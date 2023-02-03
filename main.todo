@@ -1,0 +1,11 @@
+Features:
+  ☐ RCON for Minecraft servers (check players online)
+  ☐ RCON for csgo servers (check players online)
+  ☐ Measuring users onlinetime in voice channels
+  ☐ Record users onlinetime in voice channels to file
+  ☐ Setup temporary voice channels
+  ☐ Announce on fridays who the koolest kid of the week is.
+
+Fun Features:
+  ☐ Create a command to list oldest users in the server (based on join date)
+  ☐ create a command for checking if you are KOOL
