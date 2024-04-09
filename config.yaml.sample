@@ -1,0 +1,4 @@
+token: "YOUR_DISCORD_BOT_TOKEN"
+guildID: "YOUR_GUILD_ID"
+coolRoleID: "YOUR_COOL_ROLE_ID"
+databasePath: "./koolbot.db"
