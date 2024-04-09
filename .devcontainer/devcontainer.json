@@ -1,0 +1,25 @@
+{
+  "name": "Go Discord Bot",
+  "image": "mcr.microsoft.com/vscode/devcontainers/go:1",
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  },
+  "extensions": [
+    "golang.Go",
+    "GitHub.copilot",
+    "ms-vscode-remote.remote-containers"
+  ],
+  "forwardPorts": [],
+  "postCreateCommand": "go get github.com/bwmarrin/discordgo github.com/mattn/go-sqlite3",
+  "remoteUser": "vscode",
+  "mounts": [
+    "source=koolbot-workspace,target=/workspace,type=volume"
+  ],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "go.gopath": "/workspace"
+      }
+    }
+  }
+}
