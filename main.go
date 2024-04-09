@@ -2,12 +2,12 @@ package main
 
 import (
 	"database/sql"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	_ "github.com/mattn/go-sqlite3"
@@ -23,6 +23,11 @@ type Config struct {
 	ExcludedChannels   []string `yaml:"excluded_channels"`
 	AdminOnlyChannelID string   `yaml:"admin_only_channelID"`
 }
+
+var (
+	voiceStateMap = make(map[string]time.Time)
+	db            *sql.DB
+)
 
 func loadConfig(configPath string) (*Config, error) {
 	configFile, err := ioutil.ReadFile(configPath)
@@ -44,24 +49,14 @@ func initDB(databasePath string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// Your database initialization code here
-
 	return db, nil
 }
 
-func registerSlashCommands(s *discordgo.Session, guildID string) error {
-	pingCommand := &discordgo.ApplicationCommand{
-		Name:        "ping",
-		Description: "Responds with Pong!",
-	}
-
-	_, err := s.ApplicationCommandCreate(s.State.User.ID, guildID, pingCommand)
+func updateUserVoiceTime(db *sql.DB, userID string, seconds int) {
+	_, err := db.Exec("INSERT INTO users (user_id, total_seconds, last_seen) VALUES (?, ?, CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET total_seconds = total_seconds + EXCLUDED.total_seconds, last_seen = CURRENT_TIMESTAMP", userID, seconds)
 	if err != nil {
-		return fmt.Errorf("cannot create slash command: %w", err)
+		log.Printf("Failed to update user voice time: %v", err)
 	}
-
-	return nil
 }
 
 func main() {
@@ -70,72 +65,39 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	// Set up logging
-	logFile, err := os.OpenFile("koolbot.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0666)
-	if err != nil {
-		log.Fatalf("error opening log file: %v", err)
-	}
-	defer logFile.Close()
-	log.SetOutput(logFile)
-	log.SetPrefix("[koolbot] ")
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	// Initialize database
-	db, err := initDB(config.DatabasePath)
+	db, err = initDB(config.DatabasePath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 	defer db.Close()
 
-	// Initialize Discord session
 	dg, err := discordgo.New("Bot " + config.DiscordToken)
 	if err != nil {
 		log.Fatalf("error creating Discord session: %v", err)
 	}
 	defer dg.Close()
 
-	// Register slash commands
-	err = registerSlashCommands(dg, config.DiscordGuildID)
-	if err != nil {
-		log.Fatalf("failed to register slash commands: %v", err)
-	}
+	dg.AddHandler(func(s *discordgo.Session, vsu *discordgo.VoiceStateUpdate) {
+		userID := vsu.UserID
+		now := time.Now()
 
-	dg.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
-		if i.Type != discordgo.InteractionApplicationCommand {
+		// User joins a voice channel
+		if vsu.ChannelID != "" {
+			voiceStateMap[userID] = now
 			return
 		}
 
-		switch i.ApplicationCommandData().Name {
-		case "ping":
-			err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: &discordgo.InteractionResponseData{
-					Content: "Pong!",
-				},
-			})
-			if err != nil {
-				log.Printf("Failed to respond to ping command: %v", err)
-			}
+		// User leaves a voice channel
+		if joinTime, ok := voiceStateMap[userID]; ok {
+			duration := int(now.Sub(joinTime).Seconds())
+			updateUserVoiceTime(db, userID, duration)
+			delete(voiceStateMap, userID)
 		}
 	})
 
 	err = dg.Open()
 	if err != nil {
 		log.Fatalf("error opening connection to Discord: %v", err)
-	}
-
-	defer func() {
-		_, err := dg.ChannelMessageSend(config.AdminOnlyChannelID, "Bot is shutting down.")
-		if err != nil {
-			log.Printf("Error sending shutdown message to admin channel: %v", err)
-		}
-		dg.Close()
-	}()
-
-	// Bot is now connected; send a message to the admin-only channel
-	_, err = dg.ChannelMessageSend(config.AdminOnlyChannelID, "Bot is now online and available!")
-	if err != nil {
-		log.Printf("Error sending online message to admin channel: %v", err)
 	}
 
 	log.Println("Bot is now running. Press CTRL+C to exit.")
