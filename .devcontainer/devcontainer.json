@@ -1,25 +1,27 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/go
 {
-  "name": "Go Discord Bot",
-  "image": "mcr.microsoft.com/vscode/devcontainers/go:1",
-  "settings": {
-    "terminal.integrated.shell.linux": "/bin/bash"
-  },
-  "extensions": [
-    "golang.Go",
-    "GitHub.copilot",
-    "ms-vscode-remote.remote-containers"
-  ],
-  "forwardPorts": [],
-  "postCreateCommand": "go get github.com/bwmarrin/discordgo github.com/mattn/go-sqlite3",
-  "remoteUser": "vscode",
-  "mounts": [
-    "source=koolbot-workspace,target=/workspace,type=volume"
-  ],
-  "customizations": {
-    "vscode": {
-      "settings": {
-        "go.gopath": "/workspace"
-      }
-    }
-  }
+	"name": "Go",
+	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+	"image": "mcr.microsoft.com/devcontainers/go:1-1.22-bookworm",
+	"features": {
+		"ghcr.io/devcontainers/features/github-cli:1": {},
+		"ghcr.io/guiyomh/features/golangci-lint:0": {},
+		"ghcr.io/joshuanianji/devcontainer-features/github-cli-persistence:1": {}
+	}
+
+	// Features to add to the dev container. More info: https://containers.dev/features.
+	// "features": {},
+
+	// Use 'forwardPorts' to make a list of ports inside the container available locally.
+	// "forwardPorts": [],
+	
+	// Use 'postCreateCommand' to run commands after the container is created.
+	"postCreateCommand": "go version",
+
+	// Configure tool-specific properties.
+	// "customizations": {},
+
+	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "root"
 }
