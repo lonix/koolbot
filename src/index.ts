@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, REST, Routes, GuildMember, Role } from 'discord.js';
 import dotenv from 'dotenv';
 import axios from 'axios';
 
@@ -33,6 +33,17 @@ client.once('ready', async () => {
   console.log('Koolbot is ready!');
 
   try {
+    // Clean up existing commands first
+    console.log('Cleaning up existing commands...');
+    const existingCommands = await rest.get(Routes.applicationCommands(process.env.CLIENT_ID!));
+    if (Array.isArray(existingCommands)) {
+      for (const command of existingCommands) {
+        await rest.delete(Routes.applicationCommand(process.env.CLIENT_ID!, command.id));
+      }
+    }
+    console.log('Successfully cleaned up existing commands.');
+
+    // Register new commands
     console.log('Started refreshing application (/) commands.');
     await rest.put(
       Routes.applicationCommands(process.env.CLIENT_ID!),
@@ -40,14 +51,18 @@ client.once('ready', async () => {
     );
     console.log('Successfully reloaded application (/) commands.');
   } catch (error) {
-    console.error(error);
+    console.error('Error during command registration:', error);
   }
 });
 
-client.on('interactionCreate', async interaction => {
+client.on('interactionCreate', async (interaction) => {
   if (!interaction.isCommand()) return;
 
-  const { commandName } = interaction;
+  const { commandName, user } = interaction;
+
+  if (process.env.DEBUG === 'true') {
+    console.log(`Command received: ${commandName} from user ${user.tag} (${user.id})`);
+  }
 
   switch (commandName) {
     case 'ping':
@@ -68,9 +83,9 @@ client.on('interactionCreate', async interaction => {
       break;
 
     case 'amikool':
-      if (interaction.member && 'roles' in interaction.member) {
+      if (interaction.member instanceof GuildMember) {
         const coolRoleName = process.env.COOL_ROLE_NAME || 'Kool Kids';
-        const hasCoolRole = interaction.member.roles.cache.some(role => role.name === coolRoleName);
+        const hasCoolRole = interaction.member.roles.cache.some((role: Role) => role.name === coolRoleName);
         const coolResponses = [
           'Hell yes!',
           'Yea buddy!',
