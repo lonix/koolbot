@@ -1,6 +1,0 @@
-discord_token: "YOUR_DISCORD_BOT_TOKEN"
-discord_guildID: "YOUR_GUILD_ID"
-discord_coolRoleID: "YOUR_COOL_ROLE_ID"
-database_path: "./koolbot.db"
-excluded_channels: ["EXCLUDED_CHANNEL_ID"]
-admin_only_channelID: "ADMIN_ONLY_CHANNEL_ID"
