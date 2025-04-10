@@ -1,89 +1,86 @@
-# Koolbot
+# KoolBot
 
-A Discord bot built with TypeScript and discord.js.
+A Discord bot with various features including PLEX price checking and role-based commands.
 
 ## Features
 
-### Basic Commands
-- **Ping Command** (`/ping`)
-  - Replies with "Pong!"
-  - Environment variable: `ENABLE_PING`
-
-### EVE Online Integration
-- **PLEX Price Command** (`/plexprice`)
-  - Fetches the current Jita split price of PLEX
-  - Environment variable: `ENABLE_PLEXPRICE`
-
-### Role Management
-- **Am I Kool Command** (`/amikool`)
-  - Checks if a user has the cool role
-  - Environment variable: `ENABLE_AMIKOOL`
-  - Role name configurable via `COOL_ROLE_NAME`
-
-### Voice Channel Management
-- **Dynamic Voice Channels**
-  - Creates a personal voice channel when joining the Lobby
-  - Each channel comes with its own text channel
-  - Environment variable: `ENABLE_VC_MANAGEMENT`
-- **Channel Commands**
-  - `/public` - Make your voice channel public
-  - `/private` - Make your voice channel private
-  - `/ban <user>` - Ban a user from your voice channel
-
-### Voice Activity Tracking
-- **Time Tracking**
-  - Automatically tracks time spent in voice channels
-  - Environment variable: `ENABLE_VC_TRACKING`
-- **Commands**
-  - `/vctime <user> [period]` - Check voice chat time for a user
-    - Periods: today, week, month, alltime
-  - `/seen <user>` - Check when a user was last in voice chat
+- `/ping` - Responds with "Pong!"
+- `/plexprice` - Gets the current PLEX price in Jita from Eve Online
+- `/amikool` - Checks if a user has the cool role
 
 ## Environment Variables
 
-### Discord Configuration
-- `DISCORD_TOKEN`: Your Discord bot token
-- `CLIENT_ID`: Your Discord application client ID
+Create a `.env` file with the following variables:
 
-### Feature Flags
-All features are disabled by default. Set to `true` to enable:
-- `ENABLE_PING`: Enable the ping command
-- `ENABLE_PLEXPRICE`: Enable the PLEX price command
-- `ENABLE_AMIKOOL`: Enable the amikool command
-- `ENABLE_VC_MANAGEMENT`: Enable voice channel management features
-- `ENABLE_VC_TRACKING`: Enable voice activity tracking features
+```env
+# Discord Configuration
+DISCORD_TOKEN=your_discord_token
+CLIENT_ID=your_client_id
+BOT_LOGS_CHANNEL_ID=your_logs_channel_id
 
-### Role Configuration
-- `COOL_ROLE_NAME`: Name of the role to check for in the amikool command (default: "Kool Kids")
+# Feature Flags
+ENABLE_PING=true
+ENABLE_PLEXPRICE=true
+ENABLE_AMIKOOL=true
 
-### Voice Channel Configuration
-- `LOBBY_CHANNEL_NAME`: Name of the lobby channel (default: "Lobby")
-- `VC_CATEGORY_NAME`: Category for dynamic voice channels (default: "Dynamic Voice Channels")
-- `VC_PREFIX`: Prefix for dynamic voice channels (default: "Room")
+# Role Configuration
+COOL_ROLE_NAME=Verifyed Kool Kid
 
-### Debug Configuration
-- `DEBUG`: Set to `true` to enable debug logging
-- `NODE_ENV`: Set to `development` or `production`
+# Debug Configuration
+DEBUG=true
+NODE_ENV=development
+```
 
 ## Development
 
 ### Prerequisites
-- Node.js 20 or later
-- Docker and Docker Compose
-- A Discord bot token
 
-### Local Development
-1. Copy `.env.example` to `.env` and fill in your Discord token and client ID
-2. Enable desired features in `.env`
-3. Run the bot:
-   ```bash
-   docker-compose up --build koolbot-dev
-   ```
+- Docker
+- Docker Compose
+- Node.js (for local development)
 
-### Production
+### Running with Docker
+
+1. Build and start the containers:
 ```bash
-docker-compose up --build koolbot
+docker-compose up --build
 ```
 
+2. To stop the containers:
+```bash
+docker-compose down
+```
+
+### Local Development
+
+1. Install dependencies:
+```bash
+npm install
+```
+
+2. Start the development server:
+```bash
+npm run dev
+```
+
+## Production Deployment
+
+1. Build the Docker image:
+```bash
+docker build -t koolbot .
+```
+
+2. Run the container:
+```bash
+docker run -d --name koolbot --env-file .env koolbot
+```
+
+## Logging
+
+- In production, all commands and actions are logged to stdout
+- When DEBUG=true, additional debug information is logged
+- If BOT_LOGS_CHANNEL_ID is set, logs are also sent to the specified Discord channel
+
 ## License
+
 MIT
