@@ -1,0 +1,58 @@
+# KoolBot TODO List
+
+## Core Improvements
+- [ ] Implement clean shutdown on disconnect
+  - [ ] Handle SIGTERM/SIGINT signals
+  - [ ] Gracefully disconnect from Discord
+  - [ ] Save state before shutdown
+  - [ ] Close database connections
+
+## Voice Channel Features
+- [ ] Voice Channel Tracking
+  - [ ] Track user time in VC
+  - [ ] Track message count in VC
+  - [ ] Store VC statistics in database
+  - [ ] Add VC leaderboard command
+
+- [ ] Lobby VC Creation
+  - [ ] Create dynamic voice channels from lobby
+  - [ ] Auto-cleanup unused channels
+  - [ ] Custom channel naming
+  - [ ] Channel permissions management
+
+## Commands
+- [ ] /seen Command
+  - [ ] Track last seen time for users
+  - [ ] Store in database
+  - [ ] Add command to check last seen
+  - [ ] Add optional timezone support
+
+- [ ] PLEX Price Checker
+  - [ ] Add Jita price check
+  - [ ] Add MJ price check
+  - [ ] Add price history tracking
+  - [ ] Add price alerts
+
+## Documentation
+- [ ] Update Documentation
+  - [ ] Add setup instructions
+  - [ ] Document all commands
+  - [ ] Add configuration examples
+  - [ ] Add troubleshooting guide
+  - [ ] Document database schema
+  - [ ] Add contribution guidelines
+
+## Technical Debt
+- [ ] Code Quality
+  - [ ] Add unit tests
+  - [ ] Add integration tests
+  - [ ] Improve error handling
+  - [ ] Add monitoring
+  - [ ] Add performance metrics
+
+## Future Ideas
+- [ ] Add more EVE Online related features
+- [ ] Implement user roles and permissions
+- [ ] Add custom command creation
+- [ ] Add bot statistics and analytics
+- [ ] Implement web dashboard
