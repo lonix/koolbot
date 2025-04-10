@@ -8,6 +8,48 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DISCORD_TOKEN=${DISCORD_TOKEN}
+      - CLIENT_ID=${CLIENT_ID}
+      - COOL_ROLE_NAME=${COOL_ROLE_NAME}
+      - DEBUG=${DEBUG}
+      - MONGODB_URI=mongodb://mongodb:27017/koolbot
+    depends_on:
+      mongodb:
+        condition: service_started
+    networks:
+      - koolbot-network
+    restart: unless-stopped
+
+  koolbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - koolbot-data:/app/data
     env_file:
       - .env
+
+  mongodb:
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - koolbot-network
     restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  koolbot-data:
+  mongodb_data:
+
+networks:
+  koolbot-network:
+    driver: bridge
