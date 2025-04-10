@@ -3,7 +3,7 @@ import { Logger } from '../utils/logger';
 
 const logger = Logger.getInstance();
 
-export async function handleAmIKool(interaction: CommandInteraction) {
+export async function handleAmIKool(interaction: CommandInteraction): Promise<void> {
   try {
     logger.debug('AmIKool command executed');
 

@@ -1,28 +1,24 @@
 import winston from 'winston';
-import { Client, TextChannel } from 'discord.js';
+import { TextChannel, Client } from 'discord.js';
 
-const { createLogger, format, transports } = winston;
-const { combine, timestamp, printf } = format;
-
-const logFormat = printf(({ level, message, timestamp }) => {
-  return `${timestamp} [${level}]: ${message}`;
-});
-
-export class Logger {
+class Logger {
   private static instance: Logger;
   private logger: winston.Logger;
   private logChannel: TextChannel | null = null;
 
   private constructor() {
-    this.logger = createLogger({
-      format: combine(
-        timestamp(),
-        logFormat
+    this.logger = winston.createLogger({
+      level: process.env.DEBUG === 'true' ? 'debug' : 'info',
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.printf(({ level, message, timestamp }) => {
+          return `${timestamp} [${level}]: ${message}`;
+        })
       ),
       transports: [
-        new transports.Console({
-          level: process.env.DEBUG === 'true' ? 'debug' : 'info'
-        })
+        new winston.transports.Console(),
+        new winston.transports.File({ filename: 'error.log', level: 'error' }),
+        new winston.transports.File({ filename: 'combined.log' })
       ]
     });
   }
@@ -34,41 +30,39 @@ export class Logger {
     return Logger.instance;
   }
 
-  public async setLogChannel(client: Client, channelId: string) {
+  public async setLogChannel(client: Client, channelId: string): Promise<void> {
     try {
       const channel = await client.channels.fetch(channelId);
       if (channel instanceof TextChannel) {
         this.logChannel = channel;
+        this.info('Log channel set successfully');
       }
     } catch (error) {
       this.error('Failed to set log channel:', error);
     }
   }
 
-  public info(message: string) {
-    this.logger.info(message);
-    this.sendToDiscord('INFO', message);
-  }
-
-  public error(message: string, error?: any) {
-    this.logger.error(message, error);
-    this.sendToDiscord('ERROR', `${message} ${error ? JSON.stringify(error) : ''}`);
-  }
-
-  public debug(message: string) {
-    if (process.env.DEBUG === 'true') {
-      this.logger.debug(message);
-      this.sendToDiscord('DEBUG', message);
-    }
-  }
-
-  private async sendToDiscord(level: string, message: string) {
+  public info(message: string, ...args: unknown[]): void {
+    this.logger.info(message, ...args);
     if (this.logChannel) {
-      try {
-        await this.logChannel.send(`[${level}] ${message}`);
-      } catch (error) {
+      this.logChannel.send(`[INFO] ${message}`).catch(error => {
         this.logger.error('Failed to send log to Discord:', error);
-      }
+      });
     }
+  }
+
+  public error(message: string, ...args: unknown[]): void {
+    this.logger.error(message, ...args);
+    if (this.logChannel) {
+      this.logChannel.send(`[ERROR] ${message}`).catch(error => {
+        this.logger.error('Failed to send log to Discord:', error);
+      });
+    }
+  }
+
+  public debug(message: string, ...args: unknown[]): void {
+    this.logger.debug(message, ...args);
   }
 }
+
+export { Logger };

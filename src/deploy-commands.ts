@@ -1,35 +1,42 @@
-import { REST, Routes, SlashCommandBuilder } from 'discord.js';
-import dotenv from 'dotenv';
+import { REST, Routes } from 'discord.js';
+import { config } from 'dotenv';
+import { Logger } from './utils/logger';
 
-dotenv.config();
+config();
+const logger = Logger.getInstance();
 
 const commands = [
-  new SlashCommandBuilder()
-    .setName('ping')
-    .setDescription('Replies with Pong!'),
-  new SlashCommandBuilder()
-    .setName('plexprice')
-    .setDescription('Get the current PLEX price in Jita'),
-  new SlashCommandBuilder()
-    .setName('amikool')
-    .setDescription('Check if you are kool'),
+  {
+    name: 'ping',
+    description: 'Replies with Pong!',
+  },
+  {
+    name: 'amikool',
+    description: 'Check if you are kool',
+  },
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
 
-async function main() {
+export async function deployCommands(): Promise<void> {
   try {
-    console.log('Started refreshing application (/) commands.');
+    // First, remove all existing commands
+    logger.info('Removing all existing commands...');
+    await rest.put(
+      Routes.applicationCommands(process.env.CLIENT_ID!),
+      { body: [] },
+    );
+    logger.info('Successfully removed all existing commands.');
 
+    // Then register our commands
+    logger.info('Registering new commands...');
     await rest.put(
       Routes.applicationCommands(process.env.CLIENT_ID!),
       { body: commands },
     );
-
-    console.log('Successfully reloaded application (/) commands.');
+    logger.info('Successfully registered new commands.');
   } catch (error) {
-    console.error(error);
+    logger.error('Error during command deployment:', error);
+    throw error;
   }
 }
-
-main();

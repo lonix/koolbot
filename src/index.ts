@@ -1,11 +1,11 @@
-import { Client, GatewayIntentBits, Partials } from 'discord.js';
-import mongoose from 'mongoose';
-import dotenv from 'dotenv';
+import { Client, GatewayIntentBits, Interaction } from 'discord.js';
+import { config } from 'dotenv';
 import { Logger } from './utils/logger';
 import { handleCommands } from './commands';
+import { deployCommands } from './deploy-commands';
+import mongoose from 'mongoose';
 
-dotenv.config();
-
+config();
 const logger = Logger.getInstance();
 
 const client = new Client({
@@ -13,40 +13,38 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
   ],
-  partials: [Partials.Message, Partials.Channel]
 });
 
-client.once('ready', async () => {
-  logger.info(`Logged in as ${client.user?.tag}`);
-
-  // Connect to MongoDB
+async function initializeDatabase(): Promise<void> {
   try {
-    await mongoose.connect('mongodb://mongodb:27017/koolbot');
+    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://mongodb:27017/koolbot');
     logger.info('Connected to MongoDB');
   } catch (error) {
     logger.error('Failed to connect to MongoDB:', error);
-    process.exit(1);
+    throw error;
   }
+}
 
-  // Set up log channel if specified
-  if (process.env.BOT_LOGS_CHANNEL_ID) {
-    await logger.setLogChannel(client, process.env.BOT_LOGS_CHANNEL_ID);
+client.on('ready', async () => {
+  try {
+    // Wait for both database connection and command deployment
+    await Promise.all([
+      initializeDatabase(),
+      deployCommands()
+    ]);
+
+    // Only log ready after everything is set up
+    logger.info(`Bot is ready! Logged in as ${client.user?.tag}`);
+  } catch (error) {
+    logger.error('Failed to initialize bot:', error);
+    process.exit(1);
   }
 });
 
-client.on('interactionCreate', async (interaction) => {
+client.on('interactionCreate', async (interaction: Interaction) => {
   if (!interaction.isCommand()) return;
-
-  try {
-    await handleCommands(interaction);
-  } catch (error) {
-    logger.error('Error handling command:', error);
-    if (!interaction.replied) {
-      await interaction.reply({ content: 'There was an error executing this command!', ephemeral: true });
-    }
-  }
+  await handleCommands(interaction);
 });
 
 client.login(process.env.DISCORD_TOKEN);
