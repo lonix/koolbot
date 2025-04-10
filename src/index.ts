@@ -69,7 +69,8 @@ client.on('interactionCreate', async interaction => {
 
     case 'amikool':
       if (interaction.member && 'roles' in interaction.member) {
-        const hasCoolRole = interaction.member.roles.cache.some(role => role.name === 'Cool People');
+        const coolRoleName = process.env.COOL_ROLE_NAME || 'Kool Kids';
+        const hasCoolRole = interaction.member.roles.cache.some(role => role.name === coolRoleName);
         const coolResponses = [
           'Hell yes!',
           'Yea buddy!',
