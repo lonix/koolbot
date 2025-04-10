@@ -9,8 +9,8 @@ RUN npm install
 # Copy source code
 COPY . .
 
-# Expose port (if needed)
-EXPOSE 3000
+# Expose port for debugging (if needed)
+EXPOSE 9229
 
-# Start development server
+# Start the application in development mode
 CMD ["npm", "run", "dev"]

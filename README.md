@@ -1,89 +1,49 @@
-# KoolBot
+# Koolbot
 
-A modern Discord bot built with TypeScript and discord.js v14.
+A Discord bot built with TypeScript and Discord.js, containerized with Docker.
 
 ## Features
 
-- Slash commands support
-- Event handling system
-- Database integration with Prisma
-- Docker support for development and production
+- `/ping` - Responds with "Pong!"
+- `/plexprice` - Shows the current Jita split price of PLEX
+- `/amikool` - Checks if you're cool (requires "Cool People" role)
+
+## Prerequisites
+
+- Docker and Docker Compose
+- Node.js (for local development)
+- Discord Bot Token and Client ID
+
+## Setup
+
+1. Clone the repository
+2. Copy `.env.example` to `.env` and fill in your Discord bot credentials
+3. Build and run the containers:
+
+```bash
+# For development
+docker-compose up koolbot-dev
+
+# For production
+docker-compose up koolbot-prod
+```
 
 ## Development
 
-### Prerequisites
+The bot uses slash commands, which need to be registered with Discord. The bot will automatically register these commands on startup.
 
-- Node.js 20 or later
-- Docker and Docker Compose
-- Discord Bot Token
+### Available Commands
 
-### Setup
+- `/ping` - Simple ping-pong command
+- `/plexprice` - Fetches current PLEX price from Jita
+- `/amikool` - Checks if you're in the "Cool People" role
 
-1. Clone the repository
-2. Copy `.env.example` to `.env` and fill in your Discord credentials
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
+## Security
 
-### Development with Docker
-
-```bash
-# Start development environment
-docker-compose up
-
-# Build and start development environment
-docker-compose up --build
-
-# Stop development environment
-docker-compose down
-```
-
-### Local Development
-
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Build for production
-npm run build
-
-# Deploy commands
-npm run deploy
-```
-
-## Production Deployment
-
-### Docker
-
-```bash
-# Build production image
-docker build -t koolbot:latest .
-
-# Run production container
-docker run -d \
-  --name koolbot \
-  -e DISCORD_TOKEN=your_token \
-  -e CLIENT_ID=your_client_id \
-  -e GUILD_ID=your_guild_id \
-  -e DATABASE_URL=your_db_url \
-  koolbot:latest
-```
-
-## Project Structure
-
-```
-src/
-├── bot.ts              # Main bot file
-├── deploy-commands.ts  # Command deployment script
-├── commands/          # Slash commands
-├── events/            # Event handlers
-└── types/             # TypeScript type definitions
-```
+- Uses Alpine Linux for minimal attack surface
+- Runs as non-root user in production
+- Environment variables for sensitive data
 
 ## License
 
-ISC
+MIT

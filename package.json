@@ -1,40 +1,27 @@
 {
   "name": "koolbot",
   "version": "1.0.0",
-  "description": "A modern Discord bot built with discord.js v14 and TypeScript",
-  "main": "dist/bot.js",
+  "description": "A Discord bot for EVE Online related commands",
+  "main": "dist/index.js",
   "scripts": {
-    "start": "node dist/bot.js",
-    "dev": "ts-node src/bot.ts",
     "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
     "watch": "tsc -w",
-    "deploy": "tsc && node dist/deploy-commands.js"
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\""
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/lonix/koolbot.git"
-  },
-  "keywords": ["discord", "bot", "discord.js", "typescript"],
-  "author": "",
-  "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/lonix/koolbot/issues"
-  },
-  "homepage": "https://github.com/lonix/koolbot#readme",
   "dependencies": {
-    "@discordjs/builders": "^1.7.0",
-    "@discordjs/rest": "^2.2.0",
-    "@discordjs/voice": "^0.16.1",
-    "@prisma/client": "^5.10.0",
-    "@types/node": "^20.11.19",
     "discord.js": "^14.14.1",
-    "dotenv": "^16.4.1",
-    "prisma": "^5.10.0",
-    "typescript": "^5.3.3"
+    "dotenv": "^16.4.5",
+    "axios": "^1.6.7"
   },
   "devDependencies": {
-    "@types/node": "^20.11.19",
-    "prisma": "^5.10.0",
+    "@types/node": "^20.11.24",
+    "@typescript-eslint/eslint-plugin": "^7.1.1",
+    "@typescript-eslint/parser": "^7.1.1",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }
