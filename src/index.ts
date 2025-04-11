@@ -31,19 +31,7 @@ async function initializeDatabase(): Promise<void> {
   }
 }
 
-async function cleanupDatabase(): Promise<void> {
-  try {
-    if (mongoose.connection.readyState === 1) {
-      logger.info('Starting MongoDB cleanup...');
-      await mongoose.disconnect();
-      logger.info('MongoDB cleanup completed successfully');
-    }
-  } catch (error) {
-    logger.error('Error during MongoDB cleanup:', error);
-  }
-}
-
-async function cleanup() {
+async function cleanup(): Promise<void> {
   try {
     logger.info('Cleaning up resources...');
     

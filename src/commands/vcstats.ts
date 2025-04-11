@@ -1,4 +1,4 @@
-import { CommandInteraction, SlashCommandBuilder, User, SlashCommandUserOption } from 'discord.js';
+import { CommandInteraction, SlashCommandBuilder, SlashCommandUserOption } from 'discord.js';
 import { Logger } from '../utils/logger';
 import { VoiceChannelTracker } from '../services/voice-channel-tracker';
 
@@ -13,7 +13,7 @@ export const data = new SlashCommandBuilder()
       .setRequired(false)
   );
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.info(`Executing vcstats command for user ${interaction.user.tag}`);
     

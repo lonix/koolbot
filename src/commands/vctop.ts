@@ -15,7 +15,7 @@ export const data = new SlashCommandBuilder()
       .setMaxValue(25)
   );
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.info(`Executing vctop command for user ${interaction.user.tag}`);
     

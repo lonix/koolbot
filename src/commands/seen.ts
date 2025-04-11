@@ -13,7 +13,7 @@ export const data = new SlashCommandBuilder()
       .setRequired(true)
   );
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.info(`Executing seen command for user ${interaction.user.tag}`);
     

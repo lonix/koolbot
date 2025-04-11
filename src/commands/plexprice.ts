@@ -23,7 +23,7 @@ export const data = new SlashCommandBuilder()
   .setName('plexprice')
   .setDescription('Check current PLEX price in Jita');
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.info(`Executing plexprice command for user ${interaction.user.tag}`);
     

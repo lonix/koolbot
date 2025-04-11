@@ -35,7 +35,7 @@ export class VoiceChannelManager {
     }
   }
 
-  private startPeriodicCleanup() {
+  private startPeriodicCleanup(): void {
     // Run cleanup every 5 minutes
     this.cleanupInterval = setInterval(() => {
       this.cleanupEmptyChannels().catch(error => {
@@ -44,7 +44,7 @@ export class VoiceChannelManager {
     }, 5 * 60 * 1000);
   }
 
-  public async initialize(guildId: string) {
+  public async initialize(guildId: string): Promise<void> {
     try {
       logger.info('Initializing voice channel manager...');
       const guild = await this.getGuild(guildId);
@@ -86,7 +86,7 @@ export class VoiceChannelManager {
     }
   }
 
-  public async handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState) {
+  public async handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): Promise<void> {
     try {
       const member = newState.member;
       if (!member) return;
@@ -100,35 +100,28 @@ export class VoiceChannelManager {
           await this.createUserChannel(member);
         }
       }
-      // User switched channels
-      else if (oldChannel && newChannel) {
-        // If user is moving from their dynamic channel to lobby
-        if (this.userChannels.has(oldChannel.id) && newChannel.name === process.env.LOBBY_CHANNEL_NAME) {
-          await this.cleanupUserChannel(member.id);
-          await this.createUserChannel(member);
-        }
-        // If user is moving from lobby to another channel
-        else if (oldChannel.name === process.env.LOBBY_CHANNEL_NAME && newChannel.name !== process.env.LOBBY_CHANNEL_NAME) {
-          await this.cleanupUserChannel(member.id);
-        }
-        // If user is moving from their dynamic channel to another channel
-        else if (this.userChannels.has(oldChannel.id)) {
-          await this.cleanupUserChannel(member.id);
-        }
-      }
       // User left a channel
       else if (oldChannel && !newChannel) {
         await this.cleanupUserChannel(member.id);
+      }
+      // User switched channels
+      else if (oldChannel && newChannel) {
+        if (oldChannel.name === process.env.LOBBY_CHANNEL_NAME) {
+          await this.createUserChannel(member);
+        }
       }
     } catch (error) {
       logger.error('Error handling voice state update:', error);
     }
   }
 
-  private async createUserChannel(member: GuildMember) {
+  private async createUserChannel(member: GuildMember): Promise<void> {
     try {
+      const guild = member.guild;
       const categoryName = process.env.VC_CATEGORY_NAME || 'Dynamic Voice Channels';
-      const category = member.guild.channels.cache.find(
+      const prefix = process.env.VC_PREFIX || 's\'-Room';
+      
+      const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel => 
           channel.type === ChannelType.GuildCategory && 
           channel.name === categoryName
@@ -139,72 +132,53 @@ export class VoiceChannelManager {
         return;
       }
 
-      const channelName = `${member.displayName}'s Channel`;
-      const userChannel = await member.guild.channels.create({
+      const channelName = `${prefix} ${member.displayName}`;
+      const channel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildVoice,
         parent: category,
       });
 
-      this.userChannels.set(member.id, userChannel);
-      await member.voice.setChannel(userChannel);
-      logger.info(`Created voice channel for ${member.displayName}`);
+      this.userChannels.set(member.id, channel);
+      await member.voice.setChannel(channel);
+      logger.info(`Created voice channel ${channelName} for ${member.displayName}`);
     } catch (error) {
       logger.error('Error creating user channel:', error);
     }
   }
 
-  private async cleanupUserChannel(userId: string) {
+  private async cleanupUserChannel(userId: string): Promise<void> {
     try {
       const channel = this.userChannels.get(userId);
-      if (channel) {
-        if (channel.members.size === 0) {
-          await channel.delete();
-          this.userChannels.delete(userId);
-          logger.info(`Deleted voice channel for user ${userId}`);
-        }
+      if (channel && channel.members.size === 0) {
+        await channel.delete();
+        this.userChannels.delete(userId);
+        logger.info(`Cleaned up voice channel ${channel.name}`);
       }
     } catch (error) {
       logger.error('Error cleaning up user channel:', error);
     }
   }
 
-  private async cleanupEmptyChannels() {
+  private async cleanupEmptyChannels(): Promise<void> {
     try {
-      logger.debug('Starting periodic cleanup of empty channels');
-      const channelsToDelete: string[] = [];
-
-      // Find all empty channels
       for (const [userId, channel] of this.userChannels.entries()) {
         if (channel.members.size === 0) {
-          channelsToDelete.push(userId);
+          await channel.delete();
+          this.userChannels.delete(userId);
+          logger.info(`Cleaned up empty voice channel ${channel.name}`);
         }
       }
-
-      // Delete empty channels
-      for (const userId of channelsToDelete) {
-        const channel = this.userChannels.get(userId);
-        if (channel) {
-          try {
-            await channel.delete();
-            this.userChannels.delete(userId);
-            logger.info(`Deleted empty voice channel for user ${userId}`);
-          } catch (error) {
-            logger.error(`Error deleting channel for user ${userId}:`, error);
-          }
-        }
-      }
-
-      logger.debug(`Periodic cleanup completed. Deleted ${channelsToDelete.length} empty channels`);
     } catch (error) {
-      logger.error('Error during periodic channel cleanup:', error);
+      logger.error('Error during channel cleanup:', error);
     }
   }
 
-  public destroy() {
+  public destroy(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
     }
+    this.userChannels.clear();
   }
 } 

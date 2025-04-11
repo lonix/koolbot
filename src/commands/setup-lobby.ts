@@ -7,7 +7,7 @@ export const data = new SlashCommandBuilder()
   .setName('setup-lobby')
   .setDescription('Sets up the lobby channel for dynamic voice channels');
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     if (!interaction.guild) {
       await interaction.reply({ content: 'This command can only be used in a server!', ephemeral: true });

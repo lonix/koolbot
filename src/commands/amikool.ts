@@ -33,7 +33,7 @@ export const data = new SlashCommandBuilder()
   .setName('amikool')
   .setDescription('Check if you are kool');
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.info(`Executing amikool command for user ${interaction.user.tag}`);
     
