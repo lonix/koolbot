@@ -99,6 +99,30 @@ npm run dev
 
 ## Production Deployment
 
+### Using GitHub Container Registry (GHCR)
+
+1. Log in to GitHub Container Registry:
+```bash
+echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_USER --password-stdin
+```
+
+2. Set your GitHub username as an environment variable:
+```bash
+export GITHUB_USER=your_github_username
+```
+
+3. Start the production containers:
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
+
+4. To stop the containers:
+```bash
+docker-compose -f docker-compose.prod.yml down
+```
+
+### Manual Build (Alternative)
+
 1. Build the Docker image:
 ```bash
 docker build -t koolbot .
