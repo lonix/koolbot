@@ -10,7 +10,7 @@ services:
       - .:/app
       - /app/node_modules
       - /app/dist
-    command: sh -c "npm run build && npm run deploy-commands && npm start"
+    command: sh -c "npm run build && npm start"
     depends_on:
       - mongodb
     stop_grace_period: 30s

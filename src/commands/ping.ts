@@ -1,9 +1,13 @@
-import { CommandInteraction } from 'discord.js';
+import { CommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { Logger } from '../utils/logger';
 
 const logger = Logger.getInstance();
 
-export async function handlePing(interaction: CommandInteraction): Promise<void> {
+export const data = new SlashCommandBuilder()
+  .setName('ping')
+  .setDescription('Replies with Pong!');
+
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.debug('Ping command executed');
     await interaction.reply('Pong!');

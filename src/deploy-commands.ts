@@ -1,19 +1,15 @@
 import { REST, Routes } from 'discord.js';
 import { config } from 'dotenv';
 import { Logger } from './utils/logger';
+import { data as setupLobbyCommand } from './commands/setup-lobby';
+import { data as pingCommand } from './commands/ping';
 
 config();
 const logger = Logger.getInstance();
 
 const commands = [
-  {
-    name: 'ping',
-    description: 'Replies with Pong!',
-  },
-  {
-    name: 'amikool',
-    description: 'Check if you are kool',
-  },
+  pingCommand.toJSON(),
+  setupLobbyCommand.toJSON(),
 ];
 
 const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);

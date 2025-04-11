@@ -1,9 +1,13 @@
-import { CommandInteraction } from 'discord.js';
+import { CommandInteraction, SlashCommandBuilder } from 'discord.js';
 import { Logger } from '../utils/logger';
 
 const logger = Logger.getInstance();
 
-export async function handleAmIKool(interaction: CommandInteraction): Promise<void> {
+export const data = new SlashCommandBuilder()
+  .setName('amikool')
+  .setDescription('Check if you are kool!');
+
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.debug('AmIKool command executed');
 
@@ -13,7 +17,7 @@ export async function handleAmIKool(interaction: CommandInteraction): Promise<vo
 
     const coolRoleName = process.env.COOL_ROLE_NAME || 'Verifyed Kool Kid';
     const member = await interaction.guild.members.fetch(interaction.user.id);
-    const hasCoolRole = member.roles.cache.some(role => role.name === coolRoleName);
+    const hasCoolRole = member.roles.cache.some((role) => role.name === coolRoleName);
 
     const response = hasCoolRole
       ? 'Yes, you are kool! 😎'

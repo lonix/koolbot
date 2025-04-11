@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY package*.json ./
 RUN npm install
+RUN npm install --save-dev @types/node @types/dotenv @types/mongoose
 
 COPY . .
 

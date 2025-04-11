@@ -1,9 +1,11 @@
-import { Client, GatewayIntentBits, Interaction } from 'discord.js';
+import { Client, GatewayIntentBits, Interaction, VoiceState } from 'discord.js';
 import { config } from 'dotenv';
 import { Logger } from './utils/logger';
 import { handleCommands } from './commands';
-import { deployCommands } from './deploy-commands';
-import mongoose, { Connection } from 'mongoose';
+import mongoose from 'mongoose';
+import { VoiceChannelManager } from './services/voice-channel-manager';
+import { ChannelInitializer } from './services/channel-initializer';
+import { CommandManager } from './services/command-manager';
 
 config();
 const logger = Logger.getInstance();
@@ -13,6 +15,8 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -30,30 +34,13 @@ async function initializeDatabase(): Promise<void> {
 
 async function cleanupDatabase(): Promise<void> {
   try {
-    // Check if we have an active connection
-    if (mongoose.connection.readyState === 1) { // 1 = connected
+    if (mongoose.connection.readyState === 1) {
       logger.info('Starting MongoDB cleanup...');
-      
-      // Close all connections in the connection pool
-      const connections = mongoose.connections;
-      for (const connection of connections) {
-        if (connection.readyState === 1) { // 1 = connected
-          logger.info(`Closing MongoDB connection: ${connection.name}`);
-          await connection.close();
-        }
-      }
-
-      // Ensure the main connection is closed
-      if (mongoose.connection.readyState === 1) { // 1 = connected
-        logger.info('Closing main MongoDB connection');
-        await mongoose.disconnect();
-      }
-
+      await mongoose.disconnect();
       logger.info('MongoDB cleanup completed successfully');
     }
   } catch (error) {
     logger.error('Error during MongoDB cleanup:', error);
-    // Don't throw here, we want to continue with other cleanup tasks
   }
 }
 
@@ -67,16 +54,13 @@ async function cleanup(): Promise<void> {
   logger.info('Starting cleanup...');
   
   try {
-    // Disconnect from Discord
     if (client.isReady()) {
       logger.info('Disconnecting from Discord...');
       await client.destroy();
       logger.info('Successfully disconnected from Discord');
     }
 
-    // Cleanup MongoDB connections
     await cleanupDatabase();
-
     logger.info('Cleanup completed successfully');
   } catch (error) {
     logger.error('Error during cleanup:', error);
@@ -89,40 +73,69 @@ async function cleanup(): Promise<void> {
 process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 process.on('SIGQUIT', cleanup);
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', (error: Error) => {
   logger.error('Uncaught Exception:', error);
   cleanup();
 });
-process.on('unhandledRejection', (error) => {
+process.on('unhandledRejection', (error: Error) => {
   logger.error('Unhandled Rejection:', error);
   cleanup();
 });
 
-// Handle Docker stop
-process.on('SIGTERM', () => {
-  logger.info('Received SIGTERM signal, initiating cleanup...');
-  cleanup();
-});
-
-client.on('ready', async () => {
+client.once('ready', async () => {
   try {
-    // Wait for both database connection and command deployment
-    await Promise.all([
-      initializeDatabase(),
-      deployCommands()
-    ]);
-
-    // Only log ready after everything is set up
+    logger.info('Bot is starting up...');
+    
+    // Initialize database first
+    await initializeDatabase();
+    logger.info('Database initialized');
+    
+    // Initialize channels
+    const guild = client.guilds.cache.get(process.env.GUILD_ID || '');
+    if (guild) {
+      await ChannelInitializer.getInstance().initializeChannels(guild);
+      logger.info('Channels initialized');
+    } else {
+      logger.error('Guild not found, skipping channel initialization');
+    }
+    
+    // Clean up and register commands
+    const commandManager = CommandManager.getInstance();
+    await commandManager.unregisterAllCommands();
+    await commandManager.registerCommands();
+    logger.info('Commands initialized');
+    
     logger.info(`Bot is ready! Logged in as ${client.user?.tag}`);
   } catch (error) {
     logger.error('Failed to initialize bot:', error);
-    cleanup();
+    await cleanup();
   }
 });
 
 client.on('interactionCreate', async (interaction: Interaction) => {
-  if (!interaction.isCommand()) return;
-  await handleCommands(interaction);
+  try {
+    if (!interaction.isCommand()) return;
+    await handleCommands(interaction);
+  } catch (error) {
+    logger.error('Error handling interaction:', error);
+    if (interaction.isCommand() && !interaction.replied) {
+      await interaction.reply({ 
+        content: 'An error occurred while executing this command.', 
+        ephemeral: true 
+      });
+    }
+  }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
+  if (process.env.ENABLE_VC_MANAGEMENT === 'true') {
+    await VoiceChannelManager.getInstance().handleVoiceStateUpdate(oldState, newState);
+  }
+});
+
+// Start the bot
+client.login(process.env.DISCORD_TOKEN)
+  .catch(error => {
+    logger.error('Failed to login:', error);
+    process.exit(1);
+  });
