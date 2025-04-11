@@ -140,7 +140,10 @@ export class VoiceChannelManager {
           await this.createUserChannel(member);
         }
         // If user is moving from their personal channel to another channel, clean up the old one
-        else if (this.userChannels.has(member.id) && oldChannel.id === this.userChannels.get(member.id)?.id) {
+        else if (
+          this.userChannels.has(member.id) &&
+          oldChannel.id === this.userChannels.get(member.id)?.id
+        ) {
           await this.cleanupUserChannel(member.id);
         }
       }
@@ -153,7 +156,9 @@ export class VoiceChannelManager {
     try {
       // Check if user already has a channel
       if (this.userChannels.has(member.id)) {
-        logger.info(`User ${member.displayName} already has a channel, skipping creation`);
+        logger.info(
+          `User ${member.displayName} already has a channel, skipping creation`,
+        );
         return;
       }
 
