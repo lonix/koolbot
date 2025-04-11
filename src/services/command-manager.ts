@@ -28,7 +28,16 @@ export class CommandManager {
     return CommandManager.instance;
   }
 
-  private getEnabledCommands(): any[] {
+  private getEnabledCommands(): Array<{
+    name: string;
+    description: string;
+    options?: Array<{
+      name: string;
+      description: string;
+      type: number;
+      required?: boolean;
+    }>;
+  }> {
     const commands = [];
 
     if (process.env.ENABLE_PING === "true") {
