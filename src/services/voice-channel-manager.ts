@@ -8,6 +8,7 @@ import {
   Client,
 } from "discord.js";
 import { Logger } from "../utils/logger";
+import { NodeJS } from "node";
 
 const logger = Logger.getInstance();
 
@@ -131,7 +132,7 @@ export class VoiceChannelManager {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
-        if (oldChannel.name === process.env.LOBBY_CHANNEL_NAME) {
+        if (newChannel.name === process.env.LOBBY_CHANNEL_NAME) {
           await this.createUserChannel(member);
         }
       }
@@ -142,10 +143,16 @@ export class VoiceChannelManager {
 
   private async createUserChannel(member: GuildMember): Promise<void> {
     try {
+      // Check if user already has a channel
+      if (this.userChannels.has(member.id)) {
+        logger.info(`User ${member.displayName} already has a channel, skipping creation`);
+        return;
+      }
+
       const guild = member.guild;
       const categoryName =
         process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
-      const prefix = process.env.VC_PREFIX || "s'-Room";
+      const suffix = process.env.VC_SUFFIX || "'s Room";
 
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
@@ -158,7 +165,7 @@ export class VoiceChannelManager {
         return;
       }
 
-      const channelName = `${prefix} ${member.displayName}`;
+      const channelName = `${member.displayName}${suffix}`;
       const channel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildVoice,
