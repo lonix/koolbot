@@ -26,7 +26,7 @@ export class VoiceChannelTracker {
   public async handleVoiceStateUpdate(
     oldState: VoiceState,
     newState: VoiceState,
-  ) {
+  ): Promise<void> {
     try {
       const member = newState.member || oldState.member; // Try to get member from either state
       if (!member) {
@@ -107,7 +107,7 @@ export class VoiceChannelTracker {
     member: GuildMember,
     channelId: string,
     channelName: string,
-  ) {
+  ): Promise<void> {
     try {
       const startTime = new Date();
       this.activeSessions.set(member.id, { startTime, channelId, channelName });
@@ -137,7 +137,7 @@ export class VoiceChannelTracker {
     }
   }
 
-  private async endTracking(userId: string) {
+  private async endTracking(userId: string): Promise<void> {
     try {
       const session = this.activeSessions.get(userId);
       if (!session) {
