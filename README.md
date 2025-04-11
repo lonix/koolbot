@@ -1,167 +1,139 @@
 # KoolBot
 
-A Discord bot with various features including PLEX price checking, role-based commands, and automatic voice channel management.
+A Discord bot that automatically manages voice channels and tracks user activity. Perfect for gaming communities and Discord servers that need dynamic voice channel management.
 
-## Features
+## Quick Start
 
-- `/ping` - Responds with "Pong!"
-- `/plexprice` - Gets the current PLEX price in Jita from Eve Online
-- `/amikool` - Checks if a user has the cool role
-- `/vctop` - Shows the top users by voice channel time
-- `/vcstats` - Shows voice channel statistics for a specific user
-- `/seen` - Shows when a user was last seen in a voice channel
-- Automatic Voice Channel Management - Automatically creates and manages voice channels when users join the lobby
-- Voice Channel Time Tracking - Tracks and records time spent in voice channels
+1. Download the required files:
+```bash
+# Download docker-compose.yml
+curl -O https://raw.githubusercontent.com/your-username/koolbot/main/docker-compose.yml
 
-## Environment Variables
+# Download .env.example
+curl -O https://raw.githubusercontent.com/your-username/koolbot/main/.env.example
 
-Create a `.env` file with the following variables:
+# Rename .env.example to .env
+mv .env.example .env
+```
 
+2. Edit the `.env` file with your Discord bot configuration:
 ```env
 # Discord Configuration
 DISCORD_TOKEN=your_discord_token
 CLIENT_ID=your_client_id
 GUILD_ID=your_guild_id
 
-# Feature Flags
-ENABLE_PING=true
-ENABLE_PLEXPRICE=true
-ENABLE_AMIKOOL=true
+# Feature Flags (enable/disable features as needed)
 ENABLE_VC_MANAGEMENT=true
 ENABLE_VC_TRACKING=true
 ENABLE_SEEN=true
+ENABLE_PING=true
+ENABLE_PLEXPRICE=true
+ENABLE_AMIKOOL=true
 
-# Role Configuration
-COOL_ROLE_NAME=Verifyed Kool Kid
-VC_TRACKING_ADMIN_ROLES=Admin,Moderator
-
-# VC Configuration
+# Voice Channel Settings
 LOBBY_CHANNEL_NAME=Lobby
 VC_CATEGORY_NAME=Dynamic Voice Channels
 VC_PREFIX=s'-Room
-
-# Debug Configuration
-DEBUG=true
-NODE_ENV=development
 ```
 
-## Voice Channel Management
+3. Start the bot with Docker Compose:
+```bash
+docker-compose up -d
+```
 
-The bot automatically manages voice channels when the `ENABLE_VC_MANAGEMENT` feature flag is enabled:
-- When a user joins the lobby channel (configured by `LOBBY_CHANNEL_NAME`), a new voice channel is automatically created in the specified category (`VC_CATEGORY_NAME`)
-- The channel is named after the user who created it
-- When all users leave the channel, it is automatically deleted
-- The feature can be disabled by setting `ENABLE_VC_MANAGEMENT=false`
+That's it! The bot will automatically:
+- Create voice channels when users join the lobby
+- Track time spent in voice channels
+- Show voice channel statistics with `/vctop` and `/seen` commands
 
-## Voice Channel Tracking
+## Bot Commands
 
-When `ENABLE_VC_TRACKING` is enabled, the bot tracks:
-- Time spent in voice channels
-- User presence and activity
-- Channel creation and deletion events
-
-Available commands:
-- `/vctop` - Shows the top users by total voice channel time
+### Voice Channel Commands
+- `/vctop` - Shows the top users by voice channel time
 - `/vcstats` - Shows detailed voice channel statistics for a specific user
 - `/seen` - Shows when a user was last seen in a voice channel
 
-## Development
+### Eve Online Commands
+- `/plexprice` - Gets the current PLEX price in Jita from Eve Online
 
-### Prerequisites
+### Utility Commands
+- `/ping` - Responds with "Pong!" (useful for checking if the bot is responsive)
+- `/amikool` - Checks if a user has the cool role
 
-- Docker
-- Docker Compose
-- Node.js (for local development)
+## Voice Channel Features
 
-### Running with Docker
+### Automatic Channel Management
+- When a user joins the lobby channel, a new voice channel is created
+- Channels are named after the user who created them
+- Empty channels are automatically deleted
+- All channels are created in the "Dynamic Voice Channels" category
 
-1. Build and start the containers:
+### Time Tracking
+- Tracks time spent in voice channels
+- Records user presence and activity
+- Provides statistics through commands
+
+## Configuration Options
+
+### Environment Variables
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DISCORD_TOKEN` | Your Discord bot token | Required |
+| `CLIENT_ID` | Your Discord application ID | Required |
+| `GUILD_ID` | Your Discord server ID | Required |
+| `ENABLE_VC_MANAGEMENT` | Enable automatic voice channel management | true |
+| `ENABLE_VC_TRACKING` | Enable voice channel time tracking | true |
+| `ENABLE_SEEN` | Enable last seen tracking | true |
+| `ENABLE_PING` | Enable ping command | true |
+| `ENABLE_PLEXPRICE` | Enable PLEX price command | true |
+| `ENABLE_AMIKOOL` | Enable amikool command | true |
+| `LOBBY_CHANNEL_NAME` | Name of the lobby channel | Lobby |
+| `VC_CATEGORY_NAME` | Name of the voice channel category | Dynamic Voice Channels |
+| `VC_PREFIX` | Prefix for created voice channels | s'-Room |
+
+## Maintenance
+
+### Viewing Logs
 ```bash
-docker-compose up --build
+docker-compose logs -f
 ```
 
-2. To stop the containers:
+### Updating the Bot
+```bash
+docker-compose pull
+docker-compose up -d
+```
+
+### Stopping the Bot
 ```bash
 docker-compose down
 ```
 
-### Local Development
+## Troubleshooting
 
-1. Install dependencies:
-```bash
-npm install
-```
+### Common Issues
 
-2. Start the development server:
-```bash
-npm run dev
-```
+1. **Bot can't create channels**
+   - Ensure the bot has the "Manage Channels" permission
+   - Check if the bot has permissions in the target category
 
-## Production Deployment
+2. **Commands not working**
+   - Verify the bot has the "applications.commands" scope
+   - Check if the bot has the necessary permissions
+   - Ensure the corresponding feature flag is enabled in `.env`
 
-### Using GitHub Container Registry (GHCR)
+3. **Time tracking not working**
+   - Ensure `ENABLE_VC_TRACKING` is set to true
+   - Check if MongoDB is running properly
 
-1. Log in to GitHub Container Registry:
-```bash
-echo $GITHUB_TOKEN | docker login ghcr.io -u $GITHUB_USER --password-stdin
-```
+### Getting Help
 
-2. Set your GitHub username as an environment variable:
-```bash
-export GITHUB_USER=your_github_username
-```
+If you encounter any issues:
+1. Check the logs with `docker-compose logs -f`
+2. Verify your environment variables
+3. Ensure the bot has all required permissions
 
-3. Start the production containers:
-```bash
-docker-compose -f docker-compose.prod.yml up -d
-```
+## Support
 
-4. To stop the containers:
-```bash
-docker-compose -f docker-compose.prod.yml down
-```
-
-### Manual Build (Alternative)
-
-1. Build the Docker image:
-```bash
-docker build -t koolbot .
-```
-
-2. Run the container:
-```bash
-docker run -d --name koolbot --env-file .env koolbot
-```
-
-## Logging
-
-- In production, all commands and actions are logged to stdout
-- When DEBUG=true, additional debug information is logged
-- If BOT_LOGS_CHANNEL_ID is set, logs are also sent to the specified Discord channel
-
-## Release Process
-
-The project uses Release Drafter to automatically create draft releases based on pull request labels and commit messages.
-
-### Pull Request Labels
-
-When creating a pull request, please use one of the following labels to categorize your changes:
-
-- `feature` or `enhancement` - New features or improvements
-- `bug` or `fix` - Bug fixes
-- `documentation` - Documentation changes
-- `chore`, `refactor`, or `dependencies` - Maintenance tasks
-- `test` - Test-related changes
-
-### Version Bumping
-
-To specify the version bump for a release, use one of these labels:
-- `major` - Major version bump (breaking changes)
-- `minor` - Minor version bump (new features)
-- `patch` - Patch version bump (bug fixes)
-
-If no version label is specified, the default is a patch version bump.
-
-## License
-
-MIT
+For additional help or feature requests, please open an issue in the GitHub repository.
