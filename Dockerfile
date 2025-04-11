@@ -4,8 +4,7 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm install && \
-    npm install --save-dev @types/node @types/discord.js
+RUN npm install --include=dev
 
 COPY . .
 

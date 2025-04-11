@@ -8,14 +8,13 @@ import {
   Client,
 } from "discord.js";
 import { Logger } from "../utils/logger";
-import { NodeJS } from "node";
 
 const logger = Logger.getInstance();
 
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
 
   private constructor(client: Client) {
@@ -132,8 +131,17 @@ export class VoiceChannelManager {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
+        // If user is moving to the Lobby, create a new channel
         if (newChannel.name === process.env.LOBBY_CHANNEL_NAME) {
+          // Clean up the old channel if it was a personal channel
+          if (this.userChannels.has(member.id)) {
+            await this.cleanupUserChannel(member.id);
+          }
           await this.createUserChannel(member);
+        }
+        // If user is moving from their personal channel to another channel, clean up the old one
+        else if (this.userChannels.has(member.id) && oldChannel.id === this.userChannels.get(member.id)?.id) {
+          await this.cleanupUserChannel(member.id);
         }
       }
     } catch (error) {
