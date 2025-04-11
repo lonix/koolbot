@@ -1,25 +1,30 @@
-import { CommandInteraction, SlashCommandBuilder, SlashCommandUserOption } from 'discord.js';
-import { Logger } from '../utils/logger';
-import { VoiceChannelTracker } from '../services/voice-channel-tracker';
+import {
+  CommandInteraction,
+  SlashCommandBuilder,
+  SlashCommandUserOption,
+} from "discord.js";
+import { Logger } from "../utils/logger";
+import { VoiceChannelTracker } from "../services/voice-channel-tracker";
 
 const logger = Logger.getInstance();
 
 export const data = new SlashCommandBuilder()
-  .setName('seen')
-  .setDescription('Shows when a user was last seen in a voice channel')
+  .setName("seen")
+  .setDescription("Shows when a user was last seen in a voice channel")
   .addUserOption((option: SlashCommandUserOption) =>
-    option.setName('user')
-      .setDescription('The user to check')
-      .setRequired(true)
+    option
+      .setName("user")
+      .setDescription("The user to check")
+      .setRequired(true),
   );
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.info(`Executing seen command for user ${interaction.user.tag}`);
-    
-    const targetUser = interaction.options.get('user')?.user;
+
+    const targetUser = interaction.options.get("user")?.user;
     if (!targetUser) {
-      await interaction.reply('Please specify a user to check.');
+      await interaction.reply("Please specify a user to check.");
       return;
     }
 
@@ -27,7 +32,9 @@ export async function execute(interaction: CommandInteraction) {
     const lastSeen = await tracker.getUserLastSeen(targetUser.id);
 
     if (!lastSeen) {
-      await interaction.reply(`${targetUser.username} has never been seen in a voice channel.`);
+      await interaction.reply(
+        `${targetUser.username} has never been seen in a voice channel.`,
+      );
       return;
     }
 
@@ -38,17 +45,22 @@ export async function execute(interaction: CommandInteraction) {
 
     let timeAgo;
     if (days > 0) {
-      timeAgo = `${days} day${days === 1 ? '' : 's'} ago`;
+      timeAgo = `${days} day${days === 1 ? "" : "s"} ago`;
     } else if (hours > 0) {
-      timeAgo = `${hours} hour${hours === 1 ? '' : 's'} and ${minutes % 60} minute${minutes % 60 === 1 ? '' : 's'} ago`;
+      timeAgo = `${hours} hour${hours === 1 ? "" : "s"} and ${minutes % 60} minute${minutes % 60 === 1 ? "" : "s"} ago`;
     } else {
-      timeAgo = `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+      timeAgo = `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
     }
 
-    await interaction.reply(`${targetUser.username} was last seen in a voice channel ${timeAgo}.`);
+    await interaction.reply(
+      `${targetUser.username} was last seen in a voice channel ${timeAgo}.`,
+    );
     logger.info(`Seen command completed for user ${interaction.user.tag}`);
   } catch (error) {
-    logger.error('Error executing seen command:', error);
-    await interaction.reply({ content: 'An error occurred while fetching user information.', ephemeral: true });
+    logger.error("Error executing seen command:", error);
+    await interaction.reply({
+      content: "An error occurred while fetching user information.",
+      ephemeral: true,
+    });
   }
-} 
+}

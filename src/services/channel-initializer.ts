@@ -1,5 +1,5 @@
-import { Guild, ChannelType, VoiceChannel, CategoryChannel } from 'discord.js';
-import { Logger } from '../utils/logger';
+import { Guild, ChannelType, VoiceChannel, CategoryChannel } from "discord.js";
+import { Logger } from "../utils/logger";
 
 const logger = Logger.getInstance();
 
@@ -17,21 +17,27 @@ export class ChannelInitializer {
 
   public async initializeChannels(guild: Guild): Promise<void> {
     try {
-      if (process.env.ENABLE_VC_MANAGEMENT !== 'true') {
-        logger.info('Voice channel management is disabled, skipping channel initialization');
+      if (process.env.ENABLE_VC_MANAGEMENT !== "true") {
+        logger.info(
+          "Voice channel management is disabled, skipping channel initialization",
+        );
         return;
       }
 
-      const categoryName = process.env.VC_CATEGORY_NAME || 'Dynamic Voice Channels';
-      const lobbyChannelName = process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, '') || 'Lobby';
+      const categoryName =
+        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
+      const lobbyChannelName =
+        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
 
-      logger.info(`Initializing channels with category: ${categoryName} and lobby: ${lobbyChannelName}`);
+      logger.info(
+        `Initializing channels with category: ${categoryName} and lobby: ${lobbyChannelName}`,
+      );
 
       // Find or create the category
       let category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
           channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName
+          channel.name === categoryName,
       );
 
       if (!category) {
@@ -49,7 +55,7 @@ export class ChannelInitializer {
         (channel): channel is VoiceChannel =>
           channel.type === ChannelType.GuildVoice &&
           channel.name === lobbyChannelName &&
-          channel.parentId === category.id
+          channel.parentId === category.id,
       );
 
       if (!lobbyChannel) {
@@ -65,10 +71,10 @@ export class ChannelInitializer {
         logger.info(`Found existing lobby channel: ${lobbyChannelName}`);
       }
 
-      logger.info('Channel initialization completed successfully');
+      logger.info("Channel initialization completed successfully");
     } catch (error) {
-      logger.error('Error initializing channels:', error);
+      logger.error("Error initializing channels:", error);
       throw error;
     }
   }
-} 
+}
