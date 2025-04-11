@@ -6,6 +6,7 @@ import mongoose from 'mongoose';
 import { VoiceChannelManager } from './services/voice-channel-manager';
 import { ChannelInitializer } from './services/channel-initializer';
 import { CommandManager } from './services/command-manager';
+import { VoiceChannelTracker } from './services/voice-channel-tracker';
 
 config();
 const logger = Logger.getInstance();
@@ -13,10 +14,8 @@ const logger = Logger.getInstance();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
   ],
 });
 
@@ -44,34 +43,45 @@ async function cleanupDatabase(): Promise<void> {
   }
 }
 
-async function cleanup(): Promise<void> {
-  if (isShuttingDown) {
-    logger.info('Cleanup already in progress, skipping...');
-    return;
-  }
-  
-  isShuttingDown = true;
-  logger.info('Starting cleanup...');
-  
+async function cleanup() {
   try {
-    if (client.isReady()) {
-      logger.info('Disconnecting from Discord...');
-      await client.destroy();
-      logger.info('Successfully disconnected from Discord');
-    }
-
-    await cleanupDatabase();
-    logger.info('Cleanup completed successfully');
+    logger.info('Cleaning up resources...');
+    
+    // Clean up voice channel manager
+    VoiceChannelManager.getInstance().destroy();
+    
+    // Close MongoDB connection
+    await mongoose.connection.close();
+    logger.info('MongoDB connection closed');
+    
+    // Destroy Discord client
+    client.destroy();
+    logger.info('Discord client destroyed');
+    
+    process.exit(0);
   } catch (error) {
     logger.error('Error during cleanup:', error);
-  } finally {
-    process.exit(0);
+    process.exit(1);
   }
 }
 
 // Handle process termination
-process.on('SIGINT', cleanup);
-process.on('SIGTERM', cleanup);
+process.on('SIGTERM', async () => {
+  if (!isShuttingDown) {
+    isShuttingDown = true;
+    logger.info('Received SIGTERM, shutting down...');
+    await cleanup();
+  }
+});
+
+process.on('SIGINT', async () => {
+  if (!isShuttingDown) {
+    isShuttingDown = true;
+    logger.info('Received SIGINT, shutting down...');
+    await cleanup();
+  }
+});
+
 process.on('SIGQUIT', cleanup);
 process.on('uncaughtException', (error: Error) => {
   logger.error('Uncaught Exception:', error);
@@ -91,19 +101,22 @@ client.once('ready', async () => {
     logger.info('Database initialized');
     
     // Initialize channels
-    const guild = client.guilds.cache.get(process.env.GUILD_ID || '');
+    const guild = await client.guilds.fetch(process.env.GUILD_ID || '');
     if (guild) {
       await ChannelInitializer.getInstance().initializeChannels(guild);
       logger.info('Channels initialized');
+      
+      // Initialize voice channel manager and clean up any empty channels
+      if (process.env.ENABLE_VC_MANAGEMENT === 'true') {
+        await VoiceChannelManager.getInstance(client).initialize(guild.id);
+      }
     } else {
       logger.error('Guild not found, skipping channel initialization');
     }
     
-    // Clean up and register commands
-    const commandManager = CommandManager.getInstance();
-    await commandManager.unregisterAllCommands();
-    await commandManager.registerCommands();
-    logger.info('Commands initialized');
+    // Register commands
+    await CommandManager.getInstance().registerCommands();
+    logger.info('Commands registered');
     
     logger.info(`Bot is ready! Logged in as ${client.user?.tag}`);
   } catch (error) {
@@ -113,23 +126,24 @@ client.once('ready', async () => {
 });
 
 client.on('interactionCreate', async (interaction: Interaction) => {
-  try {
-    if (!interaction.isCommand()) return;
+  if (interaction.isCommand()) {
     await handleCommands(interaction);
-  } catch (error) {
-    logger.error('Error handling interaction:', error);
-    if (interaction.isCommand() && !interaction.replied) {
-      await interaction.reply({ 
-        content: 'An error occurred while executing this command.', 
-        ephemeral: true 
-      });
-    }
   }
 });
 
 client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
-  if (process.env.ENABLE_VC_MANAGEMENT === 'true') {
-    await VoiceChannelManager.getInstance().handleVoiceStateUpdate(oldState, newState);
+  try {
+    // Handle voice channel management
+    if (process.env.ENABLE_VC_MANAGEMENT === 'true') {
+      await VoiceChannelManager.getInstance().handleVoiceStateUpdate(oldState, newState);
+    }
+
+    // Handle voice channel tracking
+    if (process.env.ENABLE_VC_TRACKING === 'true') {
+      await VoiceChannelTracker.getInstance().handleVoiceStateUpdate(oldState, newState);
+    }
+  } catch (error) {
+    logger.error('Error handling voice state update:', error);
   }
 });
 

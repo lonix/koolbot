@@ -23,7 +23,9 @@ export class ChannelInitializer {
       }
 
       const categoryName = process.env.VC_CATEGORY_NAME || 'Dynamic Voice Channels';
-      const lobbyChannelName = process.env.LOBBY_CHANNEL_NAME || 'Lobby';
+      const lobbyChannelName = process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, '') || 'Lobby';
+
+      logger.info(`Initializing channels with category: ${categoryName} and lobby: ${lobbyChannelName}`);
 
       // Find or create the category
       let category = guild.channels.cache.find(
@@ -59,6 +61,8 @@ export class ChannelInitializer {
           position: 0,
         });
         logger.info(`Created lobby channel: ${lobbyChannelName}`);
+      } else {
+        logger.info(`Found existing lobby channel: ${lobbyChannelName}`);
       }
 
       logger.info('Channel initialization completed successfully');

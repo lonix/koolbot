@@ -3,6 +3,10 @@ import { config } from 'dotenv';
 import { Logger } from '../utils/logger';
 import { data as pingCommand } from '../commands/ping';
 import { data as amikoolCommand } from '../commands/amikool';
+import { data as plexpriceCommand } from '../commands/plexprice';
+import { data as vctopCommand } from '../commands/vctop';
+import { data as vcstatsCommand } from '../commands/vcstats';
+import { data as seenCommand } from '../commands/seen';
 
 config();
 const logger = Logger.getInstance();
@@ -31,6 +35,19 @@ export class CommandManager {
 
     if (process.env.ENABLE_AMIKOOL === 'true') {
       commands.push(amikoolCommand.toJSON());
+    }
+
+    if (process.env.ENABLE_PLEXPRICE === 'true') {
+      commands.push(plexpriceCommand.toJSON());
+    }
+
+    if (process.env.ENABLE_VC_TRACKING === 'true') {
+      commands.push(vctopCommand.toJSON());
+      commands.push(vcstatsCommand.toJSON());
+    }
+
+    if (process.env.ENABLE_SEEN === 'true') {
+      commands.push(seenCommand.toJSON());
     }
 
     return commands;

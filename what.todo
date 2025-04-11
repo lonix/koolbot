@@ -1,0 +1,78 @@
+# KoolBot TODO List
+
+## Core Improvements
+- [x] Implement clean shutdown on disconnect
+  - [x] Handle SIGTERM/SIGINT signals
+  - [x] Gracefully disconnect from Discord
+  - [x] Save state before shutdown
+  - [x] Close database connections
+
+## Voice Channel Features
+- [x] Voice Channel Tracking
+  - [x] Track user time in VC
+  - [x] Track message count in VC
+  - [x] Store VC statistics in database
+  - [x] Add VC leaderboard command
+  - [x] Add VC stats command
+  - [x] Add last seen tracking
+
+- [x] Lobby VC Creation
+  - [x] Create dynamic voice channels from lobby
+  - [x] Auto-cleanup unused channels
+  - [x] Custom channel naming
+  - [x] Channel permissions management
+  - [x] Remove default user limit
+  - [x] Add startup cleanup
+
+## Commands
+- [x] /seen Command
+  - [x] Track last seen time for users
+  - [x] Store in database
+  - [x] Add command to check last seen
+  - [ ] Add optional timezone support
+
+- [x] PLEX Price Checker
+  - [x] Add Jita price check
+  - [ ] Add price history tracking
+  - [ ] Add price alerts
+
+- [x] /amikool Command
+  - [x] Add role-based verification
+  - [x] Add random response variety
+  - [x] Add emoji support
+
+- [x] /ping Command
+  - [x] Add basic ping functionality
+  - [x] Add error handling
+  - [x] Add logging
+
+## Documentation
+- [x] Update Documentation
+  - [x] Add setup instructions
+  - [x] Document all commands
+  - [x] Add configuration examples
+  - [ ] Add troubleshooting guide
+  - [x] Document database schema
+  - [ ] Add contribution guidelines
+
+## Technical Debt
+- [ ] Code Quality
+  - [ ] Add unit tests
+  - [ ] Add integration tests
+  - [x] Improve error handling
+  - [ ] Add monitoring
+  - [ ] Add performance metrics
+  - [x] Fix TypeScript type definitions
+  - [x] Add proper dependency management
+
+## Future Ideas
+- [ ] Add more EVE Online related features
+- [x] Implement user roles and permissions
+- [ ] Add custom command creation
+- [ ] Add bot statistics and analytics
+- [ ] Implement web dashboard
+- [ ] Add more interactive commands
+- [ ] Add user achievements system
+- [x] Add voice channel statistics visualization
+- [ ] Add command cooldown system
+- [ ] Add user feedback system
