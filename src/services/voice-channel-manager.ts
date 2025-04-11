@@ -1,5 +1,13 @@
-import { VoiceState, VoiceChannel, CategoryChannel, ChannelType, GuildMember, Guild, Client } from 'discord.js';
-import { Logger } from '../utils/logger';
+import {
+  VoiceState,
+  VoiceChannel,
+  CategoryChannel,
+  ChannelType,
+  GuildMember,
+  Guild,
+  Client,
+} from "discord.js";
+import { Logger } from "../utils/logger";
 
 const logger = Logger.getInstance();
 
@@ -18,7 +26,7 @@ export class VoiceChannelManager {
   public static getInstance(client?: Client): VoiceChannelManager {
     if (!VoiceChannelManager.instance) {
       if (!client) {
-        throw new Error('Client instance is required for first initialization');
+        throw new Error("Client instance is required for first initialization");
       }
       VoiceChannelManager.instance = new VoiceChannelManager(client);
     }
@@ -37,56 +45,73 @@ export class VoiceChannelManager {
 
   private startPeriodicCleanup(): void {
     // Run cleanup every 5 minutes
-    this.cleanupInterval = setInterval(() => {
-      this.cleanupEmptyChannels().catch(error => {
-        logger.error('Error during periodic channel cleanup:', error);
-      });
-    }, 5 * 60 * 1000);
+    this.cleanupInterval = setInterval(
+      () => {
+        this.cleanupEmptyChannels().catch((error) => {
+          logger.error("Error during periodic channel cleanup:", error);
+        });
+      },
+      5 * 60 * 1000,
+    );
   }
 
   public async initialize(guildId: string): Promise<void> {
     try {
-      logger.info('Initializing voice channel manager...');
+      logger.info("Initializing voice channel manager...");
       const guild = await this.getGuild(guildId);
       if (!guild) {
-        logger.error('Guild not found during initialization');
+        logger.error("Guild not found during initialization");
         return;
       }
 
-      const categoryName = process.env.VC_CATEGORY_NAME || 'Dynamic Voice Channels';
-      const lobbyChannelName = process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, '') || 'Lobby';
+      const categoryName =
+        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
+      const lobbyChannelName =
+        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
       const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel => 
-          channel.type === ChannelType.GuildCategory && 
-          channel.name === categoryName
+        (channel): channel is CategoryChannel =>
+          channel.type === ChannelType.GuildCategory &&
+          channel.name === categoryName,
       );
 
       if (!category) {
-        logger.error(`Category ${categoryName} not found during initialization`);
+        logger.error(
+          `Category ${categoryName} not found during initialization`,
+        );
         return;
       }
 
       // Clean up any empty channels in the category, except the lobby channel
       for (const channel of category.children.cache.values()) {
-        if (channel.type === ChannelType.GuildVoice && 
-            channel.members.size === 0 && 
-            channel.name !== lobbyChannelName) {
+        if (
+          channel.type === ChannelType.GuildVoice &&
+          channel.members.size === 0 &&
+          channel.name !== lobbyChannelName
+        ) {
           try {
             await channel.delete();
-            logger.info(`Cleaned up empty channel ${channel.name} during initialization`);
+            logger.info(
+              `Cleaned up empty channel ${channel.name} during initialization`,
+            );
           } catch (error) {
-            logger.error(`Error cleaning up channel ${channel.name} during initialization:`, error);
+            logger.error(
+              `Error cleaning up channel ${channel.name} during initialization:`,
+              error,
+            );
           }
         }
       }
 
-      logger.info('Voice channel manager initialization completed');
+      logger.info("Voice channel manager initialization completed");
     } catch (error) {
-      logger.error('Error during voice channel manager initialization:', error);
+      logger.error("Error during voice channel manager initialization:", error);
     }
   }
 
-  public async handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): Promise<void> {
+  public async handleVoiceStateUpdate(
+    oldState: VoiceState,
+    newState: VoiceState,
+  ): Promise<void> {
     try {
       const member = newState.member;
       if (!member) return;
@@ -111,20 +136,21 @@ export class VoiceChannelManager {
         }
       }
     } catch (error) {
-      logger.error('Error handling voice state update:', error);
+      logger.error("Error handling voice state update:", error);
     }
   }
 
   private async createUserChannel(member: GuildMember): Promise<void> {
     try {
       const guild = member.guild;
-      const categoryName = process.env.VC_CATEGORY_NAME || 'Dynamic Voice Channels';
-      const prefix = process.env.VC_PREFIX || 's\'-Room';
-      
+      const categoryName =
+        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
+      const prefix = process.env.VC_PREFIX || "s'-Room";
+
       const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel => 
-          channel.type === ChannelType.GuildCategory && 
-          channel.name === categoryName
+        (channel): channel is CategoryChannel =>
+          channel.type === ChannelType.GuildCategory &&
+          channel.name === categoryName,
       );
 
       if (!category) {
@@ -141,9 +167,11 @@ export class VoiceChannelManager {
 
       this.userChannels.set(member.id, channel);
       await member.voice.setChannel(channel);
-      logger.info(`Created voice channel ${channelName} for ${member.displayName}`);
+      logger.info(
+        `Created voice channel ${channelName} for ${member.displayName}`,
+      );
     } catch (error) {
-      logger.error('Error creating user channel:', error);
+      logger.error("Error creating user channel:", error);
     }
   }
 
@@ -156,7 +184,7 @@ export class VoiceChannelManager {
         logger.info(`Cleaned up voice channel ${channel.name}`);
       }
     } catch (error) {
-      logger.error('Error cleaning up user channel:', error);
+      logger.error("Error cleaning up user channel:", error);
     }
   }
 
@@ -170,7 +198,7 @@ export class VoiceChannelManager {
         }
       }
     } catch (error) {
-      logger.error('Error during channel cleanup:', error);
+      logger.error("Error during channel cleanup:", error);
     }
   }
 
@@ -181,4 +209,4 @@ export class VoiceChannelManager {
     }
     this.userChannels.clear();
   }
-} 
+}
