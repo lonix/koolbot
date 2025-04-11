@@ -13,6 +13,8 @@ services:
     command: sh -c "npm run build && npm run deploy-commands && npm start"
     depends_on:
       - mongodb
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
 
   mongodb:
     image: mongo:latest
@@ -22,6 +24,8 @@ services:
       - mongodb_data:/data/db
     ports:
       - "27017:27017"
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
 
 volumes:
   mongodb_data:
