@@ -1,16 +1,15 @@
-version: '3.8'
 
 services:
   bot:
-    image: ghcr.io/lonix/koolbot:latest
+    build: .
     container_name: koolbot
     restart: unless-stopped
-    env_file:
-      - .env
+    env_file: .env
     depends_on:
       - mongodb
-    networks:
-      - koolbot-network
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
 
   mongodb:
     image: mongo:latest
@@ -18,12 +17,10 @@ services:
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
-    networks:
-      - koolbot-network
-
-networks:
-  koolbot-network:
-    driver: bridge
+    ports:
+      - "27017:27017"
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
 
 volumes:
   mongodb_data: 

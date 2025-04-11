@@ -14,7 +14,7 @@ const logger = Logger.getInstance();
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
 
   private constructor(client: Client) {
@@ -131,8 +131,20 @@ export class VoiceChannelManager {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
-        if (oldChannel.name === process.env.LOBBY_CHANNEL_NAME) {
+        // If user is moving to the Lobby, create a new channel
+        if (newChannel.name === process.env.LOBBY_CHANNEL_NAME) {
+          // Clean up the old channel if it was a personal channel
+          if (this.userChannels.has(member.id)) {
+            await this.cleanupUserChannel(member.id);
+          }
           await this.createUserChannel(member);
+        }
+        // If user is moving from their personal channel to another channel, clean up the old one
+        else if (
+          this.userChannels.has(member.id) &&
+          oldChannel.id === this.userChannels.get(member.id)?.id
+        ) {
+          await this.cleanupUserChannel(member.id);
         }
       }
     } catch (error) {
@@ -142,10 +154,18 @@ export class VoiceChannelManager {
 
   private async createUserChannel(member: GuildMember): Promise<void> {
     try {
+      // Check if user already has a channel
+      if (this.userChannels.has(member.id)) {
+        logger.info(
+          `User ${member.displayName} already has a channel, skipping creation`,
+        );
+        return;
+      }
+
       const guild = member.guild;
       const categoryName =
         process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
-      const prefix = process.env.VC_PREFIX || "s'-Room";
+      const suffix = process.env.VC_SUFFIX || "'s Room";
 
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
@@ -158,7 +178,7 @@ export class VoiceChannelManager {
         return;
       }
 
-      const channelName = `${prefix} ${member.displayName}`;
+      const channelName = `${member.displayName}${suffix}`;
       const channel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildVoice,
