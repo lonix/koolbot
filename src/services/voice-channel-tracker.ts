@@ -9,6 +9,27 @@ const logger = Logger.getInstance();
 
 export type TimePeriod = "week" | "month" | "alltime";
 
+interface IAggregatedUserStats {
+  userId: string;
+  username: string;
+  totalTime: number;
+  lastSeen: Date;
+}
+
+interface IUserStats {
+  userId: string;
+  username: string;
+  totalTime: number;
+  lastSeen: Date;
+  sessions: Array<{
+    startTime: Date;
+    endTime?: Date;
+    duration?: number;
+    channelId: string;
+    channelName: string;
+  }>;
+}
+
 export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
   private activeSessions: Map<
@@ -200,7 +221,7 @@ export class VoiceChannelTracker {
   public async getUserStats(
     userId: string,
     timePeriod: TimePeriod = "alltime",
-  ): Promise<IVoiceChannelTracking | null> {
+  ): Promise<IUserStats | null> {
     try {
       const user = await VoiceChannelTracking.findOne({ userId });
       if (!user) return null;
@@ -216,7 +237,13 @@ export class VoiceChannelTracker {
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
           break;
         case "alltime":
-          return user;
+          return {
+            userId: user.userId,
+            username: user.username,
+            totalTime: user.totalTime,
+            lastSeen: user.lastSeen,
+            sessions: user.sessions,
+          };
       }
 
       // Filter sessions within the time period
@@ -231,9 +258,11 @@ export class VoiceChannelTracker {
       );
 
       return {
-        ...user,
-        sessions: filteredSessions,
+        userId: user.userId,
+        username: user.username,
         totalTime,
+        lastSeen: user.lastSeen,
+        sessions: filteredSessions,
       };
     } catch (error) {
       logger.error("Error getting user stats:", error);
@@ -244,7 +273,7 @@ export class VoiceChannelTracker {
   public async getTopUsers(
     limit: number = 10,
     timePeriod: TimePeriod = "alltime",
-  ): Promise<IVoiceChannelTracking[]> {
+  ): Promise<IAggregatedUserStats[]> {
     try {
       const now = new Date();
       let startDate: Date;
@@ -257,9 +286,15 @@ export class VoiceChannelTracker {
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
           break;
         case "alltime":
-          return await VoiceChannelTracking.find()
+          const allTimeUsers = await VoiceChannelTracking.find()
             .sort({ totalTime: -1 })
             .limit(limit);
+          return allTimeUsers.map(user => ({
+            userId: user.userId,
+            username: user.username,
+            totalTime: user.totalTime,
+            lastSeen: user.lastSeen,
+          }));
       }
 
       // For time period filtering, we need to aggregate the sessions
@@ -293,7 +328,6 @@ export class VoiceChannelTracker {
         username: user.username,
         totalTime: user.totalTime,
         lastSeen: user.lastSeen,
-        sessions: [], // We don't need individual sessions for top users
       }));
     } catch (error) {
       logger.error("Error getting top users:", error);
