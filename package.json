@@ -5,7 +5,7 @@
   "description": "A Discord bot with various features including PLEX price checking and role-based commands",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --listFiles --listEmittedFiles",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "watch": "tsc -w",

@@ -1,11 +1,13 @@
 import { VoiceState, GuildMember } from "discord.js";
-import { Logger } from "../utils/logger";
+import Logger from "../utils/logger.js";
 import {
   VoiceChannelTracking,
   IVoiceChannelTracking,
-} from "../models/voice-channel-tracking";
+} from "../models/voice-channel-tracking.js";
 
 const logger = Logger.getInstance();
+
+export type TimePeriod = "week" | "month" | "alltime";
 
 export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
@@ -197,9 +199,42 @@ export class VoiceChannelTracker {
 
   public async getUserStats(
     userId: string,
+    timePeriod: TimePeriod = "alltime",
   ): Promise<IVoiceChannelTracking | null> {
     try {
-      return await VoiceChannelTracking.findOne({ userId });
+      const user = await VoiceChannelTracking.findOne({ userId });
+      if (!user) return null;
+
+      const now = new Date();
+      let startDate: Date;
+
+      switch (timePeriod) {
+        case "week":
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case "month":
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        case "alltime":
+          return user;
+      }
+
+      // Filter sessions within the time period
+      const filteredSessions = user.sessions.filter(
+        (session) => session.startTime >= startDate,
+      );
+
+      // Calculate total time for filtered sessions
+      const totalTime = filteredSessions.reduce(
+        (total, session) => total + (session.duration || 0),
+        0,
+      );
+
+      return {
+        ...user,
+        sessions: filteredSessions,
+        totalTime,
+      };
     } catch (error) {
       logger.error("Error getting user stats:", error);
       return null;
@@ -208,11 +243,58 @@ export class VoiceChannelTracker {
 
   public async getTopUsers(
     limit: number = 10,
+    timePeriod: TimePeriod = "alltime",
   ): Promise<IVoiceChannelTracking[]> {
     try {
-      return await VoiceChannelTracking.find()
-        .sort({ totalTime: -1 })
-        .limit(limit);
+      const now = new Date();
+      let startDate: Date;
+
+      switch (timePeriod) {
+        case "week":
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          break;
+        case "month":
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          break;
+        case "alltime":
+          return await VoiceChannelTracking.find()
+            .sort({ totalTime: -1 })
+            .limit(limit);
+      }
+
+      // For time period filtering, we need to aggregate the sessions
+      const users = await VoiceChannelTracking.aggregate([
+        {
+          $unwind: "$sessions",
+        },
+        {
+          $match: {
+            "sessions.startTime": { $gte: startDate },
+          },
+        },
+        {
+          $group: {
+            _id: "$userId",
+            username: { $first: "$username" },
+            totalTime: { $sum: "$sessions.duration" },
+            lastSeen: { $max: "$sessions.startTime" },
+          },
+        },
+        {
+          $sort: { totalTime: -1 },
+        },
+        {
+          $limit: limit,
+        },
+      ]);
+
+      return users.map((user) => ({
+        userId: user._id,
+        username: user.username,
+        totalTime: user.totalTime,
+        lastSeen: user.lastSeen,
+        sessions: [], // We don't need individual sessions for top users
+      }));
     } catch (error) {
       logger.error("Error getting top users:", error);
       return [];

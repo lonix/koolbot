@@ -2,15 +2,16 @@ import {
   CommandInteraction,
   SlashCommandBuilder,
   SlashCommandIntegerOption,
+  SlashCommandStringOption,
 } from "discord.js";
-import { Logger } from "../utils/logger";
-import { VoiceChannelTracker } from "../services/voice-channel-tracker";
+import Logger from "../utils/logger.js";
+import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 
 export const data = new SlashCommandBuilder()
   .setName("vctop")
-  .setDescription("Show all-time voice channel rankings")
+  .setDescription("Show voice channel rankings")
   .addIntegerOption((option: SlashCommandIntegerOption) =>
     option
       .setName("limit")
@@ -18,6 +19,17 @@ export const data = new SlashCommandBuilder()
       .setRequired(false)
       .setMinValue(1)
       .setMaxValue(25),
+  )
+  .addStringOption((option: SlashCommandStringOption) =>
+    option
+      .setName("period")
+      .setDescription("Time period to show rankings for")
+      .setRequired(false)
+      .addChoices(
+        { name: "Last Week", value: "week" },
+        { name: "Last Month", value: "month" },
+        { name: "All Time", value: "alltime" },
+      ),
   );
 
 export async function execute(interaction: CommandInteraction): Promise<void> {
@@ -25,8 +37,9 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     logger.info(`Executing vctop command for user ${interaction.user.tag}`);
 
     const limit = (interaction.options.get("limit")?.value as number) || 10;
+    const period = (interaction.options.get("period")?.value as TimePeriod) || "alltime";
     const tracker = VoiceChannelTracker.getInstance();
-    const topUsers = await tracker.getTopUsers(limit);
+    const topUsers = await tracker.getTopUsers(limit, period);
 
     if (topUsers.length === 0) {
       await interaction.reply("No voice channel statistics available yet.");
@@ -39,8 +52,10 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return `${hours}h ${minutes}m`;
     };
 
+    const periodTitle = period === "week" ? "Last Week" : period === "month" ? "Last Month" : "All Time";
+
     const response = [
-      "**All-Time Voice Channel Rankings**",
+      `**${periodTitle} Voice Channel Rankings**`,
       "```",
       ...topUsers.map((user, index) => {
         const rank = index + 1;

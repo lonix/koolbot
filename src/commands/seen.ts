@@ -3,8 +3,8 @@ import {
   SlashCommandBuilder,
   SlashCommandUserOption,
 } from "discord.js";
-import { Logger } from "../utils/logger";
-import { VoiceChannelTracker } from "../services/voice-channel-tracker";
+import Logger from "../utils/logger.js";
+import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 

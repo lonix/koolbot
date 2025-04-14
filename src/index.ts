@@ -1,12 +1,12 @@
 import { Client, GatewayIntentBits, Interaction, VoiceState } from "discord.js";
 import { config } from "dotenv";
-import { Logger } from "./utils/logger";
-import { handleCommands } from "./commands";
+import Logger from "./utils/logger.js";
+import { handleCommands } from "./commands/index.js";
 import mongoose from "mongoose";
-import { VoiceChannelManager } from "./services/voice-channel-manager";
-import { ChannelInitializer } from "./services/channel-initializer";
-import { CommandManager } from "./services/command-manager";
-import { VoiceChannelTracker } from "./services/voice-channel-tracker";
+import { VoiceChannelManager } from "./services/voice-channel-manager.js";
+import { ChannelInitializer } from "./services/channel-initializer.js";
+import { CommandManager } from "./services/command-manager.js";
+import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 
 config();
 const logger = Logger.getInstance();

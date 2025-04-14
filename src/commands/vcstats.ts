@@ -2,9 +2,10 @@ import {
   CommandInteraction,
   SlashCommandBuilder,
   SlashCommandUserOption,
+  SlashCommandStringOption,
 } from "discord.js";
-import { Logger } from "../utils/logger";
-import { VoiceChannelTracker } from "../services/voice-channel-tracker";
+import Logger from "../utils/logger.js";
+import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 
@@ -16,6 +17,17 @@ export const data = new SlashCommandBuilder()
       .setName("user")
       .setDescription("The user to check (defaults to yourself)")
       .setRequired(false),
+  )
+  .addStringOption((option: SlashCommandStringOption) =>
+    option
+      .setName("period")
+      .setDescription("Time period to show statistics for")
+      .setRequired(false)
+      .addChoices(
+        { name: "Last Week", value: "week" },
+        { name: "Last Month", value: "month" },
+        { name: "All Time", value: "alltime" },
+      ),
   );
 
 export async function execute(interaction: CommandInteraction): Promise<void> {
@@ -24,8 +36,9 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
 
     const targetUser =
       interaction.options.get("user")?.user || interaction.user;
+    const period = (interaction.options.get("period")?.value as TimePeriod) || "alltime";
     const tracker = VoiceChannelTracker.getInstance();
-    const stats = await tracker.getUserStats(targetUser.id);
+    const stats = await tracker.getUserStats(targetUser.id, period);
 
     if (!stats) {
       await interaction.reply(
@@ -44,12 +57,14 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return date.toLocaleString();
     };
 
+    const periodTitle = period === "week" ? "Last Week" : period === "month" ? "Last Month" : "All Time";
+
     const response = [
-      `**Voice Channel Statistics for ${targetUser.username}**`,
-      `\`\`\``,
+      `**${periodTitle} Voice Channel Statistics for ${targetUser.username}**`,
+      "```",
       `Total Time: ${formatTime(stats.totalTime)}`,
       `Last Seen: ${stats.lastSeen ? formatDate(stats.lastSeen) : "Never"}`,
-      `\`\`\``,
+      "```",
     ].join("\n");
 
     await interaction.reply(response);

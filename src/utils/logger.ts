@@ -65,4 +65,4 @@ class Logger {
   }
 }
 
-export { Logger };
+export default Logger;

@@ -1,11 +1,11 @@
 import { CommandInteraction } from "discord.js";
-import { Logger } from "../utils/logger";
-import { execute as ping } from "./ping";
-import { execute as amikool } from "./amikool";
-import { execute as plexprice } from "./plexprice";
-import { execute as vctop } from "./vctop";
-import { execute as vcstats } from "./vcstats";
-import { execute as seen } from "./seen";
+import Logger from "../utils/logger.js";
+import { execute as ping } from "./ping.js";
+import { execute as amikool } from "./amikool.js";
+import { execute as plexprice } from "./plexprice.js";
+import { execute as vctop } from "./vctop.js";
+import { execute as vcstats } from "./vcstats.js";
+import { execute as seen } from "./seen.js";
 
 const logger = Logger.getInstance();
 
