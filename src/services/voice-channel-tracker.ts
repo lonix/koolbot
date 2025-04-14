@@ -356,6 +356,14 @@ export class VoiceChannelTracker {
 
   private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
     try {
+      if (!interaction.guild) {
+        await interaction.reply({
+          content: "This command can only be used in a server.",
+          ephemeral: true
+        });
+        return;
+      }
+
       const channel = await this.client.channels.fetch(interaction.channelId);
       if (!channel || !(channel instanceof VoiceChannel)) {
         return;
