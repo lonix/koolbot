@@ -16,13 +16,11 @@ import { ChannelInitializer } from "./services/channel-initializer.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 
+// Add proper type declarations for Node.js globals
+declare const setTimeout: (callback: (...args: unknown[]) => void, ms: number) => number;
+
 config();
 const logger = Logger.getInstance();
-
-// Add global type for setTimeout
-declare global {
-  function setTimeout(callback: (...args: any[]) => void, ms: number): NodeJS.Timeout;
-}
 
 const client = new Client({
   intents: [
