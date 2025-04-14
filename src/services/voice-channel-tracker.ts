@@ -288,54 +288,72 @@ export class VoiceChannelTracker {
     try {
       const now = new Date();
       let startDate: Date;
+      let users;
 
       switch (timePeriod) {
         case "week":
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          users = await VoiceChannelTracking.aggregate([
+            {
+              $unwind: "$sessions",
+            },
+            {
+              $match: {
+                "sessions.startTime": { $gte: startDate },
+              },
+            },
+            {
+              $group: {
+                _id: "$userId",
+                username: { $first: "$username" },
+                totalTime: { $sum: "$sessions.duration" },
+                lastSeen: { $max: "$sessions.startTime" },
+              },
+            },
+            {
+              $sort: { totalTime: -1 },
+            },
+            {
+              $limit: limit,
+            },
+          ]);
           break;
         case "month":
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          users = await VoiceChannelTracking.aggregate([
+            {
+              $unwind: "$sessions",
+            },
+            {
+              $match: {
+                "sessions.startTime": { $gte: startDate },
+              },
+            },
+            {
+              $group: {
+                _id: "$userId",
+                username: { $first: "$username" },
+                totalTime: { $sum: "$sessions.duration" },
+                lastSeen: { $max: "$sessions.startTime" },
+              },
+            },
+            {
+              $sort: { totalTime: -1 },
+            },
+            {
+              $limit: limit,
+            },
+          ]);
           break;
         case "alltime":
-          const allTimeUsers = await VoiceChannelTracking.find()
+          users = await VoiceChannelTracking.find()
             .sort({ totalTime: -1 })
             .limit(limit);
-          return allTimeUsers.map(user => ({
-            userId: user.userId,
-            username: user.username,
-            totalTime: user.totalTime,
-            lastSeen: user.lastSeen,
-          }));
+          break;
       }
 
-      // For time period filtering, we need to aggregate the sessions
-      const users = await VoiceChannelTracking.aggregate([
-        {
-          $unwind: "$sessions",
-        },
-        {
-          $match: {
-            "sessions.startTime": { $gte: startDate },
-          },
-        },
-        {
-          $group: {
-            _id: "$userId",
-            username: { $first: "$username" },
-            totalTime: { $sum: "$sessions.duration" },
-            lastSeen: { $max: "$sessions.startTime" },
-          },
-        },
-        {
-          $sort: { totalTime: -1 },
-        },
-        {
-          $limit: limit,
-        },
-      ]);
-
       return users.map((user) => ({
-        userId: user._id,
+        userId: user._id || user.userId,
         username: user.username,
         totalTime: user.totalTime,
         lastSeen: user.lastSeen,

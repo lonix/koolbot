@@ -15,10 +15,14 @@ import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
-import { connectToDatabase } from "./utils/database.js";
 
 config();
 const logger = Logger.getInstance();
+
+// Add global type for setTimeout
+declare global {
+  function setTimeout(callback: (...args: any[]) => void, ms: number): NodeJS.Timeout;
+}
 
 const client = new Client({
   intents: [
