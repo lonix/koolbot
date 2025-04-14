@@ -26,6 +26,8 @@ services:
       - mongodb_data_dev:/data/db
     ports:
       - "27017:27017"
+    networks:
+      - koolbot-network
     stop_grace_period: 30s
     stop_signal: SIGTERM
 
