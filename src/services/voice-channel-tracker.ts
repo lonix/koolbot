@@ -349,4 +349,68 @@ export class VoiceChannelTracker {
       return null;
     }
   }
+
+  private async handleButtonInteraction(interaction: any): Promise<void> {
+    try {
+      const [action, channelId] = interaction.customId.split('_');
+      const channel = await this.client.channels.fetch(channelId) as VoiceChannel;
+      
+      if (!channel) {
+        await interaction.reply({ content: "Channel not found.", ephemeral: true });
+        return;
+      }
+
+      // Check if the user is the owner of the channel
+      const ownerId = Array.from(this.userChannels.entries())
+        .find(([_, vc]) => vc.id === channel.id)?.[0];
+
+      if (interaction.user.id !== ownerId) {
+        await interaction.reply({ 
+          content: "Only the channel owner can use these controls.", 
+          ephemeral: true 
+        });
+        return;
+      }
+
+      let response;
+      switch (action) {
+        case 'rename':
+          response = "Please enter the new name for your channel:";
+          break;
+        case 'public':
+          await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+            ViewChannel: true,
+            Connect: true
+          });
+          response = "Channel is now public.";
+          break;
+        case 'private':
+          await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
+            ViewChannel: false,
+            Connect: false
+          });
+          response = "Channel is now private.";
+          break;
+        case 'invite':
+          response = "Please mention the user you want to invite:";
+          break;
+        case 'kick':
+          response = "Please mention the user you want to kick:";
+          break;
+        default:
+          response = "Unknown action.";
+      }
+
+      await interaction.reply({
+        content: response,
+        ephemeral: true
+      });
+    } catch (error) {
+      logger.error("Error handling button interaction:", error);
+      await interaction.reply({
+        content: "An error occurred while processing your request.",
+        ephemeral: true
+      });
+    }
+  }
 }

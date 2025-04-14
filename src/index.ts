@@ -156,10 +156,20 @@ async function cleanup(): Promise<void> {
   }
 }
 
-// Handle process termination
-process.on("SIGTERM", async () => {
-  logger.info("Received SIGTERM, shutting down...");
-  await cleanup();
+// Set up periodic cleanup
+const cleanupInterval = setInterval(() => {
+  cleanupVoiceChannels().catch((error: Error) => {
+    logger.error("Error during periodic cleanup:", error);
+  });
+}, 5 * 60 * 1000); // Run every 5 minutes
+
+// Clean up on process exit
+process.on("SIGTERM", () => {
+  clearInterval(cleanupInterval);
+  cleanup().catch((error: Error) => {
+    logger.error("Error during cleanup:", error);
+    process.exit(1);
+  });
 });
 
 process.on("SIGINT", async () => {

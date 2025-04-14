@@ -114,7 +114,7 @@ export class VoiceChannelManager {
 
       // Get current owner from channel name
       const currentOwnerId = Array.from(this.userChannels.entries()).find(
-        ([_, vc]) => vc.id === channel.id,
+        ([userId]) => userId === channel.id
       )?.[0];
 
       if (!currentOwnerId) {

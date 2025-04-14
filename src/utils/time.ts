@@ -1,5 +1,8 @@
 import { formatDistanceToNow, format } from 'date-fns';
-import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
+import { utcToZonedTime } from 'date-fns-tz';
+import Logger from './logger.js';
+
+const logger = Logger.getInstance();
 
 /**
  * Formats a duration in milliseconds to a human-readable string
@@ -45,8 +48,9 @@ export function formatDateInTimezone(date: Date, timezone: string): string {
   try {
     const zonedDate = utcToZonedTime(date, timezone);
     return format(zonedDate, 'yyyy-MM-dd HH:mm:ss');
-  } catch (error) {
+  } catch (err) {
     // Fallback to UTC if timezone is invalid
+    logger.error(`Invalid timezone ${timezone}:`, err);
     return format(date, 'yyyy-MM-dd HH:mm:ss');
   }
 } 
