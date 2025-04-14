@@ -3,6 +3,8 @@ name: Docker Build and Push
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*.*.*'   # Match tags like v1.0.0, v1.1.0, etc.
   workflow_dispatch:
 
 env:
@@ -33,11 +35,18 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
             type=sha,format=short
             type=ref,event=branch
-            type=ref,event=tag
-          public: true
+            type=ref,event=pr
+          labels: |
+            org.opencontainers.image.title=koolbot
+            org.opencontainers.image.description=A Discord bot with various features
+            maintainer=lonix
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
