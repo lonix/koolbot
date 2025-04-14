@@ -1,4 +1,5 @@
 import { formatDistanceToNow, format } from 'date-fns';
+import { zonedTimeToUtc, utcToZonedTime } from 'date-fns-tz';
 
 /**
  * Formats a duration in milliseconds to a human-readable string
@@ -42,9 +43,10 @@ export function formatTimeAgo(date: Date): string {
  */
 export function formatDateInTimezone(date: Date, timezone: string): string {
   try {
-    return format(date, 'yyyy-MM-dd HH:mm:ss', { timeZone: timezone });
+    const zonedDate = utcToZonedTime(date, timezone);
+    return format(zonedDate, 'yyyy-MM-dd HH:mm:ss');
   } catch (error) {
     // Fallback to UTC if timezone is invalid
-    return format(date, 'yyyy-MM-dd HH:mm:ss', { timeZone: 'UTC' });
+    return format(date, 'yyyy-MM-dd HH:mm:ss');
   }
 } 

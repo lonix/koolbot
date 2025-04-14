@@ -7,10 +7,10 @@
   "scripts": {
     "build": "tsc --listFiles --listEmittedFiles",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "node --import ./src/loader.js src/index.ts",
     "watch": "tsc -w",
-    "deploy-commands": "ts-node src/deploy-commands.ts",
-    "unregister-guild-commands": "ts-node src/unregister-guild-commands.ts",
+    "deploy-commands": "node --import ./src/loader.js src/deploy-commands.ts",
+    "unregister-guild-commands": "node --import ./src/loader.js src/unregister-guild-commands.ts",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -22,7 +22,8 @@
   "dependencies": {
     "@discordjs/builders": "^1.10.1",
     "axios": "^1.6.7",
-    "date-fns": "^3.3.1",
+    "date-fns": "^2.30.0",
+    "date-fns-tz": "^2.0.0",
     "discord.js": "^14.14.1",
     "dotenv": "^16.4.1",
     "mongoose": "^8.1.1",
@@ -46,6 +47,9 @@
     "preset": "ts-jest",
     "testEnvironment": "node",
     "testMatch": ["**/__tests__/**/*.ts", "**/?(*.)+(spec|test).ts"],
-    "moduleFileExtensions": ["ts", "js", "json", "node"]
+    "moduleFileExtensions": ["ts", "js", "json", "node"],
+    "transform": {
+      "^.+\\.tsx?$": ["ts-jest", { "useESM": true }]
+    }
   }
 }

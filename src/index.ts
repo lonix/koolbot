@@ -134,7 +134,7 @@ async function cleanup(): Promise<void> {
     await cleanupVoiceChannels();
 
     // Clean up voice channel manager
-    VoiceChannelManager.getInstance().destroy();
+    VoiceChannelManager.getInstance(client).destroy();
     logger.info("Voice channel manager destroyed");
 
     // Close MongoDB connection
@@ -279,7 +279,7 @@ client.on(
     try {
       // Handle voice channel management
       if (process.env.ENABLE_VC_MANAGEMENT === "true") {
-        await VoiceChannelManager.getInstance().handleVoiceStateUpdate(
+        await VoiceChannelManager.getInstance(client).handleVoiceStateUpdate(
           oldState,
           newState,
         );
