@@ -2,7 +2,6 @@ import {
   CommandInteraction,
   SlashCommandBuilder,
   SlashCommandUserOption,
-  SlashCommandStringOption,
 } from "discord.js";
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
@@ -17,17 +16,6 @@ export const data = new SlashCommandBuilder()
       .setName("user")
       .setDescription("The user to check (defaults to yourself)")
       .setRequired(false),
-  )
-  .addStringOption((option: SlashCommandStringOption) =>
-    option
-      .setName("period")
-      .setDescription("Time period to show statistics for")
-      .setRequired(false)
-      .addChoices(
-        { name: "Last Week", value: "week" },
-        { name: "Last Month", value: "month" },
-        { name: "All Time", value: "alltime" },
-      ),
   );
 
 export async function execute(interaction: CommandInteraction): Promise<void> {
@@ -36,11 +24,16 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
 
     const targetUser =
       interaction.options.get("user")?.user || interaction.user;
-    const period = (interaction.options.get("period")?.value as TimePeriod) || "alltime";
     const tracker = VoiceChannelTracker.getInstance();
-    const stats = await tracker.getUserStats(targetUser.id, period);
 
-    if (!stats) {
+    // Get stats for all time periods
+    const [weekStats, monthStats, allTimeStats] = await Promise.all([
+      tracker.getUserStats(targetUser.id, "week"),
+      tracker.getUserStats(targetUser.id, "month"),
+      tracker.getUserStats(targetUser.id, "alltime"),
+    ]);
+
+    if (!allTimeStats) {
       await interaction.reply(
         `No voice channel statistics available for ${targetUser.username}.`,
       );
@@ -57,13 +50,14 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return date.toLocaleString();
     };
 
-    const periodTitle = period === "week" ? "Last Week" : period === "month" ? "Last Month" : "All Time";
-
     const response = [
-      `**${periodTitle} Voice Channel Statistics for ${targetUser.username}**`,
+      `**Voice Channel Statistics for ${targetUser.username}**`,
       "```",
-      `Total Time: ${formatTime(stats.totalTime)}`,
-      `Last Seen: ${stats.lastSeen ? formatDate(stats.lastSeen) : "Never"}`,
+      `Last week: ${weekStats ? formatTime(weekStats.totalTime) : "0h 0m"}`,
+      `Last 30days: ${monthStats ? formatTime(monthStats.totalTime) : "0h 0m"}`,
+      `All time: ${formatTime(allTimeStats.totalTime)}`,
+      "",
+      `Last seen: ${allTimeStats.lastSeen ? formatDate(allTimeStats.lastSeen) : "Never"}`,
       "```",
     ].join("\n");
 
