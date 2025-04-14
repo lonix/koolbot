@@ -105,7 +105,9 @@ export class VoiceChannelManager {
     }
   }
 
-  private async handleChannelOwnershipChange(channel: VoiceChannel): Promise<void> {
+  private async handleChannelOwnershipChange(
+    channel: VoiceChannel,
+  ): Promise<void> {
     try {
       if (channel.members.size === 0) {
         // Channel is empty, no need to change ownership
@@ -114,7 +116,7 @@ export class VoiceChannelManager {
 
       // Get current owner from channel name
       const currentOwnerId = Array.from(this.userChannels.entries()).find(
-        ([userId]) => userId === channel.id
+        ([userId]) => userId === channel.id,
       )?.[0];
 
       if (!currentOwnerId) {
@@ -137,11 +139,11 @@ export class VoiceChannelManager {
       }
 
       const newOwner = members[Math.floor(Math.random() * members.length)];
-      
+
       // Update channel name
       const newChannelName = `${newOwner.displayName}'s Channel`;
       await channel.setName(newChannelName);
-      
+
       // Update ownership tracking
       this.userChannels.delete(currentOwnerId);
       this.userChannels.set(newOwner.id, channel);
@@ -189,7 +191,10 @@ export class VoiceChannelManager {
           // Clean up the old channel if it was a personal channel
           if (this.userChannels.has(member.id)) {
             const oldUserChannel = this.userChannels.get(member.id);
-            if (oldUserChannel && oldUserChannel.type === ChannelType.GuildVoice) {
+            if (
+              oldUserChannel &&
+              oldUserChannel.type === ChannelType.GuildVoice
+            ) {
               await this.handleChannelOwnershipChange(oldUserChannel);
             }
             await this.cleanupUserChannel(member.id);

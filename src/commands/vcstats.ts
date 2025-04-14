@@ -24,7 +24,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     logger.info(`Executing vcstats command for user ${interaction.user.tag}`);
 
     const targetUser = interaction.options.get("user")?.user;
-    
+
     // Check if user is trying to view someone else's stats
     if (targetUser && targetUser.id !== interaction.user.id) {
       // Check if user has permission to view others' stats
@@ -38,10 +38,11 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       }
 
       // Check if user has admin or moderator role
-      const hasPermission = member.permissions instanceof PermissionsBitField && 
-                          (member.permissions.has(PermissionsBitField.Flags.Administrator) || 
-                           member.permissions.has(PermissionsBitField.Flags.ModerateMembers));
-      
+      const hasPermission =
+        member.permissions instanceof PermissionsBitField &&
+        (member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+          member.permissions.has(PermissionsBitField.Flags.ModerateMembers));
+
       if (!hasPermission) {
         await interaction.reply({
           content: "You don't have permission to view other users' statistics.",

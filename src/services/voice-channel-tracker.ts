@@ -1,4 +1,10 @@
-import { VoiceState, GuildMember, VoiceChannel, Client, ButtonInteraction } from "discord.js";
+import {
+  VoiceState,
+  GuildMember,
+  VoiceChannel,
+  Client,
+  ButtonInteraction,
+} from "discord.js";
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 
@@ -374,12 +380,14 @@ export class VoiceChannelTracker {
     }
   }
 
-  private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
+  private async handleButtonInteraction(
+    interaction: ButtonInteraction,
+  ): Promise<void> {
     try {
       if (!interaction.guild) {
         await interaction.reply({
           content: "This command can only be used in a server.",
-          ephemeral: true
+          ephemeral: true,
         });
         return;
       }
@@ -399,27 +407,33 @@ export class VoiceChannelTracker {
 
       let response;
       switch (interaction.customId) {
-        case 'rename':
+        case "rename":
           response = "Please enter the new name for your channel:";
           break;
-        case 'public':
-          await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
-            ViewChannel: true,
-            Connect: true
-          });
+        case "public":
+          await channel.permissionOverwrites.edit(
+            interaction.guild.roles.everyone,
+            {
+              ViewChannel: true,
+              Connect: true,
+            },
+          );
           response = "Channel is now public.";
           break;
-        case 'private':
-          await channel.permissionOverwrites.edit(interaction.guild.roles.everyone, {
-            ViewChannel: false,
-            Connect: false
-          });
+        case "private":
+          await channel.permissionOverwrites.edit(
+            interaction.guild.roles.everyone,
+            {
+              ViewChannel: false,
+              Connect: false,
+            },
+          );
           response = "Channel is now private.";
           break;
-        case 'invite':
+        case "invite":
           response = "Please mention the user you want to invite:";
           break;
-        case 'kick':
+        case "kick":
           response = "Please mention the user you want to kick:";
           break;
         default:
@@ -428,13 +442,13 @@ export class VoiceChannelTracker {
 
       await interaction.reply({
         content: response,
-        ephemeral: true
+        ephemeral: true,
       });
     } catch (error) {
       logger.error("Error handling button interaction:", error);
       await interaction.reply({
         content: "An error occurred while processing your request.",
-        ephemeral: true
+        ephemeral: true,
       });
     }
   }

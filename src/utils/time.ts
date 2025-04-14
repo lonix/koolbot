@@ -1,6 +1,6 @@
-import { formatDistanceToNow, format } from 'date-fns';
-import { utcToZonedTime } from 'date-fns-tz';
-import Logger from './logger.js';
+import { formatDistanceToNow, format } from "date-fns";
+import { utcToZonedTime } from "date-fns-tz";
+import Logger from "./logger.js";
 
 const logger = Logger.getInstance();
 
@@ -21,12 +21,15 @@ export function formatDuration(durationMs: number): string {
 
   const parts: string[] = [];
 
-  if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`);
-  if (remainingHours > 0) parts.push(`${remainingHours} hour${remainingHours > 1 ? 's' : ''}`);
-  if (remainingMinutes > 0) parts.push(`${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}`);
-  if (remainingSeconds > 0 && parts.length === 0) parts.push(`${remainingSeconds} second${remainingSeconds > 1 ? 's' : ''}`);
+  if (days > 0) parts.push(`${days} day${days > 1 ? "s" : ""}`);
+  if (remainingHours > 0)
+    parts.push(`${remainingHours} hour${remainingHours > 1 ? "s" : ""}`);
+  if (remainingMinutes > 0)
+    parts.push(`${remainingMinutes} minute${remainingMinutes > 1 ? "s" : ""}`);
+  if (remainingSeconds > 0 && parts.length === 0)
+    parts.push(`${remainingSeconds} second${remainingSeconds > 1 ? "s" : ""}`);
 
-  return parts.join(', ');
+  return parts.join(", ");
 }
 
 /**
@@ -47,10 +50,10 @@ export function formatTimeAgo(date: Date): string {
 export function formatDateInTimezone(date: Date, timezone: string): string {
   try {
     const zonedDate = utcToZonedTime(date, timezone);
-    return format(zonedDate, 'yyyy-MM-dd HH:mm:ss');
+    return format(zonedDate, "yyyy-MM-dd HH:mm:ss");
   } catch (err) {
     // Fallback to UTC if timezone is invalid
     logger.error(`Invalid timezone ${timezone}:`, err);
-    return format(date, 'yyyy-MM-dd HH:mm:ss');
+    return format(date, "yyyy-MM-dd HH:mm:ss");
   }
-} 
+}

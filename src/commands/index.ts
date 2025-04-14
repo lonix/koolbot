@@ -1,4 +1,8 @@
-import { CommandInteraction, InteractionReplyOptions, MessagePayload } from "discord.js";
+import {
+  CommandInteraction,
+  InteractionReplyOptions,
+  MessagePayload,
+} from "discord.js";
 import Logger from "../utils/logger.js";
 import { execute as ping } from "./ping.js";
 import { execute as amikool } from "./amikool.js";
@@ -19,22 +23,30 @@ const commands = {
 };
 
 // Create a wrapper for the interaction that makes replies ephemeral by default
-function createEphemeralInteraction(interaction: CommandInteraction): CommandInteraction {
+function createEphemeralInteraction(
+  interaction: CommandInteraction,
+): CommandInteraction {
   return {
     ...interaction,
-    reply: async function(options: string | MessagePayload | InteractionReplyOptions) {
-      if (typeof options === 'string') {
+    reply: async function (
+      options: string | MessagePayload | InteractionReplyOptions,
+    ) {
+      if (typeof options === "string") {
         options = { content: options };
       }
-      if (typeof options === 'object' && 'ephemeral' in options && options.ephemeral === undefined) {
+      if (
+        typeof options === "object" &&
+        "ephemeral" in options &&
+        options.ephemeral === undefined
+      ) {
         options.ephemeral = true;
         // Add a small indicator that the message is ephemeral
-        if (typeof options.content === 'string') {
+        if (typeof options.content === "string") {
           options.content = `🔒 ${options.content}`;
         }
       }
       return interaction.reply(options);
-    }
+    },
   } as CommandInteraction;
 }
 

@@ -1,5 +1,9 @@
 import { describe, it, expect } from "@jest/globals";
-import { formatDuration, formatTimeAgo, formatDateInTimezone } from "../utils/time.js";
+import {
+  formatDuration,
+  formatTimeAgo,
+  formatDateInTimezone,
+} from "../utils/time.js";
 
 describe("Utils", () => {
   describe("formatDuration", () => {
@@ -31,12 +35,16 @@ describe("Utils", () => {
     it("should format date in specified timezone", () => {
       const date = new Date("2024-01-01T00:00:00Z");
       expect(formatDateInTimezone(date, "UTC")).toBe("2024-01-01 00:00:00");
-      expect(formatDateInTimezone(date, "America/New_York")).toBe("2023-12-31 19:00:00");
+      expect(formatDateInTimezone(date, "America/New_York")).toBe(
+        "2023-12-31 19:00:00",
+      );
     });
 
     it("should fallback to UTC for invalid timezone", () => {
       const date = new Date("2024-01-01T00:00:00Z");
-      expect(formatDateInTimezone(date, "Invalid/Timezone")).toBe("2024-01-01 00:00:00");
+      expect(formatDateInTimezone(date, "Invalid/Timezone")).toBe(
+        "2024-01-01 00:00:00",
+      );
     });
   });
 });

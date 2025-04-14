@@ -5,7 +5,10 @@ import {
   SlashCommandStringOption,
 } from "discord.js";
 import Logger from "../utils/logger.js";
-import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
+import {
+  VoiceChannelTracker,
+  TimePeriod,
+} from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 
@@ -37,7 +40,8 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     logger.info(`Executing vctop command for user ${interaction.user.tag}`);
 
     const limit = (interaction.options.get("limit")?.value as number) || 10;
-    const period = (interaction.options.get("period")?.value as TimePeriod) || "alltime";
+    const period =
+      (interaction.options.get("period")?.value as TimePeriod) || "alltime";
     const tracker = VoiceChannelTracker.getInstance(interaction.client);
     const topUsers = await tracker.getTopUsers(limit, period);
 
@@ -52,7 +56,12 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return `${hours}h ${minutes}m`;
     };
 
-    const periodTitle = period === "week" ? "Last Week" : period === "month" ? "Last Month" : "All Time";
+    const periodTitle =
+      period === "week"
+        ? "Last Week"
+        : period === "month"
+          ? "Last Month"
+          : "All Time";
 
     const response = [
       `**${periodTitle} Voice Channel Rankings**`,

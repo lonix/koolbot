@@ -17,7 +17,10 @@ import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 
 // Add proper type declarations for Node.js globals
-declare const setTimeout: (callback: (...args: unknown[]) => void, ms: number) => number;
+declare const setTimeout: (
+  callback: (...args: unknown[]) => void,
+  ms: number,
+) => number;
 
 config();
 const logger = Logger.getInstance();
@@ -61,7 +64,9 @@ async function cleanupVoiceChannels(): Promise<void> {
           // Create offline lobby channel
           const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
           if (!offlineLobbyName) {
-            logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables");
+            logger.error(
+              "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+            );
             return;
           }
 
@@ -150,7 +155,7 @@ async function cleanup(): Promise<void> {
 
     // Wait for Discord to process the disconnection
     logger.info("Waiting for Discord to process disconnection...");
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
     process.exit(0);
   } catch (error) {
@@ -160,11 +165,14 @@ async function cleanup(): Promise<void> {
 }
 
 // Set up periodic cleanup
-const cleanupInterval = setInterval(() => {
-  cleanupVoiceChannels().catch((error: Error) => {
-    logger.error("Error during periodic cleanup:", error);
-  });
-}, 5 * 60 * 1000); // Run every 5 minutes
+const cleanupInterval = setInterval(
+  () => {
+    cleanupVoiceChannels().catch((error: Error) => {
+      logger.error("Error during periodic cleanup:", error);
+    });
+  },
+  5 * 60 * 1000,
+); // Run every 5 minutes
 
 // Clean up on process exit
 process.on("SIGTERM", () => {
@@ -216,7 +224,9 @@ client.once("ready", async () => {
       if (category) {
         const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
         if (!offlineLobbyName) {
-          logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables");
+          logger.error(
+            "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+          );
           return;
         }
 
@@ -242,7 +252,10 @@ client.once("ready", async () => {
                 try {
                   await member.voice.setChannel(newChannel);
                 } catch (error) {
-                  logger.error(`Error moving member ${member.user.tag}:`, error);
+                  logger.error(
+                    `Error moving member ${member.user.tag}:`,
+                    error,
+                  );
                 }
               }
             }

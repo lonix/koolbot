@@ -29,7 +29,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     }
 
     const tracker = VoiceChannelTracker.getInstance(interaction.client);
-    
+
     // Check if user is currently in a voice channel
     const activeSession = tracker.getActiveSession(targetUser.id);
     if (activeSession) {

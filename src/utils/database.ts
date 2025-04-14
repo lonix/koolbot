@@ -12,4 +12,4 @@ export async function connectToDatabase(): Promise<void> {
     logger.error("Failed to connect to MongoDB:", error);
     throw error;
   }
-} 
+}
