@@ -14,6 +14,17 @@ export default [
       parserOptions: {
         ecmaVersion: 'latest',
         sourceType: 'module'
+      },
+      globals: {
+        // Add Node.js globals
+        'process': 'readonly',
+        'setInterval': 'readonly',
+        'clearInterval': 'readonly',
+        '__dirname': 'readonly',
+        '__filename': 'readonly',
+        'console': 'readonly',
+        'module': 'readonly',
+        'require': 'readonly'
       }
     },
     plugins: {
