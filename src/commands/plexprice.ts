@@ -1,5 +1,5 @@
 import { CommandInteraction, SlashCommandBuilder } from "discord.js";
-import { Logger } from "../utils/logger";
+import Logger from "../utils/logger.js";
 import axios from "axios";
 
 const logger = Logger.getInstance();

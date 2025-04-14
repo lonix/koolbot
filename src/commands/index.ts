@@ -1,11 +1,15 @@
-import { CommandInteraction } from "discord.js";
-import { Logger } from "../utils/logger";
-import { execute as ping } from "./ping";
-import { execute as amikool } from "./amikool";
-import { execute as plexprice } from "./plexprice";
-import { execute as vctop } from "./vctop";
-import { execute as vcstats } from "./vcstats";
-import { execute as seen } from "./seen";
+import {
+  CommandInteraction,
+  InteractionReplyOptions,
+  MessagePayload,
+} from "discord.js";
+import Logger from "../utils/logger.js";
+import { execute as ping } from "./ping.js";
+import { execute as amikool } from "./amikool.js";
+import { execute as plexprice } from "./plexprice.js";
+import { execute as vctop } from "./vctop.js";
+import { execute as vcstats } from "./vcstats.js";
+import { execute as seen } from "./seen.js";
 
 const logger = Logger.getInstance();
 
@@ -18,6 +22,34 @@ const commands = {
   seen: process.env.ENABLE_SEEN === "true" ? seen : undefined,
 };
 
+// Create a wrapper for the interaction that makes replies ephemeral by default
+function createEphemeralInteraction(
+  interaction: CommandInteraction,
+): CommandInteraction {
+  return {
+    ...interaction,
+    reply: async function (
+      options: string | MessagePayload | InteractionReplyOptions,
+    ) {
+      if (typeof options === "string") {
+        options = { content: options };
+      }
+      if (
+        typeof options === "object" &&
+        "ephemeral" in options &&
+        options.ephemeral === undefined
+      ) {
+        options.ephemeral = true;
+        // Add a small indicator that the message is ephemeral
+        if (typeof options.content === "string") {
+          options.content = `🔒 ${options.content}`;
+        }
+      }
+      return interaction.reply(options);
+    },
+  } as CommandInteraction;
+}
+
 export async function handleCommands(
   interaction: CommandInteraction,
 ): Promise<void> {
@@ -27,9 +59,11 @@ export async function handleCommands(
 
   const command = commands[interaction.commandName as keyof typeof commands];
   if (command) {
-    await command(interaction);
+    // Create an ephemeral version of the interaction
+    const ephemeralInteraction = createEphemeralInteraction(interaction);
+    await command(ephemeralInteraction);
   } else {
     logger.error(`Unknown command: ${interaction.commandName}`);
-    await interaction.reply({ content: "Unknown command", ephemeral: true });
+    await interaction.reply({ content: "🔒 Unknown command", ephemeral: true });
   }
 }

@@ -2,9 +2,10 @@ import {
   CommandInteraction,
   SlashCommandBuilder,
   SlashCommandUserOption,
+  PermissionsBitField,
 } from "discord.js";
-import { Logger } from "../utils/logger";
-import { VoiceChannelTracker } from "../services/voice-channel-tracker";
+import Logger from "../utils/logger.js";
+import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 
@@ -22,14 +23,48 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
   try {
     logger.info(`Executing vcstats command for user ${interaction.user.tag}`);
 
-    const targetUser =
-      interaction.options.get("user")?.user || interaction.user;
-    const tracker = VoiceChannelTracker.getInstance();
-    const stats = await tracker.getUserStats(targetUser.id);
+    const targetUser = interaction.options.get("user")?.user;
 
-    if (!stats) {
+    // Check if user is trying to view someone else's stats
+    if (targetUser && targetUser.id !== interaction.user.id) {
+      // Check if user has permission to view others' stats
+      const member = interaction.member;
+      if (!member) {
+        await interaction.reply({
+          content: "You don't have permission to view other users' statistics.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Check if user has admin or moderator role
+      const hasPermission =
+        member.permissions instanceof PermissionsBitField &&
+        (member.permissions.has(PermissionsBitField.Flags.Administrator) ||
+          member.permissions.has(PermissionsBitField.Flags.ModerateMembers));
+
+      if (!hasPermission) {
+        await interaction.reply({
+          content: "You don't have permission to view other users' statistics.",
+          ephemeral: true,
+        });
+        return;
+      }
+    }
+
+    const finalTargetUser = targetUser || interaction.user;
+    const tracker = VoiceChannelTracker.getInstance(interaction.client);
+
+    // Get stats for all time periods
+    const [weekStats, monthStats, allTimeStats] = await Promise.all([
+      tracker.getUserStats(finalTargetUser.id, "week"),
+      tracker.getUserStats(finalTargetUser.id, "month"),
+      tracker.getUserStats(finalTargetUser.id, "alltime"),
+    ]);
+
+    if (!allTimeStats) {
       await interaction.reply(
-        `No voice channel statistics available for ${targetUser.username}.`,
+        `No voice channel statistics available for ${finalTargetUser.username}.`,
       );
       return;
     }
@@ -45,11 +80,14 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     };
 
     const response = [
-      `**Voice Channel Statistics for ${targetUser.username}**`,
-      `\`\`\``,
-      `Total Time: ${formatTime(stats.totalTime)}`,
-      `Last Seen: ${stats.lastSeen ? formatDate(stats.lastSeen) : "Never"}`,
-      `\`\`\``,
+      `**Voice Channel Statistics for ${finalTargetUser.username}**`,
+      "```",
+      `Last week: ${weekStats ? formatTime(weekStats.totalTime) : "0h 0m"}`,
+      `Last 30days: ${monthStats ? formatTime(monthStats.totalTime) : "0h 0m"}`,
+      `All time: ${formatTime(allTimeStats.totalTime)}`,
+      "",
+      `Last seen: ${allTimeStats.lastSeen ? formatDate(allTimeStats.lastSeen) : "Never"}`,
+      "```",
     ].join("\n");
 
     await interaction.reply(response);
@@ -57,7 +95,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
   } catch (error) {
     logger.error("Error executing vcstats command:", error);
     await interaction.reply({
-      content: "An error occurred while fetching statistics.",
+      content: "An error occurred while processing your request.",
       ephemeral: true,
     });
   }

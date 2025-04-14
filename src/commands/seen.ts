@@ -3,8 +3,8 @@ import {
   SlashCommandBuilder,
   SlashCommandUserOption,
 } from "discord.js";
-import { Logger } from "../utils/logger";
-import { VoiceChannelTracker } from "../services/voice-channel-tracker";
+import Logger from "../utils/logger.js";
+import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 
@@ -28,7 +28,17 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return;
     }
 
-    const tracker = VoiceChannelTracker.getInstance();
+    const tracker = VoiceChannelTracker.getInstance(interaction.client);
+
+    // Check if user is currently in a voice channel
+    const activeSession = tracker.getActiveSession(targetUser.id);
+    if (activeSession) {
+      await interaction.reply(
+        `${targetUser.username} is currently in the voice channel "${activeSession.channelName}".`,
+      );
+      return;
+    }
+
     const lastSeen = await tracker.getUserLastSeen(targetUser.id);
 
     if (!lastSeen) {
@@ -59,7 +69,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
   } catch (error) {
     logger.error("Error executing seen command:", error);
     await interaction.reply({
-      content: "An error occurred while fetching user information.",
+      content: "An error occurred while processing your request.",
       ephemeral: true,
     });
   }

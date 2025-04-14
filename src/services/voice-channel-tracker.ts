@@ -1,11 +1,37 @@
-import { VoiceState, GuildMember } from "discord.js";
-import { Logger } from "../utils/logger";
 import {
-  VoiceChannelTracking,
-  IVoiceChannelTracking,
-} from "../models/voice-channel-tracking";
+  VoiceState,
+  GuildMember,
+  VoiceChannel,
+  Client,
+  ButtonInteraction,
+} from "discord.js";
+import Logger from "../utils/logger.js";
+import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 
 const logger = Logger.getInstance();
+
+export type TimePeriod = "week" | "month" | "alltime";
+
+interface IAggregatedUserStats {
+  userId: string;
+  username: string;
+  totalTime: number;
+  lastSeen: Date;
+}
+
+interface IUserStats {
+  userId: string;
+  username: string;
+  totalTime: number;
+  lastSeen: Date;
+  sessions: Array<{
+    startTime: Date;
+    endTime?: Date;
+    duration?: number;
+    channelId: string;
+    channelName: string;
+  }>;
+}
 
 export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
@@ -13,14 +39,23 @@ export class VoiceChannelTracker {
     string,
     { startTime: Date; channelId: string; channelName: string }
   > = new Map();
+  private userChannels: Map<string, VoiceChannel> = new Map();
+  private client: Client;
 
-  private constructor() {}
+  private constructor(client: Client) {
+    this.client = client;
+  }
 
-  public static getInstance(): VoiceChannelTracker {
+  public static getInstance(client: Client): VoiceChannelTracker {
     if (!VoiceChannelTracker.instance) {
-      VoiceChannelTracker.instance = new VoiceChannelTracker();
+      VoiceChannelTracker.instance = new VoiceChannelTracker(client);
     }
     return VoiceChannelTracker.instance;
+  }
+
+  public getActiveSession(userId: string): { channelName: string } | null {
+    const session = this.activeSessions.get(userId);
+    return session ? { channelName: session.channelName } : null;
   }
 
   public async handleVoiceStateUpdate(
@@ -197,9 +232,55 @@ export class VoiceChannelTracker {
 
   public async getUserStats(
     userId: string,
-  ): Promise<IVoiceChannelTracking | null> {
+    timePeriod: TimePeriod = "alltime",
+  ): Promise<IUserStats | null> {
     try {
-      return await VoiceChannelTracking.findOne({ userId });
+      const user = await VoiceChannelTracking.findOne({ userId });
+      if (!user) return null;
+
+      const now = new Date();
+      let startDate: Date;
+      let filteredSessions;
+      let totalTime;
+
+      switch (timePeriod) {
+        case "week":
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          filteredSessions = user.sessions.filter(
+            (session) => session.startTime >= startDate,
+          );
+          totalTime = filteredSessions.reduce(
+            (total, session) => total + (session.duration || 0),
+            0,
+          );
+          break;
+        case "month":
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          filteredSessions = user.sessions.filter(
+            (session) => session.startTime >= startDate,
+          );
+          totalTime = filteredSessions.reduce(
+            (total, session) => total + (session.duration || 0),
+            0,
+          );
+          break;
+        case "alltime":
+          return {
+            userId: user.userId,
+            username: user.username,
+            totalTime: user.totalTime,
+            lastSeen: user.lastSeen,
+            sessions: user.sessions,
+          };
+      }
+
+      return {
+        userId: user.userId,
+        username: user.username,
+        totalTime: totalTime || 0,
+        lastSeen: user.lastSeen,
+        sessions: filteredSessions || [],
+      };
     } catch (error) {
       logger.error("Error getting user stats:", error);
       return null;
@@ -208,11 +289,81 @@ export class VoiceChannelTracker {
 
   public async getTopUsers(
     limit: number = 10,
-  ): Promise<IVoiceChannelTracking[]> {
+    timePeriod: TimePeriod = "alltime",
+  ): Promise<IAggregatedUserStats[]> {
     try {
-      return await VoiceChannelTracking.find()
-        .sort({ totalTime: -1 })
-        .limit(limit);
+      const now = new Date();
+      let startDate: Date;
+      let users;
+
+      switch (timePeriod) {
+        case "week":
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          users = await VoiceChannelTracking.aggregate([
+            {
+              $unwind: "$sessions",
+            },
+            {
+              $match: {
+                "sessions.startTime": { $gte: startDate },
+              },
+            },
+            {
+              $group: {
+                _id: "$userId",
+                username: { $first: "$username" },
+                totalTime: { $sum: "$sessions.duration" },
+                lastSeen: { $max: "$sessions.startTime" },
+              },
+            },
+            {
+              $sort: { totalTime: -1 },
+            },
+            {
+              $limit: limit,
+            },
+          ]);
+          break;
+        case "month":
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          users = await VoiceChannelTracking.aggregate([
+            {
+              $unwind: "$sessions",
+            },
+            {
+              $match: {
+                "sessions.startTime": { $gte: startDate },
+              },
+            },
+            {
+              $group: {
+                _id: "$userId",
+                username: { $first: "$username" },
+                totalTime: { $sum: "$sessions.duration" },
+                lastSeen: { $max: "$sessions.startTime" },
+              },
+            },
+            {
+              $sort: { totalTime: -1 },
+            },
+            {
+              $limit: limit,
+            },
+          ]);
+          break;
+        case "alltime":
+          users = await VoiceChannelTracking.find()
+            .sort({ totalTime: -1 })
+            .limit(limit);
+          break;
+      }
+
+      return users.map((user) => ({
+        userId: user._id || user.userId,
+        username: user.username,
+        totalTime: user.totalTime,
+        lastSeen: user.lastSeen,
+      }));
     } catch (error) {
       logger.error("Error getting top users:", error);
       return [];
@@ -226,6 +377,79 @@ export class VoiceChannelTracker {
     } catch (error) {
       logger.error("Error getting user last seen:", error);
       return null;
+    }
+  }
+
+  private async handleButtonInteraction(
+    interaction: ButtonInteraction,
+  ): Promise<void> {
+    try {
+      if (!interaction.guild) {
+        await interaction.reply({
+          content: "This command can only be used in a server.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const channel = await this.client.channels.fetch(interaction.channelId);
+      if (!channel || !(channel instanceof VoiceChannel)) {
+        return;
+      }
+
+      const entries = Array.from(this.userChannels.entries());
+      const foundEntry = entries.find(([, vc]) => vc.id === channel.id);
+      const userId = foundEntry ? foundEntry[0] : null;
+
+      if (!userId || userId !== interaction.user.id) {
+        return;
+      }
+
+      let response;
+      switch (interaction.customId) {
+        case "rename":
+          response = "Please enter the new name for your channel:";
+          break;
+        case "public":
+          await channel.permissionOverwrites.edit(
+            interaction.guild.roles.everyone,
+            {
+              ViewChannel: true,
+              Connect: true,
+            },
+          );
+          response = "Channel is now public.";
+          break;
+        case "private":
+          await channel.permissionOverwrites.edit(
+            interaction.guild.roles.everyone,
+            {
+              ViewChannel: false,
+              Connect: false,
+            },
+          );
+          response = "Channel is now private.";
+          break;
+        case "invite":
+          response = "Please mention the user you want to invite:";
+          break;
+        case "kick":
+          response = "Please mention the user you want to kick:";
+          break;
+        default:
+          response = "Unknown action.";
+      }
+
+      await interaction.reply({
+        content: response,
+        ephemeral: true,
+      });
+    } catch (error) {
+      logger.error("Error handling button interaction:", error);
+      await interaction.reply({
+        content: "An error occurred while processing your request.",
+        ephemeral: true,
+      });
     }
   }
 }

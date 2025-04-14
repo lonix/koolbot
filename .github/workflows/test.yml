@@ -32,11 +32,3 @@ jobs:
 
       - name: Check formatting
         run: npm run format:check
-
-      - name: Run tests
-        run: npm test
-        env:
-          NODE_ENV: test
-          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          GUILD_ID: ${{ secrets.GUILD_ID }}

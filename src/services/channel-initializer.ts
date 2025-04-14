@@ -1,5 +1,5 @@
 import { Guild, ChannelType, VoiceChannel, CategoryChannel } from "discord.js";
-import { Logger } from "../utils/logger";
+import Logger from "../utils/logger.js";
 
 const logger = Logger.getInstance();
 
