@@ -1,4 +1,12 @@
-import { Client, GatewayIntentBits, Interaction, VoiceState } from "discord.js";
+import {
+  Client,
+  GatewayIntentBits,
+  Interaction,
+  VoiceState,
+  ChannelType,
+  CategoryChannel,
+  GuildBasedChannel,
+} from "discord.js";
 import { config } from "dotenv";
 import Logger from "./utils/logger.js";
 import { handleCommands } from "./commands/index.js";
@@ -33,12 +41,101 @@ async function initializeDatabase(): Promise<void> {
   }
 }
 
-async function cleanup(): Promise<void> {
+async function cleanupVoiceChannels(): Promise<void> {
   try {
-    logger.info("Cleaning up resources...");
+    if (process.env.ENABLE_VC_MANAGEMENT === "true") {
+      logger.info("Cleaning up voice channels...");
+      const guild = await client.guilds.fetch(process.env.GUILD_ID || "");
+      if (guild) {
+        // Get the VC category
+        const category = guild.channels.cache.find(
+          (channel: GuildBasedChannel) =>
+            channel.type === ChannelType.GuildCategory &&
+            channel.name === process.env.VC_CATEGORY_NAME,
+        ) as CategoryChannel;
+
+        if (category) {
+          // Create offline lobby channel
+          const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+          if (!offlineLobbyName) {
+            logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables");
+            return;
+          }
+
+          const existingOfflineLobby = category.children.cache.find(
+            (channel: GuildBasedChannel) =>
+              channel.type === ChannelType.GuildVoice &&
+              channel.name === offlineLobbyName,
+          );
+
+          if (!existingOfflineLobby) {
+            try {
+              await guild.channels.create({
+                name: offlineLobbyName,
+                type: ChannelType.GuildVoice,
+                parent: category,
+                position: 0,
+              });
+              logger.info(`Created offline lobby channel: ${offlineLobbyName}`);
+            } catch (error) {
+              logger.error("Error creating offline lobby channel:", error);
+            }
+          }
+
+          // Delete all empty voice channels
+          const emptyChannels = category.children.cache.filter(
+            (channel: GuildBasedChannel) =>
+              channel.type === ChannelType.GuildVoice &&
+              channel.members.size === 0 &&
+              channel.name !== process.env.LOBBY_CHANNEL_NAME &&
+              channel.name !== offlineLobbyName,
+          );
+
+          for (const channel of emptyChannels.values()) {
+            try {
+              await channel.delete("Bot shutdown cleanup");
+              logger.info(`Deleted empty voice channel: ${channel.name}`);
+            } catch (error) {
+              logger.error(`Error deleting channel ${channel.name}:`, error);
+            }
+          }
+
+          // Delete the lobby channel if empty
+          const lobbyChannel = category.children.cache.find(
+            (channel: GuildBasedChannel) =>
+              channel.type === ChannelType.GuildVoice &&
+              channel.name === process.env.LOBBY_CHANNEL_NAME,
+          );
+
+          if (lobbyChannel && lobbyChannel.members.size === 0) {
+            try {
+              await lobbyChannel.delete("Bot shutdown cleanup");
+              logger.info("Deleted lobby channel");
+            } catch (error) {
+              logger.error("Error deleting lobby channel:", error);
+            }
+          }
+        }
+      }
+    }
+  } catch (error) {
+    logger.error("Error during voice channel cleanup:", error);
+  }
+}
+
+async function cleanup(): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  try {
+    logger.info("Starting cleanup process...");
+
+    // Clean up voice channels
+    await cleanupVoiceChannels();
 
     // Clean up voice channel manager
     VoiceChannelManager.getInstance().destroy();
+    logger.info("Voice channel manager destroyed");
 
     // Close MongoDB connection
     await mongoose.connection.close();
@@ -47,6 +144,10 @@ async function cleanup(): Promise<void> {
     // Destroy Discord client
     client.destroy();
     logger.info("Discord client destroyed");
+
+    // Wait for Discord to process the disconnection
+    logger.info("Waiting for Discord to process disconnection...");
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
     process.exit(0);
   } catch (error) {
@@ -57,29 +158,28 @@ async function cleanup(): Promise<void> {
 
 // Handle process termination
 process.on("SIGTERM", async () => {
-  if (!isShuttingDown) {
-    isShuttingDown = true;
-    logger.info("Received SIGTERM, shutting down...");
-    await cleanup();
-  }
+  logger.info("Received SIGTERM, shutting down...");
+  await cleanup();
 });
 
 process.on("SIGINT", async () => {
-  if (!isShuttingDown) {
-    isShuttingDown = true;
-    logger.info("Received SIGINT, shutting down...");
-    await cleanup();
-  }
+  logger.info("Received SIGINT, shutting down...");
+  await cleanup();
 });
 
-process.on("SIGQUIT", cleanup);
-process.on("uncaughtException", (error: Error) => {
-  logger.error("Uncaught Exception:", error);
-  cleanup();
+process.on("SIGQUIT", async () => {
+  logger.info("Received SIGQUIT, shutting down...");
+  await cleanup();
 });
-process.on("unhandledRejection", (error: Error) => {
+
+process.on("uncaughtException", async (error: Error) => {
+  logger.error("Uncaught Exception:", error);
+  await cleanup();
+});
+
+process.on("unhandledRejection", async (error: Error) => {
   logger.error("Unhandled Rejection:", error);
-  cleanup();
+  await cleanup();
 });
 
 client.once("ready", async () => {
@@ -93,6 +193,58 @@ client.once("ready", async () => {
     // Initialize channels
     const guild = await client.guilds.fetch(process.env.GUILD_ID || "");
     if (guild) {
+      // Handle offline lobby channel
+      const category = guild.channels.cache.find(
+        (channel: GuildBasedChannel) =>
+          channel.type === ChannelType.GuildCategory &&
+          channel.name === process.env.VC_CATEGORY_NAME,
+      ) as CategoryChannel;
+
+      if (category) {
+        const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+        if (!offlineLobbyName) {
+          logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables");
+          return;
+        }
+
+        const offlineLobby = category.children.cache.find(
+          (channel: GuildBasedChannel) =>
+            channel.type === ChannelType.GuildVoice &&
+            channel.name === offlineLobbyName,
+        );
+
+        if (offlineLobby) {
+          // If there are users in the offline lobby, create a new channel for them
+          if (offlineLobby.members.size > 0) {
+            const firstMember = offlineLobby.members.first();
+            if (firstMember) {
+              const newChannel = await guild.channels.create({
+                name: `${firstMember.user.username}'s Channel`,
+                type: ChannelType.GuildVoice,
+                parent: category,
+              });
+
+              // Move all users to the new channel
+              for (const member of offlineLobby.members.values()) {
+                try {
+                  await member.voice.setChannel(newChannel);
+                } catch (error) {
+                  logger.error(`Error moving member ${member.user.tag}:`, error);
+                }
+              }
+            }
+          }
+
+          // Delete the offline lobby channel
+          try {
+            await offlineLobby.delete("Bot startup cleanup");
+            logger.info("Deleted offline lobby channel");
+          } catch (error) {
+            logger.error("Error deleting offline lobby channel:", error);
+          }
+        }
+      }
+
       await ChannelInitializer.getInstance().initializeChannels(guild);
       logger.info("Channels initialized");
 
