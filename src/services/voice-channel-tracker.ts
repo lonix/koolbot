@@ -234,8 +234,6 @@ export class VoiceChannelTracker {
 
       const now = new Date();
       let startDate: Date;
-
-      // Move the declaration outside the switch
       let filteredSessions;
       let totalTime;
 
