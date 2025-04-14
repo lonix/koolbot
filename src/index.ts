@@ -313,3 +313,5 @@ client.login(process.env.DISCORD_TOKEN).catch((error) => {
   logger.error("Failed to login:", error);
   process.exit(1);
 });
+
+declare function setTimeout(callback: (...args: any[]) => void, ms: number): NodeJS.Timeout;

@@ -1,9 +1,6 @@
-import { VoiceState, GuildMember, VoiceChannel, Client } from "discord.js";
+import { VoiceState, GuildMember, VoiceChannel, Client, ButtonInteraction } from "discord.js";
 import Logger from "../utils/logger.js";
-import {
-  VoiceChannelTracking,
-  IVoiceChannelTracking,
-} from "../models/voice-channel-tracking.js";
+import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 
 const logger = Logger.getInstance();
 
@@ -239,13 +236,15 @@ export class VoiceChannelTracker {
       let startDate: Date;
 
       switch (timePeriod) {
-        case "week":
+        case "week": {
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
           break;
-        case "month":
+        }
+        case "month": {
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
           break;
-        case "alltime":
+        }
+        case "alltime": {
           return {
             userId: user.userId,
             username: user.username,
@@ -253,6 +252,7 @@ export class VoiceChannelTracker {
             lastSeen: user.lastSeen,
             sessions: user.sessions,
           };
+        }
       }
 
       // Filter sessions within the time period
@@ -354,7 +354,7 @@ export class VoiceChannelTracker {
     }
   }
 
-  private async handleButtonInteraction(interaction: any): Promise<void> {
+  private async handleButtonInteraction(interaction: ButtonInteraction): Promise<void> {
     try {
       const channel = await this.client.channels.fetch(interaction.channelId);
       if (!channel || !(channel instanceof VoiceChannel)) {
@@ -362,7 +362,7 @@ export class VoiceChannelTracker {
       }
 
       const entries = Array.from(this.userChannels.entries());
-      const foundEntry = entries.find(([_, vc]) => vc.id === channel.id);
+      const foundEntry = entries.find(([, vc]) => vc.id === channel.id);
       const userId = foundEntry ? foundEntry[0] : null;
 
       if (!userId || userId !== interaction.user.id) {

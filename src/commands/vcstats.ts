@@ -5,7 +5,7 @@ import {
   PermissionsBitField,
 } from "discord.js";
 import Logger from "../utils/logger.js";
-import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
+import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 
