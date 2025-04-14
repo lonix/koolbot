@@ -49,6 +49,12 @@ export function formatTimeAgo(date: Date): string {
  */
 export function formatDateInTimezone(date: Date, timezone: string): string {
   try {
+    // For UTC, we don't need to do any timezone conversion
+    if (timezone === "UTC") {
+      return format(date, "yyyy-MM-dd HH:mm:ss");
+    }
+
+    // For other timezones, convert from UTC to the specified timezone
     const zonedDate = utcToZonedTime(date, timezone);
     return format(zonedDate, "yyyy-MM-dd HH:mm:ss");
   } catch (err) {
