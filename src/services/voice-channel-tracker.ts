@@ -235,16 +235,32 @@ export class VoiceChannelTracker {
       const now = new Date();
       let startDate: Date;
 
+      // Move the declaration outside the switch
+      let filteredSessions;
+      let totalTime;
+
       switch (timePeriod) {
-        case "week": {
+        case "week":
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          filteredSessions = user.sessions.filter(
+            (session) => session.startTime >= startDate,
+          );
+          totalTime = filteredSessions.reduce(
+            (total, session) => total + (session.duration || 0),
+            0,
+          );
           break;
-        }
-        case "month": {
+        case "month":
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          filteredSessions = user.sessions.filter(
+            (session) => session.startTime >= startDate,
+          );
+          totalTime = filteredSessions.reduce(
+            (total, session) => total + (session.duration || 0),
+            0,
+          );
           break;
-        }
-        case "alltime": {
+        case "alltime":
           return {
             userId: user.userId,
             username: user.username,
@@ -252,26 +268,14 @@ export class VoiceChannelTracker {
             lastSeen: user.lastSeen,
             sessions: user.sessions,
           };
-        }
       }
-
-      // Filter sessions within the time period
-      const filteredSessions = user.sessions.filter(
-        (session) => session.startTime >= startDate,
-      );
-
-      // Calculate total time for filtered sessions
-      const totalTime = filteredSessions.reduce(
-        (total, session) => total + (session.duration || 0),
-        0,
-      );
 
       return {
         userId: user.userId,
         username: user.username,
-        totalTime,
+        totalTime: totalTime || 0,
         lastSeen: user.lastSeen,
-        sessions: filteredSessions,
+        sessions: filteredSessions || [],
       };
     } catch (error) {
       logger.error("Error getting user stats:", error);

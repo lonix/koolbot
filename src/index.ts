@@ -15,6 +15,9 @@ import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
+import { connectToDatabase } from "./utils/database.js";
+import { formatDistanceToNow } from "date-fns";
+import { utcToZonedTime } from "date-fns-tz";
 
 config();
 const logger = Logger.getInstance();
@@ -314,4 +317,4 @@ client.login(process.env.DISCORD_TOKEN).catch((error) => {
   process.exit(1);
 });
 
-declare function setTimeout(callback: (...args: any[]) => void, ms: number): NodeJS.Timeout;
+type Timeout = ReturnType<typeof setTimeout>;
