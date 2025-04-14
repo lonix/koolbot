@@ -23,11 +23,8 @@ export class VoiceChannelManager {
     this.startPeriodicCleanup();
   }
 
-  public static getInstance(client?: Client): VoiceChannelManager {
+  public static getInstance(client: Client): VoiceChannelManager {
     if (!VoiceChannelManager.instance) {
-      if (!client) {
-        throw new Error("Client instance is required for first initialization");
-      }
       VoiceChannelManager.instance = new VoiceChannelManager(client);
     }
     return VoiceChannelManager.instance;
@@ -108,6 +105,55 @@ export class VoiceChannelManager {
     }
   }
 
+  private async handleChannelOwnershipChange(channel: VoiceChannel): Promise<void> {
+    try {
+      if (channel.members.size === 0) {
+        // Channel is empty, no need to change ownership
+        return;
+      }
+
+      // Get current owner from channel name
+      const currentOwnerId = Array.from(this.userChannels.entries()).find(
+        ([_, vc]) => vc.id === channel.id,
+      )?.[0];
+
+      if (!currentOwnerId) {
+        logger.error(`Could not find owner for channel ${channel.name}`);
+        return;
+      }
+
+      // Check if current owner is still in the channel
+      const currentOwner = channel.members.get(currentOwnerId);
+      if (currentOwner) {
+        // Owner is still in the channel, no need to change
+        return;
+      }
+
+      // Pick a random member from the channel
+      const members = Array.from(channel.members.values());
+      if (members.length === 0) {
+        logger.error(`No members found in channel ${channel.name}`);
+        return;
+      }
+
+      const newOwner = members[Math.floor(Math.random() * members.length)];
+      
+      // Update channel name
+      const newChannelName = `${newOwner.displayName}'s Channel`;
+      await channel.setName(newChannelName);
+      
+      // Update ownership tracking
+      this.userChannels.delete(currentOwnerId);
+      this.userChannels.set(newOwner.id, channel);
+
+      logger.info(
+        `Changed ownership of channel ${channel.name} from ${currentOwnerId} to ${newOwner.id}`,
+      );
+    } catch (error) {
+      logger.error("Error handling channel ownership change:", error);
+    }
+  }
+
   public async handleVoiceStateUpdate(
     oldState: VoiceState,
     newState: VoiceState,
@@ -127,6 +173,13 @@ export class VoiceChannelManager {
       }
       // User left a channel
       else if (oldChannel && !newChannel) {
+        // Check if the user was the owner of a channel
+        if (this.userChannels.has(member.id)) {
+          const channel = this.userChannels.get(member.id);
+          if (channel && channel.type === ChannelType.GuildVoice) {
+            await this.handleChannelOwnershipChange(channel);
+          }
+        }
         await this.cleanupUserChannel(member.id);
       }
       // User switched channels
@@ -135,6 +188,10 @@ export class VoiceChannelManager {
         if (newChannel.name === process.env.LOBBY_CHANNEL_NAME) {
           // Clean up the old channel if it was a personal channel
           if (this.userChannels.has(member.id)) {
+            const oldUserChannel = this.userChannels.get(member.id);
+            if (oldUserChannel && oldUserChannel.type === ChannelType.GuildVoice) {
+              await this.handleChannelOwnershipChange(oldUserChannel);
+            }
             await this.cleanupUserChannel(member.id);
           }
           await this.createUserChannel(member);
@@ -144,6 +201,9 @@ export class VoiceChannelManager {
           this.userChannels.has(member.id) &&
           oldChannel.id === this.userChannels.get(member.id)?.id
         ) {
+          if (oldChannel.type === ChannelType.GuildVoice) {
+            await this.handleChannelOwnershipChange(oldChannel);
+          }
           await this.cleanupUserChannel(member.id);
         }
       }

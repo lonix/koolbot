@@ -46,6 +46,11 @@ export class VoiceChannelTracker {
     return VoiceChannelTracker.instance;
   }
 
+  public getActiveSession(userId: string): { channelName: string } | null {
+    const session = this.activeSessions.get(userId);
+    return session ? { channelName: session.channelName } : null;
+  }
+
   public async handleVoiceStateUpdate(
     oldState: VoiceState,
     newState: VoiceState,

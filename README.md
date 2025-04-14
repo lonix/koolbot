@@ -11,15 +11,15 @@ A Discord bot for managing voice channels and tracking user activity.
 - Automatic user migration from offline lobby to new channels on bot restart
 - Customizable channel naming and user limits
 
-### Voice Channel Tracking
+### Voice Channel Tracking (Requires Voice Channel Management)
 - Track user time spent in voice channels
 - View statistics for different time periods (last week, last month, all time)
 - Top users leaderboard
 - Individual user statistics
+- Last seen tracking with `/seen` command
 
 ### Other Features
 - Plex price checking
-- User last seen tracking
 - Ping command
 - Am I Kool command
 
@@ -34,11 +34,15 @@ A Discord bot for managing voice channels and tracking user activity.
 - `ENABLE_VC_MANAGEMENT`: Enable/disable voice channel management (true/false)
 - `VC_CATEGORY_NAME`: Name of the category for voice channels
 - `LOBBY_CHANNEL_NAME`: Name of the lobby channel
+- `LOBBY_CHANNEL_NAME_OFFLINE`: Name of the offline lobby channel
 - `VC_USER_LIMIT`: Maximum users per voice channel
 - `VC_CHANNEL_PREFIX`: Prefix for dynamically created channels
 
-### Voice Channel Tracking
-- `ENABLE_VC_TRACKING`: Enable/disable voice channel tracking (true/false)
+### Voice Channel Tracking (Requires ENABLE_VC_MANAGEMENT=true)
+- `ENABLE_VC_TRACKING`: Enable/disable voice channel tracking
+- `ENABLE_VC_STATS`: Enable/disable voice channel statistics
+- `ENABLE_VC_TOP`: Enable/disable voice channel leaderboard
+- `ENABLE_SEEN`: Enable/disable last seen tracking
 
 ### MongoDB Configuration
 - `MONGODB_URI`: MongoDB connection string
@@ -46,26 +50,21 @@ A Discord bot for managing voice channels and tracking user activity.
 ### Logging Configuration
 - `LOG_LEVEL`: Logging level (info, debug, error)
 
-### Feature Flags
+### Bot Features
 - `ENABLE_PLEX_PRICE`: Enable/disable plex price checking
-- `ENABLE_SEEN_COMMAND`: Enable/disable last seen tracking
-- `ENABLE_VC_STATS`: Enable/disable voice channel statistics
-- `ENABLE_VC_TOP`: Enable/disable voice channel leaderboard
+- `ENABLE_AMIKOOL`: Enable/disable amikool command
 
-## Offline Lobby Feature
+## Commands
 
-When the bot shuts down:
-1. Creates an offline lobby channel (named `LOBBY_CHANNEL_NAME_OFFLINE`)
-2. Cleans up empty voice channels
-3. Deletes the regular lobby channel if empty
+### Voice Channel Commands (Requires Voice Channel Management)
+- `/seen @user`: Check when a user was last seen in a voice channel (shows "currently" if in a channel)
+- `/vcstats`: View your voice channel statistics
+- `/vctop`: View voice channel leaderboard
 
-When the bot starts up:
-1. Checks for users in the offline lobby
-2. If users are present:
-   - Creates a new channel named after the first user
-   - Moves all users to the new channel
-3. Deletes the offline lobby channel
-4. Initializes normal channels
+### Other Commands
+- `/ping`: Check bot latency
+- `/plexprice`: Check current PLEX price
+- `/amikool`: Check if you're kool
 
 ## Installation
 
@@ -100,15 +99,6 @@ Or use docker-compose:
 ```bash
 docker-compose up -d
 ```
-
-## Commands
-
-- `/ping`: Check bot latency
-- `/seen @user`: Check when a user was last seen
-- `/plexprice`: Check current PLEX price
-- `/vcstats`: View your voice channel statistics
-- `/vctop`: View voice channel leaderboard
-- `/amikool`: Check if you're kool
 
 ## Development
 

@@ -29,6 +29,16 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     }
 
     const tracker = VoiceChannelTracker.getInstance();
+    
+    // Check if user is currently in a voice channel
+    const activeSession = tracker.getActiveSession(targetUser.id);
+    if (activeSession) {
+      await interaction.reply(
+        `${targetUser.username} is currently in the voice channel "${activeSession.channelName}".`,
+      );
+      return;
+    }
+
     const lastSeen = await tracker.getUserLastSeen(targetUser.id);
 
     if (!lastSeen) {
