@@ -28,7 +28,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return;
     }
 
-    const tracker = VoiceChannelTracker.getInstance();
+    const tracker = VoiceChannelTracker.getInstance(interaction.client);
     
     // Check if user is currently in a voice channel
     const activeSession = tracker.getActiveSession(targetUser.id);
@@ -69,7 +69,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
   } catch (error) {
     logger.error("Error executing seen command:", error);
     await interaction.reply({
-      content: "An error occurred while fetching user information.",
+      content: "An error occurred while processing your request.",
       ephemeral: true,
     });
   }

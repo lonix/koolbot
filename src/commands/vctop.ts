@@ -38,7 +38,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
 
     const limit = (interaction.options.get("limit")?.value as number) || 10;
     const period = (interaction.options.get("period")?.value as TimePeriod) || "alltime";
-    const tracker = VoiceChannelTracker.getInstance();
+    const tracker = VoiceChannelTracker.getInstance(interaction.client);
     const topUsers = await tracker.getTopUsers(limit, period);
 
     if (topUsers.length === 0) {
@@ -77,7 +77,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
   } catch (error) {
     logger.error("Error executing vctop command:", error);
     await interaction.reply({
-      content: "An error occurred while fetching rankings.",
+      content: "An error occurred while processing your request.",
       ephemeral: true,
     });
   }

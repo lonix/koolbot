@@ -52,7 +52,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     }
 
     const finalTargetUser = targetUser || interaction.user;
-    const tracker = VoiceChannelTracker.getInstance();
+    const tracker = VoiceChannelTracker.getInstance(interaction.client);
 
     // Get stats for all time periods
     const [weekStats, monthStats, allTimeStats] = await Promise.all([
@@ -94,7 +94,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
   } catch (error) {
     logger.error("Error executing vcstats command:", error);
     await interaction.reply({
-      content: "An error occurred while fetching statistics.",
+      content: "An error occurred while processing your request.",
       ephemeral: true,
     });
   }

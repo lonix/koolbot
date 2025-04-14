@@ -1,4 +1,4 @@
-import { VoiceState, GuildMember } from "discord.js";
+import { VoiceState, GuildMember, VoiceChannel, Client } from "discord.js";
 import Logger from "../utils/logger.js";
 import {
   VoiceChannelTracking,
@@ -36,12 +36,16 @@ export class VoiceChannelTracker {
     string,
     { startTime: Date; channelId: string; channelName: string }
   > = new Map();
+  private userChannels: Map<string, VoiceChannel> = new Map();
+  private client: Client;
 
-  private constructor() {}
+  private constructor(client: Client) {
+    this.client = client;
+  }
 
-  public static getInstance(): VoiceChannelTracker {
+  public static getInstance(client: Client): VoiceChannelTracker {
     if (!VoiceChannelTracker.instance) {
-      VoiceChannelTracker.instance = new VoiceChannelTracker();
+      VoiceChannelTracker.instance = new VoiceChannelTracker(client);
     }
     return VoiceChannelTracker.instance;
   }
@@ -352,28 +356,21 @@ export class VoiceChannelTracker {
 
   private async handleButtonInteraction(interaction: any): Promise<void> {
     try {
-      const [action, channelId] = interaction.customId.split('_');
-      const channel = await this.client.channels.fetch(channelId) as VoiceChannel;
-      
-      if (!channel) {
-        await interaction.reply({ content: "Channel not found.", ephemeral: true });
+      const channel = await this.client.channels.fetch(interaction.channelId);
+      if (!channel || !(channel instanceof VoiceChannel)) {
         return;
       }
 
-      // Check if the user is the owner of the channel
-      const ownerId = Array.from(this.userChannels.entries())
-        .find(([_, vc]) => vc.id === channel.id)?.[0];
+      const entries = Array.from(this.userChannels.entries());
+      const foundEntry = entries.find(([_, vc]) => vc.id === channel.id);
+      const userId = foundEntry ? foundEntry[0] : null;
 
-      if (interaction.user.id !== ownerId) {
-        await interaction.reply({ 
-          content: "Only the channel owner can use these controls.", 
-          ephemeral: true 
-        });
+      if (!userId || userId !== interaction.user.id) {
         return;
       }
 
       let response;
-      switch (action) {
+      switch (interaction.customId) {
         case 'rename':
           response = "Please enter the new name for your channel:";
           break;

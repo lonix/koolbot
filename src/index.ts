@@ -297,7 +297,7 @@ client.on(
 
       // Handle voice channel tracking
       if (process.env.ENABLE_VC_TRACKING === "true") {
-        await VoiceChannelTracker.getInstance().handleVoiceStateUpdate(
+        await VoiceChannelTracker.getInstance(client).handleVoiceStateUpdate(
           oldState,
           newState,
         );
