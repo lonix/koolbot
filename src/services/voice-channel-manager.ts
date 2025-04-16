@@ -289,15 +289,59 @@ export class VoiceChannelManager {
 
   private async cleanupEmptyChannels(): Promise<void> {
     try {
-      for (const [userId, channel] of this.userChannels.entries()) {
-        if (channel.members.size === 0) {
-          await channel.delete();
-          this.userChannels.delete(userId);
-          logger.info(`Cleaned up empty voice channel ${channel.name}`);
+      if (process.env.ENABLE_VC_MANAGEMENT !== "true") {
+        return;
+      }
+
+      const guild = await this.getGuild(process.env.GUILD_ID || "");
+      if (!guild) {
+        logger.error("Guild not found during cleanup");
+        return;
+      }
+
+      const categoryName =
+        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
+      const lobbyChannelName =
+        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
+      const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+
+      if (!offlineLobbyName) {
+        logger.error(
+          "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+        );
+        return;
+      }
+
+      const category = guild.channels.cache.find(
+        (channel): channel is CategoryChannel =>
+          channel.type === ChannelType.GuildCategory &&
+          channel.name === categoryName,
+      );
+
+      if (!category) {
+        logger.error(`Category ${categoryName} not found during cleanup`);
+        return;
+      }
+
+      // Delete all empty voice channels except lobby channels
+      const emptyChannels = category.children.cache.filter(
+        (channel): channel is VoiceChannel =>
+          channel.type === ChannelType.GuildVoice &&
+          channel.members.size === 0 &&
+          channel.name !== lobbyChannelName &&
+          channel.name !== offlineLobbyName,
+      );
+
+      for (const channel of emptyChannels.values()) {
+        try {
+          await channel.delete("Bot cleanup");
+          logger.info(`Deleted empty voice channel: ${channel.name}`);
+        } catch (error) {
+          logger.error(`Error deleting channel ${channel.name}:`, error);
         }
       }
     } catch (error) {
-      logger.error("Error during channel cleanup:", error);
+      logger.error("Error during voice channel cleanup:", error);
     }
   }
 

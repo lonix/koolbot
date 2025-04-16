@@ -16,12 +16,6 @@ import { ChannelInitializer } from "./services/channel-initializer.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 
-// Add proper type declarations for Node.js globals
-declare const setTimeout: (
-  callback: (...args: unknown[]) => void,
-  ms: number,
-) => number;
-
 config();
 const logger = Logger.getInstance();
 
@@ -47,7 +41,9 @@ async function initializeDatabase(): Promise<void> {
   }
 }
 
-async function cleanupVoiceChannels(): Promise<void> {
+async function cleanupVoiceChannels(
+  createOfflineLobby: boolean = false,
+): Promise<void> {
   try {
     if (process.env.ENABLE_VC_MANAGEMENT === "true") {
       logger.info("Cleaning up voice channels...");
@@ -61,32 +57,36 @@ async function cleanupVoiceChannels(): Promise<void> {
         ) as CategoryChannel;
 
         if (category) {
-          // Create offline lobby channel
-          const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
-          if (!offlineLobbyName) {
-            logger.error(
-              "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+          // Only create offline lobby if explicitly requested (during shutdown)
+          if (createOfflineLobby) {
+            const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+            if (!offlineLobbyName) {
+              logger.error(
+                "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+              );
+              return;
+            }
+
+            const existingOfflineLobby = category.children.cache.find(
+              (channel: GuildBasedChannel) =>
+                channel.type === ChannelType.GuildVoice &&
+                channel.name === offlineLobbyName,
             );
-            return;
-          }
 
-          const existingOfflineLobby = category.children.cache.find(
-            (channel: GuildBasedChannel) =>
-              channel.type === ChannelType.GuildVoice &&
-              channel.name === offlineLobbyName,
-          );
-
-          if (!existingOfflineLobby) {
-            try {
-              await guild.channels.create({
-                name: offlineLobbyName,
-                type: ChannelType.GuildVoice,
-                parent: category,
-                position: 0,
-              });
-              logger.info(`Created offline lobby channel: ${offlineLobbyName}`);
-            } catch (error) {
-              logger.error("Error creating offline lobby channel:", error);
+            if (!existingOfflineLobby) {
+              try {
+                await guild.channels.create({
+                  name: offlineLobbyName,
+                  type: ChannelType.GuildVoice,
+                  parent: category,
+                  position: 0,
+                });
+                logger.info(
+                  `Created offline lobby channel: ${offlineLobbyName}`,
+                );
+              } catch (error) {
+                logger.error("Error creating offline lobby channel:", error);
+              }
             }
           }
 
@@ -96,7 +96,7 @@ async function cleanupVoiceChannels(): Promise<void> {
               channel.type === ChannelType.GuildVoice &&
               channel.members.size === 0 &&
               channel.name !== process.env.LOBBY_CHANNEL_NAME &&
-              channel.name !== offlineLobbyName,
+              channel.name !== process.env.LOBBY_CHANNEL_NAME_OFFLINE,
           );
 
           for (const channel of emptyChannels.values()) {
@@ -136,70 +136,35 @@ async function cleanup(): Promise<void> {
   isShuttingDown = true;
 
   try {
-    logger.info("Starting cleanup process...");
-
-    // Clean up voice channels
-    await cleanupVoiceChannels();
-
-    // Clean up voice channel manager
-    VoiceChannelManager.getInstance(client).destroy();
-    logger.info("Voice channel manager destroyed");
-
-    // Close MongoDB connection
-    await mongoose.connection.close();
-    logger.info("MongoDB connection closed");
-
-    // Destroy Discord client
-    client.destroy();
-    logger.info("Discord client destroyed");
-
-    // Wait for Discord to process the disconnection
-    logger.info("Waiting for Discord to process disconnection...");
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-
-    process.exit(0);
+    logger.info("Cleaning up...");
+    await cleanupVoiceChannels(true); // Create offline lobby during actual shutdown
+    await mongoose.disconnect();
+    logger.info("Cleanup completed");
   } catch (error) {
     logger.error("Error during cleanup:", error);
-    process.exit(1);
   }
 }
 
-// Set up periodic cleanup
-const cleanupInterval = setInterval(
-  () => {
-    cleanupVoiceChannels().catch((error: Error) => {
-      logger.error("Error during periodic cleanup:", error);
-    });
-  },
-  5 * 60 * 1000,
-); // Run every 5 minutes
-
-// Clean up on process exit
-process.on("SIGTERM", () => {
-  clearInterval(cleanupInterval);
-  cleanup().catch((error: Error) => {
-    logger.error("Error during cleanup:", error);
-    process.exit(1);
-  });
+// Handle process termination
+process.on("SIGTERM", async () => {
+  logger.info("Received SIGTERM signal");
+  await cleanup();
+  process.exit(0);
 });
 
 process.on("SIGINT", async () => {
-  logger.info("Received SIGINT, shutting down...");
+  logger.info("Received SIGINT signal");
   await cleanup();
-});
-
-process.on("SIGQUIT", async () => {
-  logger.info("Received SIGQUIT, shutting down...");
-  await cleanup();
-});
-
-process.on("uncaughtException", async (error: Error) => {
-  logger.error("Uncaught Exception:", error);
-  await cleanup();
+  process.exit(0);
 });
 
 process.on("unhandledRejection", async (error: Error) => {
   logger.error("Unhandled Rejection:", error);
+  await cleanupVoiceChannels(false); // Don't create offline lobby for unhandled rejections
+});
+
+process.on("uncaughtException", async (error: Error) => {
+  logger.error("Uncaught Exception:", error);
   await cleanup();
 });
 
