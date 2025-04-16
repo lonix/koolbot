@@ -15,12 +15,14 @@ export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+  private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
 
   private constructor(client: Client) {
     this.client = client;
-    // Start periodic cleanup
+    // Start periodic cleanup and health checks
     this.startPeriodicCleanup();
+    this.startHealthChecks();
   }
 
   public static getInstance(client: Client): VoiceChannelManager {
@@ -49,6 +51,18 @@ export class VoiceChannelManager {
         });
       },
       5 * 60 * 1000,
+    );
+  }
+
+  private startHealthChecks(): void {
+    // Run health check every 15 minutes
+    this.healthCheckInterval = setInterval(
+      () => {
+        this.checkLobbyHealth().catch((error) => {
+          logger.error("Error during lobby health check:", error);
+        });
+      },
+      15 * 60 * 1000, // 15 minutes
     );
   }
 
@@ -287,10 +301,117 @@ export class VoiceChannelManager {
     }
   }
 
+  private async checkLobbyHealth(): Promise<void> {
+    try {
+      if (process.env.ENABLE_VC_MANAGEMENT !== "true") {
+        return;
+      }
+
+      const guild = await this.getGuild(process.env.GUILD_ID || "");
+      if (!guild) {
+        logger.error("Guild not found during health check");
+        return;
+      }
+
+      const categoryName =
+        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
+      const lobbyChannelName =
+        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
+      const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+
+      if (!offlineLobbyName) {
+        logger.error(
+          "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+        );
+        return;
+      }
+
+      const category = guild.channels.cache.find(
+        (channel): channel is CategoryChannel =>
+          channel.type === ChannelType.GuildCategory &&
+          channel.name === categoryName,
+      );
+
+      if (!category) {
+        logger.error(`Category ${categoryName} not found during health check`);
+        return;
+      }
+
+      // Check for offline lobby
+      const offlineLobby = category.children.cache.find(
+        (channel): channel is VoiceChannel =>
+          channel.type === ChannelType.GuildVoice &&
+          channel.name === offlineLobbyName,
+      );
+
+      if (offlineLobby) {
+        logger.warn(
+          "Offline lobby detected, attempting to restore normal lobby...",
+        );
+
+        // If there are users in the offline lobby, create new channels for them
+        if (offlineLobby.members.size > 0) {
+          for (const member of offlineLobby.members.values()) {
+            try {
+              await this.createUserChannel(member);
+            } catch (error) {
+              logger.error(
+                `Error creating channel for member ${member.user.tag}:`,
+                error,
+              );
+            }
+          }
+        }
+
+        // Delete the offline lobby
+        try {
+          await offlineLobby.delete("Health check cleanup");
+          logger.info("Deleted offline lobby channel during health check");
+        } catch (error) {
+          logger.error(
+            "Error deleting offline lobby channel during health check:",
+            error,
+          );
+        }
+      }
+
+      // Ensure normal lobby exists
+      const lobbyChannel = category.children.cache.find(
+        (channel): channel is VoiceChannel =>
+          channel.type === ChannelType.GuildVoice &&
+          channel.name === lobbyChannelName,
+      );
+
+      if (!lobbyChannel) {
+        logger.warn("Normal lobby not found, creating it...");
+        try {
+          await guild.channels.create({
+            name: lobbyChannelName,
+            type: ChannelType.GuildVoice,
+            parent: category,
+            position: 0,
+          });
+          logger.info("Created normal lobby channel during health check");
+        } catch (error) {
+          logger.error(
+            "Error creating normal lobby channel during health check:",
+            error,
+          );
+        }
+      }
+    } catch (error) {
+      logger.error("Error during lobby health check:", error);
+    }
+  }
+
   public destroy(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);
       this.cleanupInterval = null;
+    }
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
     }
     this.userChannels.clear();
   }

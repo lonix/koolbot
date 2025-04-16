@@ -62,6 +62,20 @@ class Logger {
 
   public debug(message: string, ...args: unknown[]): void {
     this.logger.debug(message, ...args);
+    if (this.logChannel && process.env.DEBUG === "true") {
+      this.logChannel.send(`[DEBUG] ${message}`).catch((error) => {
+        this.logger.error("Failed to send log to Discord:", error);
+      });
+    }
+  }
+
+  public warn(message: string, ...args: unknown[]): void {
+    this.logger.warn(message, ...args);
+    if (this.logChannel) {
+      this.logChannel.send(`[WARN] ${message}`).catch((error) => {
+        this.logger.error("Failed to send log to Discord:", error);
+      });
+    }
   }
 }
 
