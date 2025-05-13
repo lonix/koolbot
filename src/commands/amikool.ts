@@ -14,7 +14,7 @@ const koolResponses = [
   "Kool status: Confirmed! ✅",
   "100% kool certified! 🏆",
   "Kool as ice! ❄️",
-  "The koolest of them all! 👑",
+  "Much kool, Such wow! 👑",
   "Kool vibes detected! 🎵",
   "Maximum koolness achieved! 🚀",
   "Kool level: Legendary! 🏅",
