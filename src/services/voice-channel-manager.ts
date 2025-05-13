@@ -6,7 +6,6 @@ import {
   GuildMember,
   Guild,
   Client,
-  TextChannel,
 } from "discord.js";
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";

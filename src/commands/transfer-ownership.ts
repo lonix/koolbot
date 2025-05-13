@@ -1,7 +1,6 @@
 import {
   CommandInteraction,
   SlashCommandBuilder,
-  VoiceChannel,
   GuildMember,
   SlashCommandUserOption,
 } from "discord.js";
