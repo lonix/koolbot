@@ -6,14 +6,17 @@ import {
   GuildMember,
   Guild,
   Client,
+  TextChannel,
 } from "discord.js";
 import Logger from "../utils/logger.js";
+import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 
 const logger = Logger.getInstance();
 
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
+  private ownershipQueue: Map<string, string[]> = new Map(); // channelId -> array of userIds
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
@@ -130,7 +133,7 @@ export class VoiceChannelManager {
 
       // Get current owner from channel name
       const currentOwnerId = Array.from(this.userChannels.entries()).find(
-        ([userId]) => userId === channel.id,
+        ([, userChannel]) => userChannel.id === channel.id,
       )?.[0];
 
       if (!currentOwnerId) {
@@ -145,14 +148,85 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Pick a random member from the channel
+      // Get members in the channel
       const members = Array.from(channel.members.values());
       if (members.length === 0) {
         logger.error(`No members found in channel ${channel.name}`);
         return;
       }
 
-      const newOwner = members[Math.floor(Math.random() * members.length)];
+      // Get voice channel tracker instance
+      const tracker = VoiceChannelTracker.getInstance(this.client);
+
+      // Get voice time stats for all members in the channel for the last 7 days
+      const memberStats = await Promise.all(
+        members.map(async (member) => {
+          const stats = await tracker.getUserStats(member.id, "week");
+          return {
+            member,
+            totalTime: stats?.totalTime || 0,
+          };
+        })
+      );
+
+      // Sort members by their voice time in the last 7 days
+      memberStats.sort((a, b) => b.totalTime - a.totalTime);
+
+      // Select the member with the most voice time
+      const newOwner = memberStats[0].member;
+
+      // Update channel ownership
+      await this.updateChannelOwnership(channel, newOwner);
+      logger.info(`Channel ${channel.name} ownership transferred to ${newOwner.displayName} based on voice time`);
+    } catch (error) {
+      logger.error("Error handling channel ownership change:", error);
+    }
+  }
+
+  public async requestOwnership(channelId: string, userId: string): Promise<void> {
+    try {
+      const queue = this.ownershipQueue.get(channelId) || [];
+      if (!queue.includes(userId)) {
+        queue.push(userId);
+        this.ownershipQueue.set(channelId, queue);
+
+        // Notify the current owner
+        const channel = this.client.channels.cache.get(channelId) as VoiceChannel;
+        if (channel) {
+          const currentOwnerId = Array.from(this.userChannels.entries()).find(
+            ([, userChannel]) => userChannel.id === channelId
+          )?.[0];
+
+          if (currentOwnerId) {
+            const currentOwner = channel.members.get(currentOwnerId);
+            if (currentOwner) {
+              await channel.send(
+                `<@${userId}> has requested ownership of this channel. They will receive ownership when you leave.`
+              );
+            }
+          }
+        }
+      }
+    } catch (error) {
+      logger.error("Error requesting channel ownership:", error);
+    }
+  }
+
+  public async transferOwnership(
+    channelId: string,
+    currentOwnerId: string,
+    newOwnerId: string
+  ): Promise<void> {
+    try {
+      const channel = this.client.channels.cache.get(channelId) as VoiceChannel;
+      if (!channel) {
+        throw new Error("Channel not found");
+      }
+
+      const newOwner = channel.members.get(newOwnerId);
+      if (!newOwner) {
+        throw new Error("New owner is not in the channel");
+      }
 
       // Update channel name
       const newChannelName = `${newOwner.displayName}'s Channel`;
@@ -160,13 +234,22 @@ export class VoiceChannelManager {
 
       // Update ownership tracking
       this.userChannels.delete(currentOwnerId);
-      this.userChannels.set(newOwner.id, channel);
+      this.userChannels.set(newOwnerId, channel);
+
+      // Clear the ownership queue for this channel
+      this.ownershipQueue.delete(channelId);
+
+      // Notify channel members
+      await channel.send(
+        `Channel ownership has been transferred to ${newOwner.displayName}`
+      );
 
       logger.info(
-        `Changed ownership of channel ${channel.name} from ${currentOwnerId} to ${newOwner.id}`,
+        `Ownership of channel ${channel.name} manually transferred from ${currentOwnerId} to ${newOwnerId}`
       );
     } catch (error) {
-      logger.error("Error handling channel ownership change:", error);
+      logger.error("Error transferring channel ownership:", error);
+      throw error;
     }
   }
 
@@ -445,6 +528,41 @@ export class VoiceChannelManager {
       }
     } catch (error) {
       logger.error("Error during lobby health check:", error);
+    }
+  }
+
+  private async updateChannelOwnership(
+    channel: VoiceChannel,
+    newOwner: GuildMember,
+  ): Promise<void> {
+    try {
+      // Update channel name
+      const newChannelName = `${newOwner.displayName}'s Channel`;
+      await channel.setName(newChannelName);
+
+      // Update ownership tracking
+      const currentOwnerId = Array.from(this.userChannels.entries()).find(
+        ([, userChannel]) => userChannel.id === channel.id,
+      )?.[0];
+      if (currentOwnerId) {
+        this.userChannels.delete(currentOwnerId);
+      }
+      this.userChannels.set(newOwner.id, channel);
+
+      // Notify channel members about the ownership change
+      try {
+        await channel.send(
+          `Channel ownership has been transferred to ${newOwner.displayName} based on voice time in the last 7 days`
+        );
+      } catch (error) {
+        logger.error("Error sending ownership change notification:", error);
+      }
+
+      logger.info(
+        `Changed ownership of channel ${channel.name} to ${newOwner.id}`,
+      );
+    } catch (error) {
+      logger.error("Error updating channel ownership:", error);
     }
   }
 
