@@ -15,6 +15,7 @@ import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
+import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 
 config();
 const logger = Logger.getInstance();
@@ -176,6 +177,10 @@ client.once("ready", async () => {
     await initializeDatabase();
     logger.info("Database initialized");
 
+    // Initialize voice channel announcer
+    VoiceChannelAnnouncer.getInstance(client).start();
+    logger.info("Voice channel announcer initialized");
+
     // Initialize channels
     const guild = await client.guilds.fetch(process.env.GUILD_ID || "");
     if (guild) {
@@ -253,13 +258,13 @@ client.once("ready", async () => {
 
     logger.info(`Bot is ready! Logged in as ${client.user?.tag}`);
   } catch (error) {
-    logger.error("Failed to initialize bot:", error);
+    logger.error("Error during bot startup:", error);
     await cleanup();
   }
 });
 
 client.on("interactionCreate", async (interaction: Interaction) => {
-  if (interaction.isCommand()) {
+  if (interaction.isChatInputCommand()) {
     await handleCommands(interaction);
   }
 });

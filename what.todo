@@ -1,6 +1,165 @@
 # KoolBot TODO List
 
-## Core Improvements
+## High Priority
+- [ ] Environment Configuration (P0)
+  - [ ] Add .env validation system
+    - Success Criteria:
+      - All required variables are checked at startup
+      - Clear error messages for missing/invalid variables
+      - Type checking for numeric/boolean values
+      - Validation for cron expressions
+  - [ ] Add configuration checker
+    - Success Criteria:
+      - Command to verify current configuration
+      - Reports missing or invalid settings
+      - Suggests fixes for common issues
+  - [ ] Add type-safe config loading
+    - Success Criteria:
+      - TypeScript types for all config values
+      - Runtime type checking
+      - Default values for optional settings
+  - [ ] Add config migration system
+    - Success Criteria:
+      - Automatic migration of old config formats
+      - Backup of old config before changes
+      - Clear migration logs
+
+- [ ] Migrate Settings to Database (P0)
+  - [ ] Design settings schema
+    - Success Criteria:
+      - Support for all current .env settings
+      - Type-safe schema definition
+      - Version control for settings
+      - Audit trail for changes
+  - [ ] Create settings management system
+    - Success Criteria:
+      - Admin commands for viewing/editing settings
+      - Validation before saving changes
+      - Caching for performance
+      - Fallback to .env for critical settings
+  - [ ] Implement migration process
+    - Success Criteria:
+      - One-way migration from .env to database
+      - No service interruption during migration
+      - Rollback capability
+      - Migration status tracking
+  - [ ] Update documentation
+    - Success Criteria:
+      - New settings management guide
+      - Migration instructions
+      - Admin command documentation
+      - Troubleshooting guide
+
+- [ ] Remove guild command registration (P0)
+  - [ ] Migrate to global commands
+    - Success Criteria:
+      - All commands work globally
+      - No guild-specific command registration
+      - Proper permission handling
+  - [ ] Update command registration system
+    - Success Criteria:
+      - Single registration point for all commands
+      - Proper error handling for registration failures
+      - Command update tracking
+  - [ ] Clean up old guild-specific code
+    - Success Criteria:
+      - No references to guild command registration
+      - Removed unused guild-specific utilities
+      - Updated documentation
+
+- [ ] Clean up logging system (P1)
+  - [ ] Standardize log formats
+    - Success Criteria:
+      - Consistent log structure across all modules
+      - JSON format for machine parsing
+      - Clear log levels (ERROR, WARN, INFO, DEBUG)
+  - [ ] Add log rotation
+    - Success Criteria:
+      - Automatic log file rotation
+      - Configurable rotation size/interval
+      - Compressed old logs
+  - [ ] Add log levels configuration
+    - Success Criteria:
+      - Runtime log level changes
+      - Module-specific log levels
+      - Log level persistence
+
+## Medium Priority
+- [ ] Documentation Updates (P1)
+  - [ ] Add troubleshooting guide
+    - Success Criteria:
+      - Common issues and solutions
+      - Step-by-step debugging guide
+      - Error code reference
+  - [ ] Add contribution guidelines
+    - Success Criteria:
+      - Code style guide
+      - PR process documentation
+      - Testing requirements
+  - [ ] Document cron schedule format
+    - Success Criteria:
+      - Clear examples for common schedules
+      - Validation rules
+      - Timezone considerations
+  - [ ] Add environment variables guide
+    - Success Criteria:
+      - All variables documented
+      - Default values listed
+      - Required vs optional marked
+  - [ ] Document admin commands
+    - Success Criteria:
+      - Permission requirements
+      - Usage examples
+      - Expected outcomes
+
+- [ ] Code Quality (P2)
+  - [ ] Add unit tests
+    - Success Criteria:
+      - 80% code coverage
+      - All critical paths tested
+      - Mock external dependencies
+  - [ ] Add integration tests
+    - Success Criteria:
+      - End-to-end command testing
+      - Database interaction tests
+      - Discord API integration tests
+  - [ ] Add monitoring
+    - Success Criteria:
+      - Command usage metrics
+      - Error rate tracking
+      - Performance metrics
+      - Resource usage monitoring
+  - [ ] Add performance metrics
+    - Success Criteria:
+      - Response time tracking
+      - Memory usage monitoring
+      - Database query performance
+      - API call latency
+
+## Low Priority
+- [ ] Feature Enhancements (P3)
+  - [ ] Add optional timezone support to /seen
+  - [ ] Add price history tracking to PLEX checker
+  - [ ] Add price alerts to PLEX checker
+  - [ ] Add command cooldown system
+  - [ ] Add user feedback system
+
+- [ ] Fun Features (P3)
+  - [ ] Add easter eggs
+  - [ ] Add secret commands
+  - [ ] Add hidden achievements
+
+- [ ] Future Ideas (P4)
+  - [ ] Add more EVE Online related features
+  - [ ] Add custom command creation
+  - [ ] Add bot statistics and analytics
+  - [ ] Implement web dashboard
+  - [ ] Add more interactive commands
+  - [ ] Add user achievements system
+
+# Koolbot Done List
+
+## Core Features
 - [x] Implement clean shutdown on disconnect
   - [x] Handle SIGTERM/SIGINT signals
   - [x] Gracefully disconnect from Discord
@@ -15,6 +174,11 @@
   - [x] Add VC leaderboard command
   - [x] Add VC stats command
   - [x] Add last seen tracking
+  - [x] Add weekly announcement system
+    - [x] Cron-style scheduling
+    - [x] Customizable timing
+    - [x] Admin manual trigger
+    - [x] Top users highlighting
 
 - [x] Lobby VC Creation
   - [x] Create dynamic voice channels from lobby
@@ -30,12 +194,9 @@
   - [x] Track last seen time for users
   - [x] Store in database
   - [x] Add command to check last seen
-  - [ ] Add optional timezone support
 
 - [x] PLEX Price Checker
   - [x] Add Jita price check
-  - [ ] Add price history tracking
-  - [ ] Add price alerts
 
 - [x] /amikool Command
   - [x] Add role-based verification
@@ -48,37 +209,14 @@
   - [x] Add logging
 
 ## Documentation
-- [x] Update Documentation
-  - [x] Add setup instructions
-  - [x] Document all commands
-  - [x] Add configuration examples
-  - [ ] Add troubleshooting guide
-  - [x] Document database schema
-  - [ ] Add contribution guidelines
+- [x] Add setup instructions
+- [x] Document all commands
+- [x] Add configuration examples
+- [x] Document database schema
 
-## Technical Debt
-- [ ] Code Quality
-  - [ ] Add unit tests
-    - [ ] Implement formatDuration tests
-    - [ ] Implement formatTimeAgo tests
-  - [ ] Add integration tests
-  - [x] Improve error handling
-  - [ ] Add monitoring
-  - [ ] Add performance metrics
-  - [x] Fix TypeScript type definitions
-  - [x] Add proper dependency management
-
-## Future Ideas
-- [ ] Add more EVE Online related features
-- [x] Implement user roles and permissions
-- [ ] Add custom command creation
-- [ ] Add bot statistics and analytics
-- [ ] Implement web dashboard
-- [ ] Add more interactive commands
-- [ ] Add user achievements system
-- [x] Add voice channel statistics visualization
-- [ ] Add command cooldown system
-- [ ] Add user feedback system
-
-
-# Koolbot Done List
+## Technical Improvements
+- [x] Fix TypeScript type definitions
+- [x] Add proper dependency management
+- [x] Improve error handling
+- [x] Add proper command validation
+- [x] Add comprehensive logging
