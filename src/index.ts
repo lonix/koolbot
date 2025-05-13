@@ -264,7 +264,7 @@ client.once("ready", async () => {
 });
 
 client.on("interactionCreate", async (interaction: Interaction) => {
-  if (interaction.isCommand()) {
+  if (interaction.isChatInputCommand()) {
     await handleCommands(interaction);
   }
 });
