@@ -23,8 +23,12 @@ export class VoiceChannelAnnouncer {
 
   private validateCronExpression(expression: string): boolean {
     try {
+      // Remove any surrounding quotes
+      const cleanExpression = expression.replace(/^["']|["']$/g, '');
+      logger.debug(`Validating cron expression: ${cleanExpression}`);
+
       // Try to create a CronTime object - this will throw if the expression is invalid
-      new CronTime(expression);
+      new CronTime(cleanExpression);
       return true;
     } catch (error) {
       logger.error(`Invalid cron expression: ${expression}`, error);
@@ -33,18 +37,26 @@ export class VoiceChannelAnnouncer {
   }
 
   public start(): void {
+    logger.info("Starting voice channel announcer...");
+    logger.info(`ENABLE_VC_WEEKLY_ANNOUNCEMENT: ${process.env.ENABLE_VC_WEEKLY_ANNOUNCEMENT}`);
+    logger.info(`VC_ANNOUNCEMENT_SCHEDULE: ${process.env.VC_ANNOUNCEMENT_SCHEDULE}`);
+    logger.info(`VC_ANNOUNCEMENT_CHANNEL: ${process.env.VC_ANNOUNCEMENT_CHANNEL}`);
+
     if (process.env.ENABLE_VC_WEEKLY_ANNOUNCEMENT !== "true") {
       logger.info("Weekly voice channel announcements are disabled");
       return;
     }
 
-    const schedule = process.env.VC_ANNOUNCEMENT_SCHEDULE || "0 16 * * 5"; // Default: Friday at 4 PM
+    let schedule = process.env.VC_ANNOUNCEMENT_SCHEDULE || "0 16 * * 5"; // Default: Friday at 4 PM
+    // Remove any surrounding quotes from the schedule
+    schedule = schedule.replace(/^["']|["']$/g, '');
 
     if (!this.validateCronExpression(schedule)) {
       logger.error(
         `Invalid announcement schedule: ${schedule}. Using default schedule: 0 16 * * 5`,
       );
-      return;
+      // Don't return here, use the default schedule instead
+      schedule = "0 16 * * 5";
     }
 
     try {
