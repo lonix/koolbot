@@ -7,6 +7,7 @@ import { data as plexprice } from "../commands/plexprice.js";
 import { data as vctop } from "../commands/vctop.js";
 import { data as vcstats } from "../commands/vcstats.js";
 import { data as seen } from "../commands/seen.js";
+import { data as transferOwnership } from "../commands/transfer-ownership.js";
 
 config();
 const logger = Logger.getInstance();
@@ -59,6 +60,10 @@ export class CommandManager {
 
     if (process.env.ENABLE_SEEN === "true") {
       commands.push(seen.toJSON());
+    }
+
+    if (process.env.ENABLE_VC_MANAGEMENT === "true") {
+      commands.push(transferOwnership.toJSON());
     }
 
     return commands;

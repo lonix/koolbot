@@ -11,8 +11,8 @@
     "watch": "tsc -w",
     "deploy-commands": "node --import ./src/loader.js src/deploy-commands.ts",
     "unregister-guild-commands": "node --import ./src/loader.js src/unregister-guild-commands.ts",
-    "lint": "eslint . --ext .ts",
-    "lint:fix": "eslint . --ext .ts --fix",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "check": "npm run build && npm run lint && npm run format:check"
@@ -34,7 +34,7 @@
     "@typescript-eslint/eslint-plugin": "^8.29.1",
     "@typescript-eslint/parser": "^8.29.1",
     "eslint": "^9.24.0",
-    "prettier": "^3.2.5",
+    "prettier": "^3.5.3",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
   }

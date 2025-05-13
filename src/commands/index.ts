@@ -10,6 +10,7 @@ import { execute as plexprice } from "./plexprice.js";
 import { execute as vctop } from "./vctop.js";
 import { execute as vcstats } from "./vcstats.js";
 import { execute as seen } from "./seen.js";
+import { execute as transferOwnership } from "./transfer-ownership.js";
 
 const logger = Logger.getInstance();
 
@@ -20,6 +21,8 @@ const commands = {
   vctop: process.env.ENABLE_VC_TRACKING === "true" ? vctop : undefined,
   vcstats: process.env.ENABLE_VC_TRACKING === "true" ? vcstats : undefined,
   seen: process.env.ENABLE_SEEN === "true" ? seen : undefined,
+  "transfer-ownership":
+    process.env.ENABLE_VC_MANAGEMENT === "true" ? transferOwnership : undefined,
 };
 
 // Create a wrapper for the interaction that makes replies ephemeral by default
