@@ -165,7 +165,7 @@ export class VoiceChannelManager {
             member,
             totalTime: stats?.totalTime || 0,
           };
-        })
+        }),
       );
 
       // Sort members by their voice time in the last 7 days
@@ -176,13 +176,18 @@ export class VoiceChannelManager {
 
       // Update channel ownership
       await this.updateChannelOwnership(channel, newOwner);
-      logger.info(`Channel ${channel.name} ownership transferred to ${newOwner.displayName} based on voice time`);
+      logger.info(
+        `Channel ${channel.name} ownership transferred to ${newOwner.displayName} based on voice time`,
+      );
     } catch (error) {
       logger.error("Error handling channel ownership change:", error);
     }
   }
 
-  public async requestOwnership(channelId: string, userId: string): Promise<void> {
+  public async requestOwnership(
+    channelId: string,
+    userId: string,
+  ): Promise<void> {
     try {
       const queue = this.ownershipQueue.get(channelId) || [];
       if (!queue.includes(userId)) {
@@ -190,17 +195,19 @@ export class VoiceChannelManager {
         this.ownershipQueue.set(channelId, queue);
 
         // Notify the current owner
-        const channel = this.client.channels.cache.get(channelId) as VoiceChannel;
+        const channel = this.client.channels.cache.get(
+          channelId,
+        ) as VoiceChannel;
         if (channel) {
           const currentOwnerId = Array.from(this.userChannels.entries()).find(
-            ([, userChannel]) => userChannel.id === channelId
+            ([, userChannel]) => userChannel.id === channelId,
           )?.[0];
 
           if (currentOwnerId) {
             const currentOwner = channel.members.get(currentOwnerId);
             if (currentOwner) {
               await channel.send(
-                `<@${userId}> has requested ownership of this channel. They will receive ownership when you leave.`
+                `<@${userId}> has requested ownership of this channel. They will receive ownership when you leave.`,
               );
             }
           }
@@ -214,7 +221,7 @@ export class VoiceChannelManager {
   public async transferOwnership(
     channelId: string,
     currentOwnerId: string,
-    newOwnerId: string
+    newOwnerId: string,
   ): Promise<void> {
     try {
       const channel = this.client.channels.cache.get(channelId) as VoiceChannel;
@@ -240,11 +247,11 @@ export class VoiceChannelManager {
 
       // Notify channel members
       await channel.send(
-        `Channel ownership has been transferred to ${newOwner.displayName}`
+        `Channel ownership has been transferred to ${newOwner.displayName}`,
       );
 
       logger.info(
-        `Ownership of channel ${channel.name} manually transferred from ${currentOwnerId} to ${newOwnerId}`
+        `Ownership of channel ${channel.name} manually transferred from ${currentOwnerId} to ${newOwnerId}`,
       );
     } catch (error) {
       logger.error("Error transferring channel ownership:", error);
@@ -551,7 +558,7 @@ export class VoiceChannelManager {
       // Notify channel members about the ownership change
       try {
         await channel.send(
-          `Channel ownership has been transferred to ${newOwner.displayName} based on voice time in the last 7 days`
+          `Channel ownership has been transferred to ${newOwner.displayName} based on voice time in the last 7 days`,
         );
       } catch (error) {
         logger.error("Error sending ownership change notification:", error);

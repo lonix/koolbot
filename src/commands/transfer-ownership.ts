@@ -16,7 +16,7 @@ export const data = new SlashCommandBuilder()
     option
       .setName("user")
       .setDescription("The user to transfer ownership to")
-      .setRequired(true)
+      .setRequired(true),
   );
 
 export async function execute(interaction: CommandInteraction): Promise<void> {
@@ -77,13 +77,15 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     }
 
     // Get the voice channel manager instance
-    const voiceChannelManager = VoiceChannelManager.getInstance(interaction.client);
+    const voiceChannelManager = VoiceChannelManager.getInstance(
+      interaction.client,
+    );
 
     // Transfer ownership
     await voiceChannelManager.transferOwnership(
       voiceChannel.id,
       member.id,
-      targetMember.id
+      targetMember.id,
     );
 
     await interaction.reply({

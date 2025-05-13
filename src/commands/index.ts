@@ -21,7 +21,8 @@ const commands = {
   vctop: process.env.ENABLE_VC_TRACKING === "true" ? vctop : undefined,
   vcstats: process.env.ENABLE_VC_TRACKING === "true" ? vcstats : undefined,
   seen: process.env.ENABLE_SEEN === "true" ? seen : undefined,
-  "transfer-ownership": process.env.ENABLE_VC_MANAGEMENT === "true" ? transferOwnership : undefined,
+  "transfer-ownership":
+    process.env.ENABLE_VC_MANAGEMENT === "true" ? transferOwnership : undefined,
 };
 
 // Create a wrapper for the interaction that makes replies ephemeral by default
