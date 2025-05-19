@@ -1,7 +1,11 @@
 export class CooldownManager {
   private cooldowns: Map<string, Map<string, number>> = new Map();
 
-  public isOnCooldown(userId: string, command: string, cooldownSeconds: number): boolean {
+  public isOnCooldown(
+    userId: string,
+    command: string,
+    cooldownSeconds: number,
+  ): boolean {
     const now = Date.now();
     const userCooldowns = this.cooldowns.get(userId) || new Map();
     const lastUsed = userCooldowns.get(command);
@@ -10,7 +14,7 @@ export class CooldownManager {
       return false;
     }
 
-    const cooldownTime = lastUsed + (cooldownSeconds * 1000);
+    const cooldownTime = lastUsed + cooldownSeconds * 1000;
     return now < cooldownTime;
   }
 
@@ -21,7 +25,11 @@ export class CooldownManager {
     this.cooldowns.set(userId, userCooldowns);
   }
 
-  public getRemainingCooldown(userId: string, command: string, cooldownSeconds: number): number {
+  public getRemainingCooldown(
+    userId: string,
+    command: string,
+    cooldownSeconds: number,
+  ): number {
     const userCooldowns = this.cooldowns.get(userId);
     if (!userCooldowns) {
       return 0;
@@ -32,7 +40,7 @@ export class CooldownManager {
       return 0;
     }
 
-    const cooldownTime = lastUsed + (cooldownSeconds * 1000);
+    const cooldownTime = lastUsed + cooldownSeconds * 1000;
     const remaining = Math.ceil((cooldownTime - Date.now()) / 1000);
     return remaining > 0 ? remaining : 0;
   }

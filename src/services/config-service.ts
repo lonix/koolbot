@@ -279,13 +279,15 @@ export class ConfigService {
       {
         key: "quotes.add_roles",
         category: "roles",
-        description: "Comma-separated list of role IDs that can add quotes (empty for all users)",
+        description:
+          "Comma-separated list of role IDs that can add quotes (empty for all users)",
         defaultValue: "",
       },
       {
         key: "quotes.delete_roles",
         category: "roles",
-        description: "Comma-separated list of role IDs that can delete quotes (empty for admins only)",
+        description:
+          "Comma-separated list of role IDs that can delete quotes (empty for admins only)",
         defaultValue: "",
       },
       {
