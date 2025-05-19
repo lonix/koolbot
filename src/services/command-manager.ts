@@ -16,6 +16,7 @@ import { ConfigService } from "./config-service.js";
 dotenvConfig();
 const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
+const isDebug = process.env.DEBUG === "true";
 
 export class CommandManager {
   private static instance: CommandManager;
@@ -48,40 +49,83 @@ export class CommandManager {
   > {
     const commands = [];
 
+    if (isDebug) {
+      logger.debug("Checking command registration status:");
+    }
+
     if (await configService.get("ENABLE_PING")) {
       commands.push(ping.toJSON());
+      if (isDebug) logger.debug("✓ /ping command enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /ping command disabled");
     }
 
     if (await configService.get("ENABLE_AMIKOOL")) {
       commands.push(amikool.toJSON());
+      if (isDebug) logger.debug("✓ /amikool command enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /amikool command disabled");
     }
 
     if (await configService.get("ENABLE_PLEX_PRICE")) {
       commands.push(plexprice.toJSON());
+      if (isDebug) logger.debug("✓ /plexprice command enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /plexprice command disabled");
     }
 
     if (await configService.get("ENABLE_VC_TRACKING")) {
       commands.push(vctop.toJSON());
       commands.push(vcstats.toJSON());
+      if (isDebug) logger.debug("✓ /vctop and /vcstats commands enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /vctop and /vcstats commands disabled");
     }
 
     if (await configService.get("ENABLE_SEEN")) {
       commands.push(seen.toJSON());
+      if (isDebug) logger.debug("✓ /seen command enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /seen command disabled");
     }
 
     if (await configService.get("ENABLE_VC_MANAGEMENT")) {
       commands.push(transferOwnership.toJSON());
+      if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /transfer-ownership command disabled");
     }
 
     if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
       commands.push(announceVcStats.toJSON());
+      if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /announce-vc-stats command disabled");
     }
 
     if (await configService.get("quotes.enabled")) {
       commands.push(quoteCommand.toJSON());
+      if (isDebug) logger.debug("✓ /quote command enabled");
+    } else if (isDebug) {
+      logger.debug("✗ /quote command disabled");
     }
 
     commands.push(configCommand.toJSON());
+    if (isDebug) logger.debug("✓ /config command enabled (always)");
+
+    if (isDebug) {
+      logger.debug("Command registration summary:");
+      logger.debug(`Total commands to register: ${commands.length}`);
+      logger.debug("Commands to be registered:");
+      commands.forEach(cmd => {
+        logger.debug(`- /${cmd.name}: ${cmd.description}`);
+        if (cmd.options) {
+          cmd.options.forEach(opt => {
+            logger.debug(`  └─ ${opt.name}${opt.required ? ' (required)' : ''}: ${opt.description}`);
+          });
+        }
+      });
+    }
 
     return commands;
   }
@@ -112,9 +156,18 @@ export class CommandManager {
 
       // Then register global commands
       logger.info("Registering global commands...");
-      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
+      if (isDebug) {
+        logger.debug(`Attempting to register ${commands.length} commands with Discord API...`);
+      }
+
+      const response = await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
         body: commands,
       });
+
+      if (isDebug) {
+        logger.debug("Discord API response:", response);
+      }
+
       logger.info("Successfully registered global commands");
     } catch (error) {
       logger.error("Error registering commands:", error);
