@@ -7,6 +7,7 @@ import {
 } from "discord.js";
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
+import mongoose from "mongoose";
 
 const logger = Logger.getInstance();
 
@@ -41,9 +42,41 @@ export class VoiceChannelTracker {
   > = new Map();
   private userChannels: Map<string, VoiceChannel> = new Map();
   private client: Client;
+  private isConnected: boolean = false;
 
   private constructor(client: Client) {
     this.client = client;
+    this.setupMongoConnectionHandlers();
+  }
+
+  private setupMongoConnectionHandlers(): void {
+    mongoose.connection.on('connected', () => {
+      this.isConnected = true;
+      logger.info('MongoDB connection established for voice channel tracker');
+    });
+
+    mongoose.connection.on('disconnected', () => {
+      this.isConnected = false;
+      logger.warn('MongoDB connection lost for voice channel tracker');
+    });
+
+    mongoose.connection.on('error', (error) => {
+      this.isConnected = false;
+      logger.error('MongoDB connection error in voice channel tracker:', error);
+    });
+  }
+
+  private async ensureConnection(): Promise<void> {
+    if (!this.isConnected) {
+      try {
+        await mongoose.connect(process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot");
+        this.isConnected = true;
+        logger.info('Reconnected to MongoDB for voice channel tracker');
+      } catch (error) {
+        logger.error('Failed to reconnect to MongoDB:', error);
+        throw error;
+      }
+    }
   }
 
   public static getInstance(client: Client): VoiceChannelTracker {
@@ -144,6 +177,8 @@ export class VoiceChannelTracker {
     channelName: string,
   ): Promise<void> {
     try {
+      await this.ensureConnection();
+
       const startTime = new Date();
       this.activeSessions.set(member.id, { startTime, channelId, channelName });
 
@@ -160,8 +195,8 @@ export class VoiceChannelTracker {
               startTime,
               channelId,
               channelName,
-              endTime: null, // Initialize as null
-              duration: null, // Initialize as null
+              endTime: null,
+              duration: null,
             },
           },
         },
@@ -169,11 +204,17 @@ export class VoiceChannelTracker {
       );
     } catch (error) {
       logger.error("Error starting voice tracking:", error);
+      // If it's a connection error, mark as disconnected
+      if (error instanceof Error && error.message.includes('Client must be connected')) {
+        this.isConnected = false;
+      }
     }
   }
 
   private async endTracking(userId: string): Promise<void> {
     try {
+      await this.ensureConnection();
+
       const session = this.activeSessions.get(userId);
       if (!session) {
         if (process.env.DEBUG === "true") {
@@ -198,35 +239,30 @@ export class VoiceChannelTracker {
 
       // Update both total time and the specific session in one operation
       const result = await VoiceChannelTracking.findOneAndUpdate(
-        {
-          userId,
-          "sessions.startTime": session.startTime,
-          "sessions.endTime": null, // Only match sessions that haven't ended
-        },
+        { userId },
         {
           $inc: { totalTime: duration },
           $set: {
-            "sessions.$.endTime": endTime,
-            "sessions.$.duration": duration,
+            lastSeen: endTime,
+            "sessions.$[elem].endTime": endTime,
+            "sessions.$[elem].duration": duration,
           },
+        },
+        {
+          arrayFilters: [{ "elem.endTime": null }],
+          new: true,
         },
       );
 
-      if (process.env.DEBUG === "true") {
-        if (result) {
-          logger.info(
-            `[DEBUG] Successfully updated session for user ${userId}`,
-          );
-        } else {
-          logger.info(
-            `[DEBUG] Failed to find and update session for user ${userId}`,
-          );
-        }
+      if (result) {
+        this.activeSessions.delete(userId);
       }
-
-      this.activeSessions.delete(userId);
     } catch (error) {
       logger.error("Error ending voice tracking:", error);
+      // If it's a connection error, mark as disconnected
+      if (error instanceof Error && error.message.includes('Client must be connected')) {
+        this.isConnected = false;
+      }
     }
   }
 

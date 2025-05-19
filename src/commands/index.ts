@@ -8,6 +8,7 @@ import { execute as vcstats } from "./vcstats.js";
 import { execute as seen } from "./seen.js";
 import { execute as transferOwnership } from "./transfer-ownership.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
+import { execute as config } from "./config/index.js";
 
 const logger = Logger.getInstance();
 
@@ -21,6 +22,7 @@ const commands: Record<
   vctop: process.env.ENABLE_VC_TRACKING === "true" ? vctop : undefined,
   vcstats: process.env.ENABLE_VC_TRACKING === "true" ? vcstats : undefined,
   seen,
+  config,
   "transfer-ownership":
     process.env.ENABLE_VC_MANAGEMENT === "true" ? transferOwnership : undefined,
   "announce-vc-stats":
