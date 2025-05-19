@@ -193,6 +193,38 @@ Note: When running manually, you'll need to ensure MongoDB is available and the 
 - Proper error handling
 - Comprehensive logging
 
+## Backup and Restore
+
+### Backup MongoDB Data Volume
+
+To backup the MongoDB data volume in production, run the following command:
+
+```sh
+docker run --rm -v koolbot_mongodb_data:/data -v $(pwd):/backup alpine tar -czvf /backup/mongodb_backup_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
+```
+
+This command creates a compressed tar archive of the MongoDB data volume, with a timestamp in the filename.
+
+### Restore MongoDB Data Volume
+
+To restore from a backup in production, run the following command:
+
+```sh
+docker run --rm -v koolbot_mongodb_data:/data -v $(pwd):/backup alpine sh -c "rm -rf /data/* && tar -xzvf /backup/your_backup_file.tar.gz -C /data"
+```
+
+Replace `your_backup_file.tar.gz` with the name of your backup file.
+
+### Automate Backups
+
+To automate backups in production, you can set up a cron job. For example, to run the backup daily at 2 AM, add the following line to your crontab:
+
+```sh
+0 2 * * * docker run --rm -v koolbot_mongodb_data:/data -v /path/to/backup/dir:/backup alpine tar -czvf /backup/mongodb_backup_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
+```
+
+Replace `/path/to/backup/dir` with the directory where you want to store the backups.
+
 ## License
 
 MIT
