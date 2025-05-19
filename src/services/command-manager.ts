@@ -92,15 +92,25 @@ export class CommandManager {
         process.env.DISCORD_TOKEN!,
       );
 
-      logger.info("Registering commands...");
-      await rest.put(
-        Routes.applicationGuildCommands(
-          process.env.CLIENT_ID!,
-          process.env.GUILD_ID!,
-        ),
-        { body: commands },
-      );
-      logger.info("Successfully registered commands");
+      // First, unregister any existing guild commands
+      if (process.env.GUILD_ID) {
+        logger.info("Cleaning up any existing guild commands...");
+        await rest.put(
+          Routes.applicationGuildCommands(
+            process.env.CLIENT_ID!,
+            process.env.GUILD_ID,
+          ),
+          { body: [] },
+        );
+        logger.info("Successfully cleaned up guild commands");
+      }
+
+      // Then register global commands
+      logger.info("Registering global commands...");
+      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
+        body: commands,
+      });
+      logger.info("Successfully registered global commands");
     } catch (error) {
       logger.error("Error registering commands:", error);
       throw error;
@@ -118,14 +128,24 @@ export class CommandManager {
       );
 
       logger.info("Unregistering all commands...");
-      await rest.put(
-        Routes.applicationGuildCommands(
-          process.env.CLIENT_ID!,
-          process.env.GUILD_ID!,
-        ),
-        { body: [] },
-      );
-      logger.info("Successfully unregistered all commands");
+
+      // Unregister global commands
+      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
+        body: [],
+      });
+      logger.info("Successfully unregistered global commands");
+
+      // Unregister guild commands if GUILD_ID is set
+      if (process.env.GUILD_ID) {
+        await rest.put(
+          Routes.applicationGuildCommands(
+            process.env.CLIENT_ID!,
+            process.env.GUILD_ID,
+          ),
+          { body: [] },
+        );
+        logger.info("Successfully unregistered guild commands");
+      }
     } catch (error) {
       logger.error("Error unregistering commands:", error);
       throw error;

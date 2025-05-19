@@ -42,11 +42,14 @@ The following settings must be configured in the `.env` file as they are critica
 ```env
 # Critical Bot Configuration
 DISCORD_TOKEN=your_bot_token_here
-GUILD_ID=your_guild_id_here
 CLIENT_ID=your_client_id_here
 MONGODB_URI=mongodb://localhost:27017/koolbot
 DEBUG=false
 NODE_ENV=production
+
+# Note: GUILD_ID is only needed temporarily to clean up any existing guild commands
+# Can be removed after initial cleanup is complete
+GUILD_ID=your_guild_id_here
 ```
 
 ### User Configurable Settings
@@ -172,11 +175,18 @@ If you prefer to run the bot without docker-compose, you can use these commands:
    docker run -d \
      --name koolbot \
      --env-file .env \
-     --network koolbot-network \
      koolbot
    ```
 
-Note: When running manually, you'll need to ensure MongoDB is available and the network is properly configured.
+## Command Registration
+
+The bot uses global commands by default. If you have previously registered guild-specific commands, you can clean them up by:
+
+1. Setting the `GUILD_ID` in your `.env` file
+2. Starting the bot - it will automatically clean up any guild commands
+3. Once cleanup is complete, you can remove the `GUILD_ID` from your `.env` file
+
+This ensures a clean transition to global commands and prevents any command duplication.
 
 ## Development
 
