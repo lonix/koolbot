@@ -33,43 +33,73 @@ A Discord bot for managing voice channels and tracking user activity.
 - Clean shutdown handling
 - Type-safe configuration
 
-## Environment Variables
+## Configuration
 
-### Discord Bot Configuration
-- `DISCORD_TOKEN`: Your Discord bot token
-- `GUILD_ID`: Your Discord server ID
-- `CLIENT_ID`: Your Discord application client ID
+### Critical Settings (.env)
 
-### Voice Channel Management
-- `ENABLE_VC_MANAGEMENT`: Enable/disable voice channel management (true/false)
-- `VC_CATEGORY_NAME`: Name of the category for voice channels
-- `LOBBY_CHANNEL_NAME`: Name of the lobby channel
-- `LOBBY_CHANNEL_NAME_OFFLINE`: Name of the offline lobby channel
-- `VC_CHANNEL_PREFIX`: Prefix for dynamically created channels
-- `VC_SUFFIX`: Suffix for dynamically created channels
+The following settings must be configured in the `.env` file as they are critical for bot operation:
 
-### Voice Channel Tracking
-- `ENABLE_VC_TRACKING`: Enable/disable voice channel tracking
-- `ENABLE_SEEN`: Enable/disable last seen tracking
-- `ENABLE_VC_WEEKLY_ANNOUNCEMENT`: Enable/disable weekly announcements
-- `VC_ANNOUNCEMENT_CHANNEL`: Channel name for weekly announcements
-- `VC_ANNOUNCEMENT_SCHEDULE`: Cron-style schedule for announcements (default: "0 16 * * 5" for Friday at 4 PM)
+```env
+# Critical Bot Configuration
+DISCORD_TOKEN=your_bot_token_here
+GUILD_ID=your_guild_id_here
+CLIENT_ID=your_client_id_here
+MONGODB_URI=mongodb://localhost:27017/koolbot
+DEBUG=false
+NODE_ENV=production
+```
 
-### MongoDB Configuration
-- `MONGODB_URI`: MongoDB connection string
+### User Configurable Settings
 
-### Bot Features
-- `ENABLE_PING`: Enable/disable ping command
-- `ENABLE_AMIKOOL`: Enable/disable amikool command
-- `ENABLE_PLEX_PRICE`: Enable/disable plex price checking
+All other settings can be configured using the `/config` command and are stored in the database. These include:
 
-### Role Configuration
-- `COOL_ROLE_NAME`: Name of the role for kool verification
-- `VC_TRACKING_ADMIN_ROLES`: Comma-separated list of admin role names
+#### Voice Channel Management
+- Enable/disable voice channel management
+- Category name for voice channels
+- Lobby channel names
+- Channel naming patterns
 
-### Debug Configuration
-- `DEBUG`: Enable/disable debug mode
-- `NODE_ENV`: Environment (development/production)
+#### Voice Channel Tracking
+- Enable/disable tracking features
+- Weekly announcement settings
+- Last seen tracking
+
+#### Bot Features
+- Command toggles
+- Feature flags
+
+#### Roles
+- Role names for permissions
+- Admin role configurations
+
+### Configuration Commands
+
+Use the following commands to manage settings:
+
+1. List all settings:
+   ```
+   /config list
+   ```
+
+2. List settings by category:
+   ```
+   /config list category:voice_channel
+   ```
+
+3. Get a specific setting:
+   ```
+   /config get key:ENABLE_VC_WEEKLY_ANNOUNCEMENT
+   ```
+
+4. Change a setting:
+   ```
+   /config set key:ENABLE_VC_WEEKLY_ANNOUNCEMENT value:true
+   ```
+
+5. Reset a setting to default:
+   ```
+   /config reset key:ENABLE_VC_WEEKLY_ANNOUNCEMENT
+   ```
 
 ## Commands
 
@@ -88,7 +118,7 @@ A Discord bot for managing voice channels and tracking user activity.
 ## Installation
 
 1. Clone the repository
-2. Copy `.env.example` to `.env` and fill in your configuration
+2. Copy `.env.example` to `.env` and configure the critical settings
 3. Install dependencies:
    ```bash
    npm install

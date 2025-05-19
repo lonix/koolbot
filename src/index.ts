@@ -16,6 +16,7 @@ import { ChannelInitializer } from "./services/channel-initializer.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
+import { ConfigService } from "./services/config-service.js";
 
 config();
 const logger = Logger.getInstance();
@@ -176,6 +177,11 @@ client.once("ready", async () => {
     // Initialize database first
     await initializeDatabase();
     logger.info("Database initialized");
+
+    // Initialize configuration service and migrate from env
+    const configService = ConfigService.getInstance();
+    await configService.initialize();
+    await configService.migrateFromEnv();
 
     // Initialize voice channel announcer
     VoiceChannelAnnouncer.getInstance(client).start();

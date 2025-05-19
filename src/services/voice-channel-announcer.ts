@@ -2,6 +2,7 @@ import { Client, TextChannel } from "discord.js";
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { CronJob, CronTime } from "cron";
+import { ConfigService } from "./config-service.js";
 
 const logger = Logger.getInstance();
 
@@ -9,9 +10,11 @@ export class VoiceChannelAnnouncer {
   private static instance: VoiceChannelAnnouncer;
   private client: Client;
   private announcementJob: CronJob | null = null;
+  private configService: ConfigService;
 
   private constructor(client: Client) {
     this.client = client;
+    this.configService = ConfigService.getInstance();
   }
 
   public static getInstance(client: Client): VoiceChannelAnnouncer {
@@ -36,36 +39,27 @@ export class VoiceChannelAnnouncer {
     }
   }
 
-  public start(): void {
+  public async start(): Promise<void> {
     logger.info("Starting voice channel announcer...");
-    logger.info(
-      `ENABLE_VC_WEEKLY_ANNOUNCEMENT: ${process.env.ENABLE_VC_WEEKLY_ANNOUNCEMENT}`,
-    );
-    logger.info(
-      `VC_ANNOUNCEMENT_SCHEDULE: ${process.env.VC_ANNOUNCEMENT_SCHEDULE}`,
-    );
-    logger.info(
-      `VC_ANNOUNCEMENT_CHANNEL: ${process.env.VC_ANNOUNCEMENT_CHANNEL}`,
-    );
-
-    if (process.env.ENABLE_VC_WEEKLY_ANNOUNCEMENT !== "true") {
-      logger.info("Weekly voice channel announcements are disabled");
-      return;
-    }
-
-    let schedule = process.env.VC_ANNOUNCEMENT_SCHEDULE || "0 16 * * 5"; // Default: Friday at 4 PM
-    // Remove any surrounding quotes from the schedule
-    schedule = schedule.replace(/^["']|["']$/g, "");
-
-    if (!this.validateCronExpression(schedule)) {
-      logger.error(
-        `Invalid announcement schedule: ${schedule}. Using default schedule: 0 16 * * 5`,
-      );
-      // Don't return here, use the default schedule instead
-      schedule = "0 16 * * 5";
-    }
 
     try {
+      const enabled = await this.configService.get<boolean>("ENABLE_VC_WEEKLY_ANNOUNCEMENT", false);
+      if (!enabled) {
+        logger.info("Weekly voice channel announcements are disabled");
+        return;
+      }
+
+      let schedule = await this.configService.get<string>("VC_ANNOUNCEMENT_SCHEDULE", "0 16 * * 5");
+      // Remove any surrounding quotes from the schedule
+      schedule = schedule.replace(/^["']|["']$/g, "");
+
+      if (!this.validateCronExpression(schedule)) {
+        logger.error(
+          `Invalid announcement schedule: ${schedule}. Using default schedule: 0 16 * * 5`,
+        );
+        schedule = "0 16 * * 5";
+      }
+
       this.announcementJob = new CronJob(schedule, () => {
         this.makeAnnouncement();
       });
@@ -93,7 +87,7 @@ export class VoiceChannelAnnouncer {
         return;
       }
 
-      const channelName = process.env.VC_ANNOUNCEMENT_CHANNEL || "voice-stats";
+      const channelName = await this.configService.get<string>("VC_ANNOUNCEMENT_CHANNEL", "voice-stats");
       const channel = guild.channels.cache.find(
         (ch) => ch instanceof TextChannel && ch.name === channelName,
       ) as TextChannel;

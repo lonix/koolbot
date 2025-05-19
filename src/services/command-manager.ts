@@ -1,5 +1,5 @@
 import { REST, Routes } from "discord.js";
-import { config } from "dotenv";
+import { config as dotenvConfig } from "dotenv";
 import Logger from "../utils/logger.js";
 import { data as ping } from "../commands/ping.js";
 import { data as amikool } from "../commands/amikool.js";
@@ -9,8 +9,9 @@ import { data as vcstats } from "../commands/vcstats.js";
 import { data as seen } from "../commands/seen.js";
 import { data as transferOwnership } from "../commands/transfer-ownership.js";
 import { data as announceVcStats } from "../commands/announce-vc-stats.js";
+import { data as configCommand } from "../commands/config/index.js";
 
-config();
+dotenvConfig();
 const logger = Logger.getInstance();
 
 export class CommandManager {
@@ -67,9 +68,11 @@ export class CommandManager {
       commands.push(transferOwnership.toJSON());
     }
 
-    if (process.env.ENABLE_VC_WEEKLY_ANNOUNCEMENT === "true") {
+    if (process.env.ENABLE_ANNOUNCE_VC_STATS === "true") {
       commands.push(announceVcStats.toJSON());
     }
+
+    commands.push(configCommand.toJSON());
 
     return commands;
   }
