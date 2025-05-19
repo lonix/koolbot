@@ -6,7 +6,9 @@ import {
 } from "discord.js";
 import { quoteService } from "../services/quote-service.js";
 import { ConfigService } from "../services/config-service.js";
+import Logger from "../utils/logger.js";
 
+const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
 
 export const data = new SlashCommandBuilder()
@@ -65,10 +67,23 @@ export async function execute(
           .split(",")
           .filter(Boolean);
         const memberRoles = interaction.member?.roles;
+
+        // Debug logging
+        logger.debug("Quote permission check:");
+        logger.debug(`Configured add roles: ${addRoles.join(", ")}`);
+        logger.debug(`User roles: ${memberRoles instanceof GuildMemberRoleManager ?
+          memberRoles.cache.map(r => `${r.name} (${r.id})`).join(", ") : "No roles"}`);
+
         const hasPermission =
           addRoles.length === 0 || // Empty means all users can add
           (memberRoles instanceof GuildMemberRoleManager &&
-            memberRoles.cache.some((role: Role) => addRoles.includes(role.id)));
+            memberRoles.cache.some((role: Role) => {
+              const hasRole = addRoles.includes(role.id);
+              logger.debug(`Checking role ${role.name} (${role.id}): ${hasRole ? "allowed" : "denied"}`);
+              return hasRole;
+            }));
+
+        logger.debug(`Final permission result: ${hasPermission ? "allowed" : "denied"}`);
 
         if (!hasPermission) {
           await interaction.reply({
