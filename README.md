@@ -24,6 +24,7 @@ A Discord bot for managing voice channels and tracking user activity.
   - Top 10 most active users
   - Special mentions for top 3 users
   - Admin manual trigger option
+- Excluded voice channels (comma-separated list of channel IDs)
 
 ### Other Features
 - PLEX price checking
@@ -66,6 +67,7 @@ All other settings can be configured using the `/config` command and are stored 
 - Enable/disable tracking features
 - Weekly announcement settings
 - Last seen tracking
+- Excluded voice channels (comma-separated list of channel IDs)
 
 #### Bot Features
 - Command toggles
@@ -102,6 +104,26 @@ Use the following commands to manage settings:
 5. Reset a setting to default:
    ```
    /config reset key:ENABLE_VC_WEEKLY_ANNOUNCEMENT
+   ```
+
+2. List settings by category:
+   ```
+   /config list category:tracking
+   ```
+
+3. Get a specific setting:
+   ```
+   /config get key:EXCLUDED_VC_CHANNELS
+   ```
+
+4. Change a setting:
+   ```
+   /config set key:EXCLUDED_VC_CHANNELS value:123456789,987654321
+   ```
+
+5. Reset a setting to default:
+   ```
+   /config reset key:EXCLUDED_VC_CHANNELS
    ```
 
 ## Commands
