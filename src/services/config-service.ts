@@ -212,7 +212,8 @@ export class ConfigService {
       {
         key: "EXCLUDED_VC_CHANNELS",
         category: "tracking",
-        description: "Comma-separated list of voice channel IDs to exclude from tracking",
+        description:
+          "Comma-separated list of voice channel IDs to exclude from tracking",
         defaultValue: "",
       },
       {

@@ -1,12 +1,14 @@
 import {
   SlashCommandBuilder,
-  CommandInteraction,
+  ChatInputCommandInteraction,
   PermissionFlagsBits,
+  ChannelType,
 } from "discord.js";
-import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
+import { ConfigService } from "../services/config-service.js";
 import Logger from "../utils/logger.js";
 
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 export const data = new SlashCommandBuilder()
   .setName("exclude-channel")
@@ -20,7 +22,8 @@ export const data = new SlashCommandBuilder()
           .setName("channel")
           .setDescription("The voice channel to exclude from tracking")
           .setRequired(true)
-      )
+          .addChannelTypes(ChannelType.GuildVoice),
+      ),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -31,24 +34,24 @@ export const data = new SlashCommandBuilder()
           .setName("channel")
           .setDescription("The voice channel to remove from exclusion list")
           .setRequired(true)
-      )
+          .addChannelTypes(ChannelType.GuildVoice),
+      ),
   )
   .addSubcommand((subcommand) =>
     subcommand
       .setName("list")
-      .setDescription("List all excluded voice channels")
+      .setDescription("List all excluded voice channels"),
   )
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-export async function execute(interaction: CommandInteraction) {
+export async function execute(interaction: ChatInputCommandInteraction) {
   try {
     const subcommand = interaction.options.getSubcommand();
-    const tracker = VoiceChannelTracker.getInstance(interaction.client);
 
     switch (subcommand) {
       case "add": {
-        const channel = interaction.options.getChannel("channel");
-        if (!channel || channel.type !== 2) { // 2 is GUILD_VOICE
+        const channel = interaction.options.getChannel("channel", true);
+        if (channel.type !== ChannelType.GuildVoice) {
           await interaction.reply({
             content: "Please select a valid voice channel.",
             ephemeral: true,
@@ -56,7 +59,30 @@ export async function execute(interaction: CommandInteraction) {
           return;
         }
 
-        await tracker.addExcludedChannel(channel.id);
+        const currentExcluded =
+          (await configService.get("EXCLUDED_VC_CHANNELS")) || "";
+        const excludedList = currentExcluded
+          ? String(currentExcluded)
+              .split(",")
+              .map((id) => id.trim())
+          : [];
+
+        if (excludedList.includes(channel.id)) {
+          await interaction.reply({
+            content: `Voice channel ${channel.name} is already excluded from tracking.`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        excludedList.push(channel.id);
+        await configService.set(
+          "EXCLUDED_VC_CHANNELS",
+          excludedList.join(","),
+          "Comma-separated list of voice channel IDs to exclude from tracking",
+          "tracking",
+        );
+
         await interaction.reply({
           content: `Voice channel ${channel.name} has been excluded from tracking.`,
           ephemeral: true,
@@ -65,8 +91,8 @@ export async function execute(interaction: CommandInteraction) {
       }
 
       case "remove": {
-        const channel = interaction.options.getChannel("channel");
-        if (!channel || channel.type !== 2) {
+        const channel = interaction.options.getChannel("channel", true);
+        if (channel.type !== ChannelType.GuildVoice) {
           await interaction.reply({
             content: "Please select a valid voice channel.",
             ephemeral: true,
@@ -74,7 +100,30 @@ export async function execute(interaction: CommandInteraction) {
           return;
         }
 
-        await tracker.removeExcludedChannel(channel.id);
+        const currentExcluded =
+          (await configService.get("EXCLUDED_VC_CHANNELS")) || "";
+        const excludedList = currentExcluded
+          ? String(currentExcluded)
+              .split(",")
+              .map((id) => id.trim())
+          : [];
+
+        if (!excludedList.includes(channel.id)) {
+          await interaction.reply({
+            content: `Voice channel ${channel.name} is not currently excluded from tracking.`,
+            ephemeral: true,
+          });
+          return;
+        }
+
+        const newExcludedList = excludedList.filter((id) => id !== channel.id);
+        await configService.set(
+          "EXCLUDED_VC_CHANNELS",
+          newExcludedList.join(","),
+          "Comma-separated list of voice channel IDs to exclude from tracking",
+          "tracking",
+        );
+
         await interaction.reply({
           content: `Voice channel ${channel.name} has been removed from the exclusion list.`,
           ephemeral: true,
@@ -83,8 +132,15 @@ export async function execute(interaction: CommandInteraction) {
       }
 
       case "list": {
-        const excludedChannels = await tracker.getExcludedChannels();
-        if (excludedChannels.length === 0) {
+        const excludedChannels =
+          (await configService.get("EXCLUDED_VC_CHANNELS")) || "";
+        const excludedList = excludedChannels
+          ? String(excludedChannels)
+              .split(",")
+              .map((id) => id.trim())
+          : [];
+
+        if (excludedList.length === 0) {
           await interaction.reply({
             content: "No voice channels are currently excluded from tracking.",
             ephemeral: true,
@@ -93,10 +149,12 @@ export async function execute(interaction: CommandInteraction) {
         }
 
         const channelList = await Promise.all(
-          excludedChannels.map(async (channelId) => {
+          excludedList.map(async (channelId) => {
             const channel = await interaction.client.channels.fetch(channelId);
-            return channel ? `• ${channel.name}` : `• Unknown channel (${channelId})`;
-          })
+            return channel && channel.type === ChannelType.GuildVoice
+              ? `• ${channel.name}`
+              : `• Unknown channel (${channelId})`;
+          }),
         );
 
         await interaction.reply({

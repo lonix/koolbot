@@ -180,50 +180,13 @@ export class VoiceChannelTracker {
       const excludedChannels = await configService.get("EXCLUDED_VC_CHANNELS");
       if (!excludedChannels) return false;
 
-      const excludedList = String(excludedChannels).split(",").map(id => id.trim());
+      const excludedList = String(excludedChannels)
+        .split(",")
+        .map((id) => id.trim());
       return excludedList.includes(channelId);
     } catch (error) {
       logger.error("Error checking if channel is excluded:", error);
       return false;
-    }
-  }
-
-  public async addExcludedChannel(channelId: string): Promise<void> {
-    try {
-      await this.ensureConnection();
-      await VoiceChannelTracking.updateMany(
-        {},
-        { $addToSet: { excludedChannels: channelId } }
-      );
-      logger.info(`Added channel ${channelId} to excluded channels`);
-    } catch (error) {
-      logger.error("Error adding excluded channel:", error);
-      throw error;
-    }
-  }
-
-  public async removeExcludedChannel(channelId: string): Promise<void> {
-    try {
-      await this.ensureConnection();
-      await VoiceChannelTracking.updateMany(
-        {},
-        { $pull: { excludedChannels: channelId } }
-      );
-      logger.info(`Removed channel ${channelId} from excluded channels`);
-    } catch (error) {
-      logger.error("Error removing excluded channel:", error);
-      throw error;
-    }
-  }
-
-  public async getExcludedChannels(): Promise<string[]> {
-    try {
-      await this.ensureConnection();
-      const result = await VoiceChannelTracking.findOne({}, { excludedChannels: 1 });
-      return result?.excludedChannels || [];
-    } catch (error) {
-      logger.error("Error getting excluded channels:", error);
-      return [];
     }
   }
 
@@ -239,7 +202,7 @@ export class VoiceChannelTracker {
       if (await this.isChannelExcluded(channelId)) {
         if (process.env.DEBUG === "true") {
           logger.info(
-            `[DEBUG] Channel ${channelName} (${channelId}) is excluded from tracking`
+            `[DEBUG] Channel ${channelName} (${channelId}) is excluded from tracking`,
           );
         }
         return;
@@ -265,7 +228,7 @@ export class VoiceChannelTracker {
             },
           },
         },
-        { upsert: true }
+        { upsert: true },
       );
     } catch (error) {
       logger.error("Error starting voice channel tracking:", error);
