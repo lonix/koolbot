@@ -1,13 +1,12 @@
 import { Config, IConfig } from "../models/config.js";
 import Logger from "../utils/logger.js";
-import mongoose from "mongoose";
 import { Client } from "discord.js";
 
 const logger = Logger.getInstance();
 
 export class ConfigService {
   private static instance: ConfigService;
-  private cache: Map<string, any> = new Map();
+  private cache: Map<string, unknown> = new Map();
   private initialized = false;
   private client: Client | null = null;
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
@@ -87,10 +86,15 @@ export class ConfigService {
     return value as T;
   }
 
-  public async set<T>(key: string, value: T, description: string, category: string): Promise<void> {
+  public async set<T>(
+    key: string,
+    value: T,
+    description: string,
+    category: string,
+  ): Promise<void> {
     try {
       const oldValue = this.cache.get(key);
-      const config = await Config.findOneAndUpdate(
+      await Config.findOneAndUpdate(
         { key },
         {
           key,
@@ -99,7 +103,7 @@ export class ConfigService {
           category,
           updatedAt: new Date(),
         },
-        { upsert: true, new: true }
+        { upsert: true, new: true },
       );
 
       this.cache.set(key, value);
@@ -271,7 +275,7 @@ export class ConfigService {
           mapping.key,
           value,
           mapping.description,
-          mapping.category
+          mapping.category,
         );
         logger.info(`Migrated ${mapping.key} from environment to database`);
       }
@@ -279,8 +283,13 @@ export class ConfigService {
 
     // Log a warning for any configurable settings still in .env
     for (const key of Object.keys(process.env)) {
-      if (!criticalSettings.includes(key) && envMappings.some(m => m.key === key)) {
-        logger.warn(`Configuration key '${key}' found in .env but should be managed through /config command`);
+      if (
+        !criticalSettings.includes(key) &&
+        envMappings.some((m) => m.key === key)
+      ) {
+        logger.warn(
+          `Configuration key '${key}' found in .env but should be managed through /config command`,
+        );
       }
     }
   }

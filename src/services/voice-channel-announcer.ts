@@ -43,13 +43,19 @@ export class VoiceChannelAnnouncer {
     logger.info("Starting voice channel announcer...");
 
     try {
-      const enabled = await this.configService.get<boolean>("ENABLE_VC_WEEKLY_ANNOUNCEMENT", false);
+      const enabled = await this.configService.get<boolean>(
+        "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
+        false,
+      );
       if (!enabled) {
         logger.info("Weekly voice channel announcements are disabled");
         return;
       }
 
-      let schedule = await this.configService.get<string>("VC_ANNOUNCEMENT_SCHEDULE", "0 16 * * 5");
+      let schedule = await this.configService.get<string>(
+        "VC_ANNOUNCEMENT_SCHEDULE",
+        "0 16 * * 5",
+      );
       // Remove any surrounding quotes from the schedule
       schedule = schedule.replace(/^["']|["']$/g, "");
 
@@ -87,7 +93,10 @@ export class VoiceChannelAnnouncer {
         return;
       }
 
-      const channelName = await this.configService.get<string>("VC_ANNOUNCEMENT_CHANNEL", "voice-stats");
+      const channelName = await this.configService.get<string>(
+        "VC_ANNOUNCEMENT_CHANNEL",
+        "voice-stats",
+      );
       const channel = guild.channels.cache.find(
         (ch) => ch instanceof TextChannel && ch.name === channelName,
       ) as TextChannel;
