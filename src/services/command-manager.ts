@@ -10,6 +10,7 @@ import { data as seen } from "../commands/seen.js";
 import { data as transferOwnership } from "../commands/transfer-ownership.js";
 import { data as announceVcStats } from "../commands/announce-vc-stats.js";
 import { data as configCommand } from "../commands/config/index.js";
+import { data as quoteCommand } from "../commands/quote.js";
 import { ConfigService } from "./config-service.js";
 
 dotenvConfig();
@@ -74,6 +75,10 @@ export class CommandManager {
 
     if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
       commands.push(announceVcStats.toJSON());
+    }
+
+    if (await configService.get("quotes.enabled")) {
+      commands.push(quoteCommand.toJSON());
     }
 
     commands.push(configCommand.toJSON());
