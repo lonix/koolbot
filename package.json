@@ -11,6 +11,7 @@
     "watch": "tsc -w",
     "deploy-commands": "node --import ./src/loader.js src/deploy-commands.ts",
     "unregister-guild-commands": "node --import ./src/loader.js src/unregister-guild-commands.ts",
+    "cleanup-global-commands": "node --import ./src/loader.js src/scripts/cleanup-global-commands.ts",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.ts\"",

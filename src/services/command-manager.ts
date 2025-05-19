@@ -135,40 +135,35 @@ export class CommandManager {
       throw new Error("Client not set");
     }
 
+    if (!process.env.GUILD_ID) {
+      throw new Error("GUILD_ID is required for guild command registration");
+    }
+
     try {
       const commands = await this.getEnabledCommands();
       const rest = new REST({ version: "10" }).setToken(
         process.env.DISCORD_TOKEN!,
       );
 
-      // First, unregister any existing guild commands
-      if (process.env.GUILD_ID) {
-        logger.info("Cleaning up any existing guild commands...");
-        await rest.put(
-          Routes.applicationGuildCommands(
-            process.env.CLIENT_ID!,
-            process.env.GUILD_ID,
-          ),
-          { body: [] },
-        );
-        logger.info("Successfully cleaned up guild commands");
-      }
-
-      // Then register global commands
-      logger.info("Registering global commands...");
+      // Register guild commands
+      logger.info("Registering guild commands...");
       if (isDebug) {
-        logger.debug(`Attempting to register ${commands.length} commands with Discord API...`);
+        logger.debug(`Attempting to register ${commands.length} commands with Discord API for guild ${process.env.GUILD_ID}...`);
       }
 
-      const response = await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
-        body: commands,
-      });
+      const response = await rest.put(
+        Routes.applicationGuildCommands(
+          process.env.CLIENT_ID!,
+          process.env.GUILD_ID,
+        ),
+        { body: commands },
+      );
 
       if (isDebug) {
         logger.debug("Discord API response:", response);
       }
 
-      logger.info("Successfully registered global commands");
+      logger.info("Successfully registered guild commands");
     } catch (error) {
       logger.error("Error registering commands:", error);
       throw error;
@@ -180,30 +175,25 @@ export class CommandManager {
       throw new Error("Client not set");
     }
 
+    if (!process.env.GUILD_ID) {
+      throw new Error("GUILD_ID is required for guild command registration");
+    }
+
     try {
       const rest = new REST({ version: "10" }).setToken(
         process.env.DISCORD_TOKEN!,
       );
 
-      logger.info("Unregistering all commands...");
+      logger.info("Unregistering all guild commands...");
 
-      // Unregister global commands
-      await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
-        body: [],
-      });
-      logger.info("Successfully unregistered global commands");
-
-      // Unregister guild commands if GUILD_ID is set
-      if (process.env.GUILD_ID) {
-        await rest.put(
-          Routes.applicationGuildCommands(
-            process.env.CLIENT_ID!,
-            process.env.GUILD_ID,
-          ),
-          { body: [] },
-        );
-        logger.info("Successfully unregistered guild commands");
-      }
+      await rest.put(
+        Routes.applicationGuildCommands(
+          process.env.CLIENT_ID!,
+          process.env.GUILD_ID,
+        ),
+        { body: [] },
+      );
+      logger.info("Successfully unregistered guild commands");
     } catch (error) {
       logger.error("Error unregistering commands:", error);
       throw error;

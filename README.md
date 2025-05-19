@@ -202,13 +202,29 @@ If you prefer to run the bot without docker-compose, you can use these commands:
 
 ## Command Registration
 
-The bot uses global commands by default. If you have previously registered guild-specific commands, you can clean them up by:
+The bot uses guild-specific commands for faster updates and better control. The `GUILD_ID` in your `.env` file is required for command registration.
 
-1. Setting the `GUILD_ID` in your `.env` file
-2. Starting the bot - it will automatically clean up any guild commands
-3. Once cleanup is complete, you can remove the `GUILD_ID` from your `.env` file
+### One-time Global Commands Cleanup
 
-This ensures a clean transition to global commands and prevents any command duplication.
+If you have previously registered global commands, you can clean them up using Docker:
+
+```bash
+docker run --rm \
+  --env-file .env \
+  koolbot \
+  npm run cleanup-global-commands
+```
+
+This will remove all global commands, ensuring a clean transition to guild-specific commands.
+
+### Command Updates
+
+Guild commands update almost instantly (within seconds) when you:
+1. Enable/disable features using `/config`
+2. Restart the bot
+3. Deploy new commands
+
+This makes testing and development much faster compared to global commands.
 
 ## Development
 
