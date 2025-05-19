@@ -1,8 +1,7 @@
-import { Model, Document } from 'mongoose';
+import { Model, Document, model } from 'mongoose';
 import { quoteSchema } from '../database/schema.js';
 import { ConfigService } from './config-service.js';
 import { CooldownManager } from './cooldown-manager.js';
-import mongoose from 'mongoose';
 
 const configService = ConfigService.getInstance();
 
@@ -23,7 +22,7 @@ export class QuoteService {
   private cooldownManager: CooldownManager;
 
   constructor() {
-    this.model = mongoose.model<IQuote>('Quote', quoteSchema);
+    this.model = model<IQuote>('Quote', quoteSchema);
     this.cooldownManager = new CooldownManager();
   }
 
