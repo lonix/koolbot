@@ -3,12 +3,73 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   PermissionFlagsBits,
+  ChannelType,
 } from "discord.js";
 import { ConfigService } from "../../services/config-service.js";
 import Logger from "../../utils/logger.js";
 
 const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
+
+// Helper function to check if a key is a role or channel setting
+function isRoleOrChannelSetting(key: string): boolean {
+  return (
+    key.includes("role") ||
+    key.includes("channel") ||
+    key.includes("_roles") ||
+    key.includes("_channels")
+  );
+}
+
+// Helper function to extract IDs from mentions
+function extractIds(value: string): string {
+  // Match role mentions <@&123456789>
+  const roleMatches = value.match(/<@&(\d+)>/g);
+  if (roleMatches) {
+    return roleMatches
+      .map((match) => match.match(/\d+/)?.[0])
+      .filter(Boolean)
+      .join(",");
+  }
+
+  // Match channel mentions <#123456789>
+  const channelMatches = value.match(/<#(\d+)>/g);
+  if (channelMatches) {
+    return channelMatches
+      .map((match) => match.match(/\d+/)?.[0])
+      .filter(Boolean)
+      .join(",");
+  }
+
+  // If no mentions, return the original value
+  return value;
+}
+
+// Helper function to format IDs as mentions
+function formatAsMentions(
+  value: string,
+  interaction: ChatInputCommandInteraction,
+): string {
+  if (!value) return "None";
+
+  const ids = value.split(",").filter(Boolean);
+  if (ids.length === 0) return "None";
+
+  return ids
+    .map((id) => {
+      // Try to find a role
+      const role = interaction.guild?.roles.cache.get(id);
+      if (role) return role.toString();
+
+      // Try to find a channel
+      const channel = interaction.guild?.channels.cache.get(id);
+      if (channel) return channel.toString();
+
+      // If not found, return the ID
+      return id;
+    })
+    .join(", ");
+}
 
 export const data = new SlashCommandBuilder()
   .setName("config")
@@ -55,7 +116,10 @@ export const data = new SlashCommandBuilder()
           .setRequired(true),
       )
       .addStringOption((option) =>
-        option.setName("value").setDescription("New value").setRequired(true),
+        option
+          .setName("value")
+          .setDescription("New value (use @mentions for roles/channels)")
+          .setRequired(true),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -104,7 +168,12 @@ async function handleList(
           .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
           .join(" ");
         const valueList = settings
-          .map((setting) => `**${setting.key}**: ${setting.value}`)
+          .map((setting) => {
+            const value = isRoleOrChannelSetting(setting.key)
+              ? formatAsMentions(String(setting.value), interaction)
+              : String(setting.value);
+            return `**${setting.key}**: ${value}`;
+          })
           .join("\n");
         embed.addFields({ name: categoryName, value: valueList });
       }
@@ -127,10 +196,14 @@ async function handleGet(
     const key = interaction.options.getString("key", true);
     const value = await configService.get(key);
 
+    const formattedValue = isRoleOrChannelSetting(key)
+      ? formatAsMentions(String(value), interaction)
+      : String(value);
+
     const embed = new EmbedBuilder()
       .setTitle(`Configuration: ${key}`)
       .setColor(0x0099ff)
-      .addFields({ name: "Value", value: String(value) })
+      .addFields({ name: "Value", value: formattedValue })
       .setTimestamp();
 
     await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -148,7 +221,7 @@ async function handleSet(
 ): Promise<void> {
   try {
     const key = interaction.options.getString("key", true);
-    const value = interaction.options.getString("value", true);
+    const rawValue = interaction.options.getString("value", true);
 
     // Get the current config to get its category and description
     const configs = await configService.getAll();
@@ -162,6 +235,57 @@ async function handleSet(
       return;
     }
 
+    // Extract IDs from mentions if it's a role or channel setting
+    const value = isRoleOrChannelSetting(key) ? extractIds(rawValue) : rawValue;
+
+    // Validate roles and channels if applicable
+    if (isRoleOrChannelSetting(key)) {
+      const ids = value.split(",").filter(Boolean);
+      const invalidIds: string[] = [];
+
+      for (const id of ids) {
+        const role = interaction.guild?.roles.cache.get(id);
+        const channel = interaction.guild?.channels.cache.get(id);
+
+        if (!role && !channel) {
+          invalidIds.push(id);
+        }
+      }
+
+      if (invalidIds.length > 0) {
+        await interaction.reply({
+          content: `Invalid role or channel IDs found: ${invalidIds.join(", ")}. Please make sure all roles and channels exist in this server.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Additional validation for specific settings
+      if (key.includes("channel")) {
+        const channel = interaction.guild?.channels.cache.get(ids[0]);
+        if (channel) {
+          // Validate channel type for specific settings
+          if (
+            key.includes("voice") &&
+            channel.type !== ChannelType.GuildVoice
+          ) {
+            await interaction.reply({
+              content: "This setting requires a voice channel.",
+              ephemeral: true,
+            });
+            return;
+          }
+          if (key.includes("text") && channel.type !== ChannelType.GuildText) {
+            await interaction.reply({
+              content: "This setting requires a text channel.",
+              ephemeral: true,
+            });
+            return;
+          }
+        }
+      }
+    }
+
     await configService.set(
       key,
       value,
@@ -169,12 +293,16 @@ async function handleSet(
       currentConfig.category,
     );
 
+    const formattedValue = isRoleOrChannelSetting(key)
+      ? formatAsMentions(value, interaction)
+      : value;
+
     const embed = new EmbedBuilder()
       .setTitle("Configuration Updated")
       .setColor(0x00ff00)
       .addFields(
         { name: "Key", value: key },
-        { name: "New Value", value: value },
+        { name: "New Value", value: formattedValue },
       )
       .setTimestamp();
 
