@@ -1,6 +1,7 @@
 import { Config, IConfig } from "../models/config.js";
 import Logger from "../utils/logger.js";
 import mongoose from "mongoose";
+import { Client } from "discord.js";
 
 const logger = Logger.getInstance();
 
@@ -8,6 +9,8 @@ export class ConfigService {
   private static instance: ConfigService;
   private cache: Map<string, any> = new Map();
   private initialized = false;
+  private client: Client | null = null;
+  private reloadCallbacks: Set<() => Promise<void>> = new Set();
 
   private constructor() {}
 
@@ -16,6 +19,40 @@ export class ConfigService {
       ConfigService.instance = new ConfigService();
     }
     return ConfigService.instance;
+  }
+
+  public setClient(client: Client): void {
+    this.client = client;
+  }
+
+  public registerReloadCallback(callback: () => Promise<void>): void {
+    this.reloadCallbacks.add(callback);
+  }
+
+  public removeReloadCallback(callback: () => Promise<void>): void {
+    this.reloadCallbacks.delete(callback);
+  }
+
+  private async triggerReload(): Promise<void> {
+    logger.info("Triggering configuration reload...");
+
+    // Clear the cache
+    this.cache.clear();
+    this.initialized = false;
+
+    // Reinitialize the service
+    await this.initialize();
+
+    // Execute all registered reload callbacks
+    for (const callback of this.reloadCallbacks) {
+      try {
+        await callback();
+      } catch (error) {
+        logger.error("Error during configuration reload callback:", error);
+      }
+    }
+
+    logger.info("Configuration reload completed");
   }
 
   public async initialize(): Promise<void> {
@@ -52,6 +89,7 @@ export class ConfigService {
 
   public async set<T>(key: string, value: T, description: string, category: string): Promise<void> {
     try {
+      const oldValue = this.cache.get(key);
       const config = await Config.findOneAndUpdate(
         { key },
         {
@@ -66,6 +104,11 @@ export class ConfigService {
 
       this.cache.set(key, value);
       logger.info(`Configuration updated: ${key} = ${value}`);
+
+      // If the value has changed, trigger a reload
+      if (oldValue !== value) {
+        await this.triggerReload();
+      }
     } catch (error) {
       logger.error(`Error updating configuration ${key}:`, error);
       throw error;
@@ -77,6 +120,9 @@ export class ConfigService {
       await Config.deleteOne({ key });
       this.cache.delete(key);
       logger.info(`Configuration deleted: ${key}`);
+
+      // Trigger reload after deletion
+      await this.triggerReload();
     } catch (error) {
       logger.error(`Error deleting configuration ${key}:`, error);
       throw error;
@@ -208,21 +254,34 @@ export class ConfigService {
       },
     ];
 
+    // First, migrate any existing values from .env
     for (const mapping of envMappings) {
       // Skip critical settings
       if (criticalSettings.includes(mapping.key)) {
         continue;
       }
 
-      // Use environment value if available, otherwise use default
-      const value = process.env[mapping.key] || mapping.defaultValue;
-      await this.set(
-        mapping.key,
-        value,
-        mapping.description,
-        mapping.category
-      );
-      logger.info(`Migrated ${mapping.key} from environment to database`);
+      // Check if this setting exists in the database
+      const existingConfig = await Config.findOne({ key: mapping.key });
+
+      if (!existingConfig) {
+        // If not in database, use environment value if available, otherwise use default
+        const value = process.env[mapping.key] || mapping.defaultValue;
+        await this.set(
+          mapping.key,
+          value,
+          mapping.description,
+          mapping.category
+        );
+        logger.info(`Migrated ${mapping.key} from environment to database`);
+      }
+    }
+
+    // Log a warning for any configurable settings still in .env
+    for (const key of Object.keys(process.env)) {
+      if (!criticalSettings.includes(key) && envMappings.some(m => m.key === key)) {
+        logger.warn(`Configuration key '${key}' found in .env but should be managed through /config command`);
+      }
     }
   }
 }
