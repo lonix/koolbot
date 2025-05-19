@@ -117,11 +117,13 @@ export class CommandManager {
       logger.debug("Command registration summary:");
       logger.debug(`Total commands to register: ${commands.length}`);
       logger.debug("Commands to be registered:");
-      commands.forEach(cmd => {
+      commands.forEach((cmd) => {
         logger.debug(`- /${cmd.name}: ${cmd.description}`);
         if (cmd.options) {
-          cmd.options.forEach(opt => {
-            logger.debug(`  └─ ${opt.name}${opt.required ? ' (required)' : ''}: ${opt.description}`);
+          cmd.options.forEach((opt) => {
+            logger.debug(
+              `  └─ ${opt.name}${opt.required ? " (required)" : ""}: ${opt.description}`,
+            );
           });
         }
       });
@@ -148,7 +150,9 @@ export class CommandManager {
       // Register guild commands
       logger.info("Registering guild commands...");
       if (isDebug) {
-        logger.debug(`Attempting to register ${commands.length} commands with Discord API for guild ${process.env.GUILD_ID}...`);
+        logger.debug(
+          `Attempting to register ${commands.length} commands with Discord API for guild ${process.env.GUILD_ID}...`,
+        );
       }
 
       const response = await rest.put(

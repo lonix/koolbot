@@ -7,7 +7,9 @@ const logger = Logger.getInstance();
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
-    const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
+    const rest = new REST({ version: "10" }).setToken(
+      process.env.DISCORD_TOKEN!,
+    );
 
     logger.info("Starting global commands cleanup...");
 
