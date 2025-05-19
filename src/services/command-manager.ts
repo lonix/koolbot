@@ -1,4 +1,4 @@
-import { REST, Routes } from "discord.js";
+import { REST, Routes, Client } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import Logger from "../utils/logger.js";
 import { data as ping } from "../commands/ping.js";
@@ -10,19 +10,17 @@ import { data as seen } from "../commands/seen.js";
 import { data as transferOwnership } from "../commands/transfer-ownership.js";
 import { data as announceVcStats } from "../commands/announce-vc-stats.js";
 import { data as configCommand } from "../commands/config/index.js";
+import { ConfigService } from "./config-service.js";
 
 dotenvConfig();
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 export class CommandManager {
   private static instance: CommandManager;
-  private rest: REST;
+  private client: Client | null = null;
 
-  private constructor() {
-    this.rest = new REST({ version: "10" }).setToken(
-      process.env.DISCORD_TOKEN!,
-    );
-  }
+  private constructor() {}
 
   public static getInstance(): CommandManager {
     if (!CommandManager.instance) {
@@ -31,7 +29,11 @@ export class CommandManager {
     return CommandManager.instance;
   }
 
-  private getEnabledCommands(): Array<{
+  public setClient(client: Client): void {
+    this.client = client;
+  }
+
+  private async getEnabledCommands(): Promise<Array<{
     name: string;
     description: string;
     options?: Array<{
@@ -40,35 +42,35 @@ export class CommandManager {
       type: number;
       required?: boolean;
     }>;
-  }> {
+  }>> {
     const commands = [];
 
-    if (process.env.ENABLE_PING === "true") {
+    if (await configService.get("ENABLE_PING")) {
       commands.push(ping.toJSON());
     }
 
-    if (process.env.ENABLE_AMIKOOL === "true") {
+    if (await configService.get("ENABLE_AMIKOOL")) {
       commands.push(amikool.toJSON());
     }
 
-    if (process.env.ENABLE_PLEXPRICE === "true") {
+    if (await configService.get("ENABLE_PLEX_PRICE")) {
       commands.push(plexprice.toJSON());
     }
 
-    if (process.env.ENABLE_VC_TRACKING === "true") {
+    if (await configService.get("ENABLE_VC_TRACKING")) {
       commands.push(vctop.toJSON());
       commands.push(vcstats.toJSON());
     }
 
-    if (process.env.ENABLE_SEEN === "true") {
+    if (await configService.get("ENABLE_SEEN")) {
       commands.push(seen.toJSON());
     }
 
-    if (process.env.ENABLE_VC_MANAGEMENT === "true") {
+    if (await configService.get("ENABLE_VC_MANAGEMENT")) {
       commands.push(transferOwnership.toJSON());
     }
 
-    if (process.env.ENABLE_ANNOUNCE_VC_STATS === "true") {
+    if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
       commands.push(announceVcStats.toJSON());
     }
 
@@ -77,66 +79,49 @@ export class CommandManager {
     return commands;
   }
 
-  public async unregisterAllCommands(): Promise<void> {
+  public async registerCommands(): Promise<void> {
+    if (!this.client) {
+      throw new Error("Client not set");
+    }
+
     try {
-      logger.info("Starting command cleanup...");
+      const commands = await this.getEnabledCommands();
+      const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
 
-      // Unregister global commands
-      logger.info("Removing global commands...");
-      await this.rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
-        body: [],
-      });
-
-      // Unregister guild commands
-      if (process.env.GUILD_ID) {
-        logger.info("Removing guild commands...");
-        await this.rest.put(
-          Routes.applicationGuildCommands(
-            process.env.CLIENT_ID!,
-            process.env.GUILD_ID,
-          ),
-          { body: [] },
-        );
-      }
-
-      logger.info("Successfully removed all commands");
+      logger.info("Registering commands...");
+      await rest.put(
+        Routes.applicationGuildCommands(
+          process.env.CLIENT_ID!,
+          process.env.GUILD_ID!,
+        ),
+        { body: commands },
+      );
+      logger.info("Successfully registered commands");
     } catch (error) {
-      logger.error("Error during command cleanup:", error);
+      logger.error("Error registering commands:", error);
       throw error;
     }
   }
 
-  public async registerCommands(): Promise<void> {
+  public async unregisterAllCommands(): Promise<void> {
+    if (!this.client) {
+      throw new Error("Client not set");
+    }
+
     try {
-      logger.info("Starting command registration...");
-      const commands = this.getEnabledCommands();
+      const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
 
-      if (commands.length === 0) {
-        logger.info("No commands to register (all features disabled)");
-        return;
-      }
-
-      // Register global commands
-      logger.info("Registering global commands...");
-      await this.rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
-        body: commands,
-      });
-
-      // Register guild commands
-      if (process.env.GUILD_ID) {
-        logger.info("Registering guild commands...");
-        await this.rest.put(
-          Routes.applicationGuildCommands(
-            process.env.CLIENT_ID!,
-            process.env.GUILD_ID,
-          ),
-          { body: commands },
-        );
-      }
-
-      logger.info(`Successfully registered ${commands.length} commands`);
+      logger.info("Unregistering all commands...");
+      await rest.put(
+        Routes.applicationGuildCommands(
+          process.env.CLIENT_ID!,
+          process.env.GUILD_ID!,
+        ),
+        { body: [] },
+      );
+      logger.info("Successfully unregistered all commands");
     } catch (error) {
-      logger.error("Error during command registration:", error);
+      logger.error("Error unregistering commands:", error);
       throw error;
     }
   }

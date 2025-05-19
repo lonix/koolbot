@@ -184,6 +184,9 @@ client.once("ready", async () => {
     await configService.initialize();
     await configService.migrateFromEnv();
 
+    // Set up CommandManager with client
+    CommandManager.getInstance().setClient(client);
+
     // Register reload callbacks
     configService.registerReloadCallback(async () => {
       // Reinitialize voice channel announcer

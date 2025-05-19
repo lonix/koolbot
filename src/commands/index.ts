@@ -9,26 +9,56 @@ import { execute as seen } from "./seen.js";
 import { execute as transferOwnership } from "./transfer-ownership.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
 import { execute as config } from "./config/index.js";
+import { ConfigService } from "../services/config-service.js";
 
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 const commands: Record<
   string,
   ((interaction: ChatInputCommandInteraction) => Promise<void>) | undefined
 > = {
-  ping: process.env.ENABLE_PING === "true" ? ping : undefined,
-  amikool: process.env.ENABLE_AMIKOOL === "true" ? amikool : undefined,
-  plexprice: process.env.ENABLE_PLEXPRICE === "true" ? plexprice : undefined,
-  vctop: process.env.ENABLE_VC_TRACKING === "true" ? vctop : undefined,
-  vcstats: process.env.ENABLE_VC_TRACKING === "true" ? vcstats : undefined,
-  seen,
+  ping: async (interaction) => {
+    if (await configService.get("ENABLE_PING")) {
+      await ping(interaction);
+    }
+  },
+  amikool: async (interaction) => {
+    if (await configService.get("ENABLE_AMIKOOL")) {
+      await amikool(interaction);
+    }
+  },
+  plexprice: async (interaction) => {
+    if (await configService.get("ENABLE_PLEX_PRICE")) {
+      await plexprice(interaction);
+    }
+  },
+  vctop: async (interaction) => {
+    if (await configService.get("ENABLE_VC_TRACKING")) {
+      await vctop(interaction);
+    }
+  },
+  vcstats: async (interaction) => {
+    if (await configService.get("ENABLE_VC_TRACKING")) {
+      await vcstats(interaction);
+    }
+  },
+  seen: async (interaction) => {
+    if (await configService.get("ENABLE_SEEN")) {
+      await seen(interaction);
+    }
+  },
   config,
-  "transfer-ownership":
-    process.env.ENABLE_VC_MANAGEMENT === "true" ? transferOwnership : undefined,
-  "announce-vc-stats":
-    process.env.ENABLE_VC_WEEKLY_ANNOUNCEMENT === "true"
-      ? announceVcStats
-      : undefined,
+  "transfer-ownership": async (interaction) => {
+    if (await configService.get("ENABLE_VC_MANAGEMENT")) {
+      await transferOwnership(interaction);
+    }
+  },
+  "announce-vc-stats": async (interaction) => {
+    if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+      await announceVcStats(interaction);
+    }
+  },
 };
 
 export async function handleCommands(

@@ -11,32 +11,48 @@ import { data as plexprice } from "./commands/plexprice.js";
 import { data as vctop } from "./commands/vctop.js";
 import { data as vcstats } from "./commands/vcstats.js";
 import { data as seen } from "./commands/seen.js";
+import { data as configCommand } from "./commands/config/index.js";
+import { ConfigService } from "./services/config-service.js";
 
 config();
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 // Build command list based on enabled features
-const commands: RESTPostAPIChatInputApplicationCommandsJSONBody[] = [];
+const commands: Array<{
+  name: string;
+  description: string;
+  options?: Array<{
+    name: string;
+    description: string;
+    type: number;
+    required?: boolean;
+  }>;
+}> = [];
 
-if (process.env.ENABLE_PING === "true") {
-  commands.push(ping.toJSON());
-}
+async function buildCommandList(): Promise<void> {
+  if (await configService.get("ENABLE_PING")) {
+    commands.push(ping.toJSON());
+  }
 
-if (process.env.ENABLE_AMIKOOL === "true") {
-  commands.push(amikool.toJSON());
-}
+  if (await configService.get("ENABLE_AMIKOOL")) {
+    commands.push(amikool.toJSON());
+  }
 
-if (process.env.ENABLE_PLEXPRICE === "true") {
-  commands.push(plexprice.toJSON());
-}
+  if (await configService.get("ENABLE_PLEX_PRICE")) {
+    commands.push(plexprice.toJSON());
+  }
 
-if (process.env.ENABLE_VC_TRACKING === "true") {
-  commands.push(vctop.toJSON());
-  commands.push(vcstats.toJSON());
-}
+  if (await configService.get("ENABLE_VC_TRACKING")) {
+    commands.push(vctop.toJSON());
+    commands.push(vcstats.toJSON());
+  }
 
-if (process.env.ENABLE_SEEN === "true") {
-  commands.push(seen.toJSON());
+  if (await configService.get("ENABLE_SEEN")) {
+    commands.push(seen.toJSON());
+  }
+
+  commands.push(configCommand.toJSON());
 }
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
@@ -49,6 +65,9 @@ export async function deployCommands(): Promise<void> {
       body: [],
     });
     logger.info("Successfully removed all existing commands.");
+
+    // Build the command list
+    await buildCommandList();
 
     // Then register our commands
     logger.info(`Registering ${commands.length} new commands...`);
