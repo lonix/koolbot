@@ -9,6 +9,7 @@ import { execute as seen } from "./seen.js";
 import { execute as transferOwnership } from "./transfer-ownership.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
 import { execute as config } from "./config/index.js";
+import { execute as quote } from "./quote.js";
 import { ConfigService } from "../services/config-service.js";
 
 const logger = Logger.getInstance();
@@ -57,6 +58,11 @@ const commands: Record<
   "announce-vc-stats": async (interaction) => {
     if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
       await announceVcStats(interaction);
+    }
+  },
+  quote: async (interaction) => {
+    if (await configService.get("quotes.enabled")) {
+      await quote(interaction);
     }
   },
 };

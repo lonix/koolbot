@@ -8,6 +8,7 @@ import { data as vctop } from "./commands/vctop.js";
 import { data as vcstats } from "./commands/vcstats.js";
 import { data as seen } from "./commands/seen.js";
 import { data as configCommand } from "./commands/config/index.js";
+import { data as quoteCommand } from "./commands/quote.js";
 import { ConfigService } from "./services/config-service.js";
 
 config();
@@ -46,6 +47,10 @@ async function buildCommandList(): Promise<void> {
 
   if (await configService.get("ENABLE_SEEN")) {
     commands.push(seen.toJSON());
+  }
+
+  if (await configService.get("quotes.enabled")) {
+    commands.push(quoteCommand.toJSON());
   }
 
   commands.push(configCommand.toJSON());

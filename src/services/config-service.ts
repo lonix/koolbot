@@ -268,6 +268,40 @@ export class ConfigService {
         description: "Comma-separated list of admin role names",
         defaultValue: "Admin,Moderator",
       },
+
+      // Quote System
+      {
+        key: "quotes.enabled",
+        category: "features",
+        description: "Enable/disable quote system",
+        defaultValue: "true",
+      },
+      {
+        key: "quotes.add_roles",
+        category: "roles",
+        description:
+          "Comma-separated list of role IDs that can add quotes (empty for all users)",
+        defaultValue: "",
+      },
+      {
+        key: "quotes.delete_roles",
+        category: "roles",
+        description:
+          "Comma-separated list of role IDs that can delete quotes (empty for admins only)",
+        defaultValue: "",
+      },
+      {
+        key: "quotes.max_length",
+        category: "features",
+        description: "Maximum length of quotes in characters",
+        defaultValue: "1000",
+      },
+      {
+        key: "quotes.cooldown",
+        category: "features",
+        description: "Cooldown in seconds between quote additions",
+        defaultValue: "60",
+      },
     ];
 
     // First, migrate any existing values from .env
