@@ -12,6 +12,7 @@ export interface IVoiceChannelTracking extends Document {
     channelId: string;
     channelName: string;
   }>;
+  excludedChannels: string[]; // Array of voice channel IDs to exclude from tracking
 }
 
 const VoiceChannelTrackingSchema = new Schema({
@@ -28,6 +29,7 @@ const VoiceChannelTrackingSchema = new Schema({
       channelName: { type: String, required: true },
     },
   ],
+  excludedChannels: { type: [String], default: [] },
 });
 
 export const VoiceChannelTracking = mongoose.model<IVoiceChannelTracking>(

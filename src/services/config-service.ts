@@ -210,6 +210,12 @@ export class ConfigService {
         defaultValue: "true",
       },
       {
+        key: "EXCLUDED_VC_CHANNELS",
+        category: "tracking",
+        description: "Comma-separated list of voice channel IDs to exclude from tracking",
+        defaultValue: "",
+      },
+      {
         key: "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
         category: "announcements",
         description: "Enable/disable weekly voice channel announcements",

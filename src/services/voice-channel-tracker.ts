@@ -8,8 +8,10 @@ import {
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
+import { ConfigService } from "./config-service.js";
 
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -173,6 +175,58 @@ export class VoiceChannelTracker {
     }
   }
 
+  private async isChannelExcluded(channelId: string): Promise<boolean> {
+    try {
+      const excludedChannels = await configService.get("EXCLUDED_VC_CHANNELS");
+      if (!excludedChannels) return false;
+
+      const excludedList = String(excludedChannels).split(",").map(id => id.trim());
+      return excludedList.includes(channelId);
+    } catch (error) {
+      logger.error("Error checking if channel is excluded:", error);
+      return false;
+    }
+  }
+
+  public async addExcludedChannel(channelId: string): Promise<void> {
+    try {
+      await this.ensureConnection();
+      await VoiceChannelTracking.updateMany(
+        {},
+        { $addToSet: { excludedChannels: channelId } }
+      );
+      logger.info(`Added channel ${channelId} to excluded channels`);
+    } catch (error) {
+      logger.error("Error adding excluded channel:", error);
+      throw error;
+    }
+  }
+
+  public async removeExcludedChannel(channelId: string): Promise<void> {
+    try {
+      await this.ensureConnection();
+      await VoiceChannelTracking.updateMany(
+        {},
+        { $pull: { excludedChannels: channelId } }
+      );
+      logger.info(`Removed channel ${channelId} from excluded channels`);
+    } catch (error) {
+      logger.error("Error removing excluded channel:", error);
+      throw error;
+    }
+  }
+
+  public async getExcludedChannels(): Promise<string[]> {
+    try {
+      await this.ensureConnection();
+      const result = await VoiceChannelTracking.findOne({}, { excludedChannels: 1 });
+      return result?.excludedChannels || [];
+    } catch (error) {
+      logger.error("Error getting excluded channels:", error);
+      return [];
+    }
+  }
+
   private async startTracking(
     member: GuildMember,
     channelId: string,
@@ -180,6 +234,16 @@ export class VoiceChannelTracker {
   ): Promise<void> {
     try {
       await this.ensureConnection();
+
+      // Check if channel is excluded
+      if (await this.isChannelExcluded(channelId)) {
+        if (process.env.DEBUG === "true") {
+          logger.info(
+            `[DEBUG] Channel ${channelName} (${channelId}) is excluded from tracking`
+          );
+        }
+        return;
+      }
 
       const startTime = new Date();
       this.activeSessions.set(member.id, { startTime, channelId, channelName });
@@ -198,21 +262,13 @@ export class VoiceChannelTracker {
               channelId,
               channelName,
               endTime: null,
-              duration: null,
             },
           },
         },
-        { upsert: true, new: true },
+        { upsert: true }
       );
     } catch (error) {
-      logger.error("Error starting voice tracking:", error);
-      // If it's a connection error, mark as disconnected
-      if (
-        error instanceof Error &&
-        error.message.includes("Client must be connected")
-      ) {
-        this.isConnected = false;
-      }
+      logger.error("Error starting voice channel tracking:", error);
     }
   }
 
