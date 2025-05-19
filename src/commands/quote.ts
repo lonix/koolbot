@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { SlashCommandBuilder, ChatInputCommandInteraction, GuildMemberRoleManager, Role } from 'discord.js';
 import { quoteService } from '../services/quote-service.js';
 import { ConfigService } from '../services/config-service.js';
 
@@ -52,7 +52,7 @@ export const data = new SlashCommandBuilder()
       )
   );
 
-export async function execute(interaction: any) {
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const subcommand = interaction.options.getSubcommand();
 
   try {
@@ -60,15 +60,23 @@ export async function execute(interaction: any) {
       case 'add': {
         // Check if user has permission to add quotes
         const addRoles = (await configService.get<string>('quotes.add_roles')).split(',').filter(Boolean);
+        const memberRoles = interaction.member?.roles;
         const hasPermission = addRoles.length === 0 || // Empty means all users can add
-          interaction.member.roles.cache.some((role: any) => addRoles.includes(role.id));
+          (memberRoles instanceof GuildMemberRoleManager &&
+           memberRoles.cache.some((role: Role) => addRoles.includes(role.id)));
 
         if (!hasPermission) {
-          return interaction.reply({ content: 'You do not have permission to add quotes', ephemeral: true });
+          await interaction.reply({ content: 'You do not have permission to add quotes', ephemeral: true });
+          return;
         }
 
         const content = interaction.options.getString('content');
         const author = interaction.options.getUser('author');
+
+        if (!content || !author) {
+          await interaction.reply({ content: 'Missing required options', ephemeral: true });
+          return;
+        }
 
         const quote = await quoteService.addQuote(
           content,
@@ -78,51 +86,70 @@ export async function execute(interaction: any) {
           interaction.id
         );
 
-        return interaction.reply({
+        await interaction.reply({
           content: `Quote added! ID: ${quote._id}`,
           ephemeral: true
         });
+        break;
       }
 
       case 'random': {
         const quote = await quoteService.getRandomQuote();
         const author = await interaction.client.users.fetch(quote.authorId);
 
-        return interaction.reply({
+        await interaction.reply({
           content: `"${quote.content}"\n- ${author.username}`,
           allowedMentions: { users: [] }
         });
+        break;
       }
 
       case 'search': {
         const query = interaction.options.getString('query');
+        if (!query) {
+          await interaction.reply({ content: 'Missing search query', ephemeral: true });
+          return;
+        }
+
         const quotes = await quoteService.searchQuotes(query);
 
         if (quotes.length === 0) {
-          return interaction.reply({ content: 'No quotes found matching your search', ephemeral: true });
+          await interaction.reply({ content: 'No quotes found matching your search', ephemeral: true });
+          return;
         }
 
-        const quoteList = quotes.map((quote: any) =>
+        const quoteList = quotes.map(quote =>
           `ID: ${quote._id}\n"${quote.content}"\n- <@${quote.authorId}>\n`
         ).join('\n');
 
-        return interaction.reply({
+        await interaction.reply({
           content: quoteList,
           allowedMentions: { users: [] }
         });
+        break;
       }
 
       case 'delete': {
         const quoteId = interaction.options.getString('id');
-        const userRoles = interaction.member.roles.cache.map((role: any) => role.id);
+        if (!quoteId) {
+          await interaction.reply({ content: 'Missing quote ID', ephemeral: true });
+          return;
+        }
+
+        const memberRoles = interaction.member?.roles;
+        const userRoles = memberRoles instanceof GuildMemberRoleManager
+          ? memberRoles.cache.map((role: Role) => role.id)
+          : [];
 
         await quoteService.deleteQuote(quoteId, interaction.user.id, userRoles);
-        return interaction.reply({ content: 'Quote deleted successfully', ephemeral: true });
+        await interaction.reply({ content: 'Quote deleted successfully', ephemeral: true });
+        break;
       }
     }
-  } catch (error: any) {
-    return interaction.reply({
-      content: `Error: ${error.message}`,
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
+    await interaction.reply({
+      content: `Error: ${errorMessage}`,
       ephemeral: true
     });
   }

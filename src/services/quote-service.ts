@@ -1,4 +1,4 @@
-import { Model } from 'mongoose';
+import { Model, Document } from 'mongoose';
 import { quoteSchema } from '../database/schema.js';
 import { ConfigService } from './config-service.js';
 import { CooldownManager } from './cooldown-manager.js';
@@ -6,16 +6,28 @@ import mongoose from 'mongoose';
 
 const configService = ConfigService.getInstance();
 
+interface IQuote extends Document {
+  content: string;
+  authorId: string;
+  addedById: string;
+  channelId: string;
+  messageId: string;
+  createdAt: Date;
+  addedAt: Date;
+  likes: number;
+  dislikes: number;
+}
+
 export class QuoteService {
-  private model: Model<any>;
+  private model: Model<IQuote>;
   private cooldownManager: CooldownManager;
 
   constructor() {
-    this.model = mongoose.model('Quote', quoteSchema);
+    this.model = mongoose.model<IQuote>('Quote', quoteSchema);
     this.cooldownManager = new CooldownManager();
   }
 
-  async addQuote(content: string, authorId: string, addedById: string, channelId: string, messageId: string): Promise<any> {
+  async addQuote(content: string, authorId: string, addedById: string, channelId: string, messageId: string): Promise<IQuote> {
     // Check if quotes are enabled
     const enabled = await configService.get<boolean>('quotes.enabled');
     if (!enabled) {
@@ -41,7 +53,9 @@ export class QuoteService {
       channelId,
       messageId,
       createdAt: new Date(),
-      addedAt: new Date()
+      addedAt: new Date(),
+      likes: 0,
+      dislikes: 0
     });
 
     await quote.save();
@@ -49,17 +63,21 @@ export class QuoteService {
     return quote;
   }
 
-  async getRandomQuote(): Promise<any> {
+  async getRandomQuote(): Promise<IQuote> {
     const count = await this.model.countDocuments();
     if (count === 0) {
       throw new Error('No quotes available');
     }
 
     const random = Math.floor(Math.random() * count);
-    return this.model.findOne().skip(random);
+    const quote = await this.model.findOne().skip(random);
+    if (!quote) {
+      throw new Error('Failed to fetch random quote');
+    }
+    return quote;
   }
 
-  async searchQuotes(query: string): Promise<any[]> {
+  async searchQuotes(query: string): Promise<IQuote[]> {
     return this.model.find({
       content: { $regex: query, $options: 'i' }
     }).limit(10);
@@ -84,11 +102,11 @@ export class QuoteService {
     await this.model.findByIdAndDelete(quoteId);
   }
 
-  async likeQuote(quoteId: string, userId: string): Promise<void> {
+  async likeQuote(quoteId: string): Promise<void> {
     await this.model.findByIdAndUpdate(quoteId, { $inc: { likes: 1 } });
   }
 
-  async dislikeQuote(quoteId: string, userId: string): Promise<void> {
+  async dislikeQuote(quoteId: string): Promise<void> {
     await this.model.findByIdAndUpdate(quoteId, { $inc: { dislikes: 1 } });
   }
 }

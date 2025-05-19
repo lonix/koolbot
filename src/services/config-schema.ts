@@ -28,7 +28,7 @@ export interface ConfigSchema {
   'quotes.cooldown': number;  // Cooldown in seconds between quote additions
 }
 
-const defaultConfig: ConfigSchema = {
+export const defaultConfig: ConfigSchema = {
   // Voice Channel Management
   'voice_channel.enabled': false,
   'voice_channel.category_name': 'Voice Channels',
