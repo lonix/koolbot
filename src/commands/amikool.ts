@@ -44,7 +44,10 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     logger.info(`Executing amikool command for user ${interaction.user.tag}`);
 
     const member = interaction.member as GuildMember;
-    const coolRoleName = await configService.get<string>("COOL_ROLE_NAME", "Kool");
+    const coolRoleName = await configService.get<string>(
+      "COOL_ROLE_NAME",
+      "Kool",
+    );
     const hasCoolRole = member?.roles.cache.some(
       (role) => role.name === coolRoleName,
     );

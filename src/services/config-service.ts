@@ -86,6 +86,11 @@ export class ConfigService {
     return value as T;
   }
 
+  public async getString(key: string, defaultValue?: string): Promise<string> {
+    const value = await this.get<string>(key, defaultValue);
+    return value || "";
+  }
+
   public async set<T>(
     key: string,
     value: T,

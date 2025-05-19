@@ -1,9 +1,4 @@
-import {
-  Guild,
-  ChannelType,
-  CategoryChannel,
-  VoiceChannel,
-} from "discord.js";
+import { Guild, ChannelType, CategoryChannel, VoiceChannel } from "discord.js";
 import Logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 
@@ -31,8 +26,13 @@ export class ChannelInitializer {
         return;
       }
 
-      const categoryName = (await configService.get("VC_CATEGORY_NAME") as string) || "Dynamic Voice Channels";
-      const lobbyChannelName = ((await configService.get("LOBBY_CHANNEL_NAME") as string) || "Lobby").replace(/["']/g, "");
+      const categoryName = await configService.getString(
+        "VC_CATEGORY_NAME",
+        "Dynamic Voice Channels",
+      );
+      const lobbyChannelName = (
+        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
+      ).replace(/["']/g, "");
 
       logger.info(
         `Initializing channels with category: ${categoryName} and lobby: ${lobbyChannelName}`,

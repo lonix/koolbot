@@ -50,30 +50,32 @@ export class VoiceChannelTracker {
   }
 
   private setupMongoConnectionHandlers(): void {
-    mongoose.connection.on('connected', () => {
+    mongoose.connection.on("connected", () => {
       this.isConnected = true;
-      logger.info('MongoDB connection established for voice channel tracker');
+      logger.info("MongoDB connection established for voice channel tracker");
     });
 
-    mongoose.connection.on('disconnected', () => {
+    mongoose.connection.on("disconnected", () => {
       this.isConnected = false;
-      logger.warn('MongoDB connection lost for voice channel tracker');
+      logger.warn("MongoDB connection lost for voice channel tracker");
     });
 
-    mongoose.connection.on('error', (error) => {
+    mongoose.connection.on("error", (error) => {
       this.isConnected = false;
-      logger.error('MongoDB connection error in voice channel tracker:', error);
+      logger.error("MongoDB connection error in voice channel tracker:", error);
     });
   }
 
   private async ensureConnection(): Promise<void> {
     if (!this.isConnected) {
       try {
-        await mongoose.connect(process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot");
+        await mongoose.connect(
+          process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
+        );
         this.isConnected = true;
-        logger.info('Reconnected to MongoDB for voice channel tracker');
+        logger.info("Reconnected to MongoDB for voice channel tracker");
       } catch (error) {
-        logger.error('Failed to reconnect to MongoDB:', error);
+        logger.error("Failed to reconnect to MongoDB:", error);
         throw error;
       }
     }
@@ -205,7 +207,10 @@ export class VoiceChannelTracker {
     } catch (error) {
       logger.error("Error starting voice tracking:", error);
       // If it's a connection error, mark as disconnected
-      if (error instanceof Error && error.message.includes('Client must be connected')) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Client must be connected")
+      ) {
         this.isConnected = false;
       }
     }
@@ -260,7 +265,10 @@ export class VoiceChannelTracker {
     } catch (error) {
       logger.error("Error ending voice tracking:", error);
       // If it's a connection error, mark as disconnected
-      if (error instanceof Error && error.message.includes('Client must be connected')) {
+      if (
+        error instanceof Error &&
+        error.message.includes("Client must be connected")
+      ) {
         this.isConnected = false;
       }
     }

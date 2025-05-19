@@ -33,16 +33,18 @@ export class CommandManager {
     this.client = client;
   }
 
-  private async getEnabledCommands(): Promise<Array<{
-    name: string;
-    description: string;
-    options?: Array<{
+  private async getEnabledCommands(): Promise<
+    Array<{
       name: string;
       description: string;
-      type: number;
-      required?: boolean;
-    }>;
-  }>> {
+      options?: Array<{
+        name: string;
+        description: string;
+        type: number;
+        required?: boolean;
+      }>;
+    }>
+  > {
     const commands = [];
 
     if (await configService.get("ENABLE_PING")) {
@@ -86,7 +88,9 @@ export class CommandManager {
 
     try {
       const commands = await this.getEnabledCommands();
-      const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
+      const rest = new REST({ version: "10" }).setToken(
+        process.env.DISCORD_TOKEN!,
+      );
 
       logger.info("Registering commands...");
       await rest.put(
@@ -109,7 +113,9 @@ export class CommandManager {
     }
 
     try {
-      const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
+      const rest = new REST({ version: "10" }).setToken(
+        process.env.DISCORD_TOKEN!,
+      );
 
       logger.info("Unregistering all commands...");
       await rest.put(

@@ -1,8 +1,4 @@
-import {
-  REST,
-  Routes,
-  RESTPostAPIChatInputApplicationCommandsJSONBody,
-} from "discord.js";
+import { REST, Routes } from "discord.js";
 import { config } from "dotenv";
 import Logger from "./utils/logger.js";
 import { data as ping } from "./commands/ping.js";
