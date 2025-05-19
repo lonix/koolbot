@@ -9,8 +9,10 @@ import {
 } from "discord.js";
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
+import { ConfigService } from "./config-service.js";
 
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
@@ -77,10 +79,22 @@ export class VoiceChannelManager {
         return;
       }
 
-      const categoryName =
-        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
-      const lobbyChannelName =
-        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
+      const categoryName = await configService.getString(
+        "VC_CATEGORY_NAME",
+        "Dynamic Voice Channels",
+      );
+      const lobbyChannelName = (
+        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
+      ).replace(/["']/g, "");
+      const offlineLobbyName = await configService.getString(
+        "LOBBY_CHANNEL_NAME_OFFLINE",
+      );
+
+      if (!offlineLobbyName) {
+        logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
+        return;
+      }
+
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
           channel.type === ChannelType.GuildCategory &&
@@ -94,12 +108,13 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Clean up any empty channels in the category, except the lobby channel
+      // Clean up any empty channels in the category, except the lobby channels
       for (const channel of category.children.cache.values()) {
         if (
           channel.type === ChannelType.GuildVoice &&
           channel.members.size === 0 &&
-          channel.name !== lobbyChannelName
+          channel.name !== lobbyChannelName &&
+          channel.name !== offlineLobbyName
         ) {
           try {
             await channel.delete();
@@ -272,7 +287,10 @@ export class VoiceChannelManager {
 
       // User joined a channel
       if (!oldChannel && newChannel) {
-        if (newChannel.name === process.env.LOBBY_CHANNEL_NAME) {
+        if (
+          newChannel.name ===
+          (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
+        ) {
           await this.createUserChannel(member);
         }
       }
@@ -290,7 +308,10 @@ export class VoiceChannelManager {
       // User switched channels
       else if (oldChannel && newChannel) {
         // If user is moving to the Lobby, create a new channel
-        if (newChannel.name === process.env.LOBBY_CHANNEL_NAME) {
+        if (
+          newChannel.name ===
+          (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
+        ) {
           // Clean up the old channel if it was a personal channel
           if (this.userChannels.has(member.id)) {
             const oldUserChannel = this.userChannels.get(member.id);
@@ -331,9 +352,11 @@ export class VoiceChannelManager {
       }
 
       const guild = member.guild;
-      const categoryName =
-        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
-      const suffix = process.env.VC_SUFFIX || "'s Room";
+      const categoryName = await configService.getString(
+        "VC_CATEGORY_NAME",
+        "Dynamic Voice Channels",
+      );
+      const suffix = (await configService.getString("VC_SUFFIX")) || "'s Room";
 
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
@@ -378,7 +401,7 @@ export class VoiceChannelManager {
 
   private async cleanupEmptyChannels(): Promise<void> {
     try {
-      if (process.env.ENABLE_VC_MANAGEMENT !== "true") {
+      if (!(await configService.get("ENABLE_VC_MANAGEMENT"))) {
         return;
       }
 
@@ -388,16 +411,19 @@ export class VoiceChannelManager {
         return;
       }
 
-      const categoryName =
-        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
-      const lobbyChannelName =
-        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
-      const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+      const categoryName = await configService.getString(
+        "VC_CATEGORY_NAME",
+        "Dynamic Voice Channels",
+      );
+      const lobbyChannelName = (
+        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
+      ).replace(/["']/g, "");
+      const offlineLobbyName = await configService.getString(
+        "LOBBY_CHANNEL_NAME_OFFLINE",
+      );
 
       if (!offlineLobbyName) {
-        logger.error(
-          "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
-        );
+        logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
         return;
       }
 
@@ -436,7 +462,7 @@ export class VoiceChannelManager {
 
   private async checkLobbyHealth(): Promise<void> {
     try {
-      if (process.env.ENABLE_VC_MANAGEMENT !== "true") {
+      if (!(await configService.get("ENABLE_VC_MANAGEMENT"))) {
         return;
       }
 
@@ -446,16 +472,19 @@ export class VoiceChannelManager {
         return;
       }
 
-      const categoryName =
-        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
-      const lobbyChannelName =
-        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
-      const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+      const categoryName = await configService.getString(
+        "VC_CATEGORY_NAME",
+        "Dynamic Voice Channels",
+      );
+      const lobbyChannelName = (
+        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
+      ).replace(/["']/g, "");
+      const offlineLobbyName = await configService.getString(
+        "LOBBY_CHANNEL_NAME_OFFLINE",
+      );
 
       if (!offlineLobbyName) {
-        logger.error(
-          "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
-        );
+        logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
         return;
       }
 

@@ -4,8 +4,10 @@ import {
   GuildMember,
 } from "discord.js";
 import Logger from "../utils/logger.js";
+import { ConfigService } from "../services/config-service.js";
 
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 const koolResponses = [
   "Yes, you are kool! 😎",
@@ -42,8 +44,12 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     logger.info(`Executing amikool command for user ${interaction.user.tag}`);
 
     const member = interaction.member as GuildMember;
+    const coolRoleName = await configService.get<string>(
+      "COOL_ROLE_NAME",
+      "Kool",
+    );
     const hasCoolRole = member?.roles.cache.some(
-      (role) => role.name === process.env.COOL_ROLE_NAME,
+      (role) => role.name === coolRoleName,
     );
 
     const response = hasCoolRole

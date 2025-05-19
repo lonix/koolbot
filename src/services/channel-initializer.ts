@@ -1,7 +1,9 @@
-import { Guild, ChannelType, VoiceChannel, CategoryChannel } from "discord.js";
+import { Guild, ChannelType, CategoryChannel, VoiceChannel } from "discord.js";
 import Logger from "../utils/logger.js";
+import { ConfigService } from "./config-service.js";
 
 const logger = Logger.getInstance();
+const configService = ConfigService.getInstance();
 
 export class ChannelInitializer {
   private static instance: ChannelInitializer;
@@ -17,17 +19,20 @@ export class ChannelInitializer {
 
   public async initializeChannels(guild: Guild): Promise<void> {
     try {
-      if (process.env.ENABLE_VC_MANAGEMENT !== "true") {
+      if (!(await configService.get("ENABLE_VC_MANAGEMENT"))) {
         logger.info(
           "Voice channel management is disabled, skipping channel initialization",
         );
         return;
       }
 
-      const categoryName =
-        process.env.VC_CATEGORY_NAME || "Dynamic Voice Channels";
-      const lobbyChannelName =
-        process.env.LOBBY_CHANNEL_NAME?.replace(/["']/g, "") || "Lobby";
+      const categoryName = await configService.getString(
+        "VC_CATEGORY_NAME",
+        "Dynamic Voice Channels",
+      );
+      const lobbyChannelName = (
+        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
+      ).replace(/["']/g, "");
 
       logger.info(
         `Initializing channels with category: ${categoryName} and lobby: ${lobbyChannelName}`,

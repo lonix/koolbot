@@ -16,6 +16,7 @@ import { ChannelInitializer } from "./services/channel-initializer.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
+import { ConfigService } from "./services/config-service.js";
 
 config();
 const logger = Logger.getInstance();
@@ -176,6 +177,41 @@ client.once("ready", async () => {
     // Initialize database first
     await initializeDatabase();
     logger.info("Database initialized");
+
+    // Initialize configuration service and migrate from env
+    const configService = ConfigService.getInstance();
+    configService.setClient(client);
+    await configService.initialize();
+    await configService.migrateFromEnv();
+
+    // Set up CommandManager with client
+    CommandManager.getInstance().setClient(client);
+
+    // Register reload callbacks
+    configService.registerReloadCallback(async () => {
+      // Reinitialize voice channel announcer
+      VoiceChannelAnnouncer.getInstance(client).start();
+      logger.info("Voice channel announcer reloaded");
+
+      // Reinitialize voice channel manager
+      if (await configService.get("ENABLE_VC_MANAGEMENT")) {
+        const guild = await client.guilds.fetch(process.env.GUILD_ID || "");
+        if (guild) {
+          await VoiceChannelManager.getInstance(client).initialize(guild.id);
+          logger.info("Voice channel manager reloaded");
+        }
+      }
+
+      // Reinitialize voice channel tracker
+      if (await configService.get("ENABLE_VC_TRACKING")) {
+        VoiceChannelTracker.getInstance(client);
+        logger.info("Voice channel tracker reloaded");
+      }
+
+      // Re-register commands based on new configuration
+      await CommandManager.getInstance().registerCommands();
+      logger.info("Commands re-registered");
+    });
 
     // Initialize voice channel announcer
     VoiceChannelAnnouncer.getInstance(client).start();
