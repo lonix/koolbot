@@ -52,6 +52,28 @@
       - Database query performance
       - API call latency
 
+- [ ] Settings Reorganization (P2)
+  - [ ] Implement dot notation for settings
+    - Success Criteria:
+      - Convert all settings to dot notation (e.g., vc-management.enabled)
+      - Update all references to settings
+      - Maintain backward compatibility
+  - [ ] Add settings validation
+    - Success Criteria:
+      - Type checking for settings
+      - Value range validation
+      - Required dependencies checking
+  - [ ] Add settings migration system
+    - Success Criteria:
+      - Automatic migration from old format
+      - Backup of old settings
+      - Rollback capability
+  - [ ] Update documentation
+    - Success Criteria:
+      - New settings format guide
+      - Migration instructions
+      - Examples of new format
+
 ## Low Priority
 - [ ] Feature Enhancements (P3)
   - [ ] Add optional timezone support to /seen
@@ -64,9 +86,134 @@
   - [ ] Add easter eggs
   - [ ] Add secret commands
   - [ ] Add hidden achievements
+  - [ ] Add bot jealousy system
+    - Success Criteria:
+      - Bot reacts when mentioned in other channels
+      - Bot shows jealousy when users talk to other bots
+      - Configurable jealousy levels
+      - Customizable responses
+      - Cooldown system to prevent spam
+
+- [ ] Channel Info Categories (P3)
+  - [ ] Add category management
+    - Success Criteria:
+      - Create/edit/delete categories
+      - Assign channels to categories
+      - Set category display order
+  - [ ] Add info commands
+    - Success Criteria:
+      - /info list - List all categories
+      - /info category <name> - Show channels in category
+      - /info channel <name> - Show channel details
+  - [ ] Add channel templates
+    - Success Criteria:
+      - Predefined templates for common channels
+      - Custom template creation
+      - Template variables support
+  - [ ] Add auto-categorization
+    - Success Criteria:
+      - Auto-detect channel purpose
+      - Suggest appropriate category
+      - Learning from user corrections
+
+- [ ] Quote Database (P3)
+  - [ ] Add quote management
+    - Success Criteria:
+      - Add/edit/delete quotes
+      - Quote categories/tags
+      - Quote attribution
+      - Quote search
+  - [ ] Add quote commands
+    - Success Criteria:
+      - /quote add - Add new quote
+      - /quote random - Get random quote
+      - /quote search - Search quotes
+      - /quote top - Show most popular quotes
+  - [ ] Add quote reactions
+    - Success Criteria:
+      - Like/dislike quotes
+      - Quote sharing
+      - Quote of the day
+  - [ ] Add quote moderation
+    - Success Criteria:
+      - Quote approval system
+      - Report inappropriate quotes
+      - Auto-moderation rules
+
+- [ ] Docker Control (P3)
+  - [ ] Add container management
+    - Success Criteria:
+      - Start/stop containers
+      - View container status
+      - View container logs
+      - Container resource usage
+  - [ ] Add service management
+    - Success Criteria:
+      - Service status monitoring
+      - Service health checks
+      - Service restart policies
+      - Service dependencies
+  - [ ] Add Docker commands
+    - Success Criteria:
+      - /docker status - Show all containers
+      - /docker logs - View container logs
+      - /docker restart - Restart container
+      - /docker update - Update container
+  - [ ] Add security features
+    - Success Criteria:
+      - Role-based access control
+      - Command whitelisting
+      - Audit logging
+      - Rate limiting
 
 - [ ] Future Ideas (P4)
   - [ ] Add more EVE Online related features
+    - Market Commands
+      - [ ] /market price - Get current Jita market prices
+      - [ ] /market history - Show price history and trends
+      - [ ] /market compare - Compare prices between trade hubs
+      - [ ] /market alerts - Set price alerts for items
+    - Character Information
+      - [ ] /character info - Get basic character info
+      - [ ] /character skills - Show skill points and top skills
+      - [ ] /character wallet - Show wallet balance
+      - [ ] /character assets - List character's assets
+    - Corporation/Alliance
+      - [ ] /corp info - Get corporation information
+      - [ ] /corp members - List corporation members
+      - [ ] /alliance info - Get alliance information
+      - [ ] /alliance corps - List corporations in alliance
+    - Killboard Integration
+      - [ ] /killboard recent - Show recent kills
+      - [ ] /killboard stats - Get killboard statistics
+      - [ ] /killboard loss - Get recent losses
+      - [ ] /killboard top - Show top killers
+    - Industry Tools
+      - [ ] /industry cost - Calculate manufacturing costs
+      - [ ] /industry profit - Show profit margins
+      - [ ] /industry materials - List required materials
+      - [ ] /industry time - Show production time
+    - Navigation
+      - [ ] /route - Get optimal route between systems
+      - [ ] /distance - Calculate jump distance
+      - [ ] /system info - Get system information
+      - [ ] /constellation info - Get constellation info
+    - Fleet Management
+      - [ ] /fleet create - Create a new fleet
+      - [ ] /fleet invite - Invite to fleet
+      - [ ] /fleet broadcast - Send fleet message
+      - [ ] /fleet waypoint - Set fleet waypoint
+    - Miscellaneous
+      - [ ] /time - Show current EVE time
+      - [ ] /server status - Check server status
+      - [ ] /news - Get latest EVE news
+      - [ ] /events - Show upcoming events
+    - Implementation Requirements
+      - [ ] Integrate with EVE Online ESI API
+      - [ ] Add proper error handling
+      - [ ] Implement rate limiting
+      - [ ] Add response caching
+      - [ ] Create user-friendly formatting
   - [ ] Add custom command creation
   - [ ] Add bot statistics and analytics
   - [ ] Implement web dashboard
