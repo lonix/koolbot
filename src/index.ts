@@ -33,7 +33,8 @@ let isShuttingDown = false;
 
 async function initializeDatabase(): Promise<void> {
   try {
-    const mongoUri = process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot";
+    const mongoUri =
+      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot";
     await mongoose.connect(mongoUri);
     logger.info("Connected to MongoDB");
   } catch (error) {

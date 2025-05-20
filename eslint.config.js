@@ -20,6 +20,8 @@ export default [
         'process': 'readonly',
         'setInterval': 'readonly',
         'clearInterval': 'readonly',
+        'setTimeout': 'readonly',
+        'clearTimeout': 'readonly',
         '__dirname': 'readonly',
         '__filename': 'readonly',
         'console': 'readonly',
@@ -41,4 +43,4 @@ export default [
       'prefer-const': 'error'
     }
   }
-]; 
+];
