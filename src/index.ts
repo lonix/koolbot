@@ -33,9 +33,9 @@ let isShuttingDown = false;
 
 async function initializeDatabase(): Promise<void> {
   try {
-    await mongoose.connect(
-      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
-    );
+    const configService = ConfigService.getInstance();
+    const mongoUri = await configService.getString("MONGODB_URI", "mongodb://mongodb:27017/koolbot");
+    await mongoose.connect(mongoUri);
     logger.info("Connected to MongoDB");
   } catch (error) {
     logger.error("Failed to connect to MongoDB:", error);
@@ -199,7 +199,7 @@ client.once("ready", async () => {
 
       // Reinitialize voice channel manager
       if (await configService.get("ENABLE_VC_MANAGEMENT")) {
-        const guild = await client.guilds.fetch(process.env.GUILD_ID || "");
+        const guild = await client.guilds.fetch(await configService.getString("GUILD_ID", ""));
         if (guild) {
           await VoiceChannelManager.getInstance(client).initialize(guild.id);
           logger.info("Voice channel manager reloaded");
@@ -222,20 +222,21 @@ client.once("ready", async () => {
     logger.info("Voice channel announcer initialized");
 
     // Initialize channels
-    const guild = await client.guilds.fetch(process.env.GUILD_ID || "");
+    const guild = await client.guilds.fetch(await configService.getString("GUILD_ID", ""));
     if (guild) {
       // Handle offline lobby channel
+      const categoryName = await configService.getString("VC_CATEGORY_NAME", "Dynamic Voice Channels");
       const category = guild.channels.cache.find(
         (channel: GuildBasedChannel) =>
           channel.type === ChannelType.GuildCategory &&
-          channel.name === process.env.VC_CATEGORY_NAME,
+          channel.name === categoryName,
       ) as CategoryChannel;
 
       if (category) {
-        const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+        const offlineLobbyName = await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE");
         if (!offlineLobbyName) {
           logger.error(
-            "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+            "LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration",
           );
           return;
         }
@@ -285,7 +286,7 @@ client.once("ready", async () => {
       logger.info("Channels initialized");
 
       // Initialize voice channel manager and clean up any empty channels
-      if (process.env.ENABLE_VC_MANAGEMENT === "true") {
+      if (await configService.get("ENABLE_VC_MANAGEMENT")) {
         await VoiceChannelManager.getInstance(client).initialize(guild.id);
       }
     } else {
@@ -336,7 +337,8 @@ client.on(
 );
 
 // Start the bot
-client.login(process.env.DISCORD_TOKEN).catch((error) => {
+const configService = ConfigService.getInstance();
+client.login(await configService.getString("DISCORD_TOKEN")).catch((error) => {
   logger.error("Failed to login:", error);
   process.exit(1);
 });

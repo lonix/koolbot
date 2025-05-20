@@ -4,6 +4,7 @@ import {
   VoiceChannel,
   Client,
   ButtonInteraction,
+  User,
 } from "discord.js";
 import Logger from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
@@ -36,18 +37,48 @@ interface IUserStats {
   }>;
 }
 
+interface VoiceSession {
+  startTime: Date;
+  channelId: string;
+  channelName: string;
+}
+
+interface VoiceSessionDocument extends mongoose.Document {
+  userId: string;
+  username: string;
+  channelId: string;
+  channelName: string;
+  startTime: Date;
+  endTime: Date;
+  duration: number;
+}
+
+const VoiceSessionSchema = new mongoose.Schema<VoiceSessionDocument>({
+  userId: { type: String, required: true },
+  username: { type: String, required: true },
+  channelId: { type: String, required: true },
+  channelName: { type: String, required: true },
+  startTime: { type: Date, required: true },
+  endTime: { type: Date, required: true },
+  duration: { type: Number, required: true },
+});
+
+const VoiceSessionModel = mongoose.model<VoiceSessionDocument>(
+  "VoiceSession",
+  VoiceSessionSchema,
+);
+
 export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
-  private activeSessions: Map<
-    string,
-    { startTime: Date; channelId: string; channelName: string }
-  > = new Map();
+  private activeSessions: Map<string, VoiceSession> = new Map();
   private userChannels: Map<string, VoiceChannel> = new Map();
   private client: Client;
   private isConnected: boolean = false;
+  private configService: ConfigService;
 
   private constructor(client: Client) {
     this.client = client;
+    this.configService = ConfigService.getInstance();
     this.setupMongoConnectionHandlers();
   }
 
@@ -62,7 +93,7 @@ export class VoiceChannelTracker {
       logger.warn("MongoDB connection lost for voice channel tracker");
     });
 
-    mongoose.connection.on("error", (error) => {
+    mongoose.connection.on("error", (error: Error) => {
       this.isConnected = false;
       logger.error("MongoDB connection error in voice channel tracker:", error);
     });
@@ -72,12 +103,11 @@ export class VoiceChannelTracker {
     if (!this.isConnected) {
       try {
         await mongoose.connect(
-          process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
+          await this.configService.getString("MONGODB_URI", "mongodb://mongodb:27017/koolbot"),
         );
-        this.isConnected = true;
         logger.info("Reconnected to MongoDB for voice channel tracker");
-      } catch (error) {
-        logger.error("Failed to reconnect to MongoDB:", error);
+      } catch (error: unknown) {
+        logger.error("Error reconnecting to MongoDB:", error);
         throw error;
       }
     }
@@ -102,7 +132,7 @@ export class VoiceChannelTracker {
     try {
       const member = newState.member || oldState.member; // Try to get member from either state
       if (!member) {
-        if (process.env.DEBUG === "true") {
+        if (await this.configService.get("DEBUG")) {
           logger.info(`[DEBUG] No member found in voice state update`);
         }
         return;
@@ -111,7 +141,7 @@ export class VoiceChannelTracker {
       const oldChannel = oldState.channel;
       const newChannel = newState.channel;
 
-      if (process.env.DEBUG === "true") {
+      if (await this.configService.get("DEBUG")) {
         logger.info(
           `[DEBUG] Voice state update for ${member.displayName} (${member.id}):`,
         );
@@ -128,7 +158,7 @@ export class VoiceChannelTracker {
 
       // User joined a channel (including initial join)
       if (!oldChannel && newChannel) {
-        if (process.env.DEBUG === "true") {
+        if (await this.configService.get("DEBUG")) {
           logger.info(
             `[DEBUG] Starting tracking for user ${member.displayName} (${member.id}) in channel ${newChannel.name}`,
           );
@@ -137,13 +167,13 @@ export class VoiceChannelTracker {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
-        if (process.env.DEBUG === "true") {
+        if (await this.configService.get("DEBUG")) {
           logger.info(
             `[DEBUG] Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
           );
         }
         await this.endTracking(member.id);
-        if (process.env.DEBUG === "true") {
+        if (await this.configService.get("DEBUG")) {
           logger.info(
             `[DEBUG] Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
           );
@@ -157,7 +187,7 @@ export class VoiceChannelTracker {
         (oldChannel && !newChannel) ||
         (!oldChannel && !newChannel && this.activeSessions.has(member.id))
       ) {
-        if (process.env.DEBUG === "true") {
+        if (await this.configService.get("DEBUG")) {
           logger.info(
             `[DEBUG] User disconnected - Ending tracking for user ${member.displayName} (${member.id})`,
           );
@@ -170,22 +200,19 @@ export class VoiceChannelTracker {
         }
         await this.endTracking(member.id);
       }
-    } catch (error) {
+    } catch (error: unknown) {
       logger.error("Error handling voice state update in tracker:", error);
     }
   }
 
   private async isChannelExcluded(channelId: string): Promise<boolean> {
     try {
-      const excludedChannels = await configService.get("EXCLUDED_VC_CHANNELS");
+      const excludedChannels = await this.configService.get("EXCLUDED_VC_CHANNELS");
       if (!excludedChannels) return false;
 
-      const excludedList = String(excludedChannels)
-        .split(",")
-        .map((id) => id.trim());
-      return excludedList.includes(channelId);
-    } catch (error) {
-      logger.error("Error checking if channel is excluded:", error);
+      return (excludedChannels as string[]).includes(channelId);
+    } catch (error: unknown) {
+      logger.error("Error checking excluded channels:", error);
       return false;
     }
   }
@@ -200,7 +227,7 @@ export class VoiceChannelTracker {
 
       // Check if channel is excluded
       if (await this.isChannelExcluded(channelId)) {
-        if (process.env.DEBUG === "true") {
+        if (await this.configService.get("DEBUG")) {
           logger.info(
             `[DEBUG] Channel ${channelName} (${channelId}) is excluded from tracking`,
           );
@@ -208,30 +235,19 @@ export class VoiceChannelTracker {
         return;
       }
 
-      const startTime = new Date();
-      this.activeSessions.set(member.id, { startTime, channelId, channelName });
+      this.activeSessions.set(member.id, {
+        startTime: new Date(),
+        channelId,
+        channelName,
+      });
 
-      // Update last seen and add new session
-      await VoiceChannelTracking.findOneAndUpdate(
-        { userId: member.id },
-        {
-          $set: {
-            username: member.displayName,
-            lastSeen: startTime,
-          },
-          $push: {
-            sessions: {
-              startTime,
-              channelId,
-              channelName,
-              endTime: null,
-            },
-          },
-        },
-        { upsert: true },
-      );
-    } catch (error) {
-      logger.error("Error starting voice channel tracking:", error);
+      if (await this.configService.get("DEBUG")) {
+        logger.info(
+          `[DEBUG] Started tracking user ${member.displayName} (${member.id}) in channel ${channelName}`,
+        );
+      }
+    } catch (error: unknown) {
+      logger.error("Error starting voice tracking:", error);
     }
   }
 
@@ -241,7 +257,7 @@ export class VoiceChannelTracker {
 
       const session = this.activeSessions.get(userId);
       if (!session) {
-        if (process.env.DEBUG === "true") {
+        if (await this.configService.get("DEBUG")) {
           logger.info(
             `[DEBUG] No active session found for user ${userId} when attempting to end tracking`,
           );
@@ -254,42 +270,40 @@ export class VoiceChannelTracker {
         (endTime.getTime() - session.startTime.getTime()) / 1000,
       );
 
-      if (process.env.DEBUG === "true") {
+      if (await this.configService.get("DEBUG")) {
         logger.info(
           `[DEBUG] Ending session for user ${userId} in channel ${session.channelName} (${session.channelId})`,
         );
-        logger.info(`[DEBUG] Session duration: ${duration} seconds`);
       }
 
-      // Update both total time and the specific session in one operation
-      const result = await VoiceChannelTracking.findOneAndUpdate(
-        { userId },
-        {
-          $inc: { totalTime: duration },
-          $set: {
-            lastSeen: endTime,
-            "sessions.$[elem].endTime": endTime,
-            "sessions.$[elem].duration": duration,
-          },
-        },
-        {
-          arrayFilters: [{ "elem.endTime": null }],
-          new: true,
-        },
-      );
-
-      if (result) {
-        this.activeSessions.delete(userId);
+      // Get user info from Discord
+      const user: User = await this.client.users.fetch(userId);
+      if (!user) {
+        logger.error(`Could not find user ${userId} when ending tracking`);
+        return;
       }
-    } catch (error) {
+
+      // Create new session document
+      const voiceSession = new VoiceSessionModel({
+        userId,
+        username: user.username,
+        channelId: session.channelId,
+        channelName: session.channelName,
+        startTime: session.startTime,
+        endTime,
+        duration,
+      });
+
+      await voiceSession.save();
+      this.activeSessions.delete(userId);
+
+      if (await this.configService.get("DEBUG")) {
+        logger.info(
+          `[DEBUG] Saved voice session for user ${user.username} (${userId})`,
+        );
+      }
+    } catch (error: unknown) {
       logger.error("Error ending voice tracking:", error);
-      // If it's a connection error, mark as disconnected
-      if (
-        error instanceof Error &&
-        error.message.includes("Client must be connected")
-      ) {
-        this.isConnected = false;
-      }
     }
   }
 

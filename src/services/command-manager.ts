@@ -21,8 +21,11 @@ const isDebug = process.env.DEBUG === "true";
 export class CommandManager {
   private static instance: CommandManager;
   private client: Client | null = null;
+  private configService: ConfigService;
 
-  private constructor() {}
+  private constructor() {
+    this.configService = ConfigService.getInstance();
+  }
 
   public static getInstance(): CommandManager {
     if (!CommandManager.instance) {
@@ -133,73 +136,77 @@ export class CommandManager {
   }
 
   public async registerCommands(): Promise<void> {
-    if (!this.client) {
-      throw new Error("Client not set");
-    }
-
-    if (!process.env.GUILD_ID) {
-      throw new Error("GUILD_ID is required for guild command registration");
-    }
-
     try {
-      const commands = await this.getEnabledCommands();
+      if (!this.client) {
+        throw new Error("Client not set");
+      }
+
+      const guildId = await this.configService.getString("GUILD_ID");
+      if (!guildId) {
+        throw new Error("GUILD_ID not set in configuration");
+      }
+
       const rest = new REST({ version: "10" }).setToken(
-        process.env.DISCORD_TOKEN!,
+        await this.configService.getString("DISCORD_TOKEN"),
       );
 
-      // Register guild commands
-      logger.info("Registering guild commands...");
-      if (isDebug) {
-        logger.debug(
-          `Attempting to register ${commands.length} commands with Discord API for guild ${process.env.GUILD_ID}...`,
+      const commands = await this.getEnabledCommands();
+      logger.debug(
+        `Attempting to register ${commands.length} commands with Discord API for guild ${guildId}...`,
+      );
+
+      try {
+        const data = await rest.put(
+          Routes.applicationGuildCommands(
+            await this.configService.getString("CLIENT_ID"),
+            guildId,
+          ),
+          { body: commands },
         );
+
+        logger.debug("Discord API response:", data);
+        logger.info("Successfully registered guild commands");
+      } catch (error) {
+        logger.error("Error registering commands:", error);
+        throw error;
       }
-
-      const response = await rest.put(
-        Routes.applicationGuildCommands(
-          process.env.CLIENT_ID!,
-          process.env.GUILD_ID,
-        ),
-        { body: commands },
-      );
-
-      if (isDebug) {
-        logger.debug("Discord API response:", response);
-      }
-
-      logger.info("Successfully registered guild commands");
     } catch (error) {
-      logger.error("Error registering commands:", error);
+      logger.error("Error in registerCommands:", error);
       throw error;
     }
   }
 
-  public async unregisterAllCommands(): Promise<void> {
-    if (!this.client) {
-      throw new Error("Client not set");
-    }
-
-    if (!process.env.GUILD_ID) {
-      throw new Error("GUILD_ID is required for guild command registration");
-    }
-
+  public async unregisterCommands(): Promise<void> {
     try {
+      if (!this.client) {
+        throw new Error("Client not set");
+      }
+
+      const guildId = await this.configService.getString("GUILD_ID");
+      if (!guildId) {
+        throw new Error("GUILD_ID not set in configuration");
+      }
+
       const rest = new REST({ version: "10" }).setToken(
-        process.env.DISCORD_TOKEN!,
+        await this.configService.getString("DISCORD_TOKEN"),
       );
 
-      logger.info("Unregistering all guild commands...");
+      try {
+        await rest.put(
+          Routes.applicationGuildCommands(
+            await this.configService.getString("CLIENT_ID"),
+            guildId,
+          ),
+          { body: [] },
+        );
 
-      await rest.put(
-        Routes.applicationGuildCommands(
-          process.env.CLIENT_ID!,
-          process.env.GUILD_ID,
-        ),
-        { body: [] },
-      );
-      logger.info("Successfully unregistered guild commands");
+        logger.info("Successfully unregistered all guild commands");
+      } catch (error) {
+        logger.error("Error unregistering commands:", error);
+        throw error;
+      }
     } catch (error) {
-      logger.error("Error unregistering commands:", error);
+      logger.error("Error in unregisterCommands:", error);
       throw error;
     }
   }
