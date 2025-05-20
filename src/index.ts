@@ -309,8 +309,9 @@ client.on(
   "voiceStateUpdate",
   async (oldState: VoiceState, newState: VoiceState) => {
     try {
+      const configService = ConfigService.getInstance();
       // Handle voice channel management
-      if (process.env.ENABLE_VC_MANAGEMENT === "true") {
+      if (await configService.get("ENABLE_VC_MANAGEMENT")) {
         await VoiceChannelManager.getInstance(client).handleVoiceStateUpdate(
           oldState,
           newState,
@@ -318,7 +319,7 @@ client.on(
       }
 
       // Handle voice channel tracking
-      if (process.env.ENABLE_VC_TRACKING === "true") {
+      if (await configService.get("ENABLE_VC_TRACKING")) {
         await VoiceChannelTracker.getInstance(client).handleVoiceStateUpdate(
           oldState,
           newState,
