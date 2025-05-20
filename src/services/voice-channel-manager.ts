@@ -287,10 +287,8 @@ export class VoiceChannelManager {
 
       // User joined a channel
       if (!oldChannel && newChannel) {
-        if (
-          newChannel.name ===
-          (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
-        ) {
+        const lobbyChannelName = await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+        if (newChannel.name === lobbyChannelName) {
           await this.createUserChannel(member);
         }
       }
@@ -307,11 +305,9 @@ export class VoiceChannelManager {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
+        const lobbyChannelName = await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
         // If user is moving to the Lobby, create a new channel
-        if (
-          newChannel.name ===
-          (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
-        ) {
+        if (newChannel.name === lobbyChannelName) {
           // Clean up the old channel if it was a personal channel
           if (this.userChannels.has(member.id)) {
             const oldUserChannel = this.userChannels.get(member.id);
