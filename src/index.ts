@@ -21,6 +21,30 @@ import { ConfigService } from "./services/config-service.js";
 config();
 const logger = Logger.getInstance();
 
+// Validate critical environment variables
+const requiredEnvVars = {
+  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+  CLIENT_ID: process.env.CLIENT_ID,
+  GUILD_ID: process.env.GUILD_ID,
+  MONGODB_URI: process.env.MONGODB_URI,
+};
+
+const missingVars = Object.entries(requiredEnvVars)
+  .filter(([, value]) => !value)
+  .map(([key]) => key);
+
+if (missingVars.length > 0) {
+  logger.error(
+    `Missing required environment variables: ${missingVars.join(", ")}`,
+  );
+  process.exit(1);
+}
+
+// Set debug mode
+if (process.env.DEBUG === "true") {
+  logger.info("Debug mode enabled");
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -33,9 +57,7 @@ let isShuttingDown = false;
 
 async function initializeDatabase(): Promise<void> {
   try {
-    const mongoUri =
-      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot";
-    await mongoose.connect(mongoUri);
+    await mongoose.connect(process.env.MONGODB_URI!);
     logger.info("Connected to MongoDB");
   } catch (error) {
     logger.error("Failed to connect to MongoDB:", error);
@@ -358,8 +380,7 @@ client.on(
 );
 
 // Start the bot
-const configService = ConfigService.getInstance();
-client.login(await configService.getString("DISCORD_TOKEN")).catch((error) => {
+client.login(process.env.DISCORD_TOKEN).catch((error) => {
   logger.error("Failed to login:", error);
   process.exit(1);
 });
