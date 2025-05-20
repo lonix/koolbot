@@ -289,15 +289,22 @@ export class VoiceChannelManager {
       const newChannel = newState.channel;
 
       logger.info(`Voice state update for ${member.displayName}:`);
-      logger.info(`Old channel: ${oldChannel?.name || 'none'}`);
-      logger.info(`New channel: ${newChannel?.name || 'none'}`);
+      logger.info(`Old channel: ${oldChannel?.name || "none"}`);
+      logger.info(`New channel: ${newChannel?.name || "none"}`);
 
       // User joined a channel
       if (!oldChannel && newChannel) {
-        const lobbyChannelName = await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
-        logger.info(`User joined channel. Lobby name: "${lobbyChannelName}", Channel name: "${newChannel.name}"`);
+        const lobbyChannelName = await configService.getString(
+          "LOBBY_CHANNEL_NAME",
+          "Lobby",
+        );
+        logger.info(
+          `User joined channel. Lobby name: "${lobbyChannelName}", Channel name: "${newChannel.name}"`,
+        );
         if (newChannel.name === lobbyChannelName) {
-          logger.info(`Creating channel for ${member.displayName} who joined the lobby`);
+          logger.info(
+            `Creating channel for ${member.displayName} who joined the lobby`,
+          );
           await this.createUserChannel(member);
         }
       }
@@ -314,7 +321,10 @@ export class VoiceChannelManager {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
-        const lobbyChannelName = await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+        const lobbyChannelName = await configService.getString(
+          "LOBBY_CHANNEL_NAME",
+          "Lobby",
+        );
         // If user is moving to the Lobby, create a new channel
         if (newChannel.name === lobbyChannelName) {
           // Clean up the old channel if it was a personal channel
@@ -410,7 +420,9 @@ export class VoiceChannelManager {
         return;
       }
 
-      const guild = await this.getGuild(await configService.getString("GUILD_ID", ""));
+      const guild = await this.getGuild(
+        await configService.getString("GUILD_ID", ""),
+      );
       if (!guild) {
         logger.error("Guild not found during cleanup");
         return;
@@ -471,7 +483,9 @@ export class VoiceChannelManager {
         return;
       }
 
-      const guild = await this.getGuild(await configService.getString("GUILD_ID", ""));
+      const guild = await this.getGuild(
+        await configService.getString("GUILD_ID", ""),
+      );
       if (!guild) {
         logger.error("Guild not found during health check");
         return;

@@ -12,7 +12,6 @@ import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
 
 const logger = Logger.getInstance();
-const configService = ConfigService.getInstance();
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -103,7 +102,10 @@ export class VoiceChannelTracker {
     if (!this.isConnected) {
       try {
         await mongoose.connect(
-          await this.configService.getString("MONGODB_URI", "mongodb://mongodb:27017/koolbot"),
+          await this.configService.getString(
+            "MONGODB_URI",
+            "mongodb://mongodb:27017/koolbot",
+          ),
         );
         logger.info("Reconnected to MongoDB for voice channel tracker");
       } catch (error: unknown) {
@@ -207,7 +209,9 @@ export class VoiceChannelTracker {
 
   private async isChannelExcluded(channelId: string): Promise<boolean> {
     try {
-      const excludedChannels = await this.configService.get("EXCLUDED_VC_CHANNELS");
+      const excludedChannels = await this.configService.get(
+        "EXCLUDED_VC_CHANNELS",
+      );
       if (!excludedChannels) return false;
 
       return (excludedChannels as string[]).includes(channelId);

@@ -87,7 +87,9 @@ export class VoiceChannelAnnouncer {
 
   public async makeAnnouncement(): Promise<void> {
     try {
-      const guild = await this.client.guilds.fetch(await this.configService.getString("GUILD_ID", ""));
+      const guild = await this.client.guilds.fetch(
+        await this.configService.getString("GUILD_ID", ""),
+      );
       if (!guild) {
         logger.error("Guild not found for voice channel announcement");
         return;
