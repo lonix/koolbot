@@ -212,15 +212,18 @@ client.once("ready", async () => {
   try {
     logger.info("Bot is starting up...");
 
-    // Initialize database first
-    await initializeDatabase();
-    logger.info("Database initialized");
-
-    // Initialize configuration service and migrate from env
+    // Initialize configuration service first
     const configService = ConfigService.getInstance();
     configService.setClient(client);
     await configService.initialize();
+
+    // Migrate environment variables to config service
     await configService.migrateFromEnv();
+    logger.info("Configuration service initialized");
+
+    // Initialize database after config service
+    await initializeDatabase();
+    logger.info("Database initialized");
 
     // Set up CommandManager with client
     CommandManager.getInstance().setClient(client);
@@ -368,10 +371,14 @@ client.on(
 
       // Handle voice channel tracking
       if (await configService.get("ENABLE_VC_TRACKING")) {
-        await VoiceChannelTracker.getInstance(client).handleVoiceStateUpdate(
-          oldState,
-          newState,
-        );
+        try {
+          await VoiceChannelTracker.getInstance(client).handleVoiceStateUpdate(
+            oldState,
+            newState,
+          );
+        } catch (error) {
+          logger.error("Error handling voice state update in tracker:", error);
+        }
       }
     } catch (error) {
       logger.error("Error handling voice state update:", error);
