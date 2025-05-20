@@ -280,15 +280,24 @@ export class VoiceChannelManager {
   ): Promise<void> {
     try {
       const member = newState.member;
-      if (!member) return;
+      if (!member) {
+        logger.error("No member found in voice state update");
+        return;
+      }
 
       const oldChannel = oldState.channel;
       const newChannel = newState.channel;
 
+      logger.info(`Voice state update for ${member.displayName}:`);
+      logger.info(`Old channel: ${oldChannel?.name || 'none'}`);
+      logger.info(`New channel: ${newChannel?.name || 'none'}`);
+
       // User joined a channel
       if (!oldChannel && newChannel) {
         const lobbyChannelName = await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+        logger.info(`User joined channel. Lobby name: "${lobbyChannelName}", Channel name: "${newChannel.name}"`);
         if (newChannel.name === lobbyChannelName) {
+          logger.info(`Creating channel for ${member.displayName} who joined the lobby`);
           await this.createUserChannel(member);
         }
       }
