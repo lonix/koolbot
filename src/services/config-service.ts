@@ -63,11 +63,11 @@ export class ConfigService {
       if (mongoose.connection.readyState !== 1) {
         logger.info("Waiting for MongoDB connection...");
         await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
+          const timeout: NodeJS.Timeout = setTimeout(() => {
             reject(new Error("MongoDB connection timeout"));
           }, 10000);
 
-          const checkConnection = () => {
+          const checkConnection = (): void => {
             if (mongoose.connection.readyState === 1) {
               clearTimeout(timeout);
               resolve();
