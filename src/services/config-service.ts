@@ -68,14 +68,23 @@ export class ConfigService {
             reject(new Error("MongoDB connection timeout"));
           }, 10000);
 
-          const checkConnection = (): void => {
-            if (mongoose.connection.readyState === 1) {
-              clearTimeout(timeoutId);
-              resolve();
-            } else if (mongoose.connection.readyState === 0) {
-              reject(new Error("MongoDB not connected"));
-            } else {
-              timeoutId = setTimeout(checkConnection, 100);
+          const checkConnection = async (): Promise<void> => {
+            try {
+              if (mongoose.connection.readyState === 1) {
+                clearTimeout(timeoutId);
+                resolve();
+              } else if (mongoose.connection.readyState === 0) {
+                // Try to connect if not connected
+                await mongoose.connect(
+                  process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
+                );
+                clearTimeout(timeoutId);
+                resolve();
+              } else {
+                timeoutId = setTimeout(checkConnection, 100);
+              }
+            } catch (error) {
+              reject(error);
             }
           };
 
