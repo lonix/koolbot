@@ -1,6 +1,7 @@
 import { Config, IConfig } from "../models/config.js";
 import Logger from "../utils/logger.js";
 import { Client } from "discord.js";
+import mongoose from "mongoose";
 
 const logger = Logger.getInstance();
 
@@ -58,6 +59,29 @@ export class ConfigService {
     if (this.initialized) return;
 
     try {
+      // Ensure MongoDB is connected
+      if (mongoose.connection.readyState !== 1) {
+        logger.info("Waiting for MongoDB connection...");
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            reject(new Error("MongoDB connection timeout"));
+          }, 10000);
+
+          const checkConnection = () => {
+            if (mongoose.connection.readyState === 1) {
+              clearTimeout(timeout);
+              resolve();
+            } else if (mongoose.connection.readyState === 0) {
+              reject(new Error("MongoDB not connected"));
+            } else {
+              setTimeout(checkConnection, 100);
+            }
+          };
+
+          checkConnection();
+        });
+      }
+
       // Load all configs into cache
       const configs = await Config.find({});
       for (const config of configs) {
