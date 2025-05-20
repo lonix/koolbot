@@ -47,24 +47,26 @@ async function cleanupVoiceChannels(
   createOfflineLobby: boolean = false,
 ): Promise<void> {
   try {
-    if (process.env.ENABLE_VC_MANAGEMENT === "true") {
+    const configService = ConfigService.getInstance();
+    if (await configService.get("ENABLE_VC_MANAGEMENT")) {
       logger.info("Cleaning up voice channels...");
-      const guild = await client.guilds.fetch(process.env.GUILD_ID || "");
+      const guild = await client.guilds.fetch(await configService.getString("GUILD_ID", ""));
       if (guild) {
         // Get the VC category
+        const categoryName = await configService.getString("VC_CATEGORY_NAME", "Dynamic Voice Channels");
         const category = guild.channels.cache.find(
           (channel: GuildBasedChannel) =>
             channel.type === ChannelType.GuildCategory &&
-            channel.name === process.env.VC_CATEGORY_NAME,
+            channel.name === categoryName,
         ) as CategoryChannel;
 
         if (category) {
           // Only create offline lobby if explicitly requested (during shutdown)
           if (createOfflineLobby) {
-            const offlineLobbyName = process.env.LOBBY_CHANNEL_NAME_OFFLINE;
+            const offlineLobbyName = await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE");
             if (!offlineLobbyName) {
               logger.error(
-                "LOBBY_CHANNEL_NAME_OFFLINE is not set in environment variables",
+                "LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration",
               );
               return;
             }
@@ -93,12 +95,14 @@ async function cleanupVoiceChannels(
           }
 
           // Delete all empty voice channels
+          const lobbyChannelName = await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+          const offlineLobbyName = await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE");
           const emptyChannels = category.children.cache.filter(
             (channel: GuildBasedChannel) =>
               channel.type === ChannelType.GuildVoice &&
               channel.members.size === 0 &&
-              channel.name !== process.env.LOBBY_CHANNEL_NAME &&
-              channel.name !== process.env.LOBBY_CHANNEL_NAME_OFFLINE,
+              channel.name !== lobbyChannelName &&
+              channel.name !== offlineLobbyName,
           );
 
           for (const channel of emptyChannels.values()) {
@@ -114,7 +118,7 @@ async function cleanupVoiceChannels(
           const lobbyChannel = category.children.cache.find(
             (channel: GuildBasedChannel) =>
               channel.type === ChannelType.GuildVoice &&
-              channel.name === process.env.LOBBY_CHANNEL_NAME,
+              channel.name === lobbyChannelName,
           );
 
           if (lobbyChannel && lobbyChannel.members.size === 0) {

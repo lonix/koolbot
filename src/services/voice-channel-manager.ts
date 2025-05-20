@@ -410,7 +410,7 @@ export class VoiceChannelManager {
         return;
       }
 
-      const guild = await this.getGuild(process.env.GUILD_ID || "");
+      const guild = await this.getGuild(await configService.getString("GUILD_ID", ""));
       if (!guild) {
         logger.error("Guild not found during cleanup");
         return;
@@ -471,7 +471,7 @@ export class VoiceChannelManager {
         return;
       }
 
-      const guild = await this.getGuild(process.env.GUILD_ID || "");
+      const guild = await this.getGuild(await configService.getString("GUILD_ID", ""));
       if (!guild) {
         logger.error("Guild not found during health check");
         return;
