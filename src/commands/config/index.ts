@@ -46,14 +46,29 @@ function extractIds(value: string): string {
 }
 
 // Helper function to format IDs as mentions
-function formatAsMentions(
+async function formatAsMentions(
   value: string,
   interaction: ChatInputCommandInteraction,
-): string {
+): Promise<string> {
   if (!value) return "None";
 
   const ids = value.split(",").filter(Boolean);
   if (ids.length === 0) return "None";
+
+  // Ensure client is ready
+  if (!interaction.client.isReady()) {
+    logger.error("Discord client is not ready");
+    return value;
+  }
+
+  // Ensure guild is available
+  if (!interaction.guild) {
+    logger.error("Guild not available");
+    return value;
+  }
+
+  // Fetch guild data if needed
+  await interaction.guild.fetch();
 
   return ids
     .map((id) => {
@@ -138,6 +153,15 @@ async function handleList(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
+    // Ensure client is ready
+    if (!interaction.client.isReady()) {
+      await interaction.reply({
+        content: "Bot is still initializing. Please try again in a moment.",
+        ephemeral: true,
+      });
+      return;
+    }
+
     const category = interaction.options.getString("category");
     const configs = category
       ? await configService.getByCategory(category)
@@ -167,15 +191,15 @@ async function handleList(
           .split("_")
           .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
           .join(" ");
-        const valueList = settings
-          .map((setting) => {
+        const valueList = await Promise.all(
+          settings.map(async (setting) => {
             const value = isRoleOrChannelSetting(setting.key)
-              ? formatAsMentions(String(setting.value), interaction)
+              ? await formatAsMentions(String(setting.value), interaction)
               : String(setting.value);
             return `**${setting.key}**: ${value}`;
-          })
-          .join("\n");
-        embed.addFields({ name: categoryName, value: valueList });
+          }),
+        );
+        embed.addFields({ name: categoryName, value: valueList.join("\n") });
       }
     }
 
@@ -197,7 +221,7 @@ async function handleGet(
     const value = await configService.get(key);
 
     const formattedValue = isRoleOrChannelSetting(key)
-      ? formatAsMentions(String(value), interaction)
+      ? await formatAsMentions(String(value), interaction)
       : String(value);
 
     const embed = new EmbedBuilder()
@@ -294,7 +318,7 @@ async function handleSet(
     );
 
     const formattedValue = isRoleOrChannelSetting(key)
-      ? formatAsMentions(value, interaction)
+      ? await formatAsMentions(value, interaction)
       : value;
 
     const embed = new EmbedBuilder()

@@ -11,6 +11,7 @@ export class VoiceChannelAnnouncer {
   private client: Client;
   private announcementJob: CronJob | null = null;
   private configService: ConfigService;
+  private isInitialized: boolean = false;
 
   private constructor(client: Client) {
     this.client = client;
@@ -39,10 +40,30 @@ export class VoiceChannelAnnouncer {
     }
   }
 
+  private async waitForClientReady(): Promise<void> {
+    if (this.client.isReady()) {
+      return;
+    }
+
+    return new Promise((resolve) => {
+      const checkReady = () => {
+        if (this.client.isReady()) {
+          resolve();
+        } else {
+          setTimeout(checkReady, 100);
+        }
+      };
+      checkReady();
+    });
+  }
+
   public async start(): Promise<void> {
     logger.info("Starting voice channel announcer...");
 
     try {
+      // Wait for client to be ready
+      await this.waitForClientReady();
+
       const enabled = await this.configService.get<boolean>(
         "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
         false,
@@ -86,6 +107,8 @@ export class VoiceChannelAnnouncer {
       logger.info(
         `Next announcement scheduled for: ${nextRun.toLocaleString()}`,
       );
+
+      this.isInitialized = true;
     } catch (error) {
       logger.error("Error scheduling voice channel announcements:", error);
     }
@@ -93,10 +116,8 @@ export class VoiceChannelAnnouncer {
 
   public async makeAnnouncement(): Promise<void> {
     try {
-      if (!this.client.isReady()) {
-        logger.error("Discord client is not ready");
-        return;
-      }
+      // Wait for client to be ready
+      await this.waitForClientReady();
 
       const guildId = await this.configService.getString("GUILD_ID", "");
       if (!guildId) {
@@ -176,5 +197,6 @@ export class VoiceChannelAnnouncer {
       this.announcementJob.stop();
       this.announcementJob = null;
     }
+    this.isInitialized = false;
   }
 }
