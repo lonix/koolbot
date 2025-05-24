@@ -6,6 +6,7 @@ import {
   ChannelType,
   CategoryChannel,
   GuildBasedChannel,
+  VoiceChannel,
 } from "discord.js";
 import { config } from "dotenv";
 import Logger from "./utils/logger.js";
@@ -88,79 +89,23 @@ async function cleanupVoiceChannels(
         ) as CategoryChannel;
 
         if (category) {
-          // Only create offline lobby if explicitly requested (during shutdown)
-          if (createOfflineLobby) {
-            const offlineLobbyName = await configService.getString(
-              "LOBBY_CHANNEL_NAME_OFFLINE",
-            );
-            if (!offlineLobbyName) {
-              logger.error(
-                "LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration",
-              );
-              return;
-            }
-
-            const existingOfflineLobby = category.children.cache.find(
-              (channel: GuildBasedChannel) =>
-                channel.type === ChannelType.GuildVoice &&
-                channel.name === offlineLobbyName,
-            );
-
-            if (!existingOfflineLobby) {
-              try {
-                await guild.channels.create({
-                  name: offlineLobbyName,
-                  type: ChannelType.GuildVoice,
-                  parent: category,
-                  position: 0,
-                });
-                logger.info(
-                  `Created offline lobby channel: ${offlineLobbyName}`,
-                );
-              } catch (error) {
-                logger.error("Error creating offline lobby channel:", error);
-              }
-            }
-          }
-
-          // Delete all empty voice channels
-          const lobbyChannelName = await configService.getString(
-            "LOBBY_CHANNEL_NAME",
-            "Lobby",
-          );
-          const offlineLobbyName = await configService.getString(
-            "LOBBY_CHANNEL_NAME_OFFLINE",
-          );
-          const emptyChannels = category.children.cache.filter(
-            (channel: GuildBasedChannel) =>
+          // Clean up any empty channels in the category
+          for (const channel of category.children.cache.values()) {
+            if (
               channel.type === ChannelType.GuildVoice &&
               channel.members.size === 0 &&
-              channel.name !== lobbyChannelName &&
-              channel.name !== offlineLobbyName,
-          );
-
-          for (const channel of emptyChannels.values()) {
-            try {
-              await channel.delete("Bot shutdown cleanup");
-              logger.info(`Deleted empty voice channel: ${channel.name}`);
-            } catch (error) {
-              logger.error(`Error deleting channel ${channel.name}:`, error);
-            }
-          }
-
-          // Delete the lobby channel if empty
-          const lobbyChannel = category.children.cache.find(
-            (channel: GuildBasedChannel) =>
-              channel.type === ChannelType.GuildVoice &&
-              channel.name === lobbyChannelName,
-          );
-
-          if (lobbyChannel && lobbyChannel.members.size === 0) {
-            try {
-              await lobbyChannel.delete("Bot shutdown cleanup");
-              logger.info("Deleted lobby channel");
-            } catch (error) {
-              logger.error("Error deleting lobby channel:", error);
+              channel.name !==
+                (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
+            ) {
+              try {
+                await channel.delete();
+                logger.info(`Cleaned up empty channel ${channel.name}`);
+              } catch (error) {
+                logger.error(
+                  `Error cleaning up channel ${channel.name}:`,
+                  error,
+                );
+              }
             }
           }
         }
@@ -177,36 +122,18 @@ async function cleanup(): Promise<void> {
 
   try {
     logger.info("Cleaning up...");
-    await cleanupVoiceChannels(true); // Create offline lobby during actual shutdown
-    await mongoose.disconnect();
+    await cleanupVoiceChannels();
     logger.info("Cleanup completed");
   } catch (error) {
     logger.error("Error during cleanup:", error);
+  } finally {
+    process.exit(0);
   }
 }
 
 // Handle process termination
-process.on("SIGTERM", async () => {
-  logger.info("Received SIGTERM signal");
-  await cleanup();
-  process.exit(0);
-});
-
-process.on("SIGINT", async () => {
-  logger.info("Received SIGINT signal");
-  await cleanup();
-  process.exit(0);
-});
-
-process.on("unhandledRejection", async (error: Error) => {
-  logger.error("Unhandled Rejection:", error);
-  await cleanupVoiceChannels(false); // Don't create offline lobby for unhandled rejections
-});
-
-process.on("uncaughtException", async (error: Error) => {
-  logger.error("Uncaught Exception:", error);
-  await cleanup();
-});
+process.on("SIGINT", cleanup);
+process.on("SIGTERM", cleanup);
 
 client.once("ready", async () => {
   try {
@@ -265,54 +192,49 @@ client.once("ready", async () => {
       await configService.getString("GUILD_ID", ""),
     );
     if (guild) {
-      // Handle offline lobby channel
-      const categoryName = await configService.getString(
-        "VC_CATEGORY_NAME",
-        "Dynamic Voice Channels",
+      // Clean up any existing offline lobby channel
+      const offlineLobbyName = await configService.getString(
+        "LOBBY_CHANNEL_NAME_OFFLINE",
       );
-      const category = guild.channels.cache.find(
-        (channel: GuildBasedChannel) =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      ) as CategoryChannel;
-
-      if (category) {
-        const offlineLobbyName = await configService.getString(
-          "LOBBY_CHANNEL_NAME_OFFLINE",
-        );
-        if (!offlineLobbyName) {
-          logger.error(
-            "LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration",
-          );
-          return;
-        }
-
-        const offlineLobby = category.children.cache.find(
-          (channel: GuildBasedChannel) =>
+      if (offlineLobbyName) {
+        const offlineLobby = guild.channels.cache.find(
+          (channel) =>
             channel.type === ChannelType.GuildVoice &&
             channel.name === offlineLobbyName,
-        );
+        ) as VoiceChannel;
 
         if (offlineLobby) {
           // If there are users in the offline lobby, create a new channel for them
           if (offlineLobby.members.size > 0) {
             const firstMember = offlineLobby.members.first();
             if (firstMember) {
-              const newChannel = await guild.channels.create({
-                name: `${firstMember.user.username}'s Channel`,
-                type: ChannelType.GuildVoice,
-                parent: category,
-              });
+              const categoryName = await configService.getString(
+                "VC_CATEGORY_NAME",
+                "Dynamic Voice Channels",
+              );
+              const category = guild.channels.cache.find(
+                (channel: GuildBasedChannel) =>
+                  channel.type === ChannelType.GuildCategory &&
+                  channel.name === categoryName,
+              ) as CategoryChannel;
 
-              // Move all users to the new channel
-              for (const member of offlineLobby.members.values()) {
-                try {
-                  await member.voice.setChannel(newChannel);
-                } catch (error) {
-                  logger.error(
-                    `Error moving member ${member.user.tag}:`,
-                    error,
-                  );
+              if (category) {
+                const newChannel = await guild.channels.create({
+                  name: `${firstMember.user.username}'s Channel`,
+                  type: ChannelType.GuildVoice,
+                  parent: category,
+                });
+
+                // Move all users to the new channel
+                for (const member of offlineLobby.members.values()) {
+                  try {
+                    await member.voice.setChannel(newChannel);
+                  } catch (error) {
+                    logger.error(
+                      `Error moving member ${member.user.tag}:`,
+                      error,
+                    );
+                  }
                 }
               }
             }
