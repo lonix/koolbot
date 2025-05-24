@@ -47,8 +47,14 @@ export class VoiceChannelAnnouncer {
         "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
         false,
       );
-      if (!enabled) {
-        logger.info("Weekly voice channel announcements are disabled");
+      const trackingEnabled = await this.configService.get<boolean>(
+        "ENABLE_VC_TRACKING",
+        false,
+      );
+      if (!enabled || !trackingEnabled) {
+        logger.info(
+          "Weekly voice channel announcements are disabled or voice tracking is not enabled",
+        );
         return;
       }
 

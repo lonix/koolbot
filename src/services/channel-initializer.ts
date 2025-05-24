@@ -1,4 +1,10 @@
-import { Guild, ChannelType, CategoryChannel, VoiceChannel } from "discord.js";
+import {
+  Guild,
+  ChannelType,
+  CategoryChannel,
+  VoiceChannel,
+  TextChannel,
+} from "discord.js";
 import Logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 
@@ -74,6 +80,33 @@ export class ChannelInitializer {
         logger.info(`Created lobby channel: ${lobbyChannelName}`);
       } else {
         logger.info(`Found existing lobby channel: ${lobbyChannelName}`);
+      }
+
+      // Find or create the announcement channel
+      const announcementChannelName = await configService.getString(
+        "VC_ANNOUNCEMENT_CHANNEL",
+        "voice-stats",
+      );
+      let announcementChannel = guild.channels.cache.find(
+        (channel) =>
+          channel instanceof TextChannel &&
+          channel.name === announcementChannelName,
+      ) as TextChannel;
+
+      if (!announcementChannel) {
+        logger.info(
+          `Creating announcement channel: ${announcementChannelName}`,
+        );
+        announcementChannel = await guild.channels.create({
+          name: announcementChannelName,
+          type: ChannelType.GuildText,
+          parent: category,
+        });
+        logger.info(`Created announcement channel: ${announcementChannelName}`);
+      } else {
+        logger.info(
+          `Found existing announcement channel: ${announcementChannelName}`,
+        );
       }
 
       logger.info("Channel initialization completed successfully");
