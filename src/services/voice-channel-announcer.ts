@@ -93,11 +93,20 @@ export class VoiceChannelAnnouncer {
 
   public async makeAnnouncement(): Promise<void> {
     try {
-      const guild = await this.client.guilds.fetch(
-        await this.configService.getString("GUILD_ID", ""),
-      );
+      if (!this.client.isReady()) {
+        logger.error("Discord client is not ready");
+        return;
+      }
+
+      const guildId = await this.configService.getString("GUILD_ID", "");
+      if (!guildId) {
+        logger.error("GUILD_ID not configured");
+        return;
+      }
+
+      const guild = await this.client.guilds.fetch(guildId);
       if (!guild) {
-        logger.error("Guild not found for voice channel announcement");
+        logger.error(`Guild not found with ID: ${guildId}`);
         return;
       }
 
@@ -105,12 +114,18 @@ export class VoiceChannelAnnouncer {
         "VC_ANNOUNCEMENT_CHANNEL",
         "voice-stats",
       );
+
+      // Ensure guild channels are cached
+      await guild.channels.fetch();
+
       const channel = guild.channels.cache.find(
         (ch) => ch instanceof TextChannel && ch.name === channelName,
       ) as TextChannel;
 
       if (!channel) {
-        logger.error(`Announcement channel ${channelName} not found`);
+        logger.error(
+          `Announcement channel ${channelName} not found in guild ${guild.name}`,
+        );
         return;
       }
 
