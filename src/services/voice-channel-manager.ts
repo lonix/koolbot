@@ -38,10 +38,13 @@ export class VoiceChannelManager {
 
   private async getGuild(guildId: string): Promise<Guild | null> {
     try {
-      const guild = await this.client.guilds.fetch(guildId);
-      return guild;
+      if (!this.client) {
+        logger.error("Client not initialized");
+        return null;
+      }
+      return await this.client.guilds.fetch(guildId);
     } catch (error) {
-      logger.error(`Error fetching guild ${guildId}:`, error);
+      logger.error("Error fetching guild:", error);
       return null;
     }
   }
@@ -420,9 +423,13 @@ export class VoiceChannelManager {
         return;
       }
 
-      const guild = await this.getGuild(
-        await configService.getString("GUILD_ID", ""),
-      );
+      const guildId = await configService.getString("GUILD_ID", "");
+      if (!guildId) {
+        logger.error("GUILD_ID not set in configuration");
+        return;
+      }
+
+      const guild = await this.getGuild(guildId);
       if (!guild) {
         logger.error("Guild not found during cleanup");
         return;
@@ -483,9 +490,13 @@ export class VoiceChannelManager {
         return;
       }
 
-      const guild = await this.getGuild(
-        await configService.getString("GUILD_ID", ""),
-      );
+      const guildId = await configService.getString("GUILD_ID", "");
+      if (!guildId) {
+        logger.error("GUILD_ID not set in configuration");
+        return;
+      }
+
+      const guild = await this.getGuild(guildId);
       if (!guild) {
         logger.error("Guild not found during health check");
         return;

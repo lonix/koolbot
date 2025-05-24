@@ -134,52 +134,42 @@ export class VoiceChannelTracker {
     try {
       const member = newState.member || oldState.member; // Try to get member from either state
       if (!member) {
-        if (await this.configService.get("DEBUG")) {
-          logger.info(`[DEBUG] No member found in voice state update`);
-        }
+        logger.info(`No member found in voice state update`);
         return;
       }
 
       const oldChannel = oldState.channel;
       const newChannel = newState.channel;
 
-      if (await this.configService.get("DEBUG")) {
-        logger.info(
-          `[DEBUG] Voice state update for ${member.displayName} (${member.id}):`,
-        );
-        logger.info(
-          `[DEBUG] Old channel: ${oldChannel ? oldChannel.name : "none"} (${oldChannel?.id || "none"})`,
-        );
-        logger.info(
-          `[DEBUG] New channel: ${newChannel ? newChannel.name : "none"} (${newChannel?.id || "none"})`,
-        );
-        logger.info(
-          `[DEBUG] Active session exists: ${this.activeSessions.has(member.id)}`,
-        );
-      }
+      logger.info(
+        `Voice state update for ${member.displayName} (${member.id}):`,
+      );
+      logger.info(
+        `Old channel: ${oldChannel ? oldChannel.name : "none"} (${oldChannel?.id || "none"})`,
+      );
+      logger.info(
+        `New channel: ${newChannel ? newChannel.name : "none"} (${newChannel?.id || "none"})`,
+      );
+      logger.info(
+        `Active session exists: ${this.activeSessions.has(member.id)}`,
+      );
 
       // User joined a channel (including initial join)
       if (!oldChannel && newChannel) {
-        if (await this.configService.get("DEBUG")) {
-          logger.info(
-            `[DEBUG] Starting tracking for user ${member.displayName} (${member.id}) in channel ${newChannel.name}`,
-          );
-        }
+        logger.info(
+          `Starting tracking for user ${member.displayName} (${member.id}) in channel ${newChannel.name}`,
+        );
         await this.startTracking(member, newChannel.id, newChannel.name);
       }
       // User switched channels
       else if (oldChannel && newChannel) {
-        if (await this.configService.get("DEBUG")) {
-          logger.info(
-            `[DEBUG] Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
-          );
-        }
+        logger.info(
+          `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
+        );
         await this.endTracking(member.id);
-        if (await this.configService.get("DEBUG")) {
-          logger.info(
-            `[DEBUG] Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
-          );
-        }
+        logger.info(
+          `Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
+        );
         await this.startTracking(member, newChannel.id, newChannel.name);
       }
       // User left a channel (disconnect) - handle both cases:
@@ -189,20 +179,18 @@ export class VoiceChannelTracker {
         (oldChannel && !newChannel) ||
         (!oldChannel && !newChannel && this.activeSessions.has(member.id))
       ) {
-        if (await this.configService.get("DEBUG")) {
+        logger.info(
+          `User disconnected - Ending tracking for user ${member.displayName} (${member.id})`,
+        );
+        const activeSession = this.activeSessions.get(member.id);
+        if (activeSession) {
           logger.info(
-            `[DEBUG] User disconnected - Ending tracking for user ${member.displayName} (${member.id})`,
+            `Found active session in channel ${activeSession.channelName} (${activeSession.channelId})`,
           );
-          const activeSession = this.activeSessions.get(member.id);
-          if (activeSession) {
-            logger.info(
-              `[DEBUG] Found active session in channel ${activeSession.channelName} (${activeSession.channelId})`,
-            );
-          }
         }
         await this.endTracking(member.id);
       }
-    } catch (error: unknown) {
+    } catch (error) {
       logger.error("Error handling voice state update in tracker:", error);
     }
   }
