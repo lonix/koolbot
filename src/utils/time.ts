@@ -1,8 +1,6 @@
 import { formatDistanceToNow, format } from "date-fns";
 import { utcToZonedTime } from "date-fns-tz";
-import Logger from "./logger.js";
-
-const logger = Logger.getInstance();
+import logger from "./logger.js";
 
 /**
  * Formats a duration in milliseconds to a human-readable string
@@ -38,7 +36,12 @@ export function formatDuration(durationMs: number): string {
  * @returns Formatted time ago string (e.g., "2 hours ago")
  */
 export function formatTimeAgo(date: Date): string {
-  return formatDistanceToNow(date, { addSuffix: true });
+  try {
+    return formatDistanceToNow(date, { addSuffix: true });
+  } catch (error) {
+    logger.error("Error formatting time:", error);
+    return "unknown time";
+  }
 }
 
 /**

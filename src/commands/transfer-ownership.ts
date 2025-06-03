@@ -3,11 +3,10 @@ import {
   SlashCommandBuilder,
   GuildMember,
   SlashCommandUserOption,
+  ChatInputCommandInteraction,
 } from "discord.js";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
-
-const logger = Logger.getInstance();
 
 export const data = new SlashCommandBuilder()
   .setName("transfer-ownership")
@@ -19,7 +18,7 @@ export const data = new SlashCommandBuilder()
       .setRequired(true),
   );
 
-export async function execute(interaction: CommandInteraction): Promise<void> {
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
     if (!interaction.guild) {
       await interaction.reply({
@@ -29,7 +28,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return;
     }
 
-    const member = interaction.member as GuildMember;
+    const member = interaction.guild.members.cache.get(interaction.user.id);
     if (!member) {
       await interaction.reply({
         content: "Could not find your member information.",
@@ -48,7 +47,7 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     }
 
     // Get the target user
-    const targetUser = interaction.options.get("user")?.user;
+    const targetUser = interaction.options.getUser("user");
     if (!targetUser) {
       await interaction.reply({
         content: "Please specify a user to transfer ownership to.",
@@ -58,10 +57,10 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     }
 
     // Get the target member
-    const targetMember = await interaction.guild.members.fetch(targetUser.id);
+    const targetMember = interaction.guild.members.cache.get(targetUser.id);
     if (!targetMember) {
       await interaction.reply({
-        content: "Could not find the target user in this server.",
+        content: "Could not find the target user's member information.",
         ephemeral: true,
       });
       return;
@@ -77,19 +76,13 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     }
 
     // Get the voice channel manager instance
-    const voiceChannelManager = VoiceChannelManager.getInstance(
-      interaction.client,
-    );
+    const manager = VoiceChannelManager.getInstance(interaction.client);
 
     // Transfer ownership
-    await voiceChannelManager.transferOwnership(
-      voiceChannel.id,
-      member.id,
-      targetMember.id,
-    );
+    await manager.transferOwnership(voiceChannel.id, member.id, targetMember.id);
 
     await interaction.reply({
-      content: `Ownership transferred to ${targetMember.displayName}!`,
+      content: `Voice channel ownership transferred to ${targetUser.username}!`,
       ephemeral: true,
     });
   } catch (error) {

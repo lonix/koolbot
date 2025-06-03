@@ -7,11 +7,10 @@ import {
   Guild,
   Client,
 } from "discord.js";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
 
-const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
 
 export class VoiceChannelManager {
@@ -21,9 +20,11 @@ export class VoiceChannelManager {
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
+  private configService: ConfigService;
 
   private constructor(client: Client) {
     this.client = client;
+    this.configService = ConfigService.getInstance();
     // Start periodic cleanup and health checks
     this.startPeriodicCleanup();
     this.startHealthChecks();

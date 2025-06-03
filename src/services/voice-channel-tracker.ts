@@ -6,12 +6,11 @@ import {
   ButtonInteraction,
   User,
 } from "discord.js";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
-
-const logger = Logger.getInstance();
+import { connectToDatabase } from "../utils/database.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -74,6 +73,7 @@ export class VoiceChannelTracker {
   private client: Client;
   private isConnected: boolean = false;
   private configService: ConfigService;
+  private db: any;
 
   private constructor(client: Client) {
     this.client = client;
@@ -519,6 +519,16 @@ export class VoiceChannelTracker {
         content: "An error occurred while processing your request.",
         ephemeral: true,
       });
+    }
+  }
+
+  async initialize() {
+    try {
+      this.db = await connectToDatabase();
+      logger.info("VoiceChannelTracker initialized");
+    } catch (error) {
+      logger.error("Error initializing VoiceChannelTracker:", error);
+      throw error;
     }
   }
 }

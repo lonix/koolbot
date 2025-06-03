@@ -2,11 +2,11 @@ import {
   CommandInteraction,
   SlashCommandBuilder,
   SlashCommandUserOption,
+  ChatInputCommandInteraction,
 } from "discord.js";
-import Logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
-
-const logger = Logger.getInstance();
+import { formatTimeAgo } from "../utils/time.js";
+import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("seen")
@@ -18,11 +18,9 @@ export const data = new SlashCommandBuilder()
       .setRequired(true),
   );
 
-export async function execute(interaction: CommandInteraction): Promise<void> {
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
-    logger.info(`Executing seen command for user ${interaction.user.tag}`);
-
-    const targetUser = interaction.options.get("user")?.user;
+    const targetUser = interaction.options.getUser("user");
     if (!targetUser) {
       await interaction.reply("Please specify a user to check.");
       return;
@@ -48,28 +46,14 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
       return;
     }
 
-    const timeDiff = Date.now() - lastSeen.getTime();
-    const minutes = Math.floor(timeDiff / 60000);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    let timeAgo;
-    if (days > 0) {
-      timeAgo = `${days} day${days === 1 ? "" : "s"} ago`;
-    } else if (hours > 0) {
-      timeAgo = `${hours} hour${hours === 1 ? "" : "s"} and ${minutes % 60} minute${minutes % 60 === 1 ? "" : "s"} ago`;
-    } else {
-      timeAgo = `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
-    }
-
+    const timeAgo = formatTimeAgo(lastSeen);
     await interaction.reply(
       `${targetUser.username} was last seen in a voice channel ${timeAgo}.`,
     );
-    logger.info(`Seen command completed for user ${interaction.user.tag}`);
   } catch (error) {
-    logger.error("Error executing seen command:", error);
+    logger.error("Error in seen command:", error);
     await interaction.reply({
-      content: "An error occurred while processing your request.",
+      content: "There was an error while executing this command!",
       ephemeral: true,
     });
   }

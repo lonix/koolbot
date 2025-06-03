@@ -3,10 +3,9 @@ import {
   SlashCommandBuilder,
   GuildMember,
 } from "discord.js";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
 
-const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
 
 const koolResponses = [

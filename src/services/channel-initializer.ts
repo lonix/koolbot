@@ -4,40 +4,65 @@ import {
   CategoryChannel,
   VoiceChannel,
   TextChannel,
+  Client,
 } from "discord.js";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
-
-const logger = Logger.getInstance();
-const configService = ConfigService.getInstance();
 
 export class ChannelInitializer {
   private static instance: ChannelInitializer;
+  private client: Client;
+  private configService: ConfigService;
 
-  private constructor() {}
+  private constructor(client: Client) {
+    this.client = client;
+    this.configService = ConfigService.getInstance();
+  }
 
-  public static getInstance(): ChannelInitializer {
+  public static getInstance(client: Client): ChannelInitializer {
     if (!ChannelInitializer.instance) {
-      ChannelInitializer.instance = new ChannelInitializer();
+      ChannelInitializer.instance = new ChannelInitializer(client);
     }
     return ChannelInitializer.instance;
   }
 
+  async initialize(guildId: string) {
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+      if (!guild) {
+        throw new Error(`Guild ${guildId} not found`);
+      }
+
+      const isVoiceChannelManagementEnabled = await this.configService.get("ENABLE_VC_MANAGEMENT");
+      if (!isVoiceChannelManagementEnabled) {
+        logger.info("Voice channel management is disabled, skipping initialization");
+        return;
+      }
+
+      // Initialize channels
+      await this.initializeChannels(guild);
+      logger.info(`ChannelInitializer initialized for guild ${guild.name}`);
+    } catch (error) {
+      logger.error("Error initializing ChannelInitializer:", error);
+      throw error;
+    }
+  }
+
   public async initializeChannels(guild: Guild): Promise<void> {
     try {
-      if (!(await configService.get("ENABLE_VC_MANAGEMENT"))) {
+      if (!(await this.configService.get("ENABLE_VC_MANAGEMENT"))) {
         logger.info(
           "Voice channel management is disabled, skipping channel initialization",
         );
         return;
       }
 
-      const categoryName = await configService.getString(
+      const categoryName = await this.configService.getString(
         "VC_CATEGORY_NAME",
         "Dynamic Voice Channels",
       );
       const lobbyChannelName = (
-        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
+        await this.configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
       ).replace(/["']/g, "");
 
       logger.info(
@@ -83,7 +108,7 @@ export class ChannelInitializer {
       }
 
       // Find or create the announcement channel
-      const announcementChannelName = await configService.getString(
+      const announcementChannelName = await this.configService.getString(
         "VC_ANNOUNCEMENT_CHANNEL",
         "voice-stats",
       );

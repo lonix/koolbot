@@ -1,6 +1,6 @@
-import { REST, Routes, Client } from "discord.js";
+import { REST, Routes, Client, Collection } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 import { data as ping } from "../commands/ping.js";
 import { data as amikool } from "../commands/amikool.js";
 import { data as plexprice } from "../commands/plexprice.js";
@@ -14,28 +14,79 @@ import { data as quoteCommand } from "../commands/quote.js";
 import { ConfigService } from "./config-service.js";
 
 dotenvConfig();
-const logger = Logger.getInstance();
-const configService = ConfigService.getInstance();
 const isDebug = process.env.DEBUG === "true";
 
 export class CommandManager {
   private static instance: CommandManager;
-  private client: Client | null = null;
+  private client: Client;
   private configService: ConfigService;
+  private commands: Collection<string, any>;
 
-  private constructor() {
+  private constructor(client: Client) {
+    this.client = client;
     this.configService = ConfigService.getInstance();
+    this.commands = new Collection();
   }
 
-  public static getInstance(): CommandManager {
+  public static getInstance(client: Client): CommandManager {
     if (!CommandManager.instance) {
-      CommandManager.instance = new CommandManager();
+      CommandManager.instance = new CommandManager(client);
     }
     return CommandManager.instance;
   }
 
-  public setClient(client: Client): void {
-    this.client = client;
+  async initialize() {
+    try {
+      // Load commands
+      const commands = [];
+
+      if (await this.configService.get("ENABLE_PING")) {
+        commands.push(ping.toJSON());
+        if (isDebug) logger.debug("✓ /ping command enabled");
+      }
+
+      if (await this.configService.get("ENABLE_AMIKOOL")) {
+        commands.push(amikool.toJSON());
+        if (isDebug) logger.debug("✓ /amikool command enabled");
+      }
+
+      if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+        commands.push(plexprice.toJSON());
+        if (isDebug) logger.debug("✓ /plexprice command enabled");
+      }
+
+      if (await this.configService.get("ENABLE_VC_TRACKING")) {
+        commands.push(vctop.toJSON());
+        commands.push(vcstats.toJSON());
+        if (isDebug) logger.debug("✓ Voice channel tracking commands enabled");
+      }
+
+      if (await this.configService.get("ENABLE_SEEN")) {
+        commands.push(seen.toJSON());
+        if (isDebug) logger.debug("✓ /seen command enabled");
+      }
+
+      if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+        commands.push(transferOwnership.toJSON());
+        if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
+      }
+
+      if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+        commands.push(announceVcStats.toJSON());
+        if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
+      }
+
+      if (await this.configService.get("quotes.enabled")) {
+        commands.push(quoteCommand.toJSON());
+        if (isDebug) logger.debug("✓ /quote command enabled");
+      }
+
+      logger.info(`Loaded ${commands.length} commands`);
+      return commands;
+    } catch (error) {
+      logger.error("Error initializing CommandManager:", error);
+      throw error;
+    }
   }
 
   private async getEnabledCommands(): Promise<
@@ -56,28 +107,28 @@ export class CommandManager {
       logger.debug("Checking command registration status:");
     }
 
-    if (await configService.get("ENABLE_PING")) {
+    if (await this.configService.get("ENABLE_PING")) {
       commands.push(ping.toJSON());
       if (isDebug) logger.debug("✓ /ping command enabled");
     } else if (isDebug) {
       logger.debug("✗ /ping command disabled");
     }
 
-    if (await configService.get("ENABLE_AMIKOOL")) {
+    if (await this.configService.get("ENABLE_AMIKOOL")) {
       commands.push(amikool.toJSON());
       if (isDebug) logger.debug("✓ /amikool command enabled");
     } else if (isDebug) {
       logger.debug("✗ /amikool command disabled");
     }
 
-    if (await configService.get("ENABLE_PLEX_PRICE")) {
+    if (await this.configService.get("ENABLE_PLEX_PRICE")) {
       commands.push(plexprice.toJSON());
       if (isDebug) logger.debug("✓ /plexprice command enabled");
     } else if (isDebug) {
       logger.debug("✗ /plexprice command disabled");
     }
 
-    if (await configService.get("ENABLE_VC_TRACKING")) {
+    if (await this.configService.get("ENABLE_VC_TRACKING")) {
       commands.push(vctop.toJSON());
       commands.push(vcstats.toJSON());
       if (isDebug) logger.debug("✓ /vctop and /vcstats commands enabled");
@@ -85,28 +136,28 @@ export class CommandManager {
       logger.debug("✗ /vctop and /vcstats commands disabled");
     }
 
-    if (await configService.get("ENABLE_SEEN")) {
+    if (await this.configService.get("ENABLE_SEEN")) {
       commands.push(seen.toJSON());
       if (isDebug) logger.debug("✓ /seen command enabled");
     } else if (isDebug) {
       logger.debug("✗ /seen command disabled");
     }
 
-    if (await configService.get("ENABLE_VC_MANAGEMENT")) {
+    if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
       commands.push(transferOwnership.toJSON());
       if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
     } else if (isDebug) {
       logger.debug("✗ /transfer-ownership command disabled");
     }
 
-    if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+    if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
       commands.push(announceVcStats.toJSON());
       if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
     } else if (isDebug) {
       logger.debug("✗ /announce-vc-stats command disabled");
     }
 
-    if (await configService.get("quotes.enabled")) {
+    if (await this.configService.get("quotes.enabled")) {
       commands.push(quoteCommand.toJSON());
       if (isDebug) logger.debug("✓ /quote command enabled");
     } else if (isDebug) {

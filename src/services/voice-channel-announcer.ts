@@ -1,16 +1,14 @@
 import { Client, TextChannel } from "discord.js";
-import Logger from "../utils/logger.js";
-import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { CronJob, CronTime } from "cron";
 import { ConfigService } from "./config-service.js";
-
-const logger = Logger.getInstance();
+import logger from "../utils/logger.js";
+import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 
 export class VoiceChannelAnnouncer {
   private static instance: VoiceChannelAnnouncer;
   private client: Client;
-  private announcementJob: CronJob | null = null;
   private configService: ConfigService;
+  private announcementJob: CronJob | null = null;
   private isInitialized: boolean = false;
 
   private constructor(client: Client) {

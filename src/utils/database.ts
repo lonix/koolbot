@@ -1,15 +1,26 @@
-import mongoose from "mongoose";
-import Logger from "./logger.js";
+import { MongoClient } from "mongodb";
+import logger from "./logger.js";
 
-const logger = Logger.getInstance();
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017";
+const client = new MongoClient(MONGODB_URI);
 
-export async function connectToDatabase(): Promise<void> {
+export async function connectToDatabase() {
   try {
-    const uri = process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot";
-    await mongoose.connect(uri);
+    await client.connect();
     logger.info("Connected to MongoDB");
+    return client.db("koolbot");
   } catch (error) {
-    logger.error("Failed to connect to MongoDB:", error);
+    logger.error("Error connecting to MongoDB:", error);
+    throw error;
+  }
+}
+
+export async function closeDatabaseConnection() {
+  try {
+    await client.close();
+    logger.info("Closed MongoDB connection");
+  } catch (error) {
+    logger.error("Error closing MongoDB connection:", error);
     throw error;
   }
 }
