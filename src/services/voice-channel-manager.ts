@@ -292,8 +292,8 @@ export class VoiceChannelManager {
       const newChannel = newState.channel;
 
       logger.info(`Voice state update for ${member.displayName}:`);
-      logger.info(`Old channel: ${oldChannel?.name || "none"}`);
-      logger.info(`New channel: ${newChannel?.name || "none"}`);
+      logger.info(`Old channel: ${oldChannel?.name || "none"} (${oldChannel?.id || "none"})`);
+      logger.info(`New channel: ${newChannel?.name || "none"} (${newChannel?.id || "none"})`);
 
       // User joined a channel
       if (!oldChannel && newChannel) {
@@ -307,6 +307,12 @@ export class VoiceChannelManager {
         if (newChannel.name === lobbyChannelName) {
           logger.info(
             `Creating channel for ${member.displayName} who joined the lobby`,
+          );
+          await this.createUserChannel(member);
+        } else if (newChannel.name === "➕ New Channel") {
+          // If user joins the "New Channel", create a personal channel for them
+          logger.info(
+            `Creating personal channel for ${member.displayName} who joined the new channel`,
           );
           await this.createUserChannel(member);
         }
@@ -330,6 +336,21 @@ export class VoiceChannelManager {
         );
         // If user is moving to the Lobby, create a new channel
         if (newChannel.name === lobbyChannelName) {
+          // Clean up the old channel if it was a personal channel
+          if (this.userChannels.has(member.id)) {
+            const oldUserChannel = this.userChannels.get(member.id);
+            if (
+              oldUserChannel &&
+              oldUserChannel.type === ChannelType.GuildVoice
+            ) {
+              await this.handleChannelOwnershipChange(oldUserChannel);
+            }
+            await this.cleanupUserChannel(member.id);
+          }
+          await this.createUserChannel(member);
+        }
+        // If user is moving to the "New Channel", create a personal channel
+        else if (newChannel.name === "➕ New Channel") {
           // Clean up the old channel if it was a personal channel
           if (this.userChannels.has(member.id)) {
             const oldUserChannel = this.userChannels.get(member.id);
