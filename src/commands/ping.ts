@@ -1,20 +1,26 @@
-import { CommandInteraction, SlashCommandBuilder } from "discord.js";
-import Logger from "../utils/logger.js";
-
-const logger = Logger.getInstance();
+import { SlashCommandBuilder } from "discord.js";
+import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("ping")
   .setDescription("Replies with Pong!");
 
-export async function execute(interaction: CommandInteraction): Promise<void> {
+export async function execute(interaction: any) {
   try {
-    logger.debug("Ping command executed");
-    await interaction.reply("Pong!");
+    const sent = await interaction.reply({
+      content: "Pinging...",
+      fetchReply: true,
+    });
+    const latency = sent.createdTimestamp - interaction.createdTimestamp;
+    const apiLatency = Math.round(interaction.client.ws.ping);
+
+    await interaction.editReply(
+      `Pong! 🏓\nBot Latency: ${latency}ms\nAPI Latency: ${apiLatency}ms`,
+    );
   } catch (error) {
-    logger.error("Error in Ping command:", error);
+    logger.error("Error in ping command:", error);
     await interaction.reply({
-      content: "There was an error executing this command.",
+      content: "There was an error while executing this command!",
       ephemeral: true,
     });
   }

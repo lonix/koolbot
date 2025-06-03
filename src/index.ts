@@ -7,9 +7,12 @@ import {
   CategoryChannel,
   GuildBasedChannel,
   VoiceChannel,
+  Events,
+  Collection,
+  CommandInteraction,
 } from "discord.js";
-import { config } from "dotenv";
-import Logger from "./utils/logger.js";
+import { config as dotenvConfig } from "dotenv";
+import logger from "./utils/logger.js";
 import { handleCommands } from "./commands/index.js";
 import mongoose from "mongoose";
 import { VoiceChannelManager } from "./services/voice-channel-manager.js";
@@ -19,8 +22,7 @@ import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { ConfigService } from "./services/config-service.js";
 
-config();
-const logger = Logger.getInstance();
+dotenvConfig();
 
 // Validate critical environment variables
 const requiredEnvVars = {
@@ -46,13 +48,26 @@ if (process.env.DEBUG === "true") {
   logger.info("Debug mode enabled");
 }
 
+// Extend Client type to include commands collection
+declare module "discord.js" {
+  export interface Client {
+    commands: Collection<string, {
+      execute: (interaction: CommandInteraction) => Promise<void>;
+    }>;
+  }
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.MessageContent,
   ],
 });
+
+// Add commands collection to client
+client.commands = new Collection();
 
 let isShuttingDown = false;
 
@@ -135,181 +150,90 @@ async function cleanup(): Promise<void> {
 process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 
-client.once("ready", async () => {
+const configService = ConfigService.getInstance();
+const commandManager = CommandManager.getInstance();
+const voiceChannelManager = VoiceChannelManager.getInstance(client);
+const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
+const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
+const channelInitializer = ChannelInitializer.getInstance();
+
+async function initializeServices() {
   try {
-    logger.info("Bot is starting up...");
-
-    // Initialize configuration service first
-    const configService = ConfigService.getInstance();
+    // Set client for services that need it
     configService.setClient(client);
+    commandManager.setClient(client);
+
+    // Initialize services
     await configService.initialize();
-
-    // Migrate environment variables to config service
     await configService.migrateFromEnv();
-    logger.info("Configuration service initialized");
+    await commandManager.registerCommands();
 
-    // Initialize database after config service
-    await initializeDatabase();
-    logger.info("Database initialized");
-
-    // Set up CommandManager with client
-    CommandManager.getInstance().setClient(client);
-
-    // Register reload callbacks
-    configService.registerReloadCallback(async () => {
-      // Reinitialize voice channel announcer
-      await VoiceChannelAnnouncer.getInstance(client).start();
-      logger.info("Voice channel announcer reloaded");
-
-      // Reinitialize voice channel manager
-      if (await configService.get("ENABLE_VC_MANAGEMENT")) {
-        const guild = await client.guilds.fetch(
-          await configService.getString("GUILD_ID", ""),
-        );
-        if (guild) {
-          await VoiceChannelManager.getInstance(client).initialize(guild.id);
-          logger.info("Voice channel manager reloaded");
-        }
-      }
-
-      // Reinitialize voice channel tracker
-      if (await configService.get("ENABLE_VC_TRACKING")) {
-        VoiceChannelTracker.getInstance(client);
-        logger.info("Voice channel tracker reloaded");
-      }
-
-      // Re-register commands based on new configuration
-      await CommandManager.getInstance().registerCommands();
-      logger.info("Commands re-registered");
-    });
-
-    // Initialize voice channel announcer
-    await VoiceChannelAnnouncer.getInstance(client).start();
-    logger.info("Voice channel announcer initialized");
-
-    // Initialize channels
-    const guild = await client.guilds.fetch(
-      await configService.getString("GUILD_ID", ""),
-    );
-    if (guild) {
-      // Clean up any existing offline lobby channel
-      const offlineLobbyName = await configService.getString(
-        "LOBBY_CHANNEL_NAME_OFFLINE",
-      );
-      if (offlineLobbyName) {
-        const offlineLobby = guild.channels.cache.find(
-          (channel) =>
-            channel.type === ChannelType.GuildVoice &&
-            channel.name === offlineLobbyName,
-        ) as VoiceChannel;
-
-        if (offlineLobby) {
-          // If there are users in the offline lobby, create a new channel for them
-          if (offlineLobby.members.size > 0) {
-            const firstMember = offlineLobby.members.first();
-            if (firstMember) {
-              const categoryName = await configService.getString(
-                "VC_CATEGORY_NAME",
-                "Dynamic Voice Channels",
-              );
-              const category = guild.channels.cache.find(
-                (channel: GuildBasedChannel) =>
-                  channel.type === ChannelType.GuildCategory &&
-                  channel.name === categoryName,
-              ) as CategoryChannel;
-
-              if (category) {
-                const newChannel = await guild.channels.create({
-                  name: `${firstMember.user.username}'s Channel`,
-                  type: ChannelType.GuildVoice,
-                  parent: category,
-                });
-
-                // Move all users to the new channel
-                for (const member of offlineLobby.members.values()) {
-                  try {
-                    await member.voice.setChannel(newChannel);
-                  } catch (error) {
-                    logger.error(
-                      `Error moving member ${member.user.tag}:`,
-                      error,
-                    );
-                  }
-                }
-              }
-            }
-          }
-
-          // Delete the offline lobby channel
-          try {
-            await offlineLobby.delete("Bot startup cleanup");
-            logger.info("Deleted offline lobby channel");
-          } catch (error) {
-            logger.error("Error deleting offline lobby channel:", error);
-          }
-        }
-      }
-
-      await ChannelInitializer.getInstance().initializeChannels(guild);
-      logger.info("Channels initialized");
-
-      // Initialize voice channel manager and clean up any empty channels
-      if (await configService.get("ENABLE_VC_MANAGEMENT")) {
-        await VoiceChannelManager.getInstance(client).initialize(guild.id);
-      }
-    } else {
-      logger.error("Guild not found, skipping channel initialization");
+    // Get guild ID from config
+    const guildId = await configService.getString("GUILD_ID", "");
+    if (!guildId) {
+      throw new Error("GUILD_ID not configured");
     }
 
-    // Register commands
-    await CommandManager.getInstance().registerCommands();
-    logger.info("Commands registered");
+    // Initialize voice channel services
+    await voiceChannelManager.initialize(guildId);
+    await voiceChannelAnnouncer.start();
+    await channelInitializer.initializeChannels(await client.guilds.fetch(guildId));
 
-    logger.info(`Bot is ready! Logged in as ${client.user?.tag}`);
+    logger.info("All services initialized successfully");
   } catch (error) {
-    logger.error("Error during bot startup:", error);
-    await cleanup();
+    logger.error("Error initializing services:", error);
+    process.exit(1);
   }
+}
+
+client.once(Events.ClientReady, async (readyClient) => {
+  logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
+  await initializeServices();
 });
 
-client.on("interactionCreate", async (interaction: Interaction) => {
-  if (interaction.isChatInputCommand()) {
-    await handleCommands(interaction);
-  }
-});
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isCommand()) return;
 
-client.on(
-  "voiceStateUpdate",
-  async (oldState: VoiceState, newState: VoiceState) => {
-    try {
-      const configService = ConfigService.getInstance();
-      // Handle voice channel management
-      if (await configService.get("ENABLE_VC_MANAGEMENT")) {
-        await VoiceChannelManager.getInstance(client).handleVoiceStateUpdate(
-          oldState,
-          newState,
-        );
-      }
-
-      // Handle voice channel tracking
-      if (await configService.get("ENABLE_VC_TRACKING")) {
-        try {
-          await VoiceChannelTracker.getInstance(client).handleVoiceStateUpdate(
-            oldState,
-            newState,
-          );
-        } catch (error) {
-          logger.error("Error handling voice state update in tracker:", error);
-        }
-      }
-    } catch (error) {
-      logger.error("Error handling voice state update:", error);
+  try {
+    const command = client.commands.get(interaction.commandName);
+    if (!command) {
+      logger.error(`No command matching ${interaction.commandName} was found.`);
+      return;
     }
-  },
-);
 
-// Start the bot
-client.login(process.env.DISCORD_TOKEN).catch((error) => {
-  logger.error("Failed to login:", error);
+    await command.execute(interaction);
+  } catch (error) {
+    logger.error("Error handling command:", error);
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+    }
+  }
+});
+
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  try {
+    await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
+    await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
+  } catch (error) {
+    logger.error("Error handling voice state update:", error);
+  }
+});
+
+process.on("unhandledRejection", (error) => {
+  logger.error("Unhandled promise rejection:", error);
+});
+
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught exception:", error);
   process.exit(1);
 });
+
+client.login(process.env.DISCORD_TOKEN);
