@@ -64,6 +64,22 @@ export class VoiceChannelAnnouncer {
       // Wait for client to be ready
       await this.waitForClientReady();
 
+      // Ensure guild channels are cached
+      const guildId = await this.configService.getString("GUILD_ID", "");
+      if (!guildId) {
+        logger.error("GUILD_ID not configured");
+        return;
+      }
+
+      const guild = await this.client.guilds.fetch(guildId);
+      if (!guild) {
+        logger.error(`Guild not found with ID: ${guildId}`);
+        return;
+      }
+
+      // Cache guild channels
+      await guild.channels.fetch();
+
       const enabled = await this.configService.get<boolean>(
         "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
         false,
@@ -111,6 +127,7 @@ export class VoiceChannelAnnouncer {
       this.isInitialized = true;
     } catch (error) {
       logger.error("Error scheduling voice channel announcements:", error);
+      throw error; // Re-throw the error to be handled by the caller
     }
   }
 

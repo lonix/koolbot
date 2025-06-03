@@ -158,7 +158,7 @@ client.once("ready", async () => {
     // Register reload callbacks
     configService.registerReloadCallback(async () => {
       // Reinitialize voice channel announcer
-      VoiceChannelAnnouncer.getInstance(client).start();
+      await VoiceChannelAnnouncer.getInstance(client).start();
       logger.info("Voice channel announcer reloaded");
 
       // Reinitialize voice channel manager
@@ -184,7 +184,7 @@ client.once("ready", async () => {
     });
 
     // Initialize voice channel announcer
-    VoiceChannelAnnouncer.getInstance(client).start();
+    await VoiceChannelAnnouncer.getInstance(client).start();
     logger.info("Voice channel announcer initialized");
 
     // Initialize channels
