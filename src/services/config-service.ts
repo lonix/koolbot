@@ -1,5 +1,5 @@
 import { Config, IConfig } from "../models/config.js";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 import { Client } from "discord.js";
 import mongoose from "mongoose";
 
@@ -9,11 +9,8 @@ export class ConfigService {
   private initialized = false;
   private client: Client | null = null;
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
-  private logger: Logger;
 
-  private constructor() {
-    this.logger = Logger.getInstance();
-  }
+  private constructor() {}
 
   public static getInstance(): ConfigService {
     if (!ConfigService.instance) {
@@ -35,7 +32,7 @@ export class ConfigService {
   }
 
   private async triggerReload(): Promise<void> {
-    this.logger.info("Triggering configuration reload...");
+    logger.info("Triggering configuration reload...");
 
     // Clear the cache
     this.cache.clear();
@@ -49,11 +46,11 @@ export class ConfigService {
       try {
         await callback();
       } catch (error) {
-        this.logger.error("Error during configuration reload callback:", error);
+        logger.error("Error during configuration reload callback:", error);
       }
     }
 
-    this.logger.info("Configuration reload completed");
+    logger.info("Configuration reload completed");
   }
 
   public async initialize(): Promise<void> {
@@ -62,7 +59,7 @@ export class ConfigService {
     try {
       // Ensure MongoDB is connected
       if (mongoose.connection.readyState !== 1) {
-        this.logger.info("Waiting for MongoDB connection...");
+        logger.info("Waiting for MongoDB connection...");
         await new Promise<void>((resolve, reject) => {
           let timeoutId: ReturnType<typeof setTimeout>;
           timeoutId = setTimeout(() => {
@@ -119,9 +116,9 @@ export class ConfigService {
       }
 
       this.initialized = true;
-      this.logger.info("Configuration service initialized");
+      logger.info("Configuration service initialized");
     } catch (error) {
-      this.logger.error("Error initializing configuration service:", error);
+      logger.error("Error initializing configuration service:", error);
       throw error;
     }
   }
@@ -167,14 +164,14 @@ export class ConfigService {
       );
 
       this.cache.set(key, value);
-      this.logger.info(`Configuration updated: ${key} = ${value}`);
+      logger.info(`Configuration updated: ${key} = ${value}`);
 
       // If the value has changed, trigger a reload
       if (oldValue !== value) {
         await this.triggerReload();
       }
     } catch (error) {
-      this.logger.error(`Error updating configuration ${key}:`, error);
+      logger.error(`Error updating configuration ${key}:`, error);
       throw error;
     }
   }
@@ -183,12 +180,12 @@ export class ConfigService {
     try {
       await Config.deleteOne({ key });
       this.cache.delete(key);
-      this.logger.info(`Configuration deleted: ${key}`);
+      logger.info(`Configuration deleted: ${key}`);
 
       // Trigger reload after deletion
       await this.triggerReload();
     } catch (error) {
-      this.logger.error(`Error deleting configuration ${key}:`, error);
+      logger.error(`Error deleting configuration ${key}:`, error);
       throw error;
     }
   }
@@ -304,7 +301,7 @@ export class ConfigService {
       const existingConfig = await Config.findOne({ key: mapping.key });
       if (existingConfig) {
         skippedSettings.push(mapping.key);
-        this.logger.debug(`Configuration ${mapping.key} already exists in database, skipping migration`);
+        logger.debug(`Configuration ${mapping.key} already exists in database, skipping migration`);
         continue;
       }
 
@@ -318,9 +315,9 @@ export class ConfigService {
             mapping.category,
           );
           migratedSettings.push(mapping.key);
-          this.logger.info(`Migrated ${mapping.key} from environment variables`);
+          logger.info(`Migrated ${mapping.key} from environment variables`);
         } catch (error) {
-          this.logger.error(`Error migrating ${mapping.key}:`, error);
+          logger.error(`Error migrating ${mapping.key}:`, error);
         }
       } else if (mapping.defaultValue !== undefined) {
         try {
@@ -330,32 +327,32 @@ export class ConfigService {
             mapping.description,
             mapping.category,
           );
-          this.logger.info(`Set default value for ${mapping.key}`);
+          logger.info(`Set default value for ${mapping.key}`);
         } catch (error) {
-          this.logger.error(`Error setting default for ${mapping.key}:`, error);
+          logger.error(`Error setting default for ${mapping.key}:`, error);
         }
       }
     }
 
     // Output summary of migrations
     if (migratedSettings.length > 0) {
-      this.logger.info("The following settings were migrated from .env to the database:");
+      logger.info("The following settings were migrated from .env to the database:");
       migratedSettings.forEach(setting => {
-        this.logger.info(`- ${setting}`);
+        logger.info(`- ${setting}`);
       });
-      this.logger.info("These settings can now be managed through the bot's commands and no longer need to be in .env");
+      logger.info("These settings can now be managed through the bot's commands and no longer need to be in .env");
     }
 
     if (skippedSettings.length > 0) {
-      this.logger.info("The following settings were already in the database and were not migrated:");
+      logger.info("The following settings were already in the database and were not migrated:");
       skippedSettings.forEach(setting => {
-        this.logger.info(`- ${setting}`);
+        logger.info(`- ${setting}`);
       });
     }
 
-    this.logger.info("Critical settings that must remain in .env:");
+    logger.info("Critical settings that must remain in .env:");
     criticalSettings.forEach(setting => {
-      this.logger.info(`- ${setting}`);
+      logger.info(`- ${setting}`);
     });
   }
 }
