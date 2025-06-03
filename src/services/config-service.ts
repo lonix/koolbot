@@ -290,6 +290,9 @@ export class ConfigService {
       },
     ];
 
+    const migratedSettings: string[] = [];
+    const skippedSettings: string[] = [];
+
     for (const mapping of envMappings) {
       // Skip if this is a critical setting
       if (criticalSettings.includes(mapping.key)) {
@@ -299,6 +302,7 @@ export class ConfigService {
       // Check if this setting already exists in the database
       const existingConfig = await Config.findOne({ key: mapping.key });
       if (existingConfig) {
+        skippedSettings.push(mapping.key);
         logger.debug(`Configuration ${mapping.key} already exists in database, skipping migration`);
         continue;
       }
@@ -312,6 +316,7 @@ export class ConfigService {
             mapping.description,
             mapping.category,
           );
+          migratedSettings.push(mapping.key);
           logger.info(`Migrated ${mapping.key} from environment variables`);
         } catch (error) {
           logger.error(`Error migrating ${mapping.key}:`, error);
@@ -330,5 +335,26 @@ export class ConfigService {
         }
       }
     }
+
+    // Output summary of migrations
+    if (migratedSettings.length > 0) {
+      logger.info("The following settings were migrated from .env to the database:");
+      migratedSettings.forEach(setting => {
+        logger.info(`- ${setting}`);
+      });
+      logger.info("These settings can now be managed through the bot's commands and no longer need to be in .env");
+    }
+
+    if (skippedSettings.length > 0) {
+      logger.info("The following settings were already in the database and were not migrated:");
+      skippedSettings.forEach(setting => {
+        logger.info(`- ${setting}`);
+      });
+    }
+
+    logger.info("Critical settings that must remain in .env:");
+    criticalSettings.forEach(setting => {
+      logger.info(`- ${setting}`);
+    });
   }
 }
