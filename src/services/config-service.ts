@@ -296,6 +296,13 @@ export class ConfigService {
         continue;
       }
 
+      // Check if this setting already exists in the database
+      const existingConfig = await Config.findOne({ key: mapping.key });
+      if (existingConfig) {
+        logger.debug(`Configuration ${mapping.key} already exists in database, skipping migration`);
+        continue;
+      }
+
       const envValue = process.env[mapping.key];
       if (envValue !== undefined) {
         try {

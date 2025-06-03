@@ -1,22 +1,27 @@
 import winston from "winston";
-import { TextChannel, Client } from "discord.js";
+import { ConfigService } from "../services/config-service.js";
+
+const configService = ConfigService.getInstance();
 
 class Logger {
   private static instance: Logger;
   private logger: winston.Logger;
-  private logChannel: TextChannel | null = null;
+  private logChannel: any = null;
 
   private constructor() {
     this.logger = winston.createLogger({
-      level: process.env.DEBUG === "true" ? "debug" : "info",
+      level: "info",
       format: winston.format.combine(
         winston.format.timestamp(),
-        winston.format.printf(({ level, message, timestamp }) => {
-          return `${timestamp} [${level}]: ${message}`;
-        }),
+        winston.format.json()
       ),
       transports: [
-        new winston.transports.Console(),
+        new winston.transports.Console({
+          format: winston.format.combine(
+            winston.format.colorize(),
+            winston.format.simple()
+          ),
+        }),
         new winston.transports.File({ filename: "error.log", level: "error" }),
         new winston.transports.File({ filename: "combined.log" }),
       ],
@@ -30,51 +35,50 @@ class Logger {
     return Logger.instance;
   }
 
-  public async setLogChannel(client: Client, channelId: string): Promise<void> {
-    try {
-      const channel = await client.channels.fetch(channelId);
-      if (channel instanceof TextChannel) {
-        this.logChannel = channel;
-        this.info("Log channel set successfully");
+  public setLogChannel(channel: any): void {
+    this.logChannel = channel;
+  }
+
+  private async updateLogLevel(): Promise<void> {
+    const isDebug = await configService.get("DEBUG", false);
+    this.logger.level = isDebug ? "debug" : "info";
+  }
+
+  public async info(message: string, meta?: any): Promise<void> {
+    await this.updateLogLevel();
+    this.logger.info(message, meta);
+    if (this.logChannel) {
+      const isDebug = await configService.get("DEBUG", false);
+      if (isDebug) {
+        await this.logChannel.send(`[INFO] ${message}`);
       }
-    } catch (error) {
-      this.error("Failed to set log channel:", error);
     }
   }
 
-  public info(message: string, ...args: unknown[]): void {
-    this.logger.info(message, ...args);
+  public async error(message: string, meta?: any): Promise<void> {
+    await this.updateLogLevel();
+    this.logger.error(message, meta);
     if (this.logChannel) {
-      this.logChannel.send(`[INFO] ${message}`).catch((error) => {
-        this.logger.error("Failed to send log to Discord:", error);
-      });
+      await this.logChannel.send(`[ERROR] ${message}`);
     }
   }
 
-  public error(message: string, ...args: unknown[]): void {
-    this.logger.error(message, ...args);
+  public async debug(message: string, meta?: any): Promise<void> {
+    await this.updateLogLevel();
+    this.logger.debug(message, meta);
     if (this.logChannel) {
-      this.logChannel.send(`[ERROR] ${message}`).catch((error) => {
-        this.logger.error("Failed to send log to Discord:", error);
-      });
+      const isDebug = await configService.get("DEBUG", false);
+      if (isDebug) {
+        await this.logChannel.send(`[DEBUG] ${message}`);
+      }
     }
   }
 
-  public debug(message: string, ...args: unknown[]): void {
-    this.logger.debug(message, ...args);
-    if (this.logChannel && process.env.DEBUG === "true") {
-      this.logChannel.send(`[DEBUG] ${message}`).catch((error) => {
-        this.logger.error("Failed to send log to Discord:", error);
-      });
-    }
-  }
-
-  public warn(message: string, ...args: unknown[]): void {
-    this.logger.warn(message, ...args);
+  public async warn(message: string, meta?: any): Promise<void> {
+    await this.updateLogLevel();
+    this.logger.warn(message, meta);
     if (this.logChannel) {
-      this.logChannel.send(`[WARN] ${message}`).catch((error) => {
-        this.logger.error("Failed to send log to Discord:", error);
-      });
+      await this.logChannel.send(`[WARN] ${message}`);
     }
   }
 }

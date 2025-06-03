@@ -210,4 +210,32 @@ export class CommandManager {
       throw error;
     }
   }
+
+  private async loadCommands(): Promise<void> {
+    // Load commands based on configuration
+    if (await this.configService.get("ENABLE_PING")) {
+      await this.loadCommand("ping");
+    }
+    if (await this.configService.get("ENABLE_AMIKOOL")) {
+      await this.loadCommand("amikool");
+    }
+    if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+      await this.loadCommand("plex-price");
+    }
+    if (await this.configService.get("ENABLE_VC_TRACKING")) {
+      await this.loadCommand("vc-stats");
+    }
+    if (await this.configService.get("ENABLE_SEEN")) {
+      await this.loadCommand("seen");
+    }
+    if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+      await this.loadCommand("setup-lobby");
+    }
+    if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+      await this.loadCommand("vc-announcement");
+    }
+    if (await this.configService.get("quotes.enabled")) {
+      await this.loadCommand("quote");
+    }
+  }
 }
