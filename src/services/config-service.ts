@@ -92,11 +92,31 @@ export class ConfigService {
         });
       }
 
-      // Load all configs into cache
+      // Load critical settings from environment variables first
+      const criticalSettings = {
+        GUILD_ID: process.env.GUILD_ID,
+        CLIENT_ID: process.env.CLIENT_ID,
+        DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+        MONGODB_URI: process.env.MONGODB_URI,
+        DEBUG: process.env.DEBUG,
+        NODE_ENV: process.env.NODE_ENV,
+      };
+
+      for (const [key, value] of Object.entries(criticalSettings)) {
+        if (value) {
+          this.cache.set(key, value);
+        }
+      }
+
+      // Load all configs from database
       const configs = await Config.find({});
       for (const config of configs) {
-        this.cache.set(config.key, config.value);
+        // Only set if not already set by critical settings
+        if (!this.cache.has(config.key)) {
+          this.cache.set(config.key, config.value);
+        }
       }
+
       this.initialized = true;
       logger.info("Configuration service initialized");
     } catch (error) {
@@ -252,124 +272,55 @@ export class ConfigService {
       },
       {
         key: "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
-        category: "announcements",
+        category: "tracking",
         description: "Enable/disable weekly voice channel announcements",
         defaultValue: "true",
       },
       {
         key: "VC_ANNOUNCEMENT_SCHEDULE",
-        category: "announcements",
-        description: "Cron schedule for weekly announcements",
+        category: "tracking",
+        description: "Cron expression for weekly announcements",
         defaultValue: "0 16 * * 5",
       },
       {
         key: "VC_ANNOUNCEMENT_CHANNEL",
-        category: "announcements",
-        description: "Channel name for weekly announcements",
+        category: "tracking",
+        description: "Channel name for voice channel announcements",
         defaultValue: "voice-stats",
-      },
-
-      // Bot Features
-      {
-        key: "ENABLE_PING",
-        category: "features",
-        description: "Enable/disable ping command",
-        defaultValue: "true",
-      },
-      {
-        key: "ENABLE_AMIKOOL",
-        category: "features",
-        description: "Enable/disable amikool command",
-        defaultValue: "true",
-      },
-      {
-        key: "ENABLE_PLEX_PRICE",
-        category: "features",
-        description: "Enable/disable plex price checking",
-        defaultValue: "true",
-      },
-
-      // Roles
-      {
-        key: "COOL_ROLE_NAME",
-        category: "roles",
-        description: "Name of the role for kool verification",
-        defaultValue: "Kool",
-      },
-      {
-        key: "VC_TRACKING_ADMIN_ROLES",
-        category: "roles",
-        description: "Comma-separated list of admin role names",
-        defaultValue: "Admin,Moderator",
-      },
-
-      // Quote System
-      {
-        key: "quotes.enabled",
-        category: "features",
-        description: "Enable/disable quote system",
-        defaultValue: "true",
-      },
-      {
-        key: "quotes.add_roles",
-        category: "roles",
-        description:
-          "Comma-separated list of role IDs that can add quotes (empty for all users)",
-        defaultValue: "",
-      },
-      {
-        key: "quotes.delete_roles",
-        category: "roles",
-        description:
-          "Comma-separated list of role IDs that can delete quotes (empty for admins only)",
-        defaultValue: "",
-      },
-      {
-        key: "quotes.max_length",
-        category: "features",
-        description: "Maximum length of quotes in characters",
-        defaultValue: "1000",
-      },
-      {
-        key: "quotes.cooldown",
-        category: "features",
-        description: "Cooldown in seconds between quote additions",
-        defaultValue: "60",
       },
     ];
 
-    // First, migrate any existing values from .env
     for (const mapping of envMappings) {
-      // Skip critical settings
+      // Skip if this is a critical setting
       if (criticalSettings.includes(mapping.key)) {
         continue;
       }
 
-      // Check if this setting exists in the database
-      const existingConfig = await Config.findOne({ key: mapping.key });
-
-      if (!existingConfig) {
-        // If not in database, use environment value if available, otherwise use default
-        const value = process.env[mapping.key] || mapping.defaultValue;
-        await this.set(
-          mapping.key,
-          value,
-          mapping.description,
-          mapping.category,
-        );
-        logger.info(`Migrated ${mapping.key} from environment to database`);
-      }
-    }
-
-    // Log a warning for any configurable settings still in .env
-    for (const key of Object.keys(process.env)) {
-      if (
-        !criticalSettings.includes(key) &&
-        envMappings.some((m) => m.key === key)
-      ) {
-        logger.warn(
-          `Configuration key '${key}' found in .env but should be managed through /config command`,
-        );
+      const envValue = process.env[mapping.key];
+      if (envValue !== undefined) {
+        try {
+          await this.set(
+            mapping.key,
+            envValue,
+            mapping.description,
+            mapping.category,
+          );
+          logger.info(`Migrated ${mapping.key} from environment variables`);
+        } catch (error) {
+          logger.error(`Error migrating ${mapping.key}:`, error);
+        }
+      } else if (mapping.defaultValue !== undefined) {
+        try {
+          await this.set(
+            mapping.key,
+            mapping.defaultValue,
+            mapping.description,
+            mapping.category,
+          );
+          logger.info(`Set default value for ${mapping.key}`);
+        } catch (error) {
+          logger.error(`Error setting default for ${mapping.key}:`, error);
+        }
       }
     }
   }
