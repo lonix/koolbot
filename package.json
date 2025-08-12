@@ -36,7 +36,7 @@
     "@types/dotenv": "^6.1.1",
     "@types/mongoose": "^5.11.96",
     "@types/node": "^22.15.19",
-    "@typescript-eslint/eslint-plugin": "^8.32.1",
+    "@typescript-eslint/eslint-plugin": "^8.39.1",
     "@typescript-eslint/parser": "^8.32.1",
     "eslint": "^9.27.0",
     "prettier": "^3.5.3",
