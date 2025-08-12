@@ -227,6 +227,79 @@ export class CommandManager {
     }
   }
 
+  public async populateClientCommands(): Promise<void> {
+    try {
+      if (!this.client) {
+        throw new Error("Client not set");
+      }
+
+      // Import command handlers
+      const { execute: ping } = await import("../commands/ping.js");
+      const { execute: amikool } = await import("../commands/amikool.js");
+      const { execute: plexprice } = await import("../commands/plexprice.js");
+      const { execute: vctop } = await import("../commands/vctop.js");
+      const { execute: vcstats } = await import("../commands/vcstats.js");
+      const { execute: seen } = await import("../commands/seen.js");
+      const { execute: transferOwnership } = await import("../commands/transfer-ownership.js");
+      const { execute: announceVcStats } = await import("../commands/announce-vc-stats.js");
+      const { execute: configCommand } = await import("../commands/config/index.js");
+      const { execute: quoteCommand } = await import("../commands/quote.js");
+      const { execute: excludeChannel } = await import("../commands/exclude-channel.js");
+      const { command: setupLobbyCommand } = await import("../commands/setup-lobby.js");
+
+      // Clear existing commands
+      this.client.commands.clear();
+
+      // Add commands based on configuration
+      if (await this.configService.get("ENABLE_PING")) {
+        this.client.commands.set("ping", { execute: ping });
+      }
+
+      if (await this.configService.get("ENABLE_AMIKOOL")) {
+        this.client.commands.set("amikool", { execute: amikool });
+      }
+
+      if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+        this.client.commands.set("plexprice", { execute: plexprice });
+      }
+
+      if (await this.configService.get("ENABLE_VC_TRACKING")) {
+        this.client.commands.set("vctop", { execute: vctop });
+        this.client.commands.set("vcstats", { execute: vcstats });
+      }
+
+      if (await this.configService.get("ENABLE_SEEN")) {
+        this.client.commands.set("seen", { execute: seen });
+      }
+
+      if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+        this.client.commands.set("transfer-ownership", { execute: transferOwnership });
+      }
+
+      if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+        this.client.commands.set("announce-vc-stats", { execute: announceVcStats });
+      }
+
+      if (await this.configService.get("quotes.enabled")) {
+        this.client.commands.set("quote", { execute: quoteCommand });
+      }
+
+      // Always add config command
+      this.client.commands.set("config", { execute: configCommand });
+
+      // Always add exclude-channel command
+      this.client.commands.set("exclude-channel", { execute: excludeChannel });
+
+      // Always add setup-lobby command
+      this.client.commands.set("setup-lobby", { execute: setupLobbyCommand });
+
+      logger.info(`Populated client.commands with ${this.client.commands.size} commands`);
+    } catch (error) {
+      logger.error("Error populating client commands:", error);
+      throw error;
+    }
+  }
+
   public async unregisterCommands(): Promise<void> {
     try {
       if (!this.client) {
@@ -257,8 +330,9 @@ export class CommandManager {
         throw error;
       }
     } catch (error) {
-      logger.error("Error in unregisterCommands:", error);
-      throw error;
+        logger.error("Error in unregisterCommands:", error);
+        throw error;
+      }
     }
   }
 }

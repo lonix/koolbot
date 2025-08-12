@@ -166,6 +166,7 @@ async function initializeServices(): Promise<void> {
     await configService.initialize();
     await configService.migrateFromEnv();
     await commandManager.registerCommands();
+    await commandManager.populateClientCommands();
 
     // Get guild ID from config
     const guildId = await configService.getString("GUILD_ID", "");
