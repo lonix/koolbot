@@ -25,6 +25,10 @@ COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 
+# Copy migration scripts for production use
+COPY --from=builder /app/src/scripts ./src/scripts
+COPY --from=builder /app/src/loader.js ./src/loader.js
+
 # Set environment variables
 ENV NODE_ENV=production
 
