@@ -1,9 +1,4 @@
-import {
-  CommandInteraction,
-  SlashCommandBuilder,
-  SlashCommandUserOption,
-  ChatInputCommandInteraction,
-} from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { formatTimeAgo } from "../utils/time.js";
 import logger from "../utils/logger.js";

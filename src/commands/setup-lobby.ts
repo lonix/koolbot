@@ -1,19 +1,11 @@
 import {
   SlashCommandBuilder,
-  CommandInteraction,
-  CategoryChannel,
-  VoiceChannel,
-  ChannelType,
   ChatInputCommandInteraction,
 } from "discord.js";
 import logger from "../utils/logger.js";
-import { Command } from "../interfaces/command.js";
-import { ConfigService } from "../services/config-service.js";
 import { ChannelInitializer } from "../services/channel-initializer.js";
 
-const configService = ConfigService.getInstance();
-
-export const command: Command = {
+export const command = {
   data: new SlashCommandBuilder()
     .setName("setup-lobby")
     .setDescription("Set up the voice channel lobby and category"),

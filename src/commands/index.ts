@@ -1,9 +1,8 @@
-import { Client, Collection, Events, GatewayIntentBits, ChatInputCommandInteraction } from "discord.js";
 import { readdirSync } from "fs";
 import { join } from "path";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
-import { Command } from "../interfaces/command.js";
+import { ChatInputCommandInteraction } from "discord.js";
 import logger from "../utils/logger.js";
 import { execute as ping } from "./ping.js";
 import { execute as amikool } from "./amikool.js";
@@ -13,8 +12,10 @@ import { execute as vcstats } from "./vcstats.js";
 import { execute as seen } from "./seen.js";
 import { execute as transferOwnership } from "./transfer-ownership.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
-import { execute as config } from "./config/index.js";
-import { execute as quote } from "./quote.js";
+import { execute as configCommand } from "./config/index.js";
+import { execute as quoteCommand } from "./quote.js";
+import { execute as excludeChannel } from "./exclude-channel.js";
+import { command as setupLobbyCommand } from "./setup-lobby.js";
 import { ConfigService } from "../services/config-service.js";
 
 const configService = ConfigService.getInstance();
@@ -53,7 +54,9 @@ const commands: Record<
       await seen(interaction);
     }
   },
-  config,
+  config: async (interaction) => {
+    await configCommand(interaction);
+  },
   "transfer-ownership": async (interaction) => {
     if (await configService.get("ENABLE_VC_MANAGEMENT")) {
       await transferOwnership(interaction);
@@ -66,8 +69,14 @@ const commands: Record<
   },
   quote: async (interaction) => {
     if (await configService.get("quotes.enabled")) {
-      await quote(interaction);
+      await quoteCommand(interaction);
     }
+  },
+  "exclude-channel": async (interaction) => {
+    await excludeChannel(interaction);
+  },
+  "setup-lobby": async (interaction) => {
+    await setupLobbyCommand.execute(interaction);
   },
 };
 

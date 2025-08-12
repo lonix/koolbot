@@ -1,16 +1,17 @@
-import {
-  CommandInteraction,
-  SlashCommandBuilder,
-  SlashCommandUserOption,
-  PermissionsBitField,
-  ChatInputCommandInteraction,
-} from "discord.js";
-import logger from "../utils/logger.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
 import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
+import { formatTimeAgo } from "../utils/time.js";
+import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("vcstats")
-  .setDescription("Show your voice channel statistics")
+  .setDescription("Show voice channel statistics for a user")
+  .addUserOption((option) =>
+    option
+      .setName("user")
+      .setDescription("The user to show statistics for")
+      .setRequired(false),
+  )
   .addStringOption((option) =>
     option
       .setName("period")
@@ -23,11 +24,12 @@ export const data = new SlashCommandBuilder()
       ),
   );
 
-export async function execute(interaction: ChatInputCommandInteraction) {
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   try {
+    const user = interaction.options.getUser("user") || interaction.user;
     const period = (interaction.options.getString("period") || "week") as TimePeriod;
     const tracker = VoiceChannelTracker.getInstance(interaction.client);
-    const stats = await tracker.getUserStats(interaction.user.id, period);
+    const stats = await tracker.getUserStats(user.id, period);
 
     if (!stats) {
       await interaction.reply("No voice channel activity found for the selected period.");
@@ -41,7 +43,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     };
 
     const response = [
-      `**Voice Channel Statistics (${period})**`,
+      `**Voice Channel Statistics for ${user.username} (${period})**`,
       `Total Time: ${formatTime(stats.totalTime)}`,
       `Last Seen: ${stats.lastSeen.toLocaleString()}`,
       "",

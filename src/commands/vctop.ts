@@ -1,15 +1,6 @@
-import {
-  CommandInteraction,
-  SlashCommandBuilder,
-  SlashCommandIntegerOption,
-  SlashCommandStringOption,
-  ChatInputCommandInteraction,
-} from "discord.js";
+import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
+import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
 import logger from "../utils/logger.js";
-import {
-  VoiceChannelTracker,
-  TimePeriod,
-} from "../services/voice-channel-tracker.js";
 
 export const data = new SlashCommandBuilder()
   .setName("vctop")

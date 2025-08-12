@@ -1,26 +1,23 @@
 import {
   Client,
-  GatewayIntentBits,
-  Interaction,
-  VoiceState,
-  ChannelType,
-  CategoryChannel,
-  GuildBasedChannel,
-  VoiceChannel,
   Events,
+  GatewayIntentBits,
+  GuildBasedChannel,
+  CategoryChannel,
+  TextChannel,
+  ChannelType,
   Collection,
-  CommandInteraction,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
-import { handleCommands } from "./commands/index.js";
-import mongoose from "mongoose";
-import { VoiceChannelManager } from "./services/voice-channel-manager.js";
-import { ChannelInitializer } from "./services/channel-initializer.js";
+import { ConfigService } from "./services/config-service.js";
 import { CommandManager } from "./services/command-manager.js";
+import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
-import { ConfigService } from "./services/config-service.js";
+import { ChannelInitializer } from "./services/channel-initializer.js";
+import { connectToDatabase } from "./utils/database.js";
+import mongoose from "mongoose";
 
 dotenvConfig();
 
@@ -71,19 +68,7 @@ client.commands = new Collection();
 
 let isShuttingDown = false;
 
-async function initializeDatabase(): Promise<void> {
-  try {
-    await mongoose.connect(process.env.MONGODB_URI!);
-    logger.info("Connected to MongoDB");
-  } catch (error) {
-    logger.error("Failed to connect to MongoDB:", error);
-    throw error;
-  }
-}
-
-async function cleanupVoiceChannels(
-  createOfflineLobby: boolean = false,
-): Promise<void> {
+async function cleanupVoiceChannels(): Promise<void> {
   try {
     const configService = ConfigService.getInstance();
 
@@ -163,7 +148,7 @@ const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
 const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 
-async function initializeServices() {
+async function initializeServices(): Promise<void> {
   try {
     // Set client for services that need it
     configService.setClient(client);
