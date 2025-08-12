@@ -196,9 +196,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isCommand()) return;
 
   try {
-    // Import the command handler function
-    const { handleCommands } = await import("./commands/index.js");
-    await handleCommands(interaction);
+    const command = client.commands.get(interaction.commandName);
+    if (!command) {
+      logger.error(`No command matching ${interaction.commandName} was found.`);
+      return;
+    }
+
+    await command.execute(interaction);
   } catch (error) {
     logger.error("Error handling command:", error);
     if (interaction.replied || interaction.deferred) {
