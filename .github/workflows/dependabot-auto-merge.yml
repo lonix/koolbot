@@ -17,15 +17,15 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       github.actor == 'dependabot[bot]' &&
-      (github.event_name == 'pull_request_target' ||
-       github.event_name == 'status' ||
+      (github.event_name == 'pull_request_target' || 
+       github.event_name == 'status' || 
        github.event_name == 'check_suite')
     steps:
       - name: Auto-merge Dependabot PR
         run: |
           # Wait a moment for any pending checks to register
           sleep 10
-
+          
           # Enable auto-merge with squash
           gh pr merge --auto --squash "$PR_URL" || echo "Auto-merge failed or already enabled"
         env:
@@ -45,7 +45,7 @@ jobs:
         run: |
           PR_NUMBER=$(echo "${{ github.event.target_url }}" | grep -o '[0-9]\+$')
           echo "number=$PR_NUMBER" >> $GITHUB_OUTPUT
-
+          
       - name: Merge if all checks pass
         if: steps.pr.outputs.number
         run: |
