@@ -198,7 +198,9 @@ export class VoiceChannelTracker {
   private async isChannelExcluded(channelId: string): Promise<boolean> {
     try {
       // Try new configuration key first, then fall back to old for backward compatibility
-      let excludedChannels = await this.configService.get("tracking.excluded_channels");
+      let excludedChannels = await this.configService.get(
+        "tracking.excluded_channels",
+      );
 
       if (!excludedChannels) {
         // Fallback to old key
@@ -209,7 +211,10 @@ export class VoiceChannelTracker {
 
       // Handle both string (comma-separated) and array formats
       if (typeof excludedChannels === "string") {
-        return excludedChannels.split(",").map(id => id.trim()).includes(channelId);
+        return excludedChannels
+          .split(",")
+          .map((id) => id.trim())
+          .includes(channelId);
       }
 
       if (Array.isArray(excludedChannels)) {

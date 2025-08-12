@@ -8,7 +8,9 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   try {
-    const response = await axios.get("https://api.evemarketer.com/ec/marketstat/json?typeid=44992&usesystem=30000142");
+    const response = await axios.get(
+      "https://api.evemarketer.com/ec/marketstat/json?typeid=44992&usesystem=30000142",
+    );
     const plexData = response.data[0];
     const buyPrice = plexData.buy.max.toLocaleString();
     const sellPrice = plexData.sell.min.toLocaleString();

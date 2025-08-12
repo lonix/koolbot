@@ -1,4 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, SlashCommandUserOption } from "discord.js";
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  SlashCommandUserOption,
+} from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 
@@ -12,7 +16,9 @@ export const data = new SlashCommandBuilder()
       .setRequired(true),
   );
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     if (!interaction.guild) {
       await interaction.reply({
@@ -73,7 +79,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const manager = VoiceChannelManager.getInstance(interaction.client);
 
     // Transfer ownership
-    await manager.transferOwnership(voiceChannel.id, member.id, targetMember.id);
+    await manager.transferOwnership(
+      voiceChannel.id,
+      member.id,
+      targetMember.id,
+    );
 
     await interaction.reply({
       content: `Voice channel ownership transferred to ${targetUser.username}!`,

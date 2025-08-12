@@ -7,7 +7,9 @@ export const data = new SlashCommandBuilder()
   .setDescription("Manually trigger the voice channel activity announcement")
   .setDefaultMemberPermissions(0x8); // Requires Administrator permission
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     await interaction.deferReply({ ephemeral: true });
 
@@ -20,7 +22,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   } catch (error) {
     logger.error("Error executing announce-vc-stats command:", error);
     await interaction.editReply({
-      content: "❌ Failed to send the announcement. Please check the logs for details.",
+      content:
+        "❌ Failed to send the announcement. Please check the logs for details.",
     });
   }
 }

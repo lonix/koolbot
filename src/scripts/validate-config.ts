@@ -111,8 +111,13 @@ async function validateConfiguration(): Promise<void> {
         }
 
         // Validate the value
-        if (config.required && (value === null || value === undefined || value === "")) {
-          logger.error(`❌ Missing required configuration: ${config.key} - ${config.description}`);
+        if (
+          config.required &&
+          (value === null || value === undefined || value === "")
+        ) {
+          logger.error(
+            `❌ Missing required configuration: ${config.key} - ${config.description}`,
+          );
           errorCount++;
           continue;
         }
@@ -122,7 +127,11 @@ async function validateConfiguration(): Promise<void> {
           let typeValid = true;
           switch (config.type) {
             case "boolean":
-              if (typeof value !== "boolean" && value !== "true" && value !== "false") {
+              if (
+                typeof value !== "boolean" &&
+                value !== "true" &&
+                value !== "false"
+              ) {
                 typeValid = false;
               }
               break;
@@ -139,7 +148,9 @@ async function validateConfiguration(): Promise<void> {
           }
 
           if (!typeValid) {
-            logger.warn(`⚠️  Type mismatch for ${config.key}: expected ${config.type}, got ${typeof value}`);
+            logger.warn(
+              `⚠️  Type mismatch for ${config.key}: expected ${config.type}, got ${typeof value}`,
+            );
             warningCount++;
           } else {
             logger.info(`✅ ${config.key}: ${value} (${config.description})`);
@@ -148,14 +159,15 @@ async function validateConfiguration(): Promise<void> {
         } else {
           // Use default value
           if (config.defaultValue !== undefined) {
-            logger.info(`✅ ${config.key}: ${config.defaultValue} (default) - ${config.description}`);
+            logger.info(
+              `✅ ${config.key}: ${config.defaultValue} (default) - ${config.description}`,
+            );
             validCount++;
           } else {
             logger.warn(`⚠️  ${config.key}: not set - ${config.description}`);
             warningCount++;
           }
         }
-
       } catch (error) {
         logger.error(`❌ Error validating ${config.key}:`, error);
         errorCount++;
@@ -170,13 +182,16 @@ async function validateConfiguration(): Promise<void> {
     if (errorCount === 0) {
       logger.info("🎉 All required configurations are valid!");
     } else {
-      logger.error("❌ Some configurations have errors. Please fix them before starting the bot.");
+      logger.error(
+        "❌ Some configurations have errors. Please fix them before starting the bot.",
+      );
     }
 
     if (warningCount > 0) {
-      logger.warn("⚠️  Some configurations have warnings. The bot may not work as expected.");
+      logger.warn(
+        "⚠️  Some configurations have warnings. The bot may not work as expected.",
+      );
     }
-
   } catch (error) {
     logger.error("Fatal error during configuration validation:", error);
     process.exit(1);

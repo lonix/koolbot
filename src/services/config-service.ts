@@ -163,7 +163,10 @@ export class ConfigService {
     }
   }
 
-  public async getString(key: string, defaultValue: string = ""): Promise<string> {
+  public async getString(
+    key: string,
+    defaultValue: string = "",
+  ): Promise<string> {
     const value = await this.get(key);
     if (typeof value === "string") {
       return value;
@@ -174,7 +177,10 @@ export class ConfigService {
     return defaultValue;
   }
 
-  public async getBoolean(key: string, defaultValue: boolean = false): Promise<boolean> {
+  public async getBoolean(
+    key: string,
+    defaultValue: boolean = false,
+  ): Promise<boolean> {
     const value = await this.get(key);
     if (typeof value === "boolean") {
       return value;
@@ -188,7 +194,10 @@ export class ConfigService {
     return defaultValue;
   }
 
-  public async getNumber(key: string, defaultValue: number = 0): Promise<number> {
+  public async getNumber(
+    key: string,
+    defaultValue: number = 0,
+  ): Promise<number> {
     const value = await this.get(key);
     if (typeof value === "number") {
       return value;
@@ -361,7 +370,9 @@ export class ConfigService {
       const existingConfig = await Config.findOne({ key: mapping.key });
       if (existingConfig) {
         skippedSettings.push(mapping.key);
-        logger.debug(`Configuration ${mapping.key} already exists in database, skipping migration`);
+        logger.debug(
+          `Configuration ${mapping.key} already exists in database, skipping migration`,
+        );
         continue;
       }
 
@@ -396,22 +407,28 @@ export class ConfigService {
 
     // Output summary of migrations
     if (migratedSettings.length > 0) {
-      logger.info("The following settings were migrated from .env to the database:");
-      migratedSettings.forEach(setting => {
+      logger.info(
+        "The following settings were migrated from .env to the database:",
+      );
+      migratedSettings.forEach((setting) => {
         logger.info(`- ${setting}`);
       });
-      logger.info("These settings can now be managed through the bot's commands and no longer need to be in .env");
+      logger.info(
+        "These settings can now be managed through the bot's commands and no longer need to be in .env",
+      );
     }
 
     if (skippedSettings.length > 0) {
-      logger.info("The following settings were already in the database and were not migrated:");
-      skippedSettings.forEach(setting => {
+      logger.info(
+        "The following settings were already in the database and were not migrated:",
+      );
+      skippedSettings.forEach((setting) => {
         logger.info(`- ${setting}`);
       });
     }
 
     logger.info("Critical settings that must remain in .env:");
-    criticalSettings.forEach(setting => {
+    criticalSettings.forEach((setting) => {
       logger.info(`- ${setting}`);
     });
   }

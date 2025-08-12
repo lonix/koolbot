@@ -105,7 +105,10 @@ export class QuoteService {
     }
 
     // Check if user has permission to delete
-    const deleteRolesStr = await configService.getString("quotes.delete_roles", "");
+    const deleteRolesStr = await configService.getString(
+      "quotes.delete_roles",
+      "",
+    );
     const deleteRoles = deleteRolesStr.split(",").filter(Boolean);
     const hasPermission =
       deleteRoles.length === 0 || // Empty means only admins

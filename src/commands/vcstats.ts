@@ -1,5 +1,8 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
-import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
+import {
+  VoiceChannelTracker,
+  TimePeriod,
+} from "../services/voice-channel-tracker.js";
 import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
@@ -23,15 +26,20 @@ export const data = new SlashCommandBuilder()
       ),
   );
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     const user = interaction.options.getUser("user") || interaction.user;
-    const period = (interaction.options.getString("period") || "week") as TimePeriod;
+    const period = (interaction.options.getString("period") ||
+      "week") as TimePeriod;
     const tracker = VoiceChannelTracker.getInstance(interaction.client);
     const stats = await tracker.getUserStats(user.id, period);
 
     if (!stats) {
-      await interaction.reply("No voice channel activity found for the selected period.");
+      await interaction.reply(
+        "No voice channel activity found for the selected period.",
+      );
       return;
     }
 
@@ -48,7 +56,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       "",
       "**Recent Sessions:**",
       ...stats.sessions.slice(0, 5).map((session) => {
-        const duration = session.duration ? formatTime(session.duration) : "ongoing";
+        const duration = session.duration
+          ? formatTime(session.duration)
+          : "ongoing";
         return `• ${session.channelName}: ${duration}`;
       }),
     ].join("\n");

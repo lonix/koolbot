@@ -74,7 +74,8 @@ const configMigrations: ConfigMigration[] = [
     oldKey: "EXCLUDED_VC_CHANNELS",
     newKey: "tracking.excluded_channels",
     category: "tracking",
-    description: "Comma-separated list of voice channel IDs to exclude from tracking",
+    description:
+      "Comma-separated list of voice channel IDs to exclude from tracking",
     defaultValue: "",
   },
   {
@@ -119,7 +120,9 @@ async function migrateConfiguration(): Promise<void> {
         // Check if new key already exists
         const existingConfig = await configService.get(migration.newKey);
         if (existingConfig !== null) {
-          logger.info(`Configuration ${migration.newKey} already exists, skipping`);
+          logger.info(
+            `Configuration ${migration.newKey} already exists, skipping`,
+          );
           skippedCount++;
           continue;
         }
@@ -127,7 +130,9 @@ async function migrateConfiguration(): Promise<void> {
         // Get value from old environment variable
         const envValue = process.env[migration.oldKey];
         if (!envValue) {
-          logger.info(`Environment variable ${migration.oldKey} not set, using default value`);
+          logger.info(
+            `Environment variable ${migration.oldKey} not set, using default value`,
+          );
         }
 
         // Use environment value or default
@@ -142,25 +147,37 @@ async function migrateConfiguration(): Promise<void> {
         }
 
         // Set the new configuration
-        await configService.set(migration.newKey, finalValue, migration.description, migration.category);
+        await configService.set(
+          migration.newKey,
+          finalValue,
+          migration.description,
+          migration.category,
+        );
 
-        logger.info(`Migrated ${migration.oldKey} -> ${migration.newKey} with value: ${finalValue}`);
+        logger.info(
+          `Migrated ${migration.oldKey} -> ${migration.newKey} with value: ${finalValue}`,
+        );
         migratedCount++;
-
       } catch (error) {
-        logger.error(`Error migrating ${migration.oldKey} -> ${migration.newKey}:`, error);
+        logger.error(
+          `Error migrating ${migration.oldKey} -> ${migration.newKey}:`,
+          error,
+        );
         errorCount++;
       }
     }
 
-    logger.info(`Migration completed: ${migratedCount} migrated, ${skippedCount} skipped, ${errorCount} errors`);
+    logger.info(
+      `Migration completed: ${migratedCount} migrated, ${skippedCount} skipped, ${errorCount} errors`,
+    );
 
     if (errorCount === 0) {
       logger.info("All configurations migrated successfully!");
     } else {
-      logger.warn(`Some configurations failed to migrate. Check the logs above.`);
+      logger.warn(
+        `Some configurations failed to migrate. Check the logs above.`,
+      );
     }
-
   } catch (error) {
     logger.error("Fatal error during configuration migration:", error);
     process.exit(1);

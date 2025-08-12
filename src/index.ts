@@ -46,9 +46,12 @@ if (process.env.DEBUG === "true") {
 // Extend Client type to include commands collection
 declare module "discord.js" {
   export interface Client {
-    commands: Collection<string, {
-      execute: (interaction: CommandInteraction) => Promise<void>;
-    }>;
+    commands: Collection<
+      string,
+      {
+        execute: (interaction: CommandInteraction) => Promise<void>;
+      }
+    >;
   }
 }
 
@@ -71,8 +74,9 @@ async function cleanupVoiceChannels(): Promise<void> {
     const configService = ConfigService.getInstance();
 
     // Check if voice channel management is enabled using new config keys
-    const isEnabled = await configService.getBoolean("voice_channel.enabled") ||
-                     await configService.getBoolean("ENABLE_VC_MANAGEMENT");
+    const isEnabled =
+      (await configService.getBoolean("voice_channel.enabled")) ||
+      (await configService.getBoolean("ENABLE_VC_MANAGEMENT"));
 
     if (isEnabled) {
       logger.info("Cleaning up voice channels...");
@@ -81,8 +85,12 @@ async function cleanupVoiceChannels(): Promise<void> {
       );
       if (guild) {
         // Get the VC category - try new config keys first, then fall back to old ones
-        const categoryName = await configService.getString("voice_channel.category_name") ||
-                            await configService.getString("VC_CATEGORY_NAME", "Dynamic Voice Channels");
+        const categoryName =
+          (await configService.getString("voice_channel.category_name")) ||
+          (await configService.getString(
+            "VC_CATEGORY_NAME",
+            "Dynamic Voice Channels",
+          ));
         const category = guild.channels.cache.find(
           (channel: GuildBasedChannel) =>
             channel.type === ChannelType.GuildCategory &&
@@ -91,8 +99,11 @@ async function cleanupVoiceChannels(): Promise<void> {
 
         if (category) {
           // Get lobby channel name - try new config keys first, then fall back to old ones
-          const lobbyChannelName = await configService.getString("voice_channel.lobby_channel_name") ||
-                                  await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+          const lobbyChannelName =
+            (await configService.getString(
+              "voice_channel.lobby_channel_name",
+            )) ||
+            (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
 
           // Clean up any empty channels in the category
           for (const channel of category.children.cache.values()) {
@@ -165,7 +176,9 @@ async function initializeServices(): Promise<void> {
     // Initialize voice channel services
     await voiceChannelManager.initialize(guildId);
     await voiceChannelAnnouncer.start();
-    await channelInitializer.initializeChannels(await client.guilds.fetch(guildId));
+    await channelInitializer.initializeChannels(
+      await client.guilds.fetch(guildId),
+    );
 
     logger.info("All services initialized successfully");
   } catch (error) {

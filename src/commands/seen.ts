@@ -1,4 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, SlashCommandUserOption } from "discord.js";
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  SlashCommandUserOption,
+} from "discord.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { formatTimeAgo } from "../utils/time.js";
 import logger from "../utils/logger.js";
@@ -13,7 +17,9 @@ export const data = new SlashCommandBuilder()
       .setRequired(true),
   );
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     const targetUser = interaction.options.getUser("user");
     if (!targetUser) {
