@@ -6,9 +6,9 @@ import {
   ChannelType,
 } from "discord.js";
 import { ConfigService } from "../../services/config-service.js";
-import Logger from "../../utils/logger.js";
+import logger from "../../utils/logger.js";
 
-const logger = Logger.getInstance();
+const logger = logger;
 const configService = ConfigService.getInstance();
 
 // Helper function to check if a key is a role or channel setting

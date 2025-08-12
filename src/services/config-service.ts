@@ -123,24 +123,84 @@ export class ConfigService {
     }
   }
 
-  public async get<T>(key: string, defaultValue?: T): Promise<T> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
-    const value = this.cache.get(key);
-    if (value === undefined) {
-      if (defaultValue !== undefined) {
-        return defaultValue;
+  public async get(key: string): Promise<unknown> {
+    try {
+      // Check cache first
+      if (this.cache.has(key)) {
+        return this.cache.get(key);
       }
-      throw new Error(`Configuration key '${key}' not found`);
+
+      // Try to get from database
+      const config = await Config.findOne({ key });
+      if (config) {
+        this.cache.set(key, config.value);
+        return config.value;
+      }
+
+      // If not found, try to get from environment variables (for backward compatibility)
+      const envValue = process.env[key];
+      if (envValue !== undefined) {
+        // Convert string values to appropriate types
+        if (envValue === "true" || envValue === "false") {
+          const boolValue = envValue === "true";
+          this.cache.set(key, boolValue);
+          return boolValue;
+        }
+        if (!isNaN(Number(envValue))) {
+          const numValue = Number(envValue);
+          this.cache.set(key, numValue);
+          return numValue;
+        }
+        this.cache.set(key, envValue);
+        return envValue;
+      }
+
+      // Return null if not found anywhere
+      return null;
+    } catch (error) {
+      logger.error(`Error getting configuration for key ${key}:`, error);
+      return null;
     }
-    return value as T;
   }
 
-  public async getString(key: string, defaultValue?: string): Promise<string> {
-    const value = await this.get<string>(key, defaultValue);
-    return value || "";
+  public async getString(key: string, defaultValue: string = ""): Promise<string> {
+    const value = await this.get(key);
+    if (typeof value === "string") {
+      return value;
+    }
+    if (typeof value === "number" || typeof value === "boolean") {
+      return String(value);
+    }
+    return defaultValue;
+  }
+
+  public async getBoolean(key: string, defaultValue: boolean = false): Promise<boolean> {
+    const value = await this.get(key);
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      return value === "true";
+    }
+    if (typeof value === "number") {
+      return value !== 0;
+    }
+    return defaultValue;
+  }
+
+  public async getNumber(key: string, defaultValue: number = 0): Promise<number> {
+    const value = await this.get(key);
+    if (typeof value === "number") {
+      return value;
+    }
+    if (typeof value === "string") {
+      const num = Number(value);
+      return isNaN(num) ? defaultValue : num;
+    }
+    if (typeof value === "boolean") {
+      return value ? 1 : 0;
+    }
+    return defaultValue;
   }
 
   public async set<T>(

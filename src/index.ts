@@ -86,17 +86,20 @@ async function cleanupVoiceChannels(
 ): Promise<void> {
   try {
     const configService = ConfigService.getInstance();
-    if (await configService.get("ENABLE_VC_MANAGEMENT")) {
+
+    // Check if voice channel management is enabled using new config keys
+    const isEnabled = await configService.getBoolean("voice_channel.enabled") ||
+                     await configService.getBoolean("ENABLE_VC_MANAGEMENT");
+
+    if (isEnabled) {
       logger.info("Cleaning up voice channels...");
       const guild = await client.guilds.fetch(
         await configService.getString("GUILD_ID", ""),
       );
       if (guild) {
-        // Get the VC category
-        const categoryName = await configService.getString(
-          "VC_CATEGORY_NAME",
-          "Dynamic Voice Channels",
-        );
+        // Get the VC category - try new config keys first, then fall back to old ones
+        const categoryName = await configService.getString("voice_channel.category_name") ||
+                            await configService.getString("VC_CATEGORY_NAME", "Dynamic Voice Channels");
         const category = guild.channels.cache.find(
           (channel: GuildBasedChannel) =>
             channel.type === ChannelType.GuildCategory &&
@@ -104,13 +107,16 @@ async function cleanupVoiceChannels(
         ) as CategoryChannel;
 
         if (category) {
+          // Get lobby channel name - try new config keys first, then fall back to old ones
+          const lobbyChannelName = await configService.getString("voice_channel.lobby_channel_name") ||
+                                  await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+
           // Clean up any empty channels in the category
           for (const channel of category.children.cache.values()) {
             if (
               channel.type === ChannelType.GuildVoice &&
               channel.members.size === 0 &&
-              channel.name !==
-                (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
+              channel.name !== lobbyChannelName
             ) {
               try {
                 await channel.delete();

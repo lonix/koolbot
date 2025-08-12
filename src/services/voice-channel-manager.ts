@@ -77,22 +77,31 @@ export class VoiceChannelManager {
   public async initialize(guildId: string): Promise<void> {
     try {
       logger.info("Initializing voice channel manager...");
+
+      // Check if voice channel management is enabled using new config keys
+      const isEnabled = await configService.getBoolean("voice_channel.enabled") ||
+                       await configService.getBoolean("ENABLE_VC_MANAGEMENT");
+
+      if (!isEnabled) {
+        logger.info("Voice channel management is disabled, skipping initialization");
+        return;
+      }
+
       const guild = await this.getGuild(guildId);
       if (!guild) {
         logger.error("Guild not found during initialization");
         return;
       }
 
-      const categoryName = await configService.getString(
-        "VC_CATEGORY_NAME",
-        "Dynamic Voice Channels",
-      );
-      const lobbyChannelName = (
-        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
-      ).replace(/["']/g, "");
-      const offlineLobbyName = await configService.getString(
-        "LOBBY_CHANNEL_NAME_OFFLINE",
-      );
+      // Try new config keys first, then fall back to old ones
+      const categoryName = await configService.getString("voice_channel.category_name") ||
+                          await configService.getString("VC_CATEGORY_NAME", "Dynamic Voice Channels");
+
+      const lobbyChannelName = await configService.getString("voice_channel.lobby_channel_name") ||
+                              await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+
+      const offlineLobbyName = await configService.getString("voice_channel.lobby_channel_name_offline") ||
+                               await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE");
 
       if (!offlineLobbyName) {
         logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
@@ -298,10 +307,8 @@ export class VoiceChannelManager {
 
       // User joined a channel
       if (!oldChannel && newChannel) {
-        const lobbyChannelName = await configService.getString(
-          "LOBBY_CHANNEL_NAME",
-          "Lobby",
-        );
+        const lobbyChannelName = await configService.getString("voice_channel.lobby_channel_name") ||
+                                await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
         logger.info(
           `User joined channel. Lobby name: "${lobbyChannelName}", Channel name: "${newChannel.name}"`,
         );
@@ -392,11 +399,14 @@ export class VoiceChannelManager {
       }
 
       const guild = member.guild;
-      const categoryName = await configService.getString(
-        "VC_CATEGORY_NAME",
-        "Dynamic Voice Channels",
-      );
-      const suffix = (await configService.getString("VC_SUFFIX")) || "'s Room";
+
+      // Try new config keys first, then fall back to old ones
+      const categoryName = await configService.getString("voice_channel.category_name") ||
+                          await configService.getString("VC_CATEGORY_NAME", "Dynamic Voice Channels");
+
+      const suffix = await configService.getString("voice_channel.suffix") ||
+                    await configService.getString("VC_SUFFIX") ||
+                    "'s Room";
 
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
@@ -441,7 +451,11 @@ export class VoiceChannelManager {
 
   private async cleanupEmptyChannels(): Promise<void> {
     try {
-      if (!(await configService.get("ENABLE_VC_MANAGEMENT"))) {
+      // Check if voice channel management is enabled using new config keys
+      const isEnabled = await configService.getBoolean("voice_channel.enabled") ||
+                       await configService.getBoolean("ENABLE_VC_MANAGEMENT");
+
+      if (!isEnabled) {
         return;
       }
 
@@ -457,16 +471,15 @@ export class VoiceChannelManager {
         return;
       }
 
-      const categoryName = await configService.getString(
-        "VC_CATEGORY_NAME",
-        "Dynamic Voice Channels",
-      );
-      const lobbyChannelName = (
-        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
-      ).replace(/["']/g, "");
-      const offlineLobbyName = await configService.getString(
-        "LOBBY_CHANNEL_NAME_OFFLINE",
-      );
+      // Try new config keys first, then fall back to old ones
+      const categoryName = await configService.getString("voice_channel.category_name") ||
+                          await configService.getString("VC_CATEGORY_NAME", "Dynamic Voice Channels");
+
+      const lobbyChannelName = await configService.getString("voice_channel.lobby_channel_name") ||
+                              await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
+
+      const offlineLobbyName = await configService.getString("voice_channel.lobby_channel_name_offline") ||
+                               await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE");
 
       if (!offlineLobbyName) {
         logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
