@@ -1,6 +1,6 @@
 import { REST, Routes } from "discord.js";
 import { config } from "dotenv";
-import Logger from "./utils/logger.js";
+import logger from "./utils/logger.js";
 import { data as ping } from "./commands/ping.js";
 import { data as amikool } from "./commands/amikool.js";
 import { data as plexprice } from "./commands/plexprice.js";
@@ -12,7 +12,6 @@ import { data as quoteCommand } from "./commands/quote.js";
 import { ConfigService } from "./services/config-service.js";
 
 config();
-const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
 
 // Build command list based on enabled features

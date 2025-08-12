@@ -8,7 +8,6 @@ import {
 import { ConfigService } from "../../services/config-service.js";
 import logger from "../../utils/logger.js";
 
-const logger = logger;
 const configService = ConfigService.getInstance();
 
 // Helper function to check if a key is a role or channel setting

@@ -1,9 +1,8 @@
 import { REST, Routes } from "discord.js";
 import { config } from "dotenv";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 
 config();
-const logger = Logger.getInstance();
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {

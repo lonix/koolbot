@@ -34,13 +34,13 @@ export class QuoteService {
     messageId: string,
   ): Promise<IQuote> {
     // Check if quotes are enabled
-    const enabled = await configService.get<boolean>("quotes.enabled");
+    const enabled = await configService.getBoolean("quotes.enabled");
     if (!enabled) {
       throw new Error("Quote system is disabled");
     }
 
     // Check cooldown
-    const cooldown = await configService.get<number>("quotes.cooldown");
+    const cooldown = await configService.getNumber("quotes.cooldown", 60);
     if (this.cooldownManager.isOnCooldown(addedById, "quote_add", cooldown)) {
       throw new Error(
         `Please wait ${cooldown} seconds before adding another quote`,
@@ -48,7 +48,7 @@ export class QuoteService {
     }
 
     // Check quote length
-    const maxLength = await configService.get<number>("quotes.max_length");
+    const maxLength = await configService.getNumber("quotes.max_length", 1000);
     if (content.length > maxLength) {
       throw new Error(
         `Quote is too long. Maximum length is ${maxLength} characters`,
@@ -105,9 +105,8 @@ export class QuoteService {
     }
 
     // Check if user has permission to delete
-    const deleteRoles = (await configService.get<string>("quotes.delete_roles"))
-      .split(",")
-      .filter(Boolean);
+    const deleteRolesStr = await configService.getString("quotes.delete_roles", "");
+    const deleteRoles = deleteRolesStr.split(",").filter(Boolean);
     const hasPermission =
       deleteRoles.length === 0 || // Empty means only admins
       userRoles.some((role) => deleteRoles.includes(role)) ||

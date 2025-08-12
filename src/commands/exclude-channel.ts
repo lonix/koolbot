@@ -1,13 +1,13 @@
 import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
+  EmbedBuilder,
   PermissionFlagsBits,
   ChannelType,
 } from "discord.js";
 import { ConfigService } from "../services/config-service.js";
-import Logger from "../utils/logger.js";
+import logger from "../utils/logger.js";
 
-const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
 
 export const data = new SlashCommandBuilder()

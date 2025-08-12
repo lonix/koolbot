@@ -78,11 +78,11 @@ export class VoiceChannelAnnouncer {
       // Cache guild channels
       await guild.channels.fetch();
 
-      const enabled = await this.configService.get<boolean>(
+      const enabled = await this.configService.getBoolean(
         "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
         false,
       );
-      const trackingEnabled = await this.configService.get<boolean>(
+      const trackingEnabled = await this.configService.getBoolean(
         "ENABLE_VC_TRACKING",
         false,
       );
@@ -93,7 +93,7 @@ export class VoiceChannelAnnouncer {
         return;
       }
 
-      let schedule = await this.configService.get<string>(
+      let schedule = await this.configService.getString(
         "VC_ANNOUNCEMENT_SCHEDULE",
         "0 16 * * 5",
       );
@@ -146,7 +146,7 @@ export class VoiceChannelAnnouncer {
         return;
       }
 
-      const channelName = await this.configService.get<string>(
+      const channelName = await this.configService.getString(
         "VC_ANNOUNCEMENT_CHANNEL",
         "voice-stats",
       );

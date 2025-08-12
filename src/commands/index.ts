@@ -1,5 +1,10 @@
-import { ChatInputCommandInteraction } from "discord.js";
-import Logger from "../utils/logger.js";
+import { Client, Collection, Events, GatewayIntentBits, ChatInputCommandInteraction } from "discord.js";
+import { readdirSync } from "fs";
+import { join } from "path";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
+import { Command } from "../interfaces/command.js";
+import logger from "../utils/logger.js";
 import { execute as ping } from "./ping.js";
 import { execute as amikool } from "./amikool.js";
 import { execute as plexprice } from "./plexprice.js";
@@ -12,7 +17,6 @@ import { execute as config } from "./config/index.js";
 import { execute as quote } from "./quote.js";
 import { ConfigService } from "../services/config-service.js";
 
-const logger = Logger.getInstance();
 const configService = ConfigService.getInstance();
 
 const commands: Record<

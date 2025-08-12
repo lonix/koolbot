@@ -157,17 +157,16 @@ process.on("SIGINT", cleanup);
 process.on("SIGTERM", cleanup);
 
 const configService = ConfigService.getInstance();
-const commandManager = CommandManager.getInstance();
+const commandManager = CommandManager.getInstance(client);
 const voiceChannelManager = VoiceChannelManager.getInstance(client);
 const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
 const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
-const channelInitializer = ChannelInitializer.getInstance();
+const channelInitializer = ChannelInitializer.getInstance(client);
 
 async function initializeServices() {
   try {
     // Set client for services that need it
     configService.setClient(client);
-    commandManager.setClient(client);
 
     // Initialize services
     await configService.initialize();
