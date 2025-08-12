@@ -1,7 +1,6 @@
 import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
-  PermissionFlagsBits,
 } from "discord.js";
 import { quoteService } from "../services/quote-service.js";
 import logger from "../utils/logger.js";

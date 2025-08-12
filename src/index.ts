@@ -4,9 +4,9 @@ import {
   GatewayIntentBits,
   GuildBasedChannel,
   CategoryChannel,
-  TextChannel,
   ChannelType,
   Collection,
+  CommandInteraction,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
@@ -16,8 +16,6 @@ import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
-import { connectToDatabase } from "./utils/database.js";
-import mongoose from "mongoose";
 
 dotenvConfig();
 

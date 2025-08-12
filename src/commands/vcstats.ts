@@ -1,6 +1,5 @@
 import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
 import { VoiceChannelTracker, TimePeriod } from "../services/voice-channel-tracker.js";
-import { formatTimeAgo } from "../utils/time.js";
 import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()

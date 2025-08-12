@@ -1,7 +1,3 @@
-import { readdirSync } from "fs";
-import { join } from "path";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
 import { ChatInputCommandInteraction } from "discord.js";
 import logger from "../utils/logger.js";
 import { execute as ping } from "./ping.js";
