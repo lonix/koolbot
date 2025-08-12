@@ -17,8 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     if: >
       github.actor == 'dependabot[bot]' &&
-      (github.event_name == 'pull_request_target' || 
-       github.event_name == 'status' || 
+      (github.event_name == 'pull_request_target' ||
+       github.event_name == 'status' ||
        github.event_name == 'check_suite')
     steps:
       - name: Auto-merge Dependabot PR
