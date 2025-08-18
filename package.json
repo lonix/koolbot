@@ -33,7 +33,7 @@
     "winston": "^3.11.0"
   },
   "devDependencies": {
-    "@types/dotenv": "^6.1.1",
+    "@types/dotenv": "^8.2.3",
     "@types/mongoose": "^5.11.96",
     "@types/node": "^22.15.19",
     "@typescript-eslint/eslint-plugin": "^8.39.1",
