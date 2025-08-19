@@ -1,6 +1,12 @@
 # KoolBot TODO List
 
 ## Medium Priority
+- [x] Bot Registration Validation (P1) ✅ COMPLETED
+  - [x] Add startup check for global commands
+  - [x] Automatically clean up duplicate global commands
+  - [x] Prevent future duplicate command issues
+  - [x] Update deploy-commands script to use guild commands
+
 - [ ] Documentation Updates (P1)
   - [ ] Add troubleshooting guide
     - Success Criteria:
@@ -39,12 +45,6 @@
       - End-to-end command testing
       - Database interaction tests
       - Discord API integration tests
-  - [ ] Add monitoring
-    - Success Criteria:
-      - Command usage metrics
-      - Error rate tracking
-      - Performance metrics
-      - Resource usage monitoring
   - [ ] Add performance metrics
     - Success Criteria:
       - Response time tracking
@@ -309,6 +309,14 @@
   - [x] Maintain consistent code formatting
   - [x] Validate TypeScript compilation
   - [x] Run comprehensive checks before deployment
+- [x] Add monitoring and performance metrics system
+  - [x] Create MonitoringService with command tracking
+  - [x] Track command usage, response times, and error rates
+  - [x] Monitor memory usage and system performance
+  - [x] Add periodic logging of performance metrics
+  - [x] Create /botstats command for viewing metrics
+  - [x] Integrate monitoring into command execution flow
+  - [x] Add automatic error tracking and reporting
 
 ## Configuration
 - [x] Environment Configuration (P0)
