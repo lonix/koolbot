@@ -26,6 +26,17 @@ export class CommandManager {
     this.client = client;
     this.configService = ConfigService.getInstance();
     this.commands = new Collection();
+
+    // Ensure commands are refreshed whenever configuration changes
+    this.configService.registerReloadCallback(async () => {
+      try {
+        await this.registerCommands();
+        await this.populateClientCommands();
+        logger.info("Commands reloaded after configuration change");
+      } catch (error) {
+        logger.error("Error reloading commands after configuration change:", error);
+      }
+    });
   }
 
   public static getInstance(client: Client): CommandManager {
@@ -291,9 +302,11 @@ export class CommandManager {
       this.client.commands.set("exclude-channel", { execute: excludeChannel });
 
       // Always add setup-lobby command
-      this.client.commands.set("setup-lobby", { execute: setupLobbyCommand });
+      this.client.commands.set("setup-lobby", { execute: setupLobbyCommand.execute });
 
       logger.info(`Populated client.commands with ${this.client.commands.size} commands`);
+      const availableCommandNames = Array.from(this.client.commands.keys()).sort();
+      logger.info(`Available commands: ${availableCommandNames.join(", ")}`);
     } catch (error) {
       logger.error("Error populating client commands:", error);
       throw error;
@@ -330,9 +343,8 @@ export class CommandManager {
         throw error;
       }
     } catch (error) {
-        logger.error("Error in unregisterCommands:", error);
-        throw error;
-      }
+      logger.error("Error in unregisterCommands:", error);
+      throw error;
     }
   }
 }

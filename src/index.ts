@@ -6,7 +6,7 @@ import {
   CategoryChannel,
   ChannelType,
   Collection,
-  CommandInteraction,
+  ChatInputCommandInteraction,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
@@ -49,7 +49,7 @@ declare module "discord.js" {
     commands: Collection<
       string,
       {
-        execute: (interaction: CommandInteraction) => Promise<void>;
+        execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
       }
     >;
   }
@@ -194,16 +194,28 @@ client.once(Events.ClientReady, async (readyClient) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isCommand()) return;
+  if (!interaction.isChatInputCommand()) return;
 
   try {
     const command = client.commands.get(interaction.commandName);
     if (!command) {
       logger.error(`No command matching ${interaction.commandName} was found.`);
-      return;
+      // Attempt a one-time refresh in case commands were not yet populated
+      try {
+        await commandManager.populateClientCommands();
+        const refreshed = client.commands.get(interaction.commandName);
+        if (!refreshed) {
+          return;
+        }
+        await refreshed.execute(interaction as ChatInputCommandInteraction);
+        return;
+      } catch (refreshError) {
+        logger.error("Error refreshing commands after missing command:", refreshError);
+        return;
+      }
     }
 
-    await command.execute(interaction);
+    await command.execute(interaction as ChatInputCommandInteraction);
   } catch (error) {
     logger.error("Error handling command:", error);
     if (interaction.replied || interaction.deferred) {
