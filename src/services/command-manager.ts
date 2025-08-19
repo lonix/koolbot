@@ -11,7 +11,9 @@ import { data as transferOwnership } from "../commands/transfer-ownership.js";
 import { data as announceVcStats } from "../commands/announce-vc-stats.js";
 import { data as configCommand } from "../commands/config/index.js";
 import { data as quoteCommand } from "../commands/quote.js";
+import { data as botstatsCommand } from "../commands/botstats.js";
 import { ConfigService } from "./config-service.js";
+import { MonitoringService } from "./monitoring-service.js";
 
 dotenvConfig();
 const isDebug = process.env.DEBUG === "true";
@@ -94,6 +96,10 @@ export class CommandManager {
         commands.push(quoteCommand.toJSON());
         if (isDebug) logger.debug("✓ /quote command enabled");
       }
+
+      // Always add botstats command
+      commands.push(botstatsCommand.toJSON());
+      if (isDebug) logger.debug("✓ /botstats command enabled");
 
       logger.info(`Loaded ${commands.length} commands`);
       return commands;
@@ -270,6 +276,9 @@ export class CommandManager {
       const { command: setupLobbyCommand } = await import(
         "../commands/setup-lobby.js"
       );
+      const { execute: botstatsCommand } = await import(
+        "../commands/botstats.js"
+      );
 
       // Clear existing commands
       this.client.commands.clear();
@@ -323,6 +332,9 @@ export class CommandManager {
         execute: setupLobbyCommand.execute,
       });
 
+      // Always add botstats command
+      this.client.commands.set("botstats", { execute: botstatsCommand });
+
       logger.info(
         `Populated client.commands with ${this.client.commands.size} commands`,
       );
@@ -367,6 +379,37 @@ export class CommandManager {
       }
     } catch (error) {
       logger.error("Error in unregisterCommands:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Execute a command with monitoring
+   */
+  public async executeCommand(
+    commandName: string,
+    executeFunction: () => Promise<void>,
+  ): Promise<void> {
+    const monitoringService = MonitoringService.getInstance();
+    const startTime = Date.now();
+    const trackingId = monitoringService.trackCommandStart(commandName);
+
+    try {
+      await executeFunction();
+      monitoringService.trackCommandEnd(
+        commandName,
+        trackingId,
+        startTime,
+        true,
+      );
+    } catch (error) {
+      monitoringService.trackCommandEnd(
+        commandName,
+        trackingId,
+        startTime,
+        false,
+      );
+      monitoringService.trackError(commandName, error as Error);
       throw error;
     }
   }

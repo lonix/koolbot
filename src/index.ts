@@ -207,7 +207,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (!refreshed) {
           return;
         }
-        await refreshed.execute(interaction as ChatInputCommandInteraction);
+        await commandManager.executeCommand(interaction.commandName, () =>
+          refreshed.execute(interaction as ChatInputCommandInteraction),
+        );
         return;
       } catch (refreshError) {
         logger.error(
@@ -218,19 +220,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    await command.execute(interaction as ChatInputCommandInteraction);
+    await commandManager.executeCommand(interaction.commandName, () =>
+      command.execute(interaction as ChatInputCommandInteraction),
+    );
   } catch (error) {
-    logger.error("Error handling command:", error);
+    logger.error(`Error executing command ${interaction.commandName}:`, error);
+    const errorMessage = "There was an error while executing this command!";
+
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
+      await interaction.editReply({ content: errorMessage });
     } else {
-      await interaction.reply({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
+      await interaction.reply({ content: errorMessage, ephemeral: true });
     }
   }
 });
