@@ -34,7 +34,10 @@ export class CommandManager {
         await this.populateClientCommands();
         logger.info("Commands reloaded after configuration change");
       } catch (error) {
-        logger.error("Error reloading commands after configuration change:", error);
+        logger.error(
+          "Error reloading commands after configuration change:",
+          error,
+        );
       }
     });
   }
@@ -251,12 +254,22 @@ export class CommandManager {
       const { execute: vctop } = await import("../commands/vctop.js");
       const { execute: vcstats } = await import("../commands/vcstats.js");
       const { execute: seen } = await import("../commands/seen.js");
-      const { execute: transferOwnership } = await import("../commands/transfer-ownership.js");
-      const { execute: announceVcStats } = await import("../commands/announce-vc-stats.js");
-      const { execute: configCommand } = await import("../commands/config/index.js");
+      const { execute: transferOwnership } = await import(
+        "../commands/transfer-ownership.js"
+      );
+      const { execute: announceVcStats } = await import(
+        "../commands/announce-vc-stats.js"
+      );
+      const { execute: configCommand } = await import(
+        "../commands/config/index.js"
+      );
       const { execute: quoteCommand } = await import("../commands/quote.js");
-      const { execute: excludeChannel } = await import("../commands/exclude-channel.js");
-      const { command: setupLobbyCommand } = await import("../commands/setup-lobby.js");
+      const { execute: excludeChannel } = await import(
+        "../commands/exclude-channel.js"
+      );
+      const { command: setupLobbyCommand } = await import(
+        "../commands/setup-lobby.js"
+      );
 
       // Clear existing commands
       this.client.commands.clear();
@@ -284,11 +297,15 @@ export class CommandManager {
       }
 
       if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
-        this.client.commands.set("transfer-ownership", { execute: transferOwnership });
+        this.client.commands.set("transfer-ownership", {
+          execute: transferOwnership,
+        });
       }
 
       if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
-        this.client.commands.set("announce-vc-stats", { execute: announceVcStats });
+        this.client.commands.set("announce-vc-stats", {
+          execute: announceVcStats,
+        });
       }
 
       if (await this.configService.get("quotes.enabled")) {
@@ -302,10 +319,16 @@ export class CommandManager {
       this.client.commands.set("exclude-channel", { execute: excludeChannel });
 
       // Always add setup-lobby command
-      this.client.commands.set("setup-lobby", { execute: setupLobbyCommand.execute });
+      this.client.commands.set("setup-lobby", {
+        execute: setupLobbyCommand.execute,
+      });
 
-      logger.info(`Populated client.commands with ${this.client.commands.size} commands`);
-      const availableCommandNames = Array.from(this.client.commands.keys()).sort();
+      logger.info(
+        `Populated client.commands with ${this.client.commands.size} commands`,
+      );
+      const availableCommandNames = Array.from(
+        this.client.commands.keys(),
+      ).sort();
       logger.info(`Available commands: ${availableCommandNames.join(", ")}`);
     } catch (error) {
       logger.error("Error populating client commands:", error);

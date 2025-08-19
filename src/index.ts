@@ -210,7 +210,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await refreshed.execute(interaction as ChatInputCommandInteraction);
         return;
       } catch (refreshError) {
-        logger.error("Error refreshing commands after missing command:", refreshError);
+        logger.error(
+          "Error refreshing commands after missing command:",
+          refreshError,
+        );
         return;
       }
     }
