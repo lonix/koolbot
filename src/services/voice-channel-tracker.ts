@@ -269,7 +269,7 @@ export class VoiceChannelTracker {
       }
 
       // Update or create user tracking record
-      const userTracking = await VoiceChannelTracking.findOneAndUpdate(
+      await VoiceChannelTracking.findOneAndUpdate(
         { userId },
         {
           $set: {
@@ -287,7 +287,7 @@ export class VoiceChannelTracker {
             },
           },
         },
-        { upsert: true, new: true }
+        { upsert: true, new: true },
       );
 
       this.activeSessions.delete(userId);

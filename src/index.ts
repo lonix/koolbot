@@ -240,10 +240,10 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     const member = newState.member || oldState.member;
     if (member) {
       logger.debug(
-        `Voice state update: ${member.displayName} (${member.id}) - Old: ${oldState.channel?.name || 'none'} -> New: ${newState.channel?.name || 'none'}`
+        `Voice state update: ${member.displayName} (${member.id}) - Old: ${oldState.channel?.name || "none"} -> New: ${newState.channel?.name || "none"}`,
       );
     }
-    
+
     await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
     await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
   } catch (error) {
