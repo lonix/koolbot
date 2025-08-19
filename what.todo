@@ -242,6 +242,10 @@
     - [x] Customizable timing
     - [x] Admin manual trigger
     - [x] Top users highlighting
+  - [x] Fix voice tracking database model integration
+    - [x] Resolve VoiceSessionModel vs VoiceChannelTracking model mismatch
+    - [x] Ensure proper data persistence and retrieval
+    - [x] Add debug logging for voice state updates
 
 - [x] Lobby VC Creation
   - [x] Create dynamic voice channels from lobby
@@ -251,6 +255,11 @@
   - [x] Remove default user limit
   - [x] Add startup cleanup
   - [x] Add control buttons for channel management
+  - [x] Add automatic channel reinitialization on config changes
+    - [x] Configuration reload callback system
+    - [x] Handle lobby channel name changes automatically
+    - [x] Force reinitialization capability
+    - [x] Enhanced setup-lobby command with better feedback
 
 ## Commands
 - [x] /seen Command
@@ -260,6 +269,11 @@
 
 - [x] PLEX Price Checker
   - [x] Add Jita price check
+  - [x] Fix API 503 error with fallback endpoints
+    - [x] Implement EVE ESI API fallback
+    - [x] Add better error handling and user feedback
+    - [x] Add timeout handling for API calls
+    - [x] Provide helpful error messages when both APIs fail
 
 - [x] /amikool Command
   - [x] Add role-based verification
@@ -270,6 +284,13 @@
   - [x] Add basic ping functionality
   - [x] Add error handling
   - [x] Add logging
+
+- [x] Fix command loading and registration issues
+  - [x] Resolve "No command matching config was found" error
+  - [x] Add configuration reload callbacks for command manager
+  - [x] Implement on-demand command refresh mechanism
+  - [x] Fix TypeScript type definitions for command interactions
+  - [x] Ensure proper command population in client collection
 
 ## Documentation
 - [x] Add setup instructions
@@ -283,6 +304,11 @@
 - [x] Improve error handling
 - [x] Add proper command validation
 - [x] Add comprehensive logging
+- [x] Add build, lint, and prettier validation
+  - [x] Ensure all code passes linting checks
+  - [x] Maintain consistent code formatting
+  - [x] Validate TypeScript compilation
+  - [x] Run comprehensive checks before deployment
 
 ## Configuration
 - [x] Environment Configuration (P0)
