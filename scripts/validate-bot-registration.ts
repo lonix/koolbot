@@ -52,7 +52,7 @@ async function validateBotRegistration(): Promise<void> {
     try {
       const currentCommands = await rest.get(Routes.applicationCommands(clientId)) as CommandInfo[];
       logger.info(`📊 Currently registered commands: ${currentCommands.length}`);
-      
+
       if (currentCommands.length > 0) {
         logger.info("📋 Current commands:");
         currentCommands.forEach((cmd, index) => {
@@ -82,7 +82,7 @@ async function validateBotRegistration(): Promise<void> {
     try {
       const registeredCommands = await rest.get(Routes.applicationCommands(clientId)) as CommandInfo[];
       logger.info(`✅ Successfully verified ${registeredCommands.length} commands registered`);
-      
+
       logger.info("📋 Registered commands:");
       registeredCommands.forEach((cmd, index) => {
         logger.info(`  ${index + 1}. /${cmd.name} - ${cmd.description} (ID: ${cmd.id})`);
@@ -91,7 +91,7 @@ async function validateBotRegistration(): Promise<void> {
       // Check for specific important commands
       const commandNames = registeredCommands.map(cmd => cmd.name);
       const importantCommands = ['ping', 'botstats', 'config'];
-      
+
       logger.info("🔍 Checking for important commands:");
       importantCommands.forEach(cmdName => {
         if (commandNames.includes(cmdName)) {

@@ -88,7 +88,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
 export async function deployCommands(): Promise<void> {
   try {
     logger.info("Starting command deployment process...");
-    
+
     // Build the command list
     await buildCommandList();
 
@@ -104,10 +104,10 @@ export async function deployCommands(): Promise<void> {
     const data = await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
       body: commands,
     });
-    
+
     logger.info("Successfully registered new commands.");
     logger.info(`Registered commands: ${commands.map(cmd => cmd.name).join(', ')}`);
-    
+
     // Log the response from Discord API
     if (Array.isArray(data)) {
       logger.info(`Discord API confirmed ${data.length} commands registered`);
