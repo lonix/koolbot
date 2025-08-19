@@ -89,24 +89,48 @@ export async function deployCommands(): Promise<void> {
   try {
     logger.info("Starting command deployment process...");
 
+    // Safety check: This script should not be used when CommandManager is handling commands
+    logger.warn(
+      "⚠️  WARNING: This script registers GLOBAL commands and may conflict with guild commands!",
+    );
+    logger.warn(
+      "⚠️  The bot uses CommandManager for guild-specific commands in production.",
+    );
+    logger.warn(
+      "⚠️  Only use this for development or when specifically needed.",
+    );
+
+    const guildId = process.env.GUILD_ID;
+    if (!guildId) {
+      logger.error("GUILD_ID not set. Cannot register guild commands.");
+      throw new Error("GUILD_ID required for command registration");
+    }
+
     // Build the command list
     await buildCommandList();
 
-    // First, remove all existing commands
-    logger.info("Removing all existing commands...");
+    // First, remove all existing global commands to avoid conflicts
+    logger.info("Removing all existing global commands...");
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
       body: [],
     });
-    logger.info("Successfully removed all existing commands.");
+    logger.info("Successfully removed all existing global commands.");
 
-    // Then register our commands
-    logger.info(`Registering ${commands.length} new commands...`);
-    const data = await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
-      body: commands,
-    });
+    // Register as guild commands instead to avoid duplicates
+    logger.info(
+      `Registering ${commands.length} guild commands for guild ${guildId}...`,
+    );
+    const data = await rest.put(
+      Routes.applicationGuildCommands(process.env.CLIENT_ID!, guildId),
+      {
+        body: commands,
+      },
+    );
 
-    logger.info("Successfully registered new commands.");
-    logger.info(`Registered commands: ${commands.map(cmd => cmd.name).join(', ')}`);
+    logger.info("Successfully registered guild commands.");
+    logger.info(
+      `Registered commands: ${commands.map((cmd) => cmd.name).join(", ")}`,
+    );
 
     // Log the response from Discord API
     if (Array.isArray(data)) {

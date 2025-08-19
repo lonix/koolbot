@@ -1,6 +1,12 @@
 # KoolBot TODO List
 
 ## Medium Priority
+- [x] Bot Registration Validation (P1) ✅ COMPLETED
+  - [x] Add startup check for global commands
+  - [x] Automatically clean up duplicate global commands
+  - [x] Prevent future duplicate command issues
+  - [x] Update deploy-commands script to use guild commands
+
 - [ ] Documentation Updates (P1)
   - [ ] Add troubleshooting guide
     - Success Criteria:

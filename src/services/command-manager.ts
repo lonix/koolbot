@@ -187,6 +187,10 @@ export class CommandManager {
     commands.push(configCommand.toJSON());
     if (isDebug) logger.debug("✓ /config command enabled (always)");
 
+    // Always add botstats command
+    commands.push(botstatsCommand.toJSON());
+    if (isDebug) logger.debug("✓ /botstats command enabled (always)");
+
     if (isDebug) {
       logger.debug("Command registration summary:");
       logger.debug(`Total commands to register: ${commands.length}`);

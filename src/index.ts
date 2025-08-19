@@ -7,6 +7,8 @@ import {
   ChannelType,
   Collection,
   ChatInputCommandInteraction,
+  REST,
+  Routes,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
@@ -68,6 +70,52 @@ const client = new Client({
 client.commands = new Collection();
 
 let isShuttingDown = false;
+
+async function cleanupGlobalCommands(): Promise<void> {
+  try {
+    const token = process.env.DISCORD_TOKEN;
+    const clientId = process.env.CLIENT_ID;
+
+    if (!token || !clientId) {
+      logger.warn(
+        "Cannot check global commands: Missing DISCORD_TOKEN or CLIENT_ID",
+      );
+      return;
+    }
+
+    const rest = new REST({ version: "10" }).setToken(token);
+
+    // Check for global commands
+    const globalCommands = (await rest.get(
+      Routes.applicationCommands(clientId),
+    )) as Array<{
+      id: string;
+      name: string;
+      description: string;
+    }>;
+
+    if (globalCommands.length > 0) {
+      logger.warn(
+        `Found ${globalCommands.length} global commands that may conflict with guild commands:`,
+      );
+      globalCommands.forEach((cmd) => {
+        logger.warn(`  - /${cmd.name} (${cmd.description})`);
+      });
+
+      // Remove global commands to prevent duplicates
+      logger.info(
+        "Removing global commands to prevent duplicate command issues...",
+      );
+      await rest.put(Routes.applicationCommands(clientId), { body: [] });
+      logger.info("✅ Global commands removed successfully");
+    } else {
+      logger.debug("No global commands found - no cleanup needed");
+    }
+  } catch (error) {
+    logger.error("Error checking/cleaning global commands:", error);
+    // Don't fail startup for this - just log the error
+  }
+}
 
 async function cleanupVoiceChannels(): Promise<void> {
   try {
@@ -161,6 +209,9 @@ async function initializeServices(): Promise<void> {
   try {
     // Set client for services that need it
     configService.setClient(client);
+
+    // Check and clean up any global commands that might cause duplicates
+    await cleanupGlobalCommands();
 
     // Initialize services
     await configService.initialize();
