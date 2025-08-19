@@ -17,6 +17,24 @@ export class ChannelInitializer {
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+
+    // Register configuration reload callback to reinitialize channels when voice channel settings change
+    this.configService.registerReloadCallback(async () => {
+      try {
+        const guildId = await this.configService.getString("GUILD_ID", "");
+        if (guildId) {
+          logger.info(
+            "Voice channel configuration changed, reinitializing channels...",
+          );
+          await this.initialize(guildId);
+        }
+      } catch (error) {
+        logger.error(
+          "Error reinitializing channels after configuration change:",
+          error,
+        );
+      }
+    });
   }
 
   public static getInstance(client: Client): ChannelInitializer {
@@ -156,6 +174,20 @@ export class ChannelInitializer {
       logger.info("Channel initialization completed successfully");
     } catch (error) {
       logger.error("Error initializing channels:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Force reinitialize channels - useful when configuration changes
+   */
+  public async forceReinitialize(guildId: string): Promise<void> {
+    try {
+      logger.info("Force reinitializing channels...");
+      await this.initialize(guildId);
+      logger.info("Channel reinitialization completed");
+    } catch (error) {
+      logger.error("Error force reinitializing channels:", error);
       throw error;
     }
   }
