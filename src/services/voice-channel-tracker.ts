@@ -18,7 +18,6 @@ interface IAggregatedUserStats {
   userId: string;
   username: string;
   totalTime: number;
-  lastSeen: Date;
 }
 
 interface IUserStats {
@@ -40,31 +39,6 @@ interface VoiceSession {
   channelId: string;
   channelName: string;
 }
-
-interface VoiceSessionDocument extends mongoose.Document {
-  userId: string;
-  username: string;
-  channelId: string;
-  channelName: string;
-  startTime: Date;
-  endTime: Date;
-  duration: number;
-}
-
-const VoiceSessionSchema = new mongoose.Schema<VoiceSessionDocument>({
-  userId: { type: String, required: true },
-  username: { type: String, required: true },
-  channelId: { type: String, required: true },
-  channelName: { type: String, required: true },
-  startTime: { type: Date, required: true },
-  endTime: { type: Date, required: true },
-  duration: { type: Number, required: true },
-});
-
-const VoiceSessionModel = mongoose.model<VoiceSessionDocument>(
-  "VoiceSession",
-  VoiceSessionSchema,
-);
 
 export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
@@ -294,23 +268,33 @@ export class VoiceChannelTracker {
         return;
       }
 
-      // Create new session document
-      const voiceSession = new VoiceSessionModel({
-        userId,
-        username: user.username,
-        channelId: session.channelId,
-        channelName: session.channelName,
-        startTime: session.startTime,
-        endTime,
-        duration,
-      });
+      // Update or create user tracking record
+      const userTracking = await VoiceChannelTracking.findOneAndUpdate(
+        { userId },
+        {
+          $set: {
+            username: user.username,
+            lastSeen: endTime,
+          },
+          $inc: { totalTime: duration },
+          $push: {
+            sessions: {
+              startTime: session.startTime,
+              endTime,
+              duration,
+              channelId: session.channelId,
+              channelName: session.channelName,
+            },
+          },
+        },
+        { upsert: true, new: true }
+      );
 
-      await voiceSession.save();
       this.activeSessions.delete(userId);
 
       if (await this.configService.get("DEBUG")) {
         logger.info(
-          `[DEBUG] Saved voice session for user ${user.username} (${userId})`,
+          `[DEBUG] Saved voice session for user ${user.username} (${userId}) - Duration: ${duration}s`,
         );
       }
     } catch (error: unknown) {
@@ -401,7 +385,6 @@ export class VoiceChannelTracker {
                 _id: "$userId",
                 username: { $first: "$username" },
                 totalTime: { $sum: "$sessions.duration" },
-                lastSeen: { $max: "$sessions.startTime" },
               },
             },
             {
@@ -428,7 +411,6 @@ export class VoiceChannelTracker {
                 _id: "$userId",
                 username: { $first: "$username" },
                 totalTime: { $sum: "$sessions.duration" },
-                lastSeen: { $max: "$sessions.startTime" },
               },
             },
             {
@@ -440,17 +422,28 @@ export class VoiceChannelTracker {
           ]);
           break;
         case "alltime":
-          users = await VoiceChannelTracking.find()
-            .sort({ totalTime: -1 })
-            .limit(limit);
+          users = await VoiceChannelTracking.aggregate([
+            {
+              $group: {
+                _id: "$userId",
+                username: { $first: "$username" },
+                totalTime: { $sum: "$totalTime" },
+              },
+            },
+            {
+              $sort: { totalTime: -1 },
+            },
+            {
+              $limit: limit,
+            },
+          ]);
           break;
       }
 
       return users.map((user) => ({
-        userId: user._id || user.userId,
+        userId: user._id,
         username: user.username,
-        totalTime: user.totalTime,
-        lastSeen: user.lastSeen,
+        totalTime: user.totalTime || 0,
       }));
     } catch (error) {
       logger.error("Error getting top users:", error);
