@@ -18,6 +18,7 @@ import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
+import { StartupMigrator } from "./services/startup-migrator.js";
 
 dotenvConfig();
 
@@ -204,6 +205,7 @@ const voiceChannelManager = VoiceChannelManager.getInstance(client);
 const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
 const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
+const startupMigrator = StartupMigrator.getInstance();
 
 async function initializeServices(): Promise<void> {
   try {
@@ -216,6 +218,7 @@ async function initializeServices(): Promise<void> {
     // Initialize services
     await configService.initialize();
     await configService.migrateFromEnv();
+    await startupMigrator.migrateOnStartup();
     await commandManager.registerCommands();
     await commandManager.populateClientCommands();
 
