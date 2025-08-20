@@ -56,38 +56,38 @@ export class CommandManager {
       // Load commands
       const commands = [];
 
-      if (await this.configService.get("ENABLE_PING")) {
+      if (await this.configService.get("ping.enabled")) {
         commands.push(ping.toJSON());
         if (isDebug) logger.debug("✓ /ping command enabled");
       }
 
-      if (await this.configService.get("ENABLE_AMIKOOL")) {
+      if (await this.configService.get("amikool.enabled")) {
         commands.push(amikool.toJSON());
         if (isDebug) logger.debug("✓ /amikool command enabled");
       }
 
-      if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+      if (await this.configService.get("plexprice.enabled")) {
         commands.push(plexprice.toJSON());
         if (isDebug) logger.debug("✓ /plexprice command enabled");
       }
 
-      if (await this.configService.get("ENABLE_VC_TRACKING")) {
+      if (await this.configService.get("voicetracking.enabled")) {
         commands.push(vctop.toJSON());
         commands.push(vcstats.toJSON());
         if (isDebug) logger.debug("✓ Voice channel tracking commands enabled");
       }
 
-      if (await this.configService.get("ENABLE_SEEN")) {
+      if (await this.configService.get("voicetracking.seen.enabled")) {
         commands.push(seen.toJSON());
         if (isDebug) logger.debug("✓ /seen command enabled");
       }
 
-      if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+      if (await this.configService.get("voicechannels.enabled")) {
         commands.push(transferOwnership.toJSON());
         if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
       }
 
-      if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+      if (await this.configService.get("voicetracking.announcements.enabled")) {
         commands.push(announceVcStats.toJSON());
         if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
       }
@@ -127,28 +127,28 @@ export class CommandManager {
       logger.debug("Checking command registration status:");
     }
 
-    if (await this.configService.get("ENABLE_PING")) {
+    if (await this.configService.get("ping.enabled")) {
       commands.push(ping.toJSON());
       if (isDebug) logger.debug("✓ /ping command enabled");
     } else if (isDebug) {
       logger.debug("✗ /ping command disabled");
     }
 
-    if (await this.configService.get("ENABLE_AMIKOOL")) {
+    if (await this.configService.get("amikool.enabled")) {
       commands.push(amikool.toJSON());
       if (isDebug) logger.debug("✓ /amikool command enabled");
     } else if (isDebug) {
       logger.debug("✗ /amikool command disabled");
     }
 
-    if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+    if (await this.configService.get("plexprice.enabled")) {
       commands.push(plexprice.toJSON());
       if (isDebug) logger.debug("✓ /plexprice command enabled");
     } else if (isDebug) {
       logger.debug("✗ /plexprice command disabled");
     }
 
-    if (await this.configService.get("ENABLE_VC_TRACKING")) {
+    if (await this.configService.get("voicetracking.enabled")) {
       commands.push(vctop.toJSON());
       commands.push(vcstats.toJSON());
       if (isDebug) logger.debug("✓ /vctop and /vcstats commands enabled");
@@ -156,21 +156,21 @@ export class CommandManager {
       logger.debug("✗ /vctop and /vcstats commands disabled");
     }
 
-    if (await this.configService.get("ENABLE_SEEN")) {
+    if (await this.configService.get("voicetracking.seen.enabled")) {
       commands.push(seen.toJSON());
       if (isDebug) logger.debug("✓ /seen command enabled");
     } else if (isDebug) {
       logger.debug("✗ /seen command disabled");
     }
 
-    if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+    if (await this.configService.get("voicechannels.enabled")) {
       commands.push(transferOwnership.toJSON());
       if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
     } else if (isDebug) {
       logger.debug("✗ /transfer-ownership command disabled");
     }
 
-    if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+    if (await this.configService.get("voicetracking.announcements.enabled")) {
       commands.push(announceVcStats.toJSON());
       if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
     } else if (isDebug) {
@@ -288,34 +288,34 @@ export class CommandManager {
       this.client.commands.clear();
 
       // Add commands based on configuration
-      if (await this.configService.get("ENABLE_PING")) {
+      if (await this.configService.get("ping.enabled")) {
         this.client.commands.set("ping", { execute: ping });
       }
 
-      if (await this.configService.get("ENABLE_AMIKOOL")) {
+      if (await this.configService.get("amikool.enabled")) {
         this.client.commands.set("amikool", { execute: amikool });
       }
 
-      if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+      if (await this.configService.get("plexprice.enabled")) {
         this.client.commands.set("plexprice", { execute: plexprice });
       }
 
-      if (await this.configService.get("ENABLE_VC_TRACKING")) {
+      if (await this.configService.get("voicetracking.enabled")) {
         this.client.commands.set("vctop", { execute: vctop });
         this.client.commands.set("vcstats", { execute: vcstats });
       }
 
-      if (await this.configService.get("ENABLE_SEEN")) {
+      if (await this.configService.get("voicetracking.seen.enabled")) {
         this.client.commands.set("seen", { execute: seen });
       }
 
-      if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+      if (await this.configService.get("voicechannels.enabled")) {
         this.client.commands.set("transfer-ownership", {
           execute: transferOwnership,
         });
       }
 
-      if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+      if (await this.configService.get("voicetracking.announcements.enabled")) {
         this.client.commands.set("announce-vc-stats", {
           execute: announceVcStats,
         });

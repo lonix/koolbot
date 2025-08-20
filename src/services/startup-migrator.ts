@@ -211,6 +211,9 @@ export class StartupMigrator {
       }
     }
 
+    // Ensure all expected settings exist with default values
+    await this.ensureDefaultSettings();
+
     if (migratedCount > 0) {
       logger.info(
         `Configuration migration completed: ${migratedCount} settings migrated, ${skippedCount} skipped`,
@@ -219,6 +222,53 @@ export class StartupMigrator {
       logger.info(
         "No configuration migration needed - all settings are already in new format",
       );
+    }
+  }
+
+  /**
+   * Ensure all expected settings exist with default values
+   */
+  private async ensureDefaultSettings(): Promise<void> {
+    logger.info("Ensuring all expected settings exist with default values...");
+
+    let createdCount = 0;
+
+    for (const migration of configMigrations) {
+      try {
+        // Check if the new setting exists
+        const existingSetting = await this.configService.get(migration.newKey);
+
+        if (existingSetting === null || existingSetting === undefined) {
+          // Setting doesn't exist, create it with default value
+          if (migration.defaultValue !== undefined) {
+            logger.info(
+              `Creating missing setting: ${migration.newKey} with default value: ${migration.defaultValue}`,
+            );
+
+            await this.configService.set(
+              migration.newKey,
+              migration.defaultValue,
+              migration.category,
+              migration.description,
+            );
+
+            createdCount++;
+          }
+        }
+      } catch (error) {
+        logger.error(
+          `Failed to create default setting ${migration.newKey}:`,
+          error,
+        );
+      }
+    }
+
+    if (createdCount > 0) {
+      logger.info(
+        `Created ${createdCount} missing settings with default values`,
+      );
+    } else {
+      logger.info("All expected settings already exist");
     }
   }
 

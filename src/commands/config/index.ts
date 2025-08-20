@@ -347,13 +347,13 @@ async function handleSet(
     const key = interaction.options.getString("key", true);
     const rawValue = interaction.options.getString("value", true);
 
-    // Get the current config to get its category and description
-    const configs = await configService.getAll();
-    const currentConfig = configs.find((c) => c.key === key);
+    // Check if the key exists in our schema
+    const allSettings = getAllSettingsFromSchema();
+    const settingInfo = allSettings.find((s) => s.key === key);
 
-    if (!currentConfig) {
+    if (!settingInfo) {
       await interaction.reply({
-        content: `Configuration key '${key}' not found.`,
+        content: `Configuration key '${key}' not found in the schema.`,
         ephemeral: true,
       });
       return;
@@ -410,11 +410,12 @@ async function handleSet(
       }
     }
 
+    // Use the setting info from the schema instead of looking in the database
     await configService.set(
       key,
       value,
-      currentConfig.description,
-      currentConfig.category,
+      settingInfo.description,
+      settingInfo.category,
     );
 
     const formattedValue = isRoleOrChannelSetting(key)
