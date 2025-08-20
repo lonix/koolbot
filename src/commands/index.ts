@@ -21,32 +21,32 @@ const commands: Record<
   ((interaction: ChatInputCommandInteraction) => Promise<void>) | undefined
 > = {
   ping: async (interaction) => {
-    if (await configService.get("ENABLE_PING")) {
+    if (await configService.get("ping.enabled")) {
       await ping(interaction);
     }
   },
   amikool: async (interaction) => {
-    if (await configService.get("ENABLE_AMIKOOL")) {
+    if (await configService.get("amikool.enabled")) {
       await amikool(interaction);
     }
   },
   plexprice: async (interaction) => {
-    if (await configService.get("ENABLE_PLEX_PRICE")) {
+    if (await configService.get("plexprice.enabled")) {
       await plexprice(interaction);
     }
   },
   vctop: async (interaction) => {
-    if (await configService.get("ENABLE_VC_TRACKING")) {
+    if (await configService.get("voicetracking.enabled")) {
       await vctop(interaction);
     }
   },
   vcstats: async (interaction) => {
-    if (await configService.get("ENABLE_VC_TRACKING")) {
+    if (await configService.get("voicetracking.enabled")) {
       await vcstats(interaction);
     }
   },
   seen: async (interaction) => {
-    if (await configService.get("ENABLE_SEEN")) {
+    if (await configService.get("voicetracking.seen.enabled")) {
       await seen(interaction);
     }
   },
@@ -54,12 +54,12 @@ const commands: Record<
     await configCommand(interaction);
   },
   "transfer-ownership": async (interaction) => {
-    if (await configService.get("ENABLE_VC_MANAGEMENT")) {
+    if (await configService.get("voicechannels.enabled")) {
       await transferOwnership(interaction);
     }
   },
   "announce-vc-stats": async (interaction) => {
-    if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+    if (await configService.get("voicetracking.announcements.enabled")) {
       await announceVcStats(interaction);
     }
   },

@@ -31,7 +31,7 @@ export class ConfigService {
     this.reloadCallbacks.delete(callback);
   }
 
-  private async triggerReload(): Promise<void> {
+  public async triggerReload(): Promise<void> {
     logger.info("Triggering configuration reload...");
 
     // Clear the cache
@@ -219,7 +219,6 @@ export class ConfigService {
     category: string,
   ): Promise<void> {
     try {
-      const oldValue = this.cache.get(key);
       await Config.findOneAndUpdate(
         { key },
         {
@@ -235,10 +234,7 @@ export class ConfigService {
       this.cache.set(key, value);
       logger.info(`Configuration updated: ${key} = ${value}`);
 
-      // If the value has changed, trigger a reload
-      if (oldValue !== value) {
-        await this.triggerReload();
-      }
+      // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {
       logger.error(`Error updating configuration ${key}:`, error);
       throw error;
@@ -251,8 +247,7 @@ export class ConfigService {
       this.cache.delete(key);
       logger.info(`Configuration deleted: ${key}`);
 
-      // Trigger reload after deletion
-      await this.triggerReload();
+      // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {
       logger.error(`Error deleting configuration ${key}:`, error);
       throw error;

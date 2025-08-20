@@ -29,19 +29,20 @@ export class CommandManager {
     this.configService = ConfigService.getInstance();
     this.commands = new Collection();
 
-    // Ensure commands are refreshed whenever configuration changes
-    this.configService.registerReloadCallback(async () => {
-      try {
-        await this.registerCommands();
-        await this.populateClientCommands();
-        logger.info("Commands reloaded after configuration change");
-      } catch (error) {
-        logger.error(
-          "Error reloading commands after configuration change:",
-          error,
-        );
-      }
-    });
+    // No automatic reloads - users must manually trigger via /config reload
+    // this.configService.registerReloadCallback(async () => {
+    //   try {
+    //     logger.info("🔄 Configuration change detected, reloading commands...");
+    //     await this.registerCommands();
+    //     await this.populateClientCommands();
+    //     logger.info("✅ Commands reloaded after configuration change");
+    //   } catch (error) {
+    //     logger.error(
+    //       "❌ Error reloading commands after configuration change:",
+    //       error,
+    //     );
+    //   }
+    // });
   }
 
   public static getInstance(client: Client): CommandManager {
@@ -56,38 +57,44 @@ export class CommandManager {
       // Load commands
       const commands = [];
 
-      if (await this.configService.get("ENABLE_PING")) {
+      // Debug: Check the actual value of ping.enabled
+      const pingEnabled = await this.configService.get("ping.enabled");
+      logger.debug(
+        `DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`,
+      );
+
+      if (await this.configService.get("ping.enabled")) {
         commands.push(ping.toJSON());
         if (isDebug) logger.debug("✓ /ping command enabled");
       }
 
-      if (await this.configService.get("ENABLE_AMIKOOL")) {
+      if (await this.configService.get("amikool.enabled")) {
         commands.push(amikool.toJSON());
         if (isDebug) logger.debug("✓ /amikool command enabled");
       }
 
-      if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+      if (await this.configService.get("plexprice.enabled")) {
         commands.push(plexprice.toJSON());
         if (isDebug) logger.debug("✓ /plexprice command enabled");
       }
 
-      if (await this.configService.get("ENABLE_VC_TRACKING")) {
+      if (await this.configService.get("voicetracking.enabled")) {
         commands.push(vctop.toJSON());
         commands.push(vcstats.toJSON());
         if (isDebug) logger.debug("✓ Voice channel tracking commands enabled");
       }
 
-      if (await this.configService.get("ENABLE_SEEN")) {
+      if (await this.configService.get("voicetracking.seen.enabled")) {
         commands.push(seen.toJSON());
         if (isDebug) logger.debug("✓ /seen command enabled");
       }
 
-      if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+      if (await this.configService.get("voicechannels.enabled")) {
         commands.push(transferOwnership.toJSON());
         if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
       }
 
-      if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+      if (await this.configService.get("voicetracking.announcements.enabled")) {
         commands.push(announceVcStats.toJSON());
         if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
       }
@@ -127,28 +134,33 @@ export class CommandManager {
       logger.debug("Checking command registration status:");
     }
 
-    if (await this.configService.get("ENABLE_PING")) {
+    const pingEnabled = await this.configService.get("ping.enabled");
+    logger.debug(
+      `🔍 DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`,
+    );
+
+    if (pingEnabled) {
       commands.push(ping.toJSON());
       if (isDebug) logger.debug("✓ /ping command enabled");
     } else if (isDebug) {
       logger.debug("✗ /ping command disabled");
     }
 
-    if (await this.configService.get("ENABLE_AMIKOOL")) {
+    if (await this.configService.get("amikool.enabled")) {
       commands.push(amikool.toJSON());
       if (isDebug) logger.debug("✓ /amikool command enabled");
     } else if (isDebug) {
       logger.debug("✗ /amikool command disabled");
     }
 
-    if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+    if (await this.configService.get("plexprice.enabled")) {
       commands.push(plexprice.toJSON());
       if (isDebug) logger.debug("✓ /plexprice command enabled");
     } else if (isDebug) {
       logger.debug("✗ /plexprice command disabled");
     }
 
-    if (await this.configService.get("ENABLE_VC_TRACKING")) {
+    if (await this.configService.get("voicetracking.enabled")) {
       commands.push(vctop.toJSON());
       commands.push(vcstats.toJSON());
       if (isDebug) logger.debug("✓ /vctop and /vcstats commands enabled");
@@ -156,21 +168,21 @@ export class CommandManager {
       logger.debug("✗ /vctop and /vcstats commands disabled");
     }
 
-    if (await this.configService.get("ENABLE_SEEN")) {
+    if (await this.configService.get("voicetracking.seen.enabled")) {
       commands.push(seen.toJSON());
       if (isDebug) logger.debug("✓ /seen command enabled");
     } else if (isDebug) {
       logger.debug("✗ /seen command disabled");
     }
 
-    if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+    if (await this.configService.get("voicechannels.enabled")) {
       commands.push(transferOwnership.toJSON());
       if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
     } else if (isDebug) {
       logger.debug("✗ /transfer-ownership command disabled");
     }
 
-    if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+    if (await this.configService.get("voicetracking.announcements.enabled")) {
       commands.push(announceVcStats.toJSON());
       if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
     } else if (isDebug) {
@@ -210,6 +222,66 @@ export class CommandManager {
     return commands;
   }
 
+  // Helper function to make Discord API calls with timeout and retry logic
+  private async makeDiscordApiCall<T>(
+    apiCall: () => Promise<T>,
+    operationName: string,
+    timeoutMs: number = 30000,
+    maxRetries: number = 3,
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Create a timeout promise
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(
+            () => reject(new Error(`Discord API timeout after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
+        });
+
+        // Race the API call against the timeout
+        const result = await Promise.race([apiCall(), timeoutPromise]);
+
+        if (attempt > 1) {
+          logger.info(`✅ ${operationName} succeeded on attempt ${attempt}`);
+        }
+        return result;
+      } catch (error: any) {
+        const isRateLimit =
+          error.code === 429 || error.message?.includes("rate limit");
+        const isTimeout = error.message?.includes("timeout");
+
+        if (isRateLimit) {
+          const retryAfter = error.retry_after || 5;
+          logger.warn(
+            `⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, retryAfter * 1000),
+          );
+        } else if (isTimeout) {
+          logger.warn(
+            `⏰ Discord API timeout for ${operationName} (attempt ${attempt}/${maxRetries})`,
+          );
+          if (attempt < maxRetries) {
+            await new Promise((resolve) => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+          }
+        } else {
+          logger.error(`❌ Discord API error for ${operationName}:`, error);
+          throw error;
+        }
+
+        if (attempt === maxRetries) {
+          throw new Error(
+            `Failed to ${operationName} after ${maxRetries} attempts`,
+          );
+        }
+      }
+    }
+
+    throw new Error(`Unexpected error in ${operationName}`);
+  }
+
   public async registerCommands(): Promise<void> {
     try {
       if (!this.client) {
@@ -231,12 +303,41 @@ export class CommandManager {
       );
 
       try {
-        const data = await rest.put(
-          Routes.applicationGuildCommands(
-            await this.configService.getString("CLIENT_ID"),
-            guildId,
-          ),
-          { body: commands },
+        // First, clear all existing commands to force Discord to refresh its cache
+        logger.debug(
+          "Clearing all existing commands to force Discord cache refresh...",
+        );
+        await this.makeDiscordApiCall(
+          async () =>
+            rest.put(
+              Routes.applicationGuildCommands(
+                await this.configService.getString("CLIENT_ID"),
+                guildId,
+              ),
+              { body: [] },
+            ),
+          "clear existing commands",
+          15000, // 15 second timeout for clear operation
+          2, // 2 retries for clear operation
+        );
+
+        // Wait a moment for Discord to process the clear
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+
+        // Now register the new command list
+        logger.debug("Registering new commands with Discord API...");
+        const data = await this.makeDiscordApiCall(
+          async () =>
+            rest.put(
+              Routes.applicationGuildCommands(
+                await this.configService.getString("CLIENT_ID"),
+                guildId,
+              ),
+              { body: commands },
+            ),
+          "register new commands",
+          30000, // 30 second timeout for registration
+          3, // 3 retries for registration
         );
 
         logger.debug("Discord API response:", data);
@@ -288,34 +389,34 @@ export class CommandManager {
       this.client.commands.clear();
 
       // Add commands based on configuration
-      if (await this.configService.get("ENABLE_PING")) {
+      if (await this.configService.get("ping.enabled")) {
         this.client.commands.set("ping", { execute: ping });
       }
 
-      if (await this.configService.get("ENABLE_AMIKOOL")) {
+      if (await this.configService.get("amikool.enabled")) {
         this.client.commands.set("amikool", { execute: amikool });
       }
 
-      if (await this.configService.get("ENABLE_PLEX_PRICE")) {
+      if (await this.configService.get("plexprice.enabled")) {
         this.client.commands.set("plexprice", { execute: plexprice });
       }
 
-      if (await this.configService.get("ENABLE_VC_TRACKING")) {
+      if (await this.configService.get("voicetracking.enabled")) {
         this.client.commands.set("vctop", { execute: vctop });
         this.client.commands.set("vcstats", { execute: vcstats });
       }
 
-      if (await this.configService.get("ENABLE_SEEN")) {
+      if (await this.configService.get("voicetracking.seen.enabled")) {
         this.client.commands.set("seen", { execute: seen });
       }
 
-      if (await this.configService.get("ENABLE_VC_MANAGEMENT")) {
+      if (await this.configService.get("voicechannels.enabled")) {
         this.client.commands.set("transfer-ownership", {
           execute: transferOwnership,
         });
       }
 
-      if (await this.configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+      if (await this.configService.get("voicetracking.announcements.enabled")) {
         this.client.commands.set("announce-vc-stats", {
           execute: announceVcStats,
         });

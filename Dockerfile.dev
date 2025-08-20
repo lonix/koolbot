@@ -9,6 +9,9 @@ RUN npm install --include=dev
 # Copy source code
 COPY . .
 
+# Ensure scripts are available for development
+RUN ls -la src/scripts/
+
 # Expose ports for development
 EXPOSE 3000
 
@@ -16,5 +19,4 @@ EXPOSE 3000
 ENV NODE_ENV=development
 
 # Start the application with hot reloading
-CMD ["node", "--loader", "./src/loader.mjs", "src/index.ts"] 
- 
+CMD ["node", "--loader", "./src/loader.mjs", "src/index.ts"]

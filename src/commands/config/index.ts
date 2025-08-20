@@ -6,6 +6,7 @@ import {
   ChannelType,
 } from "discord.js";
 import { ConfigService } from "../../services/config-service.js";
+import { defaultConfig } from "../../services/config-schema.js";
 import logger from "../../utils/logger.js";
 
 const configService = ConfigService.getInstance();
@@ -85,6 +86,89 @@ async function formatAsMentions(
     .join(", ");
 }
 
+// Helper function to get display name for category
+function getCategoryDisplayName(category: string): string {
+  const displayNames: Record<string, string> = {
+    voicechannels: "Voice Channels",
+    voicetracking: "Voice Tracking",
+    ping: "Ping",
+    amikool: "Amikool",
+    plexprice: "PLEX Price",
+    quotes: "Quotes",
+  };
+  return displayNames[category] || category;
+}
+
+// Helper function to get all settings from the new schema
+function getAllSettingsFromSchema(): Array<{
+  key: string;
+  value: string | number | boolean;
+  category: string;
+  description: string;
+}> {
+  const settings: Array<{
+    key: string;
+    value: string | number | boolean;
+    category: string;
+    description: string;
+  }> = [];
+
+  // Add all settings from the default config
+  for (const [key, value] of Object.entries(defaultConfig)) {
+    const category = key.split(".")[0];
+    settings.push({
+      key,
+      value,
+      category,
+      description: getSettingDescription(key),
+    });
+  }
+
+  return settings;
+}
+
+// Helper function to get setting descriptions
+function getSettingDescription(key: string): string {
+  const descriptions: Record<string, string> = {
+    // Voice Channels
+    "voicechannels.enabled": "Enable/disable dynamic voice channel management",
+    "voicechannels.category.name": "Name of the category for voice channels",
+    "voicechannels.lobby.name": "Name of the lobby channel",
+    "voicechannels.lobby.offlinename": "Name of the offline lobby channel",
+    "voicechannels.channel.prefix": "Prefix for dynamically created channels",
+    "voicechannels.channel.suffix": "Suffix for dynamically created channels",
+
+    // Voice Tracking
+    "voicetracking.enabled": "Enable/disable voice activity tracking",
+    "voicetracking.seen.enabled": "Enable/disable last seen tracking",
+    "voicetracking.excluded_channels":
+      "Comma-separated list of voice channel IDs to exclude from tracking",
+    "voicetracking.announcements.enabled":
+      "Enable/disable weekly voice channel announcements",
+    "voicetracking.announcements.schedule":
+      "Cron expression for weekly announcements",
+    "voicetracking.announcements.channel":
+      "Channel name for voice channel announcements",
+    "voicetracking.admin_roles":
+      "Comma-separated role names that can manage tracking",
+
+    // Individual Features
+    "ping.enabled": "Enable/disable ping command",
+    "amikool.enabled": "Enable/disable amikool command",
+    "amikool.role.name": "Role name required to use amikool command",
+    "plexprice.enabled": "Enable/disable PLEX price checker",
+
+    // Quote System
+    "quotes.enabled": "Enable/disable quote system",
+    "quotes.add_roles": "Comma-separated role IDs that can add quotes",
+    "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",
+    "quotes.max_length": "Maximum quote length",
+    "quotes.cooldown": "Cooldown in seconds between quote additions",
+  };
+
+  return descriptions[key] || "No description available";
+}
+
 export const data = new SlashCommandBuilder()
   .setName("config")
   .setDescription("Manage bot configuration")
@@ -99,12 +183,12 @@ export const data = new SlashCommandBuilder()
           .setDescription("Filter by category")
           .setRequired(false)
           .addChoices(
-            { name: "Voice Channel", value: "voice_channel" },
-            { name: "Tracking", value: "tracking" },
-            { name: "Announcements", value: "announcements" },
-            { name: "Roles", value: "roles" },
-            { name: "Features", value: "features" },
-            { name: "System", value: "system" },
+            { name: "Voice Channels", value: "voicechannels" },
+            { name: "Voice Tracking", value: "voicetracking" },
+            { name: "Ping", value: "ping" },
+            { name: "Amikool", value: "amikool" },
+            { name: "PLEX Price", value: "plexprice" },
+            { name: "Quotes", value: "quotes" },
           ),
       ),
   )
@@ -146,6 +230,13 @@ export const data = new SlashCommandBuilder()
           .setDescription("Configuration key")
           .setRequired(true),
       ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("reload")
+      .setDescription(
+        "Reload all commands to Discord API (use after changing command settings)",
+      ),
   );
 
 async function handleList(
@@ -161,40 +252,66 @@ async function handleList(
       return;
     }
 
+    // Defer the reply immediately to prevent timeout
+    await interaction.deferReply({ ephemeral: true });
+
     const category = interaction.options.getString("category");
-    const configs = category
-      ? await configService.getByCategory(category)
-      : await configService.getAll();
+
+    // Get all settings from the new schema
+    let allSettings = getAllSettingsFromSchema();
+
+    // Filter by category if specified
+    if (category) {
+      allSettings = allSettings.filter(
+        (setting) => setting.category === category,
+      );
+    }
 
     const embed = new EmbedBuilder()
       .setTitle("Configuration Settings")
       .setColor(0x0099ff)
       .setTimestamp();
 
-    if (configs.length === 0) {
+    if (allSettings.length === 0) {
       embed.setDescription("No configuration settings found.");
     } else {
-      const groupedConfigs = configs.reduce(
-        (acc, config) => {
-          if (!acc[config.category]) {
-            acc[config.category] = [];
-          }
-          acc[config.category].push(config);
-          return acc;
-        },
-        {} as Record<string, typeof configs>,
+      // Batch fetch all settings from database at once
+      const allDbValues = await configService.getAll();
+      const dbValuesMap = new Map(
+        allDbValues.map((config) => [config.key, config.value]),
       );
 
-      for (const [category, settings] of Object.entries(groupedConfigs)) {
-        const categoryName = category
-          .split("_")
-          .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-          .join(" ");
+      // Pre-fetch guild data once to avoid repeated API calls
+      if (interaction.guild) {
+        await interaction.guild.fetch();
+      }
+
+      // Group settings by category
+      const groupedSettings = allSettings.reduce(
+        (acc, setting) => {
+          if (!acc[setting.category]) {
+            acc[setting.category] = [];
+          }
+          acc[setting.category].push(setting);
+          return acc;
+        },
+        {} as Record<string, typeof allSettings>,
+      );
+
+      for (const [category, settings] of Object.entries(groupedSettings)) {
+        const categoryName = getCategoryDisplayName(category);
         const valueList = await Promise.all(
           settings.map(async (setting) => {
+            // Get value from database map, fallback to default
+            let actualValue = setting.value;
+            const dbValue = dbValuesMap.get(setting.key);
+            if (dbValue !== null && dbValue !== undefined) {
+              actualValue = dbValue as string | number | boolean;
+            }
+
             const value = isRoleOrChannelSetting(setting.key)
-              ? await formatAsMentions(String(setting.value), interaction)
-              : String(setting.value);
+              ? await formatAsMentions(String(actualValue), interaction)
+              : String(actualValue);
             return `**${setting.key}**: ${value}`;
           }),
         );
@@ -202,12 +319,11 @@ async function handleList(
       }
     }
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error listing configuration:", error);
-    await interaction.reply({
+    await interaction.editReply({
       content: "An error occurred while listing configuration settings.",
-      ephemeral: true,
     });
   }
 }
@@ -246,23 +362,56 @@ async function handleSet(
     const key = interaction.options.getString("key", true);
     const rawValue = interaction.options.getString("value", true);
 
-    // Get the current config to get its category and description
-    const configs = await configService.getAll();
-    const currentConfig = configs.find((c) => c.key === key);
+    // Check if the key exists in our schema
+    const allSettings = getAllSettingsFromSchema();
+    const settingInfo = allSettings.find((s) => s.key === key);
 
-    if (!currentConfig) {
+    if (!settingInfo) {
       await interaction.reply({
-        content: `Configuration key '${key}' not found.`,
+        content: `Configuration key '${key}' not found in the schema.`,
         ephemeral: true,
       });
       return;
     }
 
+    // Convert the raw value to the expected type based on the schema
+    let value: string | number | boolean = rawValue;
+
+    // Convert boolean strings to actual booleans
+    if (typeof settingInfo.value === "boolean") {
+      if (rawValue.toLowerCase() === "true") {
+        value = true;
+      } else if (rawValue.toLowerCase() === "false") {
+        value = false;
+      } else {
+        await interaction.reply({
+          content: `Invalid value for boolean setting '${key}'. Use 'true' or 'false'.`,
+          ephemeral: true,
+        });
+        return;
+      }
+    }
+
+    // Convert number strings to actual numbers
+    else if (typeof settingInfo.value === "number") {
+      const numValue = Number(rawValue);
+      if (isNaN(numValue)) {
+        await interaction.reply({
+          content: `Invalid value for number setting '${key}'. Use a valid number.`,
+          ephemeral: true,
+        });
+        return;
+      }
+      value = numValue;
+    }
+
     // Extract IDs from mentions if it's a role or channel setting
-    const value = isRoleOrChannelSetting(key) ? extractIds(rawValue) : rawValue;
+    if (isRoleOrChannelSetting(key)) {
+      value = extractIds(rawValue);
+    }
 
     // Validate roles and channels if applicable
-    if (isRoleOrChannelSetting(key)) {
+    if (isRoleOrChannelSetting(key) && typeof value === "string") {
       const ids = value.split(",").filter(Boolean);
       const invalidIds: string[] = [];
 
@@ -284,7 +433,7 @@ async function handleSet(
       }
 
       // Additional validation for specific settings
-      if (key.includes("channel")) {
+      if (key.includes("channel") && typeof value === "string") {
         const channel = interaction.guild?.channels.cache.get(ids[0]);
         if (channel) {
           // Validate channel type for specific settings
@@ -309,16 +458,18 @@ async function handleSet(
       }
     }
 
+    // Use the setting info from the schema instead of looking in the database
     await configService.set(
       key,
       value,
-      currentConfig.description,
-      currentConfig.category,
+      settingInfo.description,
+      settingInfo.category,
     );
 
-    const formattedValue = isRoleOrChannelSetting(key)
-      ? await formatAsMentions(value, interaction)
-      : value;
+    const formattedValue =
+      isRoleOrChannelSetting(key) && typeof value === "string"
+        ? await formatAsMentions(value, interaction)
+        : String(value);
 
     const embed = new EmbedBuilder()
       .setTitle("Configuration Updated")
@@ -362,6 +513,44 @@ async function handleReset(
   }
 }
 
+async function handleReload(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    await interaction.reply({
+      content: "Reloading commands to Discord API... This may take a moment.",
+      ephemeral: true,
+    });
+
+    // Get the command manager instance and force a reload
+    const { CommandManager } = await import(
+      "../../services/command-manager.js"
+    );
+    const commandManager = CommandManager.getInstance(interaction.client);
+
+    // Reload commands to Discord API
+    await commandManager.registerCommands();
+
+    // Update client-side command handling
+    await commandManager.populateClientCommands();
+
+    const embed = new EmbedBuilder()
+      .setTitle("Commands Reloaded")
+      .setColor(0x00ff00)
+      .setDescription(
+        "All commands have been reloaded to Discord API with current settings.",
+      )
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    logger.error("Error reloading commands:", error);
+    await interaction.editReply({
+      content: "An error occurred while reloading commands.",
+    });
+  }
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -379,6 +568,9 @@ export async function execute(
       break;
     case "reset":
       await handleReset(interaction);
+      break;
+    case "reload":
+      await handleReload(interaction);
       break;
     default:
       await interaction.reply({
