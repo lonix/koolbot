@@ -51,7 +51,7 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicechannels.channel.suffix",
     category: "voicechannels",
     description: "Suffix for dynamically created channels",
-    defaultValue: "'s Room",
+    defaultValue: "",  // Fixed: match isDefaultValue method
   },
 
   // Voice Activity Tracking
@@ -123,7 +123,7 @@ const configMigrations: ConfigMigration[] = [
   },
   {
     oldKey: "COOL_ROLE_NAME",
-    newKey: "amikool.cool_role_name",
+    newKey: "amikool.role.name",  // Fixed: match expected dot notation
     category: "amikool",
     description: "Name of the cool role for amikool command",
     defaultValue: "HR",
@@ -198,6 +198,7 @@ export class StartupMigrator {
     // First, force migration by removing new settings with default values
     await this.forceMigration();
 
+    // Now run the actual migration logic
     let migratedCount = 0;
     let skippedCount = 0;
 
@@ -278,7 +279,7 @@ export class StartupMigrator {
       "voicechannels.lobby.name": "🟢 Lobby",
       "voicechannels.lobby.offlinename": "🔴 Lobby",
       "voicechannels.channel.prefix": "🎮",
-      "voicechannels.channel.suffix": "",
+      "voicechannels.channel.suffix": "",  // Fixed: match migration defaultValue
       "voicetracking.enabled": true,
       "voicetracking.seen.enabled": true,
       "voicetracking.excluded_channels": "",
