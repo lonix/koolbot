@@ -1,38 +1,5 @@
 # KoolBot TODO List
 
-## Medium Priority
-- [x] Bot Registration Validation (P1) ✅ COMPLETED
-  - [x] Add startup check for global commands
-  - [x] Automatically clean up duplicate global commands
-  - [x] Prevent future duplicate command issues
-  - [x] Update deploy-commands script to use guild commands
-
-- [ ] Documentation Updates (P1)
-  - [ ] Add troubleshooting guide
-    - Success Criteria:
-      - Common issues and solutions
-      - Step-by-step debugging guide
-      - Error code reference
-  - [ ] Add contribution guidelines
-    - Success Criteria:
-      - Code style guide
-      - PR process documentation
-      - Testing requirements
-  - [ ] Document cron schedule format
-    - Success Criteria:
-      - Clear examples for common schedules
-      - Validation rules
-      - Timezone considerations
-  - [ ] Add environment variables guide
-    - Success Criteria:
-      - All variables documented
-      - Default values listed
-      - Required vs optional marked
-  - [ ] Document admin commands
-    - Success Criteria:
-      - Permission requirements
-      - Usage examples
-      - Expected outcomes
 
 - [ ] Code Quality (P2)
   - [ ] Add unit tests
@@ -52,27 +19,29 @@
       - Database query performance
       - API call latency
 
-- [ ] Settings Reorganization (P2)
-  - [ ] Implement dot notation for settings
+- [x] Settings Reorganization (P2)
+  - [x] Implement dot notation for settings
     - Success Criteria:
-      - Convert all settings to dot notation (e.g., vc-management.enabled)
+      - Convert all settings to dot notation (e.g., voicechannels.enabled)
       - Update all references to settings
       - Maintain backward compatibility
-  - [ ] Add settings validation
+  - [x] Add settings validation
     - Success Criteria:
       - Type checking for settings
       - Value range validation
       - Required dependencies checking
-  - [ ] Add settings migration system
+  - [x] Add settings migration system
     - Success Criteria:
-      - Automatic migration from old format
-      - Backup of old settings
-      - Rollback capability
-  - [ ] Update documentation
+      - Manual migration via standalone scripts (npm run migrate-config)
+      - Bot startup detection of outdated settings
+      - Warning system for settings that need migration
+      - Automatic creation of missing default settings
+  - [x] Update documentation
     - Success Criteria:
-      - New settings format guide
-      - Migration instructions
-      - Examples of new format
+      - New settings format guide in README.md
+      - Comprehensive SETTINGS.md reference
+      - Migration instructions and troubleshooting
+      - Examples of new dot notation format
 
 ## Low Priority
 - [ ] Feature Enhancements (P3)
@@ -317,6 +286,27 @@
   - [x] Create /botstats command for viewing metrics
   - [x] Integrate monitoring into command execution flow
   - [x] Add automatic error tracking and reporting
+- [x] Implement Discord API resilience and graceful degradation
+  - [x] Add comprehensive rate limiting protection
+    - [x] Detect Discord 429 rate limit responses
+    - [x] Implement automatic retry with Discord-specified delays
+    - [x] Add exponential backoff for timeouts
+    - [x] Log rate limit warnings and retry attempts
+  - [x] Add timeout protection for Discord API calls
+    - [x] 15-second timeout for command clearing operations
+    - [x] 30-second timeout for command registration
+    - [x] Prevent bot from hanging indefinitely on API calls
+    - [x] Smart retry logic with configurable attempts
+  - [x] Implement graceful degradation when Discord API fails
+    - [x] Bot continues running without slash commands
+    - [x] Voice channel management and user tracking remain functional
+    - [x] Lobby renaming and core features continue working
+    - [x] Clear user feedback about what's working vs. what's not
+  - [x] Add comprehensive error handling and logging
+    - [x] Detailed logging of Discord API failures
+    - [x] User-friendly warning messages
+    - [x] Debug information for troubleshooting
+    - [x] Recovery instructions for users
 
 ## Configuration
 - [x] Environment Configuration (P0)
