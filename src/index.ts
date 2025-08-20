@@ -217,7 +217,7 @@ async function initializeServices(): Promise<void> {
 
     // Initialize services
     await configService.initialize();
-    await configService.migrateFromEnv();
+    // await configService.migrateFromEnv(); // Disabled - let startup migrator handle all migration
     await startupMigrator.migrateOnStartup();
     await commandManager.registerCommands();
     await commandManager.populateClientCommands();

@@ -56,6 +56,12 @@ export class CommandManager {
       // Load commands
       const commands = [];
 
+      // Debug: Check the actual value of ping.enabled
+      const pingEnabled = await this.configService.get("ping.enabled");
+      logger.debug(
+        `DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`,
+      );
+
       if (await this.configService.get("ping.enabled")) {
         commands.push(ping.toJSON());
         if (isDebug) logger.debug("✓ /ping command enabled");

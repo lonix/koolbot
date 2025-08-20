@@ -39,38 +39,38 @@ async function buildCommandList(): Promise<void> {
   commands.push(excludeChannelCommand.toJSON());
 
   // Add conditional commands based on configuration
-  if (await configService.get("ENABLE_PING")) {
+  if (await configService.get("ping.enabled")) {
     commands.push(ping.toJSON());
     logger.info("✓ /ping command enabled");
   }
 
-  if (await configService.get("ENABLE_AMIKOOL")) {
+  if (await configService.get("amikool.enabled")) {
     commands.push(amikool.toJSON());
     logger.info("✓ /amikool command enabled");
   }
 
-  if (await configService.get("ENABLE_PLEX_PRICE")) {
+  if (await configService.get("plexprice.enabled")) {
     commands.push(plexprice.toJSON());
     logger.info("✓ /plexprice command enabled");
   }
 
-  if (await configService.get("ENABLE_VC_TRACKING")) {
+  if (await configService.get("voicetracking.enabled")) {
     commands.push(vctop.toJSON());
     commands.push(vcstats.toJSON());
     logger.info("✓ /vctop and /vcstats commands enabled");
   }
 
-  if (await configService.get("ENABLE_SEEN")) {
+  if (await configService.get("voicetracking.seen.enabled")) {
     commands.push(seen.toJSON());
     logger.info("✓ /seen command enabled");
   }
 
-  if (await configService.get("ENABLE_VC_MANAGEMENT")) {
+  if (await configService.get("voicechannels.enabled")) {
     commands.push(transferOwnershipCommand.toJSON());
     logger.info("✓ /transfer-ownership command enabled");
   }
 
-  if (await configService.get("ENABLE_VC_WEEKLY_ANNOUNCEMENT")) {
+  if (await configService.get("voicetracking.announcements.enabled")) {
     commands.push(announceVcStatsCommand.toJSON());
     logger.info("✓ /announce-vc-stats command enabled");
   }
