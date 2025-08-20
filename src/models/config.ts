@@ -33,6 +33,7 @@ const ConfigSchema = new Schema<IConfig>(
         "announcements",
         "roles",
         "features",
+        "quotes",
         "system",
       ],
     },

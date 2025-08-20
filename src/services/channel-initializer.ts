@@ -51,8 +51,9 @@ export class ChannelInitializer {
         throw new Error(`Guild ${guildId} not found`);
       }
 
-      const isVoiceChannelManagementEnabled = await this.configService.get(
-        "ENABLE_VC_MANAGEMENT",
+      const isVoiceChannelManagementEnabled = await this.configService.getBoolean(
+        "voice_channel.enabled",
+        false
       );
       if (!isVoiceChannelManagementEnabled) {
         logger.info(

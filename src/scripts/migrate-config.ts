@@ -99,6 +99,66 @@ const configMigrations: ConfigMigration[] = [
     description: "Channel name for voice channel announcements",
     defaultValue: "voice-stats",
   },
+
+  // Bot Features (if they exist in old format)
+  {
+    oldKey: "ENABLE_PING",
+    newKey: "features.ping_enabled",
+    category: "features",
+    description: "Enable/disable ping command",
+    defaultValue: "true",
+  },
+  {
+    oldKey: "ENABLE_AMIKOOL",
+    newKey: "features.amikool_enabled",
+    category: "features",
+    description: "Enable/disable amikool command",
+    defaultValue: "true",
+  },
+  {
+    oldKey: "ENABLE_PLEX_CHECKER",
+    newKey: "features.plex_checker_enabled",
+    category: "features",
+    description: "Enable/disable PLEX price checker",
+    defaultValue: "true",
+  },
+
+  // Quote System (if they exist in old format)
+  {
+    oldKey: "ENABLE_QUOTES",
+    newKey: "quotes.enabled",
+    category: "quotes",
+    description: "Enable/disable quote system",
+    defaultValue: "true",
+  },
+  {
+    oldKey: "QUOTE_ADD_ROLES",
+    newKey: "quotes.add_roles",
+    category: "quotes",
+    description: "Comma-separated role IDs that can add quotes",
+    defaultValue: "",
+  },
+  {
+    oldKey: "QUOTE_DELETE_ROLES",
+    newKey: "quotes.delete_roles",
+    category: "quotes",
+    description: "Comma-separated role IDs that can delete quotes",
+    defaultValue: "",
+  },
+  {
+    oldKey: "QUOTE_MAX_LENGTH",
+    newKey: "quotes.max_length",
+    category: "quotes",
+    description: "Maximum length for quotes",
+    defaultValue: "1000",
+  },
+  {
+    oldKey: "QUOTE_COOLDOWN",
+    newKey: "quotes.cooldown",
+    category: "quotes",
+    description: "Cooldown in seconds between quote additions",
+    defaultValue: "60",
+  },
 ];
 
 async function migrateConfiguration(): Promise<void> {

@@ -15,9 +15,10 @@ export const command = {
       }
 
       const configService = ConfigService.getInstance();
-      const lobbyChannelName =
-        (await configService.getString("voice_channel.lobby_channel_name")) ||
-        (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+      const lobbyChannelName = await configService.getString(
+        "voice_channel.lobby_channel_name",
+        "Lobby"
+      );
 
       await interaction.reply(
         `Setting up voice channels with lobby name: **${lobbyChannelName}**...`,
