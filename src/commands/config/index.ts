@@ -233,9 +233,9 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
-      .setName("redeploy")
+      .setName("reload")
       .setDescription(
-        "Redeploy all commands to Discord API (use after changing command settings)",
+        "Reload all commands to Discord API (use after changing command settings)",
       ),
   );
 
@@ -251,6 +251,9 @@ async function handleList(
       });
       return;
     }
+
+    // Defer the reply immediately to prevent timeout
+    await interaction.deferReply({ ephemeral: true });
 
     const category = interaction.options.getString("category");
 
@@ -272,6 +275,15 @@ async function handleList(
     if (allSettings.length === 0) {
       embed.setDescription("No configuration settings found.");
     } else {
+      // Batch fetch all settings from database at once
+      const allDbValues = await configService.getAll();
+      const dbValuesMap = new Map(allDbValues.map(config => [config.key, config.value]));
+
+      // Pre-fetch guild data once to avoid repeated API calls
+      if (interaction.guild) {
+        await interaction.guild.fetch();
+      }
+
       // Group settings by category
       const groupedSettings = allSettings.reduce(
         (acc, setting) => {
@@ -288,16 +300,11 @@ async function handleList(
         const categoryName = getCategoryDisplayName(category);
         const valueList = await Promise.all(
           settings.map(async (setting) => {
-            // Try to get the actual value from the database, fallback to default
+            // Get value from database map, fallback to default
             let actualValue = setting.value;
-            try {
-              const dbValue = await configService.get(setting.key);
-              if (dbValue !== null && dbValue !== undefined) {
-                actualValue = dbValue as string | number | boolean;
-              }
-            } catch (error) {
-              // If there's an error getting from DB, use the default value
-              logger.debug(`Using default value for ${setting.key}: ${error}`);
+            const dbValue = dbValuesMap.get(setting.key);
+            if (dbValue !== null && dbValue !== undefined) {
+              actualValue = dbValue as string | number | boolean;
             }
 
             const value = isRoleOrChannelSetting(setting.key)
@@ -310,12 +317,11 @@ async function handleList(
       }
     }
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error listing configuration:", error);
-    await interaction.reply({
+    await interaction.editReply({
       content: "An error occurred while listing configuration settings.",
-      ephemeral: true,
     });
   }
 }
@@ -366,11 +372,44 @@ async function handleSet(
       return;
     }
 
+    // Convert the raw value to the expected type based on the schema
+    let value: string | number | boolean = rawValue;
+
+    // Convert boolean strings to actual booleans
+    if (typeof settingInfo.value === 'boolean') {
+      if (rawValue.toLowerCase() === 'true') {
+        value = true;
+      } else if (rawValue.toLowerCase() === 'false') {
+        value = false;
+      } else {
+        await interaction.reply({
+          content: `Invalid value for boolean setting '${key}'. Use 'true' or 'false'.`,
+          ephemeral: true,
+        });
+        return;
+      }
+    }
+
+    // Convert number strings to actual numbers
+    else if (typeof settingInfo.value === 'number') {
+      const numValue = Number(rawValue);
+      if (isNaN(numValue)) {
+        await interaction.reply({
+          content: `Invalid value for number setting '${key}'. Use a valid number.`,
+          ephemeral: true,
+        });
+        return;
+      }
+      value = numValue;
+    }
+
     // Extract IDs from mentions if it's a role or channel setting
-    const value = isRoleOrChannelSetting(key) ? extractIds(rawValue) : rawValue;
+    if (isRoleOrChannelSetting(key)) {
+      value = extractIds(rawValue);
+    }
 
     // Validate roles and channels if applicable
-    if (isRoleOrChannelSetting(key)) {
+    if (isRoleOrChannelSetting(key) && typeof value === 'string') {
       const ids = value.split(",").filter(Boolean);
       const invalidIds: string[] = [];
 
@@ -392,7 +431,7 @@ async function handleSet(
       }
 
       // Additional validation for specific settings
-      if (key.includes("channel")) {
+      if (key.includes("channel") && typeof value === 'string') {
         const channel = interaction.guild?.channels.cache.get(ids[0]);
         if (channel) {
           // Validate channel type for specific settings
@@ -425,9 +464,9 @@ async function handleSet(
       settingInfo.category,
     );
 
-    const formattedValue = isRoleOrChannelSetting(key)
+    const formattedValue = isRoleOrChannelSetting(key) && typeof value === 'string'
       ? await formatAsMentions(value, interaction)
-      : value;
+      : String(value);
 
     const embed = new EmbedBuilder()
       .setTitle("Configuration Updated")
@@ -471,40 +510,40 @@ async function handleReset(
   }
 }
 
-async function handleRedeploy(
+async function handleReload(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
     await interaction.reply({
-      content: "Redeploying commands to Discord API... This may take a moment.",
+      content: "Reloading commands to Discord API... This may take a moment.",
       ephemeral: true,
     });
 
-    // Get the command manager instance and force a redeploy
+    // Get the command manager instance and force a reload
     const { CommandManager } = await import(
       "../../services/command-manager.js"
     );
     const commandManager = CommandManager.getInstance(interaction.client);
 
-    // Redeploy commands to Discord API
+    // Reload commands to Discord API
     await commandManager.registerCommands();
 
     // Update client-side command handling
     await commandManager.populateClientCommands();
 
     const embed = new EmbedBuilder()
-      .setTitle("Commands Redeployed")
+      .setTitle("Commands Reloaded")
       .setColor(0x00ff00)
       .setDescription(
-        "All commands have been redeployed to Discord API with current settings.",
+        "All commands have been reloaded to Discord API with current settings.",
       )
       .setTimestamp();
 
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
-    logger.error("Error redeploying commands:", error);
+    logger.error("Error reloading commands:", error);
     await interaction.editReply({
-      content: "An error occurred while redeploying commands.",
+      content: "An error occurred while reloading commands.",
     });
   }
 }
@@ -527,8 +566,8 @@ export async function execute(
     case "reset":
       await handleReset(interaction);
       break;
-    case "redeploy":
-      await handleRedeploy(interaction);
+    case "reload":
+      await handleReload(interaction);
       break;
     default:
       await interaction.reply({

@@ -232,6 +232,10 @@ export class StartupMigrator {
       logger.info(
         `Configuration migration completed: ${migratedCount} settings migrated, ${skippedCount} skipped`,
       );
+
+      // No automatic reloads - users must manually trigger via /config reload
+      // logger.info("Triggering final configuration reload after migration...");
+      // await this.configService.triggerReload();
     } else {
       logger.info(
         "No configuration migration needed - all settings are already in new format",

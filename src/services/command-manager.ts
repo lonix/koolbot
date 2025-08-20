@@ -29,19 +29,20 @@ export class CommandManager {
     this.configService = ConfigService.getInstance();
     this.commands = new Collection();
 
-    // Ensure commands are refreshed whenever configuration changes
-    this.configService.registerReloadCallback(async () => {
-      try {
-        await this.registerCommands();
-        await this.populateClientCommands();
-        logger.info("Commands reloaded after configuration change");
-      } catch (error) {
-        logger.error(
-          "Error reloading commands after configuration change:",
-          error,
-        );
-      }
-    });
+              // No automatic reloads - users must manually trigger via /config reload
+          // this.configService.registerReloadCallback(async () => {
+          //   try {
+          //     logger.info("🔄 Configuration change detected, reloading commands...");
+          //     await this.registerCommands();
+          //     await this.populateClientCommands();
+          //     logger.info("✅ Commands reloaded after configuration change");
+          //   } catch (error) {
+          //     logger.error(
+          //       "❌ Error reloading commands after configuration change:",
+          //       error,
+          //     );
+          //   }
+          // });
   }
 
   public static getInstance(client: Client): CommandManager {
@@ -133,7 +134,10 @@ export class CommandManager {
       logger.debug("Checking command registration status:");
     }
 
-    if (await this.configService.get("ping.enabled")) {
+    const pingEnabled = await this.configService.get("ping.enabled");
+    logger.debug(`🔍 DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`);
+
+    if (pingEnabled) {
       commands.push(ping.toJSON());
       if (isDebug) logger.debug("✓ /ping command enabled");
     } else if (isDebug) {
@@ -237,6 +241,20 @@ export class CommandManager {
       );
 
       try {
+        // First, clear all existing commands to force Discord to refresh its cache
+        logger.debug("Clearing all existing commands to force Discord cache refresh...");
+        await rest.put(
+          Routes.applicationGuildCommands(
+            await this.configService.getString("CLIENT_ID"),
+            guildId,
+          ),
+          { body: [] },
+        );
+
+        // Wait a moment for Discord to process the clear
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Now register the new command list
         const data = await rest.put(
           Routes.applicationGuildCommands(
             await this.configService.getString("CLIENT_ID"),
