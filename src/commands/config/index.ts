@@ -230,6 +230,13 @@ export const data = new SlashCommandBuilder()
           .setDescription("Configuration key")
           .setRequired(true),
       ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("redeploy")
+      .setDescription(
+        "Redeploy all commands to Discord API (use after changing command settings)",
+      ),
   );
 
 async function handleList(
@@ -464,6 +471,44 @@ async function handleReset(
   }
 }
 
+async function handleRedeploy(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    await interaction.reply({
+      content: "Redeploying commands to Discord API... This may take a moment.",
+      ephemeral: true,
+    });
+
+    // Get the command manager instance and force a redeploy
+    const { CommandManager } = await import(
+      "../../services/command-manager.js"
+    );
+    const commandManager = CommandManager.getInstance(interaction.client);
+
+    // Redeploy commands to Discord API
+    await commandManager.registerCommands();
+
+    // Update client-side command handling
+    await commandManager.populateClientCommands();
+
+    const embed = new EmbedBuilder()
+      .setTitle("Commands Redeployed")
+      .setColor(0x00ff00)
+      .setDescription(
+        "All commands have been redeployed to Discord API with current settings.",
+      )
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    logger.error("Error redeploying commands:", error);
+    await interaction.editReply({
+      content: "An error occurred while redeploying commands.",
+    });
+  }
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -481,6 +526,9 @@ export async function execute(
       break;
     case "reset":
       await handleReset(interaction);
+      break;
+    case "redeploy":
+      await handleRedeploy(interaction);
       break;
     default:
       await interaction.reply({
