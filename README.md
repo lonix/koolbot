@@ -55,76 +55,69 @@ GUILD_ID=your_guild_id_here
 
 ### User Configurable Settings
 
-All other settings can be configured using the `/config` command and are stored in the database. These include:
+All other settings can be configured using the `/config` command and are stored in the database. These settings use a hierarchical dot notation structure for better organization:
 
-#### Voice Channel Management
-- Enable/disable voice channel management
-- Category name for voice channels
-- Lobby channel names
-- Channel naming patterns
+#### Settings Hierarchy
 
-#### Voice Channel Tracking
-- Enable/disable tracking features
-- Weekly announcement settings
-- Last seen tracking
-- Excluded voice channels (comma-separated list of channel IDs)
+```
+ping.enabled                    # Enable/disable ping command
+amikool.enabled                # Enable/disable amikool command
+amikool.role.name              # Name of the cool role for verification
 
-#### Bot Features
-- Command toggles
-- Feature flags
+plexprice.enabled              # Enable/disable plexprice command
 
-#### Roles
-- Role names for permissions
-- Admin role configurations
+quotes.enabled                 # Enable/disable quote system
+quotes.cooldown                # Cooldown between quote additions (seconds)
+quotes.max_length              # Maximum length for quotes
+quotes.add_roles               # Roles that can add quotes (comma-separated IDs)
+quotes.delete_roles            # Roles that can delete quotes (comma-separated IDs)
 
-### Configuration Commands
+voicechannels.enabled          # Enable/disable voice channel management
+voicechannels.category.name    # Category name for voice channels
+voicechannels.lobby.name       # Online lobby channel name
+voicechannels.lobby.offlinename # Offline lobby channel name
+voicechannels.channel.prefix   # Prefix for dynamically created channels
+voicechannels.channel.suffix   # Suffix for dynamically created channels
+
+voicetracking.enabled          # Enable/disable voice channel tracking
+voicetracking.seen.enabled     # Enable/disable last seen tracking
+voicetracking.excluded_channels # Excluded voice channels (comma-separated IDs)
+voicetracking.admin_roles      # Admin roles for tracking (comma-separated IDs)
+voicetracking.announcements.enabled    # Enable/disable weekly announcements
+voicetracking.announcements.channel    # Channel for announcements
+voicetracking.announcements.schedule   # Cron schedule for announcements
+```
+
+#### Configuration Commands
 
 Use the following commands to manage settings:
 
-1. List all settings:
+1. **List all settings:**
    ```
    /config list
    ```
 
-2. List settings by category:
+2. **Get a specific setting:**
    ```
-   /config list category:voice_channel
-   ```
-
-3. Get a specific setting:
-   ```
-   /config get key:ENABLE_VC_WEEKLY_ANNOUNCEMENT
+   /config get key:ping.enabled
    ```
 
-4. Change a setting:
+3. **Change a setting:**
    ```
-   /config set key:ENABLE_VC_WEEKLY_ANNOUNCEMENT value:true
-   ```
-
-5. Reset a setting to default:
-   ```
-   /config reset key:ENABLE_VC_WEEKLY_ANNOUNCEMENT
+   /config set key:ping.enabled value:false
    ```
 
-2. List settings by category:
+4. **Reset a setting to default:**
    ```
-   /config list category:tracking
-   ```
-
-3. Get a specific setting:
-   ```
-   /config get key:EXCLUDED_VC_CHANNELS
+   /config reset key:ping.enabled
    ```
 
-4. Change a setting:
+5. **Reload commands after changing settings:**
    ```
-   /config set key:EXCLUDED_VC_CHANNELS value:123456789,987654321
+   /config reload
    ```
 
-5. Reset a setting to default:
-   ```
-   /config reset key:EXCLUDED_VC_CHANNELS
-   ```
+
 
 ## Commands
 
@@ -219,12 +212,38 @@ This will remove all global commands, ensuring a clean transition to guild-speci
 
 ### Command Updates
 
-Guild commands update almost instantly (within seconds) when you:
-1. Enable/disable features using `/config`
+Guild commands update when you:
+1. **Manually reload** using `/config reload` after changing command settings
 2. Restart the bot
 3. Deploy new commands
 
-This makes testing and development much faster compared to global commands.
+**Important**: After changing command enable/disable settings, you must run `/config reload` to update Discord. This gives you full control over when commands are updated and prevents unexpected behavior.
+
+### Configuration Migration
+
+**Important**: The bot no longer automatically migrates settings on startup. Instead, it will:
+
+1. **Warn you** if outdated flat settings (like `ENABLE_PING`) are found in the database
+2. **Create missing settings** with default values for new installations
+3. **Require manual migration** using the standalone script
+
+#### Manual Migration
+
+To migrate old settings to the new dot notation format, run:
+
+```bash
+npm run migrate-config
+```
+
+This script will:
+- Convert old flat keys (e.g., `ENABLE_PING`) to new dot notation (e.g., `ping.enabled`)
+- Preserve all your existing values
+- Clean up old settings after successful migration
+
+**When to migrate:**
+- After updating from an older version of the bot
+- When you see warnings about outdated settings in the logs
+- Before manually deleting old settings from the database
 
 ## Development
 
