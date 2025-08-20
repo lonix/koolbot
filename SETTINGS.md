@@ -1,175 +1,158 @@
-# KoolBot Settings Configuration
+# KoolBot Settings Reference
 
-This document describes all configurable settings for KoolBot using the new dot notation system.
+This document provides a comprehensive reference for all configurable settings in KoolBot.
 
-## Settings Hierarchy
+## Migration Notice
 
-All settings use dot notation for logical grouping and easy identification. The format is: `category.subcategory.setting`
+**Important**: The bot no longer automatically migrates old flat settings (like `ENABLE_PING`) to the new dot notation format. 
 
-## Voice Channel Management (`voicechannels.*`)
-
-Settings for dynamic creation, deletion, and management of voice channels.
-
-### Core Settings
-- **`voicechannels.enabled`** (boolean) - Enable/disable dynamic voice channel management
-- **`voicechannels.category.name`** (string) - Name of the category for voice channels
-- **`voicechannels.lobby.name`** (string) - Name of the lobby channel
-- **`voicechannels.lobby.offlinename`** (string) - Name of the offline lobby channel
-- **`voicechannels.channel.prefix`** (string) - Prefix for dynamically created channels
-- **`voicechannels.channel.suffix`** (string) - Suffix for dynamically created channels
-
-### Default Values
-```json
-{
-  "voicechannels.enabled": false,
-  "voicechannels.category.name": "Voice Channels",
-  "voicechannels.lobby.name": "Lobby",
-  "voicechannels.lobby.offlinename": "Offline Lobby",
-  "voicechannels.channel.prefix": "🎮",
-  "voicechannels.channel.suffix": ""
-}
-```
-
-## Voice Activity Tracking (`voicetracking.*`)
-
-Settings for tracking voice channel activity, statistics, and announcements.
-
-### Core Settings
-- **`voicetracking.enabled`** (boolean) - Enable/disable voice activity tracking
-- **`voicetracking.seen.enabled`** (boolean) - Enable/disable last seen tracking
-- **`voicetracking.excluded_channels`** (string) - Comma-separated list of voice channel IDs to exclude from tracking
-- **`voicetracking.announcements.enabled`** (boolean) - Enable/disable weekly voice channel announcements
-- **`voicetracking.announcements.channel`** (string) - Channel name for voice channel announcements
-- **`voicetracking.announcements.schedule`** (string) - Cron expression for weekly announcements
-- **`voicetracking.admin_roles`** (string) - Comma-separated role names that can manage tracking
-
-### Default Values
-```json
-{
-  "voicetracking.enabled": false,
-  "voicetracking.seen.enabled": false,
-  "voicetracking.excluded_channels": "",
-  "voicetracking.announcements.enabled": false,
-  "voicetracking.announcements.schedule": "0 16 * * 5",
-  "voicetracking.announcements.channel": "voice-stats",
-  "voicetracking.admin_roles": ""
-}
-```
-
-## Individual Feature Settings
-
-### Ping Command (`ping.*`)
-- **`ping.enabled`** (boolean) - Enable/disable ping command
-
-### Amikool Command (`amikool.*`)
-- **`amikool.enabled`** (boolean) - Enable/disable amikool command
-- **`amikool.role.name`** (string) - Role name required to use amikool command
-
-### PLEX Price Checker (`plexprice.*`)
-- **`plexprice.enabled`** (boolean) - Enable/disable PLEX price checker
-
-### Quote System (`quotes.*`)
-- **`quotes.enabled`** (boolean) - Enable/disable quote system
-- **`quotes.add_roles`** (string) - Comma-separated role IDs that can add quotes
-- **`quotes.delete_roles`** (string) - Comma-separated role IDs that can delete quotes
-- **`quotes.max_length`** (number) - Maximum quote length
-- **`quotes.cooldown`** (number) - Cooldown in seconds between quote additions
-
-### Default Values
-```json
-{
-  "ping.enabled": false,
-  "amikool.enabled": false,
-  "amikool.role.name": "",
-  "plexprice.enabled": false,
-  "quotes.enabled": false,
-  "quotes.add_roles": "",
-  "quotes.delete_roles": "",
-  "quotes.max_length": 1000,
-  "quotes.cooldown": 60
-}
-```
-
-## Configuration Commands
-
-Use the following commands to manage settings:
-
-### List all settings:
-```
-/config list
-```
-
-### List settings by category:
-```
-/config list category:voicechannels
-/config list category:voicetracking
-/config list category:quotes
-```
-
-### Get a specific setting:
-```
-/config get key:voicechannels.enabled
-/config get key:voicetracking.announcements.schedule
-```
-
-### Change a setting:
-```
-/config set key:voicechannels.enabled value:true
-/config set key:voicetracking.excluded_channels value:123456789,987654321
-/config set key:quotes.max_length value:500
-```
-
-### Reset a setting to default:
-```
-/config reset key:voicechannels.category.name
-/config reset key:voicetracking.announcements.schedule
-```
-
-## Migration from Old Format
-
-The old flat settings format (e.g., `ENABLE_VC_MANAGEMENT`) is being migrated to the new dot notation format. Use the migration script to convert existing settings:
+If you have old settings in your database, you'll see warnings in the bot logs. To migrate them, run:
 
 ```bash
 npm run migrate-config
 ```
 
-## Environment Variables
+This ensures you have full control over when migrations happen and prevents unexpected behavior during startup.
 
-Critical startup settings remain in `.env` and cannot be changed via `/config`:
-- `DISCORD_TOKEN` - Bot authentication token
-- `GUILD_ID` - Target Discord server ID
-- `CLIENT_ID` - Bot client ID
-- `MONGODB_URI` - Database connection string
-- `DEBUG` - Debug mode flag
-- `NODE_ENV` - Environment (development/production)
+## Settings Hierarchy
+
+All settings use a hierarchical dot notation structure for better organization and clarity.
+
+### Command Enablement
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ping.enabled` | `true` | Enable/disable the ping command |
+| `amikool.enabled` | `true` | Enable/disable the amikool command |
+| `plexprice.enabled` | `true` | Enable/disable the plexprice command |
+| `quotes.enabled` | `true` | Enable/disable the quote system |
+
+### Amikool Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `amikool.role.name` | `"HR"` | Name of the cool role for verification |
+
+### Quote System Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `quotes.cooldown` | `60` | Cooldown between quote additions (seconds) |
+| `quotes.max_length` | `1000` | Maximum length for quotes |
+| `quotes.add_roles` | `""` | Roles that can add quotes (comma-separated IDs) |
+| `quotes.delete_roles` | `""` | Roles that can delete quotes (comma-separated IDs) |
+
+### Voice Channel Management
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `voicechannels.enabled` | `true` | Enable/disable voice channel management |
+| `voicechannels.category.name` | `"Voice Channels"` | Category name for voice channels |
+| `voicechannels.lobby.name` | `"🟢 Lobby"` | Online lobby channel name |
+| `voicechannels.lobby.offlinename` | `"🔴 Lobby"` | Offline lobby channel name |
+| `voicechannels.channel.prefix` | `"🎮"` | Prefix for dynamically created channels |
+| `voicechannels.channel.suffix` | `""` | Suffix for dynamically created channels |
+
+### Voice Channel Tracking
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `voicetracking.enabled` | `true` | Enable/disable voice channel tracking |
+| `voicetracking.seen.enabled` | `true` | Enable/disable last seen tracking |
+| `voicetracking.excluded_channels` | `""` | Excluded voice channels (comma-separated IDs) |
+| `voicetracking.admin_roles` | `""` | Admin roles for tracking (comma-separated IDs) |
+
+### Voice Channel Announcements
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `voicetracking.announcements.enabled` | `true` | Enable/disable weekly announcements |
+| `voicetracking.announcements.channel` | `"announcement"` | Channel for announcements |
+| `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule for announcements (Fridays at 4 PM) |
+
+## Configuration Commands
+
+### List Settings
+```
+/config list
+```
+Shows all current configuration settings organized by category.
+
+### Get Setting Value
+```
+/config get key:ping.enabled
+```
+Retrieves the current value of a specific setting.
+
+### Set Setting Value
+```
+/config set key:ping.enabled value:false
+```
+Updates a setting to a new value. The system automatically converts:
+- `"true"`/`"false"` strings to boolean values
+- Numeric strings to numbers
+- Role/channel mentions to IDs
+
+### Reset Setting
+```
+/config reset key:ping.enabled
+```
+Resets a setting to its default value.
+
+### Reload Commands
+```
+/config reload
+```
+**Important**: After changing command enable/disable settings, you must run this command to update Discord. This ensures that disabled commands are properly removed and enabled commands are registered.
+
+## Environment Variables (.env)
+
+The following settings are **critical** and must be configured in the `.env` file:
+
+```env
+# Critical Bot Configuration
+DISCORD_TOKEN=your_bot_token_here
+CLIENT_ID=your_client_id_here
+MONGODB_URI=mongodb://localhost:27017/koolbot
+DEBUG=false
+NODE_ENV=production
+
+# Note: GUILD_ID is only needed temporarily to clean up any existing guild commands
+# Can be removed after initial cleanup is complete
+GUILD_ID=your_guild_id_here
+```
+
+## Migration from Old Settings
+
+KoolBot automatically migrates old flat settings (e.g., `ENABLE_PING`) to the new dot notation format (e.g., `ping.enabled`) on startup. Old settings are automatically cleaned up after successful migration.
+
+## Best Practices
+
+1. **Always use `/config reload`** after changing command enable/disable settings
+2. **Use the exact setting keys** as shown in this document
+3. **Boolean values** can be set as `true`/`false` or `"true"`/`"false"`
+4. **Role and channel IDs** can be provided as mentions or raw IDs
+5. **Multiple IDs** should be comma-separated without spaces
 
 ## Examples
 
-### Enable voice channel management:
+### Disable Ping Command
 ```
-/config set key:voicechannels.enabled value:true
-```
-
-### Set lobby channel name:
-```
-/config set key:voicechannels.lobby.name value:"🎮 Gaming Lobby"
+/config set key:ping.enabled value:false
+/config reload
 ```
 
-### Configure weekly announcements:
+### Set Quote Cooldown
 ```
-/config set key:voicetracking.announcements.enabled value:true
-/config set key:voicetracking.announcements.schedule value:"0 18 * * 5"
-/config set key:voicetracking.announcements.channel value:"voice-stats"
+/config set key:quotes.cooldown value:120
 ```
 
-### Set amikool role requirement:
+### Configure Voice Channel Category
 ```
-/config set key:amikool.role.name value:"Gamer"
+/config set key:voicechannels.category.name value:"Gaming Channels"
 ```
 
-### Configure quote system:
+### Set Admin Roles for Tracking
 ```
-/config set key:quotes.enabled value:true
-/config set key:quotes.max_length value:2000
-/config set key:quotes.cooldown value:30
+/config set key:voicetracking.admin_roles value:@Admin,@Moderator
 ```
