@@ -196,26 +196,38 @@ export class StartupMigrator {
     logger.info("Checking for outdated configuration settings...");
 
     const outdatedSettings: string[] = [];
-    let missingSettings: string[] = [];
+    const missingSettings: string[] = [];
 
     // Check for old flat settings that need migration
     for (const migration of configMigrations) {
       try {
         // Check if old setting exists in database (not just in cache/env)
         const oldSetting = await this.configService.get(migration.oldKey);
-        logger.debug(`Checking old setting ${migration.oldKey}: ${oldSetting} (type: ${typeof oldSetting})`);
+        logger.debug(
+          `Checking old setting ${migration.oldKey}: ${oldSetting} (type: ${typeof oldSetting})`,
+        );
 
         // Only consider it outdated if it's actually in the database, not from env vars
-        if (oldSetting !== null && oldSetting !== undefined && !this.isFromEnvironment(migration.oldKey)) {
+        if (
+          oldSetting !== null &&
+          oldSetting !== undefined &&
+          !this.isFromEnvironment(migration.oldKey)
+        ) {
           outdatedSettings.push(migration.oldKey);
-          logger.debug(`✓ Found outdated setting in database: ${migration.oldKey}`);
+          logger.debug(
+            `✓ Found outdated setting in database: ${migration.oldKey}`,
+          );
         } else {
-          logger.debug(`✗ No outdated setting found in database: ${migration.oldKey}`);
+          logger.debug(
+            `✗ No outdated setting found in database: ${migration.oldKey}`,
+          );
         }
 
         // Check if new setting exists
         const newSetting = await this.configService.get(migration.newKey);
-        logger.debug(`Checking new setting ${migration.newKey}: ${newSetting} (type: ${typeof newSetting})`);
+        logger.debug(
+          `Checking new setting ${migration.newKey}: ${newSetting} (type: ${typeof newSetting})`,
+        );
 
         if (newSetting === null || newSetting === undefined) {
           missingSettings.push(migration.newKey);
@@ -230,16 +242,22 @@ export class StartupMigrator {
 
     // Warn about outdated settings
     if (outdatedSettings.length > 0) {
-      logger.warn(`⚠️  Found ${outdatedSettings.length} outdated settings that need migration:`);
-      outdatedSettings.forEach(setting => {
+      logger.warn(
+        `⚠️  Found ${outdatedSettings.length} outdated settings that need migration:`,
+      );
+      outdatedSettings.forEach((setting) => {
         logger.warn(`   - ${setting} (should be migrated to new dot notation)`);
       });
-      logger.warn("💡 Run 'npm run migrate-config' to migrate these settings to the new format");
+      logger.warn(
+        "💡 Run 'npm run migrate-config' to migrate these settings to the new format",
+      );
     }
 
     // Create missing settings with defaults
     if (missingSettings.length > 0) {
-      logger.info(`Creating ${missingSettings.length} missing settings with default values...`);
+      logger.info(
+        `Creating ${missingSettings.length} missing settings with default values...`,
+      );
       await this.ensureDefaultSettings();
     }
 
@@ -249,8 +267,6 @@ export class StartupMigrator {
       logger.info("✅ All outdated settings have been migrated");
     }
   }
-
-
 
   /**
    * Check if a setting value comes from environment variables
@@ -344,10 +360,6 @@ export class StartupMigrator {
     }
   }
 
-
-
-
-
   /**
    * Get all available migrations for reference
    */
@@ -355,4 +367,3 @@ export class StartupMigrator {
     return [...configMigrations];
   }
 }
-

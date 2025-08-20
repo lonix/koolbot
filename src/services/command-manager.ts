@@ -227,13 +227,16 @@ export class CommandManager {
     apiCall: () => Promise<T>,
     operationName: string,
     timeoutMs: number = 30000,
-    maxRetries: number = 3
+    maxRetries: number = 3,
   ): Promise<T> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         // Create a timeout promise
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error(`Discord API timeout after ${timeoutMs}ms`)), timeoutMs);
+          setTimeout(
+            () => reject(new Error(`Discord API timeout after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
         });
 
         // Race the API call against the timeout
@@ -243,19 +246,25 @@ export class CommandManager {
           logger.info(`✅ ${operationName} succeeded on attempt ${attempt}`);
         }
         return result;
-
       } catch (error: any) {
-        const isRateLimit = error.code === 429 || error.message?.includes('rate limit');
-        const isTimeout = error.message?.includes('timeout');
+        const isRateLimit =
+          error.code === 429 || error.message?.includes("rate limit");
+        const isTimeout = error.message?.includes("timeout");
 
         if (isRateLimit) {
           const retryAfter = error.retry_after || 5;
-          logger.warn(`⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`);
-          await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+          logger.warn(
+            `⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, retryAfter * 1000),
+          );
         } else if (isTimeout) {
-          logger.warn(`⏰ Discord API timeout for ${operationName} (attempt ${attempt}/${maxRetries})`);
+          logger.warn(
+            `⏰ Discord API timeout for ${operationName} (attempt ${attempt}/${maxRetries})`,
+          );
           if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+            await new Promise((resolve) => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
           }
         } else {
           logger.error(`❌ Discord API error for ${operationName}:`, error);
@@ -263,7 +272,9 @@ export class CommandManager {
         }
 
         if (attempt === maxRetries) {
-          throw new Error(`Failed to ${operationName} after ${maxRetries} attempts`);
+          throw new Error(
+            `Failed to ${operationName} after ${maxRetries} attempts`,
+          );
         }
       }
     }
@@ -292,20 +303,22 @@ export class CommandManager {
       );
 
       try {
-
         // First, clear all existing commands to force Discord to refresh its cache
-        logger.debug("Clearing all existing commands to force Discord cache refresh...");
+        logger.debug(
+          "Clearing all existing commands to force Discord cache refresh...",
+        );
         await this.makeDiscordApiCall(
-          async () => rest.put(
-            Routes.applicationGuildCommands(
-              await this.configService.getString("CLIENT_ID"),
-              guildId,
+          async () =>
+            rest.put(
+              Routes.applicationGuildCommands(
+                await this.configService.getString("CLIENT_ID"),
+                guildId,
+              ),
+              { body: [] },
             ),
-            { body: [] },
-          ),
           "clear existing commands",
           15000, // 15 second timeout for clear operation
-          2      // 2 retries for clear operation
+          2, // 2 retries for clear operation
         );
 
         // Wait a moment for Discord to process the clear
@@ -314,16 +327,17 @@ export class CommandManager {
         // Now register the new command list
         logger.debug("Registering new commands with Discord API...");
         const data = await this.makeDiscordApiCall(
-          async () => rest.put(
-            Routes.applicationGuildCommands(
-              await this.configService.getString("CLIENT_ID"),
-              guildId,
+          async () =>
+            rest.put(
+              Routes.applicationGuildCommands(
+                await this.configService.getString("CLIENT_ID"),
+                guildId,
+              ),
+              { body: commands },
             ),
-            { body: commands },
-          ),
           "register new commands",
           30000, // 30 second timeout for registration
-          3      // 3 retries for registration
+          3, // 3 retries for registration
         );
 
         logger.debug("Discord API response:", data);

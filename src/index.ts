@@ -9,6 +9,7 @@ import {
   ChatInputCommandInteraction,
   REST,
   Routes,
+  TextChannel,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
@@ -197,11 +198,14 @@ async function gracefulShutdown(signal: string): Promise<void> {
     const runWithTimeout = async <T>(
       operation: () => Promise<T>,
       timeoutMs: number,
-      operationName: string
+      operationName: string,
     ): Promise<T | null> => {
       try {
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+          setTimeout(
+            () => reject(new Error(`Timeout after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
         });
 
         const result = await Promise.race([operation(), timeoutPromise]);
@@ -214,67 +218,99 @@ async function gracefulShutdown(signal: string): Promise<void> {
     };
 
     // 1. Switch lobby to offline mode (priority 1) - 5 second timeout
-    await runWithTimeout(async () => {
-      const guildId = await configService.getString("GUILD_ID", "");
-      if (guildId) {
-        const guild = await client.guilds.fetch(guildId);
-        const offlineLobbyName = await configService.getString("voicechannels.lobby.offlinename", "🔴 Lobby");
+    await runWithTimeout(
+      async () => {
+        const guildId = await configService.getString("GUILD_ID", "");
+        if (guildId) {
+          const guild = await client.guilds.fetch(guildId);
+          const offlineLobbyName = await configService.getString(
+            "voicechannels.lobby.offlinename",
+            "🔴 Lobby",
+          );
 
-        // Find the lobby channel and rename it
-        const lobbyChannel = guild.channels.cache.find(
-          channel => channel.name.includes("🟢") && channel.type === ChannelType.GuildVoice
-        );
+          // Find the lobby channel and rename it
+          const lobbyChannel = guild.channels.cache.find(
+            (channel) =>
+              channel.name.includes("🟢") &&
+              channel.type === ChannelType.GuildVoice,
+          );
 
-        if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
-          await lobbyChannel.setName(offlineLobbyName);
-          logger.info(`✅ Lobby renamed to offline mode: ${offlineLobbyName}`);
+          if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
+            await lobbyChannel.setName(offlineLobbyName);
+            logger.info(
+              `✅ Lobby renamed to offline mode: ${offlineLobbyName}`,
+            );
+          }
         }
-      }
-    }, 5000, "Lobby offline mode switch");
+      },
+      5000,
+      "Lobby offline mode switch",
+    );
 
     // 2. Set bot status to offline (priority 2) - 3 second timeout
-    await runWithTimeout(async () => {
-      await client.user?.setStatus('invisible');
-    }, 3000, "Bot status offline");
+    await runWithTimeout(
+      async () => {
+        await client.user?.setStatus("invisible");
+      },
+      3000,
+      "Bot status offline",
+    );
 
     // 3. Deregister commands (no wait needed) - 5 second timeout
-    await runWithTimeout(async () => {
-      const guildId = await configService.getString("GUILD_ID", "");
-      if (guildId) {
-        const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
-        await rest.put(
-          Routes.applicationGuildCommands(process.env.CLIENT_ID!, guildId),
-          { body: [] }
-        );
-        logger.info("✅ Commands deregistered from Discord");
-      }
-    }, 5000, "Command deregistration");
+    await runWithTimeout(
+      async () => {
+        const guildId = await configService.getString("GUILD_ID", "");
+        if (guildId) {
+          const rest = new REST({ version: "10" }).setToken(
+            process.env.DISCORD_TOKEN!,
+          );
+          await rest.put(
+            Routes.applicationGuildCommands(process.env.CLIENT_ID!, guildId),
+            { body: [] },
+          );
+          logger.info("✅ Commands deregistered from Discord");
+        }
+      },
+      5000,
+      "Command deregistration",
+    );
 
     // 4. Clean up voice channels (existing functionality) - 3 second timeout
-    await runWithTimeout(async () => {
-      await cleanupVoiceChannels();
-    }, 3000, "Voice channel cleanup");
+    await runWithTimeout(
+      async () => {
+        await cleanupVoiceChannels();
+      },
+      3000,
+      "Voice channel cleanup",
+    );
 
     // 5. Close database connections - 3 second timeout
-    await runWithTimeout(async () => {
-      const { default: mongoose } = await import('mongoose');
-      if (mongoose.connection.readyState !== 0) {
-        await mongoose.connection.close();
-        logger.info("✅ Database connections closed");
-      }
-    }, 3000, "Database connection closure");
+    await runWithTimeout(
+      async () => {
+        const { default: mongoose } = await import("mongoose");
+        if (mongoose.connection.readyState !== 0) {
+          await mongoose.connection.close();
+          logger.info("✅ Database connections closed");
+        }
+      },
+      3000,
+      "Database connection closure",
+    );
 
     // 6. Destroy Discord client - 5 second timeout
-    await runWithTimeout(async () => {
-      await client.destroy();
-    }, 5000, "Discord client destruction");
+    await runWithTimeout(
+      async () => {
+        await client.destroy();
+      },
+      5000,
+      "Discord client destruction",
+    );
 
     const shutdownTime = Date.now() - startTime;
     logger.info(`✅ Graceful shutdown completed in ${shutdownTime}ms`);
 
     // Exit with success
     process.exit(0);
-
   } catch (error) {
     logger.error("❌ Error during graceful shutdown:", error);
     process.exit(1);
@@ -282,8 +318,8 @@ async function gracefulShutdown(signal: string): Promise<void> {
 }
 
 // Handle process termination
-process.on("SIGINT", () => gracefulShutdown('SIGINT'));
-process.on("SIGTERM", () => gracefulShutdown('SIGTERM'));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 const configService = ConfigService.getInstance();
 const commandManager = CommandManager.getInstance(client);
@@ -312,9 +348,15 @@ async function initializeServices(): Promise<void> {
       await commandManager.populateClientCommands();
       logger.info("✅ Discord commands registered successfully");
     } catch (error) {
-      logger.warn("⚠️ Failed to register Discord commands - bot will continue without slash commands");
-      logger.warn("💡 Voice channel management and user tracking will still work");
-      logger.warn("💡 Restart the bot when Discord API is available to register commands");
+      logger.warn(
+        "⚠️ Failed to register Discord commands - bot will continue without slash commands",
+      );
+      logger.warn(
+        "💡 Voice channel management and user tracking will still work",
+      );
+      logger.warn(
+        "💡 Restart the bot when Discord API is available to register commands",
+      );
       logger.debug("Command registration error details:", error);
     }
 
@@ -334,11 +376,16 @@ async function initializeServices(): Promise<void> {
     // Switch lobby to online mode on startup
     try {
       const guild = await client.guilds.fetch(guildId);
-      const onlineLobbyName = await configService.getString("voicechannels.lobby.name", "🟢 Lobby");
+      const onlineLobbyName = await configService.getString(
+        "voicechannels.lobby.name",
+        "🟢 Lobby",
+      );
 
       // Find the lobby channel and rename it to online mode
       const lobbyChannel = guild.channels.cache.find(
-        channel => channel.name.includes("🔴") && channel.type === ChannelType.GuildVoice
+        (channel) =>
+          channel.name.includes("🔴") &&
+          channel.type === ChannelType.GuildVoice,
       );
 
       if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
@@ -418,6 +465,26 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
   } catch (error) {
     logger.error("Error handling voice state update:", error);
+  }
+});
+
+// Easter egg: Creator detection when joining the server
+client.on(Events.GuildMemberAdd, async (member) => {
+  if (member.id === "174051908586176512") {
+    try {
+      const guild = member.guild;
+      const generalChannel = guild.channels.cache.find(
+        (channel) =>
+          channel.name === "general" && channel.type === ChannelType.GuildText,
+      ) as TextChannel;
+
+      if (generalChannel) {
+        await generalChannel.send("👑 All hail my creator!");
+        logger.debug("Easter egg triggered for creator joining server");
+      }
+    } catch (error) {
+      logger.debug("Easter egg failed (non-critical):", error);
+    }
   }
 });
 
