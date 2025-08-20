@@ -99,12 +99,12 @@ export const data = new SlashCommandBuilder()
           .setDescription("Filter by category")
           .setRequired(false)
           .addChoices(
-            { name: "Voice Channel", value: "voice_channel" },
-            { name: "Tracking", value: "tracking" },
-            { name: "Announcements", value: "announcements" },
-            { name: "Roles", value: "roles" },
-            { name: "Features", value: "features" },
-            { name: "System", value: "system" },
+            { name: "Voice Channels", value: "voicechannels" },
+            { name: "Voice Tracking", value: "voicetracking" },
+            { name: "Ping", value: "ping" },
+            { name: "Amikool", value: "amikool" },
+            { name: "PLEX Price", value: "plexprice" },
+            { name: "Quotes", value: "quotes" },
           ),
       ),
   )

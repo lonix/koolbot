@@ -12,65 +12,93 @@ const settingReferences: SettingReference[] = [
   // Voice Channel Management
   {
     oldKey: "ENABLE_VC_MANAGEMENT",
-    newKey: "voice_channel.enabled",
-    description: "Enable/disable voice channel management",
+    newKey: "voicechannels.enabled",
+    description: "Enable/disable dynamic voice channel management",
   },
   {
     oldKey: "VC_CATEGORY_NAME",
-    newKey: "voice_channel.category_name",
+    newKey: "voicechannels.category.name",
     description: "Name of the category for voice channels",
   },
   {
     oldKey: "LOBBY_CHANNEL_NAME",
-    newKey: "voice_channel.lobby_channel_name",
+    newKey: "voicechannels.lobby.name",
     description: "Name of the lobby channel",
   },
   {
     oldKey: "LOBBY_CHANNEL_NAME_OFFLINE",
-    newKey: "voice_channel.lobby_channel_name_offline",
+    newKey: "voicechannels.lobby.offlinename",
     description: "Name of the offline lobby channel",
   },
   {
     oldKey: "VC_CHANNEL_PREFIX",
-    newKey: "voice_channel.channel_prefix",
+    newKey: "voicechannels.channel.prefix",
     description: "Prefix for dynamically created channels",
   },
   {
     oldKey: "VC_SUFFIX",
-    newKey: "voice_channel.suffix",
+    newKey: "voicechannels.channel.suffix",
     description: "Suffix for dynamically created channels",
   },
 
-  // Voice Channel Tracking
+  // Voice Activity Tracking
   {
     oldKey: "ENABLE_VC_TRACKING",
-    newKey: "tracking.enabled",
-    description: "Enable/disable voice channel tracking",
+    newKey: "voicetracking.enabled",
+    description: "Enable/disable voice activity tracking",
   },
   {
     oldKey: "ENABLE_SEEN",
-    newKey: "tracking.seen_enabled",
+    newKey: "voicetracking.seen.enabled",
     description: "Enable/disable last seen tracking",
   },
   {
     oldKey: "EXCLUDED_VC_CHANNELS",
-    newKey: "tracking.excluded_channels",
-    description: "Comma-separated list of voice channel IDs to exclude from tracking",
+    newKey: "voicetracking.excluded_channels",
+    description:
+      "Comma-separated list of voice channel IDs to exclude from tracking",
   },
   {
     oldKey: "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
-    newKey: "tracking.weekly_announcement_enabled",
+    newKey: "voicetracking.announcements.enabled",
     description: "Enable/disable weekly voice channel announcements",
   },
   {
     oldKey: "VC_ANNOUNCEMENT_SCHEDULE",
-    newKey: "tracking.weekly_announcement_schedule",
+    newKey: "voicetracking.announcements.schedule",
     description: "Cron expression for weekly announcements",
   },
   {
     oldKey: "VC_ANNOUNCEMENT_CHANNEL",
-    newKey: "tracking.weekly_announcement_channel",
+    newKey: "voicetracking.announcements.channel",
     description: "Channel name for voice channel announcements",
+  },
+  {
+    oldKey: "VC_TRACKING_ADMIN_ROLES",
+    newKey: "voicetracking.admin_roles",
+    description: "Comma-separated role names that can manage tracking",
+  },
+
+  // Individual Features
+  {
+    oldKey: "ENABLE_PING",
+    newKey: "ping.enabled",
+    description: "Enable/disable ping command",
+  },
+  {
+    oldKey: "ENABLE_AMIKOOL",
+    newKey: "amikool.enabled",
+    description: "Enable/disable amikool command",
+  },
+  {
+    oldKey: "COOL_ROLE_NAME",
+    newKey: "amikool.role.name",
+    description: "Role name required to use amikool command",
+  },
+  {
+    oldKey: "ENABLE_PLEX_PRICE",
+    newKey: "plexprice.enabled",
+    description: "Enable/disable PLEX price checker",
   },
 ];
 
@@ -94,8 +122,12 @@ async function updateSettingsReferences(): Promise<void> {
     }
 
     logger.info("========================================================");
-    logger.info("Please update all code references to use the new dot notation.");
-    logger.info("The migration script will handle converting the database values.");
+    logger.info(
+      "Please update all code references to use the new dot notation.",
+    );
+    logger.info(
+      "The migration script will handle converting the database values.",
+    );
     logger.info("");
     logger.info("Files that likely need updates:");
     logger.info("- src/commands/setup-lobby.ts");
@@ -105,7 +137,6 @@ async function updateSettingsReferences(): Promise<void> {
     logger.info("- src/commands/index.ts");
     logger.info("- src/deploy-commands.ts");
     logger.info("- src/index.ts");
-
   } catch (error) {
     logger.error("Error during settings reference update:", error);
     process.exit(1);

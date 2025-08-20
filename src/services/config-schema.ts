@@ -1,24 +1,26 @@
 export interface ConfigSchema {
   // Voice Channel Management
-  "voice_channel.enabled": boolean;
-  "voice_channel.category_name": string;
-  "voice_channel.lobby_channel_name": string;
-  "voice_channel.lobby_channel_name_offline": string;
-  "voice_channel.channel_prefix": string;
-  "voice_channel.suffix": string;
+  "voicechannels.enabled": boolean;
+  "voicechannels.category.name": string;
+  "voicechannels.lobby.name": string;
+  "voicechannels.lobby.offlinename": string;
+  "voicechannels.channel.prefix": string;
+  "voicechannels.channel.suffix": string;
 
-  // Voice Channel Tracking
-  "tracking.enabled": boolean;
-  "tracking.seen_enabled": boolean;
-  "tracking.excluded_channels": string; // Comma-separated channel IDs
-  "tracking.weekly_announcement_enabled": boolean;
-  "tracking.weekly_announcement_schedule": string; // Cron schedule
-  "tracking.weekly_announcement_channel": string;
+  // Voice Activity Tracking
+  "voicetracking.enabled": boolean;
+  "voicetracking.seen.enabled": boolean;
+  "voicetracking.excluded_channels": string; // Comma-separated channel IDs
+  "voicetracking.announcements.enabled": boolean;
+  "voicetracking.announcements.schedule": string; // Cron schedule
+  "voicetracking.announcements.channel": string;
+  "voicetracking.admin_roles": string; // Comma-separated role names
 
-  // Bot Features
-  "features.ping_enabled": boolean;
-  "features.amikool_enabled": boolean;
-  "features.plex_checker_enabled": boolean;
+  // Individual Features
+  "ping.enabled": boolean;
+  "amikool.enabled": boolean;
+  "amikool.role.name": string; // Role name required for amikool
+  "plexprice.enabled": boolean;
 
   // Quote System Settings
   "quotes.enabled": boolean;
@@ -30,25 +32,27 @@ export interface ConfigSchema {
 
 export const defaultConfig: ConfigSchema = {
   // Voice Channel Management
-  "voice_channel.enabled": false,
-  "voice_channel.category_name": "Voice Channels",
-  "voice_channel.lobby_channel_name": "Lobby",
-  "voice_channel.lobby_channel_name_offline": "Offline Lobby",
-  "voice_channel.channel_prefix": "🎮",
-  "voice_channel.suffix": "",
+  "voicechannels.enabled": false,
+  "voicechannels.category.name": "Voice Channels",
+  "voicechannels.lobby.name": "Lobby",
+  "voicechannels.lobby.offlinename": "Offline Lobby",
+  "voicechannels.channel.prefix": "🎮",
+  "voicechannels.channel.suffix": "",
 
-  // Voice Channel Tracking
-  "tracking.enabled": false,
-  "tracking.seen_enabled": false,
-  "tracking.excluded_channels": "",
-  "tracking.weekly_announcement_enabled": false,
-  "tracking.weekly_announcement_schedule": "0 16 * * 5", // Every Friday at 16:00
-  "tracking.weekly_announcement_channel": "voice-stats",
+  // Voice Activity Tracking
+  "voicetracking.enabled": false,
+  "voicetracking.seen.enabled": false,
+  "voicetracking.excluded_channels": "",
+  "voicetracking.announcements.enabled": false,
+  "voicetracking.announcements.schedule": "0 16 * * 5", // Every Friday at 16:00
+  "voicetracking.announcements.channel": "voice-stats",
+  "voicetracking.admin_roles": "",
 
-  // Bot Features
-  "features.ping_enabled": false,
-  "features.amikool_enabled": false,
-  "features.plex_checker_enabled": false,
+  // Individual Features
+  "ping.enabled": false,
+  "amikool.enabled": false,
+  "amikool.role.name": "",
+  "plexprice.enabled": false,
 
   // Quote System Defaults
   "quotes.enabled": false,

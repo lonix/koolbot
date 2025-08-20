@@ -28,13 +28,12 @@ const ConfigSchema = new Schema<IConfig>(
       type: String,
       required: true,
       enum: [
-        "voice_channel",
-        "tracking",
-        "announcements",
-        "roles",
-        "features",
+        "voicechannels",
+        "voicetracking",
+        "ping",
+        "amikool",
+        "plexprice",
         "quotes",
-        "system",
       ],
     },
     updatedAt: {
