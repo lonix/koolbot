@@ -29,20 +29,20 @@ export class CommandManager {
     this.configService = ConfigService.getInstance();
     this.commands = new Collection();
 
-              // No automatic reloads - users must manually trigger via /config reload
-          // this.configService.registerReloadCallback(async () => {
-          //   try {
-          //     logger.info("🔄 Configuration change detected, reloading commands...");
-          //     await this.registerCommands();
-          //     await this.populateClientCommands();
-          //     logger.info("✅ Commands reloaded after configuration change");
-          //   } catch (error) {
-          //     logger.error(
-          //       "❌ Error reloading commands after configuration change:",
-          //       error,
-          //     );
-          //   }
-          // });
+    // No automatic reloads - users must manually trigger via /config reload
+    // this.configService.registerReloadCallback(async () => {
+    //   try {
+    //     logger.info("🔄 Configuration change detected, reloading commands...");
+    //     await this.registerCommands();
+    //     await this.populateClientCommands();
+    //     logger.info("✅ Commands reloaded after configuration change");
+    //   } catch (error) {
+    //     logger.error(
+    //       "❌ Error reloading commands after configuration change:",
+    //       error,
+    //     );
+    //   }
+    // });
   }
 
   public static getInstance(client: Client): CommandManager {
@@ -135,7 +135,9 @@ export class CommandManager {
     }
 
     const pingEnabled = await this.configService.get("ping.enabled");
-    logger.debug(`🔍 DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`);
+    logger.debug(
+      `🔍 DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`,
+    );
 
     if (pingEnabled) {
       commands.push(ping.toJSON());
@@ -220,6 +222,55 @@ export class CommandManager {
     return commands;
   }
 
+  // Helper function to make Discord API calls with timeout and retry logic
+  private async makeDiscordApiCall<T>(
+    apiCall: () => Promise<T>,
+    operationName: string,
+    timeoutMs: number = 30000,
+    maxRetries: number = 3
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        // Create a timeout promise
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Discord API timeout after ${timeoutMs}ms`)), timeoutMs);
+        });
+
+        // Race the API call against the timeout
+        const result = await Promise.race([apiCall(), timeoutPromise]);
+
+        if (attempt > 1) {
+          logger.info(`✅ ${operationName} succeeded on attempt ${attempt}`);
+        }
+        return result;
+
+      } catch (error: any) {
+        const isRateLimit = error.code === 429 || error.message?.includes('rate limit');
+        const isTimeout = error.message?.includes('timeout');
+
+        if (isRateLimit) {
+          const retryAfter = error.retry_after || 5;
+          logger.warn(`⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+        } else if (isTimeout) {
+          logger.warn(`⏰ Discord API timeout for ${operationName} (attempt ${attempt}/${maxRetries})`);
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
+          }
+        } else {
+          logger.error(`❌ Discord API error for ${operationName}:`, error);
+          throw error;
+        }
+
+        if (attempt === maxRetries) {
+          throw new Error(`Failed to ${operationName} after ${maxRetries} attempts`);
+        }
+      }
+    }
+
+    throw new Error(`Unexpected error in ${operationName}`);
+  }
+
   public async registerCommands(): Promise<void> {
     try {
       if (!this.client) {
@@ -241,26 +292,38 @@ export class CommandManager {
       );
 
       try {
+
         // First, clear all existing commands to force Discord to refresh its cache
         logger.debug("Clearing all existing commands to force Discord cache refresh...");
-        await rest.put(
-          Routes.applicationGuildCommands(
-            await this.configService.getString("CLIENT_ID"),
-            guildId,
+        await this.makeDiscordApiCall(
+          async () => rest.put(
+            Routes.applicationGuildCommands(
+              await this.configService.getString("CLIENT_ID"),
+              guildId,
+            ),
+            { body: [] },
           ),
-          { body: [] },
+          "clear existing commands",
+          15000, // 15 second timeout for clear operation
+          2      // 2 retries for clear operation
         );
 
         // Wait a moment for Discord to process the clear
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
         // Now register the new command list
-        const data = await rest.put(
-          Routes.applicationGuildCommands(
-            await this.configService.getString("CLIENT_ID"),
-            guildId,
+        logger.debug("Registering new commands with Discord API...");
+        const data = await this.makeDiscordApiCall(
+          async () => rest.put(
+            Routes.applicationGuildCommands(
+              await this.configService.getString("CLIENT_ID"),
+              guildId,
+            ),
+            { body: commands },
           ),
-          { body: commands },
+          "register new commands",
+          30000, // 30 second timeout for registration
+          3      // 3 retries for registration
         );
 
         logger.debug("Discord API response:", data);

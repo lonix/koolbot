@@ -277,7 +277,9 @@ async function handleList(
     } else {
       // Batch fetch all settings from database at once
       const allDbValues = await configService.getAll();
-      const dbValuesMap = new Map(allDbValues.map(config => [config.key, config.value]));
+      const dbValuesMap = new Map(
+        allDbValues.map((config) => [config.key, config.value]),
+      );
 
       // Pre-fetch guild data once to avoid repeated API calls
       if (interaction.guild) {
@@ -376,10 +378,10 @@ async function handleSet(
     let value: string | number | boolean = rawValue;
 
     // Convert boolean strings to actual booleans
-    if (typeof settingInfo.value === 'boolean') {
-      if (rawValue.toLowerCase() === 'true') {
+    if (typeof settingInfo.value === "boolean") {
+      if (rawValue.toLowerCase() === "true") {
         value = true;
-      } else if (rawValue.toLowerCase() === 'false') {
+      } else if (rawValue.toLowerCase() === "false") {
         value = false;
       } else {
         await interaction.reply({
@@ -391,7 +393,7 @@ async function handleSet(
     }
 
     // Convert number strings to actual numbers
-    else if (typeof settingInfo.value === 'number') {
+    else if (typeof settingInfo.value === "number") {
       const numValue = Number(rawValue);
       if (isNaN(numValue)) {
         await interaction.reply({
@@ -409,7 +411,7 @@ async function handleSet(
     }
 
     // Validate roles and channels if applicable
-    if (isRoleOrChannelSetting(key) && typeof value === 'string') {
+    if (isRoleOrChannelSetting(key) && typeof value === "string") {
       const ids = value.split(",").filter(Boolean);
       const invalidIds: string[] = [];
 
@@ -431,7 +433,7 @@ async function handleSet(
       }
 
       // Additional validation for specific settings
-      if (key.includes("channel") && typeof value === 'string') {
+      if (key.includes("channel") && typeof value === "string") {
         const channel = interaction.guild?.channels.cache.get(ids[0]);
         if (channel) {
           // Validate channel type for specific settings
@@ -464,9 +466,10 @@ async function handleSet(
       settingInfo.category,
     );
 
-    const formattedValue = isRoleOrChannelSetting(key) && typeof value === 'string'
-      ? await formatAsMentions(value, interaction)
-      : String(value);
+    const formattedValue =
+      isRoleOrChannelSetting(key) && typeof value === "string"
+        ? await formatAsMentions(value, interaction)
+        : String(value);
 
     const embed = new EmbedBuilder()
       .setTitle("Configuration Updated")

@@ -137,7 +137,9 @@ export async function deployCommands(): Promise<void> {
       logger.info(`Discord API confirmed ${data.length} commands registered`);
     }
 
-    logger.info("💡 Use /config reload after changing command settings to update Discord");
+    logger.info(
+      "💡 Use /config reload after changing command settings to update Discord",
+    );
   } catch (error) {
     logger.error("Error during command deployment:", error);
     throw error;

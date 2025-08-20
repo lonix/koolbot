@@ -180,24 +180,110 @@ async function cleanupVoiceChannels(): Promise<void> {
   }
 }
 
-async function cleanup(): Promise<void> {
-  if (isShuttingDown) return;
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string): Promise<void> {
+  if (isShuttingDown) {
+    logger.info("Shutdown already in progress, forcing exit...");
+    process.exit(1);
+  }
+
   isShuttingDown = true;
+  const startTime = Date.now();
 
   try {
-    logger.info("Cleaning up...");
-    await cleanupVoiceChannels();
-    logger.info("Cleanup completed");
-  } catch (error) {
-    logger.error("Error during cleanup:", error);
-  } finally {
+    logger.info(`🔄 Received ${signal}, starting graceful shutdown...`);
+
+    // Helper function to run operations with timeout
+    const runWithTimeout = async <T>(
+      operation: () => Promise<T>,
+      timeoutMs: number,
+      operationName: string
+    ): Promise<T | null> => {
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+        });
+
+        const result = await Promise.race([operation(), timeoutPromise]);
+        logger.info(`✅ ${operationName} completed`);
+        return result;
+      } catch (error) {
+        logger.error(`❌ Error in ${operationName}:`, error);
+        return null;
+      }
+    };
+
+    // 1. Switch lobby to offline mode (priority 1) - 5 second timeout
+    await runWithTimeout(async () => {
+      const guildId = await configService.getString("GUILD_ID", "");
+      if (guildId) {
+        const guild = await client.guilds.fetch(guildId);
+        const offlineLobbyName = await configService.getString("voicechannels.lobby.offlinename", "🔴 Lobby");
+
+        // Find the lobby channel and rename it
+        const lobbyChannel = guild.channels.cache.find(
+          channel => channel.name.includes("🟢") && channel.type === ChannelType.GuildVoice
+        );
+
+        if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
+          await lobbyChannel.setName(offlineLobbyName);
+          logger.info(`✅ Lobby renamed to offline mode: ${offlineLobbyName}`);
+        }
+      }
+    }, 5000, "Lobby offline mode switch");
+
+    // 2. Set bot status to offline (priority 2) - 3 second timeout
+    await runWithTimeout(async () => {
+      await client.user?.setStatus('invisible');
+    }, 3000, "Bot status offline");
+
+    // 3. Deregister commands (no wait needed) - 5 second timeout
+    await runWithTimeout(async () => {
+      const guildId = await configService.getString("GUILD_ID", "");
+      if (guildId) {
+        const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
+        await rest.put(
+          Routes.applicationGuildCommands(process.env.CLIENT_ID!, guildId),
+          { body: [] }
+        );
+        logger.info("✅ Commands deregistered from Discord");
+      }
+    }, 5000, "Command deregistration");
+
+    // 4. Clean up voice channels (existing functionality) - 3 second timeout
+    await runWithTimeout(async () => {
+      await cleanupVoiceChannels();
+    }, 3000, "Voice channel cleanup");
+
+    // 5. Close database connections - 3 second timeout
+    await runWithTimeout(async () => {
+      const { default: mongoose } = await import('mongoose');
+      if (mongoose.connection.readyState !== 0) {
+        await mongoose.connection.close();
+        logger.info("✅ Database connections closed");
+      }
+    }, 3000, "Database connection closure");
+
+    // 6. Destroy Discord client - 5 second timeout
+    await runWithTimeout(async () => {
+      await client.destroy();
+    }, 5000, "Discord client destruction");
+
+    const shutdownTime = Date.now() - startTime;
+    logger.info(`✅ Graceful shutdown completed in ${shutdownTime}ms`);
+
+    // Exit with success
     process.exit(0);
+
+  } catch (error) {
+    logger.error("❌ Error during graceful shutdown:", error);
+    process.exit(1);
   }
 }
 
 // Handle process termination
-process.on("SIGINT", cleanup);
-process.on("SIGTERM", cleanup);
+process.on("SIGINT", () => gracefulShutdown('SIGINT'));
+process.on("SIGTERM", () => gracefulShutdown('SIGTERM'));
 
 const configService = ConfigService.getInstance();
 const commandManager = CommandManager.getInstance(client);
@@ -218,9 +304,19 @@ async function initializeServices(): Promise<void> {
     // Initialize services
     await configService.initialize();
     // await configService.migrateFromEnv(); // Disabled - let startup migrator handle all migration
-    await startupMigrator.migrateOnStartup();
-    await commandManager.registerCommands();
-    await commandManager.populateClientCommands();
+    await startupMigrator.checkForOutdatedSettings();
+
+    // Try to register commands, but don't fail if Discord API is unavailable
+    try {
+      await commandManager.registerCommands();
+      await commandManager.populateClientCommands();
+      logger.info("✅ Discord commands registered successfully");
+    } catch (error) {
+      logger.warn("⚠️ Failed to register Discord commands - bot will continue without slash commands");
+      logger.warn("💡 Voice channel management and user tracking will still work");
+      logger.warn("💡 Restart the bot when Discord API is available to register commands");
+      logger.debug("Command registration error details:", error);
+    }
 
     // Get guild ID from config
     const guildId = await configService.getString("GUILD_ID", "");
@@ -234,6 +330,26 @@ async function initializeServices(): Promise<void> {
     await channelInitializer.initializeChannels(
       await client.guilds.fetch(guildId),
     );
+
+    // Switch lobby to online mode on startup
+    try {
+      const guild = await client.guilds.fetch(guildId);
+      const onlineLobbyName = await configService.getString("voicechannels.lobby.name", "🟢 Lobby");
+
+      // Find the lobby channel and rename it to online mode
+      const lobbyChannel = guild.channels.cache.find(
+        channel => channel.name.includes("🔴") && channel.type === ChannelType.GuildVoice
+      );
+
+      if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
+        await lobbyChannel.setName(onlineLobbyName);
+        logger.info(`✅ Lobby switched to online mode: ${onlineLobbyName}`);
+      } else {
+        logger.debug("No offline lobby channel found to rename");
+      }
+    } catch (error) {
+      logger.error("❌ Error switching lobby to online mode:", error);
+    }
 
     logger.info("All services initialized successfully");
   } catch (error) {
