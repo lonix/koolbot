@@ -553,22 +553,53 @@ async function handleImport(
       try {
         // Check if the key exists in our schema
         if (key in defaultConfig) {
-          // Validate the value type matches the schema
+          // Get the expected type and convert the value if needed
           const expectedType =
             typeof defaultConfig[key as keyof typeof defaultConfig];
-          if (typeof value === expectedType) {
-            // Get description and category from schema
-            const description = getSettingDescription(key);
-            const category = key.split(".")[0];
-            await configService.set(key, value, description, category);
-            results.push({ key, success: true, message: "✅ Updated" });
-          } else {
+          let convertedValue = value;
+
+          // Convert string boolean values to actual booleans
+          if (expectedType === "boolean" && typeof value === "string") {
+            if (value === "true" || value === "false") {
+              convertedValue = value === "true";
+            } else {
+              results.push({
+                key,
+                success: false,
+                message: `❌ Invalid boolean value: expected "true" or "false", got "${value}"`,
+              });
+              continue;
+            }
+          }
+          // Convert string number values to actual numbers
+          else if (expectedType === "number" && typeof value === "string") {
+            const numValue = Number(value);
+            if (!isNaN(numValue)) {
+              convertedValue = numValue;
+            } else {
+              results.push({
+                key,
+                success: false,
+                message: `❌ Invalid number value: expected a number, got "${value}"`,
+              });
+              continue;
+            }
+          }
+          // Check if types match after conversion
+          else if (typeof convertedValue !== expectedType) {
             results.push({
               key,
               success: false,
               message: `❌ Type mismatch: expected ${expectedType}, got ${typeof value}`,
             });
+            continue;
           }
+
+          // Get description and category from schema
+          const description = getSettingDescription(key);
+          const category = key.split(".")[0];
+          await configService.set(key, convertedValue, description, category);
+          results.push({ key, success: true, message: "✅ Updated" });
         } else {
           results.push({ key, success: false, message: "❌ Unknown setting" });
         }
