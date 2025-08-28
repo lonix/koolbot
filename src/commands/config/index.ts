@@ -269,6 +269,24 @@ export const data = new SlashCommandBuilder()
             { name: "Quote System", value: "quotes" },
           ),
       ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("reset")
+      .setDescription("Reset a configuration value to default")
+      .addStringOption((option) =>
+        option
+          .setName("key")
+          .setDescription("Configuration key")
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("reload")
+      .setDescription(
+        "Reload all commands to Discord API (use after changing command settings)",
+      ),
   );
 
 async function handleList(
@@ -657,6 +675,67 @@ async function handleExport(
   }
 }
 
+async function handleReset(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    const key = interaction.options.getString("key", true);
+    await configService.delete(key);
+
+    const embed = new EmbedBuilder()
+      .setTitle("Configuration Reset")
+      .setColor(0x00ff00)
+      .addFields({ name: "Key", value: key })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+  } catch (error) {
+    logger.error("Error resetting configuration:", error);
+    await interaction.reply({
+      content: "An error occurred while resetting the configuration value.",
+      ephemeral: true,
+    });
+  }
+}
+
+async function handleReload(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    await interaction.reply({
+      content: "Reloading commands to Discord API... This may take a moment.",
+      ephemeral: true,
+    });
+
+    // Get the command manager instance and force a reload
+    const { CommandManager } = await import(
+      "../../services/command-manager.js"
+    );
+    const commandManager = CommandManager.getInstance(interaction.client);
+
+    // Reload commands to Discord API
+    await commandManager.registerCommands();
+
+    // Update client-side command handling
+    await commandManager.populateClientCommands();
+
+    const embed = new EmbedBuilder()
+      .setTitle("Commands Reloaded")
+      .setColor(0x00ff00)
+      .setDescription(
+        "All commands have been reloaded to Discord API with current settings.",
+      )
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+  } catch (error) {
+    logger.error("Error reloading commands:", error);
+    await interaction.editReply({
+      content: "An error occurred while reloading commands.",
+    });
+  }
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -674,6 +753,12 @@ export async function execute(
       break;
     case "export":
       await handleExport(interaction);
+      break;
+    case "reset":
+      await handleReset(interaction);
+      break;
+    case "reload":
+      await handleReload(interaction);
       break;
     default:
       await interaction.reply({
