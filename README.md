@@ -68,18 +68,21 @@ KoolBot is built with a modular, service-oriented architecture:
 - **Automatic Ownership Transfer**: Seamless channel handoff when owners leave
 - **Smart Cleanup**: Automatic channel removal and cleanup
 - **Permission Management**: Role-based access control
+- **Lobby System**: Dynamic lobby that renames on bot startup/shutdown
 
 ### 📊 Voice Channel Tracking
 - **Real-time Monitoring**: Track user activity in voice channels
 - **Statistics Generation**: Weekly/monthly/all-time leaderboards
 - **Session Recording**: Detailed session tracking with timestamps
 - **Exclusion Support**: Configure channels to ignore
+- **Data Cleanup**: Automatic cleanup with configurable retention periods
 
 ### 🧹 Data Cleanup System
 - **Automatic Maintenance**: Configurable retention periods
 - **Data Aggregation**: Preserve statistics while removing old sessions
 - **Notification System**: Report cleanup activities to Discord channels
 - **Admin Controls**: Manual cleanup execution and monitoring
+- **Flexible Scheduling**: Cron-based cleanup scheduling
 
 ### 🛠️ Utility Commands
 - **Role Verification**: Role-based command access control
@@ -92,8 +95,18 @@ KoolBot is built with a modular, service-oriented architecture:
 - **Hierarchical Organization**: Dot-notation configuration keys
 - **Validation**: Schema-based configuration validation
 - **Migration Support**: Automatic settings migration
+- **Import/Export**: YAML-based configuration backup and restore
+
+### 📝 Discord Logging
+- **Startup/Shutdown Logging**: Track bot lifecycle events
+- **Error Logging**: Monitor critical issues and problems
+- **Cleanup Logging**: Track data maintenance activities
+- **Configuration Logging**: Monitor setting changes
+- **Cron Job Logging**: Track scheduled task execution
 
 ## 📋 Commands
+
+For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)**.
 
 ### User Commands
 | Command | Description | Permission |
@@ -106,17 +119,17 @@ KoolBot is built with a modular, service-oriented architecture:
 | `/seen` | Last seen information | All users |
 | `/transfer-ownership` | Transfer channel ownership | Channel owner |
 | `/quote` | Quote management | All users |
-| `/setup-lobby` | Configure voice lobby | Admin |
-| `/exclude-channel` | Exclude from tracking | Admin |
-| `/config` | Configuration management | Admin |
 
 ### Admin Commands
 | Command | Description | Permission |
 |---------|-------------|------------|
+| `/config` | Configuration management | Admin |
 | `/announce-vc-stats` | Trigger voice stats announcement | Admin |
 | `/dbtrunk` | Voice channel database cleanup management | Admin |
 | `/vc` | Voice channel management | Admin |
 | `/botstats` | Bot performance statistics | Admin |
+| `/exclude-channel` | Exclude from tracking | Admin |
+| `/setup-lobby` | Configure voice lobby | Admin |
 
 ## 🐳 Docker Deployment
 
@@ -211,6 +224,8 @@ docker-compose exec bot sh
 
 ## ⚙️ Configuration
 
+For a complete configuration reference, see **[SETTINGS.md](SETTINGS.md)**.
+
 ### Environment Variables (.env)
 ```bash
 # Critical Bot Configuration (Required)
@@ -280,6 +295,8 @@ All bot settings are stored in MongoDB and can be configured using the `/config`
 - **Voice Tracking**: Tracking features and exclusions
 - **Announcements**: Schedule and channel configuration
 - **Quote System**: Cooldowns and role permissions
+- **Data Cleanup**: Retention periods and scheduling
+- **Discord Logging**: Bot event logging to Discord channels
 
 ## 🔧 Development
 
@@ -345,6 +362,13 @@ interface IVoiceChannelTracking {
     channels: string[];
     averageSessionLength: number;
   }>;
+  yearlyTotals?: Array<{
+    year: string;
+    totalTime: number;
+    sessionCount: number;
+    channels: string[];
+    averageSessionLength: number;
+  }>;
 }
 ```
 
@@ -394,6 +418,7 @@ docker-compose exec bot npm run migrate-config
 
 ## 📚 Documentation
 
+- **[COMMANDS.md](COMMANDS.md)**: Complete command reference
 - **[SETTINGS.md](SETTINGS.md)**: Complete configuration reference
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**: Common issues and solutions
 - **[.env.example](.env.example)**: Environment variable template
