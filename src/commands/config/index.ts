@@ -5,10 +5,14 @@ import {
   AttachmentBuilder,
   PermissionFlagsBits,
 } from "discord.js";
+import { Buffer } from "buffer";
 import { ConfigService } from "../../services/config-service.js";
 import { defaultConfig } from "../../services/config-schema.js";
 import * as yaml from "js-yaml";
 import logger from "../../utils/logger.js";
+
+// Import fetch for Node.js compatibility
+import fetch from "node-fetch";
 
 const configService = ConfigService.getInstance();
 
@@ -508,7 +512,7 @@ async function handleImport(
       return;
     }
 
-    // Fetch the file content
+    // Fetch the file content from Discord's CDN
     const response = await fetch(file.url);
     if (!response.ok) {
       await interaction.reply({
@@ -548,8 +552,7 @@ async function handleImport(
         // Check if the key exists in our schema
         if (key in defaultConfig) {
           // Validate the value type matches the schema
-          const expectedType =
-            typeof defaultConfig[key as keyof typeof defaultConfig];
+          const expectedType = typeof defaultConfig[key as keyof typeof defaultConfig];
           if (typeof value === expectedType) {
             // Get description and category from schema
             const description = getSettingDescription(key);
@@ -597,8 +600,7 @@ async function handleImport(
     if (failed.length > 0) {
       embed.addFields({
         name: `❌ Failed to Update (${failed.length})`,
-        value:
-          failed.map((r) => `\`${r.key}\`: ${r.message}`).join("\n") || "None",
+        value: failed.map((r) => `\`${r.key}\`: ${r.message}`).join("\n") || "None",
         inline: true,
       });
     }

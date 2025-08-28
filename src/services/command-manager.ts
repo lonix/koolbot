@@ -1,17 +1,6 @@
 import { REST, Routes, Client, Collection } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "../utils/logger.js";
-import { data as ping } from "../commands/ping.js";
-import { data as amikool } from "../commands/amikool.js";
-import { data as plexprice } from "../commands/plexprice.js";
-import { data as vctop } from "../commands/vctop.js";
-import { data as vcstats } from "../commands/vcstats.js";
-import { data as seen } from "../commands/seen.js";
-import { data as transferOwnership } from "../commands/transfer-ownership.js";
-import { data as announceVcStats } from "../commands/announce-vc-stats.js";
-import { data as configCommand } from "../commands/config/index.js";
-import { data as quoteCommand } from "../commands/quote.js";
-import { data as botstatsCommand } from "../commands/botstats.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
 
@@ -52,66 +41,77 @@ export class CommandManager {
     return CommandManager.instance;
   }
 
-  async initialize() {
+  async initialize(): Promise<any[]> {
     try {
-      // Load commands
-      const commands = [];
-
-      // Debug: Check the actual value of ping.enabled
-      const pingEnabled = await this.configService.get("ping.enabled");
-      logger.debug(
-        `DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`,
-      );
-
-      if (await this.configService.get("ping.enabled")) {
-        commands.push(ping.toJSON());
-        if (isDebug) logger.debug("✓ /ping command enabled");
-      }
-
-      if (await this.configService.get("amikool.enabled")) {
-        commands.push(amikool.toJSON());
-        if (isDebug) logger.debug("✓ /amikool command enabled");
-      }
-
-      if (await this.configService.get("plexprice.enabled")) {
-        commands.push(plexprice.toJSON());
-        if (isDebug) logger.debug("✓ /plexprice command enabled");
-      }
-
-      if (await this.configService.get("voicetracking.enabled")) {
-        commands.push(vctop.toJSON());
-        commands.push(vcstats.toJSON());
-        if (isDebug) logger.debug("✓ Voice channel tracking commands enabled");
-      }
-
-      if (await this.configService.get("voicetracking.seen.enabled")) {
-        commands.push(seen.toJSON());
-        if (isDebug) logger.debug("✓ /seen command enabled");
-      }
-
-      if (await this.configService.get("voicechannels.enabled")) {
-        commands.push(transferOwnership.toJSON());
-        if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
-      }
-
-      if (await this.configService.get("voicetracking.announcements.enabled")) {
-        commands.push(announceVcStats.toJSON());
-        if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
-      }
-
-      if (await this.configService.get("quotes.enabled")) {
-        commands.push(quoteCommand.toJSON());
-        if (isDebug) logger.debug("✓ /quote command enabled");
-      }
-
-      // Always add botstats command
-      commands.push(botstatsCommand.toJSON());
-      if (isDebug) logger.debug("✓ /botstats command enabled");
+      // Load commands dynamically from commands/index.ts
+      const commands = await this.loadCommandsDynamically();
 
       logger.info(`Loaded ${commands.length} commands`);
       return commands;
     } catch (error) {
       logger.error("Error initializing CommandManager:", error);
+      throw error;
+    }
+  }
+
+  private async loadCommandsDynamically(): Promise<any[]> {
+    try {
+      const commands = [];
+      const enabledCommands = [];
+
+      // Define command configurations with their requirements
+      const commandConfigs = [
+        { name: "ping", configKey: "ping.enabled", file: "ping" },
+        { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
+        { name: "plexprice", configKey: "plexprice.enabled", file: "plexprice" },
+        { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
+        { name: "vcstats", configKey: "voicetracking.enabled", file: "vcstats" },
+        { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
+        { name: "transfer-ownership", configKey: "voicechannels.enabled", file: "transfer-ownership" },
+        { name: "announce-vc-stats", configKey: "voicetracking.announcements.enabled", file: "announce-vc-stats" },
+        { name: "quote", configKey: "quotes.enabled", file: "quote" },
+        { name: "vc-cleanup", configKey: "voicetracking.enabled", file: "vc-cleanup" },
+        { name: "config", configKey: null, file: "config/index" }, // Always enabled
+        { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
+      ];
+
+      // Process each command
+      for (const config of commandConfigs) {
+        try {
+          let shouldEnable = true;
+
+          // Check configuration if required
+          if (config.configKey) {
+            const configValue = await this.configService.get(config.configKey);
+            shouldEnable = configValue === true;
+          }
+
+          if (shouldEnable) {
+            // Import the command data
+            const commandModule = await import(`../commands/${config.file}.js`);
+            const commandData = commandModule.data;
+
+            commands.push(commandData.toJSON());
+            enabledCommands.push(config.name);
+
+            if (isDebug) {
+              logger.debug(`✓ /${config.name} command enabled`);
+            }
+          } else if (isDebug) {
+            logger.debug(`✗ /${config.name} command disabled`);
+          }
+        } catch (error) {
+          logger.warn(`Failed to load command ${config.name}:`, error);
+        }
+      }
+
+      if (isDebug) {
+        logger.debug(`Enabled commands: ${enabledCommands.join(", ")}`);
+      }
+
+      return commands;
+    } catch (error) {
+      logger.error("Error loading commands dynamically:", error);
       throw error;
     }
   }
@@ -128,98 +128,20 @@ export class CommandManager {
       }>;
     }>
   > {
-    const commands = [];
+    try {
+      // Use the same dynamic loading logic
+      const commands = await this.loadCommandsDynamically();
 
-    if (isDebug) {
-      logger.debug("Checking command registration status:");
+      // Convert to the expected format
+      return commands.map(cmd => ({
+        name: cmd.name,
+        description: cmd.description,
+        options: cmd.options || []
+      }));
+    } catch (error) {
+      logger.error("Error getting enabled commands:", error);
+      return [];
     }
-
-    const pingEnabled = await this.configService.get("ping.enabled");
-    logger.debug(
-      `🔍 DEBUG: ping.enabled = ${pingEnabled} (type: ${typeof pingEnabled})`,
-    );
-
-    if (pingEnabled) {
-      commands.push(ping.toJSON());
-      if (isDebug) logger.debug("✓ /ping command enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /ping command disabled");
-    }
-
-    if (await this.configService.get("amikool.enabled")) {
-      commands.push(amikool.toJSON());
-      if (isDebug) logger.debug("✓ /amikool command enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /amikool command disabled");
-    }
-
-    if (await this.configService.get("plexprice.enabled")) {
-      commands.push(plexprice.toJSON());
-      if (isDebug) logger.debug("✓ /plexprice command enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /plexprice command disabled");
-    }
-
-    if (await this.configService.get("voicetracking.enabled")) {
-      commands.push(vctop.toJSON());
-      commands.push(vcstats.toJSON());
-      if (isDebug) logger.debug("✓ /vctop and /vcstats commands enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /vctop and /vcstats commands disabled");
-    }
-
-    if (await this.configService.get("voicetracking.seen.enabled")) {
-      commands.push(seen.toJSON());
-      if (isDebug) logger.debug("✓ /seen command enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /seen command disabled");
-    }
-
-    if (await this.configService.get("voicechannels.enabled")) {
-      commands.push(transferOwnership.toJSON());
-      if (isDebug) logger.debug("✓ /transfer-ownership command enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /transfer-ownership command disabled");
-    }
-
-    if (await this.configService.get("voicetracking.announcements.enabled")) {
-      commands.push(announceVcStats.toJSON());
-      if (isDebug) logger.debug("✓ /announce-vc-stats command enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /announce-vc-stats command disabled");
-    }
-
-    if (await this.configService.get("quotes.enabled")) {
-      commands.push(quoteCommand.toJSON());
-      if (isDebug) logger.debug("✓ /quote command enabled");
-    } else if (isDebug) {
-      logger.debug("✗ /quote command disabled");
-    }
-
-    commands.push(configCommand.toJSON());
-    if (isDebug) logger.debug("✓ /config command enabled (always)");
-
-    // Always add botstats command
-    commands.push(botstatsCommand.toJSON());
-    if (isDebug) logger.debug("✓ /botstats command enabled (always)");
-
-    if (isDebug) {
-      logger.debug("Command registration summary:");
-      logger.debug(`Total commands to register: ${commands.length}`);
-      logger.debug("Commands to be registered:");
-      commands.forEach((cmd) => {
-        logger.debug(`- /${cmd.name}: ${cmd.description}`);
-        if (cmd.options) {
-          cmd.options.forEach((opt) => {
-            logger.debug(
-              `  └─ ${opt.name}${opt.required ? " (required)" : ""}: ${opt.description}`,
-            );
-          });
-        }
-      });
-    }
-
-    return commands;
   }
 
   // Helper function to make Discord API calls with timeout and retry logic
@@ -358,87 +280,65 @@ export class CommandManager {
         throw new Error("Client not set");
       }
 
-      // Import command handlers
-      const { execute: ping } = await import("../commands/ping.js");
-      const { execute: amikool } = await import("../commands/amikool.js");
-      const { execute: plexprice } = await import("../commands/plexprice.js");
-      const { execute: vctop } = await import("../commands/vctop.js");
-      const { execute: vcstats } = await import("../commands/vcstats.js");
-      const { execute: seen } = await import("../commands/seen.js");
-      const { execute: transferOwnership } = await import(
-        "../commands/transfer-ownership.js"
-      );
-      const { execute: announceVcStats } = await import(
-        "../commands/announce-vc-stats.js"
-      );
-      const { execute: configCommand } = await import(
-        "../commands/config/index.js"
-      );
-      const { execute: quoteCommand } = await import("../commands/quote.js");
-      const { execute: excludeChannel } = await import(
-        "../commands/exclude-channel.js"
-      );
-      const { command: setupLobbyCommand } = await import(
-        "../commands/setup-lobby.js"
-      );
-      const { execute: botstatsCommand } = await import(
-        "../commands/botstats.js"
-      );
-
       // Clear existing commands
       this.client.commands.clear();
 
-      // Add commands based on configuration
-      if (await this.configService.get("ping.enabled")) {
-        this.client.commands.set("ping", { execute: ping });
+      // Define command configurations with their requirements
+      const commandConfigs = [
+        { name: "ping", configKey: "ping.enabled", file: "ping" },
+        { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
+        { name: "plexprice", configKey: "plexprice.enabled", file: "plexprice" },
+        { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
+        { name: "vcstats", configKey: "voicetracking.enabled", file: "vcstats" },
+        { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
+        { name: "transfer-ownership", configKey: "voicechannels.enabled", file: "transfer-ownership" },
+        { name: "announce-vc-stats", configKey: "voicetracking.announcements.enabled", file: "announce-vc-stats" },
+        { name: "quote", configKey: "quotes.enabled", file: "quote" },
+        { name: "vc-cleanup", configKey: "voicetracking.enabled", file: "vc-cleanup" },
+        { name: "config", configKey: null, file: "config/index" }, // Always enabled
+        { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
+        { name: "exclude-channel", configKey: null, file: "exclude-channel" }, // Always enabled
+        { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
+      ];
+
+      // Process each command
+      for (const config of commandConfigs) {
+        try {
+          let shouldEnable = true;
+
+          // Check configuration if required
+          if (config.configKey) {
+            const configValue = await this.configService.get(config.configKey);
+            shouldEnable = configValue === true;
+          }
+
+          if (shouldEnable) {
+            // Import the command execute function
+            const commandModule = await import(`../commands/${config.file}.js`);
+            let executeFunction;
+
+            // Handle different export patterns
+            if (commandModule.execute) {
+              executeFunction = commandModule.execute;
+            } else if (commandModule.command && commandModule.command.execute) {
+              executeFunction = commandModule.command.execute;
+            } else {
+              logger.warn(`Command ${config.name} has no execute function`);
+              continue;
+            }
+
+            this.client.commands.set(config.name, { execute: executeFunction });
+
+            if (isDebug) {
+              logger.debug(`✓ /${config.name} command loaded`);
+            }
+          } else if (isDebug) {
+            logger.debug(`✗ /${config.name} command disabled`);
+          }
+        } catch (error) {
+          logger.warn(`Failed to load command ${config.name}:`, error);
+        }
       }
-
-      if (await this.configService.get("amikool.enabled")) {
-        this.client.commands.set("amikool", { execute: amikool });
-      }
-
-      if (await this.configService.get("plexprice.enabled")) {
-        this.client.commands.set("plexprice", { execute: plexprice });
-      }
-
-      if (await this.configService.get("voicetracking.enabled")) {
-        this.client.commands.set("vctop", { execute: vctop });
-        this.client.commands.set("vcstats", { execute: vcstats });
-      }
-
-      if (await this.configService.get("voicetracking.seen.enabled")) {
-        this.client.commands.set("seen", { execute: seen });
-      }
-
-      if (await this.configService.get("voicechannels.enabled")) {
-        this.client.commands.set("transfer-ownership", {
-          execute: transferOwnership,
-        });
-      }
-
-      if (await this.configService.get("voicetracking.announcements.enabled")) {
-        this.client.commands.set("announce-vc-stats", {
-          execute: announceVcStats,
-        });
-      }
-
-      if (await this.configService.get("quotes.enabled")) {
-        this.client.commands.set("quote", { execute: quoteCommand });
-      }
-
-      // Always add config command
-      this.client.commands.set("config", { execute: configCommand });
-
-      // Always add exclude-channel command
-      this.client.commands.set("exclude-channel", { execute: excludeChannel });
-
-      // Always add setup-lobby command
-      this.client.commands.set("setup-lobby", {
-        execute: setupLobbyCommand.execute,
-      });
-
-      // Always add botstats command
-      this.client.commands.set("botstats", { execute: botstatsCommand });
 
       logger.info(
         `Populated client.commands with ${this.client.commands.size} commands`,

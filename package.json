@@ -29,6 +29,7 @@
     "discord.js": "^14.22.1",
     "dotenv": "^17.2.1",
     "mongoose": "^8.18.0",
+    "node-fetch": "^3.3.2",
     "winston": "^3.11.0"
   },
   "devDependencies": {
@@ -36,6 +37,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/mongoose": "^5.11.96",
     "@types/node": "^24.3.0",
+    "@types/node-fetch": "^2.6.13",
     "@typescript-eslint/eslint-plugin": "^8.40.0",
     "@typescript-eslint/parser": "^8.32.1",
     "eslint": "^9.34.0",
