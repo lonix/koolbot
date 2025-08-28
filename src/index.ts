@@ -20,6 +20,7 @@ import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
+import { DiscordLogger } from "./services/discord-logger.js";
 
 dotenvConfig();
 
@@ -72,6 +73,7 @@ const client = new Client({
 client.commands = new Collection();
 
 let isShuttingDown = false;
+let discordLogger: DiscordLogger;
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
@@ -334,6 +336,10 @@ async function initializeServices(): Promise<void> {
     // Set client for services that need it
     configService.setClient(client);
 
+    // Initialize Discord logger first
+    discordLogger = DiscordLogger.getInstance(client);
+    await discordLogger.initialize();
+
     // Check and clean up any global commands that might cause duplicates
     await cleanupGlobalCommands();
 
@@ -342,11 +348,20 @@ async function initializeServices(): Promise<void> {
     // await configService.migrateFromEnv(); // Disabled - let startup migrator handle all migration
     await startupMigrator.checkForOutdatedSettings();
 
+    // Log database connection status
+    await discordLogger.logDatabaseStatus(
+      true,
+      "Successfully connected to MongoDB database",
+    );
+
     // Try to register commands, but don't fail if Discord API is unavailable
     try {
       await commandManager.registerCommands();
       await commandManager.populateClientCommands();
       logger.info("✅ Discord commands registered successfully");
+
+      // Log successful Discord registration
+      await discordLogger.logDiscordRegistrationSuccess();
     } catch (error) {
       logger.warn(
         "⚠️ Failed to register Discord commands - bot will continue without slash commands",
@@ -401,6 +416,15 @@ async function initializeServices(): Promise<void> {
     logger.info("All services initialized successfully");
   } catch (error) {
     logger.error("Error initializing services:", error);
+
+    // Log startup failure
+    if (discordLogger) {
+      await discordLogger.logError(
+        error instanceof Error ? error : new Error(String(error)),
+        "Service Initialization",
+      );
+    }
+
     process.exit(1);
   }
 }

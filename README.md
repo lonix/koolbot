@@ -221,6 +221,38 @@ DEBUG=false
 NODE_ENV=production
 ```
 
+### Discord Logging Configuration
+The bot can log important events to Discord channels using the `core.*` configuration structure:
+
+```bash
+# Enable startup/shutdown logging to #bot-status channel
+/config set key:core.startup.enabled value:true
+/config set key:core.startup.channel_id value:123456789
+
+# Enable error logging to #admin-alerts channel  
+/config set key:core.errors.enabled value:true
+/config set key:core.errors.channel_id value:987654321
+
+# Enable cleanup logging to #bot-logs channel
+/config set key:core.cleanup.enabled value:true
+/config set key:core.cleanup.channel_id value:555666777
+
+# Enable configuration change logging
+/config set key:core.config.enabled value:true
+/config set key:core.config.channel_id value:111222333
+
+# Enable cron job logging
+/config set key:core.cron.enabled value:true
+/config set key:core.cron.channel_id value:444555666
+```
+
+**Available Log Types:**
+- **`core.startup.*`** - Bot startup/shutdown, service initialization, Discord registration
+- **`core.errors.*`** - Critical errors and problems that need admin attention
+- **`core.cleanup.*`** - Voice channel cleanup results and status
+- **`core.config.*`** - Configuration reloads and changes
+- **`core.cron.*`** - Scheduled task execution results
+
 ### Database Configuration
 All bot settings are stored in MongoDB and can be configured using the `/config` command:
 

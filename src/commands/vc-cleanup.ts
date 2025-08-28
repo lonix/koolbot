@@ -1,4 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, PermissionFlagsBits } from "discord.js";
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  PermissionFlagsBits,
+} from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 
@@ -6,20 +10,14 @@ export const data = new SlashCommandBuilder()
   .setName("vc-cleanup")
   .setDescription("Voice channel cleanup management")
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName("run")
-      .setDescription("Run cleanup immediately")
+  .addSubcommand((subcommand) =>
+    subcommand.setName("run").setDescription("Run cleanup immediately"),
   )
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName("status")
-      .setDescription("Show cleanup service status")
+  .addSubcommand((subcommand) =>
+    subcommand.setName("status").setDescription("Show cleanup service status"),
   )
-  .addSubcommand(subcommand =>
-    subcommand
-      .setName("config")
-      .setDescription("View cleanup configuration")
+  .addSubcommand((subcommand) =>
+    subcommand.setName("config").setDescription("View cleanup configuration"),
   );
 
 export async function execute(
@@ -42,7 +40,9 @@ async function handleCleanupSubcommand(
   interaction: ChatInputCommandInteraction,
   subcommand: string,
 ): Promise<void> {
-  const truncationService = VoiceChannelTruncationService.getInstance(interaction.client);
+  const truncationService = VoiceChannelTruncationService.getInstance(
+    interaction.client,
+  );
 
   switch (subcommand) {
     case "run":
@@ -71,7 +71,8 @@ async function handleCleanupRun(
     const isEnabled = await truncationService.isEnabled();
     if (!isEnabled) {
       await interaction.reply({
-        content: "❌ Voice tracking cleanup is currently disabled. Enable it in the configuration first.",
+        content:
+          "❌ Voice tracking cleanup is currently disabled. Enable it in the configuration first.",
         ephemeral: true,
       });
       return;
@@ -81,27 +82,33 @@ async function handleCleanupRun(
     const status = truncationService.getStatus();
     if (status.isRunning) {
       await interaction.reply({
-        content: "⚠️ Cleanup is already running. Please wait for it to complete.",
+        content:
+          "⚠️ Cleanup is already running. Please wait for it to complete.",
         ephemeral: true,
       });
       return;
     }
 
     await interaction.reply({
-      content: "🔄 Starting voice channel cleanup... This may take a few minutes.",
+      content:
+        "🔄 Starting voice channel cleanup... This may take a few minutes.",
       ephemeral: true,
     });
 
     // Run cleanup in background
-    truncationService.runCleanup()
+    truncationService
+      .runCleanup()
       .then(async (stats) => {
-        // Send notification to configured channel
-        await truncationService.sendCleanupNotification(stats);
+        // Results are automatically logged to Discord via DiscordLogger
+        logger.info(
+          `Cleanup completed: ${stats.sessionsRemoved} sessions removed, ${stats.dataAggregated} users processed`,
+        );
 
         // Update the original interaction with results
-        const resultMessage = stats.errors.length > 0
-          ? `❌ Cleanup completed with errors:\n${stats.errors.join("\n")}`
-          : `✅ Cleanup completed successfully!\n📊 Sessions removed: ${stats.sessionsRemoved}\n⏱️ Execution time: ${stats.executionTime}ms`;
+        const resultMessage =
+          stats.errors.length > 0
+            ? `❌ Cleanup completed with errors:\n${stats.errors.join("\n")}`
+            : `✅ Cleanup completed successfully!\n📊 Sessions removed: ${stats.sessionsRemoved}\n⏱️ Execution time: ${stats.executionTime}ms`;
 
         await interaction.editReply({
           content: resultMessage,
@@ -113,7 +120,6 @@ async function handleCleanupRun(
           content: `❌ Cleanup failed: ${error.message}`,
         });
       });
-
   } catch (error) {
     logger.error("Error handling cleanup run:", error);
     await interaction.editReply({
@@ -129,16 +135,21 @@ async function handleCleanupStatus(
   try {
     const status = truncationService.getStatus();
     const isEnabled = await truncationService.isEnabled();
-    const notificationChannel = await truncationService.getNotificationChannel();
+    const notificationChannel =
+      await truncationService.getNotificationChannel();
     const schedule = await truncationService.getSchedule();
 
     const statusEmbed = {
-      color: status.isRunning ? 0xFFA500 : (isEnabled ? 0x00FF00 : 0xFF0000),
+      color: status.isRunning ? 0xffa500 : isEnabled ? 0x00ff00 : 0xff0000,
       title: "🎙️ Voice Tracking Cleanup Status",
       fields: [
         {
           name: "Status",
-          value: status.isRunning ? "🔄 Running" : (isEnabled ? "✅ Enabled" : "❌ Disabled"),
+          value: status.isRunning
+            ? "🔄 Running"
+            : isEnabled
+              ? "✅ Enabled"
+              : "❌ Disabled",
           inline: true,
         },
         {
@@ -188,11 +199,12 @@ async function handleCleanupConfig(
 ): Promise<void> {
   try {
     const isEnabled = await truncationService.isEnabled();
-    const notificationChannel = await truncationService.getNotificationChannel();
+    const notificationChannel =
+      await truncationService.getNotificationChannel();
     const schedule = await truncationService.getSchedule();
 
     const configEmbed = {
-      color: isEnabled ? 0x00FF00 : 0xFF0000,
+      color: isEnabled ? 0x00ff00 : 0xff0000,
       title: "⚙️ Voice Tracking Cleanup Configuration",
       description: "Current configuration settings for the cleanup service.",
       fields: [
@@ -215,7 +227,8 @@ async function handleCleanupConfig(
         },
         {
           name: "📋 Configuration Note",
-          value: "Retention settings are currently using default values and will be configurable in a future update.",
+          value:
+            "Retention settings are currently using default values and will be configurable in a future update.",
           inline: false,
         },
       ],
