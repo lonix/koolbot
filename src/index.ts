@@ -20,6 +20,8 @@ import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
+import { DiscordLogger } from "./services/discord-logger.js";
+import { BotStatusService } from "./services/bot-status-service.js";
 
 dotenvConfig();
 
@@ -72,6 +74,8 @@ const client = new Client({
 client.commands = new Collection();
 
 let isShuttingDown = false;
+let discordLogger: DiscordLogger;
+const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
@@ -329,6 +333,8 @@ const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 
+// Bot status service is already initialized above
+
 async function initializeServices(): Promise<void> {
   try {
     // Set client for services that need it
@@ -342,11 +348,24 @@ async function initializeServices(): Promise<void> {
     // await configService.migrateFromEnv(); // Disabled - let startup migrator handle all migration
     await startupMigrator.checkForOutdatedSettings();
 
+    // Initialize Discord logger AFTER database connection is established
+    discordLogger = DiscordLogger.getInstance(client);
+    await discordLogger.initialize();
+
+    // Log database connection status
+    await discordLogger.logDatabaseStatus(
+      true,
+      "Successfully connected to MongoDB database",
+    );
+
     // Try to register commands, but don't fail if Discord API is unavailable
     try {
       await commandManager.registerCommands();
       await commandManager.populateClientCommands();
       logger.info("✅ Discord commands registered successfully");
+
+      // Log successful Discord registration
+      await discordLogger.logDiscordRegistrationSuccess();
     } catch (error) {
       logger.warn(
         "⚠️ Failed to register Discord commands - bot will continue without slash commands",
@@ -373,40 +392,40 @@ async function initializeServices(): Promise<void> {
       await client.guilds.fetch(guildId),
     );
 
-    // Switch lobby to online mode on startup
+    // Switch lobby to online mode on startup and handle any users in offline lobby
     try {
       const guild = await client.guilds.fetch(guildId);
-      const onlineLobbyName = await configService.getString(
-        "voicechannels.lobby.name",
-        "🟢 Lobby",
-      );
-
-      // Find the lobby channel and rename it to online mode
-      const lobbyChannel = guild.channels.cache.find(
-        (channel) =>
-          channel.name.includes("🔴") &&
-          channel.type === ChannelType.GuildVoice,
-      );
-
-      if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
-        await lobbyChannel.setName(onlineLobbyName);
-        logger.info(`✅ Lobby switched to online mode: ${onlineLobbyName}`);
-      } else {
-        logger.debug("No offline lobby channel found to rename");
-      }
+      await voiceChannelManager.renameLobbyToOnline(guild);
     } catch (error) {
       logger.error("❌ Error switching lobby to online mode:", error);
     }
 
+    // Set bot to fully operational status (green) and start VC monitoring
+    botStatusService.setOperationalStatus();
+    botStatusService.startVcMonitoring();
+
     logger.info("All services initialized successfully");
   } catch (error) {
     logger.error("Error initializing services:", error);
+
+    // Log startup failure
+    if (discordLogger) {
+      await discordLogger.logError(
+        error instanceof Error ? error : new Error(String(error)),
+        "Service Initialization",
+      );
+    }
+
     process.exit(1);
   }
 }
 
 client.once(Events.ClientReady, async (readyClient) => {
   logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
+
+  // Set connecting status (yellow) immediately when Discord is ready
+  botStatusService.setConnectingStatus();
+
   await initializeServices();
 });
 
@@ -463,6 +482,12 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
     await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
     await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
+
+    // Update bot status with current VC user count
+    if (botStatusService) {
+      const vcUserCount = await voiceChannelManager.getTotalVcUserCount();
+      botStatusService.updateVcUserCount(vcUserCount);
+    }
   } catch (error) {
     logger.error("Error handling voice state update:", error);
   }
@@ -490,6 +515,55 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
 process.on("unhandledRejection", (error) => {
   logger.error("Unhandled promise rejection:", error);
+});
+
+// Handle graceful shutdown
+process.on("SIGINT", async () => {
+  logger.info("Received SIGINT, shutting down gracefully...");
+
+  try {
+    // Set bot to shutdown status (yellow)
+    botStatusService.setShutdownStatus();
+
+    // Rename lobby to offline before shutting down
+    const guildId = await configService.getString("GUILD_ID", "");
+    if (guildId) {
+      const guild = await client.guilds.fetch(guildId);
+      await voiceChannelManager.renameLobbyToOffline(guild);
+      logger.info("Lobby renamed to offline mode");
+    }
+
+    // Clean shutdown of bot status service
+    await botStatusService.shutdown();
+  } catch (error) {
+    logger.error("Error during SIGINT shutdown:", error);
+  }
+
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  logger.info("Received SIGTERM, shutting down gracefully...");
+
+  try {
+    // Set bot to shutdown status (yellow)
+    botStatusService.setShutdownStatus();
+
+    // Rename lobby to offline before shutting down
+    const guildId = await configService.getString("GUILD_ID", "");
+    if (guildId) {
+      const guild = await client.guilds.fetch(guildId);
+      await voiceChannelManager.renameLobbyToOffline(guild);
+      logger.info("Lobby renamed to offline mode");
+    }
+
+    // Clean shutdown of bot status service
+    await botStatusService.shutdown();
+  } catch (error) {
+    logger.error("Error during SIGTERM shutdown:", error);
+  }
+
+  process.exit(0);
 });
 
 process.on("uncaughtException", (error) => {

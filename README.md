@@ -1,297 +1,467 @@
 # KoolBot
 
-A Discord bot for managing voice channels and tracking user activity.
+A feature-rich Discord bot built with TypeScript, featuring voice channel management, tracking, utility commands, and automated data cleanup. Designed for seamless deployment using Docker Compose.
 
-## Features
+![Discord.js](https://img.shields.io/badge/Discord.js-14.22.1-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.9.2-blue)
+![MongoDB](https://img.shields.io/badge/MongoDB-8.18.0-green)
+![Docker](https://img.shields.io/badge/Docker-22.0.0-blue)
 
-### Voice Channel Management
-- Dynamic voice channel creation and deletion
-- Automatic cleanup of empty channels
-- Offline lobby channel for when the bot is down
-- Automatic user migration from offline lobby to new channels on bot restart
-- Customizable channel naming and user limits
-- Voice channel ownership management
-- Automatic ownership assignment based on activity
+## 🚀 Quick Start with Docker Compose
 
-### Voice Channel Tracking
-- Track user time spent in voice channels
-- View statistics for different time periods (last week, last month, all time)
-- Top users leaderboard
-- Individual user statistics
-- Last seen tracking with `/seen` command
-- Weekly voice channel activity announcements
-  - Cron-style scheduling
-  - Top 10 most active users
-  - Special mentions for top 3 users
-  - Admin manual trigger option
-- Excluded voice channels (comma-separated list of channel IDs)
+The recommended way to run KoolBot is using Docker Compose, which handles all dependencies and configuration automatically.
 
-### Other Features
-- PLEX price checking
-- Ping command
-- Am I Kool command with role-based verification
-- Comprehensive logging system
-- Clean shutdown handling
-- Type-safe configuration
+### Prerequisites
+- Docker and Docker Compose installed
+- Discord Bot Token
+- Discord Application ID and Guild ID
 
-## Configuration
+### 1. Clone and Configure
+```bash
+git clone <repository-url>
+cd koolbot
+cp .env.example .env
+```
 
-### Critical Settings (.env)
-
-The following settings must be configured in the `.env` file as they are critical for bot operation:
-
-```env
-# Critical Bot Configuration
+### 2. Edit Environment Variables
+```bash
+# Edit .env file with your Discord bot credentials
 DISCORD_TOKEN=your_bot_token_here
 CLIENT_ID=your_client_id_here
-MONGODB_URI=mongodb://localhost:27017/koolbot
+GUILD_ID=your_guild_id_here
+MONGODB_URI=mongodb://mongodb:27017/koolbot
+```
+
+### 3. Start the Bot
+```bash
+# Production deployment
+docker-compose up -d
+
+# Development with hot reloading
+docker-compose -f docker-compose.dev.yml up --build
+```
+
+That's it! Your bot is now running with MongoDB automatically configured and commands automatically registered with Discord.
+
+## 🏗️ Architecture
+
+KoolBot is built with a modular, service-oriented architecture:
+
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Discord.js    │    │   TypeScript     │    │     MongoDB     │
+│   Bot Client    │◄──►│   Core Services  │◄──►│   Data Store    │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+         │                       │                       │
+         │                       │                       │
+         ▼                       ▼                       ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│   Command       │    │   Voice Channel  │    │   Configuration │
+│   System        │    │   Management     │    │   Service       │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+## ✨ Features
+
+### 🎙️ Voice Channel Management
+- **Dynamic Channel Creation**: Users create voice channels from lobby
+- **Automatic Ownership Transfer**: Seamless channel handoff when owners leave
+- **Smart Cleanup**: Automatic channel removal and cleanup
+- **Permission Management**: Role-based access control
+- **Lobby System**: Dynamic lobby that renames on bot startup/shutdown
+
+### 📊 Voice Channel Tracking
+- **Real-time Monitoring**: Track user activity in voice channels
+- **Statistics Generation**: Weekly/monthly/all-time leaderboards
+- **Session Recording**: Detailed session tracking with timestamps
+- **Exclusion Support**: Configure channels to ignore
+- **Data Cleanup**: Automatic cleanup with configurable retention periods
+
+### 🧹 Data Cleanup System
+- **Automatic Maintenance**: Configurable retention periods
+- **Data Aggregation**: Preserve statistics while removing old sessions
+- **Notification System**: Report cleanup activities to Discord channels
+- **Admin Controls**: Manual cleanup execution and monitoring
+- **Flexible Scheduling**: Cron-based cleanup scheduling
+
+### 🛠️ Utility Commands
+- **Role Verification**: Role-based command access control
+- **EVE Online Integration**: PLEX price checking
+- **Quote Management**: Add, view, and manage quotes
+- **Bot Statistics**: Monitor bot performance and usage
+
+### ⚙️ Configuration Management
+- **Dynamic Settings**: Runtime configuration updates
+- **Hierarchical Organization**: Dot-notation configuration keys
+- **Validation**: Schema-based configuration validation
+- **Migration Support**: Automatic settings migration
+- **Import/Export**: YAML-based configuration backup and restore
+
+### 📝 Discord Logging
+- **Startup/Shutdown Logging**: Track bot lifecycle events
+- **Error Logging**: Monitor critical issues and problems
+- **Cleanup Logging**: Track data maintenance activities
+- **Configuration Logging**: Monitor setting changes
+- **Cron Job Logging**: Track scheduled task execution
+
+## 📋 Commands
+
+For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)**.
+
+### User Commands
+| Command | Description | Permission |
+|---------|-------------|------------|
+| `/ping` | Basic connectivity test | All users |
+| `/amikool` | Role-based verification | All users |
+| `/plexprice` | EVE Online PLEX prices | All users |
+| `/vctop` | Voice channel leaderboards | All users |
+| `/vcstats` | Personal voice statistics | All users |
+| `/seen` | Last seen information | All users |
+| `/transfer-ownership` | Transfer channel ownership | Channel owner |
+| `/quote` | Quote management | All users |
+
+### Admin Commands
+| Command | Description | Permission |
+|---------|-------------|------------|
+| `/config` | Configuration management | Admin |
+| `/announce-vc-stats` | Trigger voice stats announcement | Admin |
+| `/dbtrunk` | Voice channel database cleanup management | Admin |
+| `/vc` | Voice channel management | Admin |
+| `/botstats` | Bot performance statistics | Admin |
+| `/exclude-channel` | Exclude from tracking | Admin |
+| `/setup-lobby` | Configure voice lobby | Admin |
+
+## 🐳 Docker Deployment
+
+### Production Deployment
+```yaml
+# docker-compose.yml
+services:
+  bot:
+    image: ghcr.io/lonix/koolbot:latest
+    container_name: koolbot
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - mongodb
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+  mongodb:
+    image: mongo:latest
+    container_name: koolbot-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+volumes:
+  mongodb_data:
+```
+
+### Development Deployment
+```yaml
+# docker-compose.dev.yml
+services:
+  koolbot:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: koolbot-dev
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      - .env
+    networks:
+      - koolbot-network
+    depends_on:
+      - mongodb
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+  mongodb:
+    image: mongo:latest
+    container_name: koolbot-mongodb-dev
+    restart: unless-stopped
+    volumes:
+      - mongodb_data_dev:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - koolbot-network
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+volumes:
+  mongodb_data_dev:
+
+networks:
+  koolbot-network:
+    driver: bridge
+```
+
+### Docker Commands
+```bash
+# Start services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f bot
+
+# Stop services
+docker-compose down
+
+# Rebuild and restart
+docker-compose up --build -d
+
+# Access bot container
+docker-compose exec bot sh
+```
+
+## ⚙️ Configuration
+
+For a complete configuration reference, see **[SETTINGS.md](SETTINGS.md)**.
+
+### Environment Variables (.env)
+```bash
+# Critical Bot Configuration (Required)
+DISCORD_TOKEN=your_bot_token_here
+CLIENT_ID=your_client_id_here
+GUILD_ID=your_guild_id_here
+MONGODB_URI=mongodb://mongodb:27017/koolbot
 DEBUG=false
 NODE_ENV=production
-
-# Note: GUILD_ID is only needed temporarily to clean up any existing guild commands
-# Can be removed after initial cleanup is complete
-GUILD_ID=your_guild_id_here
 ```
 
-### User Configurable Settings
-
-All other settings can be configured using the `/config` command and are stored in the database. These settings use a hierarchical dot notation structure for better organization:
-
-#### Settings Hierarchy
-
-```
-ping.enabled                    # Enable/disable ping command
-amikool.enabled                # Enable/disable amikool command
-amikool.role.name              # Name of the cool role for verification
-
-plexprice.enabled              # Enable/disable plexprice command
-
-quotes.enabled                 # Enable/disable quote system
-quotes.cooldown                # Cooldown between quote additions (seconds)
-quotes.max_length              # Maximum length for quotes
-quotes.add_roles               # Roles that can add quotes (comma-separated IDs)
-quotes.delete_roles            # Roles that can delete quotes (comma-separated IDs)
-
-voicechannels.enabled          # Enable/disable voice channel management
-voicechannels.category.name    # Category name for voice channels
-voicechannels.lobby.name       # Online lobby channel name
-voicechannels.lobby.offlinename # Offline lobby channel name
-voicechannels.channel.prefix   # Prefix for dynamically created channels
-voicechannels.channel.suffix   # Suffix for dynamically created channels
-
-voicetracking.enabled          # Enable/disable voice channel tracking
-voicetracking.seen.enabled     # Enable/disable last seen tracking
-voicetracking.excluded_channels # Excluded voice channels (comma-separated IDs)
-voicetracking.admin_roles      # Admin roles for tracking (comma-separated IDs)
-voicetracking.announcements.enabled    # Enable/disable weekly announcements
-voicetracking.announcements.channel    # Channel for announcements
-voicetracking.announcements.schedule   # Cron schedule for announcements
-```
-
-#### Configuration Commands
-
-Use the following commands to manage settings:
-
-1. **List all settings:**
-   ```
-   /config list
-   ```
-
-2. **Get a specific setting:**
-   ```
-   /config get key:ping.enabled
-   ```
-
-3. **Change a setting:**
-   ```
-   /config set key:ping.enabled value:false
-   ```
-
-4. **Reset a setting to default:**
-   ```
-   /config reset key:ping.enabled
-   ```
-
-5. **Reload commands after changing settings:**
-   ```
-   /config reload
-   ```
-
-
-
-## Commands
-
-### Voice Channel Commands
-- `/seen @user`: Check when a user was last seen in a voice channel
-- `/vcstats`: View your voice channel statistics
-- `/vctop`: View voice channel leaderboard
-- `/transfer-ownership @user`: Transfer ownership of your voice channel
-- `/announce-vc-stats`: Manually trigger weekly announcement (Admin only)
-
-### Other Commands
-- `/ping`: Check bot latency
-- `/plexprice`: Check current PLEX price
-- `/amikool`: Check if you're kool (requires role verification)
-
-## Installation
-
-1. Clone the repository
-2. Copy `.env.example` to `.env` and configure the critical settings
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
-4. Build the project:
-   ```bash
-   npm run build
-   ```
-5. Start the bot:
-   ```bash
-   npm start
-   ```
-
-## Docker Deployment
-
-The recommended way to deploy KoolBot is using Docker Compose, which will set up both the bot and its MongoDB database.
-
-1. Make sure you have Docker and Docker Compose installed
-2. Copy `.env.example` to `.env` and configure your settings
-3. Start the services:
-   ```bash
-   docker-compose up -d
-   ```
-
-To view logs:
-```bash
-docker-compose logs -f
-```
-
-To stop the services:
-```bash
-docker-compose down
-```
-
-To rebuild and restart:
-```bash
-docker-compose up -d --build
-```
-
-### Manual Docker Deployment (Alternative)
-
-If you prefer to run the bot without docker-compose, you can use these commands:
-
-1. Build the image:
-   ```bash
-   docker build -t koolbot .
-   ```
-
-2. Run the container:
-   ```bash
-   docker run -d \
-     --name koolbot \
-     --env-file .env \
-     koolbot
-   ```
-
-## Command Registration
-
-The bot uses guild-specific commands for faster updates and better control. The `GUILD_ID` in your `.env` file is required for command registration.
-
-### One-time Global Commands Cleanup
-
-If you have previously registered global commands, you can clean them up using Docker:
+### Discord Logging Configuration
+The bot can log important events to Discord channels using the `core.*` configuration structure:
 
 ```bash
-docker run --rm \
-  --env-file .env \
-  koolbot \
-  npm run cleanup-global-commands
+# Enable startup/shutdown logging to #bot-status channel
+/config set key:core.startup.enabled value:true
+/config set key:core.startup.channel_id value:123456789
+
+# Enable error logging to #admin-alerts channel  
+/config set key:core.errors.enabled value:true
+/config set key:core.errors.channel_id value:987654321
+
+# Enable cleanup logging to #bot-logs channel
+/config set key:core.cleanup.enabled value:true
+/config set key:core.cleanup.channel_id value:555666777
+
+# Enable configuration change logging
+/config set key:core.config.enabled value:true
+/config set key:core.config.channel_id value:111222333
+
+# Enable cron job logging
+/config set key:core.cron.enabled value:true
+/config set key:core.cron.channel_id value:444555666
 ```
 
-This will remove all global commands, ensuring a clean transition to guild-specific commands.
+**Available Log Types:**
+- **`core.startup.*`** - Bot startup/shutdown, service initialization, Discord registration
+- **`core.errors.*`** - Critical errors and problems that need admin attention
+- **`core.cleanup.*`** - Voice channel cleanup results and status
+- **`core.config.*`** - Configuration reloads and changes
+- **`core.cron.*`** - Scheduled task execution results
 
-### Command Updates
-
-Guild commands update when you:
-1. **Manually reload** using `/config reload` after changing command settings
-2. Restart the bot
-3. Deploy new commands
-
-**Important**: After changing command enable/disable settings, you must run `/config reload` to update Discord. This gives you full control over when commands are updated and prevents unexpected behavior.
-
-### Configuration Migration
-
-**Important**: The bot no longer automatically migrates settings on startup. Instead, it will:
-
-1. **Warn you** if outdated flat settings (like `ENABLE_PING`) are found in the database
-2. **Create missing settings** with default values for new installations
-3. **Require manual migration** using the standalone script
-
-#### Manual Migration
-
-To migrate old settings to the new dot notation format, run:
+### Database Configuration
+All bot settings are stored in MongoDB and can be configured using the `/config` command:
 
 ```bash
-npm run migrate-config
+# List all settings
+/config list
+
+# Get specific setting
+/config get key:ping.enabled
+
+# Set setting value
+/config set key:ping.enabled value:false
+
+# Reset to default
+/config reset key:ping.enabled
+
+# Reload commands after changes
+/config reload
 ```
 
-This script will:
-- Convert old flat keys (e.g., `ENABLE_PING`) to new dot notation (e.g., `ping.enabled`)
-- Preserve all your existing values
-- Clean up old settings after successful migration
+### Configuration Categories
+- **Command Enablement**: Control which commands are available
+- **Voice Channel Settings**: Lobby configuration and channel management
+- **Voice Tracking**: Tracking features and exclusions
+- **Announcements**: Schedule and channel configuration
+- **Quote System**: Cooldowns and role permissions
+- **Data Cleanup**: Retention periods and scheduling
+- **Discord Logging**: Bot event logging to Discord channels
 
-**When to migrate:**
-- After updating from an older version of the bot
-- When you see warnings about outdated settings in the logs
-- Before manually deleting old settings from the database
+## 🔧 Development
 
-## Development
+### Prerequisites
+- Node.js 22+
+- Docker and Docker Compose
+- MongoDB (handled by Docker)
 
-### Tech Stack
-- TypeScript
-- Discord.js
-- MongoDB
-- Winston for logging
-- Cron for scheduling
+### Local Development Setup
+```bash
+# Install dependencies
+npm install
+
+# Build TypeScript
+npm run build
+
+# Start development server
+npm run dev
+
+# Run quality checks
+npm run check
+```
+
+### Available Scripts
+```bash
+npm run build          # TypeScript compilation
+npm run start          # Start production bot
+npm run dev            # Start development server
+npm run lint           # ESLint code quality check
+npm run format         # Prettier code formatting
+npm run check          # Full build, lint, and format check
+```
 
 ### Code Quality
-- ESLint for code linting
-- TypeScript for type safety
-- Proper error handling
-- Comprehensive logging
+- **TypeScript**: Full type safety and modern JavaScript features
+- **ESLint**: Code quality and style enforcement
+- **Prettier**: Consistent code formatting
+- **Error Handling**: Comprehensive error handling and logging
+- **Testing**: Built-in validation and testing scripts
 
-## Backup and Restore
+## 📊 Database Schema
 
-### Backup MongoDB Data Volume
-
-To backup the MongoDB data volume in production, run the following command:
-
-```sh
-docker run --rm -v koolbot_mongodb_data:/data -v $(pwd):/backup alpine tar -czvf /backup/mongodb_backup_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
+### Voice Channel Tracking
+```typescript
+interface IVoiceChannelTracking {
+  userId: string;
+  username: string;
+  totalTime: number; // in seconds
+  lastSeen: Date;
+  sessions: Array<{
+    startTime: Date;
+    endTime?: Date;
+    duration?: number;
+    channelId: string;
+    channelName: string;
+  }>;
+  excludedChannels: string[];
+  lastCleanupDate?: Date;
+  monthlyTotals?: Array<{
+    month: string;
+    totalTime: number;
+    sessionCount: number;
+    channels: string[];
+    averageSessionLength: number;
+  }>;
+  yearlyTotals?: Array<{
+    year: string;
+    totalTime: number;
+    sessionCount: number;
+    channels: string[];
+    averageSessionLength: number;
+  }>;
+}
 ```
 
-This command creates a compressed tar archive of the MongoDB data volume, with a timestamp in the filename.
-
-### Restore MongoDB Data Volume
-
-To restore from a backup in production, run the following command:
-
-```sh
-docker run --rm -v koolbot_mongodb_data:/data -v $(pwd):/backup alpine sh -c "rm -rf /data/* && tar -xzvf /backup/your_backup_file.tar.gz -C /data"
+### Configuration Storage
+```typescript
+interface IConfig {
+  key: string;
+  value: any;
+  category: string;
+  description: string;
+  defaultValue: any;
+  updatedAt: Date;
+}
 ```
 
-Replace `your_backup_file.tar.gz` with the name of your backup file.
+## 🚨 Troubleshooting
 
-### Automate Backups
+### Common Issues
+1. **Bot not responding**: Check Discord permissions and token validity
+2. **Database connection errors**: Verify MongoDB container is running
+3. **Command registration failures**: Ensure bot has proper Discord permissions
+4. **Voice tracking issues**: Check channel permissions and bot voice state
 
-To automate backups in production, you can set up a cron job. For example, to run the backup daily at 2 AM, add the following line to your crontab:
-
-```sh
-0 2 * * * docker run --rm -v koolbot_mongodb_data:/data -v /path/to/backup/dir:/backup alpine tar -czvf /backup/mongodb_backup_$(date +%Y%m%d_%H%M%S).tar.gz -C /data .
+### Debug Mode
+```bash
+# Enable debug logging
+DEBUG=true
 ```
 
-Replace `/path/to/backup/dir` with the directory where you want to store the backups.
+### Logs
+```bash
+# View bot logs
+docker-compose logs -f bot
 
-## License
+# View MongoDB logs
+docker-compose logs -f mongodb
+```
 
-MIT
+### Validation Scripts
+```bash
+# Validate configuration
+docker-compose exec bot npm run validate-config
+
+# Run configuration migration
+docker-compose exec bot npm run migrate-config
+```
+
+## 📚 Documentation
+
+- **[COMMANDS.md](COMMANDS.md)**: Complete command reference
+- **[SETTINGS.md](SETTINGS.md)**: Complete configuration reference
+- **[RELEASE_NOTES.md](RELEASE_NOTES.md)**: Version history and what's new
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**: Common issues and solutions
+- **[.env.example](.env.example)**: Environment variable template
+
+## 🤝 Contributing
+
+### Development Workflow
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run quality checks: `npm run check`
+5. Test with Docker Compose
+6. Submit a pull request
+
+### Code Standards
+- Follow existing TypeScript patterns
+- Add proper error handling
+- Include comprehensive documentation
+- Test your changes thoroughly
+- Follow the established code style
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **Discord.js Team**: Excellent Discord API library
+- **MongoDB Team**: Robust database solution
+- **Docker Team**: Containerization platform
+- **Community Contributors**: Testing and feedback
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/your-repo/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/your-repo/discussions)
+- **Documentation**: Check the docs folder and markdown files
+
+---
+
+**KoolBot v0.5.0** - Making Discord servers more engaging, one feature at a time! 🚀
+
+---
+
+📋 **[RELEASE_NOTES.md](RELEASE_NOTES.md)** - What's new in this version

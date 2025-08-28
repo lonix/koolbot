@@ -16,6 +16,13 @@ export interface ConfigSchema {
   "voicetracking.announcements.channel": string;
   "voicetracking.admin_roles": string; // Comma-separated role names
 
+  // Voice Channel Cleanup
+  "voicetracking.cleanup.enabled": boolean;
+  "voicetracking.cleanup.schedule": string; // Cron schedule for cleanup
+  "voicetracking.cleanup.retention.detailed_sessions_days": number;
+  "voicetracking.cleanup.retention.monthly_summaries_months": number;
+  "voicetracking.cleanup.retention.yearly_summaries_years": number;
+
   // Individual Features
   "ping.enabled": boolean;
   "amikool.enabled": boolean;
@@ -28,6 +35,18 @@ export interface ConfigSchema {
   "quotes.delete_roles": string; // Comma-separated role IDs
   "quotes.max_length": number; // Maximum quote length
   "quotes.cooldown": number; // Cooldown in seconds between quote additions
+
+  // Core Bot Logging (Discord) - Defaults to disabled
+  "core.startup.enabled": boolean;
+  "core.startup.channel_id": string;
+  "core.errors.enabled": boolean;
+  "core.errors.channel_id": string;
+  "core.cleanup.enabled": boolean;
+  "core.cleanup.channel_id": string;
+  "core.config.enabled": boolean;
+  "core.config.channel_id": string;
+  "core.cron.enabled": boolean;
+  "core.cron.channel_id": string;
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -48,6 +67,13 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.announcements.channel": "voice-stats",
   "voicetracking.admin_roles": "",
 
+  // Voice Channel Cleanup
+  "voicetracking.cleanup.enabled": false,
+  "voicetracking.cleanup.schedule": "0 0 * * *", // Every day at midnight
+  "voicetracking.cleanup.retention.detailed_sessions_days": 30,
+  "voicetracking.cleanup.retention.monthly_summaries_months": 6,
+  "voicetracking.cleanup.retention.yearly_summaries_years": 1,
+
   // Individual Features
   "ping.enabled": false,
   "amikool.enabled": false,
@@ -60,4 +86,16 @@ export const defaultConfig: ConfigSchema = {
   "quotes.delete_roles": "", // Empty means only admins can delete
   "quotes.max_length": 1000,
   "quotes.cooldown": 60,
+
+  // Core Bot Logging (Discord) - Defaults to disabled
+  "core.startup.enabled": false,
+  "core.startup.channel_id": "",
+  "core.errors.enabled": false,
+  "core.errors.channel_id": "",
+  "core.cleanup.enabled": false,
+  "core.cleanup.channel_id": "",
+  "core.config.enabled": false,
+  "core.config.channel_id": "",
+  "core.cron.enabled": false,
+  "core.cron.channel_id": "",
 };

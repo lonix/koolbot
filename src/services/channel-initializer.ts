@@ -2,12 +2,12 @@ import {
   Guild,
   ChannelType,
   CategoryChannel,
-  VoiceChannel,
   TextChannel,
   Client,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
+import { VoiceChannelManager } from "./voice-channel-manager.js";
 
 export class ChannelInitializer {
   private static instance: ChannelInitializer;
@@ -52,7 +52,8 @@ export class ChannelInitializer {
       }
 
       const isVoiceChannelManagementEnabled =
-        await this.configService.getBoolean("voice_channel.enabled", false);
+        (await this.configService.getBoolean("voicechannels.enabled", false)) ||
+        (await this.configService.getBoolean("voice_channel.enabled", false));
       if (!isVoiceChannelManagementEnabled) {
         logger.info(
           "Voice channel management is disabled, skipping initialization",
@@ -71,8 +72,9 @@ export class ChannelInitializer {
 
   public async initializeChannels(guild: Guild): Promise<void> {
     try {
-      // Check if voice channel management is enabled using new config keys
+      // Check if voice channel management is enabled using correct config keys
       const isEnabled =
+        (await this.configService.getBoolean("voicechannels.enabled")) ||
         (await this.configService.getBoolean("voice_channel.enabled")) ||
         (await this.configService.getBoolean("ENABLE_VC_MANAGEMENT"));
 
@@ -83,8 +85,9 @@ export class ChannelInitializer {
         return;
       }
 
-      // Try new config keys first, then fall back to old ones
+      // Try correct config keys first, then fall back to old ones
       const categoryName =
+        (await this.configService.getString("voicechannels.category.name")) ||
         (await this.configService.getString("voice_channel.category_name")) ||
         (await this.configService.getString(
           "VC_CATEGORY_NAME",
@@ -92,6 +95,7 @@ export class ChannelInitializer {
         ));
 
       const lobbyChannelName =
+        (await this.configService.getString("voicechannels.lobby.name")) ||
         (await this.configService.getString(
           "voice_channel.lobby_channel_name",
         )) ||
@@ -118,29 +122,15 @@ export class ChannelInitializer {
         logger.info(`Created category: ${categoryName}`);
       }
 
-      // Find or create the lobby channel
-      let lobbyChannel = guild.channels.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          channel.name === lobbyChannelName &&
-          channel.parentId === category.id,
-      );
-
-      if (!lobbyChannel) {
-        logger.info(`Creating lobby channel: ${lobbyChannelName}`);
-        lobbyChannel = await guild.channels.create({
-          name: lobbyChannelName,
-          type: ChannelType.GuildVoice,
-          parent: category,
-          position: 0,
-        });
-        logger.info(`Created lobby channel: ${lobbyChannelName}`);
-      } else {
-        logger.info(`Found existing lobby channel: ${lobbyChannelName}`);
-      }
+      // Use the voice channel manager to ensure lobby channels exist
+      const voiceChannelManager = VoiceChannelManager.getInstance(this.client);
+      await voiceChannelManager.ensureLobbyChannelExists(guild);
 
       // Find or create the announcement channel
       const announcementChannelName =
+        (await this.configService.getString(
+          "voicetracking.announcements.channel",
+        )) ||
         (await this.configService.getString(
           "tracking.weekly_announcement_channel",
         )) ||

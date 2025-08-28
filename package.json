@@ -1,6 +1,6 @@
 {
   "name": "koolbot",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "A Discord bot with various features including PLEX price checking and role-based commands",
   "main": "dist/index.js",
@@ -9,7 +9,6 @@
     "start": "node dist/index.js",
     "dev": "node --loader ./src/loader.mjs src/index.ts",
     "watch": "tsc --watch",
-    "deploy-commands": "node --import ./src/loader.js src/deploy-commands.ts",
     "unregister-guild-commands": "node --import ./src/loader.js src/unregister-guild-commands.ts",
     "cleanup-global-commands": "node --import ./src/loader.js src/scripts/cleanup-global-commands.ts",
     "migrate-config": "node --import ./src/loader.js src/scripts/migrate-config.ts",
@@ -34,6 +33,7 @@
   },
   "devDependencies": {
     "@types/dotenv": "^8.2.3",
+    "@types/js-yaml": "^4.0.9",
     "@types/mongoose": "^5.11.96",
     "@types/node": "^24.3.0",
     "@typescript-eslint/eslint-plugin": "^8.40.0",

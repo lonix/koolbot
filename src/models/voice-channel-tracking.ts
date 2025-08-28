@@ -13,6 +13,22 @@ export interface IVoiceChannelTracking extends Document {
     channelName: string;
   }>;
   excludedChannels: string[]; // Array of voice channel IDs to exclude from tracking
+  // Cleanup-related fields for future use
+  lastCleanupDate?: Date;
+  monthlyTotals?: Array<{
+    month: string; // YYYY-MM format
+    totalTime: number;
+    sessionCount: number;
+    channels: string[];
+    averageSessionLength: number;
+  }>;
+  yearlyTotals?: Array<{
+    year: string; // YYYY format
+    totalTime: number;
+    sessionCount: number;
+    channels: string[];
+    averageSessionLength: number;
+  }>;
 }
 
 const VoiceChannelTrackingSchema = new Schema({
@@ -30,6 +46,26 @@ const VoiceChannelTrackingSchema = new Schema({
     },
   ],
   excludedChannels: { type: [String], default: [] },
+  // Cleanup-related fields
+  lastCleanupDate: { type: Date },
+  monthlyTotals: [
+    {
+      month: { type: String, required: true },
+      totalTime: { type: Number, required: true },
+      sessionCount: { type: Number, required: true },
+      channels: [{ type: String }],
+      averageSessionLength: { type: Number, required: true },
+    },
+  ],
+  yearlyTotals: [
+    {
+      year: { type: String, required: true },
+      totalTime: { type: Number, required: true },
+      sessionCount: { type: Number, required: true },
+      channels: [{ type: String }],
+      averageSessionLength: { type: Number, required: true },
+    },
+  ],
 });
 
 export const VoiceChannelTracking = mongoose.model<IVoiceChannelTracking>(

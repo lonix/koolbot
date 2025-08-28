@@ -2,12 +2,18 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   EmbedBuilder,
+  AttachmentBuilder,
   PermissionFlagsBits,
-  ChannelType,
 } from "discord.js";
+import { Buffer } from "buffer";
 import { ConfigService } from "../../services/config-service.js";
 import { defaultConfig } from "../../services/config-schema.js";
+import * as yaml from "js-yaml";
 import logger from "../../utils/logger.js";
+import { BotStatusService } from "../../services/bot-status-service.js";
+
+// Use built-in fetch or undici for Node.js compatibility
+import { fetch } from "undici";
 
 const configService = ConfigService.getInstance();
 
@@ -95,6 +101,8 @@ function getCategoryDisplayName(category: string): string {
     amikool: "Amikool",
     plexprice: "PLEX Price",
     quotes: "Quotes",
+    core: "Core",
+    individual: "Individual Features",
   };
   return displayNames[category] || category;
 }
@@ -152,6 +160,18 @@ function getSettingDescription(key: string): string {
     "voicetracking.admin_roles":
       "Comma-separated role names that can manage tracking",
 
+    // Voice Channel Cleanup
+    "voicetracking.cleanup.enabled":
+      "Enable/disable automated voice channel data cleanup",
+    "voicetracking.cleanup.schedule":
+      "Cron schedule for automated cleanup (e.g., '0 0 * * *' for daily at midnight)",
+    "voicetracking.cleanup.retention.detailed_sessions_days":
+      "Number of days to keep detailed session data",
+    "voicetracking.cleanup.retention.monthly_summaries_months":
+      "Number of months to keep monthly summary data",
+    "voicetracking.cleanup.retention.yearly_summaries_years":
+      "Number of years to keep yearly summary data",
+
     // Individual Features
     "ping.enabled": "Enable/disable ping command",
     "amikool.enabled": "Enable/disable amikool command",
@@ -164,6 +184,23 @@ function getSettingDescription(key: string): string {
     "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",
     "quotes.max_length": "Maximum quote length",
     "quotes.cooldown": "Cooldown in seconds between quote additions",
+
+    // Core Bot Logging (Discord)
+    "core.startup.enabled":
+      "Enable/disable Discord logging for bot startup/shutdown events",
+    "core.startup.channel_id":
+      "Discord channel ID for startup/shutdown logging",
+    "core.errors.enabled": "Enable/disable Discord logging for critical errors",
+    "core.errors.channel_id": "Discord channel ID for error logging",
+    "core.cleanup.enabled":
+      "Enable/disable Discord logging for database cleanup results",
+    "core.cleanup.channel_id": "Discord channel ID for cleanup logging",
+    "core.config.enabled":
+      "Enable/disable Discord logging for configuration changes",
+    "core.config.channel_id": "Discord channel ID for config change logging",
+    "core.cron.enabled":
+      "Enable/disable Discord logging for scheduled task results",
+    "core.cron.channel_id": "Discord channel ID for cron job logging",
   };
 
   return descriptions[key] || "No description available";
@@ -180,27 +217,15 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("category")
-          .setDescription("Filter by category")
+          .setDescription("Show settings for specific category only")
           .setRequired(false)
           .addChoices(
             { name: "Voice Channels", value: "voicechannels" },
             { name: "Voice Tracking", value: "voicetracking" },
-            { name: "Ping", value: "ping" },
-            { name: "Amikool", value: "amikool" },
-            { name: "PLEX Price", value: "plexprice" },
-            { name: "Quotes", value: "quotes" },
+            { name: "Core", value: "core" },
+            { name: "Individual Features", value: "individual" },
+            { name: "Quote System", value: "quotes" },
           ),
-      ),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("get")
-      .setDescription("Get a specific configuration value")
-      .addStringOption((option) =>
-        option
-          .setName("key")
-          .setDescription("Configuration key")
-          .setRequired(true),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -210,14 +235,44 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("key")
-          .setDescription("Configuration key")
+          .setDescription("Configuration key (e.g., voicechannels.enabled)")
           .setRequired(true),
       )
       .addStringOption((option) =>
         option
           .setName("value")
-          .setDescription("New value (use @mentions for roles/channels)")
+          .setDescription("Configuration value")
           .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("import")
+      .setDescription("Import configuration from YAML file")
+      .addAttachmentOption((option) =>
+        option
+          .setName("file")
+          .setDescription("YAML configuration file")
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("export")
+      .setDescription("Export current configuration to YAML file")
+      .addStringOption((option) =>
+        option
+          .setName("category")
+          .setDescription("Export specific category only")
+          .setRequired(false)
+          .addChoices(
+            { name: "All Categories", value: "all" },
+            { name: "Voice Channels", value: "voicechannels" },
+            { name: "Voice Tracking", value: "voicetracking" },
+            { name: "Core", value: "core" },
+            { name: "Individual Features", value: "individual" },
+            { name: "Quote System", value: "quotes" },
+          ),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -328,155 +383,108 @@ async function handleList(
   }
 }
 
-async function handleGet(
-  interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  try {
-    const key = interaction.options.getString("key", true);
-    const value = await configService.get(key);
-
-    const formattedValue = isRoleOrChannelSetting(key)
-      ? await formatAsMentions(String(value), interaction)
-      : String(value);
-
-    const embed = new EmbedBuilder()
-      .setTitle(`Configuration: ${key}`)
-      .setColor(0x0099ff)
-      .addFields({ name: "Value", value: formattedValue })
-      .setTimestamp();
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
-  } catch (error) {
-    logger.error("Error getting configuration:", error);
-    await interaction.reply({
-      content: "An error occurred while getting the configuration value.",
-      ephemeral: true,
-    });
-  }
-}
-
 async function handleSet(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
     const key = interaction.options.getString("key", true);
-    const rawValue = interaction.options.getString("value", true);
+    const value = interaction.options.getString("value", true);
 
-    // Check if the key exists in our schema
-    const allSettings = getAllSettingsFromSchema();
-    const settingInfo = allSettings.find((s) => s.key === key);
-
-    if (!settingInfo) {
+    // Validate the key exists in our schema
+    if (!(key in defaultConfig)) {
       await interaction.reply({
-        content: `Configuration key '${key}' not found in the schema.`,
+        content: `❌ Unknown configuration key: \`${key}\``,
         ephemeral: true,
       });
       return;
     }
 
-    // Convert the raw value to the expected type based on the schema
-    let value: string | number | boolean = rawValue;
+    // Special handling for channel ID settings
+    if (key.includes("channel_id")) {
+      let channelId = value;
 
-    // Convert boolean strings to actual booleans
-    if (typeof settingInfo.value === "boolean") {
-      if (rawValue.toLowerCase() === "true") {
-        value = true;
-      } else if (rawValue.toLowerCase() === "false") {
-        value = false;
-      } else {
-        await interaction.reply({
-          content: `Invalid value for boolean setting '${key}'. Use 'true' or 'false'.`,
-          ephemeral: true,
-        });
-        return;
-      }
-    }
-
-    // Convert number strings to actual numbers
-    else if (typeof settingInfo.value === "number") {
-      const numValue = Number(rawValue);
-      if (isNaN(numValue)) {
-        await interaction.reply({
-          content: `Invalid value for number setting '${key}'. Use a valid number.`,
-          ephemeral: true,
-        });
-        return;
-      }
-      value = numValue;
-    }
-
-    // Extract IDs from mentions if it's a role or channel setting
-    if (isRoleOrChannelSetting(key)) {
-      value = extractIds(rawValue);
-    }
-
-    // Validate roles and channels if applicable
-    if (isRoleOrChannelSetting(key) && typeof value === "string") {
-      const ids = value.split(",").filter(Boolean);
-      const invalidIds: string[] = [];
-
-      for (const id of ids) {
-        const role = interaction.guild?.roles.cache.get(id);
-        const channel = interaction.guild?.channels.cache.get(id);
-
-        if (!role && !channel) {
-          invalidIds.push(id);
-        }
-      }
-
-      if (invalidIds.length > 0) {
-        await interaction.reply({
-          content: `Invalid role or channel IDs found: ${invalidIds.join(", ")}. Please make sure all roles and channels exist in this server.`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // Additional validation for specific settings
-      if (key.includes("channel") && typeof value === "string") {
-        const channel = interaction.guild?.channels.cache.get(ids[0]);
+      // If it's a channel mention, extract the ID
+      const channelMatch = value.match(/<#(\d+)>/);
+      if (channelMatch) {
+        channelId = channelMatch[1];
+      } else if (value.startsWith("#")) {
+        // If it's a channel name with #, try to find the channel
+        const channelName = value.substring(1);
+        const channel = interaction.guild?.channels.cache.find(
+          (ch) => ch.name === channelName && ch.type === 0, // TextChannel type
+        );
         if (channel) {
-          // Validate channel type for specific settings
-          if (
-            key.includes("voice") &&
-            channel.type !== ChannelType.GuildVoice
-          ) {
-            await interaction.reply({
-              content: "This setting requires a voice channel.",
-              ephemeral: true,
-            });
-            return;
-          }
-          if (key.includes("text") && channel.type !== ChannelType.GuildText) {
-            await interaction.reply({
-              content: "This setting requires a text channel.",
-              ephemeral: true,
-            });
-            return;
-          }
+          channelId = channel.id;
+        } else {
+          await interaction.reply({
+            content: `❌ Channel \`${channelName}\` not found. Please use a channel mention (#channel-name) or the actual channel ID.`,
+            ephemeral: true,
+          });
+          return;
         }
+      } else if (!/^\d+$/.test(value)) {
+        // If it's not a numeric ID, provide guidance
+        await interaction.reply({
+          content: `❌ Invalid channel ID format. Please use:\n• Channel mention: #channel-name\n• Channel ID: 123456789012345678\n• Or right-click the channel and "Copy ID"`,
+          ephemeral: true,
+        });
+        return;
       }
+
+      // Validate the channel exists
+      const channel = interaction.guild?.channels.cache.get(channelId);
+      if (!channel || channel.type !== 0) {
+        await interaction.reply({
+          content: `❌ Channel with ID \`${channelId}\` not found or is not a text channel.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Store the numeric channel ID
+      await configService.set(
+        key,
+        channelId,
+        getSettingDescription(key),
+        key.split(".")[0],
+      );
+
+      const embed = new EmbedBuilder()
+        .setTitle("Configuration Updated")
+        .setColor(0x00ff00)
+        .addFields(
+          { name: "Key", value: key, inline: true },
+          {
+            name: "Value",
+            value: `${channel.toString()} (ID: ${channelId})`,
+            inline: true,
+          },
+        )
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+      return;
     }
 
-    // Use the setting info from the schema instead of looking in the database
+    // For non-channel settings, use the original logic
+    const extractedValue = extractIds(value);
     await configService.set(
       key,
-      value,
-      settingInfo.description,
-      settingInfo.category,
+      extractedValue,
+      getSettingDescription(key),
+      key.split(".")[0],
     );
-
-    const formattedValue =
-      isRoleOrChannelSetting(key) && typeof value === "string"
-        ? await formatAsMentions(value, interaction)
-        : String(value);
 
     const embed = new EmbedBuilder()
       .setTitle("Configuration Updated")
       .setColor(0x00ff00)
       .addFields(
-        { name: "Key", value: key },
-        { name: "New Value", value: formattedValue },
+        { name: "Key", value: key, inline: true },
+        {
+          name: "Value",
+          value: await formatAsMentions(extractedValue, interaction),
+          inline: true,
+        },
       )
       .setTimestamp();
 
@@ -485,6 +493,189 @@ async function handleSet(
     logger.error("Error setting configuration:", error);
     await interaction.reply({
       content: "An error occurred while setting the configuration value.",
+      ephemeral: true,
+    });
+  }
+}
+
+async function handleImport(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    const file = interaction.options.getAttachment("file", true);
+
+    // Check if it's a YAML file
+    if (!file.name?.endsWith(".yml") && !file.name?.endsWith(".yaml")) {
+      await interaction.reply({
+        content: "❌ Please upload a YAML file (.yml or .yaml extension).",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Fetch the file content from Discord's CDN
+    const response = await fetch(file.url);
+    if (!response.ok) {
+      await interaction.reply({
+        content: "❌ Failed to download the uploaded file.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const fileContent = await response.text();
+    let importedConfig: Record<string, any>;
+
+    try {
+      importedConfig = yaml.load(fileContent) as Record<string, any>;
+    } catch (error) {
+      logger.error("Error parsing YAML file:", error);
+      await interaction.reply({
+        content:
+          "❌ Failed to parse YAML file. Please ensure it's a valid YAML file.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (!importedConfig || typeof importedConfig !== "object") {
+      await interaction.reply({
+        content: "❌ Invalid configuration format. Expected a YAML object.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Validate and apply each setting
+    const results: { key: string; success: boolean; message: string }[] = [];
+
+    for (const [key, value] of Object.entries(importedConfig)) {
+      try {
+        // Check if the key exists in our schema
+        if (key in defaultConfig) {
+          // Validate the value type matches the schema
+          const expectedType =
+            typeof defaultConfig[key as keyof typeof defaultConfig];
+          if (typeof value === expectedType) {
+            // Get description and category from schema
+            const description = getSettingDescription(key);
+            const category = key.split(".")[0];
+            await configService.set(key, value, description, category);
+            results.push({ key, success: true, message: "✅ Updated" });
+          } else {
+            results.push({
+              key,
+              success: false,
+              message: `❌ Type mismatch: expected ${expectedType}, got ${typeof value}`,
+            });
+          }
+        } else {
+          results.push({ key, success: false, message: "❌ Unknown setting" });
+        }
+      } catch (error) {
+        results.push({
+          key,
+          success: false,
+          message: `❌ Error: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    // Create results embed
+    const embed = new EmbedBuilder()
+      .setTitle("Configuration Import Results")
+      .setColor(0x0099ff)
+      .setDescription(`Processed ${results.length} configuration settings`)
+      .setTimestamp();
+
+    // Group results by success/failure
+    const successful = results.filter((r) => r.success);
+    const failed = results.filter((r) => !r.success);
+
+    if (successful.length > 0) {
+      embed.addFields({
+        name: `✅ Successfully Updated (${successful.length})`,
+        value: successful.map((r) => `\`${r.key}\``).join("\n") || "None",
+        inline: true,
+      });
+    }
+
+    if (failed.length > 0) {
+      embed.addFields({
+        name: `❌ Failed to Update (${failed.length})`,
+        value:
+          failed.map((r) => `\`${r.key}\`: ${r.message}`).join("\n") || "None",
+        inline: true,
+      });
+    }
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+  } catch (error) {
+    logger.error("Error importing configuration:", error);
+    await interaction.reply({
+      content: "An error occurred while importing the configuration.",
+      ephemeral: true,
+    });
+  }
+}
+
+async function handleExport(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    const category = interaction.options.getString("category") || "all";
+
+    // Get current configuration
+    const currentConfig = await configService.getAll();
+    logger.debug(`Retrieved ${currentConfig.length} configuration items`);
+    const configMap = new Map(currentConfig.map((c) => [c.key, c.value]));
+
+    // Get all settings from schema
+    let allSettings = getAllSettingsFromSchema();
+
+    // Filter by category if specified
+    if (category !== "all") {
+      allSettings = allSettings.filter(
+        (setting) => setting.category === category,
+      );
+    }
+
+    // Build export object with current values or defaults
+    const exportConfig: Record<string, any> = {};
+
+    for (const setting of allSettings) {
+      if (configMap.has(setting.key)) {
+        // Use current value
+        exportConfig[setting.key] = configMap.get(setting.key);
+      } else {
+        // Use default value
+        exportConfig[setting.key] = setting.value;
+      }
+    }
+
+    // Convert to YAML
+    const yamlContent = yaml.dump(exportConfig);
+    logger.debug(`YAML export successful, length: ${yamlContent.length}`);
+
+    // Create an AttachmentBuilder for the YAML content
+    const attachment = new AttachmentBuilder(Buffer.from(yamlContent), {
+      name: `config_${category === "all" ? "all" : getCategoryDisplayName(category).toLowerCase().replace(/\s+/g, "_")}.yaml`,
+    });
+
+    // Send the attachment
+    await interaction.reply({
+      files: [attachment],
+      ephemeral: true,
+    });
+
+    logger.debug("Export response sent successfully");
+  } catch (error) {
+    logger.error("Error exporting configuration:", error);
+
+    // Provide more specific error information
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await interaction.reply({
+      content: `❌ Error exporting configuration: ${errorMessage}`,
       ephemeral: true,
     });
   }
@@ -522,6 +713,10 @@ async function handleReload(
       ephemeral: true,
     });
 
+    // Set bot to config reload status (yellow)
+    const botStatusService = BotStatusService.getInstance(interaction.client);
+    botStatusService.setConfigReloadStatus();
+
     // Get the command manager instance and force a reload
     const { CommandManager } = await import(
       "../../services/command-manager.js"
@@ -534,6 +729,9 @@ async function handleReload(
     // Update client-side command handling
     await commandManager.populateClientCommands();
 
+    // Set bot back to operational status (green)
+    botStatusService.setOperationalStatus();
+
     const embed = new EmbedBuilder()
       .setTitle("Commands Reloaded")
       .setColor(0x00ff00)
@@ -545,6 +743,18 @@ async function handleReload(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error reloading commands:", error);
+
+    // Ensure bot status is restored even on error
+    try {
+      const botStatusService = BotStatusService.getInstance(interaction.client);
+      botStatusService.setOperationalStatus();
+    } catch (statusError) {
+      logger.error(
+        "Error restoring bot status after reload error:",
+        statusError,
+      );
+    }
+
     await interaction.editReply({
       content: "An error occurred while reloading commands.",
     });
@@ -560,11 +770,14 @@ export async function execute(
     case "list":
       await handleList(interaction);
       break;
-    case "get":
-      await handleGet(interaction);
-      break;
     case "set":
       await handleSet(interaction);
+      break;
+    case "import":
+      await handleImport(interaction);
+      break;
+    case "export":
+      await handleExport(interaction);
       break;
     case "reset":
       await handleReset(interaction);
