@@ -1,6 +1,6 @@
 {
   "name": "koolbot",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "description": "A Discord bot with various features including PLEX price checking and role-based commands",
   "main": "dist/index.js",
