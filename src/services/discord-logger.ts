@@ -25,6 +25,7 @@ export class DiscordLogger {
   private client: Client;
   private configService: ConfigService;
   private logChannels: Map<string, ILogChannel> = new Map();
+  private isInitialized: boolean = false;
 
   private constructor(client: Client) {
     this.client = client;
@@ -39,6 +40,13 @@ export class DiscordLogger {
   }
 
   /**
+   * Check if the logger is fully initialized and ready
+   */
+  public isReady(): boolean {
+    return this.isInitialized && this.logChannels.size > 0;
+  }
+
+  /**
    * Initialize the Discord logger by loading channel configurations
    */
   public async initialize(): Promise<void> {
@@ -48,6 +56,7 @@ export class DiscordLogger {
       // Load all core.* channel configurations
       await this.loadLogChannels();
 
+      this.isInitialized = true;
       logger.info("Discord logger initialized successfully");
     } catch (error) {
       logger.error("Error initializing Discord logger:", error);
@@ -96,26 +105,41 @@ export class DiscordLogger {
     message: ILogMessage,
   ): Promise<void> {
     try {
+      // Check if logger is ready
+      if (!this.isReady()) {
+        logger.debug(`Discord logger: Logger not ready, skipping message to ${logType}`);
+        return;
+      }
+
+      logger.debug(`Discord logger: Attempting to log to channel: ${logType}`);
+
       const channelConfig = this.logChannels.get(logType);
+      logger.debug(`Discord logger: Channel config for ${logType}:`, channelConfig);
 
       if (
         !channelConfig ||
         !channelConfig.enabled ||
         !channelConfig.channelId
       ) {
-        logger.debug(`Log channel ${logType} not configured or disabled`);
+        logger.debug(`Discord logger: Log channel ${logType} not configured or disabled`);
         return;
       }
+
+      logger.debug(`Discord logger: Looking for channel with ID: ${channelConfig.channelId}`);
 
       const channel = this.client.channels.cache.get(
         channelConfig.channelId,
       ) as TextChannel;
+
       if (!channel) {
         logger.warn(
-          `Log channel ${logType} not found: ${channelConfig.channelId}`,
+          `Discord logger: Log channel ${logType} not found: ${channelConfig.channelId}`,
         );
+        logger.debug(`Discord logger: Available channels:`, Array.from(this.client.channels.cache.keys()));
         return;
       }
+
+      logger.debug(`Discord logger: Found channel: ${channel.name} (${channel.id})`);
 
       const embed = new EmbedBuilder()
         .setTitle(message.title)
@@ -132,9 +156,9 @@ export class DiscordLogger {
       }
 
       await channel.send({ embeds: [embed] });
-      logger.debug(`Log message sent to ${logType}: ${message.title}`);
+      logger.info(`Discord logger: Log message sent to ${logType}: ${message.title}`);
     } catch (error) {
-      logger.error(`Error sending log message to ${logType}:`, error);
+      logger.error(`Discord logger: Error sending log message to ${logType}:`, error);
     }
   }
 

@@ -3,7 +3,6 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   PermissionFlagsBits,
-  ChannelType,
 } from "discord.js";
 import { ConfigService } from "../../services/config-service.js";
 import { defaultConfig } from "../../services/config-schema.js";
@@ -423,123 +422,103 @@ async function handleSet(
 ): Promise<void> {
   try {
     const key = interaction.options.getString("key", true);
-    const rawValue = interaction.options.getString("value", true);
+    const value = interaction.options.getString("value", true);
 
-    // Check if the key exists in our schema
-    const allSettings = getAllSettingsFromSchema();
-    const settingInfo = allSettings.find((s) => s.key === key);
-
-    if (!settingInfo) {
+    // Validate the key exists in our schema
+    if (!(key in defaultConfig)) {
       await interaction.reply({
-        content: `Configuration key '${key}' not found in the schema.`,
+        content: `❌ Unknown configuration key: \`${key}\``,
         ephemeral: true,
       });
       return;
     }
 
-    // Convert the raw value to the expected type based on the schema
-    let value: string | number | boolean = rawValue;
+    // Special handling for channel ID settings
+    if (key.includes("channel_id")) {
+      let channelId = value;
 
-    // Convert boolean strings to actual booleans
-    if (typeof settingInfo.value === "boolean") {
-      if (rawValue.toLowerCase() === "true") {
-        value = true;
-      } else if (rawValue.toLowerCase() === "false") {
-        value = false;
-      } else {
-        await interaction.reply({
-          content: `Invalid value for boolean setting '${key}'. Use 'true' or 'false'.`,
-          ephemeral: true,
-        });
-        return;
-      }
-    }
-
-    // Convert number strings to actual numbers
-    else if (typeof settingInfo.value === "number") {
-      const numValue = Number(rawValue);
-      if (isNaN(numValue)) {
-        await interaction.reply({
-          content: `Invalid value for number setting '${key}'. Use a valid number.`,
-          ephemeral: true,
-        });
-        return;
-      }
-      value = numValue;
-    }
-
-    // Extract IDs from mentions if it's a role or channel setting
-    if (isRoleOrChannelSetting(key)) {
-      value = extractIds(rawValue);
-    }
-
-    // Validate roles and channels if applicable
-    if (isRoleOrChannelSetting(key) && typeof value === "string") {
-      const ids = value.split(",").filter(Boolean);
-      const invalidIds: string[] = [];
-
-      for (const id of ids) {
-        const role = interaction.guild?.roles.cache.get(id);
-        const channel = interaction.guild?.channels.cache.get(id);
-
-        if (!role && !channel) {
-          invalidIds.push(id);
-        }
-      }
-
-      if (invalidIds.length > 0) {
-        await interaction.reply({
-          content: `Invalid role or channel IDs found: ${invalidIds.join(", ")}. Please make sure all roles and channels exist in this server.`,
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // Additional validation for specific settings
-      if (key.includes("channel") && typeof value === "string") {
-        const channel = interaction.guild?.channels.cache.get(ids[0]);
+      // If it's a channel mention, extract the ID
+      const channelMatch = value.match(/<#(\d+)>/);
+      if (channelMatch) {
+        channelId = channelMatch[1];
+      } else if (value.startsWith("#")) {
+        // If it's a channel name with #, try to find the channel
+        const channelName = value.substring(1);
+        const channel = interaction.guild?.channels.cache.find(
+          (ch) => ch.name === channelName && ch.type === 0, // TextChannel type
+        );
         if (channel) {
-          // Validate channel type for specific settings
-          if (
-            key.includes("voice") &&
-            channel.type !== ChannelType.GuildVoice
-          ) {
-            await interaction.reply({
-              content: "This setting requires a voice channel.",
-              ephemeral: true,
-            });
-            return;
-          }
-          if (key.includes("text") && channel.type !== ChannelType.GuildText) {
-            await interaction.reply({
-              content: "This setting requires a text channel.",
-              ephemeral: true,
-            });
-            return;
-          }
+          channelId = channel.id;
+        } else {
+          await interaction.reply({
+            content: `❌ Channel \`${channelName}\` not found. Please use a channel mention (#channel-name) or the actual channel ID.`,
+            ephemeral: true,
+          });
+          return;
         }
+      } else if (!/^\d+$/.test(value)) {
+        // If it's not a numeric ID, provide guidance
+        await interaction.reply({
+          content: `❌ Invalid channel ID format. Please use:\n• Channel mention: #channel-name\n• Channel ID: 123456789012345678\n• Or right-click the channel and "Copy ID"`,
+          ephemeral: true,
+        });
+        return;
       }
+
+      // Validate the channel exists
+      const channel = interaction.guild?.channels.cache.get(channelId);
+      if (!channel || channel.type !== 0) {
+        await interaction.reply({
+          content: `❌ Channel with ID \`${channelId}\` not found or is not a text channel.`,
+          ephemeral: true,
+        });
+        return;
+      }
+
+      // Store the numeric channel ID
+      await configService.set(
+        key,
+        channelId,
+        getSettingDescription(key),
+        key.split(".")[0],
+      );
+
+      const embed = new EmbedBuilder()
+        .setTitle("Configuration Updated")
+        .setColor(0x00ff00)
+        .addFields(
+          { name: "Key", value: key, inline: true },
+          {
+            name: "Value",
+            value: `${channel.toString()} (ID: ${channelId})`,
+            inline: true,
+          },
+        )
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+      return;
     }
 
-    // Use the setting info from the schema instead of looking in the database
+    // For non-channel settings, use the original logic
+    const extractedValue = extractIds(value);
     await configService.set(
       key,
-      value,
-      settingInfo.description,
-      settingInfo.category,
+      extractedValue,
+      getSettingDescription(key),
+      key.split(".")[0],
     );
-
-    const formattedValue =
-      isRoleOrChannelSetting(key) && typeof value === "string"
-        ? await formatAsMentions(value, interaction)
-        : String(value);
 
     const embed = new EmbedBuilder()
       .setTitle("Configuration Updated")
       .setColor(0x00ff00)
       .addFields(
-        { name: "Key", value: key },
-        { name: "New Value", value: formattedValue },
+        { name: "Key", value: key, inline: true },
+        {
+          name: "Value",
+          value: await formatAsMentions(extractedValue, interaction),
+          inline: true,
+        },
       )
       .setTimestamp();
 
@@ -723,6 +702,7 @@ async function handleExport(
 
     // Get current configuration
     const currentConfig = await configService.getAll();
+    logger.debug(`Retrieved ${currentConfig.length} configuration items`);
     const configMap = new Map(currentConfig.map((c) => [c.key, c.value]));
 
     // Get all settings from schema
@@ -751,6 +731,28 @@ async function handleExport(
     // Convert to YAML
     const yaml = await import("js-yaml");
     const yamlContent = yaml.dump(exportConfig);
+    logger.debug(`YAML export successful, length: ${yamlContent.length}`);
+
+    // Check if YAML content is too long for Discord
+    if (yamlContent.length > 4000) {
+      logger.warn(
+        `YAML content too long (${yamlContent.length} chars), sending summary instead`,
+      );
+      const embed = new EmbedBuilder()
+        .setTitle("Configuration Export")
+        .setColor(0x00ff00)
+        .setDescription(
+          `Exported ${Object.keys(exportConfig).length} settings${category !== "all" ? ` from ${getCategoryDisplayName(category)}` : ""}`,
+        )
+        .addFields({
+          name: "⚠️ Content Too Long",
+          value: `The exported configuration is ${yamlContent.length} characters long, which exceeds Discord's limit. Consider exporting by category instead.`,
+        })
+        .setTimestamp();
+
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+      return;
+    }
 
     // Create export embed
     const embed = new EmbedBuilder()
@@ -765,11 +767,30 @@ async function handleExport(
       })
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    try {
+      await interaction.reply({ embeds: [embed], ephemeral: true });
+      logger.debug("Export response sent successfully");
+    } catch (replyError) {
+      logger.error("Error sending export response:", replyError);
+
+      // Try to send a simpler response if the embed fails
+      try {
+        await interaction.reply({
+          content: `✅ Configuration exported successfully!\n\n**${Object.keys(exportConfig).length} settings** exported${category !== "all" ? ` from ${getCategoryDisplayName(category)}` : ""}.\n\nUse \`/config export\` to see the full YAML content.`,
+          ephemeral: true,
+        });
+      } catch (fallbackError) {
+        logger.error("Fallback response also failed:", fallbackError);
+        // At this point, we can't send any response, but the command technically succeeded
+      }
+    }
   } catch (error) {
     logger.error("Error exporting configuration:", error);
+
+    // Provide more specific error information
+    const errorMessage = error instanceof Error ? error.message : String(error);
     await interaction.reply({
-      content: "An error occurred while exporting the configuration.",
+      content: `❌ Error exporting configuration: ${errorMessage}`,
       ephemeral: true,
     });
   }
