@@ -177,8 +177,6 @@ export class VoiceChannelTruncationService {
       }
 
       const stats = await this.performCleanup();
-      stats.executionTime = Date.now() - startTime;
-      stats.timestamp = new Date();
 
       // Update last cleanup date
       this.lastCleanupDate = new Date();
@@ -219,9 +217,8 @@ export class VoiceChannelTruncationService {
   /**
    * Perform the actual cleanup operations
    */
-  private async performCleanup(): Promise<
-    Omit<ICleanupStats, "executionTime" | "timestamp">
-  > {
+  private async performCleanup(): Promise<ICleanupStats> {
+    const startTime = Date.now();
     let sessionsRemoved = 0;
     let dataAggregated = 0;
     const errors: string[] = [];
@@ -289,6 +286,8 @@ export class VoiceChannelTruncationService {
       sessionsRemoved,
       dataAggregated,
       errors,
+      executionTime: Date.now() - startTime,
+      timestamp: new Date(),
     };
   }
 

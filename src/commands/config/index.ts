@@ -268,6 +268,38 @@ export const data = new SlashCommandBuilder()
       .setDescription(
         "Reload all commands to Discord API (use after changing command settings)",
       ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("import")
+      .setDescription("Import configuration from YAML")
+      .addStringOption((option) =>
+        option
+          .setName("yaml")
+          .setDescription("YAML configuration content")
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("export")
+      .setDescription("Export current configuration to YAML")
+      .addStringOption((option) =>
+        option
+          .setName("category")
+          .setDescription("Export specific category only")
+          .setRequired(false)
+          .addChoices(
+            { name: "All Categories", value: "all" },
+            { name: "Voice Channels", value: "voicechannels" },
+            { name: "Voice Tracking", value: "voicetracking" },
+            { name: "Ping", value: "ping" },
+            { name: "Amikool", value: "amikool" },
+            { name: "PLEX Price", value: "plexprice" },
+            { name: "Quotes", value: "quotes" },
+            { name: "Core", value: "core" },
+          ),
+      ),
   );
 
 async function handleList(
@@ -582,6 +614,167 @@ async function handleReload(
   }
 }
 
+async function handleImport(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    const yamlContent = interaction.options.getString("yaml", true);
+
+    // Parse YAML content
+    const yaml = await import("js-yaml");
+    let importedConfig: Record<string, any>;
+
+    try {
+      importedConfig = yaml.load(yamlContent) as Record<string, any>;
+    } catch {
+      await interaction.reply({
+        content: "❌ Invalid YAML format. Please check your syntax.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (!importedConfig || typeof importedConfig !== "object") {
+      await interaction.reply({
+        content: "❌ Invalid configuration format. Expected a YAML object.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Validate and apply each setting
+    const results: { key: string; success: boolean; message: string }[] = [];
+
+    for (const [key, value] of Object.entries(importedConfig)) {
+      try {
+        // Check if the key exists in our schema
+        if (key in defaultConfig) {
+          // Validate the value type matches the schema
+          const expectedType =
+            typeof defaultConfig[key as keyof typeof defaultConfig];
+          if (typeof value === expectedType) {
+            // Get description and category from schema
+            const description = getSettingDescription(key);
+            const category = key.split(".")[0];
+            await configService.set(key, value, description, category);
+            results.push({ key, success: true, message: "✅ Updated" });
+          } else {
+            results.push({
+              key,
+              success: false,
+              message: `❌ Type mismatch: expected ${expectedType}, got ${typeof value}`,
+            });
+          }
+        } else {
+          results.push({ key, success: false, message: "❌ Unknown setting" });
+        }
+      } catch (error) {
+        results.push({
+          key,
+          success: false,
+          message: `❌ Error: ${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }
+
+    // Create results embed
+    const embed = new EmbedBuilder()
+      .setTitle("Configuration Import Results")
+      .setColor(0x0099ff)
+      .setDescription(`Processed ${results.length} configuration settings`)
+      .setTimestamp();
+
+    // Group results by success/failure
+    const successful = results.filter((r) => r.success);
+    const failed = results.filter((r) => !r.success);
+
+    if (successful.length > 0) {
+      embed.addFields({
+        name: `✅ Successfully Updated (${successful.length})`,
+        value: successful.map((r) => `\`${r.key}\``).join("\n") || "None",
+        inline: true,
+      });
+    }
+
+    if (failed.length > 0) {
+      embed.addFields({
+        name: `❌ Failed to Update (${failed.length})`,
+        value:
+          failed.map((r) => `\`${r.key}\`: ${r.message}`).join("\n") || "None",
+        inline: true,
+      });
+    }
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+  } catch (error) {
+    logger.error("Error importing configuration:", error);
+    await interaction.reply({
+      content: "An error occurred while importing the configuration.",
+      ephemeral: true,
+    });
+  }
+}
+
+async function handleExport(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    const category = interaction.options.getString("category") || "all";
+
+    // Get current configuration
+    const currentConfig = await configService.getAll();
+    const configMap = new Map(currentConfig.map((c) => [c.key, c.value]));
+
+    // Get all settings from schema
+    let allSettings = getAllSettingsFromSchema();
+
+    // Filter by category if specified
+    if (category !== "all") {
+      allSettings = allSettings.filter(
+        (setting) => setting.category === category,
+      );
+    }
+
+    // Build export object with current values or defaults
+    const exportConfig: Record<string, any> = {};
+
+    for (const setting of allSettings) {
+      if (configMap.has(setting.key)) {
+        // Use current value
+        exportConfig[setting.key] = configMap.get(setting.key);
+      } else {
+        // Use default value
+        exportConfig[setting.key] = setting.value;
+      }
+    }
+
+    // Convert to YAML
+    const yaml = await import("js-yaml");
+    const yamlContent = yaml.dump(exportConfig);
+
+    // Create export embed
+    const embed = new EmbedBuilder()
+      .setTitle("Configuration Export")
+      .setColor(0x00ff00)
+      .setDescription(
+        `Exported ${Object.keys(exportConfig).length} settings${category !== "all" ? ` from ${getCategoryDisplayName(category)}` : ""}`,
+      )
+      .addFields({
+        name: "YAML Content",
+        value: `\`\`\`yaml\n${yamlContent}\`\`\``,
+      })
+      .setTimestamp();
+
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+  } catch (error) {
+    logger.error("Error exporting configuration:", error);
+    await interaction.reply({
+      content: "An error occurred while exporting the configuration.",
+      ephemeral: true,
+    });
+  }
+}
+
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
@@ -602,6 +795,12 @@ export async function execute(
       break;
     case "reload":
       await handleReload(interaction);
+      break;
+    case "import":
+      await handleImport(interaction);
+      break;
+    case "export":
+      await handleExport(interaction);
       break;
     default:
       await interaction.reply({
