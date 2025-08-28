@@ -142,7 +142,8 @@ export class VoiceChannelTruncationService {
       throw new Error("Cleanup is already running");
     }
 
-    if (!this.isConnected) {
+    // Check live database connection status
+    if (mongoose.connection.readyState !== 1) {
       throw new Error("Database not connected");
     }
 
