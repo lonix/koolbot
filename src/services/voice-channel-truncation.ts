@@ -2,7 +2,6 @@ import { Client, TextChannel } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
-import { connectToDatabase } from "../utils/database.js";
 import mongoose from "mongoose";
 
 export interface ICleanupStats {
@@ -207,9 +206,6 @@ export class VoiceChannelTruncationService {
         const recentSessions = user.sessions.filter(session => session.startTime >= cutoffDate);
 
         if (oldSessions.length > 0) {
-          // Aggregate old sessions data before removal
-          const oldSessionsTotalTime = oldSessions.reduce((total, session) => total + (session.duration || 0), 0);
-
           // Update user document: remove old sessions, keep recent ones
           await VoiceChannelTracking.updateOne(
             { _id: user._id },
