@@ -114,7 +114,8 @@ KoolBot is built with a modular, service-oriented architecture:
 | Command | Description | Permission |
 |---------|-------------|------------|
 | `/announce-vc-stats` | Trigger voice stats announcement | Admin |
-| `/vc-cleanup` | Voice tracking cleanup management | Admin |
+| `/dbtrunk` | Voice channel database cleanup management | Admin |
+| `/vc` | Voice channel management | Admin |
 | `/botstats` | Bot performance statistics | Admin |
 
 ## 🐳 Docker Deployment

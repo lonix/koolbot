@@ -702,6 +702,10 @@ export class VoiceChannelManager {
         // Now rename the channel back to online
         await offlineLobbyChannel.setName(lobbyName, "Bot starting up");
         logger.info(`Renamed offline lobby channel to online: ${lobbyName}`);
+      } else {
+        // No offline lobby found, ensure we have a lobby channel
+        logger.info("No offline lobby found, ensuring lobby channel exists");
+        await this.ensureLobbyChannelExists(guild);
       }
     } catch (error) {
       logger.error("Error renaming offline lobby to online:", error);
@@ -709,8 +713,97 @@ export class VoiceChannelManager {
   }
 
   /**
+   * Ensure lobby channel exists for normal startup operations
+   * This method is gentle and tries to reuse existing offline lobby channels
+   */
+  public async ensureLobbyChannelExists(guild: Guild): Promise<void> {
+    try {
+      const categoryName = await configService.getString(
+        "voicechannels.category.name",
+        "Voice Channels",
+      );
+      const lobbyName = await configService.getString(
+        "voicechannels.lobby.name",
+        "Lobby",
+      );
+      const offlineLobbyName = await configService.getString(
+        "voicechannels.lobby.offlinename",
+        "🔴 Lobby",
+      );
+
+      const category = guild.channels.cache.find(
+        (channel): channel is CategoryChannel =>
+          channel.type === ChannelType.GuildCategory &&
+          channel.name === categoryName,
+      );
+
+      if (!category) {
+        logger.error(`Category ${categoryName} not found for lobby creation`);
+        return;
+      }
+
+      // First, try to find an existing online lobby
+      const existingLobby = category.children.cache.find(
+        (channel): channel is VoiceChannel =>
+          channel.type === ChannelType.GuildVoice && channel.name === lobbyName,
+      );
+
+      if (existingLobby) {
+        logger.debug(`Lobby channel already exists: ${existingLobby.name}`);
+        return; // We're good, lobby already exists
+      }
+
+      // Check if there's an offline lobby we can rename
+      const offlineLobbyChannel = category.children.cache.find(
+        (channel): channel is VoiceChannel =>
+          channel.type === ChannelType.GuildVoice &&
+          channel.name === offlineLobbyName,
+      );
+
+      if (offlineLobbyChannel) {
+        // Rename the offline lobby back to online
+        try {
+          await offlineLobbyChannel.setName(
+            lobbyName,
+            "Bot starting up - renaming offline lobby",
+          );
+          logger.info(
+            `Renamed offline lobby channel back to online: ${lobbyName}`,
+          );
+          return; // We're done
+        } catch (error) {
+          logger.error(`Failed to rename offline lobby channel:`, error);
+          // Fall through to creation if renaming fails
+        }
+      }
+
+      // If no lobby exists at all, create one
+      try {
+        const newLobby = await guild.channels.create({
+          name: lobbyName,
+          type: ChannelType.GuildVoice,
+          parent: category,
+          permissionOverwrites: [
+            {
+              id: guild.roles.everyone.id,
+              allow: ["Connect", "Speak", "ViewChannel"],
+            },
+          ],
+        });
+        logger.info(`Created new lobby channel: ${newLobby.name}`);
+      } catch (error) {
+        logger.error(`Failed to create lobby channel:`, error);
+      }
+    } catch (error) {
+      logger.error("Error ensuring lobby channel exists:", error);
+    }
+  }
+
+  /**
    * Ensure lobby channel exists, create it if it doesn't
    * Also removes duplicate lobby channels
+   * WARNING: This method is aggressive and will delete ALL existing lobby channels
+   * Use ensureLobbyChannelExists for normal startup operations
    */
   public async ensureLobbyChannels(guild: Guild): Promise<void> {
     try {

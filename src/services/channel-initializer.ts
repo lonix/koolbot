@@ -124,7 +124,7 @@ export class ChannelInitializer {
 
       // Use the voice channel manager to ensure lobby channels exist
       const voiceChannelManager = VoiceChannelManager.getInstance(this.client);
-      await voiceChannelManager.ensureLobbyChannels(guild);
+      await voiceChannelManager.ensureLobbyChannelExists(guild);
 
       // Find or create the announcement channel
       const announcementChannelName =

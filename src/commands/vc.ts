@@ -116,7 +116,7 @@ async function handleForceReload(
     // Force cleanup
     await voiceChannelManager.cleanupEmptyChannels();
 
-    // Ensure lobby channels exist
+    // Force cleanup and ensure lobby channels exist
     await voiceChannelManager.ensureLobbyChannels(guild);
 
     await interaction.editReply({
