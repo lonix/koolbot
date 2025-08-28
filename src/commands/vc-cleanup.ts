@@ -15,9 +15,6 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand.setName("status").setDescription("Show cleanup service status"),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand.setName("config").setDescription("View cleanup configuration"),
   );
 
 export async function execute(
@@ -50,9 +47,6 @@ async function handleCleanupSubcommand(
       break;
     case "status":
       await handleCleanupStatus(interaction, truncationService);
-      break;
-    case "config":
-      await handleCleanupConfig(interaction, truncationService);
       break;
     default:
       await interaction.reply({
@@ -193,57 +187,4 @@ async function handleCleanupStatus(
   }
 }
 
-async function handleCleanupConfig(
-  interaction: ChatInputCommandInteraction,
-  truncationService: VoiceChannelTruncationService,
-): Promise<void> {
-  try {
-    const isEnabled = await truncationService.isEnabled();
-    const notificationChannel =
-      await truncationService.getNotificationChannel();
-    const schedule = await truncationService.getSchedule();
 
-    const configEmbed = {
-      color: isEnabled ? 0x00ff00 : 0xff0000,
-      title: "⚙️ Voice Tracking Cleanup Configuration",
-      description: "Current configuration settings for the cleanup service.",
-      fields: [
-        {
-          name: "🔄 Service Status",
-          value: isEnabled ? "✅ Enabled" : "❌ Disabled",
-          inline: true,
-        },
-        {
-          name: "⏰ Schedule",
-          value: schedule || "Not configured",
-          inline: true,
-        },
-        {
-          name: "📢 Notification Channel",
-          value: notificationChannel
-            ? `<#${notificationChannel}>`
-            : "Not configured",
-          inline: true,
-        },
-        {
-          name: "📋 Configuration Note",
-          value:
-            "Retention settings are currently using default values and will be configurable in a future update.",
-          inline: false,
-        },
-      ],
-      timestamp: new Date().toISOString(),
-      footer: {
-        text: "Voice Tracking Cleanup Service",
-      },
-    };
-
-    await interaction.reply({ embeds: [configEmbed] });
-  } catch (error) {
-    logger.error("Error handling cleanup config:", error);
-    await interaction.reply({
-      content: "There was an error while getting the cleanup configuration!",
-      ephemeral: true,
-    });
-  }
-}
