@@ -69,7 +69,7 @@ export class VoiceChannelTruncationService {
   } {
     return {
       isRunning: this.isRunning,
-      isConnected: this.isConnected,
+      isConnected: mongoose.connection.readyState === 1, // 1 = connected
       lastCleanupDate: this.lastCleanupDate,
     };
   }

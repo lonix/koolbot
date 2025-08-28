@@ -116,28 +116,13 @@ export class CommandManager {
     }
   }
 
-  private async getEnabledCommands(): Promise<
-    Array<{
-      name: string;
-      description: string;
-      options?: Array<{
-        name: string;
-        description: string;
-        type: number;
-        required?: boolean;
-      }>;
-    }>
-  > {
+  private async getEnabledCommands(): Promise<any[]> {
     try {
       // Use the same dynamic loading logic
       const commands = await this.loadCommandsDynamically();
-
-      // Convert to the expected format
-      return commands.map(cmd => ({
-        name: cmd.name,
-        description: cmd.description,
-        options: cmd.options || []
-      }));
+      
+      // Return the full command data including subcommands
+      return commands;
     } catch (error) {
       logger.error("Error getting enabled commands:", error);
       return [];
