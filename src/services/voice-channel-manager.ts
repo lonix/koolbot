@@ -78,8 +78,9 @@ export class VoiceChannelManager {
     try {
       logger.info("Initializing voice channel manager...");
 
-      // Check if voice channel management is enabled using new config keys
+      // Check if voice channel management is enabled using correct config keys
       const isEnabled =
+        (await configService.getBoolean("voicechannels.enabled")) ||
         (await configService.getBoolean("voice_channel.enabled")) ||
         (await configService.getBoolean("ENABLE_VC_MANAGEMENT"));
 
@@ -96,8 +97,9 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Try new config keys first, then fall back to old ones
+      // Try correct config keys first, then fall back to old ones
       const categoryName =
+        (await configService.getString("voicechannels.category.name")) ||
         (await configService.getString("voice_channel.category_name")) ||
         (await configService.getString(
           "VC_CATEGORY_NAME",
@@ -105,10 +107,12 @@ export class VoiceChannelManager {
         ));
 
       const lobbyChannelName =
+        (await configService.getString("voicechannels.lobby.name")) ||
         (await configService.getString("voice_channel.lobby_channel_name")) ||
         (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
 
       const offlineLobbyName =
+        (await configService.getString("voicechannels.lobby.offlinename")) ||
         (await configService.getString(
           "voice_channel.lobby_channel_name_offline",
         )) || (await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE"));

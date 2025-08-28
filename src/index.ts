@@ -336,10 +336,6 @@ async function initializeServices(): Promise<void> {
     // Set client for services that need it
     configService.setClient(client);
 
-    // Initialize Discord logger first
-    discordLogger = DiscordLogger.getInstance(client);
-    await discordLogger.initialize();
-
     // Check and clean up any global commands that might cause duplicates
     await cleanupGlobalCommands();
 
@@ -347,6 +343,10 @@ async function initializeServices(): Promise<void> {
     await configService.initialize();
     // await configService.migrateFromEnv(); // Disabled - let startup migrator handle all migration
     await startupMigrator.checkForOutdatedSettings();
+
+    // Initialize Discord logger AFTER database connection is established
+    discordLogger = DiscordLogger.getInstance(client);
+    await discordLogger.initialize();
 
     // Log database connection status
     await discordLogger.logDatabaseStatus(
