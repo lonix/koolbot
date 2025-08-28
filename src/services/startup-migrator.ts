@@ -60,14 +60,14 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicetracking.enabled",
     category: "voicetracking",
     description: "Enable/disable voice activity tracking",
-    defaultValue: "true",
+    defaultValue: true,
   },
   {
     oldKey: "ENABLE_SEEN",
     newKey: "voicetracking.seen.enabled",
     category: "voicetracking",
     description: "Enable/disable last seen tracking",
-    defaultValue: "true",
+    defaultValue: true,
   },
   {
     oldKey: "EXCLUDED_VC_CHANNELS",
@@ -82,7 +82,7 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicetracking.announcements.enabled",
     category: "voicetracking",
     description: "Enable/disable weekly voice channel announcements",
-    defaultValue: "true",
+    defaultValue: true,
   },
   {
     oldKey: "VC_ANNOUNCEMENT_SCHEDULE",
@@ -112,14 +112,14 @@ const configMigrations: ConfigMigration[] = [
     newKey: "ping.enabled",
     category: "ping",
     description: "Enable/disable ping command",
-    defaultValue: "true",
+    defaultValue: true,
   },
   {
     oldKey: "ENABLE_AMIKOOL",
     newKey: "amikool.enabled",
     category: "amikool",
     description: "Enable/disable amikool command",
-    defaultValue: "true",
+    defaultValue: true,
   },
   {
     oldKey: "COOL_ROLE_NAME",
@@ -133,7 +133,7 @@ const configMigrations: ConfigMigration[] = [
     newKey: "plexprice.enabled",
     category: "plexprice",
     description: "Enable/disable PLEX price checker",
-    defaultValue: "true",
+    defaultValue: true,
   },
 
   // Quote System
@@ -142,7 +142,7 @@ const configMigrations: ConfigMigration[] = [
     newKey: "quotes.enabled",
     category: "quotes",
     description: "Enable/disable quote system",
-    defaultValue: "true",
+    defaultValue: true,
   },
   {
     oldKey: "QUOTE_ADD_ROLES",

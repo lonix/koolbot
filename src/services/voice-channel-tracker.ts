@@ -106,6 +106,12 @@ export class VoiceChannelTracker {
     newState: VoiceState,
   ): Promise<void> {
     try {
+      // Check if voice tracking is enabled
+      const isEnabled = await this.configService.getBoolean("voicetracking.enabled", false);
+      if (!isEnabled) {
+        return; // Voice tracking is disabled
+      }
+
       const member = newState.member || oldState.member; // Try to get member from either state
       if (!member) {
         logger.info(`No member found in voice state update`);
@@ -173,7 +179,7 @@ export class VoiceChannelTracker {
     try {
       // Try new configuration key first, then fall back to old for backward compatibility
       let excludedChannels = await this.configService.get(
-        "tracking.excluded_channels",
+        "voicetracking.excluded_channels",
       );
 
       if (!excludedChannels) {

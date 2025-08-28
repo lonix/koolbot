@@ -307,6 +307,12 @@ export class VoiceChannelManager {
     newState: VoiceState,
   ): Promise<void> {
     try {
+      // Check if voice channel management is enabled
+      const isEnabled = await configService.getBoolean("voicechannels.enabled", false);
+      if (!isEnabled) {
+        return; // Voice channel management is disabled
+      }
+
       const member = newState.member;
       if (!member) {
         logger.error("No member found in voice state update");
@@ -1021,7 +1027,7 @@ export class VoiceChannelManager {
 
   private async checkLobbyHealth(): Promise<void> {
     try {
-      if (!(await configService.get("ENABLE_VC_MANAGEMENT"))) {
+      if (!(await configService.getBoolean("voicechannels.enabled", false))) {
         return;
       }
 

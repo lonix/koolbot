@@ -79,11 +79,11 @@ export class VoiceChannelAnnouncer {
       await guild.channels.fetch();
 
       const enabled = await this.configService.getBoolean(
-        "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
+        "voicetracking.announcements.enabled",
         false,
       );
       const trackingEnabled = await this.configService.getBoolean(
-        "ENABLE_VC_TRACKING",
+        "voicetracking.enabled",
         false,
       );
       if (!enabled || !trackingEnabled) {
@@ -94,7 +94,7 @@ export class VoiceChannelAnnouncer {
       }
 
       let schedule = await this.configService.getString(
-        "VC_ANNOUNCEMENT_SCHEDULE",
+        "voicetracking.announcements.schedule",
         "0 16 * * 5",
       );
       // Remove any surrounding quotes from the schedule
@@ -147,7 +147,7 @@ export class VoiceChannelAnnouncer {
       }
 
       const channelName = await this.configService.getString(
-        "VC_ANNOUNCEMENT_CHANNEL",
+        "voicetracking.announcements.channel",
         "voice-stats",
       );
 

@@ -23,32 +23,32 @@ const commands: Record<
   ((interaction: ChatInputCommandInteraction) => Promise<void>) | undefined
 > = {
   ping: async (interaction) => {
-    if (await configService.get("ping.enabled")) {
+    if (await configService.getBoolean("ping.enabled", false)) {
       await ping(interaction);
     }
   },
   amikool: async (interaction) => {
-    if (await configService.get("amikool.enabled")) {
+    if (await configService.getBoolean("amikool.enabled", false)) {
       await amikool(interaction);
     }
   },
   plexprice: async (interaction) => {
-    if (await configService.get("plexprice.enabled")) {
+    if (await configService.getBoolean("plexprice.enabled", false)) {
       await plexprice(interaction);
     }
   },
   vctop: async (interaction) => {
-    if (await configService.get("voicetracking.enabled")) {
+    if (await configService.getBoolean("voicetracking.enabled", false)) {
       await vctop(interaction);
     }
   },
   vcstats: async (interaction) => {
-    if (await configService.get("voicetracking.enabled")) {
+    if (await configService.getBoolean("voicetracking.enabled", false)) {
       await vcstats(interaction);
     }
   },
   seen: async (interaction) => {
-    if (await configService.get("voicetracking.seen.enabled")) {
+    if (await configService.getBoolean("voicetracking.seen.enabled", false)) {
       await seen(interaction);
     }
   },
@@ -56,17 +56,17 @@ const commands: Record<
     await configCommand(interaction);
   },
   "transfer-ownership": async (interaction) => {
-    if (await configService.get("voicechannels.enabled")) {
+    if (await configService.getBoolean("voicechannels.enabled", false)) {
       await transferOwnership(interaction);
     }
   },
   "announce-vc-stats": async (interaction) => {
-    if (await configService.get("voicetracking.announcements.enabled")) {
+    if (await configService.getBoolean("voicetracking.announcements.enabled", false)) {
       await announceVcStats(interaction);
     }
   },
   quote: async (interaction) => {
-    if (await configService.get("quotes.enabled")) {
+    if (await configService.getBoolean("quotes.enabled", false)) {
       await quoteCommand(interaction);
     }
   },
@@ -80,7 +80,7 @@ const commands: Record<
     await dbtrunkCommand(interaction);
   },
   vc: async (interaction) => {
-    if (await configService.get("voicechannels.enabled")) {
+    if (await configService.getBoolean("voicechannels.enabled", false)) {
       await vcCommand(interaction);
     }
   },

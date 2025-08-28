@@ -18,6 +18,7 @@ import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
+import { VoiceChannelTruncationService } from "./services/voice-channel-truncation.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
@@ -129,8 +130,9 @@ async function cleanupVoiceChannels(): Promise<void> {
 
     // Check if voice channel management is enabled using new config keys
     const isEnabled =
-      (await configService.getBoolean("voice_channel.enabled")) ||
-      (await configService.getBoolean("ENABLE_VC_MANAGEMENT"));
+      (await configService.getBoolean("voicechannels.enabled", false)) ||
+      (await configService.getBoolean("voice_channel.enabled", false)) ||
+      (await configService.getBoolean("ENABLE_VC_MANAGEMENT", false));
 
     if (isEnabled) {
       logger.info("Cleaning up voice channels...");
@@ -330,6 +332,7 @@ const commandManager = CommandManager.getInstance(client);
 const voiceChannelManager = VoiceChannelManager.getInstance(client);
 const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
 const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
+const voiceChannelTruncation = VoiceChannelTruncationService.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 
@@ -387,6 +390,8 @@ async function initializeServices(): Promise<void> {
 
     // Initialize voice channel services
     await voiceChannelManager.initialize(guildId);
+    await voiceChannelTracker.initialize();
+    await voiceChannelTruncation.initialize();
     await voiceChannelAnnouncer.start();
     await channelInitializer.initializeChannels(
       await client.guilds.fetch(guildId),

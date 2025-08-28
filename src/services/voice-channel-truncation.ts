@@ -4,6 +4,7 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import mongoose from "mongoose";
+import { CronJob } from "cron";
 
 export interface ICleanupStats {
   sessionsRemoved: number;
@@ -27,6 +28,7 @@ export class VoiceChannelTruncationService {
   private isRunning = false;
   private lastCleanupDate: Date | null = null;
   private isConnected = false;
+  private cleanupJob: CronJob | null = null;
 
   private constructor(client: Client) {
     this.client = client;
@@ -47,9 +49,7 @@ export class VoiceChannelTruncationService {
    */
   public async isEnabled(): Promise<boolean> {
     try {
-      return (await this.configService.get(
-        "voicetracking.cleanup.enabled",
-      )) as boolean;
+      return await this.configService.getBoolean("voicetracking.cleanup.enabled", false);
     } catch (error) {
       logger.debug(
         "Cleanup service enabled check failed, defaulting to false:",
@@ -79,9 +79,7 @@ export class VoiceChannelTruncationService {
    */
   public async getNotificationChannel(): Promise<string | null> {
     try {
-      return (await this.configService.get("core.cleanup.channel_id")) as
-        | string
-        | null;
+      return await this.configService.getString("core.cleanup.channel_id", "");
     } catch (error) {
       logger.debug(
         "Failed to get notification channel, defaulting to null:",
@@ -96,9 +94,7 @@ export class VoiceChannelTruncationService {
    */
   public async getSchedule(): Promise<string | null> {
     try {
-      return (await this.configService.get(
-        "voicetracking.cleanup.schedule",
-      )) as string | null;
+      return await this.configService.getString("voicetracking.cleanup.schedule", "");
     } catch (error) {
       logger.debug(
         "Failed to get cleanup schedule, defaulting to null:",
@@ -124,6 +120,9 @@ export class VoiceChannelTruncationService {
         );
       }
 
+      // Start the scheduled cleanup if enabled
+      await this.startScheduledCleanup();
+
       logger.info("Voice channel truncation service initialized successfully");
     } catch (error) {
       logger.error(
@@ -131,6 +130,43 @@ export class VoiceChannelTruncationService {
         error,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Start the scheduled cleanup job
+   */
+  private async startScheduledCleanup(): Promise<void> {
+    try {
+      const enabled = await this.isEnabled();
+      if (!enabled) {
+        logger.info("Voice channel cleanup service is disabled");
+        return;
+      }
+
+      const schedule = await this.getSchedule();
+      if (!schedule) {
+        logger.warn("No cleanup schedule configured, using default (daily at midnight)");
+        // Default to daily at midnight
+        this.cleanupJob = new CronJob("0 0 * * *", () => {
+          this.runCleanup().catch(error => {
+            logger.error("Error in scheduled cleanup:", error);
+          });
+        });
+      } else {
+        // Remove any surrounding quotes from the schedule
+        const cleanSchedule = schedule.replace(/^["']|["']$/g, "");
+        this.cleanupJob = new CronJob(cleanSchedule, () => {
+          this.runCleanup().catch(error => {
+            logger.error("Error in scheduled cleanup:", error);
+          });
+        });
+      }
+
+      this.cleanupJob.start();
+      logger.info(`Voice channel cleanup scheduled with cron: ${schedule ? schedule.replace(/^["']|["']$/g, "") : "0 0 * * *"}`);
+    } catch (error) {
+      logger.error("Error starting scheduled cleanup:", error);
     }
   }
 
@@ -298,17 +334,20 @@ export class VoiceChannelTruncationService {
   private async getRetentionConfig(): Promise<IRetentionConfig> {
     try {
       const detailedSessionsDays =
-        ((await this.configService.get(
+        await this.configService.getNumber(
           "voicetracking.cleanup.retention.detailed_sessions_days",
-        )) as number) || 30;
+          30,
+        );
       const monthlySummariesMonths =
-        ((await this.configService.get(
+        await this.configService.getNumber(
           "voicetracking.cleanup.retention.monthly_summaries_months",
-        )) as number) || 12;
+          6,
+        );
       const yearlySummariesYears =
-        ((await this.configService.get(
+        await this.configService.getNumber(
           "voicetracking.cleanup.retention.yearly_summaries_years",
-        )) as number) || 5;
+          1,
+        );
 
       return {
         detailedSessionsDays,
@@ -319,9 +358,21 @@ export class VoiceChannelTruncationService {
       logger.warn("Failed to load retention config, using defaults:", error);
       return {
         detailedSessionsDays: 30,
-        monthlySummariesMonths: 12,
-        yearlySummariesYears: 5,
+        monthlySummariesMonths: 6,
+        yearlySummariesYears: 1,
       };
     }
+  }
+
+  /**
+   * Destroy the cleanup service and stop the cron job
+   */
+  public destroy(): void {
+    if (this.cleanupJob) {
+      this.cleanupJob.stop();
+      this.cleanupJob = null;
+    }
+    this.isRunning = false;
+    this.isConnected = false;
   }
 }
