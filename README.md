@@ -420,6 +420,7 @@ docker-compose exec bot npm run migrate-config
 
 - **[COMMANDS.md](COMMANDS.md)**: Complete command reference
 - **[SETTINGS.md](SETTINGS.md)**: Complete configuration reference
+- **[RELEASE_NOTES.md](RELEASE_NOTES.md)**: Version history and what's new
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**: Common issues and solutions
 - **[.env.example](.env.example)**: Environment variable template
 
@@ -459,4 +460,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**KoolBot** - Making Discord servers more engaging, one feature at a time! 🚀
+**KoolBot v0.5.0** - Making Discord servers more engaging, one feature at a time! 🚀
+
+---
+
+📋 **[RELEASE_NOTES.md](RELEASE_NOTES.md)** - What's new in this version
