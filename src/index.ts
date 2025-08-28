@@ -388,27 +388,10 @@ async function initializeServices(): Promise<void> {
       await client.guilds.fetch(guildId),
     );
 
-    // Switch lobby to online mode on startup
+    // Switch lobby to online mode on startup and handle any users in offline lobby
     try {
       const guild = await client.guilds.fetch(guildId);
-      const onlineLobbyName = await configService.getString(
-        "voicechannels.lobby.name",
-        "🟢 Lobby",
-      );
-
-      // Find the lobby channel and rename it to online mode
-      const lobbyChannel = guild.channels.cache.find(
-        (channel) =>
-          channel.name.includes("🔴") &&
-          channel.type === ChannelType.GuildVoice,
-      );
-
-      if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
-        await lobbyChannel.setName(onlineLobbyName);
-        logger.info(`✅ Lobby switched to online mode: ${onlineLobbyName}`);
-      } else {
-        logger.debug("No offline lobby channel found to rename");
-      }
+      await voiceChannelManager.renameLobbyToOnline(guild);
     } catch (error) {
       logger.error("❌ Error switching lobby to online mode:", error);
     }
@@ -514,6 +497,43 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
 process.on("unhandledRejection", (error) => {
   logger.error("Unhandled promise rejection:", error);
+});
+
+// Handle graceful shutdown
+process.on("SIGINT", async () => {
+  logger.info("Received SIGINT, shutting down gracefully...");
+
+  try {
+    // Rename lobby to offline before shutting down
+    const guildId = await configService.getString("GUILD_ID", "");
+    if (guildId) {
+      const guild = await client.guilds.fetch(guildId);
+      await voiceChannelManager.renameLobbyToOffline(guild);
+      logger.info("Lobby renamed to offline mode");
+    }
+  } catch (error) {
+    logger.error("Error renaming lobby to offline:", error);
+  }
+
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  logger.info("Received SIGTERM, shutting down gracefully...");
+
+  try {
+    // Rename lobby to offline before shutting down
+    const guildId = await configService.getString("GUILD_ID", "");
+    if (guildId) {
+      const guild = await client.guilds.fetch(guildId);
+      await voiceChannelManager.renameLobbyToOffline(guild);
+      logger.info("Lobby renamed to offline mode");
+    }
+  } catch (error) {
+    logger.error("Error renaming lobby to offline:", error);
+  }
+
+  process.exit(0);
 });
 
 process.on("uncaughtException", (error) => {

@@ -2,12 +2,12 @@ import {
   Guild,
   ChannelType,
   CategoryChannel,
-  VoiceChannel,
   TextChannel,
   Client,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
+import { VoiceChannelManager } from "./voice-channel-manager.js";
 
 export class ChannelInitializer {
   private static instance: ChannelInitializer;
@@ -122,26 +122,9 @@ export class ChannelInitializer {
         logger.info(`Created category: ${categoryName}`);
       }
 
-      // Find or create the lobby channel
-      let lobbyChannel = guild.channels.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          channel.name === lobbyChannelName &&
-          channel.parentId === category.id,
-      );
-
-      if (!lobbyChannel) {
-        logger.info(`Creating lobby channel: ${lobbyChannelName}`);
-        lobbyChannel = await guild.channels.create({
-          name: lobbyChannelName,
-          type: ChannelType.GuildVoice,
-          parent: category,
-          position: 0,
-        });
-        logger.info(`Created lobby channel: ${lobbyChannelName}`);
-      } else {
-        logger.info(`Found existing lobby channel: ${lobbyChannelName}`);
-      }
+      // Use the voice channel manager to ensure lobby channels exist
+      const voiceChannelManager = VoiceChannelManager.getInstance(this.client);
+      await voiceChannelManager.ensureLobbyChannels(guild);
 
       // Find or create the announcement channel
       const announcementChannelName =

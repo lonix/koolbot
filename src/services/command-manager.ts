@@ -120,7 +120,7 @@ export class CommandManager {
     try {
       // Use the same dynamic loading logic
       const commands = await this.loadCommandsDynamically();
-      
+
       // Return the full command data including subcommands
       return commands;
     } catch (error) {

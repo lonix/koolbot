@@ -5,6 +5,8 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
+import { VoiceChannelManager } from "../services/voice-channel-manager.js";
+import { ConfigService } from "../services/config-service.js";
 
 export const data = new SlashCommandBuilder()
   .setName("vc-cleanup")
@@ -15,6 +17,12 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand.setName("status").setDescription("Show cleanup service status"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand.setName("cleanup-channels").setDescription("Clean up empty voice channels"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand.setName("force-cleanup").setDescription("Force cleanup of ALL unmanaged channels in category"),
   );
 
 export async function execute(
@@ -47,6 +55,12 @@ async function handleCleanupSubcommand(
       break;
     case "status":
       await handleCleanupStatus(interaction, truncationService);
+      break;
+    case "cleanup-channels":
+      await handleCleanupChannels(interaction);
+      break;
+    case "force-cleanup":
+      await handleForceCleanup(interaction);
       break;
     default:
       await interaction.reply({
@@ -183,6 +197,76 @@ async function handleCleanupStatus(
     await interaction.reply({
       content: "There was an error while getting the cleanup status!",
       ephemeral: true,
+    });
+  }
+}
+
+async function handleCleanupChannels(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    await interaction.reply({
+      content: "🔄 Cleaning up empty voice channels...",
+      ephemeral: true,
+    });
+
+    const voiceChannelManager = VoiceChannelManager.getInstance(interaction.client);
+    await voiceChannelManager.cleanupEmptyChannels();
+
+    await interaction.editReply({
+      content: "✅ Voice channel cleanup completed!",
+    });
+  } catch (error) {
+    logger.error("Error handling channel cleanup:", error);
+    await interaction.editReply({
+      content: `❌ Error during channel cleanup: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  }
+}
+
+async function handleForceCleanup(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  try {
+    await interaction.reply({
+      content: "⚠️ Force cleaning up ALL unmanaged channels in category...",
+      ephemeral: true,
+    });
+
+    const voiceChannelManager = VoiceChannelManager.getInstance(interaction.client);
+
+    // Get guild ID from config
+    const configService = ConfigService.getInstance();
+    const guildId = await configService.getString("GUILD_ID", "");
+
+    if (!guildId) {
+      await interaction.editReply({
+        content: "❌ GUILD_ID not configured",
+      });
+      return;
+    }
+
+    const guild = await interaction.client.guilds.fetch(guildId);
+    if (!guild) {
+      await interaction.editReply({
+        content: "❌ Guild not found",
+      });
+      return;
+    }
+
+    // Force cleanup
+    await voiceChannelManager.cleanupEmptyChannels();
+
+    // Ensure lobby channels exist
+    await voiceChannelManager.ensureLobbyChannels(guild);
+
+    await interaction.editReply({
+      content: "✅ Force cleanup completed! All unmanaged channels removed and lobby channels ensured.",
+    });
+  } catch (error) {
+    logger.error("Error handling force cleanup:", error);
+    await interaction.editReply({
+      content: `❌ Error during force cleanup: ${error instanceof Error ? error.message : String(error)}`,
     });
   }
 }
