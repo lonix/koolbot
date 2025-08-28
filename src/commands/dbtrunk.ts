@@ -17,7 +17,9 @@ export const data = new SlashCommandBuilder()
     subcommand.setName("status").setDescription("Show cleanup service status"),
   );
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     const subcommand = interaction.options.getSubcommand();
     await handleSubcommand(interaction, subcommand);
@@ -83,7 +85,8 @@ async function handleStatus(
   try {
     const status = await truncationService.getStatus();
 
-    const statusMessage = `**Voice Channel Cleanup Service Status**\n\n` +
+    const statusMessage =
+      `**Voice Channel Cleanup Service Status**\n\n` +
       `🔄 **Service Status:** ${status.isRunning ? "Running" : "Stopped"}\n` +
       `🔌 **Database Connection:** ${status.isConnected ? "✅ Connected" : "❌ Disconnected"}\n` +
       `📅 **Last Cleanup:** ${status.lastCleanupDate ? status.lastCleanupDate.toLocaleString() : "Never"}`;

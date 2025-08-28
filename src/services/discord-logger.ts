@@ -107,25 +107,34 @@ export class DiscordLogger {
     try {
       // Check if logger is ready
       if (!this.isReady()) {
-        logger.debug(`Discord logger: Logger not ready, skipping message to ${logType}`);
+        logger.debug(
+          `Discord logger: Logger not ready, skipping message to ${logType}`,
+        );
         return;
       }
 
       logger.debug(`Discord logger: Attempting to log to channel: ${logType}`);
 
       const channelConfig = this.logChannels.get(logType);
-      logger.debug(`Discord logger: Channel config for ${logType}:`, channelConfig);
+      logger.debug(
+        `Discord logger: Channel config for ${logType}:`,
+        channelConfig,
+      );
 
       if (
         !channelConfig ||
         !channelConfig.enabled ||
         !channelConfig.channelId
       ) {
-        logger.debug(`Discord logger: Log channel ${logType} not configured or disabled`);
+        logger.debug(
+          `Discord logger: Log channel ${logType} not configured or disabled`,
+        );
         return;
       }
 
-      logger.debug(`Discord logger: Looking for channel with ID: ${channelConfig.channelId}`);
+      logger.debug(
+        `Discord logger: Looking for channel with ID: ${channelConfig.channelId}`,
+      );
 
       const channel = this.client.channels.cache.get(
         channelConfig.channelId,
@@ -135,11 +144,16 @@ export class DiscordLogger {
         logger.warn(
           `Discord logger: Log channel ${logType} not found: ${channelConfig.channelId}`,
         );
-        logger.debug(`Discord logger: Available channels:`, Array.from(this.client.channels.cache.keys()));
+        logger.debug(
+          `Discord logger: Available channels:`,
+          Array.from(this.client.channels.cache.keys()),
+        );
         return;
       }
 
-      logger.debug(`Discord logger: Found channel: ${channel.name} (${channel.id})`);
+      logger.debug(
+        `Discord logger: Found channel: ${channel.name} (${channel.id})`,
+      );
 
       const embed = new EmbedBuilder()
         .setTitle(message.title)
@@ -156,9 +170,14 @@ export class DiscordLogger {
       }
 
       await channel.send({ embeds: [embed] });
-      logger.info(`Discord logger: Log message sent to ${logType}: ${message.title}`);
+      logger.info(
+        `Discord logger: Log message sent to ${logType}: ${message.title}`,
+      );
     } catch (error) {
-      logger.error(`Discord logger: Error sending log message to ${logType}:`, error);
+      logger.error(
+        `Discord logger: Error sending log message to ${logType}:`,
+        error,
+      );
     }
   }
 

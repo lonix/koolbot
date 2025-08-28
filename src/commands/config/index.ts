@@ -504,7 +504,7 @@ async function handleImport(
     const file = interaction.options.getAttachment("file", true);
 
     // Check if it's a YAML file
-    if (!file.name?.endsWith('.yml') && !file.name?.endsWith('.yaml')) {
+    if (!file.name?.endsWith(".yml") && !file.name?.endsWith(".yaml")) {
       await interaction.reply({
         content: "❌ Please upload a YAML file (.yml or .yaml extension).",
         ephemeral: true,
@@ -530,7 +530,8 @@ async function handleImport(
     } catch (error) {
       logger.error("Error parsing YAML file:", error);
       await interaction.reply({
-        content: "❌ Failed to parse YAML file. Please ensure it's a valid YAML file.",
+        content:
+          "❌ Failed to parse YAML file. Please ensure it's a valid YAML file.",
         ephemeral: true,
       });
       return;
@@ -552,7 +553,8 @@ async function handleImport(
         // Check if the key exists in our schema
         if (key in defaultConfig) {
           // Validate the value type matches the schema
-          const expectedType = typeof defaultConfig[key as keyof typeof defaultConfig];
+          const expectedType =
+            typeof defaultConfig[key as keyof typeof defaultConfig];
           if (typeof value === expectedType) {
             // Get description and category from schema
             const description = getSettingDescription(key);
@@ -600,7 +602,8 @@ async function handleImport(
     if (failed.length > 0) {
       embed.addFields({
         name: `❌ Failed to Update (${failed.length})`,
-        value: failed.map((r) => `\`${r.key}\`: ${r.message}`).join("\n") || "None",
+        value:
+          failed.map((r) => `\`${r.key}\`: ${r.message}`).join("\n") || "None",
         inline: true,
       });
     }
@@ -655,7 +658,7 @@ async function handleExport(
 
     // Create an AttachmentBuilder for the YAML content
     const attachment = new AttachmentBuilder(Buffer.from(yamlContent), {
-      name: `config_${category === "all" ? "all" : getCategoryDisplayName(category).toLowerCase().replace(/\s+/g, '_')}.yaml`,
+      name: `config_${category === "all" ? "all" : getCategoryDisplayName(category).toLowerCase().replace(/\s+/g, "_")}.yaml`,
     });
 
     // Send the attachment

@@ -63,12 +63,28 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        { name: "plexprice", configKey: "plexprice.enabled", file: "plexprice" },
+        {
+          name: "plexprice",
+          configKey: "plexprice.enabled",
+          file: "plexprice",
+        },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
-        { name: "vcstats", configKey: "voicetracking.enabled", file: "vcstats" },
+        {
+          name: "vcstats",
+          configKey: "voicetracking.enabled",
+          file: "vcstats",
+        },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
-        { name: "transfer-ownership", configKey: "voicechannels.enabled", file: "transfer-ownership" },
-        { name: "announce-vc-stats", configKey: "voicetracking.announcements.enabled", file: "announce-vc-stats" },
+        {
+          name: "transfer-ownership",
+          configKey: "voicechannels.enabled",
+          file: "transfer-ownership",
+        },
+        {
+          name: "announce-vc-stats",
+          configKey: "voicetracking.announcements.enabled",
+          file: "announce-vc-stats",
+        },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
         { name: "dbtrunk", configKey: null, file: "dbtrunk" }, // Always enabled for admins
         { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
@@ -273,14 +289,34 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        { name: "plexprice", configKey: "plexprice.enabled", file: "plexprice" },
+        {
+          name: "plexprice",
+          configKey: "plexprice.enabled",
+          file: "plexprice",
+        },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
-        { name: "vcstats", configKey: "voicetracking.enabled", file: "vcstats" },
+        {
+          name: "vcstats",
+          configKey: "voicetracking.enabled",
+          file: "vcstats",
+        },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
-        { name: "transfer-ownership", configKey: "voicechannels.enabled", file: "transfer-ownership" },
-        { name: "announce-vc-stats", configKey: "voicetracking.announcements.enabled", file: "announce-vc-stats" },
+        {
+          name: "transfer-ownership",
+          configKey: "voicechannels.enabled",
+          file: "transfer-ownership",
+        },
+        {
+          name: "announce-vc-stats",
+          configKey: "voicetracking.announcements.enabled",
+          file: "announce-vc-stats",
+        },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
-        { name: "vc-cleanup", configKey: "voicetracking.enabled", file: "vc-cleanup" },
+        {
+          name: "vc-cleanup",
+          configKey: "voicetracking.enabled",
+          file: "vc-cleanup",
+        },
         { name: "config", configKey: null, file: "config/index" }, // Always enabled
         { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
         { name: "exclude-channel", configKey: null, file: "exclude-channel" }, // Always enabled

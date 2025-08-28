@@ -52,8 +52,8 @@ export class ChannelInitializer {
       }
 
       const isVoiceChannelManagementEnabled =
-        await this.configService.getBoolean("voicechannels.enabled", false) ||
-        await this.configService.getBoolean("voice_channel.enabled", false);
+        (await this.configService.getBoolean("voicechannels.enabled", false)) ||
+        (await this.configService.getBoolean("voice_channel.enabled", false));
       if (!isVoiceChannelManagementEnabled) {
         logger.info(
           "Voice channel management is disabled, skipping initialization",
@@ -128,7 +128,9 @@ export class ChannelInitializer {
 
       // Find or create the announcement channel
       const announcementChannelName =
-        (await this.configService.getString("voicetracking.announcements.channel")) ||
+        (await this.configService.getString(
+          "voicetracking.announcements.channel",
+        )) ||
         (await this.configService.getString(
           "tracking.weekly_announcement_channel",
         )) ||

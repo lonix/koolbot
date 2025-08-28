@@ -12,13 +12,19 @@ export const data = new SlashCommandBuilder()
   .setDescription("Voice channel management")
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addSubcommand((subcommand) =>
-    subcommand.setName("reload").setDescription("Clean up empty voice channels"),
+    subcommand
+      .setName("reload")
+      .setDescription("Clean up empty voice channels"),
   )
   .addSubcommand((subcommand) =>
-    subcommand.setName("force-reload").setDescription("Force cleanup of ALL unmanaged channels in category"),
+    subcommand
+      .setName("force-reload")
+      .setDescription("Force cleanup of ALL unmanaged channels in category"),
   );
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     const subcommand = interaction.options.getSubcommand();
     await handleSubcommand(interaction, subcommand);
@@ -59,7 +65,9 @@ async function handleReload(
       ephemeral: true,
     });
 
-    const voiceChannelManager = VoiceChannelManager.getInstance(interaction.client);
+    const voiceChannelManager = VoiceChannelManager.getInstance(
+      interaction.client,
+    );
     await voiceChannelManager.cleanupEmptyChannels();
 
     await interaction.editReply({
@@ -82,7 +90,9 @@ async function handleForceReload(
       ephemeral: true,
     });
 
-    const voiceChannelManager = VoiceChannelManager.getInstance(interaction.client);
+    const voiceChannelManager = VoiceChannelManager.getInstance(
+      interaction.client,
+    );
 
     // Get guild ID from config
     const configService = ConfigService.getInstance();
@@ -110,7 +120,8 @@ async function handleForceReload(
     await voiceChannelManager.ensureLobbyChannels(guild);
 
     await interaction.editReply({
-      content: "✅ Force cleanup completed! All unmanaged channels removed and lobby channels ensured.",
+      content:
+        "✅ Force cleanup completed! All unmanaged channels removed and lobby channels ensured.",
     });
   } catch (error) {
     logger.error("Error handling force cleanup:", error);
