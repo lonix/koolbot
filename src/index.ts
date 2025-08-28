@@ -21,6 +21,7 @@ import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
+import { BotStatusService } from "./services/bot-status-service.js";
 
 dotenvConfig();
 
@@ -74,6 +75,7 @@ client.commands = new Collection();
 
 let isShuttingDown = false;
 let discordLogger: DiscordLogger;
+let botStatusService: BotStatusService;
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
@@ -331,6 +333,10 @@ const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 
+// Initialize bot status service
+const botStatusServiceInstance = BotStatusService.getInstance(client);
+botStatusService = botStatusServiceInstance;
+
 async function initializeServices(): Promise<void> {
   try {
     // Set client for services that need it
@@ -396,6 +402,10 @@ async function initializeServices(): Promise<void> {
       logger.error("❌ Error switching lobby to online mode:", error);
     }
 
+    // Set bot to fully operational status (green) and start VC monitoring
+    botStatusService.setOperationalStatus();
+    botStatusService.startVcMonitoring();
+
     logger.info("All services initialized successfully");
   } catch (error) {
     logger.error("Error initializing services:", error);
@@ -414,6 +424,10 @@ async function initializeServices(): Promise<void> {
 
 client.once(Events.ClientReady, async (readyClient) => {
   logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
+
+  // Set connecting status (yellow) immediately when Discord is ready
+  botStatusService.setConnectingStatus();
+
   await initializeServices();
 });
 
@@ -470,6 +484,12 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
     await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
     await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
+
+    // Update bot status with current VC user count
+    if (botStatusService) {
+      const vcUserCount = await voiceChannelManager.getTotalVcUserCount();
+      botStatusService.updateVcUserCount(vcUserCount);
+    }
   } catch (error) {
     logger.error("Error handling voice state update:", error);
   }
@@ -504,6 +524,9 @@ process.on("SIGINT", async () => {
   logger.info("Received SIGINT, shutting down gracefully...");
 
   try {
+    // Set bot to shutdown status (yellow)
+    botStatusService.setShutdownStatus();
+
     // Rename lobby to offline before shutting down
     const guildId = await configService.getString("GUILD_ID", "");
     if (guildId) {
@@ -511,8 +534,11 @@ process.on("SIGINT", async () => {
       await voiceChannelManager.renameLobbyToOffline(guild);
       logger.info("Lobby renamed to offline mode");
     }
+
+    // Clean shutdown of bot status service
+    await botStatusService.shutdown();
   } catch (error) {
-    logger.error("Error renaming lobby to offline:", error);
+    logger.error("Error during SIGINT shutdown:", error);
   }
 
   process.exit(0);
@@ -522,6 +548,9 @@ process.on("SIGTERM", async () => {
   logger.info("Received SIGTERM, shutting down gracefully...");
 
   try {
+    // Set bot to shutdown status (yellow)
+    botStatusService.setShutdownStatus();
+
     // Rename lobby to offline before shutting down
     const guildId = await configService.getString("GUILD_ID", "");
     if (guildId) {
@@ -529,8 +558,11 @@ process.on("SIGTERM", async () => {
       await voiceChannelManager.renameLobbyToOffline(guild);
       logger.info("Lobby renamed to offline mode");
     }
+
+    // Clean shutdown of bot status service
+    await botStatusService.shutdown();
   } catch (error) {
-    logger.error("Error renaming lobby to offline:", error);
+    logger.error("Error during SIGTERM shutdown:", error);
   }
 
   process.exit(0);

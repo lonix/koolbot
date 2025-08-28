@@ -1166,6 +1166,46 @@ export class VoiceChannelManager {
     }
   }
 
+  /**
+   * Get the total number of users currently in voice channels
+   */
+  public async getTotalVcUserCount(): Promise<number> {
+    try {
+      const guildId = await this.configService.getString("GUILD_ID", "");
+      if (!guildId) return 0;
+
+      const guild = await this.getGuild(guildId);
+      if (!guild) return 0;
+
+      // Get the voice channel category
+      const categoryName = await this.configService.getString(
+        "voicechannels.category.name",
+        "Voice Channels"
+      );
+
+      const category = guild.channels.cache.find(
+        (channel): channel is CategoryChannel =>
+          channel.type === ChannelType.GuildCategory &&
+          channel.name === categoryName
+      );
+
+      if (!category) return 0;
+
+      // Count all users in voice channels within the category
+      let totalUsers = 0;
+      for (const channel of category.children.cache.values()) {
+        if (channel.type === ChannelType.GuildVoice) {
+          totalUsers += channel.members.size;
+        }
+      }
+
+      return totalUsers;
+    } catch (error) {
+      logger.error("Error getting total VC user count:", error);
+      return 0;
+    }
+  }
+
   public destroy(): void {
     if (this.cleanupInterval) {
       clearInterval(this.cleanupInterval);

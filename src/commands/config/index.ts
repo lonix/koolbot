@@ -10,6 +10,7 @@ import { ConfigService } from "../../services/config-service.js";
 import { defaultConfig } from "../../services/config-schema.js";
 import * as yaml from "js-yaml";
 import logger from "../../utils/logger.js";
+import { BotStatusService } from "../../services/bot-status-service.js";
 
 // Use built-in fetch or undici for Node.js compatibility
 import { fetch } from "undici";
@@ -712,6 +713,10 @@ async function handleReload(
       ephemeral: true,
     });
 
+    // Set bot to config reload status (yellow)
+    const botStatusService = BotStatusService.getInstance(interaction.client);
+    botStatusService.setConfigReloadStatus();
+
     // Get the command manager instance and force a reload
     const { CommandManager } = await import(
       "../../services/command-manager.js"
@@ -724,6 +729,9 @@ async function handleReload(
     // Update client-side command handling
     await commandManager.populateClientCommands();
 
+    // Set bot back to operational status (green)
+    botStatusService.setOperationalStatus();
+
     const embed = new EmbedBuilder()
       .setTitle("Commands Reloaded")
       .setColor(0x00ff00)
@@ -735,6 +743,15 @@ async function handleReload(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error reloading commands:", error);
+
+    // Ensure bot status is restored even on error
+    try {
+      const botStatusService = BotStatusService.getInstance(interaction.client);
+      botStatusService.setOperationalStatus();
+    } catch (statusError) {
+      logger.error("Error restoring bot status after reload error:", statusError);
+    }
+
     await interaction.editReply({
       content: "An error occurred while reloading commands.",
     });
