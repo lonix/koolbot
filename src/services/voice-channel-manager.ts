@@ -1180,13 +1180,13 @@ export class VoiceChannelManager {
       // Get the voice channel category
       const categoryName = await this.configService.getString(
         "voicechannels.category.name",
-        "Voice Channels"
+        "Voice Channels",
       );
 
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
           channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName
+          channel.name === categoryName,
       );
 
       if (!category) return 0;

@@ -29,10 +29,12 @@ export class BotStatusService {
     try {
       this.client.user?.setPresence({
         status: "idle",
-        activities: [{
-          name: "Connecting to Discord...",
-          type: ActivityType.Watching
-        }]
+        activities: [
+          {
+            name: "Connecting to Discord...",
+            type: ActivityType.Watching,
+          },
+        ],
       });
       logger.info("Bot status set to: Connecting (Yellow)");
     } catch (error) {
@@ -60,10 +62,12 @@ export class BotStatusService {
     try {
       this.client.user?.setPresence({
         status: "idle",
-        activities: [{
-          name: "Reloading configuration...",
-          type: ActivityType.Watching
-        }]
+        activities: [
+          {
+            name: "Reloading configuration...",
+            type: ActivityType.Watching,
+          },
+        ],
       });
       logger.info("Bot status set to: Config Reload (Yellow)");
     } catch (error) {
@@ -78,10 +82,12 @@ export class BotStatusService {
     try {
       this.client.user?.setPresence({
         status: "idle",
-        activities: [{
-          name: "Shutting down...",
-          type: ActivityType.Watching
-        }]
+        activities: [
+          {
+            name: "Shutting down...",
+            type: ActivityType.Watching,
+          },
+        ],
       });
       logger.info("Bot status set to: Shutting Down (Yellow)");
     } catch (error) {
@@ -96,7 +102,7 @@ export class BotStatusService {
     try {
       this.client.user?.setPresence({
         status: "invisible",
-        activities: []
+        activities: [],
       });
       logger.info("Bot status set to: Invisible (Offline)");
     } catch (error) {
@@ -111,16 +117,19 @@ export class BotStatusService {
     if (!this.isInitialized) return;
 
     try {
-      const activityName = this.currentVcUserCount === 0
-        ? "Watching nobody"
-        : `Watching over ${this.currentVcUserCount} ${this.currentVcUserCount === 1 ? 'nerd' : 'nerds'}`;
+      const activityName =
+        this.currentVcUserCount === 0
+          ? "nobody"
+          : `over ${this.currentVcUserCount} ${this.currentVcUserCount === 1 ? "nerd" : "nerds"}`;
 
       this.client.user?.setPresence({
         status: "online",
-        activities: [{
-          name: activityName,
-          type: ActivityType.Watching
-        }]
+        activities: [
+          {
+            name: activityName,
+            type: ActivityType.Watching,
+          },
+        ],
       });
 
       logger.debug(`Bot activity updated: ${activityName}`);
@@ -198,7 +207,7 @@ export class BotStatusService {
     return {
       isInitialized: this.isInitialized,
       currentVcUserCount: this.currentVcUserCount,
-      isMonitoring: this.statusUpdateInterval !== null
+      isMonitoring: this.statusUpdateInterval !== null,
     };
   }
 }

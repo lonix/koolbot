@@ -75,7 +75,7 @@ client.commands = new Collection();
 
 let isShuttingDown = false;
 let discordLogger: DiscordLogger;
-let botStatusService: BotStatusService;
+const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
@@ -333,9 +333,7 @@ const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 
-// Initialize bot status service
-const botStatusServiceInstance = BotStatusService.getInstance(client);
-botStatusService = botStatusServiceInstance;
+// Bot status service is already initialized above
 
 async function initializeServices(): Promise<void> {
   try {

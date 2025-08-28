@@ -749,7 +749,10 @@ async function handleReload(
       const botStatusService = BotStatusService.getInstance(interaction.client);
       botStatusService.setOperationalStatus();
     } catch (statusError) {
-      logger.error("Error restoring bot status after reload error:", statusError);
+      logger.error(
+        "Error restoring bot status after reload error:",
+        statusError,
+      );
     }
 
     await interaction.editReply({
