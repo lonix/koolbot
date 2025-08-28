@@ -2,10 +2,12 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   EmbedBuilder,
+  AttachmentBuilder,
   PermissionFlagsBits,
 } from "discord.js";
 import { ConfigService } from "../../services/config-service.js";
 import { defaultConfig } from "../../services/config-schema.js";
+import * as yaml from "js-yaml";
 import logger from "../../utils/logger.js";
 
 const configService = ConfigService.getInstance();
@@ -95,6 +97,7 @@ function getCategoryDisplayName(category: string): string {
     plexprice: "PLEX Price",
     quotes: "Quotes",
     core: "Core",
+    individual: "Individual Features",
   };
   return displayNames[category] || category;
 }
@@ -209,28 +212,15 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("category")
-          .setDescription("Filter by category")
+          .setDescription("Show settings for specific category only")
           .setRequired(false)
           .addChoices(
             { name: "Voice Channels", value: "voicechannels" },
             { name: "Voice Tracking", value: "voicetracking" },
-            { name: "Ping", value: "ping" },
-            { name: "Amikool", value: "amikool" },
-            { name: "PLEX Price", value: "plexprice" },
-            { name: "Quotes", value: "quotes" },
             { name: "Core", value: "core" },
+            { name: "Individual Features", value: "individual" },
+            { name: "Quote System", value: "quotes" },
           ),
-      ),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("get")
-      .setDescription("Get a specific configuration value")
-      .addStringOption((option) =>
-        option
-          .setName("key")
-          .setDescription("Configuration key")
-          .setRequired(true),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -240,49 +230,31 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("key")
-          .setDescription("Configuration key")
+          .setDescription("Configuration key (e.g., voicechannels.enabled)")
           .setRequired(true),
       )
       .addStringOption((option) =>
         option
           .setName("value")
-          .setDescription("New value (use @mentions for roles/channels)")
+          .setDescription("Configuration value")
           .setRequired(true),
-      ),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("reset")
-      .setDescription("Reset a configuration value to default")
-      .addStringOption((option) =>
-        option
-          .setName("key")
-          .setDescription("Configuration key")
-          .setRequired(true),
-      ),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("reload")
-      .setDescription(
-        "Reload all commands to Discord API (use after changing command settings)",
       ),
   )
   .addSubcommand((subcommand) =>
     subcommand
       .setName("import")
-      .setDescription("Import configuration from YAML")
-      .addStringOption((option) =>
+      .setDescription("Import configuration from YAML file")
+      .addAttachmentOption((option) =>
         option
-          .setName("yaml")
-          .setDescription("YAML configuration content")
+          .setName("file")
+          .setDescription("YAML configuration file")
           .setRequired(true),
       ),
   )
   .addSubcommand((subcommand) =>
     subcommand
       .setName("export")
-      .setDescription("Export current configuration to YAML")
+      .setDescription("Export current configuration to YAML file")
       .addStringOption((option) =>
         option
           .setName("category")
@@ -292,11 +264,9 @@ export const data = new SlashCommandBuilder()
             { name: "All Categories", value: "all" },
             { name: "Voice Channels", value: "voicechannels" },
             { name: "Voice Tracking", value: "voicetracking" },
-            { name: "Ping", value: "ping" },
-            { name: "Amikool", value: "amikool" },
-            { name: "PLEX Price", value: "plexprice" },
-            { name: "Quotes", value: "quotes" },
             { name: "Core", value: "core" },
+            { name: "Individual Features", value: "individual" },
+            { name: "Quote System", value: "quotes" },
           ),
       ),
   );
@@ -386,33 +356,6 @@ async function handleList(
     logger.error("Error listing configuration:", error);
     await interaction.editReply({
       content: "An error occurred while listing configuration settings.",
-    });
-  }
-}
-
-async function handleGet(
-  interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  try {
-    const key = interaction.options.getString("key", true);
-    const value = await configService.get(key);
-
-    const formattedValue = isRoleOrChannelSetting(key)
-      ? await formatAsMentions(String(value), interaction)
-      : String(value);
-
-    const embed = new EmbedBuilder()
-      .setTitle(`Configuration: ${key}`)
-      .setColor(0x0099ff)
-      .addFields({ name: "Value", value: formattedValue })
-      .setTimestamp();
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
-  } catch (error) {
-    logger.error("Error getting configuration:", error);
-    await interaction.reply({
-      content: "An error occurred while getting the configuration value.",
-      ephemeral: true,
     });
   }
 }
@@ -532,82 +475,40 @@ async function handleSet(
   }
 }
 
-async function handleReset(
-  interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  try {
-    const key = interaction.options.getString("key", true);
-    await configService.delete(key);
-
-    const embed = new EmbedBuilder()
-      .setTitle("Configuration Reset")
-      .setColor(0x00ff00)
-      .addFields({ name: "Key", value: key })
-      .setTimestamp();
-
-    await interaction.reply({ embeds: [embed], ephemeral: true });
-  } catch (error) {
-    logger.error("Error resetting configuration:", error);
-    await interaction.reply({
-      content: "An error occurred while resetting the configuration value.",
-      ephemeral: true,
-    });
-  }
-}
-
-async function handleReload(
-  interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  try {
-    await interaction.reply({
-      content: "Reloading commands to Discord API... This may take a moment.",
-      ephemeral: true,
-    });
-
-    // Get the command manager instance and force a reload
-    const { CommandManager } = await import(
-      "../../services/command-manager.js"
-    );
-    const commandManager = CommandManager.getInstance(interaction.client);
-
-    // Reload commands to Discord API
-    await commandManager.registerCommands();
-
-    // Update client-side command handling
-    await commandManager.populateClientCommands();
-
-    const embed = new EmbedBuilder()
-      .setTitle("Commands Reloaded")
-      .setColor(0x00ff00)
-      .setDescription(
-        "All commands have been reloaded to Discord API with current settings.",
-      )
-      .setTimestamp();
-
-    await interaction.editReply({ embeds: [embed] });
-  } catch (error) {
-    logger.error("Error reloading commands:", error);
-    await interaction.editReply({
-      content: "An error occurred while reloading commands.",
-    });
-  }
-}
-
 async function handleImport(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
-    const yamlContent = interaction.options.getString("yaml", true);
+    const file = interaction.options.getAttachment("file", true);
 
-    // Parse YAML content
-    const yaml = await import("js-yaml");
+    // Check if it's a YAML file
+    if (!file.name?.endsWith('.yml') && !file.name?.endsWith('.yaml')) {
+      await interaction.reply({
+        content: "❌ Please upload a YAML file (.yml or .yaml extension).",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Fetch the file content
+    const response = await fetch(file.url);
+    if (!response.ok) {
+      await interaction.reply({
+        content: "❌ Failed to download the uploaded file.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const fileContent = await response.text();
     let importedConfig: Record<string, any>;
 
     try {
-      importedConfig = yaml.load(yamlContent) as Record<string, any>;
-    } catch {
+      importedConfig = yaml.load(fileContent) as Record<string, any>;
+    } catch (error) {
+      logger.error("Error parsing YAML file:", error);
       await interaction.reply({
-        content: "❌ Invalid YAML format. Please check your syntax.",
+        content: "❌ Failed to parse YAML file. Please ensure it's a valid YAML file.",
         ephemeral: true,
       });
       return;
@@ -729,61 +630,21 @@ async function handleExport(
     }
 
     // Convert to YAML
-    const yaml = await import("js-yaml");
     const yamlContent = yaml.dump(exportConfig);
     logger.debug(`YAML export successful, length: ${yamlContent.length}`);
 
-    // Check if YAML content is too long for Discord
-    if (yamlContent.length > 4000) {
-      logger.warn(
-        `YAML content too long (${yamlContent.length} chars), sending summary instead`,
-      );
-      const embed = new EmbedBuilder()
-        .setTitle("Configuration Export")
-        .setColor(0x00ff00)
-        .setDescription(
-          `Exported ${Object.keys(exportConfig).length} settings${category !== "all" ? ` from ${getCategoryDisplayName(category)}` : ""}`,
-        )
-        .addFields({
-          name: "⚠️ Content Too Long",
-          value: `The exported configuration is ${yamlContent.length} characters long, which exceeds Discord's limit. Consider exporting by category instead.`,
-        })
-        .setTimestamp();
+    // Create an AttachmentBuilder for the YAML content
+    const attachment = new AttachmentBuilder(Buffer.from(yamlContent), {
+      name: `config_${category === "all" ? "all" : getCategoryDisplayName(category).toLowerCase().replace(/\s+/g, '_')}.yaml`,
+    });
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-      return;
-    }
+    // Send the attachment
+    await interaction.reply({
+      files: [attachment],
+      ephemeral: true,
+    });
 
-    // Create export embed
-    const embed = new EmbedBuilder()
-      .setTitle("Configuration Export")
-      .setColor(0x00ff00)
-      .setDescription(
-        `Exported ${Object.keys(exportConfig).length} settings${category !== "all" ? ` from ${getCategoryDisplayName(category)}` : ""}`,
-      )
-      .addFields({
-        name: "YAML Content",
-        value: `\`\`\`yaml\n${yamlContent}\`\`\``,
-      })
-      .setTimestamp();
-
-    try {
-      await interaction.reply({ embeds: [embed], ephemeral: true });
-      logger.debug("Export response sent successfully");
-    } catch (replyError) {
-      logger.error("Error sending export response:", replyError);
-
-      // Try to send a simpler response if the embed fails
-      try {
-        await interaction.reply({
-          content: `✅ Configuration exported successfully!\n\n**${Object.keys(exportConfig).length} settings** exported${category !== "all" ? ` from ${getCategoryDisplayName(category)}` : ""}.\n\nUse \`/config export\` to see the full YAML content.`,
-          ephemeral: true,
-        });
-      } catch (fallbackError) {
-        logger.error("Fallback response also failed:", fallbackError);
-        // At this point, we can't send any response, but the command technically succeeded
-      }
-    }
+    logger.debug("Export response sent successfully");
   } catch (error) {
     logger.error("Error exporting configuration:", error);
 
@@ -805,17 +666,8 @@ export async function execute(
     case "list":
       await handleList(interaction);
       break;
-    case "get":
-      await handleGet(interaction);
-      break;
     case "set":
       await handleSet(interaction);
-      break;
-    case "reset":
-      await handleReset(interaction);
-      break;
-    case "reload":
-      await handleReload(interaction);
       break;
     case "import":
       await handleImport(interaction);
