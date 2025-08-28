@@ -95,6 +95,7 @@ function getCategoryDisplayName(category: string): string {
     amikool: "Amikool",
     plexprice: "PLEX Price",
     quotes: "Quotes",
+    core: "Core",
   };
   return displayNames[category] || category;
 }
@@ -152,6 +153,18 @@ function getSettingDescription(key: string): string {
     "voicetracking.admin_roles":
       "Comma-separated role names that can manage tracking",
 
+    // Voice Channel Cleanup
+    "voicetracking.cleanup.enabled":
+      "Enable/disable automated voice channel data cleanup",
+    "voicetracking.cleanup.schedule":
+      "Cron schedule for automated cleanup (e.g., '0 0 * * *' for daily at midnight)",
+    "voicetracking.cleanup.retention.detailed_sessions_days":
+      "Number of days to keep detailed session data",
+    "voicetracking.cleanup.retention.monthly_summaries_months":
+      "Number of months to keep monthly summary data",
+    "voicetracking.cleanup.retention.yearly_summaries_years":
+      "Number of years to keep yearly summary data",
+
     // Individual Features
     "ping.enabled": "Enable/disable ping command",
     "amikool.enabled": "Enable/disable amikool command",
@@ -164,6 +177,23 @@ function getSettingDescription(key: string): string {
     "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",
     "quotes.max_length": "Maximum quote length",
     "quotes.cooldown": "Cooldown in seconds between quote additions",
+
+    // Core Bot Logging (Discord)
+    "core.startup.enabled":
+      "Enable/disable Discord logging for bot startup/shutdown events",
+    "core.startup.channel_id":
+      "Discord channel ID for startup/shutdown logging",
+    "core.errors.enabled": "Enable/disable Discord logging for critical errors",
+    "core.errors.channel_id": "Discord channel ID for error logging",
+    "core.cleanup.enabled":
+      "Enable/disable Discord logging for database cleanup results",
+    "core.cleanup.channel_id": "Discord channel ID for cleanup logging",
+    "core.config.enabled":
+      "Enable/disable Discord logging for configuration changes",
+    "core.config.channel_id": "Discord channel ID for config change logging",
+    "core.cron.enabled":
+      "Enable/disable Discord logging for scheduled task results",
+    "core.cron.channel_id": "Discord channel ID for cron job logging",
   };
 
   return descriptions[key] || "No description available";
@@ -189,6 +219,7 @@ export const data = new SlashCommandBuilder()
             { name: "Amikool", value: "amikool" },
             { name: "PLEX Price", value: "plexprice" },
             { name: "Quotes", value: "quotes" },
+            { name: "Core", value: "core" },
           ),
       ),
   )

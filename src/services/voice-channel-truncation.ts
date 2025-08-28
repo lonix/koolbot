@@ -47,7 +47,9 @@ export class VoiceChannelTruncationService {
    */
   public async isEnabled(): Promise<boolean> {
     try {
-      return (await this.configService.get("core.cleanup.enabled")) as boolean;
+      return (await this.configService.get(
+        "voicetracking.cleanup.enabled",
+      )) as boolean;
     } catch (error) {
       logger.debug(
         "Cleanup service enabled check failed, defaulting to false:",
@@ -94,9 +96,9 @@ export class VoiceChannelTruncationService {
    */
   public async getSchedule(): Promise<string | null> {
     try {
-      return (await this.configService.get("core.cleanup.schedule")) as
-        | string
-        | null;
+      return (await this.configService.get(
+        "voicetracking.cleanup.schedule",
+      )) as string | null;
     } catch (error) {
       logger.debug(
         "Failed to get cleanup schedule, defaulting to null:",
@@ -297,15 +299,15 @@ export class VoiceChannelTruncationService {
     try {
       const detailedSessionsDays =
         ((await this.configService.get(
-          "core.cleanup.retention.detailed_sessions_days",
+          "voicetracking.cleanup.retention.detailed_sessions_days",
         )) as number) || 30;
       const monthlySummariesMonths =
         ((await this.configService.get(
-          "core.cleanup.retention.monthly_summaries_months",
+          "voicetracking.cleanup.retention.monthly_summaries_months",
         )) as number) || 12;
       const yearlySummariesYears =
         ((await this.configService.get(
-          "core.cleanup.retention.yearly_summaries_years",
+          "voicetracking.cleanup.retention.yearly_summaries_years",
         )) as number) || 5;
 
       return {
