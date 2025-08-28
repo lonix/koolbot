@@ -61,7 +61,12 @@ const commands: Record<
     }
   },
   "announce-vc-stats": async (interaction) => {
-    if (await configService.getBoolean("voicetracking.announcements.enabled", false)) {
+    if (
+      await configService.getBoolean(
+        "voicetracking.announcements.enabled",
+        false,
+      )
+    ) {
       await announceVcStats(interaction);
     }
   },

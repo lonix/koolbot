@@ -107,7 +107,10 @@ export class VoiceChannelTracker {
   ): Promise<void> {
     try {
       // Check if voice tracking is enabled
-      const isEnabled = await this.configService.getBoolean("voicetracking.enabled", false);
+      const isEnabled = await this.configService.getBoolean(
+        "voicetracking.enabled",
+        false,
+      );
       if (!isEnabled) {
         return; // Voice tracking is disabled
       }

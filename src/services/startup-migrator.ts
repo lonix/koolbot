@@ -6,7 +6,7 @@ interface ConfigMigration {
   newKey: string;
   category: string;
   description: string;
-  defaultValue?: string;
+  defaultValue?: string | number | boolean;
 }
 
 const configMigrations: ConfigMigration[] = [

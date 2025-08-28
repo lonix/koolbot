@@ -99,7 +99,10 @@ export class CommandManager {
 
           // Check configuration if required
           if (config.configKey) {
-            shouldEnable = await this.configService.getBoolean(config.configKey, false);
+            shouldEnable = await this.configService.getBoolean(
+              config.configKey,
+              false,
+            );
           }
 
           if (shouldEnable) {

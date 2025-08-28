@@ -308,7 +308,10 @@ export class VoiceChannelManager {
   ): Promise<void> {
     try {
       // Check if voice channel management is enabled
-      const isEnabled = await configService.getBoolean("voicechannels.enabled", false);
+      const isEnabled = await configService.getBoolean(
+        "voicechannels.enabled",
+        false,
+      );
       if (!isEnabled) {
         return; // Voice channel management is disabled
       }

@@ -332,7 +332,8 @@ const commandManager = CommandManager.getInstance(client);
 const voiceChannelManager = VoiceChannelManager.getInstance(client);
 const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
 const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
-const voiceChannelTruncation = VoiceChannelTruncationService.getInstance(client);
+const voiceChannelTruncation =
+  VoiceChannelTruncationService.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 
