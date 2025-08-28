@@ -12,7 +12,8 @@ import { execute as configCommand } from "./config/index.js";
 import { execute as quoteCommand } from "./quote.js";
 import { execute as excludeChannel } from "./exclude-channel.js";
 import { command as setupLobbyCommand } from "./setup-lobby.js";
-import { execute as vcCleanupCommand } from "./vc-cleanup.js";
+import { execute as dbtrunkCommand } from "./dbtrunk.js";
+import { execute as vcCommand } from "./vc.js";
 import { ConfigService } from "../services/config-service.js";
 
 const configService = ConfigService.getInstance();
@@ -75,9 +76,12 @@ const commands: Record<
   "setup-lobby": async (interaction) => {
     await setupLobbyCommand.execute(interaction);
   },
-  "vc-cleanup": async (interaction) => {
-    if (await configService.get("voicetracking.enabled")) {
-      await vcCleanupCommand(interaction);
+  dbtrunk: async (interaction) => {
+    await dbtrunkCommand(interaction);
+  },
+  vc: async (interaction) => {
+    if (await configService.get("voicechannels.enabled")) {
+      await vcCommand(interaction);
     }
   },
 };

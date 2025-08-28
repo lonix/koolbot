@@ -70,7 +70,8 @@ export class CommandManager {
         { name: "transfer-ownership", configKey: "voicechannels.enabled", file: "transfer-ownership" },
         { name: "announce-vc-stats", configKey: "voicetracking.announcements.enabled", file: "announce-vc-stats" },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
-        { name: "vc-cleanup", configKey: "voicetracking.enabled", file: "vc-cleanup" },
+        { name: "dbtrunk", configKey: null, file: "dbtrunk" }, // Always enabled for admins
+        { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
         { name: "config", configKey: null, file: "config/index" }, // Always enabled
         { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
       ];
