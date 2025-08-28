@@ -43,9 +43,9 @@ export async function execute(
       return;
     }
 
-    const formatTime = (minutes: number): string => {
-      const hours = Math.floor(minutes / 60);
-      const remainingMinutes = minutes % 60;
+    const formatTime = (seconds: number): string => {
+      const hours = Math.floor(seconds / 3600);
+      const remainingMinutes = Math.floor((seconds % 3600) / 60);
       return `${hours}h ${remainingMinutes}m`;
     };
 
