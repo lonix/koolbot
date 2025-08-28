@@ -11,8 +11,8 @@ import { defaultConfig } from "../../services/config-schema.js";
 import * as yaml from "js-yaml";
 import logger from "../../utils/logger.js";
 
-// Import fetch for Node.js compatibility
-import fetch from "node-fetch";
+// Use built-in fetch or undici for Node.js compatibility
+import { fetch } from "undici";
 
 const configService = ConfigService.getInstance();
 
