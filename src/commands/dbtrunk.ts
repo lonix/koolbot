@@ -63,7 +63,7 @@ async function handleRun(
       ephemeral: true,
     });
 
-    const stats = await truncationService.performCleanup();
+    const stats = await truncationService.runCleanup();
 
     await interaction.editReply({
       content: `✅ Cleanup completed!\n\n**Results:**\n• Sessions removed: ${stats.sessionsRemoved}\n• Data aggregated: ${stats.dataAggregated}\n• Execution time: ${stats.executionTime}ms\n• Errors: ${stats.errors.length > 0 ? stats.errors.join(", ") : "None"}`,

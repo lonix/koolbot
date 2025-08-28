@@ -83,11 +83,11 @@ async function handleForceReload(
     });
 
     const voiceChannelManager = VoiceChannelManager.getInstance(interaction.client);
-    
+
     // Get guild ID from config
     const configService = ConfigService.getInstance();
     const guildId = await configService.getString("GUILD_ID", "");
-    
+
     if (!guildId) {
       await interaction.editReply({
         content: "❌ GUILD_ID not configured",
@@ -105,7 +105,7 @@ async function handleForceReload(
 
     // Force cleanup
     await voiceChannelManager.cleanupEmptyChannels();
-    
+
     // Ensure lobby channels exist
     await voiceChannelManager.ensureLobbyChannels(guild);
 
