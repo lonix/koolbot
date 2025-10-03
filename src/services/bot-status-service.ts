@@ -13,42 +13,40 @@ export class BotStatusService {
 
   // Fun status messages for different scenarios
   private readonly lonelyStatuses = [
-    "is lonely",
-    "kinda bored ngl",
-    "contemplating existence",
-    "counting pixels",
-    "having a midlife crisis",
-    "playing solitaire",
-    "staring at the void",
-    "having an existential crisis",
-    "feeling like a background character",
-    "contemplating the meaning of life",
+    "nobody (is lonely)",
+    "paint dry (kinda bored ngl)",
+    "the void (contemplating existence)",
+    "pixels (counting them)",
+    "the wall (having a midlife crisis)",
+    "solitaire (playing alone)",
+    "nothing (staring at the void)",
+    "the ceiling (having an existential crisis)",
+    "the background (feeling like a character)",
+    "the meaning of life (contemplating it)",
   ];
 
   private readonly singleUserStatuses = [
     "{user} is alone and crying",
-    "please i cant listen to {user} anymore",
-    "someone please save me from {user}",
-    "{user} is talking to themselves again",
-    "help {user} is having a breakdown",
-    "{user} is having an existential crisis",
-    "i'm trapped with {user} send help",
-    "{user} is going insane please help",
-    "someone rescue me from {user}",
+    "{user} please i cant listen to them anymore",
+    "{user}, Send help!",
+    "{user} talking to themselves again",
+    "{user} having a breakdown",
+    "{user} talking about their penis... Again!",
+    "{user} is holding me hostage",
     "{user} is having a midlife crisis",
+    "{user} is having an existential crisis",
+
   ];
 
   private readonly multipleUsersStatuses = [
-    "watching {count} nerds",
-    "stalking {count} souls",
-    "observing {count} humans",
-    "babysitting {count} chatters",
-    "watching {count} socialize",
-    "keeping tabs on {count} gamers",
-    "watching {count} conversations",
-    "keeping {count} from walls",
-    "observing {count} madness",
-    "watching {count} crises",
+    "{count} nerds",
+    "{count} souls",
+    "{count} humans",
+    "{count} chatters",
+    "{count} people",
+    "{count} gamers that suck",
+    "{count} conversing about nothing",
+    "{count} people that need to get a life",
   ];
 
   private constructor(client: Client) {
@@ -225,10 +223,8 @@ export class BotStatusService {
       clearInterval(this.statusUpdateInterval);
     }
 
-    // Update status every 30 seconds to keep it fresh
-    this.statusUpdateInterval = setInterval(() => {
-      this.updateActivityBasedOnVcUsers();
-    }, 30000);
+    // No periodic updates - only update when user count actually changes
+    this.statusUpdateInterval = null;
 
     logger.info("Started VC user monitoring for bot status updates");
   }
