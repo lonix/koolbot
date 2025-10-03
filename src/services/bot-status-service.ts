@@ -13,16 +13,18 @@ export class BotStatusService {
 
   // Fun status messages for different scenarios
   private readonly lonelyStatuses = [
-    "nobody (is lonely)",
-    "paint dry (kinda bored ngl)",
-    "the void (contemplating existence)",
-    "pixels (counting them)",
-    "the wall (having a midlife crisis)",
-    "solitaire (playing alone)",
-    "nothing (staring at the void)",
-    "the ceiling (having an existential crisis)",
-    "the background (feeling like a character)",
-    "the meaning of life (contemplating it)",
+    "nobody, I hate it here",
+    "paint dry, I'm so bored",
+    "the void, I'm contemplating existence",
+    "pixels, I'm counting them",
+    "solitaire, I'm playing alone",
+    "nothing, I'm staring at the void",
+    "the meaning of life, I'm contemplating it",
+    "Rick Astley on repeat, I'm so lonely", // cspell:ignore Astley
+    "Lo-fi girl, kinda goes with the vibe",
+    "the whole universe was in a hot dense state",
+    "Some russian kid, screaming about fucking my mom",
+    "The matrix, blue or red pill, guys ?",
   ];
 
   private readonly singleUserStatuses = [
@@ -35,7 +37,6 @@ export class BotStatusService {
     "{user} is holding me hostage",
     "{user} is having a midlife crisis",
     "{user} is having an existential crisis",
-
   ];
 
   private readonly multipleUsersStatuses = [
