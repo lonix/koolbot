@@ -494,8 +494,12 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       const vcUserCount = await voiceChannelManager.getTotalVcUserCount();
       let vcUserName = "";
 
-      // If there's exactly one user, get their name for personalized status
-      if (vcUserCount === 1) {
+      // Only get username if count changed to 1 or if we need to refresh the name
+      const statusInfo = botStatusService.getStatusInfo();
+      const shouldUpdateName = vcUserCount === 1 &&
+        (statusInfo.currentVcUserCount !== 1 || !statusInfo.currentVcUserName);
+
+      if (shouldUpdateName) {
         try {
           const guildId = await configService.getString("GUILD_ID", "");
           if (guildId) {
@@ -511,13 +515,13 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
             ) as CategoryChannel;
 
             if (category) {
-              // Find the first user in any voice channel
+              // Find the first non-bot user in any voice channel
               for (const channel of category.children.cache.values()) {
                 if (
                   channel.type === ChannelType.GuildVoice &&
                   channel.members.size > 0
                 ) {
-                  const firstMember = channel.members.first();
+                  const firstMember = channel.members.find(member => !member.user.bot);
                   if (firstMember) {
                     vcUserName = firstMember.displayName;
                     break;
