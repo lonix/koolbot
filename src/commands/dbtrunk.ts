@@ -87,7 +87,8 @@ async function handleStatus(
 
     const statusMessage =
       `**Voice Channel Cleanup Service Status**\n\n` +
-      `🔄 **Service Status:** ${status.isRunning ? "Running" : "Stopped"}\n` +
+      `🔄 **Service Status:** ${status.isScheduled ? "Scheduled" : "Stopped"}\n` +
+      `⚡ **Currently Running:** ${status.isRunning ? "Yes" : "No"}\n` +
       `🔌 **Database Connection:** ${status.isConnected ? "✅ Connected" : "❌ Disconnected"}\n` +
       `📅 **Last Cleanup:** ${status.lastCleanupDate ? status.lastCleanupDate.toLocaleString() : "Never"}`;
 
