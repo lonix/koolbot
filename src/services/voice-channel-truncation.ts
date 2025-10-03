@@ -197,6 +197,12 @@ export class VoiceChannelTruncationService {
 
       if (!enabled) {
         logger.info("Voice channel cleanup service is disabled");
+        // Stop any existing cron job and update flags
+        if (this.cleanupJob) {
+          this.cleanupJob.stop();
+          this.cleanupJob = null;
+          logger.info("Stopped existing cleanup cron job");
+        }
         this.isScheduled = false;
         return;
       }
