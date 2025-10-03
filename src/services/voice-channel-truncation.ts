@@ -150,10 +150,14 @@ export class VoiceChannelTruncationService {
    */
   private async loadLastCleanupDate(): Promise<void> {
     try {
-      const lastCleanup = await this.configService.get("voicetracking.cleanup.last_run");
-      if (lastCleanup && typeof lastCleanup === 'string') {
+      const lastCleanup = await this.configService.get(
+        "voicetracking.cleanup.last_run",
+      );
+      if (lastCleanup && typeof lastCleanup === "string") {
         this.lastCleanupDate = new Date(lastCleanup);
-        logger.info(`Loaded last cleanup date: ${this.lastCleanupDate.toLocaleString()}`);
+        logger.info(
+          `Loaded last cleanup date: ${this.lastCleanupDate.toLocaleString()}`,
+        );
       } else {
         this.lastCleanupDate = null;
         logger.info("No previous cleanup date found");
@@ -173,7 +177,7 @@ export class VoiceChannelTruncationService {
         "voicetracking.cleanup.last_run",
         date.toISOString(),
         "Last cleanup execution timestamp",
-        "voicetracking"
+        "voicetracking",
       );
       logger.debug(`Saved last cleanup date: ${date.toLocaleString()}`);
     } catch (error) {
