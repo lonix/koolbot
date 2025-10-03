@@ -26,6 +26,7 @@ export class VoiceChannelTruncationService {
   private configService: ConfigService;
   private discordLogger: DiscordLogger;
   private isRunning = false;
+  private isScheduled = false;
   private lastCleanupDate: Date | null = null;
   private isConnected = false;
   private cleanupJob: CronJob | null = null;
@@ -67,11 +68,13 @@ export class VoiceChannelTruncationService {
    */
   public getStatus(): {
     isRunning: boolean;
+    isScheduled: boolean;
     isConnected: boolean;
     lastCleanupDate: Date | null;
   } {
     return {
       isRunning: this.isRunning,
+      isScheduled: this.isScheduled,
       isConnected: mongoose.connection.readyState === 1, // 1 = connected
       lastCleanupDate: this.lastCleanupDate,
     };
@@ -126,6 +129,9 @@ export class VoiceChannelTruncationService {
         );
       }
 
+      // Load last cleanup date from database
+      await this.loadLastCleanupDate();
+
       // Start the scheduled cleanup if enabled
       await this.startScheduledCleanup();
 
@@ -140,23 +146,77 @@ export class VoiceChannelTruncationService {
   }
 
   /**
+   * Load the last cleanup date from database
+   */
+  private async loadLastCleanupDate(): Promise<void> {
+    try {
+      const lastCleanup = await this.configService.get(
+        "voicetracking.cleanup.last_run",
+      );
+      if (lastCleanup && typeof lastCleanup === "string") {
+        this.lastCleanupDate = new Date(lastCleanup);
+        logger.info(
+          `Loaded last cleanup date: ${this.lastCleanupDate.toLocaleString()}`,
+        );
+      } else {
+        this.lastCleanupDate = null;
+        logger.info("No previous cleanup date found");
+      }
+    } catch (error) {
+      logger.warn("Failed to load last cleanup date:", error);
+      this.lastCleanupDate = null;
+    }
+  }
+
+  /**
+   * Save the last cleanup date to database
+   */
+  private async saveLastCleanupDate(date: Date): Promise<void> {
+    try {
+      await this.configService.set(
+        "voicetracking.cleanup.last_run",
+        date.toISOString(),
+        "Last cleanup execution timestamp",
+        "voicetracking",
+      );
+      logger.debug(`Saved last cleanup date: ${date.toLocaleString()}`);
+    } catch (error) {
+      logger.error("Failed to save last cleanup date:", error);
+    }
+  }
+
+  /**
    * Start the scheduled cleanup job
    */
   private async startScheduledCleanup(): Promise<void> {
     try {
+      logger.info("Starting voice channel cleanup scheduler...");
+
       const enabled = await this.isEnabled();
+      logger.info(`Cleanup service enabled: ${enabled}`);
+
       if (!enabled) {
         logger.info("Voice channel cleanup service is disabled");
+        // Stop any existing cron job and update flags
+        if (this.cleanupJob) {
+          this.cleanupJob.stop();
+          this.cleanupJob = null;
+          logger.info("Stopped existing cleanup cron job");
+        }
+        this.isScheduled = false;
         return;
       }
 
       const schedule = await this.getSchedule();
+      logger.info(`Cleanup schedule from config: "${schedule}"`);
+
       if (!schedule) {
         logger.warn(
           "No cleanup schedule configured, using default (daily at midnight)",
         );
         // Default to daily at midnight
         this.cleanupJob = new CronJob("0 0 * * *", () => {
+          logger.info("Scheduled cleanup triggered");
           this.runCleanup().catch((error) => {
             logger.error("Error in scheduled cleanup:", error);
           });
@@ -164,7 +224,10 @@ export class VoiceChannelTruncationService {
       } else {
         // Remove any surrounding quotes from the schedule
         const cleanSchedule = schedule.replace(/^["']|["']$/g, "");
+        logger.info(`Using cleaned schedule: "${cleanSchedule}"`);
+
         this.cleanupJob = new CronJob(cleanSchedule, () => {
+          logger.info("Scheduled cleanup triggered");
           this.runCleanup().catch((error) => {
             logger.error("Error in scheduled cleanup:", error);
           });
@@ -172,11 +235,13 @@ export class VoiceChannelTruncationService {
       }
 
       this.cleanupJob.start();
+      this.isScheduled = true;
       logger.info(
-        `Voice channel cleanup scheduled with cron: ${schedule ? schedule.replace(/^["']|["']$/g, "") : "0 0 * * *"}`,
+        `✅ Voice channel cleanup scheduled successfully with cron: ${schedule ? schedule.replace(/^["']|["']$/g, "") : "0 0 * * *"}`,
       );
     } catch (error) {
-      logger.error("Error starting scheduled cleanup:", error);
+      logger.error("❌ Error starting scheduled cleanup:", error);
+      this.isScheduled = false;
     }
   }
 
@@ -226,7 +291,9 @@ export class VoiceChannelTruncationService {
       const stats = await this.performCleanup();
 
       // Update last cleanup date
-      this.lastCleanupDate = new Date();
+      const cleanupDate = new Date();
+      this.lastCleanupDate = cleanupDate;
+      await this.saveLastCleanupDate(cleanupDate);
 
       logger.info(
         `Cleanup completed successfully. Removed ${stats.sessionsRemoved} sessions, aggregated ${stats.dataAggregated} records`,
@@ -380,6 +447,7 @@ export class VoiceChannelTruncationService {
       this.cleanupJob = null;
     }
     this.isRunning = false;
+    this.isScheduled = false;
     this.isConnected = false;
   }
 }

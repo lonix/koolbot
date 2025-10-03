@@ -115,11 +115,12 @@ export class VoiceChannelManager {
         (await configService.getString("voicechannels.lobby.offlinename")) ||
         (await configService.getString(
           "voice_channel.lobby_channel_name_offline",
-        )) ||
-        (await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE"));
+        ));
 
       if (!offlineLobbyName) {
-        logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
+        logger.error(
+          "voicechannels.lobby.offlinename is not set in configuration",
+        );
         return;
       }
 
@@ -368,11 +369,10 @@ export class VoiceChannelManager {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
-        const lobbyChannelName =
-          (await configService.getString(
-            "voicechannels.lobby.name",
-            "Lobby",
-          )) || (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+        const lobbyChannelName = await configService.getString(
+          "voicechannels.lobby.name",
+          "Lobby",
+        );
         // If user is moving to the Lobby, create a new channel
         if (newChannel.name === lobbyChannelName) {
           // Clean up the old channel if it was a personal channel
@@ -945,11 +945,12 @@ export class VoiceChannelManager {
         (await configService.getString("voicechannels.lobby.offlinename")) ||
         (await configService.getString(
           "voice_channel.lobby_channel_name_offline",
-        )) ||
-        (await configService.getString("LOBBY_CHANNEL_NAME_OFFLINE"));
+        ));
 
       if (!offlineLobbyName) {
-        logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
+        logger.error(
+          "voicechannels.lobby.offlinename is not set in configuration",
+        );
         return;
       }
 
@@ -1047,18 +1048,20 @@ export class VoiceChannelManager {
       }
 
       const categoryName = await configService.getString(
-        "VC_CATEGORY_NAME",
+        "voicechannels.category.name",
         "Dynamic Voice Channels",
       );
       const lobbyChannelName = (
-        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby")
+        await configService.getString("voicechannels.lobby.name", "Lobby")
       ).replace(/["']/g, "");
       const offlineLobbyName = await configService.getString(
-        "LOBBY_CHANNEL_NAME_OFFLINE",
+        "voicechannels.lobby.offlinename",
       );
 
       if (!offlineLobbyName) {
-        logger.error("LOBBY_CHANNEL_NAME_OFFLINE is not set in configuration");
+        logger.error(
+          "voicechannels.lobby.offlinename is not set in configuration",
+        );
         return;
       }
 
