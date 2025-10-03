@@ -496,7 +496,8 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
       // Only get username if count changed to 1 or if we need to refresh the name
       const statusInfo = botStatusService.getStatusInfo();
-      const shouldUpdateName = vcUserCount === 1 &&
+      const shouldUpdateName =
+        vcUserCount === 1 &&
         (statusInfo.currentVcUserCount !== 1 || !statusInfo.currentVcUserName);
 
       if (shouldUpdateName) {
@@ -521,7 +522,9 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
                   channel.type === ChannelType.GuildVoice &&
                   channel.members.size > 0
                 ) {
-                  const firstMember = channel.members.find(member => !member.user.bot);
+                  const firstMember = channel.members.find(
+                    (member) => !member.user.bot,
+                  );
                   if (firstMember) {
                     vcUserName = firstMember.displayName;
                     break;
