@@ -373,7 +373,6 @@ export class VoiceChannelManager {
           "voicechannels.lobby.name",
           "Lobby",
         );
-        await configService.getString("LOBBY_CHANNEL_NAME", "Lobby");
         // If user is moving to the Lobby, create a new channel
         if (newChannel.name === lobbyChannelName) {
           // Clean up the old channel if it was a personal channel
