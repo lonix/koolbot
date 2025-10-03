@@ -8,11 +8,75 @@ export class BotStatusService {
   private configService: ConfigService;
   private isInitialized = false;
   private currentVcUserCount = 0;
+  private currentVcUserName = "";
   private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Fun status messages for different scenarios
+  private readonly lonelyStatuses = [
+    "is lonely",
+    "kinda bored ngl",
+    "contemplating existence",
+    "counting pixels",
+    "having a midlife crisis",
+    "playing solitaire",
+    "staring at the void",
+    "having an existential crisis",
+    "feeling like a background character",
+    "contemplating the meaning of life",
+  ];
+
+  private readonly singleUserStatuses = [
+    "{user} is alone and crying",
+    "please i cant listen to {user} anymore",
+    "someone please save me from {user}",
+    "{user} is talking to themselves again",
+    "help {user} is having a breakdown",
+    "{user} is having an existential crisis",
+    "i'm trapped with {user} send help",
+    "{user} is going insane please help",
+    "someone rescue me from {user}",
+    "{user} is having a midlife crisis",
+  ];
+
+  private readonly multipleUsersStatuses = [
+    "watching {count} nerds",
+    "stalking {count} souls",
+    "observing {count} humans",
+    "babysitting {count} chatters",
+    "watching {count} socialize",
+    "keeping tabs on {count} gamers",
+    "watching {count} conversations",
+    "keeping {count} from walls",
+    "observing {count} madness",
+    "watching {count} crises",
+  ];
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+  }
+
+  /**
+   * Get a random status message based on the current VC user count
+   */
+  private getRandomStatusMessage(): string {
+    if (this.currentVcUserCount === 0) {
+      return this.lonelyStatuses[
+        Math.floor(Math.random() * this.lonelyStatuses.length)
+      ];
+    } else if (this.currentVcUserCount === 1) {
+      const template =
+        this.singleUserStatuses[
+          Math.floor(Math.random() * this.singleUserStatuses.length)
+        ];
+      return template.replace("{user}", this.currentVcUserName || "someone");
+    } else {
+      const template =
+        this.multipleUsersStatuses[
+          Math.floor(Math.random() * this.multipleUsersStatuses.length)
+        ];
+      return template.replace("{count}", this.currentVcUserCount.toString());
+    }
   }
 
   public static getInstance(client: Client): BotStatusService {
@@ -117,10 +181,7 @@ export class BotStatusService {
     if (!this.isInitialized) return;
 
     try {
-      const activityName =
-        this.currentVcUserCount === 0
-          ? "nobody"
-          : `over ${this.currentVcUserCount} ${this.currentVcUserCount === 1 ? "nerd" : "nerds"}`;
+      const activityName = this.getRandomStatusMessage();
 
       this.client.user?.setPresence({
         status: "online",
@@ -141,11 +202,12 @@ export class BotStatusService {
   /**
    * Update the VC user count and refresh activity
    */
-  public updateVcUserCount(count: number): void {
-    if (this.currentVcUserCount !== count) {
+  public updateVcUserCount(count: number, userName?: string): void {
+    if (this.currentVcUserCount !== count || this.currentVcUserName !== userName) {
       this.currentVcUserCount = count;
+      this.currentVcUserName = userName || "";
       this.updateActivityBasedOnVcUsers();
-      logger.debug(`VC user count updated: ${count}`);
+      logger.debug(`VC user count updated: ${count}${userName ? ` (${userName})` : ""}`);
     }
   }
 
