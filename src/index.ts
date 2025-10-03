@@ -489,10 +489,49 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
     await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
 
-    // Update bot status with current VC user count
+    // Update bot status with current VC user count and username
     if (botStatusService) {
       const vcUserCount = await voiceChannelManager.getTotalVcUserCount();
-      botStatusService.updateVcUserCount(vcUserCount);
+      let vcUserName = "";
+
+      // If there's exactly one user, get their name for personalized status
+      if (vcUserCount === 1) {
+        try {
+          const guildId = await configService.getString("GUILD_ID", "");
+          if (guildId) {
+            const guild = await client.guilds.fetch(guildId);
+            const categoryName = await configService.getString(
+              "voicechannels.category.name",
+              "Voice Channels",
+            );
+            const category = guild.channels.cache.find(
+              (channel) =>
+                channel.type === ChannelType.GuildCategory &&
+                channel.name === categoryName,
+            ) as CategoryChannel;
+
+            if (category) {
+              // Find the first user in any voice channel
+              for (const channel of category.children.cache.values()) {
+                if (
+                  channel.type === ChannelType.GuildVoice &&
+                  channel.members.size > 0
+                ) {
+                  const firstMember = channel.members.first();
+                  if (firstMember) {
+                    vcUserName = firstMember.displayName;
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        } catch (error) {
+          logger.debug("Error getting VC user name:", error);
+        }
+      }
+
+      botStatusService.updateVcUserCount(vcUserCount, vcUserName);
     }
   } catch (error) {
     logger.error("Error handling voice state update:", error);

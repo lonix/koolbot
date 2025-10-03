@@ -203,11 +203,16 @@ export class BotStatusService {
    * Update the VC user count and refresh activity
    */
   public updateVcUserCount(count: number, userName?: string): void {
-    if (this.currentVcUserCount !== count || this.currentVcUserName !== userName) {
+    if (
+      this.currentVcUserCount !== count ||
+      this.currentVcUserName !== userName
+    ) {
       this.currentVcUserCount = count;
       this.currentVcUserName = userName || "";
       this.updateActivityBasedOnVcUsers();
-      logger.debug(`VC user count updated: ${count}${userName ? ` (${userName})` : ""}`);
+      logger.debug(
+        `VC user count updated: ${count}${userName ? ` (${userName})` : ""}`,
+      );
     }
   }
 
@@ -264,11 +269,13 @@ export class BotStatusService {
   public getStatusInfo(): {
     isInitialized: boolean;
     currentVcUserCount: number;
+    currentVcUserName: string;
     isMonitoring: boolean;
   } {
     return {
       isInitialized: this.isInitialized,
       currentVcUserCount: this.currentVcUserCount,
+      currentVcUserName: this.currentVcUserName,
       isMonitoring: this.statusUpdateInterval !== null,
     };
   }
