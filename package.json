@@ -29,7 +29,7 @@
     "discord.js": "^14.22.1",
     "dotenv": "^17.2.2",
     "mongoose": "^8.19.0",
-    "winston": "^3.11.0"
+    "winston": "^3.18.3"
   },
   "devDependencies": {
     "@types/dotenv": "^8.2.3",
