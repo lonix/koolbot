@@ -23,6 +23,7 @@ import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
 import { BotStatusService } from "./services/bot-status-service.js";
+import FriendshipListener from "./services/friendship-listener.js";
 
 dotenvConfig();
 
@@ -409,6 +410,16 @@ async function initializeServices(): Promise<void> {
     // Set bot to fully operational status (green) and start VC monitoring
     botStatusService.setOperationalStatus();
     botStatusService.startVcMonitoring();
+
+    // Initialize passive friendship listener (non-critical)
+    try {
+      FriendshipListener.getInstance(client).initialize();
+    } catch (flError) {
+      logger.warn(
+        "Friendship listener failed to initialize (non-critical)",
+        flError,
+      );
+    }
 
     logger.info("All services initialized successfully");
   } catch (error) {
