@@ -4,21 +4,8 @@ This document provides a comprehensive reference for all configurable settings i
 
 ## Migration Notice
 
-**Important**: The bot no longer automatically migrates old flat settings (like `ENABLE_PING`) to the new dot notation format. 
-
-If you have old settings in your database, you'll see warnings in the bot logs. To migrate them, run:
-
-```bash
-npm run migrate-config
-```
-
-# KoolBot Settings Reference
-
-This document provides a comprehensive reference for all configurable settings in KoolBot.
-
-## Migration Notice
-
-The bot no longer automatically migrates old flat settings (like `ENABLE_PING`) to the new dot notation format. If you have old settings, warnings will appear in logs. To migrate manually:
+The bot no longer automatically migrates old flat settings (like `ENABLE_PING`) to the new dot notation format.
+If you have old settings, warnings will appear in logs. To migrate manually run:
 
 ```bash
 npm run migrate-config
@@ -135,6 +122,7 @@ Retrieves the current value of a specific setting.
 ```
 
 Updates a setting. The system automatically converts:
+
 - `"true"` / `"false"` to boolean
 - Numeric strings to numbers
 - Role/channel mentions to IDs
@@ -218,6 +206,7 @@ Enable logging categories using `core.*` keys.
 ```
 
 **Available Log Types:**
+
 - `core.startup.*` – Startup/shutdown & service init
 - `core.errors.*` – Critical errors
 - `core.cleanup.*` – Data cleanup reports
@@ -229,16 +218,19 @@ Enable logging categories using `core.*` keys.
 Automatically removes old session data while preserving summaries.
 
 ### Retention
+
 - Detailed sessions: 30 days (default)
 - Monthly summaries: 6 months (default)
 - Yearly summaries: 1 year (default)
 
 ### Schedule
+
 - Default daily midnight: `0 0 * * *`
 - Customizable via cron
 - Manual run: `/dbtrunk run`
 
 ### Cleanup Report Includes
+
 - Sessions removed
 - Data aggregated
 - Execution duration
@@ -259,33 +251,39 @@ Use `npm run migrate-config` for controlled migration of legacy env-based keys.
 ## Examples
 
 Disable ping:
+
 ```bash
 /config set key:ping.enabled value:false
 /config reload
 ```
 
 Set quote cooldown:
+
 ```bash
 /config set key:quotes.cooldown value:120
 ```
 
 Configure voice channel category:
+
 ```bash
 /config set key:voicechannels.category.name value:"Gaming Channels"
 ```
 
 Set tracking admin roles:
+
 ```bash
 /config set key:voicetracking.admin_roles value:@Admin,@Moderator
 ```
 
 Enable startup logging:
+
 ```bash
 /config set key:core.startup.enabled value:true
 /config set key:core.startup.channel_id value:123456789
 ```
 
 Enable data cleanup:
+
 ```bash
 /config set key:voicetracking.cleanup.enabled value:true
 /config set key:voicetracking.cleanup.retention.detailed_sessions_days value:60
@@ -296,4 +294,3 @@ Enable data cleanup:
 - [README.md](README.md) – Overview & setup
 - [COMMANDS.md](COMMANDS.md) – Command reference
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md) – Common issues
-/config set key:voicetracking.cleanup.retention.detailed_sessions_days value:60

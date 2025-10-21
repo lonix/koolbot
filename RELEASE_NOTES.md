@@ -24,7 +24,8 @@ If upgrading from v0.5.0 and you want the new friendship listener:
 1. Set `fun.friendship` to `true` via `/config set key:fun.friendship value:true`.
 2. (Optional) Run `/config reload` to confirm configuration; listener reads live values.
 
-If you previously used the `plexprice` command, note that it has been fully removed; no action required unless you maintained forks. Reintroduce via a custom command if needed.
+If you previously used the `plexprice` command, note that it has been fully removed; no action required unless you
+maintained forks. Reintroduce via a custom command if needed.
 
 ---
 

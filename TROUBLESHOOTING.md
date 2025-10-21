@@ -5,14 +5,18 @@
 ### Critical Issues Identified
 
 #### 1. **Missing MONGODB_URI**
+
 **Problem**: The `.env` file is missing the `MONGODB_URI` variable.
-**Impact**: 
+
+**Impact**:
+
 - Voice channel tracking data cannot be stored
 - Configuration changes cannot be persisted
 - Bot may crash on startup
 - All database operations fail
 
 **Solution**: Add to your `.env` file:
+
 ```env
 MONGODB_URI=mongodb://localhost:27017/koolbot
 # Or for production:
@@ -20,25 +24,33 @@ MONGODB_URI=mongodb://username:password@host:port/database
 ```
 
 #### 2. **Configuration Key Mismatches**
+
 **Problem**: The bot is trying to read both old environment variable names and new database configuration keys.
+
 **Impact**:
+
 - Dynamic channel creation fails
 - Voice channel stats tracking breaks
 - Inconsistent behavior
 
 **Solution**: Run the configuration migration script:
+
 ```bash
 npm run migrate-config
 ```
 
 #### 3. **Voice Channel Management Failures**
+
 **Problem**: Configuration service cannot properly determine if features are enabled.
+
 **Impact**:
+
 - No dynamic channels created
 - Lobby channel doesn't work
 - Channel cleanup fails
 
 **Solution**: Ensure these settings are properly configured:
+
 ```env
 ENABLE_VC_MANAGEMENT=true
 VC_CATEGORY_NAME=Voice Channels
@@ -49,12 +61,15 @@ LOBBY_CHANNEL_NAME_OFFLINE=🔴  Lobby
 ### Step-by-Step Fix Process
 
 #### Step 1: Fix Environment Variables
+
 1. **Add missing MONGODB_URI**:
+
    ```env
    MONGODB_URI=mongodb://localhost:27017/koolbot
    ```
 
 2. **Verify all required variables**:
+
    ```env
    DISCORD_TOKEN=your_bot_token
    CLIENT_ID=your_client_id
@@ -65,6 +80,7 @@ LOBBY_CHANNEL_NAME_OFFLINE=🔴  Lobby
    ```
 
 #### Step 2: Run Configuration Migration
+
 ```bash
 # Build the project first
 npm run build
@@ -74,22 +90,27 @@ npm run migrate-config
 ```
 
 This will:
+
 - Migrate old environment variables to new database configuration
 - Set up proper configuration categories
 - Ensure backward compatibility
 
 #### Step 3: Validate Configuration
+
 ```bash
 npm run validate-config
 ```
 
 This will:
+
 - Check all required configurations
 - Identify any remaining issues
 - Provide detailed status report
 
 #### Step 4: Test the Bot
+
 1. **Start the bot**:
+
    ```bash
    npm run dev
    ```
@@ -103,22 +124,31 @@ This will:
 ### Common Error Messages and Solutions
 
 #### "MongoDB connection timeout"
+
 **Cause**: Missing or incorrect MONGODB_URI
+
 **Solution**: Add correct MONGODB_URI to .env file
 
 #### "Category not found during initialization"
+
 **Cause**: VC_CATEGORY_NAME mismatch or category doesn't exist
-**Solution**: 
+
+**Solution**:
+
 1. Check VC_CATEGORY_NAME in .env
 2. Ensure the category exists in Discord
 3. Run `npm run migrate-config`
 
 #### "Voice channel management is disabled"
+
 **Cause**: ENABLE_VC_MANAGEMENT is false or not set
+
 **Solution**: Set `ENABLE_VC_MANAGEMENT=true` in .env
 
 #### "No member found in voice state update"
+
 **Cause**: Discord.js event handling issue
+
 **Solution**: This is usually a transient issue, check if it persists
 
 ### Testing Dynamic Channel Creation
@@ -138,19 +168,24 @@ This will:
 ### Monitoring and Debugging
 
 #### Enable Debug Mode
+
 ```env
 DEBUG=true
 ```
 
 #### Check Logs
+
 The bot will now provide detailed logging for:
+
 - Configuration loading
 - Voice channel operations
 - Database operations
 - Error conditions
 
 #### Database Verification
+
 Check if data is being stored:
+
 ```bash
 # Connect to MongoDB
 mongosh mongodb://localhost:27017/koolbot
