@@ -27,13 +27,7 @@ const ConfigSchema = new Schema<IConfig>(
     category: {
       type: String,
       required: true,
-      enum: [
-        "voicechannels",
-        "voicetracking",
-        "ping",
-        "amikool",
-        "quotes",
-      ],
+      enum: ["voicechannels", "voicetracking", "ping", "amikool", "quotes"],
     },
     updatedAt: {
       type: Date,

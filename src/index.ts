@@ -420,7 +420,9 @@ async function initializeServices(): Promise<void> {
       if (friendshipEnabled) {
         FriendshipListener.getInstance(client).initialize();
       } else {
-        logger.debug("Friendship listener disabled via config (fun.friendship=false)");
+        logger.debug(
+          "Friendship listener disabled via config (fun.friendship=false)",
+        );
       }
     } catch (flError) {
       logger.warn(
