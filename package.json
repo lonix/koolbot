@@ -1,6 +1,6 @@
 {
   "name": "koolbot",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
   "description": "A modular Discord bot with voice channel management, activity tracking, quotes, stats, and fun easter eggs",
   "main": "dist/index.js",
