@@ -166,13 +166,6 @@ const configMigrations: ConfigMigration[] = [
     defaultValue: "60",
   },
   // Fun / Easter eggs
-  {
-    oldKey: "ENABLE_FRIENDSHIP",
-    newKey: "fun.friendship",
-    category: "fun",
-    description: "Enable passive friendship listener responses",
-    defaultValue: false,
-  },
 ];
 
 export class StartupMigrator {
