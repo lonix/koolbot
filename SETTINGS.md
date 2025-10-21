@@ -104,13 +104,8 @@ All settings use a hierarchical dot notation structure for better organization a
 ## Configuration Commands
 
 ### List Settings
-```
-
 ```bash
 /config list
-```
-```
-
 Shows all current configuration settings organized by category.
 
 ### Get Setting Value
