@@ -99,7 +99,6 @@ function getCategoryDisplayName(category: string): string {
     voicetracking: "Voice Tracking",
     ping: "Ping",
     amikool: "Amikool",
-    plexprice: "PLEX Price",
     quotes: "Quotes",
     core: "Core",
     individual: "Individual Features",
@@ -176,7 +175,6 @@ function getSettingDescription(key: string): string {
     "ping.enabled": "Enable/disable ping command",
     "amikool.enabled": "Enable/disable amikool command",
     "amikool.role.name": "Role name required to use amikool command",
-    "plexprice.enabled": "Enable/disable PLEX price checker",
 
     // Quote System
     "quotes.enabled": "Enable/disable quote system",

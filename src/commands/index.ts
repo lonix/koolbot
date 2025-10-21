@@ -2,7 +2,6 @@ import { ChatInputCommandInteraction } from "discord.js";
 import logger from "../utils/logger.js";
 import { execute as ping } from "./ping.js";
 import { execute as amikool } from "./amikool.js";
-import { execute as plexprice } from "./plexprice.js";
 import { execute as vctop } from "./vctop.js";
 import { execute as vcstats } from "./vcstats.js";
 import { execute as seen } from "./seen.js";
@@ -30,11 +29,6 @@ const commands: Record<
   amikool: async (interaction) => {
     if (await configService.getBoolean("amikool.enabled", false)) {
       await amikool(interaction);
-    }
-  },
-  plexprice: async (interaction) => {
-    if (await configService.getBoolean("plexprice.enabled", false)) {
-      await plexprice(interaction);
     }
   },
   vctop: async (interaction) => {

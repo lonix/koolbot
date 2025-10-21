@@ -128,13 +128,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Name of the cool role for amikool command",
     defaultValue: "HR",
   },
-  {
-    oldKey: "ENABLE_PLEX_PRICE",
-    newKey: "plexprice.enabled",
-    category: "plexprice",
-    description: "Enable/disable PLEX price checker",
-    defaultValue: true,
-  },
 
   // Quote System
   {
@@ -297,7 +290,6 @@ export class StartupMigrator {
       "ping.enabled": true,
       "amikool.enabled": true,
       "amikool.role.name": "HR",
-      "plexprice.enabled": true,
       "quotes.enabled": true,
       "quotes.add_roles": "@HR",
       "quotes.delete_roles": "None",

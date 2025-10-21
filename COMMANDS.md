@@ -25,11 +25,6 @@ These commands are available to all users in the server.
 **Requirements**: Bot must have a role configured in `amikool.role.name`  
 **Response**: Confirms if the user has the required role
 
-### `/plexprice`
-**Description**: Check current EVE Online PLEX prices  
-**Usage**: `/plexprice`  
-**Response**: Current PLEX prices from EVE Market
-
 ### `/vctop`
 **Description**: View voice channel leaderboards  
 **Usage**: `/vctop [timeframe]`  

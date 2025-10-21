@@ -20,13 +20,6 @@ const configMigrations: ConfigMigration[] = [
     defaultValue: "true",
   },
   {
-    oldKey: "VC_CATEGORY_NAME",
-    newKey: "voicechannels.category.name",
-    category: "voicechannels",
-    description: "Name of the category for voice channels",
-    defaultValue: "Voice Channels",
-  },
-  {
     oldKey: "LOBBY_CHANNEL_NAME",
     newKey: "voicechannels.lobby.name",
     category: "voicechannels",

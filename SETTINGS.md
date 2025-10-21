@@ -24,7 +24,6 @@ All settings use a hierarchical dot notation structure for better organization a
 |---------|---------|-------------|
 | `ping.enabled` | `false` | Enable/disable the ping command |
 | `amikool.enabled` | `false` | Enable/disable the amikool command |
-| `plexprice.enabled` | `false` | Enable/disable the plexprice command |
 | `quotes.enabled` | `false` | Enable/disable the quote system |
 
 ### Amikool Settings

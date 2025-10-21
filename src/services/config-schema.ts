@@ -27,7 +27,6 @@ export interface ConfigSchema {
   "ping.enabled": boolean;
   "amikool.enabled": boolean;
   "amikool.role.name": string; // Role name required for amikool
-  "plexprice.enabled": boolean;
 
   // Quote System Settings
   "quotes.enabled": boolean;
@@ -78,7 +77,6 @@ export const defaultConfig: ConfigSchema = {
   "ping.enabled": false,
   "amikool.enabled": false,
   "amikool.role.name": "",
-  "plexprice.enabled": false,
 
   // Quote System Defaults
   "quotes.enabled": false,

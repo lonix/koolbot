@@ -32,7 +32,6 @@ const ConfigSchema = new Schema<IConfig>(
         "voicetracking",
         "ping",
         "amikool",
-        "plexprice",
         "quotes",
       ],
     },
