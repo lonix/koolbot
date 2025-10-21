@@ -26,6 +26,13 @@ All settings use a hierarchical dot notation structure for better organization a
 | `amikool.enabled` | `false` | Enable/disable the amikool command |
 | `quotes.enabled` | `false` | Enable/disable the quote system |
 
+
+### Fun / Easter Eggs
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `fun.friendship` | `false` | Enable passive friendship listener responses to "best ship" / "worst ship" queries |
+
 ### Amikool Settings
 
 | Setting | Default | Description |
@@ -97,27 +104,40 @@ All settings use a hierarchical dot notation structure for better organization a
 ## Configuration Commands
 
 ### List Settings
+```
+
 ```bash
 /config list
 ```
+```
+
 Shows all current configuration settings organized by category.
 
 ### Get Setting Value
+```
+
 
 ```bash
 /config get key:ping.enabled
 ```
+ 
 Retrieves the current value of a specific setting.
 
 ### Set Setting Value
+```
+
 
 ```bash
 /config set key:ping.enabled value:false
+```
+
 ```
 Updates a setting to a new value. The system automatically converts:
 - `"true"`/`"false"` strings to boolean values
 - Numeric strings to numbers
 - Role/channel mentions to IDs
+
+```
 
 ### Reset Setting
 
@@ -143,19 +163,27 @@ Import configuration from or export configuration to YAML files for backup and m
 
 ## Environment Variables (.env)
 
+```
+
 The following settings are **critical** and must be configured in the `.env` file:
 
 ```env
 # Critical Bot Configuration
 DISCORD_TOKEN=your_bot_token_here
+```
+
 CLIENT_ID=your_client_id_here
 MONGODB_URI=mongodb://localhost:27017/koolbot
 DEBUG=false
 NODE_ENV=production
 
+```
+
 # Note: GUILD_ID is only needed temporarily to clean up any existing guild commands
 # Can be removed after initial cleanup is complete
 GUILD_ID=your_guild_id_here
+```
+
 ```
 
 ## Discord Logging Configuration
@@ -163,6 +191,8 @@ GUILD_ID=your_guild_id_here
 The bot can log important events to Discord channels using the `core.*` configuration structure:
 
 ### Startup/Shutdown Logging
+```
+
 ```bash
 # Enable startup/shutdown logging to #bot-status channel
 /config set key:core.startup.enabled value:true

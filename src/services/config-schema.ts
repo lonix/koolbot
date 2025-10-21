@@ -46,6 +46,9 @@ export interface ConfigSchema {
   "core.config.channel_id": string;
   "core.cron.enabled": boolean;
   "core.cron.channel_id": string;
+
+  // Fun / Easter Eggs
+  "fun.friendship": boolean;
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -96,4 +99,6 @@ export const defaultConfig: ConfigSchema = {
   "core.config.channel_id": "",
   "core.cron.enabled": false,
   "core.cron.channel_id": "",
+  // Fun defaults
+  "fun.friendship": false,
 };

@@ -411,9 +411,17 @@ async function initializeServices(): Promise<void> {
     botStatusService.setOperationalStatus();
     botStatusService.startVcMonitoring();
 
-    // Initialize passive friendship listener (non-critical)
+    // Initialize passive friendship listener if enabled
     try {
-      FriendshipListener.getInstance(client).initialize();
+      const friendshipEnabled = await configService.getBoolean(
+        "fun.friendship",
+        false,
+      );
+      if (friendshipEnabled) {
+        FriendshipListener.getInstance(client).initialize();
+      } else {
+        logger.debug("Friendship listener disabled via config (fun.friendship=false)");
+      }
     } catch (flError) {
       logger.warn(
         "Friendship listener failed to initialize (non-critical)",

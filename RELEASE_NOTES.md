@@ -118,3 +118,28 @@
 ---
 
 **🎉 KoolBot v0.5.0 represents a major step forward in functionality, reliability, and user experience!**
+
+---
+
+## Unreleased
+
+### Added
+
+- New configuration key `fun.friendship` (default: false) to enable passive friendship listener responses to "best ship" / "worst ship" queries.
+
+### Removed
+
+- Deprecated `plexprice` command removed from the codebase and documentation.
+
+### Changed
+
+- Friendship listener initialization is now gated by configuration instead of always active.
+
+### Migration Notes
+
+If upgrading from v0.5.0 and you want the new friendship listener:
+
+1. Set `fun.friendship` to `true` via `/config set key:fun.friendship value:true`.
+2. Run `/config reload` (not strictly required for listener, but recommended after config changes).
+
+If you previously used the `plexprice` command, note that it has been fully removed; no action required unless you maintained custom forks. Reintroduce via a custom command if needed.

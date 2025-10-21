@@ -165,6 +165,14 @@ const configMigrations: ConfigMigration[] = [
     description: "Cooldown in seconds between quote additions",
     defaultValue: "60",
   },
+  // Fun / Easter eggs
+  {
+    oldKey: "ENABLE_FRIENDSHIP",
+    newKey: "fun.friendship",
+    category: "fun",
+    description: "Enable passive friendship listener responses",
+    defaultValue: false,
+  },
 ];
 
 export class StartupMigrator {
@@ -295,6 +303,7 @@ export class StartupMigrator {
       "quotes.delete_roles": "None",
       "quotes.max_length": 1000,
       "quotes.cooldown": 60,
+      "fun.friendship": false,
     };
 
     return defaultValues[key] === value;
