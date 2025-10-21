@@ -122,13 +122,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Role name required to use amikool command",
     defaultValue: "",
   },
-  {
-    oldKey: "ENABLE_PLEX_PRICE",
-    newKey: "plexprice.enabled",
-    category: "plexprice",
-    description: "Enable/disable PLEX price checker",
-    defaultValue: "true",
-  },
 
   // Quote System (if they exist in old format)
   {

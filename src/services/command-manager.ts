@@ -1,4 +1,11 @@
-import { REST, Routes, Client, Collection, SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
+import {
+  REST,
+  Routes,
+  Client,
+  Collection,
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+} from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
@@ -23,7 +30,7 @@ export class CommandManager {
     this.configService = ConfigService.getInstance();
     this.commands = new Collection();
 
-  // Configuration reload callback intentionally omitted (manual /config reload only)
+    // Configuration reload callback intentionally omitted (manual /config reload only)
   }
 
   public static getInstance(client: Client): CommandManager {
@@ -55,11 +62,6 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        {
-          name: "plexprice",
-          configKey: "plexprice.enabled",
-          file: "plexprice",
-        },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {
           name: "vcstats",
@@ -155,14 +157,18 @@ export class CommandManager {
           logger.info(`✅ ${operationName} succeeded on attempt ${attempt}`);
         }
         return result;
-        } catch (error: unknown) {
-          const err = error as { code?: number; message?: string; retry_after?: number };
-          const isRateLimit =
-            err.code === 429 || err.message?.includes("rate limit");
-          const isTimeout = err.message?.includes("timeout");
+      } catch (error: unknown) {
+        const err = error as {
+          code?: number;
+          message?: string;
+          retry_after?: number;
+        };
+        const isRateLimit =
+          err.code === 429 || err.message?.includes("rate limit");
+        const isTimeout = err.message?.includes("timeout");
 
         if (isRateLimit) {
-             const retryAfter = err.retry_after || 5;
+          const retryAfter = err.retry_after || 5;
           logger.warn(
             `⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`,
           );
@@ -177,8 +183,8 @@ export class CommandManager {
             await new Promise((resolve) => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
           }
         } else {
-             logger.error(`❌ Discord API error for ${operationName}:`, err);
-             throw err;
+          logger.error(`❌ Discord API error for ${operationName}:`, err);
+          throw err;
         }
 
         if (attempt === maxRetries) {
@@ -275,11 +281,6 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        {
-          name: "plexprice",
-          configKey: "plexprice.enabled",
-          file: "plexprice",
-        },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {
           name: "vcstats",

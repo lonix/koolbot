@@ -2,7 +2,7 @@
   "name": "koolbot",
   "version": "0.5.2",
   "type": "module",
-  "description": "A Discord bot with various features including PLEX price checking and role-based commands",
+  "description": "A modular Discord bot with voice channel management, activity tracking, quotes, stats, and fun easter eggs",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc --listFiles --listEmittedFiles",

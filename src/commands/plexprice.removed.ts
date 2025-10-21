@@ -11,7 +11,9 @@ interface MarketOrder {
   price: number;
 }
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     // Try the primary API first
     let plexData;
