@@ -59,12 +59,19 @@ export class BotStatusService {
   private getRandomStatusMessage(): string {
     // Simplified: only differentiate between 0, 1, and many users; no name interpolation
     if (this.currentVcUserCount <= 0) {
-      return this.lonelyStatuses[Math.floor(Math.random() * this.lonelyStatuses.length)];
+      return this.lonelyStatuses[
+        Math.floor(Math.random() * this.lonelyStatuses.length)
+      ];
     }
     if (this.currentVcUserCount === 1) {
-      return this.singleUserStatuses[Math.floor(Math.random() * this.singleUserStatuses.length)];
+      return this.singleUserStatuses[
+        Math.floor(Math.random() * this.singleUserStatuses.length)
+      ];
     }
-    const template = this.multipleUsersStatuses[Math.floor(Math.random() * this.multipleUsersStatuses.length)];
+    const template =
+      this.multipleUsersStatuses[
+        Math.floor(Math.random() * this.multipleUsersStatuses.length)
+      ];
     return template.replace("{count}", this.currentVcUserCount.toString());
   }
 
