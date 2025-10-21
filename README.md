@@ -1,6 +1,8 @@
 # KoolBot
 
-A feature-rich Discord bot built with TypeScript, featuring voice channel management, tracking, utility commands, and automated data cleanup. Designed for seamless deployment using Docker Compose.
+A feature-rich Discord bot built with TypeScript, featuring voice channel management,
+tracking, utility commands, and automated data cleanup. Designed for seamless deployment
+using Docker Compose.
 
 ![Discord.js](https://img.shields.io/badge/Discord.js-14.22.1-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9.2-blue)
@@ -12,11 +14,13 @@ A feature-rich Discord bot built with TypeScript, featuring voice channel manage
 The recommended way to run KoolBot is using Docker Compose, which handles all dependencies and configuration automatically.
 
 ### Prerequisites
+
 - Docker and Docker Compose installed
 - Discord Bot Token
 - Discord Application ID and Guild ID
 
 ### 1. Clone and Configure
+
 ```bash
 git clone <repository-url>
 cd koolbot
@@ -24,6 +28,7 @@ cp .env.example .env
 ```
 
 ### 2. Edit Environment Variables
+
 ```bash
 # Edit .env file with your Discord bot credentials
 DISCORD_TOKEN=your_bot_token_here
@@ -33,6 +38,7 @@ MONGODB_URI=mongodb://mongodb:27017/koolbot
 ```
 
 ### 3. Start the Bot
+
 ```bash
 # Production deployment
 docker-compose up -d
@@ -47,7 +53,7 @@ That's it! Your bot is now running with MongoDB automatically configured and com
 
 KoolBot is built with a modular, service-oriented architecture:
 
-```
+```text
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Discord.js    │    │   TypeScript     │    │     MongoDB     │
 │   Bot Client    │◄──►│   Core Services  │◄──►│   Data Store    │
@@ -64,6 +70,7 @@ KoolBot is built with a modular, service-oriented architecture:
 ## ✨ Features
 
 ### 🎙️ Voice Channel Management
+
 - **Dynamic Channel Creation**: Users create voice channels from lobby
 - **Automatic Ownership Transfer**: Seamless channel handoff when owners leave
 - **Smart Cleanup**: Automatic channel removal and cleanup
@@ -71,6 +78,7 @@ KoolBot is built with a modular, service-oriented architecture:
 - **Lobby System**: Dynamic lobby that renames on bot startup/shutdown
 
 ### 📊 Voice Channel Tracking
+
 - **Real-time Monitoring**: Track user activity in voice channels
 - **Statistics Generation**: Weekly/monthly/all-time leaderboards
 - **Session Recording**: Detailed session tracking with timestamps
@@ -78,6 +86,7 @@ KoolBot is built with a modular, service-oriented architecture:
 - **Data Cleanup**: Automatic cleanup with configurable retention periods
 
 ### 🧹 Data Cleanup System
+
 - **Automatic Maintenance**: Configurable retention periods
 - **Data Aggregation**: Preserve statistics while removing old sessions
 - **Notification System**: Report cleanup activities to Discord channels
@@ -85,12 +94,13 @@ KoolBot is built with a modular, service-oriented architecture:
 - **Flexible Scheduling**: Cron-based cleanup scheduling
 
 ### 🛠️ Utility Commands
+
 - **Role Verification**: Role-based command access control
-- **EVE Online Integration**: PLEX price checking
 - **Quote Management**: Add, view, and manage quotes
 - **Bot Statistics**: Monitor bot performance and usage
 
 ### ⚙️ Configuration Management
+
 - **Dynamic Settings**: Runtime configuration updates
 - **Hierarchical Organization**: Dot-notation configuration keys
 - **Validation**: Schema-based configuration validation
@@ -98,6 +108,7 @@ KoolBot is built with a modular, service-oriented architecture:
 - **Import/Export**: YAML-based configuration backup and restore
 
 ### 📝 Discord Logging
+
 - **Startup/Shutdown Logging**: Track bot lifecycle events
 - **Error Logging**: Monitor critical issues and problems
 - **Cleanup Logging**: Track data maintenance activities
@@ -109,11 +120,11 @@ KoolBot is built with a modular, service-oriented architecture:
 For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)**.
 
 ### User Commands
+
 | Command | Description | Permission |
 |---------|-------------|------------|
 | `/ping` | Basic connectivity test | All users |
 | `/amikool` | Role-based verification | All users |
-| `/plexprice` | EVE Online PLEX prices | All users |
 | `/vctop` | Voice channel leaderboards | All users |
 | `/vcstats` | Personal voice statistics | All users |
 | `/seen` | Last seen information | All users |
@@ -121,6 +132,7 @@ For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)*
 | `/quote` | Quote management | All users |
 
 ### Admin Commands
+
 | Command | Description | Permission |
 |---------|-------------|------------|
 | `/config` | Configuration management | Admin |
@@ -134,6 +146,7 @@ For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)*
 ## 🐳 Docker Deployment
 
 ### Production Deployment
+
 ```yaml
 # docker-compose.yml
 services:
@@ -163,6 +176,7 @@ volumes:
 ```
 
 ### Development Deployment
+
 ```yaml
 # docker-compose.dev.yml
 services:
@@ -205,6 +219,7 @@ networks:
 ```
 
 ### Docker Commands
+
 ```bash
 # Start services
 docker-compose up -d
@@ -227,6 +242,7 @@ docker-compose exec bot sh
 For a complete configuration reference, see **[SETTINGS.md](SETTINGS.md)**.
 
 ### Environment Variables (.env)
+
 ```bash
 # Critical Bot Configuration (Required)
 DISCORD_TOKEN=your_bot_token_here
@@ -238,6 +254,7 @@ NODE_ENV=production
 ```
 
 ### Discord Logging Configuration
+
 The bot can log important events to Discord channels using the `core.*` configuration structure:
 
 ```bash
@@ -263,6 +280,7 @@ The bot can log important events to Discord channels using the `core.*` configur
 ```
 
 **Available Log Types:**
+
 - **`core.startup.*`** - Bot startup/shutdown, service initialization, Discord registration
 - **`core.errors.*`** - Critical errors and problems that need admin attention
 - **`core.cleanup.*`** - Voice channel cleanup results and status
@@ -270,6 +288,7 @@ The bot can log important events to Discord channels using the `core.*` configur
 - **`core.cron.*`** - Scheduled task execution results
 
 ### Database Configuration
+
 All bot settings are stored in MongoDB and can be configured using the `/config` command:
 
 ```bash
@@ -290,6 +309,7 @@ All bot settings are stored in MongoDB and can be configured using the `/config`
 ```
 
 ### Configuration Categories
+
 - **Command Enablement**: Control which commands are available
 - **Voice Channel Settings**: Lobby configuration and channel management
 - **Voice Tracking**: Tracking features and exclusions
@@ -301,11 +321,13 @@ All bot settings are stored in MongoDB and can be configured using the `/config`
 ## 🔧 Development
 
 ### Prerequisites
+
 - Node.js 22+
 - Docker and Docker Compose
 - MongoDB (handled by Docker)
 
 ### Local Development Setup
+
 ```bash
 # Install dependencies
 npm install
@@ -321,6 +343,7 @@ npm run check
 ```
 
 ### Available Scripts
+
 ```bash
 npm run build          # TypeScript compilation
 npm run start          # Start production bot
@@ -331,6 +354,7 @@ npm run check          # Full build, lint, and format check
 ```
 
 ### Code Quality
+
 - **TypeScript**: Full type safety and modern JavaScript features
 - **ESLint**: Code quality and style enforcement
 - **Prettier**: Consistent code formatting
@@ -340,6 +364,7 @@ npm run check          # Full build, lint, and format check
 ## 📊 Database Schema
 
 ### Voice Channel Tracking
+
 ```typescript
 interface IVoiceChannelTracking {
   userId: string;
@@ -373,6 +398,7 @@ interface IVoiceChannelTracking {
 ```
 
 ### Configuration Storage
+
 ```typescript
 interface IConfig {
   key: string;
@@ -387,18 +413,21 @@ interface IConfig {
 ## 🚨 Troubleshooting
 
 ### Common Issues
+
 1. **Bot not responding**: Check Discord permissions and token validity
 2. **Database connection errors**: Verify MongoDB container is running
 3. **Command registration failures**: Ensure bot has proper Discord permissions
 4. **Voice tracking issues**: Check channel permissions and bot voice state
 
 ### Debug Mode
+
 ```bash
 # Enable debug logging
 DEBUG=true
 ```
 
 ### Logs
+
 ```bash
 # View bot logs
 docker-compose logs -f bot
@@ -408,6 +437,7 @@ docker-compose logs -f mongodb
 ```
 
 ### Validation Scripts
+
 ```bash
 # Validate configuration
 docker-compose exec bot npm run validate-config
@@ -427,6 +457,7 @@ docker-compose exec bot npm run migrate-config
 ## 🤝 Contributing
 
 ### Development Workflow
+
 1. Fork the repository
 2. Create a feature branch
 3. Make your changes
@@ -435,6 +466,7 @@ docker-compose exec bot npm run migrate-config
 6. Submit a pull request
 
 ### Code Standards
+
 - Follow existing TypeScript patterns
 - Add proper error handling
 - Include comprehensive documentation

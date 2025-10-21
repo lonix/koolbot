@@ -20,13 +20,6 @@ const configMigrations: ConfigMigration[] = [
     defaultValue: "true",
   },
   {
-    oldKey: "VC_CATEGORY_NAME",
-    newKey: "voicechannels.category.name",
-    category: "voicechannels",
-    description: "Name of the category for voice channels",
-    defaultValue: "Voice Channels",
-  },
-  {
     oldKey: "LOBBY_CHANNEL_NAME",
     newKey: "voicechannels.lobby.name",
     category: "voicechannels",
@@ -128,13 +121,6 @@ const configMigrations: ConfigMigration[] = [
     category: "amikool",
     description: "Role name required to use amikool command",
     defaultValue: "",
-  },
-  {
-    oldKey: "ENABLE_PLEX_PRICE",
-    newKey: "plexprice.enabled",
-    category: "plexprice",
-    description: "Enable/disable PLEX price checker",
-    defaultValue: "true",
   },
 
   // Quote System (if they exist in old format)

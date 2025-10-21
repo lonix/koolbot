@@ -6,7 +6,14 @@ export const data = new SlashCommandBuilder()
   .setName("plexprice")
   .setDescription("Get the current PLEX price in ISK");
 
-export async function execute(interaction: ChatInputCommandInteraction) {
+interface MarketOrder {
+  is_buy_order: boolean;
+  price: number;
+}
+
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     // Try the primary API first
     let plexData;
@@ -30,13 +37,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
         );
 
         // Process ESI data format
-        const orders = response.data;
+        const orders: MarketOrder[] = response.data as MarketOrder[];
         const buyOrders = orders
-          .filter((order: any) => order.is_buy_order === false)
-          .sort((a: any, b: any) => a.price - b.price);
+          .filter((order) => order.is_buy_order === false)
+          .sort((a, b) => a.price - b.price);
         const sellOrders = orders
-          .filter((order: any) => order.is_buy_order === true)
-          .sort((a: any, b: any) => b.price - a.price);
+          .filter((order) => order.is_buy_order === true)
+          .sort((a, b) => b.price - a.price);
 
         if (buyOrders.length > 0 && sellOrders.length > 0) {
           const buyPrice = Math.floor(buyOrders[0].price).toLocaleString();

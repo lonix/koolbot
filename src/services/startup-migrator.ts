@@ -128,13 +128,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Name of the cool role for amikool command",
     defaultValue: "HR",
   },
-  {
-    oldKey: "ENABLE_PLEX_PRICE",
-    newKey: "plexprice.enabled",
-    category: "plexprice",
-    description: "Enable/disable PLEX price checker",
-    defaultValue: true,
-  },
 
   // Quote System
   {
@@ -172,6 +165,7 @@ const configMigrations: ConfigMigration[] = [
     description: "Cooldown in seconds between quote additions",
     defaultValue: "60",
   },
+  // Fun / Easter eggs
 ];
 
 export class StartupMigrator {
@@ -297,12 +291,12 @@ export class StartupMigrator {
       "ping.enabled": true,
       "amikool.enabled": true,
       "amikool.role.name": "HR",
-      "plexprice.enabled": true,
       "quotes.enabled": true,
       "quotes.add_roles": "@HR",
       "quotes.delete_roles": "None",
       "quotes.max_length": 1000,
       "quotes.cooldown": 60,
+      "fun.friendship": false,
     };
 
     return defaultValues[key] === value;

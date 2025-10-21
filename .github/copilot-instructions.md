@@ -1,47 +1,108 @@
 # KoolBot: AI Coding Agent Instructions
 
-## Project Overview
-KoolBot is a modular, service-oriented Discord bot written in TypeScript. It features advanced voice channel management, user activity tracking, utility commands, and automated data cleanup. The bot is designed for seamless deployment with Docker Compose and uses MongoDB for persistent storage.
+Concise, codebase-specific guidance for automating changes. Focus on existing patterns only.
 
-## Key Architectural Patterns
-- **Service-Oriented Structure**: Core logic is organized into services under `src/services/` (e.g., `voice-channel-manager.ts`, `config-service.ts`). Each service encapsulates a major feature or responsibility.
-- **Command System**: All Discord commands are implemented as individual files in `src/commands/`. Each file exports a command definition and handler. Commands are auto-registered at startup.
-- **Configuration Management**: Runtime settings are managed via the `/config` command and stored in MongoDB. The schema and logic are in `src/services/config-service.ts` and `src/services/config-schema.ts`.
-- **Voice Channel Tracking**: User activity and statistics are tracked and aggregated in MongoDB. See `src/models/voice-channel-tracking.ts` and related services.
-- **Logging**: Bot lifecycle, errors, and scheduled tasks are logged to Discord channels, configurable via the `core.*` config keys.
+## Architecture (Mental Model)
 
-## Developer Workflows
-- **Build**: `npm run build` (TypeScript compilation)
-- **Dev Server**: `npm run dev` (nodemon, hot reload)
-- **Quality Check**: `npm run check` (build, lint, format)
-- **Lint/Format**: `npm run lint`, `npm run format`
-- **Docker**: Use `docker-compose.yml` for production, `docker-compose.dev.yml` for development. MongoDB is included.
-- **Config Validation**: `npm run validate-config` (or via Docker: `docker-compose exec bot npm run validate-config`)
-- **Settings Migration**: `npm run migrate-config`
+Entry point: `src/index.ts` wires services, validates env, registers commands, starts voice subsystems.
+Services under `src/services/` each own a domain (config, commands, voice mgmt, tracking, announcements,
+truncation, logging, monitoring).
 
-## Project-Specific Conventions
-- **Commands**: One file per command in `src/commands/`. Use clear, descriptive names. Register new commands in `src/commands/index.ts`.
-- **Config Keys**: Use dot-notation (e.g., `core.startup.enabled`). All config changes should be validated and, if needed, migrated.
-- **Logging**: Use the logger in `src/utils/logger.ts`. For Discord channel logging, follow the `core.*` config structure.
-- **Database**: All persistent data is in MongoDB. Use models in `src/models/` and access via services in `src/services/`.
-- **Testing/Validation**: Use scripts in `src/scripts/` for config and data validation.
+Data flow:
 
-## Integration Points
-- **Discord.js**: Main bot client in `src/index.ts`.
-- **MongoDB**: Connection and schema in `src/utils/database.ts` and `src/models/`.
-- **Docker**: All deployment is containerized. See `docker-compose.yml` and `Dockerfile`.
+1. Discord events -> `Client` handlers in `src/index.ts` -> delegate to specialized services.
+2. Config reads always go through `ConfigService` which caches values and merges env + Mongo (`models/config.ts`).
+3. Commands conditionally register via flags in `CommandManager.loadCommandsDynamically()` (`voicechannels.enabled`,
+   `quotes.enabled`, etc.).
+4. Voice presence events -> `VoiceChannelManager` (lifecycle & cleanup) + `VoiceChannelTracker` (session/stat persistence)
+  -> Mongo (`voice-channel-tracking.ts`).
+5. Periodic tasks (cleanup, health checks, truncation) run on timers owned by their service.
 
-## References
-- **Commands**: `COMMANDS.md`
-- **Settings**: `SETTINGS.md`
-- **Troubleshooting**: `TROUBLESHOOTING.md`
-- **Release Notes**: `RELEASE_NOTES.md`
+## Command Pattern
 
-## Examples
-- Add a new command: create `src/commands/mycommand.ts`, export handler, and add to `src/commands/index.ts`.
-- Add a config key: update schema in `src/services/config-schema.ts`, add logic in `config-service.ts`, document in `SETTINGS.md`.
-- Log to Discord: update `core.*` config keys and use logger utilities.
+Each file in `src/commands/` exports `data: SlashCommandBuilder` + `execute(interaction)`.
+Example: `src/commands/ping.ts`.
+Registration is automatic; DO NOT manually push to client collections outside `CommandManager`.
+To add a command:
+
+1. Create `src/commands/mycmd.ts` exporting `data` + `execute`.
+2. Add `{ name, configKey, file }` entry to `commandConfigs` in `CommandManager`.
+3. Add schema key `mycmd.enabled` (default) in `config-schema.ts`.
+4. Document in `COMMANDS.md` if user-facing.
+
+## Configuration Conventions
+
+Keys use dot notation grouped by feature: `voicechannels.*`, `voicetracking.*`, `core.*`, `quotes.*`.
+Always access via `ConfigService.getBoolean|getString|getNumber` (never direct env mid-runtime).
+Add new keys to `config-schema.ts`; if renaming, keep backward compat fallbacks (see `voice-channel-manager.ts`).
+
+Reload: `/config reload` calls `ConfigService.triggerReload()` (cache clear + callbacks).
+Do not reintroduce implicit reload logic in `CommandManager` (intentionally removed).
+
+## Logging
+
+Use `utils/logger.ts`. Discord channel logging flows via `DiscordLogger` governed by `core.*` keys
+(`core.errors.enabled` + channel id, etc.). To add a category, mirror `core.startup.*` naming style.
+
+## Resilience Patterns
+
+Discord API calls wrap retry + timeout via `CommandManager.makeDiscordApiCall` (race + backoff).
+Reuse it or copy pattern for new bulk REST operations.
+Periodic jobs (cleanup 5m / health 15m) follow: store interval handle, log errors, never crash.
+
+## MongoDB Usage
+
+Models live in `src/models/`. Batch load config (`Config.find({})`) at init; rely on `ConfigService` cache.
+Voice tracking: append session objects (`voice-channel-tracking.ts` shape). Keep aggregation additive.
+
+## Adding Features Safely (Checklist)
+
+1. Define config keys in `config-schema.ts` (dot notation + defaults).
+2. New service: singleton `getInstance(client)` pattern.
+3. Gate activation via `ConfigService.getBoolean` (copy voice manager initialize pattern).
+4. Register reload callback if runtime adjust needed post `/config reload`.
+5. Log lifecycle via `DiscordLogger` if user-visible.
+
+## Docker & Scripts
+
+Dev: `npm run dev` | Build: `npm run build` | Quality: `npm run check`.
+Docker compose files: prod `docker-compose.yml`, dev `docker-compose.dev.yml` (bind mounts + hot reload).
+Validation & migration: `npm run validate-config`, `npm run migrate-config`.
+Global command cleanup auto via `cleanupGlobalCommands()`; do not duplicate.
+
+## Common Pitfalls
+
+1. Direct env access mid-runtime (always use `ConfigService`).
+2. Missing backward compat for renamed config keys.
+3. Command added without enablement key in schema + `commandConfigs`.
+4. New REST call without timeout/retry pattern.
+
+## Reference Files
+
+Entry: `src/index.ts` | Commands: `services/command-manager.ts` | Config: `services/config-service.ts`,
+`services/config-schema.ts` | Voice lifecycle: `services/voice-channel-manager.ts` | Tracking:
+`services/voice-channel-tracker.ts` | Logging: `services/discord-logger.ts` | Models:
+`models/config.ts`, `models/voice-channel-tracking.ts`.
+
+## Quick Example: New Toggleable Command
+
+```ts
+// src/commands/echo.ts
+export const data = new SlashCommandBuilder()
+  .setName('echo')
+  .setDescription('Echo text')
+  .addStringOption(o => o
+    .setName('text')
+    .setDescription('Text')
+    .setRequired(true));
+
+export async function execute(interaction: ChatInputCommandInteraction) {
+  await interaction.reply(interaction.options.getString('text', true));
+}
+```
+
+Add to `commandConfigs`: `{ name: 'echo', configKey: 'echo.enabled', file: 'echo' }` then add schema key
+`echo.enabled` default `true`.
 
 ---
-
-If any conventions or workflows are unclear, consult the referenced markdown files or ask for clarification.
+If any section is unclear or missing (e.g., voice tracking internals, migration patterns), ask for refinement and specify which area to deepen.

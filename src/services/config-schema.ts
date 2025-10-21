@@ -27,7 +27,6 @@ export interface ConfigSchema {
   "ping.enabled": boolean;
   "amikool.enabled": boolean;
   "amikool.role.name": string; // Role name required for amikool
-  "plexprice.enabled": boolean;
 
   // Quote System Settings
   "quotes.enabled": boolean;
@@ -47,6 +46,9 @@ export interface ConfigSchema {
   "core.config.channel_id": string;
   "core.cron.enabled": boolean;
   "core.cron.channel_id": string;
+
+  // Fun / Easter Eggs
+  "fun.friendship": boolean;
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -78,7 +80,6 @@ export const defaultConfig: ConfigSchema = {
   "ping.enabled": false,
   "amikool.enabled": false,
   "amikool.role.name": "",
-  "plexprice.enabled": false,
 
   // Quote System Defaults
   "quotes.enabled": false,
@@ -98,4 +99,6 @@ export const defaultConfig: ConfigSchema = {
   "core.config.channel_id": "",
   "core.cron.enabled": false,
   "core.cron.channel_id": "",
+  // Fun defaults
+  "fun.friendship": false,
 };

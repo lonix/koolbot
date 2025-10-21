@@ -1,4 +1,11 @@
-import { REST, Routes, Client, Collection } from "discord.js";
+import {
+  REST,
+  Routes,
+  Client,
+  Collection,
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+} from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
@@ -7,31 +14,23 @@ import { MonitoringService } from "./monitoring-service.js";
 dotenvConfig();
 const isDebug = process.env.DEBUG === "true";
 
+interface CommandModule {
+  data: SlashCommandBuilder;
+  execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
+}
+
 export class CommandManager {
   private static instance: CommandManager;
   private client: Client;
   private configService: ConfigService;
-  private commands: Collection<string, any>;
+  private commands: Collection<string, CommandModule>;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
     this.commands = new Collection();
 
-    // No automatic reloads - users must manually trigger via /config reload
-    // this.configService.registerReloadCallback(async () => {
-    //   try {
-    //     logger.info("🔄 Configuration change detected, reloading commands...");
-    //     await this.registerCommands();
-    //     await this.populateClientCommands();
-    //     logger.info("✅ Commands reloaded after configuration change");
-    //   } catch (error) {
-    //     logger.error(
-    //       "❌ Error reloading commands after configuration change:",
-    //       error,
-    //     );
-    //   }
-    // });
+    // Configuration reload callback intentionally omitted (manual /config reload only)
   }
 
   public static getInstance(client: Client): CommandManager {
@@ -41,7 +40,7 @@ export class CommandManager {
     return CommandManager.instance;
   }
 
-  async initialize(): Promise<any[]> {
+  async initialize(): Promise<unknown[]> {
     try {
       // Load commands dynamically from commands/index.ts
       const commands = await this.loadCommandsDynamically();
@@ -54,7 +53,7 @@ export class CommandManager {
     }
   }
 
-  private async loadCommandsDynamically(): Promise<any[]> {
+  private async loadCommandsDynamically(): Promise<unknown[]> {
     try {
       const commands = [];
       const enabledCommands = [];
@@ -63,11 +62,6 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        {
-          name: "plexprice",
-          configKey: "plexprice.enabled",
-          file: "plexprice",
-        },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {
           name: "vcstats",
@@ -135,17 +129,8 @@ export class CommandManager {
     }
   }
 
-  private async getEnabledCommands(): Promise<any[]> {
-    try {
-      // Use the same dynamic loading logic
-      const commands = await this.loadCommandsDynamically();
-
-      // Return the full command data including subcommands
-      return commands;
-    } catch (error) {
-      logger.error("Error getting enabled commands:", error);
-      return [];
-    }
+  private async getEnabledCommands(): Promise<unknown[]> {
+    return this.loadCommandsDynamically();
   }
 
   // Helper function to make Discord API calls with timeout and retry logic
@@ -172,13 +157,18 @@ export class CommandManager {
           logger.info(`✅ ${operationName} succeeded on attempt ${attempt}`);
         }
         return result;
-      } catch (error: any) {
+      } catch (error: unknown) {
+        const err = error as {
+          code?: number;
+          message?: string;
+          retry_after?: number;
+        };
         const isRateLimit =
-          error.code === 429 || error.message?.includes("rate limit");
-        const isTimeout = error.message?.includes("timeout");
+          err.code === 429 || err.message?.includes("rate limit");
+        const isTimeout = err.message?.includes("timeout");
 
         if (isRateLimit) {
-          const retryAfter = error.retry_after || 5;
+          const retryAfter = err.retry_after || 5;
           logger.warn(
             `⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`,
           );
@@ -193,8 +183,8 @@ export class CommandManager {
             await new Promise((resolve) => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
           }
         } else {
-          logger.error(`❌ Discord API error for ${operationName}:`, error);
-          throw error;
+          logger.error(`❌ Discord API error for ${operationName}:`, err);
+          throw err;
         }
 
         if (attempt === maxRetries) {
@@ -291,11 +281,6 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        {
-          name: "plexprice",
-          configKey: "plexprice.enabled",
-          file: "plexprice",
-        },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {
           name: "vcstats",

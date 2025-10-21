@@ -95,11 +95,6 @@ const settingReferences: SettingReference[] = [
     newKey: "amikool.role.name",
     description: "Role name required to use amikool command",
   },
-  {
-    oldKey: "ENABLE_PLEX_PRICE",
-    newKey: "plexprice.enabled",
-    description: "Enable/disable PLEX price checker",
-  },
 ];
 
 async function updateSettingsReferences(): Promise<void> {
