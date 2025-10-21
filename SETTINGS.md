@@ -97,19 +97,21 @@ All settings use a hierarchical dot notation structure for better organization a
 ## Configuration Commands
 
 ### List Settings
-```
+```bash
 /config list
 ```
 Shows all current configuration settings organized by category.
 
 ### Get Setting Value
-```
+
+```bash
 /config get key:ping.enabled
 ```
 Retrieves the current value of a specific setting.
 
 ### Set Setting Value
-```
+
+```bash
 /config set key:ping.enabled value:false
 ```
 Updates a setting to a new value. The system automatically converts:
@@ -118,19 +120,22 @@ Updates a setting to a new value. The system automatically converts:
 - Role/channel mentions to IDs
 
 ### Reset Setting
-```
+
+```bash
 /config reset key:ping.enabled
 ```
 Resets a setting to its default value.
 
 ### Reload Commands
-```
+
+```bash
 /config reload
 ```
 **Important**: After changing command enable/disable settings, you must run this command to update Discord. This ensures that disabled commands are properly removed and enabled commands are registered.
 
 ### Import/Export Configuration
-```
+
+```bash
 /config import
 /config export
 ```

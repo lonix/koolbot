@@ -86,7 +86,6 @@ KoolBot is built with a modular, service-oriented architecture:
 
 ### 🛠️ Utility Commands
 - **Role Verification**: Role-based command access control
-- **EVE Online Integration**: PLEX price checking
 - **Quote Management**: Add, view, and manage quotes
 - **Bot Statistics**: Monitor bot performance and usage
 
@@ -109,11 +108,11 @@ KoolBot is built with a modular, service-oriented architecture:
 For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)**.
 
 ### User Commands
+
 | Command | Description | Permission |
 |---------|-------------|------------|
 | `/ping` | Basic connectivity test | All users |
 | `/amikool` | Role-based verification | All users |
-| `/plexprice` | EVE Online PLEX prices | All users |
 | `/vctop` | Voice channel leaderboards | All users |
 | `/vcstats` | Personal voice statistics | All users |
 | `/seen` | Last seen information | All users |
@@ -121,6 +120,7 @@ For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)*
 | `/quote` | Quote management | All users |
 
 ### Admin Commands
+
 | Command | Description | Permission |
 |---------|-------------|------------|
 | `/config` | Configuration management | Admin |
@@ -134,6 +134,7 @@ For a complete and detailed command reference, see **[COMMANDS.md](COMMANDS.md)*
 ## 🐳 Docker Deployment
 
 ### Production Deployment
+
 ```yaml
 # docker-compose.yml
 services:
@@ -163,6 +164,7 @@ volumes:
 ```
 
 ### Development Deployment
+
 ```yaml
 # docker-compose.dev.yml
 services:
@@ -205,6 +207,7 @@ networks:
 ```
 
 ### Docker Commands
+
 ```bash
 # Start services
 docker-compose up -d
@@ -227,6 +230,7 @@ docker-compose exec bot sh
 For a complete configuration reference, see **[SETTINGS.md](SETTINGS.md)**.
 
 ### Environment Variables (.env)
+
 ```bash
 # Critical Bot Configuration (Required)
 DISCORD_TOKEN=your_bot_token_here
@@ -238,6 +242,7 @@ NODE_ENV=production
 ```
 
 ### Discord Logging Configuration
+
 The bot can log important events to Discord channels using the `core.*` configuration structure:
 
 ```bash
@@ -270,6 +275,7 @@ The bot can log important events to Discord channels using the `core.*` configur
 - **`core.cron.*`** - Scheduled task execution results
 
 ### Database Configuration
+
 All bot settings are stored in MongoDB and can be configured using the `/config` command:
 
 ```bash
@@ -290,6 +296,7 @@ All bot settings are stored in MongoDB and can be configured using the `/config`
 ```
 
 ### Configuration Categories
+
 - **Command Enablement**: Control which commands are available
 - **Voice Channel Settings**: Lobby configuration and channel management
 - **Voice Tracking**: Tracking features and exclusions
@@ -301,11 +308,13 @@ All bot settings are stored in MongoDB and can be configured using the `/config`
 ## 🔧 Development
 
 ### Prerequisites
+
 - Node.js 22+
 - Docker and Docker Compose
 - MongoDB (handled by Docker)
 
 ### Local Development Setup
+
 ```bash
 # Install dependencies
 npm install
@@ -321,6 +330,7 @@ npm run check
 ```
 
 ### Available Scripts
+
 ```bash
 npm run build          # TypeScript compilation
 npm run start          # Start production bot
@@ -331,6 +341,7 @@ npm run check          # Full build, lint, and format check
 ```
 
 ### Code Quality
+
 - **TypeScript**: Full type safety and modern JavaScript features
 - **ESLint**: Code quality and style enforcement
 - **Prettier**: Consistent code formatting
@@ -340,6 +351,7 @@ npm run check          # Full build, lint, and format check
 ## 📊 Database Schema
 
 ### Voice Channel Tracking
+
 ```typescript
 interface IVoiceChannelTracking {
   userId: string;
