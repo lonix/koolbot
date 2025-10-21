@@ -8,7 +8,7 @@ export class BotStatusService {
   private configService: ConfigService;
   private isInitialized = false;
   private currentVcUserCount = 0;
-  private currentVcUserName = "";
+  // Username tracking removed for simplified status logic (field deleted)
   private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
 
   // Fun status messages for different scenarios
@@ -27,16 +27,14 @@ export class BotStatusService {
     "The matrix, blue or red pill, guys ?",
   ];
 
+  // Simplified single-user statuses (no username personalization)
   private readonly singleUserStatuses = [
-    "{user} is alone and crying",
-    "{user} please i cant listen to them anymore",
-    "{user}, Send help!",
-    "{user} talking to themselves again",
-    "{user} having a breakdown",
-    "{user} talking about their penis... Again!",
-    "{user} is holding me hostage",
-    "{user} is having a midlife crisis",
-    "{user} is having an existential crisis",
+    "a lone wanderer",
+    "one solitary soul",
+    "a single user existing",
+    "one person contemplating life",
+    "a lone voice in the void",
+    "just one user vibing",
   ];
 
   private readonly multipleUsersStatuses = [
@@ -59,23 +57,22 @@ export class BotStatusService {
    * Get a random status message based on the current VC user count
    */
   private getRandomStatusMessage(): string {
-    if (this.currentVcUserCount === 0) {
+    // Simplified: only differentiate between 0, 1, and many users; no name interpolation
+    if (this.currentVcUserCount <= 0) {
       return this.lonelyStatuses[
         Math.floor(Math.random() * this.lonelyStatuses.length)
       ];
-    } else if (this.currentVcUserCount === 1) {
-      const template =
-        this.singleUserStatuses[
-          Math.floor(Math.random() * this.singleUserStatuses.length)
-        ];
-      return template.replace("{user}", this.currentVcUserName || "someone");
-    } else {
-      const template =
-        this.multipleUsersStatuses[
-          Math.floor(Math.random() * this.multipleUsersStatuses.length)
-        ];
-      return template.replace("{count}", this.currentVcUserCount.toString());
     }
+    if (this.currentVcUserCount === 1) {
+      return this.singleUserStatuses[
+        Math.floor(Math.random() * this.singleUserStatuses.length)
+      ];
+    }
+    const template =
+      this.multipleUsersStatuses[
+        Math.floor(Math.random() * this.multipleUsersStatuses.length)
+      ];
+    return template.replace("{count}", this.currentVcUserCount.toString());
   }
 
   public static getInstance(client: Client): BotStatusService {
@@ -201,17 +198,12 @@ export class BotStatusService {
   /**
    * Update the VC user count and refresh activity
    */
-  public updateVcUserCount(count: number, userName?: string): void {
-    if (
-      this.currentVcUserCount !== count ||
-      this.currentVcUserName !== userName
-    ) {
+  public updateVcUserCount(count: number): void {
+    // Ignore usernames entirely; only react to count changes
+    if (this.currentVcUserCount !== count) {
       this.currentVcUserCount = count;
-      this.currentVcUserName = userName || "";
       this.updateActivityBasedOnVcUsers();
-      logger.debug(
-        `VC user count updated: ${count}${userName ? ` (${userName})` : ""}`,
-      );
+      logger.debug(`VC user count updated: ${count}`);
     }
   }
 
@@ -266,13 +258,11 @@ export class BotStatusService {
   public getStatusInfo(): {
     isInitialized: boolean;
     currentVcUserCount: number;
-    currentVcUserName: string;
     isMonitoring: boolean;
   } {
     return {
       isInitialized: this.isInitialized,
       currentVcUserCount: this.currentVcUserCount,
-      currentVcUserName: this.currentVcUserName,
       isMonitoring: this.statusUpdateInterval !== null,
     };
   }

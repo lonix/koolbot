@@ -489,56 +489,10 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
     await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
 
-    // Update bot status with current VC user count and username
+    // Update bot status with current VC user count (username logic removed)
     if (botStatusService) {
       const vcUserCount = await voiceChannelManager.getTotalVcUserCount();
-      let vcUserName = "";
-
-      // Only get username if count changed to 1 or if we need to refresh the name
-      const statusInfo = botStatusService.getStatusInfo();
-      const shouldUpdateName =
-        vcUserCount === 1 &&
-        (statusInfo.currentVcUserCount !== 1 || !statusInfo.currentVcUserName);
-
-      if (shouldUpdateName) {
-        try {
-          const guildId = await configService.getString("GUILD_ID", "");
-          if (guildId) {
-            const guild = await client.guilds.fetch(guildId);
-            const categoryName = await configService.getString(
-              "voicechannels.category.name",
-              "Voice Channels",
-            );
-            const category = guild.channels.cache.find(
-              (channel) =>
-                channel.type === ChannelType.GuildCategory &&
-                channel.name === categoryName,
-            ) as CategoryChannel;
-
-            if (category) {
-              // Find the first non-bot user in any voice channel
-              for (const channel of category.children.cache.values()) {
-                if (
-                  channel.type === ChannelType.GuildVoice &&
-                  channel.members.size > 0
-                ) {
-                  const firstMember = channel.members.find(
-                    (member) => !member.user.bot,
-                  );
-                  if (firstMember) {
-                    vcUserName = firstMember.displayName;
-                    break;
-                  }
-                }
-              }
-            }
-          }
-        } catch (error) {
-          logger.debug("Error getting VC user name:", error);
-        }
-      }
-
-      botStatusService.updateVcUserCount(vcUserCount, vcUserName);
+      botStatusService.updateVcUserCount(vcUserCount);
     }
   } catch (error) {
     logger.error("Error handling voice state update:", error);
