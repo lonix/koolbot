@@ -20,7 +20,7 @@
     "check": "npm run build && npm run lint && npm run format:check"
   },
   "dependencies": {
-    "@discordjs/builders": "^1.12.2",
+    "@discordjs/builders": "^1.13.0",
     "@types/cron": "^2.4.3",
     "axios": "^1.12.2",
     "cron": "^4.3.3",
