@@ -1,3 +1,11 @@
+// ...existing code...
+
+// Healthcheck endpoint for Docker
+import express from "express";
+import type { Request, Response } from "express";
+const healthApp = express();
+healthApp.get("/health", (_: Request, res: Response) => res.send("OK"));
+healthApp.listen(3000, () => logger.info("Healthcheck server running on port 3000"));
 import {
   Client,
   Events,
