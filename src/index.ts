@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response } from "express";
 import {
   Client,
   Events,
@@ -81,16 +81,18 @@ let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
 // Healthcheck endpoint for Docker (start only after bot is ready)
-import type { Request, Response } from "express";
+
+// ...existing code...
 import mongoose from "mongoose";
 
-function startHealthServer() {
+function startHealthServer(): void {
   const healthApp = express();
-  healthApp.get("/health", async (_req: Request, res: Response) => {
+  healthApp.get("/health", (_req: Request, res: Response) => {
     let discordReady = false;
     let mongoReady = false;
     try {
-      discordReady = client.isReady?.() ?? false;
+      discordReady =
+        typeof client.isReady === "function" ? client.isReady() : false;
     } catch {
       discordReady = false;
     }
@@ -105,9 +107,9 @@ function startHealthServer() {
       res.status(503).send("Service Unavailable");
     }
   });
-  healthApp.listen(3000, () =>
-    logger.info("Healthcheck server running on port 3000"),
-  );
+  healthApp.listen(3000, () => {
+    logger.info("Healthcheck server running on port 3000");
+  });
 }
 
 // Add health server startup to main ready handler
