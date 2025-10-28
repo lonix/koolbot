@@ -24,12 +24,12 @@ import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
 import { BotStatusService } from "./services/bot-status-service.js";
 import FriendshipListener from "./services/friendship-listener.js";
+// ...existing code...
 
 dotenvConfig();
 
 // ...existing code...
 
-// Validate critical environment variables
 const requiredEnvVars = {
   DISCORD_TOKEN: process.env.DISCORD_TOKEN,
   CLIENT_ID: process.env.CLIENT_ID,
@@ -82,33 +82,31 @@ let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
 // Healthcheck endpoint for Docker (start only after bot is ready)
+import type { Request, Response } from "express";
+
 function startHealthServer() {
   const express = require("express");
   const healthApp = express();
-  const { Request, Response } = require("express");
-  healthApp.get(
-    "/health",
-    async (_req: typeof Request, res: typeof Response) => {
-      let discordReady = false;
-      let mongoReady = false;
-      try {
-        discordReady = client.isReady?.() ?? false;
-      } catch {
-        discordReady = false;
-      }
-      try {
-        const mongoose = require("mongoose");
-        mongoReady = mongoose.connection.readyState === 1;
-      } catch {
-        mongoReady = false;
-      }
-      if (discordReady && mongoReady) {
-        res.status(200).send("OK");
-      } else {
-        res.status(503).send("Service Unavailable");
-      }
-    },
-  );
+  healthApp.get("/health", async (_req: Request, res: Response) => {
+    let discordReady = false;
+    let mongoReady = false;
+    try {
+      discordReady = client.isReady?.() ?? false;
+    } catch {
+      discordReady = false;
+    }
+    try {
+      const mongoose = require("mongoose");
+      mongoReady = mongoose.connection.readyState === 1;
+    } catch {
+      mongoReady = false;
+    }
+    if (discordReady && mongoReady) {
+      res.status(200).send("OK");
+    } else {
+      res.status(503).send("Service Unavailable");
+    }
+  });
   healthApp.listen(3000, () =>
     logger.info("Healthcheck server running on port 3000"),
   );
