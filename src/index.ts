@@ -1,3 +1,4 @@
+import express from "express";
 import {
   Client,
   Events,
@@ -24,11 +25,9 @@ import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
 import { BotStatusService } from "./services/bot-status-service.js";
 import FriendshipListener from "./services/friendship-listener.js";
-// ...existing code...
 
 dotenvConfig();
 
-// ...existing code...
 
 const requiredEnvVars = {
   DISCORD_TOKEN: process.env.DISCORD_TOKEN,
@@ -83,9 +82,9 @@ const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
 // Healthcheck endpoint for Docker (start only after bot is ready)
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
 
 function startHealthServer() {
-  const express = require("express");
   const healthApp = express();
   healthApp.get("/health", async (_req: Request, res: Response) => {
     let discordReady = false;
@@ -96,7 +95,6 @@ function startHealthServer() {
       discordReady = false;
     }
     try {
-      const mongoose = require("mongoose");
       mongoReady = mongoose.connection.readyState === 1;
     } catch {
       mongoReady = false;
@@ -112,8 +110,16 @@ function startHealthServer() {
   );
 }
 
-// Example: start after successful client login
-client.once("ready", () => {
+// Add health server startup to main ready handler
+client.once(Events.ClientReady, async (readyClient) => {
+  logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
+
+  // Set connecting status (yellow) immediately when Discord is ready
+  botStatusService.setConnectingStatus();
+
+  await initializeServices();
+
+  // Start healthcheck server after all other initialization
   startHealthServer();
 });
 
