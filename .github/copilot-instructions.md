@@ -70,6 +70,11 @@ Docker compose files: prod `docker-compose.yml`, dev `docker-compose.dev.yml` (b
 Validation & migration: `npm run validate-config`, `npm run migrate-config`.
 Global command cleanup auto via `cleanupGlobalCommands()`; do not duplicate.
 
+
+## Code quality
+After offering/implementing a code change, ensure it adheres to existing code quality standards: by running npm run check and npm run lint and fixing any issues reported before submitting the change.
+
+
 ## Common Pitfalls
 
 1. Direct env access mid-runtime (always use `ConfigService`).

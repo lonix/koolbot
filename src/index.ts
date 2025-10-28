@@ -1,3 +1,4 @@
+import express, { Request, Response } from "express";
 import {
   Client,
   Events,
@@ -78,6 +79,51 @@ client.commands = new Collection();
 let isShuttingDown = false;
 let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
+
+// Healthcheck endpoint for Docker (start only after bot is ready)
+
+// ...existing code...
+import mongoose from "mongoose";
+
+function startHealthServer(): void {
+  const healthApp = express();
+  healthApp.get("/health", (_req: Request, res: Response) => {
+    let discordReady = false;
+    let mongoReady = false;
+    try {
+      discordReady =
+        typeof client.isReady === "function" ? client.isReady() : false;
+    } catch {
+      discordReady = false;
+    }
+    try {
+      mongoReady = mongoose.connection.readyState === 1;
+    } catch {
+      mongoReady = false;
+    }
+    if (discordReady && mongoReady) {
+      res.status(200).send("OK");
+    } else {
+      res.status(503).send("Service Unavailable");
+    }
+  });
+  healthApp.listen(3000, () => {
+    logger.info("Healthcheck server running on port 3000");
+  });
+}
+
+// Add health server startup to main ready handler
+client.once(Events.ClientReady, async (readyClient) => {
+  logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
+
+  // Set connecting status (yellow) immediately when Discord is ready
+  botStatusService.setConnectingStatus();
+
+  await initializeServices();
+
+  // Start healthcheck server after all other initialization
+  startHealthServer();
+});
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
