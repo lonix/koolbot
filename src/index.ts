@@ -28,7 +28,7 @@ import FriendshipListener from "./services/friendship-listener.js";
 
 dotenvConfig();
 
-
+// Validate critical environment variables
 const requiredEnvVars = {
   DISCORD_TOKEN: process.env.DISCORD_TOKEN,
   CLIENT_ID: process.env.CLIENT_ID,
