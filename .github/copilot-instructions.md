@@ -72,7 +72,7 @@ Global command cleanup auto via `cleanupGlobalCommands()`; do not duplicate.
 
 
 ## Code quality
-After offering/implemnenting a code change, ensure it adheres to existing code quality standards: by running npn run check and npm run lint and fixing any issues reported before submitting the change.
+After offering/implementing a code change, ensure it adheres to existing code quality standards: by running npm run check and npm run lint and fixing any issues reported before submitting the change.
 
 
 ## Common Pitfalls
