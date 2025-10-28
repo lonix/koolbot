@@ -26,7 +26,7 @@
     "cron": "^4.3.3",
     "date-fns": "^2.30.0",
     "date-fns-tz": "^2.0.0",
-    "discord.js": "^14.23.2",
+    "discord.js": "^14.24.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "mongoose": "^8.19.2",
