@@ -27,13 +27,7 @@ import FriendshipListener from "./services/friendship-listener.js";
 
 dotenvConfig();
 
-// Healthcheck endpoint for Docker
-import express, { Request, Response } from "express";
-const healthApp = express();
-healthApp.get("/health", (_: Request, res: Response) => res.send("OK"));
-healthApp.listen(3000, () =>
-  logger.info("Healthcheck server running on port 3000"),
-);
+// ...existing code...
 
 // Validate critical environment variables
 const requiredEnvVars = {
@@ -86,6 +80,44 @@ client.commands = new Collection();
 let isShuttingDown = false;
 let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
+
+// Healthcheck endpoint for Docker (start only after bot is ready)
+function startHealthServer() {
+  const express = require("express");
+  const healthApp = express();
+  const { Request, Response } = require("express");
+  healthApp.get(
+    "/health",
+    async (_req: typeof Request, res: typeof Response) => {
+      let discordReady = false;
+      let mongoReady = false;
+      try {
+        discordReady = client.isReady?.() ?? false;
+      } catch {
+        discordReady = false;
+      }
+      try {
+        const mongoose = require("mongoose");
+        mongoReady = mongoose.connection.readyState === 1;
+      } catch {
+        mongoReady = false;
+      }
+      if (discordReady && mongoReady) {
+        res.status(200).send("OK");
+      } else {
+        res.status(503).send("Service Unavailable");
+      }
+    },
+  );
+  healthApp.listen(3000, () =>
+    logger.info("Healthcheck server running on port 3000"),
+  );
+}
+
+// Example: start after successful client login
+client.once("ready", () => {
+  startHealthServer();
+});
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
