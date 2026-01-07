@@ -22,7 +22,7 @@
   "dependencies": {
     "@discordjs/builders": "^1.13.0",
     "@types/cron": "^2.4.3",
-    "axios": "^1.12.2",
+    "axios": "^1.13.2",
     "cron": "^4.3.4",
     "date-fns": "^2.30.0",
     "date-fns-tz": "^2.0.0",
