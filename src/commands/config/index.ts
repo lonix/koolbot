@@ -747,9 +747,8 @@ async function handleReload(
     botStatusService.setConfigReloadStatus();
 
     // Get the command manager instance and force a reload
-    const { CommandManager } = await import(
-      "../../services/command-manager.js"
-    );
+    const { CommandManager } =
+      await import("../../services/command-manager.js");
     const commandManager = CommandManager.getInstance(interaction.client);
 
     // Reload commands to Discord API
