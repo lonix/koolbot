@@ -1,267 +1,934 @@
 # KoolBot Commands Reference
 
-This document provides a comprehensive reference for all available commands in KoolBot, organized by user permission level.
+Complete reference for all KoolBot commands with examples and detailed explanations.
 
-## 📋 Command Categories
+> **Note:** All commands must be enabled through configuration before they appear in Discord.  
+> Use `/config set key:command.enabled value:true` and then `/config reload` to enable commands.
 
-- **User Commands**: Available to all users
-- **Admin Commands**: Require Administrator permissions
-- **Owner Commands**: Special commands for bot owners
+---
+
+## 📋 Table of Contents
+
+- [User Commands](#-user-commands) - Available to all server members
+- [Admin Commands](#-admin-commands) - Require Administrator permission
+- [Configuration Management](#-configuration-management) - Detailed `/config` command guide
+- [Quick Command Reference](#-quick-command-reference) - Summary table
 
 ---
 
 ## 👥 User Commands
 
-These commands are available to all users in the server.
+Commands available to all server members.
 
 ### `/ping`
 
-**Description**: Basic connectivity test to verify the bot is responding  
-**Usage**: `/ping`  
-**Response**: Pong! (with response time)
+**Description:** Check if the bot is responding and measure latency.
 
-### `/amikool`
+**Configuration:**
+```bash
+/config set key:ping.enabled value:true
+/config reload
+```
 
-**Description**: Role-based verification command  
-**Usage**: `/amikool`  
-**Requirements**: Bot must have a role configured in `amikool.role.name`  
-**Response**: Confirms if the user has the required role
+**Usage:**
+```
+/ping
+```
+
+**Response:**
+```
+Pong! 🏓
+Bot Latency: 45ms
+API Latency: 123ms
+```
+
+**Use Cases:**
+- Verify bot is online and responsive
+- Check connection quality
+- Troubleshoot lag issues
+
+---
 
 ### `/vctop`
 
-**Description**: View voice channel leaderboards  
-**Usage**: `/vctop [timeframe]`  
-**Timeframes**: `week`, `month`, `alltime`  
-**Requirements**: Voice tracking must be enabled (`voicetracking.enabled: true`)  
-**Response**: Leaderboard showing top voice channel users
+**Description:** View voice channel activity leaderboards showing top users by time spent.
+
+**Configuration:**
+```bash
+# Requires voice tracking to be enabled
+/config set key:voicetracking.enabled value:true
+/config reload
+```
+
+**Usage:**
+```
+/vctop
+/vctop limit:20
+/vctop period:month
+/vctop period:alltime limit:10
+```
+
+**Parameters:**
+- `limit` (optional) - Number of users to display (1-50, default: 10)
+- `period` (optional) - Time period: `week`, `month`, `alltime` (default: week)
+
+**Example Response:**
+```
+Top Voice Channel Users (week):
+🥇 Alice: 24h 15m
+🥈 Bob: 18h 32m
+🥉 Charlie: 12h 45m
+4. David: 8h 20m
+5. Emma: 6h 10m
+```
+
+**Use Cases:**
+- See who's most active in voice channels
+- Create friendly competition
+- Recognize community engagement
+
+---
 
 ### `/vcstats`
 
-**Description**: View personal voice channel statistics  
-**Usage**: `/vcstats [timeframe]`  
-**Timeframes**: `week`, `month`, `alltime`  
-**Requirements**: Voice tracking must be enabled (`voicetracking.enabled: true`)  
-**Response**: Personal statistics including total time and session count
+**Description:** View your personal voice channel statistics and activity history.
+
+**Configuration:**
+```bash
+# Requires voice tracking to be enabled
+/config set key:voicetracking.enabled value:true
+/config reload
+```
+
+**Usage:**
+```
+/vcstats
+/vcstats period:month
+/vcstats period:alltime
+```
+
+**Parameters:**
+- `period` (optional) - Time period: `week`, `month`, `alltime` (default: week)
+
+**Example Response:**
+```
+Your Voice Channel Stats (week):
+Total Time: 24h 15m
+Sessions: 12
+Average Session: 2h 1m
+Most Active Channel: Gaming Room
+```
+
+**Use Cases:**
+- Track your own voice channel usage
+- See your activity trends
+- Check your ranking position
+
+---
 
 ### `/seen`
 
-**Description**: Check when a user was last seen in voice channels  
-**Usage**: `/seen [user]`  
-**Requirements**: Voice tracking must be enabled (`voicetracking.seen.enabled: true`)  
-**Response**: Last seen timestamp and channel information
+**Description:** Check when a user was last active in voice channels.
 
-### `/transfer-ownership`
+**Configuration:**
+```bash
+/config set key:voicetracking.enabled value:true
+/config set key:voicetracking.seen.enabled value:true
+/config reload
+```
 
-**Description**: Transfer ownership of a voice channel to another user  
-**Usage**: `/transfer-ownership [user]`  
-**Requirements**:
+**Usage:**
+```
+/seen user:@Username
+```
 
-- Voice channel management must be enabled (`voicechannels.enabled: true`)
-- User must be in a voice channel
-- User must be the current channel owner  
-**Response**: Confirmation of ownership transfer
+**Parameters:**
+- `user` (required) - The user to look up
+
+**Example Response:**
+```
+👤 Alice was last seen:
+🕐 2 hours ago
+📍 In: Gaming Room
+⏱️ Duration: 3h 45m
+```
+
+**Use Cases:**
+- Check if someone has been online recently
+- See what channel they were in
+- Track member activity patterns
+
+---
 
 ### `/quote`
 
-**Description**: Quote management system  
-**Usage**: `/quote [action] [options]`  
-**Actions**:
+**Description:** Save and retrieve memorable quotes from the server.
 
-- `add [text]` - Add a new quote
-- `random` - Get a random quote
-- `search [query]` - Search quotes
-- `list [page]` - List all quotes  
-**Requirements**: Quote system must be enabled (`quotes.enabled: true`)  
-**Response**: Varies by action
+**Configuration:**
+```bash
+/config set key:quotes.enabled value:true
+/config set key:quotes.cooldown value:60
+/config set key:quotes.max_length value:1000
+/config reload
+```
+
+**Usage:**
+```
+/quote                                    # Get random quote
+/quote text:"Great quote!" author:"Alice" # Add new quote
+```
+
+**Parameters:**
+- `text` (optional) - Quote text to add
+- `author` (optional) - Who said it (required when adding)
+
+**Example Responses:**
+```
+# Random quote
+"To be or not to be" - Shakespeare
+
+# Adding quote
+✅ Quote added successfully!
+```
+
+**Advanced Configuration:**
+```bash
+# Restrict who can add quotes (role IDs)
+/config set key:quotes.add_roles value:"123456789,987654321"
+
+# Restrict who can delete quotes
+/config set key:quotes.delete_roles value:"123456789"
+```
+
+---
+
+### `/amikool`
+
+**Description:** Check if you have a specific role (for role verification).
+
+**Configuration:**
+```bash
+/config set key:amikool.enabled value:true
+/config set key:amikool.role.name value:"Kool Members"
+/config reload
+```
+
+**Usage:**
+```
+/amikool
+```
+
+**Example Responses:**
+```
+✅ Yes, you are kool! You have the "Kool Members" role.
+
+❌ Sorry, you don't have the "Kool Members" role.
+```
+
+**Use Cases:**
+- Fun role verification
+- Check membership status
+- Confirm permissions
+
+---
+
+### `/transfer-ownership`
+
+**Description:** Transfer ownership of your voice channel to another user.
+
+**Configuration:**
+```bash
+/config set key:voicechannels.enabled value:true
+/config reload
+```
+
+**Usage:**
+```
+/transfer-ownership user:@NewOwner
+```
+
+**Requirements:**
+- You must be the current channel owner
+- You must be in a voice channel
+- Voice channel management must be enabled
+
+**Parameters:**
+- `user` (required) - The user to transfer ownership to
+
+**Example Response:**
+```
+✅ Channel ownership transferred to @NewOwner
+```
+
+**Use Cases:**
+- Leave while keeping the channel active
+- Delegate channel control
+- Hand off to another organizer
 
 ---
 
 ## 🔧 Admin Commands
 
-These commands require Administrator permissions in the Discord server.
+Commands that require Administrator permission in Discord.
+
+---
 
 ### `/config`
 
-**Description**: Comprehensive configuration management  
-**Usage**: `/config [action] [options]`  
-**Actions**:
+**Description:** Comprehensive configuration management for all bot settings.
+
+**Usage:**
+```
+/config list                              # List all settings
+/config get key:ping.enabled              # Get specific setting
+/config set key:ping.enabled value:true   # Set a value
+/config reset key:ping.enabled            # Reset to default
+/config reload                            # Reload commands to Discord
+/config export                            # Export config to YAML
+/config import                            # Import config from YAML (attach file)
+```
+
+**Subcommands:**
 
 #### `/config list`
+Displays all configuration settings organized by category.
 
-**Description**: Display all current configuration settings  
-**Usage**: `/config list`  
-**Response**: Organized list of all settings by category
+**Example Response:**
+```
+📋 Configuration Settings
+
+Commands:
+  ping.enabled: true
+  quotes.enabled: false
+  amikool.enabled: true
+
+Voice Channels:
+  voicechannels.enabled: true
+  voicechannels.category.name: "Voice Channels"
+  ...
+```
 
 #### `/config get`
+Get the value of a specific setting.
 
-**Description**: Get the value of a specific setting  
-**Usage**: `/config get key:[setting_key]`  
-**Example**: `/config get key:ping.enabled`  
-**Response**: Current value of the specified setting
+**Parameters:**
+- `key` (required) - The setting key (e.g., `ping.enabled`)
+
+**Example:**
+```
+/config get key:voicetracking.enabled
+→ voicetracking.enabled: true
+```
 
 #### `/config set`
+Update a configuration value.
 
-**Description**: Set a configuration value  
-**Usage**: `/config set key:[setting_key] value:[new_value]`  
-**Example**: `/config set key:ping.enabled value:true`  
-**Response**: Confirmation of the change
+**Parameters:**
+- `key` (required) - The setting key
+- `value` (required) - The new value
+
+**Examples:**
+```
+# Enable a feature
+/config set key:ping.enabled value:true
+
+# Set a string value
+/config set key:voicechannels.lobby.name value:"🟢 Join Here"
+
+# Set a number
+/config set key:quotes.cooldown value:120
+
+# Set comma-separated list
+/config set key:voicetracking.excluded_channels value:"123,456,789"
+```
 
 #### `/config reset`
+Reset a setting to its default value.
 
-**Description**: Reset a setting to its default value  
-**Usage**: `/config reset key:[setting_key]`  
-**Example**: `/config reset key:ping.enabled`  
-**Response**: Confirmation of the reset
+**Parameters:**
+- `key` (required) - The setting key to reset
+
+**Example:**
+```
+/config reset key:ping.enabled
+→ ✅ Reset ping.enabled to default value: false
+```
 
 #### `/config reload`
+Reload all commands to Discord API. **Required after enabling/disabling commands.**
 
-**Description**: Reload all commands to Discord API  
-**Usage**: `/config reload`  
-**Requirements**: Must be run after changing command enable/disable settings  
-**Response**: Confirmation of command reload
+**Example:**
+```
+/config reload
+→ ✅ Commands reloaded successfully!
+```
 
-#### `/config import`
-
-**Description**: Import configuration from a YAML file  
-**Usage**: `/config import` (with file attachment)  
-**Requirements**: YAML file attachment  
-**Response**: Summary of imported settings
+**When to use:**
+- After enabling/disabling any command
+- After changing command-related settings
+- If commands don't appear in Discord
 
 #### `/config export`
+Export current configuration to a YAML file.
 
-**Description**: Export current configuration to YAML file  
-**Usage**: `/config export`  
-**Response**: YAML file download
+**Example:**
+```
+/config export
+→ 📄 config-2026-01-15.yaml (attached file)
+```
 
-### `/announce-vc-stats`
+**Use Cases:**
+- Backup configuration
+- Transfer settings between instances
+- Version control settings
 
-**Description**: Manually trigger voice channel statistics announcement  
-**Usage**: `/announce-vc-stats`  
-**Requirements**:
+#### `/config import`
+Import configuration from a YAML file.
 
-- Voice tracking must be enabled (`voicetracking.enabled: true`)
-- Announcements must be enabled (`voicetracking.announcements.enabled: true`)  
-**Response**: Confirmation of announcement sent
+**Usage:**
+```
+/config import (attach YAML file)
+```
 
-### `/dbtrunk`
+**Use Cases:**
+- Restore from backup
+- Clone settings to new instance
+- Bulk configuration updates
 
-**Description**: Voice channel database cleanup management  
-**Usage**: `/dbtrunk [action]`  
-**Actions**:
-
-#### `/dbtrunk status`
-
-**Description**: Show cleanup service status  
-**Usage**: `/dbtrunk status`  
-**Response**: Service status, database connection, and last cleanup date
-
-#### `/dbtrunk run`
-
-**Description**: Run cleanup immediately  
-**Usage**: `/dbtrunk run`  
-**Response**: Cleanup results including sessions removed and data aggregated
+---
 
 ### `/vc`
 
-**Description**: Voice channel management  
-**Usage**: `/vc [action]`  
-**Actions**:
+**Description:** Voice channel management and cleanup tools.
+
+**Configuration:**
+```bash
+/config set key:voicechannels.enabled value:true
+/config reload
+```
+
+**Subcommands:**
 
 #### `/vc reload`
+Clean up empty dynamically created voice channels.
 
-**Description**: Clean up empty voice channels  
-**Usage**: `/vc reload`  
-**Requirements**: Voice channel management must be enabled (`voicechannels.enabled: true`)  
-**Response**: Confirmation of cleanup completion
+**Usage:**
+```
+/vc reload
+```
+
+**What it does:**
+- Removes empty user-created channels
+- Keeps channels with active users
+- Preserves the lobby channel
+
+**Example Response:**
+```
+🧹 Cleaned up 3 empty voice channels
+```
+
+**Use Cases:**
+- Manual cleanup of abandoned channels
+- Server organization
+- Free up channel slots
 
 #### `/vc force-reload`
+Force cleanup of ALL unmanaged channels in the voice category.
 
-**Description**: Force cleanup of ALL unmanaged channels in category  
-**Usage**: `/vc force-reload`  
-**Requirements**: Voice channel management must be enabled (`voicechannels.enabled: true`)  
-**Response**: Confirmation of force cleanup completion
+**Usage:**
+```
+/vc force-reload
+```
 
-### `/botstats`
+**Warning:** This is destructive! It removes ALL channels except the lobby, even if they have users.
 
-**Description**: View bot performance statistics  
-**Usage**: `/botstats`  
-**Response**: Bot uptime, command usage, and performance metrics
+**What it does:**
+- Removes ALL unmanaged channels in category
+- Keeps only the lobby channel
+- Does not remove manually created channels outside the category
 
-### `/exclude-channel`
+**Example Response:**
+```
+⚠️ Force cleanup completed
+Removed 8 channels from Voice Channels category
+```
 
-**Description**: Exclude a voice channel from tracking  
-**Usage**: `/exclude-channel [channel]`  
-**Requirements**: Voice tracking must be enabled (`voicetracking.enabled: true`)  
-**Response**: Confirmation of channel exclusion
+**Use Cases:**
+- Reset voice channel setup
+- Fix corrupted channel states
+- Emergency cleanup
+
+---
+
+### `/dbtrunk`
+
+**Description:** Database cleanup management for voice tracking data.
+
+**Configuration:**
+```bash
+/config set key:voicetracking.cleanup.enabled value:true
+/config reload
+```
+
+**Subcommands:**
+
+#### `/dbtrunk status`
+Show cleanup service status and statistics.
+
+**Usage:**
+```
+/dbtrunk status
+```
+
+**Example Response:**
+```
+📊 Cleanup Service Status
+
+Status: ✅ Running
+Database: ✅ Connected
+Schedule: Daily at 00:00
+
+Last Cleanup: 2026-01-14 00:00:15
+Sessions Removed: 1,247
+Data Aggregated: 89 records
+
+Retention Policy:
+  Detailed Sessions: 30 days
+  Monthly Summaries: 6 months
+  Yearly Summaries: 1 year
+```
+
+**Use Cases:**
+- Check cleanup status
+- Verify database health
+- Monitor data retention
+
+#### `/dbtrunk run`
+Manually trigger database cleanup now.
+
+**Usage:**
+```
+/dbtrunk run
+```
+
+**What it does:**
+- Removes old detailed sessions (older than retention period)
+- Removes old monthly summaries
+- Removes old yearly summaries
+- Preserves aggregated statistics
+
+**Example Response:**
+```
+🧹 Cleanup completed successfully!
+
+Detailed sessions removed: 1,247
+Monthly summaries removed: 12
+Yearly summaries removed: 1
+Total space freed: 15.4 MB
+Duration: 3.2 seconds
+```
+
+**Use Cases:**
+- Manual cleanup between scheduled runs
+- Free up database space immediately
+- Test cleanup configuration
+
+---
+
+### `/announce-vc-stats`
+
+**Description:** Manually trigger the weekly voice channel statistics announcement.
+
+**Configuration:**
+```bash
+/config set key:voicetracking.enabled value:true
+/config set key:voicetracking.announcements.enabled value:true
+/config set key:voicetracking.announcements.channel value:"voice-stats"
+/config reload
+```
+
+**Usage:**
+```
+/announce-vc-stats
+```
+
+**What it does:**
+- Posts top voice channel users to configured channel
+- Shows weekly statistics
+- Includes medals for top 3 users
+
+**Example Response (in configured channel):**
+```
+📊 Weekly Voice Channel Stats
+
+🥇 Alice: 45h 30m
+🥈 Bob: 38h 15m
+🥉 Charlie: 32h 20m
+4. David: 28h 10m
+5. Emma: 24h 45m
+...
+
+Total server voice time: 324h 15m
+Active users: 47
+```
+
+**Use Cases:**
+- Post stats on-demand
+- Test announcement format
+- Share stats outside regular schedule
+
+**Automatic Announcements:**
+```bash
+# Configure automatic weekly announcements
+/config set key:voicetracking.announcements.schedule value:"0 16 * * 5"
+# Every Friday at 4 PM
+```
+
+---
 
 ### `/setup-lobby`
 
-**Description**: Configure voice channel lobby system  
-**Usage**: `/setup-lobby`  
-**Requirements**: Voice channel management must be enabled (`voicechannels.enabled: true`)  
-**Response**: Confirmation of lobby setup
+**Description:** Configure the voice channel lobby system.
+
+**Configuration:**
+```bash
+/config set key:voicechannels.enabled value:true
+/config reload
+```
+
+**Usage:**
+```
+/setup-lobby
+```
+
+**What it does:**
+- Creates the voice category if missing
+- Creates/updates the lobby channel
+- Configures proper permissions
+- Sets up dynamic channel creation
+
+**Example Response:**
+```
+✅ Lobby setup complete!
+
+Category: Voice Channels
+Lobby Channel: 🟢 Lobby
+Status: Ready for users
+
+Users joining the lobby will automatically get their own channel.
+```
+
+**Use Cases:**
+- Initial bot setup
+- Fix broken lobby configuration
+- Recreate deleted channels
+
+---
+
+### `/exclude-channel`
+
+**Description:** Exclude a voice channel from activity tracking.
+
+**Configuration:**
+```bash
+/config set key:voicetracking.enabled value:true
+/config reload
+```
+
+**Usage:**
+```
+/exclude-channel channel:#afk-channel
+```
+
+**Parameters:**
+- `channel` (required) - The voice channel to exclude
+
+**Example Response:**
+```
+✅ Channel #afk-channel excluded from tracking
+```
+
+**Use Cases:**
+- Exclude AFK channels
+- Don't track music bot channels
+- Ignore waiting rooms
+
+**View Excluded Channels:**
+```
+/config get key:voicetracking.excluded_channels
+```
+
+**Manual Configuration:**
+```bash
+# Add channel IDs (comma-separated)
+/config set key:voicetracking.excluded_channels value:"123456789,987654321"
+```
+
+---
+
+### `/botstats`
+
+**Description:** View bot performance and usage statistics.
+
+**Usage:**
+```
+/botstats
+```
+
+**Example Response:**
+```
+🤖 KoolBot Statistics
+
+Uptime: 7 days, 14 hours, 23 minutes
+Version: 0.6.0
+
+Performance:
+  Memory Usage: 245 MB
+  CPU Usage: 3.2%
+  Database: Connected
+  Latency: 45ms
+
+Activity:
+  Guilds: 1
+  Users Tracked: 347
+  Voice Sessions Today: 89
+  Commands Executed: 2,451
+
+Most Used Commands:
+  1. /vctop - 892 times
+  2. /vcstats - 634 times
+  3. /ping - 421 times
+```
+
+**Use Cases:**
+- Monitor bot health
+- Check resource usage
+- View usage statistics
+- Troubleshoot performance issues
 
 ---
 
 ## 🔒 Permission Requirements
 
-### User Commands
+### User Command Permissions
 
-- **Basic**: No special permissions required
-- **Voice Commands**: User must be in a voice channel (where applicable)
-- **Quote Commands**: May be restricted by role-based permissions
+| Command | Permission Level | Additional Requirements |
+|---------|------------------|-------------------------|
+| `/ping` | Everyone | Command must be enabled |
+| `/vctop` | Everyone | Voice tracking enabled |
+| `/vcstats` | Everyone | Voice tracking enabled |
+| `/seen` | Everyone | Voice tracking + seen enabled |
+| `/quote` | Everyone* | Quotes enabled (*may be role-restricted) |
+| `/amikool` | Everyone | Command enabled + role configured |
+| `/transfer-ownership` | Channel Owner | Must own a voice channel |
 
-### Admin Commands
+### Admin Command Permissions
 
-- **Discord Permission**: Administrator permission in the server
-- **Bot Permission**: Bot must have appropriate permissions in the server
-- **Feature Enablement**: Related features must be enabled in configuration
+All admin commands require **Administrator** permission in Discord.
+
+| Command | Additional Requirements |
+|---------|-------------------------|
+| `/config` | Administrator permission |
+| `/vc` | Administrator + voice channels enabled |
+| `/dbtrunk` | Administrator + cleanup enabled |
+| `/announce-vc-stats` | Administrator + tracking & announcements enabled |
+| `/setup-lobby` | Administrator + voice channels enabled |
+| `/exclude-channel` | Administrator + voice tracking enabled |
+| `/botstats` | Administrator permission |
+
+### Bot Permissions Required
+
+The bot needs these Discord permissions to function:
+
+**Essential:**
+- Read Messages/View Channels
+- Send Messages
+- Use Slash Commands
+
+**For Voice Features:**
+- Manage Channels (create/delete voice channels)
+- Move Members (move users to created channels)
+- View Channel (see voice channels)
+- Connect (for voice state updates)
+
+**For Configuration:**
+- Embed Links (for rich responses)
+- Attach Files (for config export/import)
 
 ---
 
-## ⚙️ Command Configuration
+## 📚 Quick Command Reference
 
-Commands can be enabled/disabled using the configuration system:
+### User Commands Summary
 
 ```bash
-# Enable ping command
+/ping                               # Check bot status
+/vctop [period] [limit]            # Voice leaderboards
+/vcstats [period]                  # Your voice stats
+/seen user:@User                   # Last seen info
+/quote [text] [author]             # Quotes system
+/amikool                           # Role verification
+/transfer-ownership user:@User     # Transfer channel
+```
+
+### Admin Commands Summary
+
+```bash
+# Configuration
+/config list                       # List all settings
+/config get key:...                # Get setting value
+/config set key:... value:...      # Set setting value
+/config reset key:...              # Reset to default
+/config reload                     # Reload commands
+/config export                     # Export config
+/config import                     # Import config
+
+# Voice Management
+/vc reload                         # Clean empty channels
+/vc force-reload                   # Force cleanup all
+
+# Database Management
+/dbtrunk status                    # Cleanup status
+/dbtrunk run                       # Run cleanup now
+
+# Other Admin
+/setup-lobby                       # Setup voice lobby
+/exclude-channel channel:...       # Exclude from tracking
+/announce-vc-stats                 # Post stats now
+/botstats                          # Bot statistics
+```
+
+---
+
+## 🎯 Common Workflows
+
+### Initial Bot Setup
+
+```bash
+# 1. Enable basic commands
 /config set key:ping.enabled value:true
+/config reload
 
-# Disable amikool command  
-/config set key:amikool.enabled value:false
+# 2. Setup voice channels
+/config set key:voicechannels.enabled value:true
+/config set key:voicechannels.category.name value:"Voice Channels"
+/setup-lobby
+/config reload
 
-# Reload commands after changes
+# 3. Enable tracking
+/config set key:voicetracking.enabled value:true
+/config set key:voicetracking.seen.enabled value:true
+/config reload
+
+# 4. Enable weekly announcements
+/config set key:voicetracking.announcements.enabled value:true
+/config set key:voicetracking.announcements.channel value:"voice-stats"
+/config reload
+
+# 5. Setup data cleanup
+/config set key:voicetracking.cleanup.enabled value:true
 /config reload
 ```
 
-**Important**: After changing command enable/disable settings, you must run `/config reload` to update Discord.
+### Enable Logging
+
+```bash
+# Create channels in Discord first, then:
+/config set key:core.startup.enabled value:true
+/config set key:core.startup.channel_id value:YOUR_CHANNEL_ID
+
+/config set key:core.errors.enabled value:true
+/config set key:core.errors.channel_id value:YOUR_CHANNEL_ID
+
+/config set key:core.cleanup.enabled value:true
+/config set key:core.cleanup.channel_id value:YOUR_CHANNEL_ID
+```
+
+### Troubleshooting Commands Not Appearing
+
+```bash
+# 1. Check if command is enabled
+/config get key:ping.enabled
+
+# 2. Enable if needed
+/config set key:ping.enabled value:true
+
+# 3. MUST reload commands
+/config reload
+
+# 4. Wait a few minutes for Discord to sync
+```
+
+### Backup and Restore Configuration
+
+```bash
+# Backup
+/config export
+# Save the file somewhere safe
+
+# Restore
+/config import
+# Attach the saved YAML file
+```
 
 ---
 
-## 📚 Related Documentation
+## 🚨 Troubleshooting
 
-- **[README.md](README.md)**: Bot overview and setup instructions
-- **[SETTINGS.md](SETTINGS.md)**: Complete configuration reference
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)**: Common issues and solutions
+### "Command not found" or command doesn't appear
+
+**Solutions:**
+1. Check if enabled: `/config get key:commandname.enabled`
+2. Enable it: `/config set key:commandname.enabled value:true`
+3. **Reload commands: `/config reload`** (Required!)
+4. Wait 2-5 minutes for Discord to sync
+
+### "Permission denied" errors
+
+**Check:**
+- Do you have Administrator permission?
+- Is the bot role high enough in the hierarchy?
+- Is the feature enabled in configuration?
+
+### Voice commands not working
+
+**Verify:**
+```bash
+/config get key:voicechannels.enabled
+/config get key:voicetracking.enabled
+```
+
+Both should be `true`. If not:
+```bash
+/config set key:voicechannels.enabled value:true
+/config set key:voicetracking.enabled value:true
+/config reload
+```
+
+### Stats showing as empty
+
+**Possible causes:**
+- Tracking recently enabled (give it time)
+- Channels are excluded
+- Users not in voice channels yet
+
+**Check excluded channels:**
+```bash
+/config get key:voicetracking.excluded_channels
+```
 
 ---
 
-## 🚨 Troubleshooting Commands
+## 📖 Related Documentation
 
-### Command Not Found
+- **[README.md](README.md)** - Bot overview and quick start
+- **[SETTINGS.md](SETTINGS.md)** - Complete configuration reference
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Detailed troubleshooting guide
 
-- Check if the command is enabled in configuration
-- Run `/config reload` after enabling commands
-- Verify bot has proper Discord permissions
+---
 
-### Permission Denied
+<div align="center">
 
-- Ensure user has Administrator permissions
-- Check bot's role hierarchy in the server
-- Verify feature is enabled in configuration
+**Need help?** Check the [troubleshooting guide](TROUBLESHOOTING.md) or [open an issue](https://github.com/lonix/koolbot/issues)
 
-### Feature Not Working
-
-- Check if the related feature is enabled
-- Verify configuration settings are correct
-- Check bot logs for error messages
+</div>
