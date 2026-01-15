@@ -58,7 +58,9 @@ export class VoiceChannelAnnouncer {
   public async start(): Promise<void> {
     // Guard against multiple initializations
     if (this.isInitialized) {
-      logger.warn("Voice channel announcer is already initialized, skipping...");
+      logger.warn(
+        "Voice channel announcer is already initialized, skipping...",
+      );
       return;
     }
 
