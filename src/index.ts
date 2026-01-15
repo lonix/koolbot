@@ -493,15 +493,6 @@ async function initializeServices(): Promise<void> {
   }
 }
 
-client.once(Events.ClientReady, async (readyClient) => {
-  logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
-
-  // Set connecting status (yellow) immediately when Discord is ready
-  botStatusService.setConnectingStatus();
-
-  await initializeServices();
-});
-
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 

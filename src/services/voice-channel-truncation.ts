@@ -190,6 +190,14 @@ export class VoiceChannelTruncationService {
    */
   private async startScheduledCleanup(): Promise<void> {
     try {
+      // Guard against multiple scheduled cleanups
+      if (this.isScheduled && this.cleanupJob) {
+        logger.warn(
+          "Voice channel cleanup scheduler is already running, skipping...",
+        );
+        return;
+      }
+
       logger.info("Starting voice channel cleanup scheduler...");
 
       const enabled = await this.isEnabled();
