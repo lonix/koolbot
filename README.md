@@ -8,6 +8,8 @@ management.
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Latest-green)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
+![Tests](https://img.shields.io/badge/Tests-51%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-In%20Progress-yellow)
 
 ---
 
