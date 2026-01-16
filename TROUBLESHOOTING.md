@@ -22,6 +22,7 @@ Common issues and solutions for KoolBot deployment and operation.
 ### Bot Won't Start
 
 **Symptoms:**
+
 - Container immediately exits
 - "Missing required environment variables" error
 - Bot doesn't connect to Discord
@@ -29,16 +30,19 @@ Common issues and solutions for KoolBot deployment and operation.
 **Solutions:**
 
 1. **Verify `.env` file exists and is in the correct location:**
+
    ```bash
    ls -la .env
    ```
 
 2. **Check all required environment variables are set:**
+
    ```bash
    cat .env
    ```
-   
+
    Must include:
+
    ```env
    DISCORD_TOKEN=your_token_here
    CLIENT_ID=your_client_id
@@ -53,6 +57,7 @@ Common issues and solutions for KoolBot deployment and operation.
    - Copy the new token to `.env`
 
 4. **Check for extra spaces or quotes:**
+
    ```env
    # ❌ Wrong
    DISCORD_TOKEN = "your_token_here"
@@ -80,6 +85,7 @@ sudo chmod 666 /var/run/docker.sock
 ### Container Keeps Restarting
 
 **Check logs:**
+
 ```bash
 docker-compose logs -f bot
 ```
@@ -95,6 +101,7 @@ docker-compose logs -f bot
    - Verify all required env vars are set
 
 3. **Port conflicts:**
+
    ```bash
    # Check if port 27017 is in use
    netstat -an | grep 27017
@@ -111,6 +118,7 @@ docker-compose logs -f bot
 **Solutions:**
 
 1. **Install Docker Compose:**
+
    ```bash
    # Linux
    sudo apt-get install docker-compose
@@ -122,6 +130,7 @@ docker-compose logs -f bot
    ```
 
 2. **Use `docker compose` (without dash):**
+
    ```bash
    docker compose up -d
    ```
@@ -129,6 +138,7 @@ docker-compose logs -f bot
 ### MongoDB Container Won't Start
 
 **Check logs:**
+
 ```bash
 docker-compose logs -f mongodb
 ```
@@ -136,17 +146,20 @@ docker-compose logs -f mongodb
 **Solutions:**
 
 1. **Remove corrupted volume:**
+
    ```bash
    docker-compose down -v
    docker-compose up -d
    ```
 
 2. **Check disk space:**
+
    ```bash
    df -h
    ```
 
 3. **Verify MongoDB image:**
+
    ```bash
    docker pull mongo:latest
    docker-compose up -d --force-recreate
@@ -161,11 +174,13 @@ docker-compose logs -f mongodb
 **Verify:**
 
 1. **Check bot is running:**
+
    ```bash
    docker-compose ps
    ```
 
 2. **Check logs for connection errors:**
+
    ```bash
    docker-compose logs -f bot | grep -i "error\|discord"
    ```
@@ -180,7 +195,8 @@ docker-compose logs -f mongodb
 ### Invalid Token Error
 
 **Symptoms:**
-```
+
+```json
 Error: An invalid token was provided
 ```
 
@@ -200,6 +216,7 @@ Error: An invalid token was provided
 ### Bot Has No Permissions
 
 **Symptoms:**
+
 - Commands don't appear
 - Bot can't create channels
 - Bot can't move users
@@ -207,16 +224,18 @@ Error: An invalid token was provided
 **Solutions:**
 
 1. **Re-invite bot with correct permissions:**
-   ```
+
+```json
    https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&scope=bot%20applications.commands
    ```
+
    Replace `YOUR_CLIENT_ID` with your actual Client ID.
 
-2. **Check role hierarchy:**
+1. **Check role hierarchy:**
    - Bot's role must be ABOVE roles it needs to manage
    - Move bot's role higher in Server Settings → Roles
 
-3. **Verify required permissions:**
+2. **Verify required permissions:**
    - Administrator (easiest, or:)
    - Manage Channels
    - Move Members
@@ -234,11 +253,13 @@ Error: An invalid token was provided
 **Solutions:**
 
 1. **Enable the command:**
+
    ```bash
    /config set key:ping.enabled value:true
    ```
 
 2. **Reload commands (REQUIRED!):**
+
    ```bash
    /config reload
    ```
@@ -249,6 +270,7 @@ Error: An invalid token was provided
    - Restart Discord client
 
 4. **Check if commands are enabled:**
+
    ```bash
    /config list
    ```
@@ -256,6 +278,7 @@ Error: An invalid token was provided
 ### "Application did not respond" Error
 
 **Causes:**
+
 - Bot is processing but taking too long
 - Bot crashed during command execution
 - Network issues
@@ -263,16 +286,19 @@ Error: An invalid token was provided
 **Solutions:**
 
 1. **Check bot logs:**
+
    ```bash
    docker-compose logs -f bot | tail -50
    ```
 
 2. **Restart bot:**
+
    ```bash
    docker-compose restart bot
    ```
 
 3. **Check MongoDB connection:**
+
    ```bash
    docker-compose logs mongodb | grep -i error
    ```
@@ -284,18 +310,20 @@ Error: An invalid token was provided
 1. **Verify you have Administrator permission** in Discord
 
 2. **Check bot logs for errors:**
+
    ```bash
    docker-compose logs -f bot | grep -i config
    ```
 
 3. **Verify MongoDB is connected:**
+
    ```bash
    /dbtrunk status
    ```
 
 ---
 
-## 🎙️ Voice Channel Issues
+## 🎙 Voice Channel Issues
 
 ### Lobby Channel Not Creating Users' Rooms
 
@@ -309,12 +337,14 @@ Error: An invalid token was provided
 **Solutions:**
 
 1. **Enable voice channels:**
+
    ```bash
    /config set key:voicechannels.enabled value:true
    /config reload
    ```
 
 2. **Run lobby setup:**
+
    ```bash
    /setup-lobby
    ```
@@ -333,23 +363,28 @@ Error: An invalid token was provided
 ### Voice Channels Not Being Deleted
 
 **Symptoms:**
+
 - Empty channels remain after everyone leaves
 - Channels accumulate over time
 
 **Solutions:**
 
 1. **Manual cleanup:**
+
    ```bash
    /vc reload
    ```
 
 2. **Force cleanup:**
+
    ```bash
    /vc force-reload
    ```
+
    ⚠️ **Warning:** Removes ALL unmanaged channels!
 
 3. **Check bot logs:**
+
    ```bash
    docker-compose logs -f bot | grep -i "voice"
    ```
@@ -365,12 +400,14 @@ Error: An invalid token was provided
 **Solutions:**
 
 1. **Enable tracking:**
+
    ```bash
    /config set key:voicetracking.enabled value:true
    /config reload
    ```
 
 2. **Check excluded channels:**
+
    ```bash
    /config get key:voicetracking.excluded_channels
    ```
@@ -380,6 +417,7 @@ Error: An invalid token was provided
    - Check if channel is excluded
 
 4. **Check database:**
+
    ```bash
    /dbtrunk status
    ```
@@ -387,6 +425,7 @@ Error: An invalid token was provided
 ### `/vctop` Shows "No data"
 
 **Causes:**
+
 - Tracking recently enabled (no data yet)
 - All channels are excluded
 - Users haven't been in voice yet
@@ -398,14 +437,17 @@ Error: An invalid token was provided
    - Run `/vcstats` to verify tracking
 
 2. **Check excluded channels:**
+
    ```bash
    /config get key:voicetracking.excluded_channels
    ```
 
 3. **Verify tracking is enabled:**
+
    ```bash
    /config list
    ```
+
    Check `voicetracking.enabled: true`
 
 ---
@@ -417,24 +459,29 @@ Error: An invalid token was provided
 **Solutions:**
 
 1. **Check MongoDB container:**
+
    ```bash
    docker-compose ps mongodb
    ```
 
 2. **Restart MongoDB:**
+
    ```bash
    docker-compose restart mongodb
    ```
 
 3. **Check MongoDB logs:**
+
    ```bash
    docker-compose logs -f mongodb
    ```
 
 4. **Verify MONGODB_URI:**
+
    ```bash
    cat .env | grep MONGODB_URI
    ```
+
    Should be: `mongodb://mongodb:27017/koolbot`
 
 ### Database Connection Refused
@@ -442,16 +489,19 @@ Error: An invalid token was provided
 **Solutions:**
 
 1. **Ensure MongoDB container is running:**
+
    ```bash
    docker-compose up -d mongodb
    ```
 
 2. **Check network connectivity:**
+
    ```bash
    docker-compose exec bot ping mongodb
    ```
 
 3. **Recreate containers:**
+
    ```bash
    docker-compose down
    docker-compose up -d
@@ -480,7 +530,7 @@ Error: An invalid token was provided
 
 ---
 
-## ⚙️ Configuration Issues
+## ⚙ Configuration Issues
 
 ### "Invalid key" Error
 
@@ -489,6 +539,7 @@ Error: An invalid token was provided
 **Solution:**
 
 1. **Check exact key name:**
+
    ```bash
    /config list
    ```
@@ -513,6 +564,7 @@ docker-compose ps mongodb
 **Solution:**
 
 If database is corrupted:
+
 ```bash
 # Backup first!
 /config export
@@ -540,6 +592,7 @@ voicechannels:
 ```
 
 **Common issues:**
+
 - Incorrect indentation (use 2 spaces)
 - Missing quotes on strings with special characters
 - Invalid YAML syntax
@@ -567,15 +620,19 @@ docker-compose exec bot top
    - Increase CPU and memory allocation
 
 2. **Check database size:**
+
    ```bash
    /dbtrunk status
    ```
+
    Run cleanup if database is large:
+
    ```bash
    /dbtrunk run
    ```
 
 3. **Optimize retention:**
+
    ```bash
    # Reduce retention periods to save space
    /config set key:voicetracking.cleanup.retention.detailed_sessions_days value:14
@@ -588,16 +645,19 @@ docker-compose exec bot top
 **If exceeding 500 MB:**
 
 1. **Restart bot:**
+
    ```bash
    docker-compose restart bot
    ```
 
 2. **Check for memory leaks in logs:**
+
    ```bash
    docker-compose logs -f bot | grep -i "memory\|heap"
    ```
 
 3. **Update to latest version:**
+
    ```bash
    docker-compose pull
    docker-compose up -d
@@ -637,6 +697,7 @@ docker-compose logs -f bot
 ### Get Support
 
 1. **Check logs first:**
+
    ```bash
    docker-compose logs bot > bot-logs.txt
    ```

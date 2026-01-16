@@ -77,7 +77,7 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/koolbot
 Enable or disable individual commands. **All commands are disabled by default.**
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `ping.enabled` | `false` | Enable/disable the `/ping` command |
 | `amikool.enabled` | `false` | Enable/disable the `/amikool` command |
 | `amikool.role.name` | `""` | Role name to check for `/amikool` verification |
@@ -103,7 +103,7 @@ Enable or disable individual commands. **All commands are disabled by default.**
 Configure the quote management system.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `quotes.enabled` | `false` | Enable/disable the quote system |
 | `quotes.cooldown` | `60` | Seconds between quote additions (per user) |
 | `quotes.max_length` | `1000` | Maximum character length for quotes |
@@ -123,12 +123,12 @@ Configure the quote management system.
 
 ---
 
-## 🎙️ Voice Channel Management
+## 🎙 Voice Channel Management
 
 Dynamic voice channel creation and management.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `voicechannels.enabled` | `false` | Enable dynamic voice channel management |
 | `voicechannels.category.name` | `"Voice Channels"` | Discord category name for managed channels |
 | `voicechannels.lobby.name` | `"Lobby"` | Lobby channel name when bot is online |
@@ -160,7 +160,7 @@ Dynamic voice channel creation and management.
 Track user voice channel activity and generate statistics.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `voicetracking.enabled` | `false` | Enable voice channel activity tracking |
 | `voicetracking.seen.enabled` | `false` | Enable `/seen` command for last-seen tracking |
 | `voicetracking.excluded_channels` | `""` | Channel IDs to exclude from tracking (comma-separated) |
@@ -191,7 +191,7 @@ Track user voice channel activity and generate statistics.
 Automated voice channel statistics announcements.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `voicetracking.announcements.enabled` | `false` | Enable weekly stats announcements |
 | `voicetracking.announcements.channel` | `"voice-stats"` | Channel name or ID for announcements |
 | `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM) |
@@ -208,7 +208,7 @@ Automated voice channel statistics announcements.
 
 ### Cron Schedule Format
 
-```
+```text
 * * * * *
 │ │ │ │ │
 │ │ │ │ └─── Day of week (0-7, Sun-Sat)
@@ -219,6 +219,7 @@ Automated voice channel statistics announcements.
 ```
 
 **Examples:**
+
 - `0 16 * * 5` - Every Friday at 4 PM
 - `0 0 * * 1` - Every Monday at midnight
 - `0 12 * * *` - Every day at noon
@@ -230,7 +231,7 @@ Automated voice channel statistics announcements.
 Automatic cleanup of old tracking data with data aggregation.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `voicetracking.cleanup.enabled` | `false` | Enable automatic data cleanup |
 | `voicetracking.cleanup.schedule` | `"0 0 * * *"` | Cron schedule (default: daily at midnight) |
 | `voicetracking.cleanup.retention.detailed_sessions_days` | `30` | Days to keep detailed session data |
@@ -250,6 +251,7 @@ Automatic cleanup of old tracking data with data aggregation.
 ```
 
 **How it works:**
+
 1. Old detailed sessions are removed after retention period
 2. Data is aggregated into monthly/yearly summaries before deletion
 3. Statistics are preserved even after detailed data is removed
@@ -264,35 +266,35 @@ Send bot events and logs to Discord channels.
 ### Startup/Shutdown Logging
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `core.startup.enabled` | `false` | Enable startup/shutdown event logging |
 | `core.startup.channel_id` | `""` | Channel ID for startup/shutdown logs |
 
 ### Error Logging
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `core.errors.enabled` | `false` | Enable error logging |
 | `core.errors.channel_id` | `""` | Channel ID for error logs |
 
 ### Cleanup Logging
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `core.cleanup.enabled` | `false` | Enable cleanup operation logging |
 | `core.cleanup.channel_id` | `""` | Channel ID for cleanup logs |
 
 ### Configuration Logging
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `core.config.enabled` | `false` | Enable configuration change logging |
 | `core.config.channel_id` | `""` | Channel ID for config logs |
 
 ### Cron Job Logging
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `core.cron.enabled` | `false` | Enable scheduled task logging |
 | `core.cron.channel_id` | `""` | Channel ID for cron logs |
 
@@ -337,7 +339,7 @@ Send bot events and logs to Discord channels.
 Easter eggs and passive listeners.
 
 | Setting | Default | Description |
-|---------|---------|-------------|
+| --- | --- | --- |
 | `fun.friendship` | `false` | Respond to "best ship" and "worst ship" mentions |
 
 ### Example
@@ -351,7 +353,7 @@ This enables passive responses when users mention "best ship" or "worst ship" in
 
 ---
 
-## ⚙️ Configuration Management
+## ⚙ Configuration Management
 
 ### Using `/config` Commands
 
@@ -412,18 +414,21 @@ The config system automatically converts values:
 ### All Available Settings
 
 #### Commands
+
 - `ping.enabled` (bool, default: false)
 - `amikool.enabled` (bool, default: false)
 - `amikool.role.name` (string, default: "")
 - `quotes.enabled` (bool, default: false)
 
 #### Quote System
+
 - `quotes.cooldown` (number, default: 60)
 - `quotes.max_length` (number, default: 1000)
 - `quotes.add_roles` (string, default: "")
 - `quotes.delete_roles` (string, default: "")
 
 #### Voice Channels
+
 - `voicechannels.enabled` (bool, default: false)
 - `voicechannels.category.name` (string, default: "Voice Channels")
 - `voicechannels.lobby.name` (string, default: "Lobby")
@@ -432,24 +437,28 @@ The config system automatically converts values:
 - `voicechannels.channel.suffix` (string, default: "")
 
 #### Voice Tracking
+
 - `voicetracking.enabled` (bool, default: false)
 - `voicetracking.seen.enabled` (bool, default: false)
 - `voicetracking.excluded_channels` (string, default: "")
 - `voicetracking.admin_roles` (string, default: "")
 
 #### Announcements
+
 - `voicetracking.announcements.enabled` (bool, default: false)
 - `voicetracking.announcements.channel` (string, default: "voice-stats")
-- `voicetracking.announcements.schedule` (string, default: "0 16 * * 5")
+- `voicetracking.announcements.schedule` (string, default: "0 16 ** 5")
 
 #### Cleanup
+
 - `voicetracking.cleanup.enabled` (bool, default: false)
-- `voicetracking.cleanup.schedule` (string, default: "0 0 * * *")
+- `voicetracking.cleanup.schedule` (string, default: "0 0 ** *")
 - `voicetracking.cleanup.retention.detailed_sessions_days` (number, default: 30)
 - `voicetracking.cleanup.retention.monthly_summaries_months` (number, default: 6)
 - `voicetracking.cleanup.retention.yearly_summaries_years` (number, default: 1)
 
 #### Discord Logging
+
 - `core.startup.enabled` (bool, default: false)
 - `core.startup.channel_id` (string, default: "")
 - `core.errors.enabled` (bool, default: false)
@@ -462,6 +471,7 @@ The config system automatically converts values:
 - `core.cron.channel_id` (string, default: "")
 
 #### Fun Features
+
 - `fun.friendship` (bool, default: false)
 
 ---

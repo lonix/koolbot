@@ -1,6 +1,8 @@
 # KoolBot
 
-A powerful and modular Discord bot built with TypeScript, featuring dynamic voice channel management, activity tracking, automated announcements, and comprehensive configuration management.
+A powerful and modular Discord bot built with TypeScript, featuring dynamic voice channel
+management, activity tracking, automated announcements, and comprehensive configuration
+management.
 
 ![Discord.js](https://img.shields.io/badge/Discord.js-14.25.1-blue)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue)
@@ -43,6 +45,7 @@ NODE_ENV=production
 ```
 
 **Where to get your credentials:**
+
 - Go to [Discord Developer Portal](https://discord.com/developers/applications)
 - Create a new application (or select existing)
 - **DISCORD_TOKEN**: Bot tab → Reset Token → Copy
@@ -56,12 +59,14 @@ docker-compose up -d
 ```
 
 **That's it!** Your bot is now running. The Docker container will:
+
 - ✅ Automatically install dependencies
 - ✅ Set up MongoDB database
 - ✅ Register commands with Discord
 - ✅ Start the bot and keep it running
 
 Check the logs:
+
 ```bash
 docker-compose logs -f bot
 ```
@@ -72,11 +77,11 @@ docker-compose logs -f bot
 
 ### Core Features
 
-- **🎙️ Dynamic Voice Channels** - Users create their own voice channels from a lobby
+- **🎙 Dynamic Voice Channels** - Users create their own voice channels from a lobby
 - **📊 Activity Tracking** - Track voice channel usage with leaderboards and statistics
 - **⏰ Automated Announcements** - Weekly stats announcements
 - **🧹 Smart Data Cleanup** - Automatic cleanup with data preservation
-- **⚙️ Flexible Configuration** - Configure everything through Discord commands
+- **⚙ Flexible Configuration** - Configure everything through Discord commands
 - **📝 Discord Logging** - Bot events logged to Discord channels
 - **🎭 Quote System** - Save and retrieve memorable quotes
 - **🤖 Bot Status** - Dynamic status showing bot state and user count
@@ -84,6 +89,7 @@ docker-compose logs -f bot
 ### Available Commands
 
 **User Commands:**
+
 - `/ping` - Check bot responsiveness
 - `/vctop` - View voice channel leaderboards
 - `/vcstats` - View your personal voice statistics
@@ -93,6 +99,7 @@ docker-compose logs -f bot
 - `/amikool` - Role verification command
 
 **Admin Commands:**
+
 - `/config` - Manage all bot settings
 - `/vc` - Voice channel management
 - `/dbtrunk` - Database cleanup management
@@ -105,7 +112,7 @@ docker-compose logs -f bot
 
 ---
 
-## ⚙️ Configuration
+## ⚙ Configuration
 
 All bot features are **disabled by default** for security. You enable and configure them using Discord commands after the bot starts.
 
@@ -144,7 +151,7 @@ Once your bot is running, configure it from Discord:
 ### Configuration Categories
 
 | Category | Description |
-|----------|-------------|
+| --- | --- |
 | **Commands** | Enable/disable individual commands (`ping.enabled`, `quotes.enabled`, etc.) |
 | **Voice Channels** | Dynamic channel creation, lobby settings, naming patterns |
 | **Voice Tracking** | Activity tracking, excluded channels, admin roles |
@@ -158,7 +165,7 @@ Once your bot is running, configure it from Discord:
 
 ---
 
-## 🎙️ Voice Channel Features (Examples)
+## 🎙 Voice Channel Features (Examples)
 
 ### Dynamic Voice Channel Creation
 
@@ -170,6 +177,7 @@ When enabled, KoolBot creates private voice channels on-demand:
 4. **Channel is deleted** when everyone leaves
 
 **Setup:**
+
 ```bash
 # Enable voice channel management
 /config set key:voicechannels.enabled value:true
@@ -189,6 +197,7 @@ When enabled, KoolBot creates private voice channels on-demand:
 ```
 
 The lobby will automatically rename based on bot status:
+
 - **"🟢 Lobby"** - Bot online and ready
 - **"🔴 Lobby"** - Bot offline
 
@@ -197,6 +206,7 @@ The lobby will automatically rename based on bot status:
 Track how much time users spend in voice channels:
 
 **Setup:**
+
 ```bash
 # Enable tracking
 /config set key:voicetracking.enabled value:true
@@ -211,6 +221,7 @@ Track how much time users spend in voice channels:
 ```
 
 **Usage:**
+
 ```bash
 # View leaderboards
 /vctop              # This week's top users
@@ -230,6 +241,7 @@ Track how much time users spend in voice channels:
 Post weekly voice channel statistics automatically:
 
 **Setup:**
+
 ```bash
 # Enable announcements
 /config set key:voicetracking.announcements.enabled value:true
@@ -244,6 +256,7 @@ Post weekly voice channel statistics automatically:
 ```
 
 **Manual trigger:**
+
 ```bash
 /announce-vc-stats
 ```
@@ -253,6 +266,7 @@ Post weekly voice channel statistics automatically:
 Automatically clean old session data while preserving aggregated statistics:
 
 **Setup:**
+
 ```bash
 # Enable automatic cleanup
 /config set key:voicetracking.cleanup.enabled value:true
@@ -269,6 +283,7 @@ Automatically clean old session data while preserving aggregated statistics:
 ```
 
 **Manual cleanup:**
+
 ```bash
 /dbtrunk status     # Check cleanup status
 /dbtrunk run        # Run cleanup now
@@ -309,7 +324,7 @@ Configure the bot to send event logs to Discord channels:
 ### Available Log Types
 
 | Log Type | Description | Example Events |
-|----------|-------------|----------------|
+| --- | --- | --- |
 | `core.startup.*` | Bot lifecycle | Startup, shutdown, service initialization |
 | `core.errors.*` | Critical errors | Command failures, service crashes |
 | `core.cleanup.*` | Data maintenance | Cleanup results, sessions removed |
@@ -359,6 +374,7 @@ docker-compose -f docker-compose.dev.yml up -d
 ```
 
 This will:
+
 - Mount your local code into the container
 - Automatically reload on file changes
 - Show detailed debug output
@@ -435,11 +451,13 @@ This will:
 ### Bot Not Starting
 
 **Check the logs:**
+
 ```bash
 docker-compose logs -f bot
 ```
 
 **Common issues:**
+
 - ❌ Invalid `DISCORD_TOKEN` → Check Discord Developer Portal
 - ❌ Missing `MONGODB_URI` → Ensure it's set to `mongodb://mongodb:27017/koolbot`
 - ❌ Docker not running → Start Docker Desktop
@@ -452,6 +470,7 @@ docker-compose logs -f bot
 ```
 
 **If still not working:**
+
 - Ensure the command is enabled (`/config list`)
 - Check bot has proper Discord permissions
 - Wait a few minutes for Discord to sync
@@ -459,12 +478,14 @@ docker-compose logs -f bot
 ### Voice Channels Not Creating
 
 **Check configuration:**
+
 ```bash
 /config get key:voicechannels.enabled
 /config get key:voicechannels.category.name
 ```
 
 **Ensure:**
+
 - The category exists in Discord
 - Bot has permissions: `Manage Channels`, `Move Members`
 - The lobby channel exists
@@ -551,7 +572,7 @@ npm run cleanup-global-commands   # Clean up Discord commands
 
 ### Architecture Overview
 
-```
+```text
 src/
 ├── commands/           # Discord slash commands
 ├── services/          # Core business logic
@@ -602,6 +623,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **KoolBot v0.6.0** - Making Discord servers more engaging! 🚀
 
-*Built with ❤️ using TypeScript and Discord.js*
+Built with ❤️ using TypeScript and Discord.js
 
 </div>

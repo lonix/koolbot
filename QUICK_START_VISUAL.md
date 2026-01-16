@@ -1,6 +1,6 @@
 # KoolBot Quick Start Visual Guide
 
-```
+```text
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          KOOLBOT QUICK START                             │
 │                    (3 Steps - 5 Minutes to Deploy)                      │
