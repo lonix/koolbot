@@ -168,7 +168,6 @@ If you see errors about ES modules, ensure:
 - Tests use `.js` extensions in imports
 - `node --experimental-vm-modules` is used in test scripts (required for ES modules in Jest)
 - The hardcoded path to jest binary is necessary for cross-platform compatibility with ES modules
-- `node --experimental-vm-modules` is used in test scripts
 
 ### Type Errors
 

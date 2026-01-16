@@ -557,7 +557,7 @@ Import configuration from a YAML file.
 
 ### `/vc`
 
-**Description:** Voice channel management and cleanup tools.
+**Description:** Voice channel management, cleanup tools, and user customization.
 
 **Configuration:**
 
@@ -626,6 +626,133 @@ Removed 8 channels from Voice Channels category
 - Reset voice channel setup
 - Fix corrupted channel states
 - Emergency cleanup
+
+#### `/vc customize name <pattern>`
+
+Set a custom naming pattern for your dynamically created voice channels.
+
+**Usage:**
+
+```bash
+/vc customize name pattern:"🎮 {username}'s Gaming Room"
+/vc customize name pattern:"🎵 {username} Vibes"
+/vc customize name pattern:"{username}'s Chill Zone"
+```
+
+**Parameters:**
+
+- `pattern` (required) - Channel name template. Use `{username}` as placeholder for your display name.
+
+**Requirements:**
+
+- Pattern must include `{username}` placeholder
+- Final channel name must be under 100 characters
+
+**Example Response:**
+
+```text
+✅ Your channel name pattern has been set to: 🎮 {username}'s Gaming Room
+
+Example: 🎮 Alice's Gaming Room
+```
+
+**Use Cases:**
+
+- Personalize your voice channel names
+- Match channel names to your activity (gaming, music, studying)
+- Stand out with custom branding
+
+#### `/vc customize limit <number>`
+
+Set the user limit for your dynamically created voice channels.
+
+**Usage:**
+
+```bash
+/vc customize limit number:5
+/vc customize limit number:10
+/vc customize limit number:0  # Unlimited
+```
+
+**Parameters:**
+
+- `number` (required) - Maximum users allowed (0-99, 0 = unlimited)
+
+**Example Response:**
+
+```text
+✅ Your channel user limit has been set to: 5 users
+```
+
+**Use Cases:**
+
+- Control channel capacity for focused conversations
+- Create intimate spaces for small groups
+- Prevent overcrowding
+
+#### `/vc customize bitrate <kbps>`
+
+Set the audio quality (bitrate) for your dynamically created voice channels.
+
+**Usage:**
+
+```bash
+/vc customize bitrate kbps:64   # Standard quality
+/vc customize bitrate kbps:96   # High quality
+/vc customize bitrate kbps:128  # Premium quality (requires server boost)
+```
+
+**Parameters:**
+
+- `kbps` (required) - Bitrate in kilobits per second (8-384)
+  - 8-64 kbps: Low quality (good for voice-only)
+  - 64-96 kbps: Standard quality (recommended)
+  - 96-128 kbps: High quality (clear audio)
+  - 128-384 kbps: Premium quality (requires server boosts)
+
+**Note:** Higher bitrates require server boost levels and will be automatically capped at the server's maximum.
+
+**Example Response:**
+
+```text
+✅ Your channel bitrate has been set to: 96 kbps
+
+Note: Higher bitrates may require server boosts and will be capped at the server's maximum.
+```
+
+**Use Cases:**
+
+- Optimize audio quality for music listening
+- Reduce bandwidth for voice-only conversations
+- Maximize clarity for podcasting or streaming
+
+#### `/vc customize reset`
+
+Reset all your voice channel customizations to server defaults.
+
+**Usage:**
+
+```bash
+/vc customize reset
+```
+
+**What it does:**
+
+- Removes custom name pattern (uses default naming)
+- Resets user limit to unlimited
+- Resets bitrate to server default
+
+**Example Response:**
+
+```text
+✅ All your voice channel customizations have been reset to defaults.
+```
+
+**Use Cases:**
+
+- Return to default settings
+- Fix misconfigured preferences
+- Start fresh with new preferences
 
 ---
 
