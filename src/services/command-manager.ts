@@ -61,6 +61,7 @@ export class CommandManager {
       // Define command configurations with their requirements
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
+        { name: "help", configKey: "help.enabled", file: "help" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {

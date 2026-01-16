@@ -2,24 +2,15 @@
 
 Based on comprehensive codebase research, here are feature suggestions organized by impact and complexity:
 
-## 🎯 High-Impact, Quick Wins
-
-### 1. **Help Command System**
-**Gap**: No `/help` command or command discovery mechanism
-**Suggestion**: 
-- `/help` - List all available commands with descriptions
-- `/help <command>` - Detailed info about specific command
-- Auto-generate from command metadata
-
-### 2. **Quote System Completion**
-**Gap**: Quote service has search/like/dislike methods but no commands
-**Suggestions**:
-- `/quote search <text>` - Find quotes by content
-- `/quote like <id>` - Upvote a quote
-- `/quote delete <id>` - Remove quotes (admin only)
-- `/quote list` - Paginated quote browser
-
 ## 🚀 Medium Complexity, High Value
+
+### 3. **Enhanced Voice Channel Customization**
+**Gap**: Limited per-user customization
+**Suggestions**:
+- `/vc customize name <pattern>` - Custom channel naming template
+- `/vc customize limit <number>` - Set user limit for owned channel
+- `/vc customize bitrate <kbps>` - Audio quality preference
+- Store preferences in new `UserVoicePreferences` model
 
 ### 4. **Statistics Export & Visualization**
 **Gap**: No data export or visual analytics
@@ -137,12 +128,3 @@ Based on comprehensive codebase research, here are feature suggestions organized
 - Integrate with existing CooldownManager
 - Bypass rate limits for admin users and testing environments
 
----
-
-## 💡 Top 3 Recommendations
-
-If prioritizing by impact-to-effort ratio:
-
-1. **Help Command** (#1) - Essential for user onboarding, very quick to implement
-2. **Quote System Completion** (#2) - Half-built feature, high user engagement potential
-3. **Statistics Export & Visualization** (#4) - User-requested feature, builds on existing tracking

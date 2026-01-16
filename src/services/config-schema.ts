@@ -25,15 +25,18 @@ export interface ConfigSchema {
 
   // Individual Features
   "ping.enabled": boolean;
+  "help.enabled": boolean;
   "amikool.enabled": boolean;
   "amikool.role.name": string; // Role name required for amikool
 
   // Quote System Settings
   "quotes.enabled": boolean;
+  "quotes.channel_id": string; // Channel ID for quote messages
   "quotes.add_roles": string; // Comma-separated role IDs
   "quotes.delete_roles": string; // Comma-separated role IDs
   "quotes.max_length": number; // Maximum quote length
   "quotes.cooldown": number; // Cooldown in seconds between quote additions
+  "quotes.cleanup_interval": number; // Cleanup interval in minutes (default: 5)
 
   // Core Bot Logging (Discord) - Defaults to disabled
   "core.startup.enabled": boolean;
@@ -78,15 +81,18 @@ export const defaultConfig: ConfigSchema = {
 
   // Individual Features
   "ping.enabled": false,
+  "help.enabled": true,
   "amikool.enabled": false,
   "amikool.role.name": "",
 
   // Quote System Defaults
   "quotes.enabled": false,
+  "quotes.channel_id": "",
   "quotes.add_roles": "", // Empty means all users can add
   "quotes.delete_roles": "", // Empty means only admins can delete
   "quotes.max_length": 1000,
   "quotes.cooldown": 60,
+  "quotes.cleanup_interval": 5, // Clean up unauthorized messages every 5 minutes
 
   // Core Bot Logging (Discord) - Defaults to disabled
   "core.startup.enabled": false,

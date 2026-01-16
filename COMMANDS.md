@@ -53,6 +53,54 @@ API Latency: 123ms
 
 ---
 
+### `/help`
+
+**Description:** Get help with KoolBot commands. Lists all available commands or shows detailed information about a specific command.
+
+**Configuration:**
+
+```bash
+/config set key:help.enabled value:true
+/config reload
+```
+
+**Usage:**
+
+```bash
+/help                    # List all commands
+/help command:ping       # Get detailed help for a specific command
+```
+
+**Parameters:**
+
+- `command` (optional) - Name of the command to get detailed help for
+
+**Example Responses:**
+
+```text
+# List all commands
+📚 KoolBot Help
+✅ Enabled Commands
+/ping - Check if the bot is responding and measure latency.
+/help - Get help with KoolBot commands.
+...
+
+# Specific command help
+📖 Help: /ping
+Check if the bot is responding and measure latency.
+Usage: /ping
+Status: ✅ Enabled
+```
+
+**Use Cases:**
+
+- Discover available commands
+- Learn command syntax
+- Check if a command is enabled
+- New user onboarding
+
+---
+
 ### `/vctop`
 
 **Description:** View voice channel activity leaderboards showing top users by time spent.
@@ -181,12 +229,14 @@ Most Active Channel: Gaming Room
 
 ### `/quote`
 
-**Description:** Save and retrieve memorable quotes from the server.
+**Description:** Add memorable quotes to a dedicated bot-managed channel. All quotes are posted in a channel where users can react with 👍/👎.
 
 **Configuration:**
 
 ```bash
+# Enable quotes and set channel
 /config set key:quotes.enabled value:true
+/config set key:quotes.channel_id value:"YOUR_CHANNEL_ID"
 /config set key:quotes.cooldown value:60
 /config set key:quotes.max_length value:1000
 /config reload
@@ -195,24 +245,39 @@ Most Active Channel: Gaming Room
 **Usage:**
 
 ```bash
-/quote                                    # Get random quote
-/quote text:"Great quote!" author:"Alice" # Add new quote
+/quote text:"Great quote!" author:"@Alice"
 ```
 
-**Parameters:**
+**How It Works:**
 
-- `text` (optional) - Quote text to add
-- `author` (optional) - Who said it (required when adding)
+1. User submits a quote using `/quote` command
+2. Bot posts the quote as an embed in the configured quote channel
+3. Bot automatically adds 👍 and 👎 reactions to the message
+4. Users browse quotes by scrolling through the channel
+5. Users react with 👍 or 👎 to vote on quotes
+6. Bot automatically cleans up any unauthorized messages (every 5 minutes)
 
-**Example Responses:**
+**Security Features:**
 
-```bash
-# Random quote
-"To be or not to be" - Shakespeare
+- **Strict Permissions**: Channel is automatically configured so only the bot can post messages
+- **Auto-Cleanup**: Removes any non-bot messages every 5 minutes (configurable)
+- **User Access**: Users can view, read history, and add reactions only
 
-# Adding quote
-✅ Quote added successfully!
+**Example Response:**
+
+```text
+✅ Quote added successfully and posted to the quote channel!
 ```
+
+**Quote Display in Channel:**
+
+Each quote appears as an embed with:
+
+- The quote text
+- Author (mentioned user)
+- Who added it
+- Quote ID (in footer)
+- 👍 and 👎 reactions for voting
 
 **Advanced Configuration:**
 
@@ -220,9 +285,40 @@ Most Active Channel: Gaming Room
 # Restrict who can add quotes (role IDs)
 /config set key:quotes.add_roles value:"123456789,987654321"
 
-# Restrict who can delete quotes
-/config set key:quotes.delete_roles value:"123456789"
+# Set maximum quote length
+/config set key:quotes.max_length value:500
+
+# Set cooldown between adding quotes (seconds)
+/config set key:quotes.cooldown value:120
+
+# Set cleanup interval (minutes, default: 5)
+/config set key:quotes.cleanup_interval value:10
 ```
+
+**Use Cases:**
+
+- Preserve memorable server moments
+- Create a community quote wall
+- Natural browsing via channel scroll
+- Engage through Discord reactions
+- Simple, streamlined quote management
+- Protected channel prevents spam/abuse
+
+**Setup Steps:**
+
+1. Create a dedicated text channel for quotes (e.g., #quotes)
+2. Get the channel ID (right-click channel → Copy ID)
+3. Configure: `/config set key:quotes.channel_id value:"CHANNEL_ID"`
+4. Enable: `/config set key:quotes.enabled value:true`
+5. Reload: `/config reload`
+6. Bot will automatically set strict permissions on the channel
+
+**Permissions:**
+
+- Everyone can view quotes in the channel
+- Everyone can add reactions to quotes
+- Only bot can post messages (auto-configured)
+- Adding quotes via command respects `quotes.add_roles` configuration (empty = everyone can add)
 
 ---
 
@@ -990,10 +1086,11 @@ The bot needs these Discord permissions to function:
 
 ```bash
 /ping                               # Check bot status
+/help [command]                     # Get help on commands
 /vctop [period] [limit]            # Voice leaderboards
 /vcstats [period]                  # Your voice stats
 /seen user:@User                   # Last seen info
-/quote [text] [author]             # Quotes system
+/quote text:"..." author:"@User"   # Add quote to channel
 /amikool                           # Role verification
 /transfer-ownership user:@User     # Transfer channel
 ```
@@ -1055,6 +1152,25 @@ The bot needs these Discord permissions to function:
 # 5. Setup data cleanup
 /config set key:voicetracking.cleanup.enabled value:true
 /config reload
+
+# 6. Setup quote channel (optional)
+/config set key:quotes.enabled value:true
+/config set key:quotes.channel_id value:"YOUR_QUOTE_CHANNEL_ID"
+/config reload
+```
+
+### Enable Quote Channel
+
+```bash
+# 1. Create a dedicated text channel in Discord (e.g., #quotes)
+# 2. Right-click the channel → Copy ID
+# 3. Configure the bot:
+/config set key:quotes.enabled value:true
+/config set key:quotes.channel_id value:"YOUR_CHANNEL_ID"
+/config reload
+
+# 4. Test it
+/quote text:"Hello World!" author:"@YourName"
 ```
 
 ### Enable Logging

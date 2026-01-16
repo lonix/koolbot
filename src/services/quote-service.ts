@@ -129,6 +129,38 @@ export class QuoteService {
   async dislikeQuote(quoteId: string): Promise<void> {
     await this.model.findByIdAndUpdate(quoteId, { $inc: { dislikes: 1 } });
   }
+
+  async listQuotes(
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ quotes: IQuote[]; total: number; totalPages: number }> {
+    const skip = (page - 1) * limit;
+    const total = await this.model.countDocuments();
+    const totalPages = Math.ceil(total / limit);
+
+    const quotes = await this.model
+      .find()
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    return { quotes, total, totalPages };
+  }
+
+  async getQuoteById(quoteId: string): Promise<IQuote | null> {
+    return this.model.findById(quoteId);
+  }
+
+  async updateQuoteMessageId(
+    quoteId: string,
+    messageId: string,
+  ): Promise<void> {
+    await this.model.findByIdAndUpdate(quoteId, { messageId });
+  }
+
+  async getAllQuotes(): Promise<IQuote[]> {
+    return this.model.find().sort({ createdAt: -1 });
+  }
 }
 
 export const quoteService = new QuoteService();

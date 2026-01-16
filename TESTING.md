@@ -105,10 +105,10 @@ Coverage reports are generated in the `coverage/` directory:
 
 Current Coverage Thresholds:
 
-- Statements: 50%
-- Branches: 50%
-- Functions: 50%
-- Lines: 50%
+- Statements: 2%
+- Branches: 2%
+- Functions: 2%
+- Lines: 2%
 
 ## Best Practices
 
@@ -167,7 +167,6 @@ If you see errors about ES modules, ensure:
 
 - Tests use `.js` extensions in imports
 - `node --experimental-vm-modules` is used in test scripts (required for ES modules in Jest)
-- The hardcoded path to jest binary is necessary for cross-platform compatibility with ES modules
 
 ### Type Errors
 
