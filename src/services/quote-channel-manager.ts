@@ -355,7 +355,7 @@ export class QuoteChannelManager {
     });
   }
 
-  public async syncExistingQuotes(): Promise<void> {
+  private async syncExistingQuotes(): Promise<void> {
     try {
       logger.info("Syncing existing quotes to channel...");
 
