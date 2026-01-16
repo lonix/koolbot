@@ -13,11 +13,16 @@
     "cleanup-global-commands": "node --import ./src/loader.js src/scripts/cleanup-global-commands.ts",
     "migrate-config": "node --import ./src/loader.js src/scripts/migrate-config.ts",
     "validate-config": "node --import ./src/loader.js src/scripts/validate-config.ts",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+    "test:ci": "node --experimental-vm-modules node_modules/jest/bin/jest.js --ci --coverage --maxWorkers=2",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "check": "npm run build && npm run lint && npm run format:check"
+    "check": "npm run build && npm run lint && npm run format:check",
+    "check:all": "npm run build && npm run lint && npm run format:check && npm run test"
   },
   "dependencies": {
     "@discordjs/builders": "^1.13.1",
@@ -33,15 +38,19 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
+    "@jest/globals": "^30.2.0",
     "@types/dotenv": "^8.2.3",
     "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/mongoose": "^5.11.96",
     "@types/node": "^25.0.6",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
     "@typescript-eslint/parser": "^8.52.0",
     "eslint": "^9.39.2",
+    "jest": "^30.2.0",
     "prettier": "^3.7.4",
+    "ts-jest": "^29.4.6",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }
