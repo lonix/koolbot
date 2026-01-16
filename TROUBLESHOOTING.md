@@ -1,225 +1,731 @@
 # KoolBot Troubleshooting Guide
 
-## Settings Migration Issues (v0.3.1 → v0.4.0)
+Common issues and solutions for KoolBot deployment and operation.
 
-### Critical Issues Identified
+---
 
-#### 1. **Missing MONGODB_URI**
+## 📋 Table of Contents
 
-**Problem**: The `.env` file is missing the `MONGODB_URI` variable.
+- [Initial Setup Issues](#-initial-setup-issues)
+- [Docker Issues](#-docker-issues)
+- [Discord Connection Issues](#-discord-connection-issues)
+- [Command Issues](#-command-issues)
+- [Voice Channel Issues](#-voice-channel-issues)
+- [Database Issues](#-database-issues)
+- [Configuration Issues](#-configuration-issues)
+- [Performance Issues](#-performance-issues)
 
-**Impact**:
+---
 
-- Voice channel tracking data cannot be stored
-- Configuration changes cannot be persisted
-- Bot may crash on startup
-- All database operations fail
+## 🚀 Initial Setup Issues
 
-**Solution**: Add to your `.env` file:
+### Bot Won't Start
 
-```env
-MONGODB_URI=mongodb://localhost:27017/koolbot
-# Or for production:
-MONGODB_URI=mongodb://username:password@host:port/database
-```
+**Symptoms:**
 
-#### 2. **Configuration Key Mismatches**
+- Container immediately exits
+- "Missing required environment variables" error
+- Bot doesn't connect to Discord
 
-**Problem**: The bot is trying to read both old environment variable names and new database configuration keys.
+**Solutions:**
 
-**Impact**:
-
-- Dynamic channel creation fails
-- Voice channel stats tracking breaks
-- Inconsistent behavior
-
-**Solution**: Run the configuration migration script:
-
-```bash
-npm run migrate-config
-```
-
-#### 3. **Voice Channel Management Failures**
-
-**Problem**: Configuration service cannot properly determine if features are enabled.
-
-**Impact**:
-
-- No dynamic channels created
-- Lobby channel doesn't work
-- Channel cleanup fails
-
-**Solution**: Ensure these settings are properly configured:
-
-```env
-ENABLE_VC_MANAGEMENT=true
-VC_CATEGORY_NAME=Voice Channels
-LOBBY_CHANNEL_NAME=🟢  Lobby
-LOBBY_CHANNEL_NAME_OFFLINE=🔴  Lobby
-```
-
-### Step-by-Step Fix Process
-
-#### Step 1: Fix Environment Variables
-
-1. **Add missing MONGODB_URI**:
-
-   ```env
-   MONGODB_URI=mongodb://localhost:27017/koolbot
-   ```
-
-2. **Verify all required variables**:
-
-   ```env
-   DISCORD_TOKEN=your_bot_token
-   CLIENT_ID=your_client_id
-   GUILD_ID=your_guild_id
-   MONGODB_URI=mongodb://localhost:27017/koolbot
-   DEBUG=false
-   NODE_ENV=production
-   ```
-
-#### Step 2: Run Configuration Migration
-
-```bash
-# Build the project first
-npm run build
-
-# Run the migration script
-npm run migrate-config
-```
-
-This will:
-
-- Migrate old environment variables to new database configuration
-- Set up proper configuration categories
-- Ensure backward compatibility
-
-#### Step 3: Validate Configuration
-
-```bash
-npm run validate-config
-```
-
-This will:
-
-- Check all required configurations
-- Identify any remaining issues
-- Provide detailed status report
-
-#### Step 4: Test the Bot
-
-1. **Start the bot**:
+1. **Verify `.env` file exists and is in the correct location:**
 
    ```bash
-   npm run dev
+   ls -la .env
    ```
 
-2. **Check logs** for:
-   - Configuration loading success
-   - Voice channel manager initialization
-   - Voice channel tracker initialization
-   - Channel creation success
+2. **Check all required environment variables are set:**
 
-### Common Error Messages and Solutions
+   ```bash
+   cat .env
+   ```
 
-#### "MongoDB connection timeout"
+   Must include:
 
-**Cause**: Missing or incorrect MONGODB_URI
+   ```env
+   DISCORD_TOKEN=your_token_here
+   CLIENT_ID=your_client_id
+   GUILD_ID=your_guild_id
+   MONGODB_URI=mongodb://mongodb:27017/koolbot
+   ```
 
-**Solution**: Add correct MONGODB_URI to .env file
+3. **Verify Discord token is valid:**
+   - Go to [Discord Developer Portal](https://discord.com/developers/applications)
+   - Select your application
+   - Bot tab → Reset Token if needed
+   - Copy the new token to `.env`
 
-#### "Category not found during initialization"
+4. **Check for extra spaces or quotes:**
 
-**Cause**: VC_CATEGORY_NAME mismatch or category doesn't exist
+   ```env
+   # ❌ Wrong
+   DISCORD_TOKEN = "your_token_here"
+   
+   # ✅ Correct
+   DISCORD_TOKEN=your_token_here
+   ```
 
-**Solution**:
+### "Permission Denied" Errors
 
-1. Check VC_CATEGORY_NAME in .env
-2. Ensure the category exists in Discord
-3. Run `npm run migrate-config`
-
-#### "Voice channel management is disabled"
-
-**Cause**: ENABLE_VC_MANAGEMENT is false or not set
-
-**Solution**: Set `ENABLE_VC_MANAGEMENT=true` in .env
-
-#### "No member found in voice state update"
-
-**Cause**: Discord.js event handling issue
-
-**Solution**: This is usually a transient issue, check if it persists
-
-### Testing Dynamic Channel Creation
-
-1. **Join the lobby channel** (🟢 Lobby)
-2. **Check if a new channel is created** for your user
-3. **Verify channel naming** follows the pattern: `Username's Room`
-4. **Test channel cleanup** by leaving the channel
-
-### Testing Voice Channel Stats
-
-1. **Join any voice channel**
-2. **Stay for a few minutes**
-3. **Check if tracking data is saved** (use `/vcstats` command)
-4. **Verify weekly announcements** are working
-
-### Monitoring and Debugging
-
-#### Enable Debug Mode
-
-```env
-DEBUG=true
-```
-
-#### Check Logs
-
-The bot will now provide detailed logging for:
-
-- Configuration loading
-- Voice channel operations
-- Database operations
-- Error conditions
-
-#### Database Verification
-
-Check if data is being stored:
+**Solution:**
 
 ```bash
-# Connect to MongoDB
-mongosh mongodb://localhost:27017/koolbot
+# Fix file permissions
+chmod 600 .env
 
-# Check collections
-show collections
-
-# Check voice sessions
-db.voicesessions.find().limit(5)
-
-# Check configuration
-db.configs.find()
+# Fix Docker permissions (Linux)
+sudo chmod 666 /var/run/docker.sock
 ```
 
-### Rollback Plan
+---
 
-If issues persist, you can temporarily rollback to the old configuration system by:
+## 🐳 Docker Issues
 
-1. **Comment out the migration** in the config service
-2. **Use only environment variables** for configuration
-3. **Restart the bot**
+### Container Keeps Restarting
 
-### Support
+**Check logs:**
 
-If you continue to experience issues:
+```bash
+docker-compose logs -f bot
+```
 
-1. **Check the logs** for specific error messages
-2. **Run validation scripts** to identify problems
-3. **Verify database connectivity**
-4. **Check Discord permissions** for the bot
+**Common causes:**
 
-### Prevention for Future Updates
+1. **Database not ready:**
+   - Wait 30 seconds for MongoDB to initialize
+   - Check MongoDB status: `docker-compose ps`
 
-1. **Always test configuration changes** in development first
-2. **Use the validation scripts** before deploying
-3. **Keep environment variables** for critical settings
-4. **Monitor logs** after configuration changes
+2. **Invalid configuration:**
+   - Review error messages in logs
+   - Verify all required env vars are set
+
+3. **Port conflicts:**
+
+   ```bash
+   # Check if port 27017 is in use
+   netstat -an | grep 27017
+   
+   # Or use a different port on the host
+   # In docker-compose.yml: "27018:27017"
+   # In .env (for bot container): MONGODB_URI=mongodb://mongodb:27017/koolbot
+   # Note: The host port (27018) only affects connections from your host machine.
+   #       Containers still connect to MongoDB on its internal port 27017.
+   ```
+
+### "docker-compose: command not found"
+
+**Solutions:**
+
+1. **Install Docker Compose:**
+
+   ```bash
+   # Linux
+   sudo apt-get install docker-compose
+   
+   # macOS (via Homebrew)
+   brew install docker-compose
+   
+   # Or use Docker Desktop (includes compose)
+   ```
+
+2. **Use `docker compose` (without dash):**
+
+   ```bash
+   docker compose up -d
+   ```
+
+### MongoDB Container Won't Start
+
+**Check logs:**
+
+```bash
+docker-compose logs -f mongodb
+```
+
+**Solutions:**
+
+1. **Remove corrupted volume:**
+
+   ```bash
+   docker-compose down -v
+   docker-compose up -d
+   ```
+
+2. **Check disk space:**
+
+   ```bash
+   df -h
+   ```
+
+3. **Verify MongoDB image:**
+
+   ```bash
+   docker pull mongo:latest
+   docker-compose up -d --force-recreate
+   ```
+
+---
+
+## 📡 Discord Connection Issues
+
+### Bot Appears Offline
+
+**Verify:**
+
+1. **Check bot is running:**
+
+   ```bash
+   docker-compose ps
+   ```
+
+2. **Check logs for connection errors:**
+
+   ```bash
+   docker-compose logs -f bot | grep -i "error\|discord"
+   ```
+
+3. **Verify Discord token:**
+   - Token must be from the "Bot" section, not "OAuth2"
+   - Token should start with your bot's user ID
+
+4. **Check Discord API status:**
+   - Visit [Discord Status](https://discordstatus.com)
+
+### Invalid Token Error
+
+**Symptoms:**
+
+```json
+Error: An invalid token was provided
+```
+
+**Solutions:**
+
+1. **Reset your bot token:**
+   - Discord Developer Portal → Your App → Bot
+   - Reset Token → Copy new token
+   - Update `.env` file
+   - Restart bot: `docker-compose restart bot`
+
+2. **Check for extra characters:**
+   - No spaces before/after token
+   - No quotes around token
+   - No newlines in token
+
+### Bot Has No Permissions
+
+**Symptoms:**
+
+- Commands don't appear
+- Bot can't create channels
+- Bot can't move users
+
+**Solutions:**
+
+1. **Re-invite bot with correct permissions:**
+
+```json
+   https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&scope=bot%20applications.commands
+   ```
+
+   Replace `YOUR_CLIENT_ID` with your actual Client ID.
+
+1. **Check role hierarchy:**
+   - Bot's role must be ABOVE roles it needs to manage
+   - Move bot's role higher in Server Settings → Roles
+
+2. **Verify required permissions:**
+   - Administrator (easiest, or:)
+   - Manage Channels
+   - Move Members
+   - Send Messages
+   - Use Slash Commands
+
+---
+
+## ⚡ Command Issues
+
+### Commands Don't Appear in Discord
+
+**Most common issue!**
+
+**Solutions:**
+
+1. **Enable the command:**
+
+   ```bash
+   /config set key:ping.enabled value:true
+   ```
+
+2. **Reload commands (REQUIRED!):**
+
+   ```bash
+   /config reload
+   ```
+
+3. **Wait for Discord to sync:**
+   - Can take 2-5 minutes
+   - Try in a different channel
+   - Restart Discord client
+
+4. **Check if commands are enabled:**
+
+   ```bash
+   /config list
+   ```
+
+### "Application did not respond" Error
+
+**Causes:**
+
+- Bot is processing but taking too long
+- Bot crashed during command execution
+- Network issues
+
+**Solutions:**
+
+1. **Check bot logs:**
+
+   ```bash
+   docker-compose logs -f bot | tail -50
+   ```
+
+2. **Restart bot:**
+
+   ```bash
+   docker-compose restart bot
+   ```
+
+3. **Check MongoDB connection:**
+
+   ```bash
+   docker-compose logs mongodb | grep -i error
+   ```
+
+### `/config` Command Not Working
+
+**Solutions:**
+
+1. **Verify you have Administrator permission** in Discord
+
+2. **Check bot logs for errors:**
+
+   ```bash
+   docker-compose logs -f bot | grep -i config
+   ```
+
+3. **Verify MongoDB is connected:**
+
+   ```bash
+   /dbtrunk status
+   ```
+
+---
+
+## 🎙 Voice Channel Issues
+
+### Lobby Channel Not Creating Users' Rooms
+
+**Check configuration:**
+
+```bash
+/config get key:voicechannels.enabled
+/config get key:voicechannels.category.name
+```
+
+**Solutions:**
+
+1. **Enable voice channels:**
+
+   ```bash
+   /config set key:voicechannels.enabled value:true
+   /config reload
+   ```
+
+2. **Run lobby setup:**
+
+   ```bash
+   /setup-lobby
+   ```
+
+3. **Verify category exists:**
+   - Create category in Discord: "Voice Channels"
+   - Match exact name in config
+   - Bot role must have permissions in category
+
+4. **Check bot permissions:**
+   - Manage Channels
+   - Move Members
+   - Connect
+   - View Channel
+
+### Voice Channels Not Being Deleted
+
+**Symptoms:**
+
+- Empty channels remain after everyone leaves
+- Channels accumulate over time
+
+**Solutions:**
+
+1. **Manual cleanup:**
+
+   ```bash
+   /vc reload
+   ```
+
+2. **Force cleanup:**
+
+   ```bash
+   /vc force-reload
+   ```
+
+   ⚠️ **Warning:** Removes ALL unmanaged channels!
+
+3. **Check bot logs:**
+
+   ```bash
+   docker-compose logs -f bot | grep -i "voice"
+   ```
+
+### Voice Tracking Not Working
+
+**Check configuration:**
+
+```bash
+/config get key:voicetracking.enabled
+```
+
+**Solutions:**
+
+1. **Enable tracking:**
+
+   ```bash
+   /config set key:voicetracking.enabled value:true
+   /config reload
+   ```
+
+2. **Check excluded channels:**
+
+   ```bash
+   /config get key:voicetracking.excluded_channels
+   ```
+
+3. **Verify users are in voice channels:**
+   - Stats only update while users are active
+   - Check if channel is excluded
+
+4. **Check database:**
+
+   ```bash
+   /dbtrunk status
+   ```
+
+### `/vctop` Shows "No data"
+
+**Causes:**
+
+- Tracking recently enabled (no data yet)
+- All channels are excluded
+- Users haven't been in voice yet
+
+**Solutions:**
+
+1. **Wait for data to accumulate:**
+   - Join a voice channel for a few minutes
+   - Run `/vcstats` to verify tracking
+
+2. **Check excluded channels:**
+
+   ```bash
+   /config get key:voicetracking.excluded_channels
+   ```
+
+3. **Verify tracking is enabled:**
+
+   ```bash
+   /config list
+   ```
+
+   Check `voicetracking.enabled: true`
+
+---
+
+## 💾 Database Issues
+
+### "MongoDB connection timeout"
+
+**Solutions:**
+
+1. **Check MongoDB container:**
+
+   ```bash
+   docker-compose ps mongodb
+   ```
+
+2. **Restart MongoDB:**
+
+   ```bash
+   docker-compose restart mongodb
+   ```
+
+3. **Check MongoDB logs:**
+
+   ```bash
+   docker-compose logs -f mongodb
+   ```
+
+4. **Verify MONGODB_URI:**
+
+   ```bash
+   cat .env | grep MONGODB_URI
+   ```
+
+   Should be: `mongodb://mongodb:27017/koolbot`
+
+### Database Connection Refused
+
+**Solutions:**
+
+1. **Ensure MongoDB container is running:**
+
+   ```bash
+   docker-compose up -d mongodb
+   ```
+
+2. **Check network connectivity:**
+
+   ```bash
+   docker-compose exec bot ping mongodb
+   ```
+
+3. **Recreate containers:**
+
+   ```bash
+   docker-compose down
+   docker-compose up -d
+   ```
+
+### Data Loss / Cleanup Too Aggressive
+
+**Check retention settings:**
+
+```bash
+/config get key:voicetracking.cleanup.retention.detailed_sessions_days
+```
+
+**Adjust retention:**
+
+```bash
+# Keep detailed sessions for 90 days instead of 30
+/config set key:voicetracking.cleanup.retention.detailed_sessions_days value:90
+
+# Keep monthly summaries for 12 months
+/config set key:voicetracking.cleanup.retention.monthly_summaries_months value:12
+
+# Disable automatic cleanup
+/config set key:voicetracking.cleanup.enabled value:false
+```
+
+---
+
+## ⚙ Configuration Issues
+
+### "Invalid key" Error
+
+**Cause:** Typo in configuration key
+
+**Solution:**
+
+1. **Check exact key name:**
+
+   ```bash
+   /config list
+   ```
+
+2. **Copy exact key from list**
+
+3. **Use tab completion in Discord**
+
+### Settings Not Persisting
+
+**Check MongoDB:**
+
+```bash
+# Verify database is running
+docker-compose ps mongodb
+
+# Check bot can write to database
+/config set key:ping.enabled value:true
+/config get key:ping.enabled
+```
+
+**Solution:**
+
+If database is corrupted:
+
+```bash
+# Backup first!
+/config export
+
+# Reset database
+docker-compose down -v
+docker-compose up -d
+
+# Restore config
+/config import
+```
+
+### Can't Import Configuration
+
+**Verify YAML format:**
+
+```yaml
+# Correct format
+ping:
+  enabled: true
+voicechannels:
+  enabled: true
+  category:
+    name: "Voice Channels"
+```
+
+**Common issues:**
+
+- Incorrect indentation (use 2 spaces)
+- Missing quotes on strings with special characters
+- Invalid YAML syntax
+
+---
+
+## 🚀 Performance Issues
+
+### Bot Running Slowly
+
+**Check resource usage:**
+
+```bash
+# View container stats
+docker stats
+
+# Check system resources
+docker-compose exec bot top
+```
+
+**Solutions:**
+
+1. **Increase Docker resources:**
+   - Docker Desktop → Settings → Resources
+   - Increase CPU and memory allocation
+
+2. **Check database size:**
+
+   ```bash
+   /dbtrunk status
+   ```
+
+   Run cleanup if database is large:
+
+   ```bash
+   /dbtrunk run
+   ```
+
+3. **Optimize retention:**
+
+   ```bash
+   # Reduce retention periods to save space
+   /config set key:voicetracking.cleanup.retention.detailed_sessions_days value:14
+   ```
+
+### High Memory Usage
+
+**Normal memory usage:** 200-300 MB
+
+**If exceeding 500 MB:**
+
+1. **Restart bot:**
+
+   ```bash
+   docker-compose restart bot
+   ```
+
+2. **Check for memory leaks in logs:**
+
+   ```bash
+   docker-compose logs -f bot | grep -i "memory\|heap"
+   ```
+
+3. **Update to latest version:**
+
+   ```bash
+   docker-compose pull
+   docker-compose up -d
+   ```
+
+---
+
+## 🆘 Emergency Procedures
+
+### Complete Reset
+
+If everything is broken:
+
+```bash
+# 1. Backup configuration
+/config export
+
+# 2. Stop everything
+docker-compose down -v
+
+# 3. Verify .env file
+cat .env
+
+# 4. Start fresh
+docker-compose up -d
+
+# 5. Wait for startup
+sleep 30
+
+# 6. Check logs
+docker-compose logs -f bot
+
+# 7. Restore configuration
+/config import
+```
+
+### Get Support
+
+1. **Check logs first:**
+
+   ```bash
+   docker-compose logs bot > bot-logs.txt
+   ```
+
+2. **Gather information:**
+   - KoolBot version: `docker-compose exec bot cat package.json | grep version`
+   - Docker version: `docker --version`
+   - OS: `uname -a`
+   - Error messages from logs
+
+3. **Open an issue:**
+   - [GitHub Issues](https://github.com/lonix/koolbot/issues)
+   - Include logs and configuration (remove sensitive data!)
+
+---
+
+## 📖 Related Documentation
+
+- **[README.md](README.md)** - Bot overview and quick start
+- **[COMMANDS.md](COMMANDS.md)** - Complete command reference
+- **[SETTINGS.md](SETTINGS.md)** - Configuration guide
+
+---
+
+<div align="center">
+
+**Still having issues?** [Open an issue on GitHub](https://github.com/lonix/koolbot/issues)
+
+Include logs, configuration (without tokens!), and steps to reproduce.
+
+</div>
