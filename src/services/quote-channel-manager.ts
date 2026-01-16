@@ -371,9 +371,28 @@ export class QuoteChannelManager {
         false,
       );
       if (clearChannel) {
-        const messages = await channel.messages.fetch({ limit: 100 });
-        await channel.bulkDelete(messages);
-        logger.info("Cleared quote channel");
+        let totalDeleted = 0;
+        // Discord bulkDelete is limited to 100 messages per call; loop until the channel is cleared.
+        // The `true` flag skips messages older than 14 days to avoid API errors.
+        // See: https://discord.js.org/#/docs/main/stable/class/TextChannel?scrollTo=bulkDelete
+        // Note: this will only delete messages that are not older than 14 days.
+        // Older messages (if any) will remain in the channel.
+        // If full historical clearing is required, they must be removed individually.
+        // This loop focuses on respecting the bulkDelete 100-message limitation.
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const messages = await channel.messages.fetch({ limit: 100 });
+          if (messages.size === 0) {
+            break;
+          }
+          const deleted = await channel.bulkDelete(messages, true);
+          totalDeleted += deleted.size;
+          if (messages.size < 100) {
+            // Fetched fewer than 100 messages, so there are no more recent messages to delete.
+            break;
+          }
+        }
+        logger.info(`Cleared ${totalDeleted} messages from quote channel`);
       }
 
       // Get all quotes from database
