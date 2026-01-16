@@ -150,6 +150,17 @@ export class QuoteService {
   async getQuoteById(quoteId: string): Promise<IQuote | null> {
     return this.model.findById(quoteId);
   }
+
+  async updateQuoteMessageId(
+    quoteId: string,
+    messageId: string,
+  ): Promise<void> {
+    await this.model.findByIdAndUpdate(quoteId, { messageId });
+  }
+
+  async getAllQuotes(): Promise<IQuote[]> {
+    return this.model.find().sort({ createdAt: -1 });
+  }
 }
 
 export const quoteService = new QuoteService();

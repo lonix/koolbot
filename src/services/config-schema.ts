@@ -31,6 +31,7 @@ export interface ConfigSchema {
 
   // Quote System Settings
   "quotes.enabled": boolean;
+  "quotes.channel_id": string; // Channel ID for quote messages
   "quotes.add_roles": string; // Comma-separated role IDs
   "quotes.delete_roles": string; // Comma-separated role IDs
   "quotes.max_length": number; // Maximum quote length
@@ -85,6 +86,7 @@ export const defaultConfig: ConfigSchema = {
 
   // Quote System Defaults
   "quotes.enabled": false,
+  "quotes.channel_id": "",
   "quotes.add_roles": "", // Empty means all users can add
   "quotes.delete_roles": "", // Empty means only admins can delete
   "quotes.max_length": 1000,
