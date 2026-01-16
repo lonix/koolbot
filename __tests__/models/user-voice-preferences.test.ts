@@ -148,20 +148,22 @@ describe('UserVoicePreferences Model Schema', () => {
     });
 
     it('should allow optional fields to be undefined', async () => {
-      await import('../../src/models/user-voice-preferences.js');
+      const { UserVoicePreferences } = await import('../../src/models/user-voice-preferences.js');
       
-      // Type test - optional fields should be allowed to be undefined
-      const testDoc = {
-        userId: 'test-user-123',
-        // namePattern is optional
-        // userLimit is optional
-        // bitrate is optional
-      };
+      // Test that schema validation passes without optional fields
+      const docWithoutOptionals = new UserVoicePreferences({
+        userId: 'test-user-456',
+      });
 
-      expect(testDoc.userId).toBe('test-user-123');
-      expect(testDoc.namePattern).toBeUndefined();
-      expect(testDoc.userLimit).toBeUndefined();
-      expect(testDoc.bitrate).toBeUndefined();
+      // Validate the document (this will throw if required fields are missing)
+      const validationError = docWithoutOptionals.validateSync();
+      expect(validationError).toBeUndefined();
+      
+      // Verify optional fields are indeed undefined
+      expect(docWithoutOptionals.userId).toBe('test-user-456');
+      expect(docWithoutOptionals.namePattern).toBeUndefined();
+      expect(docWithoutOptionals.userLimit).toBeUndefined();
+      expect(docWithoutOptionals.bitrate).toBeUndefined();
     });
   });
 });
