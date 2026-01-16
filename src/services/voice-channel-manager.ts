@@ -10,6 +10,7 @@ import {
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
+import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 
 const configService = ConfigService.getInstance();
 
@@ -440,12 +441,6 @@ export class VoiceChannelManager {
           "Dynamic Voice Channels",
         ));
 
-      const suffix =
-        (await configService.getString("voicechannels.channel.suffix")) ||
-        (await configService.getString("voice_channel.suffix")) ||
-        (await configService.getString("VC_SUFFIX")) ||
-        "'s Room";
-
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
           channel.type === ChannelType.GuildCategory &&
@@ -457,15 +452,40 @@ export class VoiceChannelManager {
         return;
       }
 
-      const prefix = await configService.getString(
-        "voicechannels.channel.prefix",
-        "🎮",
-      );
-      const channelName = `${prefix} ${member.displayName}${suffix}`;
+      // Load user preferences
+      const userPrefs = await UserVoicePreferences.findOne({
+        userId: member.id,
+      });
+
+      // Determine channel name
+      let channelName: string;
+      if (userPrefs?.namePattern) {
+        // Use custom name pattern
+        channelName = userPrefs.namePattern.replace(
+          "{username}",
+          member.displayName,
+        );
+      } else {
+        // Use default naming
+        const suffix =
+          (await configService.getString("voicechannels.channel.suffix")) ||
+          (await configService.getString("voice_channel.suffix")) ||
+          (await configService.getString("VC_SUFFIX")) ||
+          "'s Room";
+        const prefix = await configService.getString(
+          "voicechannels.channel.prefix",
+          "🎮",
+        );
+        channelName = `${prefix} ${member.displayName}${suffix}`;
+      }
+
+      // Create channel with preferences
       const channel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildVoice,
         parent: category,
+        userLimit: userPrefs?.userLimit ?? 0, // 0 = unlimited
+        bitrate: userPrefs?.bitrate ? userPrefs.bitrate * 1000 : undefined, // Convert kbps to bps (Discord API requires bitrate in bits per second, not kilobits)
       });
 
       this.userChannels.set(member.id, channel);
@@ -546,10 +566,6 @@ export class VoiceChannelManager {
         "voicechannels.category.name",
         "Voice Channels",
       );
-      const channelPrefix = await configService.getString(
-        "voicechannels.channel.prefix",
-        "🎮",
-      );
 
       const category = guild.channels.cache.find(
         (channel): channel is CategoryChannel =>
@@ -564,14 +580,38 @@ export class VoiceChannelManager {
         return null;
       }
 
-      // Generate channel name if not provided
-      const finalChannelName = channelName || `${channelPrefix} ${userId}`;
+      // Load user preferences
+      const userPrefs = await UserVoicePreferences.findOne({ userId });
+      const member = await guild.members.fetch(userId);
 
-      // Create the dynamic channel
+      // Determine channel name
+      let finalChannelName: string;
+      if (channelName) {
+        finalChannelName = channelName;
+      } else if (userPrefs?.namePattern && member) {
+        // Use custom name pattern
+        finalChannelName = userPrefs.namePattern.replace(
+          "{username}",
+          member.displayName,
+        );
+      } else {
+        // Use default naming
+        const channelPrefix = await configService.getString(
+          "voicechannels.channel.prefix",
+          "🎮",
+        );
+        finalChannelName = member
+          ? `${channelPrefix} ${member.displayName}`
+          : `${channelPrefix} ${userId}`;
+      }
+
+      // Create the dynamic channel with preferences
       const newChannel = await guild.channels.create({
         name: finalChannelName,
         type: ChannelType.GuildVoice,
         parent: category,
+        userLimit: userPrefs?.userLimit ?? 0,
+        bitrate: userPrefs?.bitrate ? userPrefs.bitrate * 1000 : undefined,
         permissionOverwrites: [
           {
             id: userId,
