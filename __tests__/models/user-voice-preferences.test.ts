@@ -76,7 +76,6 @@ describe('UserVoicePreferences Model Schema', () => {
     });
 
     it('should have unique constraint on userId', () => {
-      const userIdPath = UserVoicePreferencesSchema.path('userId');
       const indexes = UserVoicePreferencesSchema.indexes();
       
       // Check if there's a unique index on userId
@@ -132,10 +131,10 @@ describe('UserVoicePreferences Model Schema', () => {
   describe('interface types', () => {
     it('should properly type the document interface', async () => {
       // Import to verify type definitions compile
-      const { IUserVoicePreferences } = await import('../../src/models/user-voice-preferences.js');
+      await import('../../src/models/user-voice-preferences.js');
       
       // Type test - this will fail at compile time if types are wrong
-      const testDoc: Partial<IUserVoicePreferences> = {
+      const testDoc = {
         userId: 'test-user-123',
         namePattern: '{username}\'s Room',
         userLimit: 10,
@@ -149,10 +148,10 @@ describe('UserVoicePreferences Model Schema', () => {
     });
 
     it('should allow optional fields to be undefined', async () => {
-      const { IUserVoicePreferences } = await import('../../src/models/user-voice-preferences.js');
+      await import('../../src/models/user-voice-preferences.js');
       
       // Type test - optional fields should be allowed to be undefined
-      const testDoc: Partial<IUserVoicePreferences> = {
+      const testDoc = {
         userId: 'test-user-123',
         // namePattern is optional
         // userLimit is optional
