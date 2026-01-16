@@ -21,8 +21,7 @@ const UserVoicePreferencesSchema = new Schema(
   },
 );
 
-export const UserVoicePreferences =
-  mongoose.model<IUserVoicePreferences>(
-    "UserVoicePreferences",
-    UserVoicePreferencesSchema,
-  );
+export const UserVoicePreferences = mongoose.model<IUserVoicePreferences>(
+  "UserVoicePreferences",
+  UserVoicePreferencesSchema,
+);

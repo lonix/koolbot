@@ -485,9 +485,7 @@ export class VoiceChannelManager {
         type: ChannelType.GuildVoice,
         parent: category,
         userLimit: userPrefs?.userLimit ?? 0, // 0 = unlimited
-        bitrate: userPrefs?.bitrate
-          ? userPrefs.bitrate * 1000
-          : undefined, // Convert kbps to bps
+        bitrate: userPrefs?.bitrate ? userPrefs.bitrate * 1000 : undefined, // Convert kbps to bps
       });
 
       this.userChannels.set(member.id, channel);

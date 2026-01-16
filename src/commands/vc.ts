@@ -59,7 +59,9 @@ export const data = new SlashCommandBuilder()
           .addIntegerOption((option) =>
             option
               .setName("kbps")
-              .setDescription("Bitrate in kbps (8-96 recommended, max 384 with boost)")
+              .setDescription(
+                "Bitrate in kbps (8-96 recommended, max 384 with boost)",
+              )
               .setRequired(true)
               .setMinValue(8)
               .setMaxValue(384),
@@ -216,7 +218,8 @@ async function handleCustomize(
   } catch (error) {
     logger.error("Error handling vc customize:", error);
     await interaction.reply({
-      content: "❌ An error occurred while customizing your voice channel settings.",
+      content:
+        "❌ An error occurred while customizing your voice channel settings.",
       ephemeral: true,
     });
   }
