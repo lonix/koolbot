@@ -32,9 +32,8 @@ const commandDetails: Record<
     configKey: "help.enabled",
   },
   quote: {
-    description:
-      "Manage quotes - add, search, like, dislike, delete, or list quotes.",
-    usage: "/quote <subcommand> [options]",
+    description: "Add a new quote to the quote channel.",
+    usage: "/quote text:<text> author:<author>",
     configKey: "quotes.enabled",
   },
   amikool: {
