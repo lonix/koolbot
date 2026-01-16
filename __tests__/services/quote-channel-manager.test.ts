@@ -1,4 +1,4 @@
-import { describe, it, expect, jest } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { QuoteChannelManager } from '../../src/services/quote-channel-manager.js';
 
 // Mock dependencies

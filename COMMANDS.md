@@ -272,6 +272,7 @@ Most Active Channel: Gaming Room
 **Quote Display in Channel:**
 
 Each quote appears as an embed with:
+
 - The quote text
 - Author (mentioned user)
 - Who added it
