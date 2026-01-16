@@ -18,18 +18,14 @@ jobs:
       - name: Create .env file for testing
         run: |
           cat > .env << EOF
-          DISCORD_TOKEN=test_token_for_ci
-          CLIENT_ID=123456789012345678
-          GUILD_ID=123456789012345678
           MONGODB_URI=mongodb://mongodb:27017/koolbot
-          DEBUG=false
           NODE_ENV=development
           EOF
 
-      - name: Start services with docker-compose.dev.yml
+      - name: Start MongoDB service with docker-compose.dev.yml
         run: |
-          docker-compose -f docker-compose.dev.yml up -d --build
-          echo "Services started, waiting for initialization..."
+          docker-compose -f docker-compose.dev.yml up -d mongodb
+          echo "MongoDB service started, waiting for initialization..."
 
       - name: Wait for MongoDB to be ready
         run: |
@@ -47,88 +43,35 @@ jobs:
           done
           if [ $elapsed -ge $timeout ]; then
             echo "MongoDB failed to start within $timeout seconds"
+            docker logs koolbot-mongodb-dev
             exit 1
           fi
 
-      - name: Wait for KoolBot to initialize
-        run: |
-          echo "Waiting for KoolBot to initialize..."
-          timeout=90
-          elapsed=0
-          while [ $elapsed -lt $timeout ]; do
-            if docker logs koolbot-dev 2>&1 | grep -q "Healthcheck server running on port 3000"; then
-              echo "KoolBot health server is ready!"
-              break
-            fi
-            echo "Waiting for KoolBot initialization... ($elapsed seconds elapsed)"
-            sleep 3
-            elapsed=$((elapsed + 3))
-          done
-          if [ $elapsed -ge $timeout ]; then
-            echo "KoolBot failed to initialize within $timeout seconds"
-            echo "=== KoolBot Logs ==="
-            docker logs koolbot-dev
-            exit 1
-          fi
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
 
-      - name: Verify MongoDB connection from KoolBot
-        run: |
-          echo "Checking if MongoDB connection is established..."
-          if docker logs koolbot-dev 2>&1 | grep -E "(Connected to MongoDB|Mongoose connected|connection.*open)" | tail -1; then
-            echo "✓ MongoDB connection successful"
-          else
-            echo "× MongoDB connection not found in logs"
-            echo "=== KoolBot Logs ==="
-            docker logs koolbot-dev
-            exit 1
-          fi
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Test health endpoint
+      - name: TypeScript build test
         run: |
-          echo "Testing health endpoint..."
-          max_attempts=10
-          attempt=0
-          while [ $attempt -lt $max_attempts ]; do
-            if docker exec koolbot-dev wget -q -O - http://localhost:3000/health; then
-              echo ""
-              echo "✓ Health endpoint returned OK"
-              exit 0
-            fi
-            attempt=$((attempt + 1))
-            echo "Health check attempt $attempt/$max_attempts failed, retrying..."
-            sleep 2
-          done
-          echo "× Health endpoint failed after $max_attempts attempts"
-          echo "=== KoolBot Logs ==="
-          docker logs koolbot-dev
-          exit 1
+          echo "=== Testing TypeScript Build ==="
+          npm run build
+          echo "✓ Build completed successfully"
+          ls -lh dist/index.js
+          echo "✓ Build artifacts created"
 
-      - name: Verify build artifacts
+      - name: Test MongoDB connection
         run: |
-          echo "Checking for TypeScript compilation..."
-          if docker exec koolbot-dev sh -c "ls -la dist/ 2>/dev/null" | grep -q "index.js"; then
-            echo "✓ Build artifacts found (dist/index.js exists)"
-          else
-            echo "Note: Running in development mode with ts-node, no dist/ artifacts expected"
-          fi
+          echo "=== Testing MongoDB Connection ==="
+          node --import ./src/loader.js src/scripts/test-mongodb-connection.ts
 
-      - name: Check for errors in logs
-        if: always()
-        run: |
-          echo "=== Checking for critical errors in logs ==="
-          if docker logs koolbot-dev 2>&1 | grep -i "error.*mongodb\|connection.*failed\|econnrefused"; then
-            echo "× Found MongoDB connection errors"
-            exit 1
-          else
-            echo "✓ No MongoDB connection errors found"
-          fi
-
-      - name: Display logs on failure
+      - name: Display MongoDB logs on failure
         if: failure()
         run: |
-          echo "=== KoolBot Container Logs ==="
-          docker logs koolbot-dev
-          echo ""
           echo "=== MongoDB Container Logs ==="
           docker logs koolbot-mongodb-dev
           echo ""

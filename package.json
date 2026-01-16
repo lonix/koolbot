@@ -13,6 +13,7 @@
     "cleanup-global-commands": "node --import ./src/loader.js src/scripts/cleanup-global-commands.ts",
     "migrate-config": "node --import ./src/loader.js src/scripts/migrate-config.ts",
     "validate-config": "node --import ./src/loader.js src/scripts/validate-config.ts",
+    "test-mongodb": "node --import ./src/loader.js src/scripts/test-mongodb-connection.ts",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
