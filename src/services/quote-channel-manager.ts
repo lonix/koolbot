@@ -2,8 +2,6 @@ import {
   Client,
   TextChannel,
   EmbedBuilder,
-  Message,
-  PermissionFlagsBits,
 } from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";

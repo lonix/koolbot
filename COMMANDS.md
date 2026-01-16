@@ -293,14 +293,6 @@ Each quote appears as an embed with:
 # Set cleanup interval (minutes, default: 5)
 /config set key:quotes.cleanup_interval value:10
 ```
-/config set key:quotes.max_length value:500
-
-# Set cooldown between adding quotes (seconds)
-/config set key:quotes.cooldown value:120
-
-# Set cleanup interval (minutes, default: 5)
-/config set key:quotes.cleanup_interval value:10
-```
 
 **Use Cases:**
 
