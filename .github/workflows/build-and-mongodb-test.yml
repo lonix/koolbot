@@ -30,6 +30,7 @@ jobs:
       - name: Wait for MongoDB to be ready
         run: |
           echo "Waiting for MongoDB to be ready..."
+          # Container name matches docker-compose.dev.yml: mongodb service -> koolbot-mongodb-dev
           timeout=60
           elapsed=0
           while [ $elapsed -lt $timeout ]; do

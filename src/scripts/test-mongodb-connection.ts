@@ -43,13 +43,23 @@ async function testMongoDBConnection(): Promise<void> {
 
     // Ping the database
     const pingResult = await mongoose.connection.db?.admin().ping();
+    if (!pingResult) {
+      throw new Error(
+        "Failed to ping database - connection may not be established",
+      );
+    }
     console.log("✓ Database ping successful:", pingResult);
 
     // List collections (should work even if empty)
     const collections = await mongoose.connection.db
       ?.listCollections()
       .toArray();
-    console.log(`✓ Found ${collections?.length || 0} collections`);
+    if (!collections) {
+      throw new Error(
+        "Failed to list collections - connection may not be established",
+      );
+    }
+    console.log(`✓ Found ${collections.length} collections`);
 
     // Test write operation by creating a test document
     const TestSchema = new mongoose.Schema({
@@ -95,8 +105,8 @@ async function testMongoDBConnection(): Promise<void> {
       if (mongoose.connection.readyState !== 0) {
         await mongoose.connection.close();
       }
-    } catch (closeError) {
-      console.error("Error closing connection:", closeError);
+    } catch (connectionCloseError) {
+      console.error("Error closing connection:", connectionCloseError);
     }
 
     process.exit(1);
