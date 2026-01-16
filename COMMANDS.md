@@ -53,6 +53,54 @@ API Latency: 123ms
 
 ---
 
+### `/help`
+
+**Description:** Get help with KoolBot commands. Lists all available commands or shows detailed information about a specific command.
+
+**Configuration:**
+
+```bash
+/config set key:help.enabled value:true
+/config reload
+```
+
+**Usage:**
+
+```bash
+/help                    # List all commands
+/help command:ping       # Get detailed help for a specific command
+```
+
+**Parameters:**
+
+- `command` (optional) - Name of the command to get detailed help for
+
+**Example Responses:**
+
+```text
+# List all commands
+📚 KoolBot Help
+✅ Enabled Commands
+/ping - Check if the bot is responding and measure latency.
+/help - Get help with KoolBot commands.
+...
+
+# Specific command help
+📖 Help: /ping
+Check if the bot is responding and measure latency.
+Usage: /ping
+Status: ✅ Enabled
+```
+
+**Use Cases:**
+
+- Discover available commands
+- Learn command syntax
+- Check if a command is enabled
+- New user onboarding
+
+---
+
 ### `/vctop`
 
 **Description:** View voice channel activity leaderboards showing top users by time spent.
@@ -181,7 +229,7 @@ Most Active Channel: Gaming Room
 
 ### `/quote`
 
-**Description:** Save and retrieve memorable quotes from the server.
+**Description:** Comprehensive quote management system - add, search, like, dislike, delete, and list quotes.
 
 **Configuration:**
 
@@ -195,23 +243,54 @@ Most Active Channel: Gaming Room
 **Usage:**
 
 ```bash
-/quote                                    # Get random quote
-/quote text:"Great quote!" author:"Alice" # Add new quote
+/quote random                                    # Get random quote
+/quote add text:"Great quote!" author:"Alice"    # Add new quote
+/quote search query:"wisdom"                     # Search quotes
+/quote like id:"507f1f77bcf86cd799439011"       # Like a quote
+/quote dislike id:"507f1f77bcf86cd799439011"    # Dislike a quote
+/quote delete id:"507f1f77bcf86cd799439011"     # Delete a quote
+/quote list                                      # List quotes (5 per page)
+/quote list page:2                               # List page 2 of quotes
 ```
 
-**Parameters:**
+**Subcommands:**
 
-- `text` (optional) - Quote text to add
-- `author` (optional) - Who said it (required when adding)
+- `random` - Get a random quote from the database
+- `add` - Add a new quote (requires text and author)
+- `search` - Search for quotes by content (returns up to 10 matches)
+- `like` - Upvote a quote by ID
+- `dislike` - Downvote a quote by ID
+- `delete` - Delete a quote by ID (admin or own quotes only)
+- `list` - Browse all quotes with pagination (5 per page)
 
 **Example Responses:**
 
-```bash
+```text
 # Random quote
-"To be or not to be" - Shakespeare
+📖 "To be or not to be"
+Author: @Shakespeare
+Added by: @User123
+👍 Likes: 15
+👎 Dislikes: 2
+ID: 507f1f77bcf86cd799439011
 
 # Adding quote
 ✅ Quote added successfully!
+
+# Search results
+🔍 Search Results for "wisdom"
+Found 3 quote(s)
+1. 507f1f77bcf86cd799439011
+"The only true wisdom is in knowing you know nothing"
+— @Socrates (👍 10 👎 1)
+
+# Like/Dislike
+👍 Liked quote: "To be or not to be..."
+
+# List
+📚 Quote List
+Page 1 of 5 (23 total quotes)
+[Shows 5 quotes with IDs, content, authors, and reaction counts]
 ```
 
 **Advanced Configuration:**
@@ -220,9 +299,29 @@ Most Active Channel: Gaming Room
 # Restrict who can add quotes (role IDs)
 /config set key:quotes.add_roles value:"123456789,987654321"
 
-# Restrict who can delete quotes
+# Restrict who can delete quotes (role IDs)
 /config set key:quotes.delete_roles value:"123456789"
+
+# Set maximum quote length
+/config set key:quotes.max_length value:500
+
+# Set cooldown between adding quotes (seconds)
+/config set key:quotes.cooldown value:120
 ```
+
+**Use Cases:**
+
+- Preserve memorable server moments
+- Create a community quote collection
+- Search for specific quotes
+- Engage with quotes through reactions
+- Moderate quote content
+
+**Permissions:**
+
+- Everyone can view and react to quotes (if quotes.enabled is true)
+- Adding quotes respects `quotes.add_roles` configuration
+- Deleting quotes requires admin role or being the quote creator
 
 ---
 
@@ -863,10 +962,11 @@ The bot needs these Discord permissions to function:
 
 ```bash
 /ping                               # Check bot status
+/help [command]                     # Get help on commands
 /vctop [period] [limit]            # Voice leaderboards
 /vcstats [period]                  # Your voice stats
 /seen user:@User                   # Last seen info
-/quote [text] [author]             # Quotes system
+/quote <subcommand> [options]      # Quotes system (random, add, search, like, dislike, delete, list)
 /amikool                           # Role verification
 /transfer-ownership user:@User     # Transfer channel
 ```
