@@ -485,7 +485,7 @@ export class VoiceChannelManager {
         type: ChannelType.GuildVoice,
         parent: category,
         userLimit: userPrefs?.userLimit ?? 0, // 0 = unlimited
-        bitrate: userPrefs?.bitrate ? userPrefs.bitrate * 1000 : undefined, // Convert kbps to bps
+        bitrate: userPrefs?.bitrate ? userPrefs.bitrate * 1000 : undefined, // Convert kbps to bps (Discord API requires bitrate in bits per second, not kilobits)
       });
 
       this.userChannels.set(member.id, channel);
