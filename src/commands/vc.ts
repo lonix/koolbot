@@ -242,7 +242,7 @@ async function handleCustomizeName(
   }
 
   // Validate pattern length (Discord channel name limit is 100 characters)
-  const testName = pattern.replace("{username}", "A".repeat(32)); // Max Discord username length
+  const testName = pattern.replace("{username}", "A".repeat(32)); // Max Discord display name length (upper bound for validation)
   if (testName.length > 100) {
     await interaction.reply({
       content:
