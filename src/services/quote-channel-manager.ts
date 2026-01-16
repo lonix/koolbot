@@ -1,8 +1,4 @@
-import {
-  Client,
-  TextChannel,
-  EmbedBuilder,
-} from "discord.js";
+import { Client, TextChannel, EmbedBuilder } from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
