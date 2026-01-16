@@ -255,6 +255,13 @@ Most Active Channel: Gaming Room
 3. Bot automatically adds 👍 and 👎 reactions to the message
 4. Users browse quotes by scrolling through the channel
 5. Users react with 👍 or 👎 to vote on quotes
+6. Bot automatically cleans up any unauthorized messages (every 5 minutes)
+
+**Security Features:**
+
+- **Strict Permissions**: Channel is automatically configured so only the bot can post messages
+- **Auto-Cleanup**: Removes any non-bot messages every 5 minutes (configurable)
+- **User Access**: Users can view, read history, and add reactions only
 
 **Example Response:**
 
@@ -282,6 +289,17 @@ Each quote appears as an embed with:
 
 # Set cooldown between adding quotes (seconds)
 /config set key:quotes.cooldown value:120
+
+# Set cleanup interval (minutes, default: 5)
+/config set key:quotes.cleanup_interval value:10
+```
+/config set key:quotes.max_length value:500
+
+# Set cooldown between adding quotes (seconds)
+/config set key:quotes.cooldown value:120
+
+# Set cleanup interval (minutes, default: 5)
+/config set key:quotes.cleanup_interval value:10
 ```
 
 **Use Cases:**
@@ -291,6 +309,7 @@ Each quote appears as an embed with:
 - Natural browsing via channel scroll
 - Engage through Discord reactions
 - Simple, streamlined quote management
+- Protected channel prevents spam/abuse
 
 **Setup Steps:**
 
@@ -299,12 +318,14 @@ Each quote appears as an embed with:
 3. Configure: `/config set key:quotes.channel_id value:"CHANNEL_ID"`
 4. Enable: `/config set key:quotes.enabled value:true`
 5. Reload: `/config reload`
+6. Bot will automatically set strict permissions on the channel
 
 **Permissions:**
 
 - Everyone can view quotes in the channel
-- Adding quotes respects `quotes.add_roles` configuration (empty = everyone can add)
-- All users can react to quotes
+- Everyone can add reactions to quotes
+- Only bot can post messages (auto-configured)
+- Adding quotes via command respects `quotes.add_roles` configuration (empty = everyone can add)
 
 ---
 
