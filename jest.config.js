@@ -29,6 +29,8 @@ export default {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
+  // Starting with 50% thresholds - increase incrementally as coverage improves
+  // Goal: 70-80% for critical modules (services, commands)
   coverageThreshold: {
     global: {
       branches: 50,
