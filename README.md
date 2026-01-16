@@ -8,6 +8,8 @@ management.
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Latest-green)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
+![Tests](https://img.shields.io/badge/Tests-51%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/Coverage-In%20Progress-yellow)
 
 ---
 
@@ -521,6 +523,7 @@ docker-compose restart mongodb
 
 - **[COMMANDS.md](COMMANDS.md)** - Complete command reference with examples
 - **[SETTINGS.md](SETTINGS.md)** - All configuration options explained
+- **[TESTING.md](TESTING.md)** - Testing guide and best practices
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
 - **[RELEASE_NOTES.md](RELEASE_NOTES.md)** - Version history and changelog
 
@@ -557,7 +560,19 @@ npm run lint:fix       # Auto-fix linting issues
 npm run format         # Format code with Prettier
 npm run format:check   # Check formatting
 npm run check          # Run all checks (build + lint + format)
+npm run check:all      # Run all checks including tests
 ```
+
+### Testing
+
+```bash
+npm test               # Run all tests
+npm run test:watch     # Run tests in watch mode
+npm run test:coverage  # Run tests with coverage report
+npm run test:ci        # Run tests in CI mode
+```
+
+📖 **[Complete Testing Guide →](TESTING.md)**
 
 ### Available Scripts
 
@@ -590,7 +605,7 @@ src/
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
-4. Run quality checks (`npm run check`)
+4. Run quality checks (`npm run check:all`)
 5. Commit your changes (`git commit -m 'Add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
