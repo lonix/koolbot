@@ -22,7 +22,7 @@ npm run test:ci
 
 Tests are located in the `__tests__` directory, organized by module:
 
-```
+```plaintext
 __tests__/
 ├── commands/       # Tests for Discord slash commands
 ├── services/       # Tests for business logic services
@@ -104,6 +104,7 @@ Coverage reports are generated in the `coverage/` directory:
 - **coverage/lcov.info** - LCOV format (for CI tools)
 
 Current Coverage Thresholds:
+
 - Statements: 50%
 - Branches: 50%
 - Functions: 50%
@@ -112,6 +113,7 @@ Current Coverage Thresholds:
 ## Best Practices
 
 1. **Follow AAA Pattern** - Arrange, Act, Assert
+
    ```typescript
    it('should format duration correctly', () => {
      // Arrange
@@ -128,6 +130,7 @@ Current Coverage Thresholds:
 2. **Test one thing at a time** - Each test should verify a single behavior
 
 3. **Use descriptive test names** - Test names should clearly describe what they test
+
    ```typescript
    it('should return false when user has no cooldown set', () => {
      // ...
@@ -145,30 +148,39 @@ Current Coverage Thresholds:
 ## Test Examples
 
 ### Utility Function Tests
+
 See `__tests__/utils/time.test.ts` for examples of testing pure utility functions.
 
 ### Service Tests
+
 See `__tests__/services/cooldown-manager.test.ts` for examples of testing stateful services.
 
 ### Command Tests
+
 See `__tests__/commands/ping.test.ts` for examples of testing Discord commands.
 
 ## Troubleshooting
 
 ### ES Modules Issues
+
 If you see errors about ES modules, ensure:
+
 - Tests use `.js` extensions in imports
 - `node --experimental-vm-modules` is used in test scripts (required for ES modules in Jest)
 - The hardcoded path to jest binary is necessary for cross-platform compatibility with ES modules
 - `node --experimental-vm-modules` is used in test scripts
 
 ### Type Errors
+
 If you see TypeScript errors:
+
 - Check that types are imported from `@jest/globals`
 - Verify `@types/jest` is installed
 
 ### Timeout Issues
+
 For tests that take longer than 10 seconds:
+
 ```typescript
 it('should handle long operation', async () => {
   // Test code
