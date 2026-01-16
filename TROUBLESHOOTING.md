@@ -99,9 +99,11 @@ docker-compose logs -f bot
    # Check if port 27017 is in use
    netstat -an | grep 27017
    
-   # Or use a different port
+   # Or use a different port on the host
    # In docker-compose.yml: "27018:27017"
-   # In .env: MONGODB_URI=mongodb://mongodb:27018/koolbot
+   # In .env (for bot container): MONGODB_URI=mongodb://mongodb:27017/koolbot
+   # Note: The host port (27018) only affects connections from your host machine.
+   #       Containers still connect to MongoDB on its internal port 27017.
    ```
 
 ### "docker-compose: command not found"

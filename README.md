@@ -87,6 +87,7 @@ docker-compose logs -f bot
 - `/ping` - Check bot responsiveness
 - `/vctop` - View voice channel leaderboards
 - `/vcstats` - View your personal voice statistics
+- `/transfer-ownership` - Transfer ownership of your voice channel
 - `/quote` - Add or retrieve quotes
 - `/seen` - Check when a user was last seen
 - `/amikool` - Role verification command
@@ -98,6 +99,7 @@ docker-compose logs -f bot
 - `/setup-lobby` - Configure voice lobby
 - `/exclude-channel` - Exclude channels from tracking
 - `/botstats` - View bot performance metrics
+- `/announce-vc-stats` - Manually trigger voice channel stats announcements
 
 📖 **[Complete Command Reference →](COMMANDS.md)**
 
