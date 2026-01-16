@@ -1,4 +1,11 @@
-import { Client, TextChannel, EmbedBuilder, Message } from "discord.js";
+import {
+  Client,
+  TextChannel,
+  EmbedBuilder,
+  Message,
+  PermissionFlagsBits,
+} from "discord.js";
+import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { quoteService } from "./quote-service.js";
@@ -8,6 +15,7 @@ export class QuoteChannelManager {
   private client: Client;
   private configService: ConfigService;
   private isInitialized: boolean = false;
+  private cleanupJob: CronJob | null = null;
 
   private constructor(client: Client) {
     this.client = client;
@@ -81,10 +89,134 @@ export class QuoteChannelManager {
       );
       this.isInitialized = true;
 
+      // Setup strict permissions on the channel
+      await this.setupChannelPermissions(channel);
+
       // Setup reaction handlers
       this.setupReactionHandlers();
+
+      // Start cleanup job to remove non-bot messages
+      this.startCleanupJob();
     } catch (error) {
       logger.error("Error initializing quote channel manager:", error);
+    }
+  }
+
+  private async setupChannelPermissions(channel: TextChannel): Promise<void> {
+    try {
+      const guild = channel.guild;
+      const botMember = guild.members.me;
+
+      if (!botMember) {
+        logger.error("Bot member not found in guild");
+        return;
+      }
+
+      // Set permissions to prevent everyone from sending messages
+      await channel.permissionOverwrites.edit(guild.roles.everyone, {
+        SendMessages: false,
+        SendMessagesInThreads: false,
+        CreatePublicThreads: false,
+        CreatePrivateThreads: false,
+        AddReactions: true, // Allow reactions
+        ViewChannel: true,
+        ReadMessageHistory: true,
+      });
+
+      // Ensure bot can send messages and manage the channel
+      await channel.permissionOverwrites.edit(botMember, {
+        SendMessages: true,
+        ManageMessages: true,
+        ManageChannels: true,
+        AddReactions: true,
+        ViewChannel: true,
+        ReadMessageHistory: true,
+      });
+
+      logger.info(`Set strict permissions on quote channel: ${channel.name}`);
+    } catch (error) {
+      logger.error("Error setting up channel permissions:", error);
+    }
+  }
+
+  private async startCleanupJob(): Promise<void> {
+    // Get cleanup interval from config (in minutes)
+    const intervalMinutes = await this.configService.getNumber(
+      "quotes.cleanup_interval",
+      5,
+    );
+
+    // Convert to cron expression (*/N * * * * means every N minutes)
+    const cronExpression = `*/${intervalMinutes} * * * *`;
+
+    this.cleanupJob = new CronJob(
+      cronExpression,
+      async () => {
+        await this.cleanupUnauthorizedMessages();
+      },
+      null,
+      true,
+      "UTC",
+    );
+
+    logger.info(
+      `Started quote channel cleanup job (every ${intervalMinutes} minutes)`,
+    );
+  }
+
+  private async cleanupUnauthorizedMessages(): Promise<void> {
+    try {
+      const channel = await this.getQuoteChannel();
+      if (!channel) {
+        return;
+      }
+
+      // Fetch recent messages (up to 100)
+      const messages = await channel.messages.fetch({ limit: 100 });
+      const botId = this.client.user?.id;
+
+      if (!botId) {
+        return;
+      }
+
+      // Find messages not sent by the bot
+      const unauthorizedMessages = messages.filter(
+        (msg) => msg.author.id !== botId,
+      );
+
+      if (unauthorizedMessages.size > 0) {
+        logger.info(
+          `Found ${unauthorizedMessages.size} unauthorized messages in quote channel, cleaning up...`,
+        );
+
+        // Delete unauthorized messages
+        for (const message of unauthorizedMessages.values()) {
+          try {
+            await message.delete();
+            logger.debug(
+              `Deleted unauthorized message from ${message.author.tag}`,
+            );
+          } catch (error) {
+            logger.error(
+              `Error deleting unauthorized message ${message.id}:`,
+              error,
+            );
+          }
+        }
+
+        logger.info(
+          `Cleaned up ${unauthorizedMessages.size} unauthorized messages from quote channel`,
+        );
+      }
+    } catch (error) {
+      logger.error("Error during quote channel cleanup:", error);
+    }
+  }
+
+  public async stop(): Promise<void> {
+    if (this.cleanupJob) {
+      this.cleanupJob.stop();
+      logger.info("Stopped quote channel cleanup job");
     }
   }
 

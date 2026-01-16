@@ -339,7 +339,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Voice channel cleanup",
     );
 
-    // 5. Close database connections - 3 second timeout
+    // 5. Stop quote channel cleanup job - 1 second timeout
+    await runWithTimeout(
+      async () => {
+        await quoteChannelManager.stop();
+      },
+      1000,
+      "Quote channel cleanup job stop",
+    );
+
+    // 6. Close database connections - 3 second timeout
     await runWithTimeout(
       async () => {
         const { default: mongoose } = await import("mongoose");
@@ -352,7 +361,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Database connection closure",
     );
 
-    // 6. Destroy Discord client - 5 second timeout
+    // 7. Destroy Discord client - 5 second timeout
     await runWithTimeout(
       async () => {
         await client.destroy();

@@ -229,12 +229,14 @@ Most Active Channel: Gaming Room
 
 ### `/quote`
 
-**Description:** Comprehensive quote management system - add, search, like, dislike, delete, and list quotes.
+**Description:** Add memorable quotes to a dedicated bot-managed channel. All quotes are posted in a channel where users can react with 👍/👎.
 
 **Configuration:**
 
 ```bash
+# Enable quotes and set channel
 /config set key:quotes.enabled value:true
+/config set key:quotes.channel_id value:"YOUR_CHANNEL_ID"
 /config set key:quotes.cooldown value:60
 /config set key:quotes.max_length value:1000
 /config reload
@@ -243,64 +245,37 @@ Most Active Channel: Gaming Room
 **Usage:**
 
 ```bash
-/quote random                                    # Get random quote
-/quote add text:"Great quote!" author:"Alice"    # Add new quote
-/quote search query:"wisdom"                     # Search quotes
-/quote like id:"507f1f77bcf86cd799439011"       # Like a quote
-/quote dislike id:"507f1f77bcf86cd799439011"    # Dislike a quote
-/quote delete id:"507f1f77bcf86cd799439011"     # Delete a quote
-/quote list                                      # List quotes (5 per page)
-/quote list page:2                               # List page 2 of quotes
+/quote text:"Great quote!" author:"@Alice"
 ```
 
-**Subcommands:**
+**How It Works:**
 
-- `random` - Get a random quote from the database
-- `add` - Add a new quote (requires text and author)
-- `search` - Search for quotes by content (returns up to 10 matches)
-- `like` - Upvote a quote by ID
-- `dislike` - Downvote a quote by ID
-- `delete` - Delete a quote by ID (admin or own quotes only)
-- `list` - Browse all quotes with pagination (5 per page)
+1. User submits a quote using `/quote` command
+2. Bot posts the quote as an embed in the configured quote channel
+3. Bot automatically adds 👍 and 👎 reactions to the message
+4. Users browse quotes by scrolling through the channel
+5. Users react with 👍 or 👎 to vote on quotes
 
-**Example Responses:**
+**Example Response:**
 
 ```text
-# Random quote
-📖 "To be or not to be"
-Author: @Shakespeare
-Added by: @User123
-👍 Likes: 15
-👎 Dislikes: 2
-ID: 507f1f77bcf86cd799439011
-
-# Adding quote
-✅ Quote added successfully!
-
-# Search results
-🔍 Search Results for "wisdom"
-Found 3 quote(s)
-1. 507f1f77bcf86cd799439011
-"The only true wisdom is in knowing you know nothing"
-— @Socrates (👍 10 👎 1)
-
-# Like/Dislike
-👍 Liked quote: "To be or not to be..."
-
-# List
-📚 Quote List
-Page 1 of 5 (23 total quotes)
-[Shows 5 quotes with IDs, content, authors, and reaction counts]
+✅ Quote added successfully and posted to the quote channel!
 ```
+
+**Quote Display in Channel:**
+
+Each quote appears as an embed with:
+- The quote text
+- Author (mentioned user)
+- Who added it
+- Quote ID (in footer)
+- 👍 and 👎 reactions for voting
 
 **Advanced Configuration:**
 
 ```bash
 # Restrict who can add quotes (role IDs)
 /config set key:quotes.add_roles value:"123456789,987654321"
-
-# Restrict who can delete quotes (role IDs)
-/config set key:quotes.delete_roles value:"123456789"
 
 # Set maximum quote length
 /config set key:quotes.max_length value:500
@@ -312,16 +287,24 @@ Page 1 of 5 (23 total quotes)
 **Use Cases:**
 
 - Preserve memorable server moments
-- Create a community quote collection
-- Search for specific quotes
-- Engage with quotes through reactions
-- Moderate quote content
+- Create a community quote wall
+- Natural browsing via channel scroll
+- Engage through Discord reactions
+- Simple, streamlined quote management
+
+**Setup Steps:**
+
+1. Create a dedicated text channel for quotes (e.g., #quotes)
+2. Get the channel ID (right-click channel → Copy ID)
+3. Configure: `/config set key:quotes.channel_id value:"CHANNEL_ID"`
+4. Enable: `/config set key:quotes.enabled value:true`
+5. Reload: `/config reload`
 
 **Permissions:**
 
-- Everyone can view and react to quotes (if quotes.enabled is true)
-- Adding quotes respects `quotes.add_roles` configuration
-- Deleting quotes requires admin role or being the quote creator
+- Everyone can view quotes in the channel
+- Adding quotes respects `quotes.add_roles` configuration (empty = everyone can add)
+- All users can react to quotes
 
 ---
 
@@ -966,7 +949,7 @@ The bot needs these Discord permissions to function:
 /vctop [period] [limit]            # Voice leaderboards
 /vcstats [period]                  # Your voice stats
 /seen user:@User                   # Last seen info
-/quote <subcommand> [options]      # Quotes system (random, add, search, like, dislike, delete, list)
+/quote text:"..." author:"@User"   # Add quote to channel
 /amikool                           # Role verification
 /transfer-ownership user:@User     # Transfer channel
 ```
@@ -1028,6 +1011,25 @@ The bot needs these Discord permissions to function:
 # 5. Setup data cleanup
 /config set key:voicetracking.cleanup.enabled value:true
 /config reload
+
+# 6. Setup quote channel (optional)
+/config set key:quotes.enabled value:true
+/config set key:quotes.channel_id value:"YOUR_QUOTE_CHANNEL_ID"
+/config reload
+```
+
+### Enable Quote Channel
+
+```bash
+# 1. Create a dedicated text channel in Discord (e.g., #quotes)
+# 2. Right-click the channel → Copy ID
+# 3. Configure the bot:
+/config set key:quotes.enabled value:true
+/config set key:quotes.channel_id value:"YOUR_CHANNEL_ID"
+/config reload
+
+# 4. Test it
+/quote text:"Hello World!" author:"@YourName"
 ```
 
 ### Enable Logging

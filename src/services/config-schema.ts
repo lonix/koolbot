@@ -36,6 +36,7 @@ export interface ConfigSchema {
   "quotes.delete_roles": string; // Comma-separated role IDs
   "quotes.max_length": number; // Maximum quote length
   "quotes.cooldown": number; // Cooldown in seconds between quote additions
+  "quotes.cleanup_interval": number; // Cleanup interval in minutes (default: 5)
 
   // Core Bot Logging (Discord) - Defaults to disabled
   "core.startup.enabled": boolean;
@@ -91,6 +92,7 @@ export const defaultConfig: ConfigSchema = {
   "quotes.delete_roles": "", // Empty means only admins can delete
   "quotes.max_length": 1000,
   "quotes.cooldown": 60,
+  "quotes.cleanup_interval": 5, // Clean up unauthorized messages every 5 minutes
 
   // Core Bot Logging (Discord) - Defaults to disabled
   "core.startup.enabled": false,
