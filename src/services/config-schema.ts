@@ -25,6 +25,7 @@ export interface ConfigSchema {
 
   // Individual Features
   "ping.enabled": boolean;
+  "help.enabled": boolean;
   "amikool.enabled": boolean;
   "amikool.role.name": string; // Role name required for amikool
 
@@ -78,6 +79,7 @@ export const defaultConfig: ConfigSchema = {
 
   // Individual Features
   "ping.enabled": false,
+  "help.enabled": true,
   "amikool.enabled": false,
   "amikool.role.name": "",
 
