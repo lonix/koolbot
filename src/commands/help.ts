@@ -32,7 +32,8 @@ const commandDetails: Record<
     configKey: "help.enabled",
   },
   quote: {
-    description: "Manage quotes - add, search, like, dislike, delete, or list quotes.",
+    description:
+      "Manage quotes - add, search, like, dislike, delete, or list quotes.",
     usage: "/quote <subcommand> [options]",
     configKey: "quotes.enabled",
   },
@@ -116,7 +117,10 @@ export async function execute(
       // Check if command is enabled
       let isEnabled = true;
       if (commandInfo.configKey) {
-        isEnabled = await configService.getBoolean(commandInfo.configKey, false);
+        isEnabled = await configService.getBoolean(
+          commandInfo.configKey,
+          false,
+        );
       }
 
       const embed = new EmbedBuilder()
@@ -157,9 +161,13 @@ export async function execute(
         }
 
         if (isEnabled) {
-          enabledCommands.push(`\`/${commandName}\` - ${commandInfo.description}`);
+          enabledCommands.push(
+            `\`/${commandName}\` - ${commandInfo.description}`,
+          );
         } else {
-          disabledCommands.push(`\`/${commandName}\` - ${commandInfo.description}`);
+          disabledCommands.push(
+            `\`/${commandName}\` - ${commandInfo.description}`,
+          );
         }
       }
 
@@ -189,7 +197,8 @@ export async function execute(
 
       embed.addFields({
         name: "💡 Tip",
-        value: "Use `/help <command>` to get detailed information about a specific command.",
+        value:
+          "Use `/help <command>` to get detailed information about a specific command.",
         inline: false,
       });
 

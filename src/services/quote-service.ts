@@ -130,11 +130,14 @@ export class QuoteService {
     await this.model.findByIdAndUpdate(quoteId, { $inc: { dislikes: 1 } });
   }
 
-  async listQuotes(page: number = 1, limit: number = 10): Promise<{ quotes: IQuote[]; total: number; totalPages: number }> {
+  async listQuotes(
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{ quotes: IQuote[]; total: number; totalPages: number }> {
     const skip = (page - 1) * limit;
     const total = await this.model.countDocuments();
     const totalPages = Math.ceil(total / limit);
-    
+
     const quotes = await this.model
       .find()
       .sort({ createdAt: -1 })

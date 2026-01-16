@@ -1,14 +1,18 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  EmbedBuilder,
+} from "discord.js";
 import { quoteService } from "../services/quote-service.js";
 import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("quote")
-  .setDescription("Manage quotes - add, search, like, dislike, delete, or list quotes")
+  .setDescription(
+    "Manage quotes - add, search, like, dislike, delete, or list quotes",
+  )
   .addSubcommand((subcommand) =>
-    subcommand
-      .setName("random")
-      .setDescription("Get a random quote"),
+    subcommand.setName("random").setDescription("Get a random quote"),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -84,7 +88,9 @@ export const data = new SlashCommandBuilder()
       ),
   );
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+export async function execute(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
   try {
     const subcommand = interaction.options.getSubcommand();
 
@@ -103,7 +109,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
             { name: "Author", value: `<@${quote.authorId}>`, inline: true },
             { name: "Added by", value: `<@${quote.addedById}>`, inline: true },
             { name: "👍 Likes", value: quote.likes.toString(), inline: true },
-            { name: "👎 Dislikes", value: quote.dislikes.toString(), inline: true },
+            {
+              name: "👎 Dislikes",
+              value: quote.dislikes.toString(),
+              inline: true,
+            },
           )
           .setFooter({ text: `ID: ${quote._id}` })
           .setTimestamp(quote.createdAt);
@@ -157,7 +167,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       case "like": {
         const quoteId = interaction.options.getString("id", true);
         const quote = await quoteService.getQuoteById(quoteId);
-        
+
         if (!quote) {
           await interaction.reply({
             content: "❌ Quote not found. Please check the ID and try again.",
@@ -167,14 +177,16 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         }
 
         await quoteService.likeQuote(quoteId);
-        await interaction.reply(`👍 Liked quote: "${quote.content.substring(0, 50)}..."`);
+        await interaction.reply(
+          `👍 Liked quote: "${quote.content.substring(0, 50)}..."`,
+        );
         break;
       }
 
       case "dislike": {
         const quoteId = interaction.options.getString("id", true);
         const quote = await quoteService.getQuoteById(quoteId);
-        
+
         if (!quote) {
           await interaction.reply({
             content: "❌ Quote not found. Please check the ID and try again.",
@@ -184,14 +196,16 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         }
 
         await quoteService.dislikeQuote(quoteId);
-        await interaction.reply(`👎 Disliked quote: "${quote.content.substring(0, 50)}..."`);
+        await interaction.reply(
+          `👎 Disliked quote: "${quote.content.substring(0, 50)}..."`,
+        );
         break;
       }
 
       case "delete": {
         const quoteId = interaction.options.getString("id", true);
         const member = interaction.member;
-        
+
         if (!member) {
           await interaction.reply({
             content: "❌ Could not verify your permissions.",
@@ -201,11 +215,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         }
 
         // Get user roles
-        const userRoles = "roles" in member && member.roles instanceof Array 
-          ? member.roles 
-          : "roles" in member && typeof member.roles === "object" && "cache" in member.roles
-          ? Array.from(member.roles.cache.values()).map((role) => role.name)
-          : [];
+        const userRoles =
+          "roles" in member && member.roles instanceof Array
+            ? member.roles
+            : "roles" in member &&
+                typeof member.roles === "object" &&
+                "cache" in member.roles
+              ? Array.from(member.roles.cache.values()).map((role) => role.name)
+              : [];
 
         await quoteService.deleteQuote(quoteId, interaction.user.id, userRoles);
         await interaction.reply("✅ Quote deleted successfully!");
@@ -214,7 +231,10 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
       case "list": {
         const page = interaction.options.getInteger("page") || 1;
-        const { quotes, total, totalPages } = await quoteService.listQuotes(page, 5);
+        const { quotes, total, totalPages } = await quoteService.listQuotes(
+          page,
+          5,
+        );
 
         if (quotes.length === 0) {
           await interaction.reply("No quotes available.");
@@ -224,7 +244,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         const embed = new EmbedBuilder()
           .setColor(0x0099ff)
           .setTitle("📚 Quote List")
-          .setDescription(`Page ${page} of ${totalPages} (${total} total quotes)`)
+          .setDescription(
+            `Page ${page} of ${totalPages} (${total} total quotes)`,
+          )
           .setTimestamp();
 
         quotes.forEach((quote, index) => {
@@ -237,7 +259,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
         });
 
         if (totalPages > 1) {
-          embed.setFooter({ text: `Use /quote list page:${page + 1} for next page` });
+          embed.setFooter({
+            text: `Use /quote list page:${page + 1} for next page`,
+          });
         }
 
         await interaction.reply({ embeds: [embed] });
@@ -252,8 +276,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     }
   } catch (error) {
     logger.error("Error in quote command:", error);
-    const errorMessage = error instanceof Error ? error.message : "There was an error while executing this command!";
-    
+    const errorMessage =
+      error instanceof Error
+        ? error.message
+        : "There was an error while executing this command!";
+
     if (interaction.replied || interaction.deferred) {
       await interaction.followUp({
         content: `❌ ${errorMessage}`,
