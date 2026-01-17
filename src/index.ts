@@ -60,6 +60,7 @@ declare module "discord.js" {
       string,
       {
         execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
+        autocomplete?: (interaction: any) => Promise<void>;
       }
     >;
   }
@@ -509,6 +510,23 @@ async function initializeServices(): Promise<void> {
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Handle autocomplete interactions
+  if (interaction.isAutocomplete()) {
+    try {
+      const command = client.commands.get(interaction.commandName);
+      if (!command || !command.autocomplete) {
+        return;
+      }
+      await command.autocomplete(interaction);
+    } catch (error) {
+      logger.error(
+        `Error handling autocomplete for ${interaction.commandName}:`,
+        error,
+      );
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   try {

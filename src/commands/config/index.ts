@@ -4,6 +4,7 @@ import {
   EmbedBuilder,
   AttachmentBuilder,
   PermissionFlagsBits,
+  AutocompleteInteraction,
 } from "discord.js";
 import { Buffer } from "buffer";
 import { ConfigService } from "../../services/config-service.js";
@@ -234,7 +235,8 @@ export const data = new SlashCommandBuilder()
         option
           .setName("key")
           .setDescription("Configuration key (e.g., voicechannels.enabled)")
-          .setRequired(true),
+          .setRequired(true)
+          .setAutocomplete(true),
       )
       .addStringOption((option) =>
         option
@@ -281,7 +283,8 @@ export const data = new SlashCommandBuilder()
         option
           .setName("key")
           .setDescription("Configuration key")
-          .setRequired(true),
+          .setRequired(true)
+          .setAutocomplete(true),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -818,5 +821,34 @@ export async function execute(
         content: "Unknown subcommand.",
         ephemeral: true,
       });
+  }
+}
+
+export async function autocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  try {
+    const focusedOption = interaction.options.getFocused(true);
+
+    if (focusedOption.name === "key") {
+      const focusedValue = focusedOption.value.toLowerCase();
+
+      // Get all config keys from the schema
+      const allKeys = Object.keys(defaultConfig);
+
+      // Filter keys based on user input
+      const choices = allKeys
+        .filter((key) => key.toLowerCase().includes(focusedValue))
+        .map((key) => ({
+          name: `${key} - ${getSettingDescription(key).substring(0, 80)}`,
+          value: key,
+        }))
+        .slice(0, 25); // Discord limits to 25 choices
+
+      await interaction.respond(choices);
+    }
+  } catch (error) {
+    logger.error("Error in config autocomplete:", error);
+    await interaction.respond([]);
   }
 }

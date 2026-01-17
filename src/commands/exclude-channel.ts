@@ -3,6 +3,7 @@ import {
   ChatInputCommandInteraction,
   PermissionFlagsBits,
   ChannelType,
+  AutocompleteInteraction,
 } from "discord.js";
 import { ConfigService } from "../services/config-service.js";
 import logger from "../utils/logger.js";
@@ -21,7 +22,8 @@ export const data = new SlashCommandBuilder()
           .setName("channel")
           .setDescription("The voice channel to exclude from tracking")
           .setRequired(true)
-          .addChannelTypes(ChannelType.GuildVoice),
+          .addChannelTypes(ChannelType.GuildVoice)
+          .setAutocomplete(true),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -33,7 +35,8 @@ export const data = new SlashCommandBuilder()
           .setName("channel")
           .setDescription("The voice channel to remove from exclusion list")
           .setRequired(true)
-          .addChannelTypes(ChannelType.GuildVoice),
+          .addChannelTypes(ChannelType.GuildVoice)
+          .setAutocomplete(true),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -171,5 +174,68 @@ export async function execute(
       content: "An error occurred while managing excluded channels.",
       ephemeral: true,
     });
+  }
+}
+
+export async function autocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  try {
+    const focusedOption = interaction.options.getFocused(true);
+    const subcommand = interaction.options.getSubcommand();
+
+    if (focusedOption.name === "channel") {
+      if (!interaction.guild) {
+        await interaction.respond([]);
+        return;
+      }
+
+      // Get all voice channels
+      const channels = interaction.guild.channels.cache.filter(
+        (channel) => channel.type === ChannelType.GuildVoice,
+      );
+
+      const focusedValue = focusedOption.value.toLowerCase();
+
+      // For 'remove' subcommand, filter to only excluded channels
+      if (subcommand === "remove") {
+        const currentExcluded =
+          (await configService.get("EXCLUDED_VC_CHANNELS")) || "";
+        const excludedList = currentExcluded
+          ? String(currentExcluded)
+              .split(",")
+              .map((id) => id.trim())
+          : [];
+
+        const choices = channels
+          .filter((channel) => excludedList.includes(channel.id))
+          .filter((channel) =>
+            channel.name.toLowerCase().includes(focusedValue),
+          )
+          .map((channel) => ({
+            name: channel.name,
+            value: channel.id,
+          }))
+          .slice(0, 25); // Discord limits to 25 choices
+
+        await interaction.respond(choices);
+      } else {
+        // For 'add' subcommand, show all voice channels
+        const choices = channels
+          .filter((channel) =>
+            channel.name.toLowerCase().includes(focusedValue),
+          )
+          .map((channel) => ({
+            name: channel.name,
+            value: channel.id,
+          }))
+          .slice(0, 25);
+
+        await interaction.respond(choices);
+      }
+    }
+  } catch (error) {
+    logger.error("Error in exclude-channel autocomplete:", error);
+    await interaction.respond([]);
   }
 }
