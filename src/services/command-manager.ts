@@ -10,6 +10,7 @@ import { config as dotenvConfig } from "dotenv";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
+import { CooldownManager } from "./cooldown-manager.js";
 
 dotenvConfig();
 const isDebug = process.env.DEBUG === "true";
@@ -24,10 +25,12 @@ export class CommandManager {
   private client: Client;
   private configService: ConfigService;
   private commands: Collection<string, CommandModule>;
+  private cooldownManager: CooldownManager;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+    this.cooldownManager = new CooldownManager();
     this.commands = new Collection();
 
     // Configuration reload callback intentionally omitted (manual /config reload only)
@@ -396,10 +399,11 @@ export class CommandManager {
   }
 
   /**
-   * Execute a command with monitoring
+   * Execute a command with monitoring and rate limiting
    */
   public async executeCommand(
     commandName: string,
+    interaction: ChatInputCommandInteraction,
     executeFunction: () => Promise<void>,
   ): Promise<void> {
     const monitoringService = MonitoringService.getInstance();
@@ -407,6 +411,65 @@ export class CommandManager {
     const trackingId = monitoringService.trackCommandStart(commandName);
 
     try {
+      // Check rate limiting if enabled
+      const rateLimitEnabled = await this.configService.getBoolean(
+        "ratelimit.enabled",
+        false,
+      );
+
+      if (rateLimitEnabled) {
+        const maxCommands = await this.configService.getNumber(
+          "ratelimit.max_commands",
+          5,
+        );
+        const windowSeconds = await this.configService.getNumber(
+          "ratelimit.window_seconds",
+          10,
+        );
+        const bypassAdmin = await this.configService.getBoolean(
+          "ratelimit.bypass_admin",
+          true,
+        );
+
+        const userId = interaction.user.id;
+        const isAdmin =
+          interaction.memberPermissions?.has("Administrator") || false;
+
+        // Check if user should be rate limited
+        if (!(bypassAdmin && isAdmin)) {
+          const isRateLimited = this.cooldownManager.isRateLimited(
+            userId,
+            maxCommands,
+            windowSeconds,
+          );
+
+          if (isRateLimited) {
+            const resetTime = this.cooldownManager.getRateLimitReset(
+              userId,
+              maxCommands,
+              windowSeconds,
+            );
+            const errorMessage = `⏱️ You're using commands too quickly! Please wait ${resetTime} second${resetTime !== 1 ? "s" : ""} before trying again.`;
+
+            await interaction.reply({
+              content: errorMessage,
+              ephemeral: true,
+            });
+
+            monitoringService.trackCommandEnd(
+              commandName,
+              trackingId,
+              startTime,
+              false,
+            );
+            return;
+          }
+
+          // Track this command execution
+          this.cooldownManager.trackCommandExecution(userId, windowSeconds);
+        }
+      }
+
       await executeFunction();
       monitoringService.trackCommandEnd(
         commandName,

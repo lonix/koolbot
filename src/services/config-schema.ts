@@ -52,6 +52,12 @@ export interface ConfigSchema {
 
   // Fun / Easter Eggs
   "fun.friendship": boolean;
+
+  // Rate Limiting
+  "ratelimit.enabled": boolean;
+  "ratelimit.max_commands": number; // Maximum commands per time window
+  "ratelimit.window_seconds": number; // Time window in seconds
+  "ratelimit.bypass_admin": boolean; // Bypass rate limit for admins
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -107,4 +113,10 @@ export const defaultConfig: ConfigSchema = {
   "core.cron.channel_id": "",
   // Fun defaults
   "fun.friendship": false,
+
+  // Rate Limiting defaults
+  "ratelimit.enabled": false,
+  "ratelimit.max_commands": 5, // 5 commands
+  "ratelimit.window_seconds": 10, // per 10 seconds
+  "ratelimit.bypass_admin": true, // Admins bypass rate limits
 };

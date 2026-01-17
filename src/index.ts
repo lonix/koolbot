@@ -541,8 +541,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (!refreshed) {
           return;
         }
-        await commandManager.executeCommand(interaction.commandName, () =>
-          refreshed.execute(interaction as ChatInputCommandInteraction),
+        await commandManager.executeCommand(
+          interaction.commandName,
+          interaction as ChatInputCommandInteraction,
+          () => refreshed.execute(interaction as ChatInputCommandInteraction),
         );
         return;
       } catch (refreshError) {
@@ -554,8 +556,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
     }
 
-    await commandManager.executeCommand(interaction.commandName, () =>
-      command.execute(interaction as ChatInputCommandInteraction),
+    await commandManager.executeCommand(
+      interaction.commandName,
+      interaction as ChatInputCommandInteraction,
+      () => command.execute(interaction as ChatInputCommandInteraction),
     );
   } catch (error) {
     logger.error(`Error executing command ${interaction.commandName}:`, error);

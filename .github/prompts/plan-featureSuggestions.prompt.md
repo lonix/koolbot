@@ -103,11 +103,3 @@ Based on comprehensive codebase research, here are feature suggestions organized
 
 ## 🔒 Security & Reliability
 
-### 17. **Rate Limiting Per Command**
-**Gap**: Only quotes have cooldowns
-**Suggestions**:
-- Global rate limiting config (e.g., 5 commands/10s per user)
-- Per-command overrides in config schema
-- Integrate with existing CooldownManager
-- Bypass rate limits for admin users and testing environments
-

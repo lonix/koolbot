@@ -17,6 +17,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Quote System](#-quote-system) - Quote management settings
 - [Discord Logging](#-discord-logging) - Event logging to channels
 - [Fun Features](#-fun-features) - Easter eggs and extras
+- [Rate Limiting](#-rate-limiting) - Command spam protection
 - [Configuration Management](#-configuration-management) - Using `/config` commands
 - [Quick Reference](#-quick-settings-reference) - All settings table
 
@@ -353,6 +354,58 @@ This enables passive responses when users mention "best ship" or "worst ship" in
 
 ---
 
+## 🔒 Rate Limiting
+
+Protect your bot from command spam with global rate limiting.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `ratelimit.enabled` | `false` | Enable global rate limiting for all commands |
+| `ratelimit.max_commands` | `5` | Maximum number of commands allowed per time window |
+| `ratelimit.window_seconds` | `10` | Time window in seconds for rate limit tracking |
+| `ratelimit.bypass_admin` | `true` | Allow administrators to bypass rate limits |
+
+### How Rate Limiting Works
+
+Rate limiting uses a **sliding window** approach to prevent command spam:
+
+- Tracks the number of commands executed by each user within a time window
+- When a user exceeds the limit, they receive a rate limit message
+- The window slides continuously, so limits reset as old commands expire
+- Administrators can bypass rate limiting (configurable)
+
+### Example
+
+```bash
+# Enable rate limiting with default settings (5 commands per 10 seconds)
+/config set key:ratelimit.enabled value:true
+
+# Custom configuration (3 commands per 5 seconds)
+/config set key:ratelimit.enabled value:true
+/config set key:ratelimit.max_commands value:3
+/config set key:ratelimit.window_seconds value:5
+
+# Disable admin bypass (rate limit applies to everyone)
+/config set key:ratelimit.bypass_admin value:false
+```
+
+### Rate Limit Messages
+
+When a user is rate limited, they receive an ephemeral message like:
+
+```text
+⏱️ You're using commands too quickly! Please wait 7 seconds before trying again.
+```
+
+### Use Cases
+
+- **Public servers**: Prevent users from spamming commands
+- **Bot testing**: Disable bypass for admins to test rate limiting behavior
+- **Custom limits**: Adjust based on your server size and activity
+- **Security**: Protect against abuse and reduce server load
+
+---
+
 ## ⚙ Configuration Management
 
 ### Using `/config` Commands
@@ -473,6 +526,13 @@ The config system automatically converts values:
 #### Fun Features
 
 - `fun.friendship` (bool, default: false)
+
+#### Rate Limiting
+
+- `ratelimit.enabled` (bool, default: false)
+- `ratelimit.max_commands` (number, default: 5)
+- `ratelimit.window_seconds` (number, default: 10)
+- `ratelimit.bypass_admin` (bool, default: true)
 
 ---
 
