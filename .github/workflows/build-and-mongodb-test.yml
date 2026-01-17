@@ -18,7 +18,7 @@ jobs:
       - name: Create .env file for testing
         run: |
           cat > .env << EOF
-          MONGODB_URI=mongodb://mongodb:27017/koolbot
+          MONGODB_URI=mongodb://localhost:27017/koolbot
           NODE_ENV=development
           EOF
 
