@@ -22,8 +22,7 @@ export const data = new SlashCommandBuilder()
           .setName("channel")
           .setDescription("The voice channel to exclude from tracking")
           .setRequired(true)
-          .addChannelTypes(ChannelType.GuildVoice)
-          .setAutocomplete(true),
+          .addChannelTypes(ChannelType.GuildVoice),
       ),
   )
   .addSubcommand((subcommand) =>
@@ -35,8 +34,7 @@ export const data = new SlashCommandBuilder()
           .setName("channel")
           .setDescription("The voice channel to remove from exclusion list")
           .setRequired(true)
-          .addChannelTypes(ChannelType.GuildVoice)
-          .setAutocomplete(true),
+          .addChannelTypes(ChannelType.GuildVoice),
       ),
   )
   .addSubcommand((subcommand) =>

@@ -14,8 +14,7 @@ export const data = new SlashCommandBuilder()
     option
       .setName("user")
       .setDescription("The user to transfer ownership to")
-      .setRequired(true)
-      .setAutocomplete(true),
+      .setRequired(true),
   );
 
 export async function execute(
