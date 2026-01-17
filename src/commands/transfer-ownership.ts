@@ -2,6 +2,7 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   SlashCommandUserOption,
+  AutocompleteInteraction,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
@@ -13,7 +14,8 @@ export const data = new SlashCommandBuilder()
     option
       .setName("user")
       .setDescription("The user to transfer ownership to")
-      .setRequired(true),
+      .setRequired(true)
+      .setAutocomplete(true),
   );
 
 export async function execute(
@@ -95,5 +97,49 @@ export async function execute(
       content: "An error occurred while transferring ownership.",
       ephemeral: true,
     });
+  }
+}
+
+export async function autocomplete(
+  interaction: AutocompleteInteraction,
+): Promise<void> {
+  try {
+    const focusedOption = interaction.options.getFocused(true);
+
+    if (focusedOption.name === "user") {
+      if (!interaction.guild) {
+        await interaction.respond([]);
+        return;
+      }
+
+      // Get the current user's voice channel
+      const member = interaction.guild.members.cache.get(interaction.user.id);
+      if (!member || !member.voice.channel) {
+        await interaction.respond([]);
+        return;
+      }
+
+      const voiceChannel = member.voice.channel;
+      const focusedValue = focusedOption.value.toLowerCase();
+
+      // Get all members in the same voice channel
+      const membersInChannel = voiceChannel.members
+        .filter((m) => m.id !== interaction.user.id) // Exclude the command user
+        .filter(
+          (m) =>
+            m.user.username.toLowerCase().includes(focusedValue) ||
+            (m.nickname && m.nickname.toLowerCase().includes(focusedValue)),
+        )
+        .map((m) => ({
+          name: m.nickname || m.user.username,
+          value: m.id,
+        }))
+        .slice(0, 25); // Discord limits to 25 choices
+
+      await interaction.respond(membersInChannel);
+    }
+  } catch (error) {
+    logger.error("Error in transfer-ownership autocomplete:", error);
+    await interaction.respond([]);
   }
 }
