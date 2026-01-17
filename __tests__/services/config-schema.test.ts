@@ -60,5 +60,15 @@ describe('Config Schema', () => {
       expect(typeof defaultConfig['quotes.add_roles']).toBe('string');
       expect(typeof defaultConfig['quotes.delete_roles']).toBe('string');
     });
+
+    it('should have rate limiting disabled by default for security', () => {
+      expect(defaultConfig['ratelimit.enabled']).toBe(false);
+    });
+
+    it('should have reasonable default values for rate limiting', () => {
+      expect(defaultConfig['ratelimit.max_commands']).toBeGreaterThan(0);
+      expect(defaultConfig['ratelimit.window_seconds']).toBeGreaterThan(0);
+      expect(typeof defaultConfig['ratelimit.bypass_admin']).toBe('boolean');
+    });
   });
 });
