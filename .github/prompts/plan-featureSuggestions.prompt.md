@@ -29,15 +29,6 @@ Based on comprehensive codebase research, here are feature suggestions organized
 - Guides user through: lobby setup → enable features → configure channels
 - Auto-detection of existing channels to avoid duplicates
 
-### 7. **Command Autocomplete**
-**Gap**: No autocomplete for command options
-**Suggestions**:
-- Add autocomplete handlers for:
-  - Channel selection in `/exclude-channel`
-  - User selection in `/transfer-ownership`
-  - Config key search in `/config get`
-- Improves discoverability
-
 ### 8. **Enhanced Error Messages**
 **Gap**: Technical errors shown to end users
 **Suggestions**:
