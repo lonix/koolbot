@@ -368,6 +368,7 @@ Protect your bot from command spam with global rate limiting.
 ### How Rate Limiting Works
 
 Rate limiting uses a **sliding window** approach to prevent command spam:
+
 - Tracks the number of commands executed by each user within a time window
 - When a user exceeds the limit, they receive a rate limit message
 - The window slides continuously, so limits reset as old commands expire
@@ -391,7 +392,8 @@ Rate limiting uses a **sliding window** approach to prevent command spam:
 ### Rate Limit Messages
 
 When a user is rate limited, they receive an ephemeral message like:
-```
+
+```text
 ⏱️ You're using commands too quickly! Please wait 7 seconds before trying again.
 ```
 
