@@ -24,7 +24,7 @@ jobs:
 
       - name: Start MongoDB service with docker-compose.dev.yml
         run: |
-          docker-compose -f docker-compose.dev.yml up -d mongodb
+          docker compose -f docker-compose.dev.yml up -d mongodb
           echo "MongoDB service started, waiting for initialization..."
 
       - name: Wait for MongoDB to be ready
@@ -77,11 +77,11 @@ jobs:
           docker logs koolbot-mongodb-dev
           echo ""
           echo "=== Docker Compose Status ==="
-          docker-compose -f docker-compose.dev.yml ps
+          docker compose -f docker-compose.dev.yml ps
 
       - name: Cleanup
         if: always()
         run: |
           echo "Stopping and removing containers..."
-          docker-compose -f docker-compose.dev.yml down -v
+          docker compose -f docker-compose.dev.yml down -v
           echo "Cleanup complete"
