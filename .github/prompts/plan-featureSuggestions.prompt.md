@@ -4,14 +4,6 @@ Based on comprehensive codebase research, here are feature suggestions organized
 
 ## 🚀 Medium Complexity, High Value
 
-### 3. **Enhanced Voice Channel Customization**
-**Gap**: Limited per-user customization
-**Suggestions**:
-- `/vc customize name <pattern>` - Custom channel naming template
-- `/vc customize limit <number>` - Set user limit for owned channel
-- `/vc customize bitrate <kbps>` - Audio quality preference
-- Store preferences in new `UserVoicePreferences` model
-
 ### 4. **Statistics Export & Visualization**
 **Gap**: No data export or visual analytics
 **Suggestions**:
