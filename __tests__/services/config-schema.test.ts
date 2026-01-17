@@ -60,5 +60,10 @@ describe('Config Schema', () => {
       expect(typeof defaultConfig['quotes.add_roles']).toBe('string');
       expect(typeof defaultConfig['quotes.delete_roles']).toBe('string');
     });
+
+    it('should have empty string default for excluded_channels', () => {
+      // Excluded channels should default to empty string (no channels excluded by default)
+      expect(defaultConfig['voicetracking.excluded_channels']).toBe('');
+    });
   });
 });

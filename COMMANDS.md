@@ -935,54 +935,6 @@ Users joining the lobby will automatically get their own channel.
 
 ---
 
-### `/exclude-channel`
-
-**Description:** Exclude a voice channel from activity tracking.
-
-**Configuration:**
-
-```bash
-/config set key:voicetracking.enabled value:true
-/config reload
-```
-
-**Usage:**
-
-```bash
-/exclude-channel channel:#afk-channel
-```
-
-**Parameters:**
-
-- `channel` (required) - The voice channel to exclude
-
-**Example Response:**
-
-```text
-✅ Channel #afk-channel excluded from tracking
-```
-
-**Use Cases:**
-
-- Exclude AFK channels
-- Don't track music bot channels
-- Ignore waiting rooms
-
-**View Excluded Channels:**
-
-```bash
-/config get key:voicetracking.excluded_channels
-```
-
-**Manual Configuration:**
-
-```bash
-# Add channel IDs (comma-separated)
-/config set key:voicetracking.excluded_channels value:"123456789,987654321"
-```
-
----
-
 ### `/botstats`
 
 **Description:** View bot performance and usage statistics.
@@ -1053,7 +1005,6 @@ All admin commands require **Administrator** permission in Discord.
 | `/dbtrunk` | Administrator + cleanup enabled |
 | `/announce-vc-stats` | Administrator + tracking & announcements enabled |
 | `/setup-lobby` | Administrator + voice channels enabled |
-| `/exclude-channel` | Administrator + voice tracking enabled |
 | `/botstats` | Administrator permission |
 
 ### Bot Permissions Required
@@ -1117,7 +1068,6 @@ The bot needs these Discord permissions to function:
 
 # Other Admin
 /setup-lobby                       # Setup voice lobby
-/exclude-channel channel:...       # Exclude from tracking
 /announce-vc-stats                 # Post stats now
 /botstats                          # Bot statistics
 ```

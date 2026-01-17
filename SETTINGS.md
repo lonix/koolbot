@@ -173,7 +173,8 @@ Track user voice channel activity and generate statistics.
 /config set key:voicetracking.enabled value:true
 /config set key:voicetracking.seen.enabled value:true
 
-# Exclude AFK channels
+# Exclude specific voice channels from tracking (e.g., AFK channels)
+# To get channel IDs: Right-click channel → Copy ID (requires Developer Mode)
 /config set key:voicetracking.excluded_channels value:"123456789,987654321"
 
 # Set admin roles
@@ -183,6 +184,24 @@ Track user voice channel activity and generate statistics.
 ```
 
 **Excluded channels** won't count toward leaderboards or statistics.
+
+**Managing Excluded Channels:**
+
+```bash
+# View currently excluded channels
+/config get key:voicetracking.excluded_channels
+
+# Add more channels (comma-separated list of channel IDs)
+/config set key:voicetracking.excluded_channels value:"123456789,987654321,555666777"
+
+# Remove all exclusions
+/config set key:voicetracking.excluded_channels value:""
+```
+
+**Common Use Cases:**
+- Exclude AFK channels from tracking
+- Don't track music bot channels
+- Ignore waiting rooms or temporary channels
 
 ---
 
