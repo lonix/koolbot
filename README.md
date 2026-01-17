@@ -87,6 +87,7 @@ docker-compose logs -f bot
 - **📝 Discord Logging** - Bot events logged to Discord channels
 - **🎭 Quote System** - Save and retrieve memorable quotes
 - **🤖 Bot Status** - Dynamic status showing bot state and user count
+- **🔒 Rate Limiting** - Protect against command spam with configurable limits
 
 ### Available Commands
 
@@ -162,6 +163,7 @@ Once your bot is running, configure it from Discord:
 | **Discord Logging** | Log bot events to Discord channels (`core.*` settings) |
 | **Quote System** | Cooldowns, permissions, max length |
 | **Fun Features** | Easter eggs and passive listeners |
+| **Rate Limiting** | Command spam protection with admin bypass |
 
 📖 **[Complete Settings Reference →](SETTINGS.md)**
 
