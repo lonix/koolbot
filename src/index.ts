@@ -8,6 +8,7 @@ import {
   ChannelType,
   Collection,
   ChatInputCommandInteraction,
+  AutocompleteInteraction,
   REST,
   Routes,
   TextChannel,
@@ -60,7 +61,7 @@ declare module "discord.js" {
       string,
       {
         execute: (interaction: ChatInputCommandInteraction) => Promise<void>;
-        autocomplete?: (interaction: any) => Promise<void>;
+        autocomplete?: (interaction: AutocompleteInteraction) => Promise<void>;
       }
     >;
   }

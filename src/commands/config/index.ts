@@ -18,6 +18,9 @@ import { fetch } from "undici";
 
 const configService = ConfigService.getInstance();
 
+// Constants
+const AUTOCOMPLETE_DESCRIPTION_MAX_LENGTH = 80;
+
 // Helper function to check if a key is a role or channel setting
 function isRoleOrChannelSetting(key: string): boolean {
   return (
@@ -840,7 +843,7 @@ export async function autocomplete(
       const choices = allKeys
         .filter((key) => key.toLowerCase().includes(focusedValue))
         .map((key) => ({
-          name: `${key} - ${getSettingDescription(key).substring(0, 80)}`,
+          name: `${key} - ${getSettingDescription(key).substring(0, AUTOCOMPLETE_DESCRIPTION_MAX_LENGTH)}`,
           value: key,
         }))
         .slice(0, 25); // Discord limits to 25 choices
