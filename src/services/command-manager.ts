@@ -307,7 +307,7 @@ export class CommandManager {
         { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
         { name: "config", configKey: null, file: "config/index" }, // Always enabled
         { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
-        { name: "exclude-channel", configKey: null, file: "exclude-channel" }, // Always enabled
+
         { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
       ];
 
