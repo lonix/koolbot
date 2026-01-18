@@ -1,0 +1,599 @@
+import {
+  Client,
+  TextChannel,
+  EmbedBuilder,
+  PermissionFlagsBits,
+  ChannelType,
+  CategoryChannel,
+  Role,
+  MessageReaction,
+  User,
+  PartialMessageReaction,
+  PartialUser,
+} from "discord.js";
+import { ConfigService } from "./config-service.js";
+import logger from "../utils/logger.js";
+import {
+  ReactionRoleConfig,
+  IReactionRoleConfig,
+} from "../models/reaction-role-config.js";
+
+export class ReactionRoleService {
+  private static instance: ReactionRoleService;
+  private client: Client;
+  private configService: ConfigService;
+  private isInitialized: boolean = false;
+
+  private constructor(client: Client) {
+    this.client = client;
+    this.configService = ConfigService.getInstance();
+  }
+
+  public static getInstance(client: Client): ReactionRoleService {
+    if (!ReactionRoleService.instance) {
+      ReactionRoleService.instance = new ReactionRoleService(client);
+    }
+    return ReactionRoleService.instance;
+  }
+
+  private async waitForClientReady(): Promise<void> {
+    if (this.client.isReady()) {
+      return;
+    }
+
+    return new Promise((resolve) => {
+      const checkReady = (): void => {
+        if (this.client.isReady()) {
+          resolve();
+        } else {
+          setTimeout(checkReady, 100);
+        }
+      };
+      checkReady();
+    });
+  }
+
+  public async initialize(): Promise<void> {
+    if (this.isInitialized) {
+      logger.warn("Reaction role service already initialized, skipping...");
+      return;
+    }
+
+    logger.info("Initializing reaction role service...");
+
+    try {
+      await this.waitForClientReady();
+
+      const enabled = await this.configService.getBoolean(
+        "reactionroles.enabled",
+        false,
+      );
+      if (!enabled) {
+        logger.info("Reaction roles feature is disabled");
+        return;
+      }
+
+      this.isInitialized = true;
+
+      // Setup reaction handlers
+      this.setupReactionHandlers();
+
+      logger.info("Reaction role service initialized successfully");
+    } catch (error) {
+      logger.error("Error initializing reaction role service:", error);
+    }
+  }
+
+  private setupReactionHandlers(): void {
+    // Listen for reactions added
+    this.client.on(
+      "messageReactionAdd",
+      async (
+        reaction: MessageReaction | PartialMessageReaction,
+        user: User | PartialUser,
+      ) => {
+        if (user.bot) return;
+
+        try {
+          // Fetch partial data if needed
+          if (reaction.partial) {
+            await reaction.fetch();
+          }
+          if (user.partial) {
+            await user.fetch();
+          }
+
+          await this.handleReactionAdd(
+            reaction as MessageReaction,
+            user as User,
+          );
+        } catch (error) {
+          logger.error("Error handling reaction add:", error);
+        }
+      },
+    );
+
+    // Listen for reactions removed
+    this.client.on(
+      "messageReactionRemove",
+      async (
+        reaction: MessageReaction | PartialMessageReaction,
+        user: User | PartialUser,
+      ) => {
+        if (user.bot) return;
+
+        try {
+          // Fetch partial data if needed
+          if (reaction.partial) {
+            await reaction.fetch();
+          }
+          if (user.partial) {
+            await user.fetch();
+          }
+
+          await this.handleReactionRemove(
+            reaction as MessageReaction,
+            user as User,
+          );
+        } catch (error) {
+          logger.error("Error handling reaction remove:", error);
+        }
+      },
+    );
+  }
+
+  private async handleReactionAdd(
+    reaction: MessageReaction,
+    user: User,
+  ): Promise<void> {
+    try {
+      const config = await ReactionRoleConfig.findOne({
+        messageId: reaction.message.id,
+        emoji: reaction.emoji.name || reaction.emoji.id || "",
+        isArchived: false,
+      });
+
+      if (!config) {
+        return;
+      }
+
+      const guild = reaction.message.guild;
+      if (!guild) {
+        return;
+      }
+
+      const member = await guild.members.fetch(user.id);
+      if (!member) {
+        return;
+      }
+
+      const role = guild.roles.cache.get(config.roleId);
+      if (!role) {
+        logger.error(
+          `Role ${config.roleId} not found for reaction role ${config.roleName}`,
+        );
+        return;
+      }
+
+      if (member.roles.cache.has(config.roleId)) {
+        logger.debug(`User ${user.tag} already has role ${role.name}`);
+        return;
+      }
+
+      await member.roles.add(role);
+      logger.info(`Added role ${role.name} to user ${user.tag}`);
+    } catch (error) {
+      logger.error("Error adding role from reaction:", error);
+    }
+  }
+
+  private async handleReactionRemove(
+    reaction: MessageReaction,
+    user: User,
+  ): Promise<void> {
+    try {
+      const config = await ReactionRoleConfig.findOne({
+        messageId: reaction.message.id,
+        emoji: reaction.emoji.name || reaction.emoji.id || "",
+        isArchived: false,
+      });
+
+      if (!config) {
+        return;
+      }
+
+      const guild = reaction.message.guild;
+      if (!guild) {
+        return;
+      }
+
+      const member = await guild.members.fetch(user.id);
+      if (!member) {
+        return;
+      }
+
+      const role = guild.roles.cache.get(config.roleId);
+      if (!role) {
+        logger.error(
+          `Role ${config.roleId} not found for reaction role ${config.roleName}`,
+        );
+        return;
+      }
+
+      if (!member.roles.cache.has(config.roleId)) {
+        logger.debug(`User ${user.tag} does not have role ${role.name}`);
+        return;
+      }
+
+      await member.roles.remove(role);
+      logger.info(`Removed role ${role.name} from user ${user.tag}`);
+    } catch (error) {
+      logger.error("Error removing role from reaction:", error);
+    }
+  }
+
+  public async createReactionRole(
+    guildId: string,
+    roleName: string,
+    emoji: string,
+  ): Promise<{
+    success: boolean;
+    message: string;
+    roleId?: string;
+    categoryId?: string;
+    channelId?: string;
+    messageId?: string;
+  }> {
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+
+      // Create the role
+      const role = await guild.roles.create({
+        name: roleName,
+        reason: `Reaction role created: ${roleName}`,
+      });
+
+      logger.info(`Created role: ${role.name} (${role.id})`);
+
+      // Create category
+      const category = (await guild.channels.create({
+        name: roleName,
+        type: ChannelType.GuildCategory,
+        reason: `Category for reaction role: ${roleName}`,
+      })) as CategoryChannel;
+
+      logger.info(`Created category: ${category.name} (${category.id})`);
+
+      // Set category permissions - only role members can view
+      await category.permissionOverwrites.edit(guild.roles.everyone, {
+        ViewChannel: false,
+      });
+
+      await category.permissionOverwrites.edit(role, {
+        ViewChannel: true,
+      });
+
+      // Create text channel in the category
+      const channel = await guild.channels.create({
+        name: `${roleName.toLowerCase().replace(/\s+/g, "-")}`,
+        type: ChannelType.GuildText,
+        parent: category.id,
+        reason: `Channel for reaction role: ${roleName}`,
+      });
+
+      logger.info(`Created channel: ${channel.name} (${channel.id})`);
+
+      // Get the configured message channel
+      const messageChannelId = await this.configService.getString(
+        "reactionroles.message_channel_id",
+        "",
+      );
+
+      if (!messageChannelId) {
+        // Rollback
+        await channel.delete();
+        await category.delete();
+        await role.delete();
+        return {
+          success: false,
+          message:
+            "Reaction role message channel not configured. Set reactionroles.message_channel_id",
+        };
+      }
+
+      const messageChannel = (await guild.channels.fetch(
+        messageChannelId,
+      )) as TextChannel;
+
+      if (!messageChannel || !messageChannel.isTextBased()) {
+        // Rollback
+        await channel.delete();
+        await category.delete();
+        await role.delete();
+        return {
+          success: false,
+          message: `Message channel ${messageChannelId} not found or is not a text channel`,
+        };
+      }
+
+      // Create the reaction role message
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`${emoji} ${roleName}`)
+        .setDescription(
+          `React with ${emoji} to get access to the **${roleName}** role and channels!`,
+        )
+        .setFooter({ text: "Remove your reaction to lose access" })
+        .setTimestamp();
+
+      const message = await messageChannel.send({ embeds: [embed] });
+      await message.react(emoji);
+
+      logger.info(
+        `Created reaction role message ${message.id} in channel ${messageChannel.name}`,
+      );
+
+      // Save to database
+      const reactionRoleConfig = new ReactionRoleConfig({
+        guildId,
+        messageId: message.id,
+        channelId: channel.id,
+        roleId: role.id,
+        categoryId: category.id,
+        emoji,
+        roleName,
+        isArchived: false,
+      });
+
+      await reactionRoleConfig.save();
+
+      logger.info(`Saved reaction role config for ${roleName}`);
+
+      return {
+        success: true,
+        message: `Successfully created reaction role **${roleName}**!`,
+        roleId: role.id,
+        categoryId: category.id,
+        channelId: channel.id,
+        messageId: message.id,
+      };
+    } catch (error) {
+      logger.error("Error creating reaction role:", error);
+      return {
+        success: false,
+        message: `Failed to create reaction role: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
+  public async archiveReactionRole(
+    guildId: string,
+    roleName: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const config = await ReactionRoleConfig.findOne({
+        guildId,
+        roleName,
+        isArchived: false,
+      });
+
+      if (!config) {
+        return {
+          success: false,
+          message: `Reaction role **${roleName}** not found or already archived`,
+        };
+      }
+
+      // Mark as archived
+      config.isArchived = true;
+      config.archivedAt = new Date();
+      await config.save();
+
+      // Delete the reaction message
+      try {
+        const guild = await this.client.guilds.fetch(guildId);
+        const messageChannelId = await this.configService.getString(
+          "reactionroles.message_channel_id",
+          "",
+        );
+        const messageChannel = (await guild.channels.fetch(
+          messageChannelId,
+        )) as TextChannel;
+
+        if (messageChannel) {
+          const message = await messageChannel.messages.fetch(config.messageId);
+          if (message) {
+            await message.delete();
+            logger.info(
+              `Deleted reaction message ${config.messageId} for archived role ${roleName}`,
+            );
+          }
+        }
+      } catch (error) {
+        logger.error("Error deleting reaction message:", error);
+      }
+
+      logger.info(`Archived reaction role: ${roleName}`);
+
+      return {
+        success: true,
+        message: `Successfully archived reaction role **${roleName}**. Role and channels are preserved but reactions are disabled.`,
+      };
+    } catch (error) {
+      logger.error("Error archiving reaction role:", error);
+      return {
+        success: false,
+        message: `Failed to archive reaction role: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
+  public async deleteReactionRole(
+    guildId: string,
+    roleName: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const config = await ReactionRoleConfig.findOne({
+        guildId,
+        roleName,
+      });
+
+      if (!config) {
+        return {
+          success: false,
+          message: `Reaction role **${roleName}** not found`,
+        };
+      }
+
+      const guild = await this.client.guilds.fetch(guildId);
+
+      // Delete message
+      try {
+        const messageChannelId = await this.configService.getString(
+          "reactionroles.message_channel_id",
+          "",
+        );
+        if (messageChannelId) {
+          const messageChannel = (await guild.channels.fetch(
+            messageChannelId,
+          )) as TextChannel;
+          if (messageChannel) {
+            const message = await messageChannel.messages.fetch(
+              config.messageId,
+            );
+            if (message) {
+              await message.delete();
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn("Could not delete reaction message:", error);
+      }
+
+      // Delete channel
+      try {
+        const channel = await guild.channels.fetch(config.channelId);
+        if (channel) {
+          await channel.delete();
+          logger.info(`Deleted channel ${config.channelId}`);
+        }
+      } catch (error) {
+        logger.warn("Could not delete channel:", error);
+      }
+
+      // Delete category
+      try {
+        const category = await guild.channels.fetch(config.categoryId);
+        if (category) {
+          // Delete all channels in category first
+          const categoryChannel = category as CategoryChannel;
+          for (const [, channel] of categoryChannel.children.cache) {
+            try {
+              await channel.delete();
+            } catch (err) {
+              logger.warn(`Could not delete channel ${channel.id}:`, err);
+            }
+          }
+          await category.delete();
+          logger.info(`Deleted category ${config.categoryId}`);
+        }
+      } catch (error) {
+        logger.warn("Could not delete category:", error);
+      }
+
+      // Delete role
+      try {
+        const role = await guild.roles.fetch(config.roleId);
+        if (role) {
+          await role.delete();
+          logger.info(`Deleted role ${config.roleId}`);
+        }
+      } catch (error) {
+        logger.warn("Could not delete role:", error);
+      }
+
+      // Delete from database
+      await ReactionRoleConfig.deleteOne({ _id: config._id });
+
+      logger.info(`Fully deleted reaction role: ${roleName}`);
+
+      return {
+        success: true,
+        message: `Successfully deleted reaction role **${roleName}** and all associated resources.`,
+      };
+    } catch (error) {
+      logger.error("Error deleting reaction role:", error);
+      return {
+        success: false,
+        message: `Failed to delete reaction role: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
+  public async listReactionRoles(
+    guildId: string,
+  ): Promise<IReactionRoleConfig[]> {
+    try {
+      const configs = await ReactionRoleConfig.find({ guildId }).sort({
+        createdAt: -1,
+      });
+      return configs;
+    } catch (error) {
+      logger.error("Error listing reaction roles:", error);
+      return [];
+    }
+  }
+
+  public async getReactionRoleStatus(
+    guildId: string,
+    roleName: string,
+  ): Promise<IReactionRoleConfig | null> {
+    try {
+      const config = await ReactionRoleConfig.findOne({
+        guildId,
+        roleName,
+      });
+      return config;
+    } catch (error) {
+      logger.error("Error getting reaction role status:", error);
+      return null;
+    }
+  }
+
+  public async maintainCategoryPermissions(
+    categoryId: string,
+    roleId: string,
+  ): Promise<void> {
+    try {
+      const guild = this.client.guilds.cache.first();
+      if (!guild) return;
+
+      const category = await guild.channels.fetch(categoryId);
+      if (!category || category.type !== ChannelType.GuildCategory) {
+        logger.warn(`Category ${categoryId} not found or invalid type`);
+        return;
+      }
+
+      const role = await guild.roles.fetch(roleId);
+      if (!role) {
+        logger.warn(`Role ${roleId} not found`);
+        return;
+      }
+
+      // Ensure permissions are correct
+      await category.permissionOverwrites.edit(guild.roles.everyone, {
+        ViewChannel: false,
+      });
+
+      await category.permissionOverwrites.edit(role, {
+        ViewChannel: true,
+      });
+
+      logger.debug(
+        `Maintained permissions for category ${category.name} and role ${role.name}`,
+      );
+    } catch (error) {
+      logger.error("Error maintaining category permissions:", error);
+    }
+  }
+}

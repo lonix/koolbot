@@ -61,6 +61,11 @@ export interface ConfigSchema {
 
   // Scheduled Announcements
   "announcements.enabled": boolean;
+
+  // Reaction Roles
+  "reactionroles.enabled": boolean;
+  "reactionroles.message_channel_id": string; // Channel for reaction role messages
+  "reactionroles.admin_roles": string; // Comma-separated role IDs that can manage reaction roles
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -125,4 +130,9 @@ export const defaultConfig: ConfigSchema = {
 
   // Scheduled Announcements defaults
   "announcements.enabled": false,
+
+  // Reaction Roles defaults
+  "reactionroles.enabled": false,
+  "reactionroles.message_channel_id": "",
+  "reactionroles.admin_roles": "",
 };
