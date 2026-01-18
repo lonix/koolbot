@@ -17,16 +17,29 @@ management.
 
 KoolBot is designed for simple deployment. You only need two files to get started:
 
-### 1. **Clone the Repository**
+### 1. **Download Required Files**
+
+Download these two files to a new directory:
+
+- [`docker-compose.yml`](https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml)
+- [`.env.example`](https://raw.githubusercontent.com/lonix/koolbot/main/.env.example)
 
 ```bash
-git clone https://github.com/lonix/koolbot.git
+# Create a directory for KoolBot
+mkdir koolbot
 cd koolbot
+
+# Download the files
+curl -O https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/lonix/koolbot/main/.env.example
 ```
+
+Or manually download from GitHub and save to your `koolbot` directory.
 
 ### 2. **Create Your `.env` File**
 
 ```bash
+# Copy the example file
 cp .env.example .env
 ```
 
@@ -533,14 +546,25 @@ docker-compose restart mongodb
 
 ## 🔧 For Developers
 
+> **Note:** The Quick Start guide above is for **users** who just want to run the bot.
+> If you want to **develop** or **contribute** to KoolBot, you'll need to clone the full repository.
+
+### Cloning for Development
+
+```bash
+# Clone the repository
+git clone https://github.com/lonix/koolbot.git
+cd koolbot
+
+# Install dependencies
+npm install
+```
+
 ### Local Development (Without Docker)
 
 If you want to develop locally without Docker:
 
 ```bash
-# Install dependencies
-npm install
-
 # Start MongoDB separately
 # (Use Docker, local install, or cloud MongoDB)
 
