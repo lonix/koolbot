@@ -45,3 +45,4 @@ updates:
       - "patch"
     commit-message:
       prefix: "chore(ci)"
+      include: "scope"
