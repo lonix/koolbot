@@ -10,10 +10,16 @@ STEP 1: Get the Files
 ════════════════════════════════════════════════════════════════════════════
 ┌─────────────────────────────────────────────────────────────────────────┐
 │ $ mkdir koolbot && cd koolbot                                            │
-│ $ curl -O https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml │
-│ $ curl -O https://raw.githubusercontent.com/lonix/koolbot/main/.env.example │
 │                                                                           │
-│ Or download manually from GitHub and save to your koolbot directory      │
+│ Download docker-compose.yml:                                             │
+│ $ curl -O https://raw.githubusercontent.com/lonix/koolbot/main/\        │
+│   docker-compose.yml                                                     │
+│                                                                           │
+│ Download .env.example:                                                   │
+│ $ curl -O https://raw.githubusercontent.com/lonix/koolbot/main/\        │
+│   .env.example                                                           │
+│                                                                           │
+│ Or download manually from GitHub                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 
 STEP 2: Configure
