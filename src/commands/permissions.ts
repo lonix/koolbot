@@ -5,6 +5,7 @@ import {
   EmbedBuilder,
   Role,
   User,
+  AutocompleteInteraction,
 } from "discord.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import logger from "../utils/logger.js";
@@ -216,7 +217,7 @@ export async function execute(
 
 // Autocomplete handler for command names
 export async function autocomplete(
-  interaction: ChatInputCommandInteraction,
+  interaction: AutocompleteInteraction,
 ): Promise<void> {
   try {
     const focusedOption = interaction.options.getFocused(true);

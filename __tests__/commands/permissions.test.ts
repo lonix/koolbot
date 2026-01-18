@@ -1,5 +1,5 @@
-import { describe, it, expect } from "@jest/globals";
-import { data } from "../../src/commands/permissions.js";
+import { describe, it, expect, jest } from "@jest/globals";
+import { data, autocomplete } from "../../src/commands/permissions.js";
 
 describe("Permissions Command", () => {
   describe("command metadata", () => {
@@ -118,6 +118,111 @@ describe("Permissions Command", () => {
         (opt: { name: string }) => opt.name === "role2",
       );
       expect(role2?.required).toBe(false);
+    });
+  });
+
+  describe("autocomplete", () => {
+    it("should export autocomplete function", () => {
+      expect(autocomplete).toBeDefined();
+      expect(typeof autocomplete).toBe("function");
+    });
+
+    it("should filter commands based on user input", async () => {
+      const mockCommands = new Map([
+        ["quote", {}],
+        ["vcstats", {}],
+        ["permissions", {}],
+        ["ping", {}],
+      ]);
+
+      const mockInteraction = {
+        client: {
+          commands: mockCommands,
+        },
+        options: {
+          getFocused: jest.fn().mockReturnValue({
+            name: "command",
+            value: "qu",
+          }),
+        },
+        respond: jest.fn(),
+      };
+
+      await autocomplete(mockInteraction as unknown as import("discord.js").AutocompleteInteraction);
+
+      expect(mockInteraction.respond).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "quote", value: "quote" }),
+        ]),
+      );
+      expect(mockInteraction.respond).not.toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ name: "ping", value: "ping" }),
+        ]),
+      );
+    });
+
+    it("should limit results to 25 items", async () => {
+      const mockCommands = new Map();
+      for (let i = 0; i < 30; i++) {
+        mockCommands.set(`command${i}`, {});
+      }
+
+      const mockInteraction = {
+        client: {
+          commands: mockCommands,
+        },
+        options: {
+          getFocused: jest.fn().mockReturnValue({
+            name: "command",
+            value: "",
+          }),
+        },
+        respond: jest.fn(),
+      };
+
+      await autocomplete(mockInteraction as unknown as import("discord.js").AutocompleteInteraction);
+
+      const respondCall = mockInteraction.respond.mock.calls[0][0];
+      expect(Array.isArray(respondCall)).toBe(true);
+      expect(respondCall.length).toBeLessThanOrEqual(25);
+    });
+
+    it("should handle errors gracefully", async () => {
+      const mockInteraction = {
+        client: {
+          commands: new Map([["quote", {}]]),
+        },
+        options: {
+          getFocused: jest.fn().mockImplementation(() => {
+            throw new Error("Test error");
+          }),
+        },
+        respond: jest.fn(),
+      };
+
+      await expect(
+        autocomplete(mockInteraction as unknown as import("discord.js").AutocompleteInteraction),
+      ).resolves.not.toThrow();
+    });
+
+    it("should only respond to command option autocomplete", async () => {
+      const mockInteraction = {
+        client: {
+          commands: new Map([["quote", {}]]),
+        },
+        options: {
+          getFocused: jest.fn().mockReturnValue({
+            name: "other",
+            value: "test",
+          }),
+        },
+        respond: jest.fn(),
+      };
+
+      await autocomplete(mockInteraction as unknown as import("discord.js").AutocompleteInteraction);
+
+      expect(mockInteraction.respond).not.toHaveBeenCalled();
     });
   });
 });

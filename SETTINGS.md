@@ -452,7 +452,7 @@ always enabled.
 
 ### Key Concepts
 
-**Permission Node Format:** `command:<commandname>` (e.g., `command:quote`, `command:vcstats`)
+**Command Name Format:** Command names are used directly (e.g., `quote`, `vcstats`)
 
 **Access Logic:**
 
@@ -471,6 +471,9 @@ always enabled.
 ### Managing Permissions
 
 Use the `/permissions` command to manage role-based access:
+
+> **Note:** In the examples below, `command:` and `role:` represent Discord slash command option names.
+> When using the command in Discord, you'll select values from dropdowns or type them in the option fields.
 
 ```bash
 # Set permissions (replaces existing)
@@ -542,7 +545,7 @@ All other commands default to accessible by everyone unless you set permissions.
 
 ### Important Notes
 
-- **No database storage** - Permissions are stored in MongoDB
+- **Database storage** - Permissions are stored in MongoDB
 - **Single guild** - Permissions are per-guild (designed for self-hosted bots)
 - **Immediate effect** - Permission changes take effect immediately
 - **Role IDs** - Uses Discord role IDs internally for consistency

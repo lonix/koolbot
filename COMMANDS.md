@@ -556,7 +556,7 @@ Import configuration from a YAML file.
 **Description:** Manage role-based command access control. This feature allows admins to restrict which commands can be used by
 specific Discord roles.
 
-**Permission Node Format:** `command:<commandname>` (e.g., `command:quote`, `command:vcstats`)
+**Command Name Format:** Command names are used directly (e.g., `quote`, `vcstats`)
 
 **Key Features:**
 
@@ -570,6 +570,10 @@ specific Discord roles.
 #### `/permissions set`
 
 Set command permissions (replaces any existing permissions).
+
+> **Note:** In Discord's slash command UI, `command` and `role` are option names. Select `quote` for the **command** option
+> and `@Moderator`, `@VIP`, etc. for the **role** options. The `command:value` notation in examples below represents the
+> option structure, not literal text you type.
 
 **Usage:**
 

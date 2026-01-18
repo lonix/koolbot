@@ -12,6 +12,7 @@ export class PermissionsService {
   private configService: ConfigService;
   private permissionsCache: Map<string, string[]> = new Map();
   private cacheInitialized = false;
+  private cacheInitializing: Promise<void> | null = null;
 
   private constructor(client: Client) {
     this.client = client;
@@ -30,31 +31,40 @@ export class PermissionsService {
    */
   private async initializeCache(): Promise<void> {
     if (this.cacheInitialized) return;
-
-    try {
-      const guildId = await this.configService.getString("GUILD_ID");
-      if (!guildId) {
-        logger.warn(
-          "GUILD_ID not set, skipping permissions cache initialization",
-        );
-        return;
-      }
-
-      const permissions = await CommandPermission.find({ guildId });
-      this.permissionsCache.clear();
-
-      for (const perm of permissions) {
-        const cacheKey = `${perm.guildId}:${perm.commandName}`;
-        this.permissionsCache.set(cacheKey, perm.roleIds);
-      }
-
-      this.cacheInitialized = true;
-      logger.info(
-        `Permissions cache initialized with ${permissions.length} entries`,
-      );
-    } catch (error) {
-      logger.error("Error initializing permissions cache:", error);
+    if (this.cacheInitializing) {
+      return this.cacheInitializing;
     }
+
+    this.cacheInitializing = (async () => {
+      try {
+        const guildId = await this.configService.getString("GUILD_ID");
+        if (!guildId) {
+          logger.warn(
+            "GUILD_ID not set, skipping permissions cache initialization",
+          );
+          return;
+        }
+
+        const permissions = await CommandPermission.find({ guildId });
+        this.permissionsCache.clear();
+
+        for (const perm of permissions) {
+          const cacheKey = `${perm.guildId}:${perm.commandName}`;
+          this.permissionsCache.set(cacheKey, perm.roleIds);
+        }
+
+        this.cacheInitialized = true;
+        logger.info(
+          `Permissions cache initialized with ${permissions.length} entries`,
+        );
+      } catch (error) {
+        logger.error("Error initializing permissions cache:", error);
+      } finally {
+        this.cacheInitializing = null;
+      }
+    })();
+
+    return this.cacheInitializing;
   }
 
   /**
