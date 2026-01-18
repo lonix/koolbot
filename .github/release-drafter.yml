@@ -1,5 +1,28 @@
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
+
+# Automatically label PRs based on file patterns
+autolabeler:
+  - label: 'documentation'
+    files:
+      - '**/*.md'
+  - label: 'dependencies'
+    files:
+      - 'package.json'
+      - 'package-lock.json'
+  - label: 'github-actions'
+    files:
+      - '.github/workflows/**'
+      - '.github/release-drafter.yml'
+  - label: 'test'
+    files:
+      - '__tests__/**'
+      - 'jest.config.js'
+  - label: 'docker'
+    files:
+      - 'Dockerfile*'
+      - 'docker-compose*.yml'
+
 categories:
   - title: '🚀 Features'
     labels:
@@ -12,27 +35,45 @@ categories:
   - title: '📚 Documentation'
     labels:
       - 'documentation'
-  - title: '🧹 Maintenance'
+  - title: '🔧 Maintenance'
     labels:
       - 'chore'
       - 'refactor'
+  - title: '📦 Dependencies'
+    labels:
       - 'dependencies'
   - title: '🧪 Tests'
     labels:
       - 'test'
+  - title: '🐳 Docker'
+    labels:
+      - 'docker'
+  - title: '⚙️ CI/CD'
+    labels:
+      - 'github-actions'
+
 change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
 change-title-escapes: '\<*_&' # You can add # and @ to disable mentions, and add ` to disable code blocks.
+
 version-resolver:
   major:
     labels:
       - 'major'
+      - 'breaking'
   minor:
     labels:
       - 'minor'
+      - 'feature'
+      - 'enhancement'
   patch:
     labels:
       - 'patch'
+      - 'bug'
+      - 'fix'
+      - 'documentation'
+      - 'dependencies'
   default: patch
+
 template: |
   ## Changes
 
@@ -40,4 +81,6 @@ template: |
 
   ## Contributors
 
+  Thank you to the following contributors for making this release possible:
+  
   $CONTRIBUTORS
