@@ -351,7 +351,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Quote channel cleanup job stop",
     );
 
-    // 6. Close database connections - 3 second timeout
+    // 6. Stop scheduled announcements cron jobs - 1 second timeout
+    await runWithTimeout(
+      async () => {
+        scheduledAnnouncementService.destroy();
+      },
+      1000,
+      "Scheduled announcements cleanup",
+    );
+
+    // 7. Close database connections - 3 second timeout
     await runWithTimeout(
       async () => {
         const { default: mongoose } = await import("mongoose");
@@ -631,6 +640,9 @@ process.on("SIGINT", async () => {
     // Set bot to shutdown status (yellow)
     botStatusService.setShutdownStatus();
 
+    // Stop scheduled announcements
+    scheduledAnnouncementService.destroy();
+
     // Rename lobby to offline before shutting down
     const guildId = await configService.getString("GUILD_ID", "");
     if (guildId) {
@@ -654,6 +666,9 @@ process.on("SIGTERM", async () => {
   try {
     // Set bot to shutdown status (yellow)
     botStatusService.setShutdownStatus();
+
+    // Stop scheduled announcements
+    scheduledAnnouncementService.destroy();
 
     // Rename lobby to offline before shutting down
     const guildId = await configService.getString("GUILD_ID", "");

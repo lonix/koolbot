@@ -128,6 +128,15 @@ async function handleCreate(
     return;
   }
 
+  // Validate that the channel is a text channel
+  if (!channel.isTextBased()) {
+    await interaction.editReply({
+      content:
+        "❌ The selected channel must be a text channel. Voice channels and categories are not supported.",
+    });
+    return;
+  }
+
   // Validate cron expression
   try {
     const { CronTime } = await import("cron");
@@ -144,12 +153,25 @@ async function handleCreate(
   // Build embed data if provided
   let embedData = undefined;
   if (embedTitle || embedDescription || embedColorHex) {
+    // Validate hex color format if provided
+    let color: number | undefined = undefined;
+    if (embedColorHex) {
+      const hexPattern = /^#?([0-9A-Fa-f]{6})$/;
+      const match = embedColorHex.match(hexPattern);
+      if (match) {
+        color = parseInt(match[1], 16);
+      } else {
+        await interaction.editReply({
+          content: `❌ Invalid color format: ${embedColorHex}. Please use a valid 6-digit hex color (e.g., #FF0000 or FF0000).`,
+        });
+        return;
+      }
+    }
+
     embedData = {
       title: embedTitle ?? undefined,
       description: embedDescription ?? undefined,
-      color: embedColorHex
-        ? parseInt(embedColorHex.replace("#", ""), 16)
-        : undefined,
+      color,
     };
   }
 

@@ -29,7 +29,21 @@ export class ScheduledAnnouncementService {
         logger.info(
           "Scheduled announcements configuration changed, reloading...",
         );
-        await this.reload();
+
+        // Check if the feature is enabled before reloading
+        const enabled = await this.configService.getBoolean(
+          "announcements.enabled",
+          false,
+        );
+
+        if (!enabled && this.isInitialized) {
+          // Feature disabled, clean up existing jobs
+          logger.info("Scheduled announcements disabled, cleaning up jobs...");
+          this.destroy();
+        } else if (enabled) {
+          // Feature enabled or still enabled, reload
+          await this.reload();
+        }
       } catch (error) {
         logger.error(
           "Error reloading scheduled announcements after configuration change:",
@@ -65,9 +79,43 @@ export class ScheduledAnnouncementService {
     }
 
     return new Promise((resolve) => {
-      this.client.once("ready", () => {
+      const maxWaitMs = 30000;
+      const pollIntervalMs = 500;
+      let resolved = false;
+      let elapsed = 0;
+
+      const cleanup = () => {
+        if (resolved) {
+          return;
+        }
+        resolved = true;
+        this.client.off("ready", onReady);
+        clearInterval(intervalId);
+      };
+
+      const onReady = () => {
+        cleanup();
         resolve();
-      });
+      };
+
+      const intervalId = setInterval(() => {
+        if (this.client.isReady()) {
+          cleanup();
+          resolve();
+          return;
+        }
+
+        elapsed += pollIntervalMs;
+        if (elapsed >= maxWaitMs) {
+          logger.warn(
+            "ScheduledAnnouncementService: client did not become ready within the expected time; continuing anyway.",
+          );
+          cleanup();
+          resolve();
+        }
+      }, pollIntervalMs);
+
+      this.client.once("ready", onReady);
     });
   }
 
@@ -93,7 +141,7 @@ export class ScheduledAnnouncementService {
 
     let result = text;
     for (const [placeholder, value] of Object.entries(replacements)) {
-      result = result.replace(new RegExp(placeholder, "g"), value);
+      result = result.replaceAll(placeholder, value);
     }
     return result;
   }
@@ -215,13 +263,20 @@ export class ScheduledAnnouncementService {
     }
 
     try {
-      const job = new CronJob(announcement.cronSchedule, () => {
-        this.makeAnnouncement(announcement).catch((error) => {
+      const job = new CronJob(announcement.cronSchedule, async () => {
+        try {
+          // Fetch fresh announcement data from database to handle updates
+          const latestAnnouncement =
+            (await ScheduledAnnouncement.findById(announcement._id)) ??
+            announcement;
+
+          await this.makeAnnouncement(latestAnnouncement);
+        } catch (error) {
           logger.error(
             `Error in scheduled announcement ${announcement._id}:`,
             error,
           );
-        });
+        }
       });
 
       job.start();
@@ -330,8 +385,7 @@ export class ScheduledAnnouncementService {
     guildId?: string,
   ): Promise<boolean> {
     // Verify the announcement exists and optionally belongs to the guild
-    const announcement =
-      await ScheduledAnnouncement.findById(announcementId);
+    const announcement = await ScheduledAnnouncement.findById(announcementId);
     if (!announcement) {
       return false;
     }
