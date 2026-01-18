@@ -498,17 +498,52 @@ export class ReactionRoleService {
         .setTimestamp();
 
       const message = await messageChannel.send({ embeds: [embed] });
-      await message.react(config.emoji);
+
+      // Try to add reaction, if it fails, delete the message and abort
+      try {
+        await message.react(config.emoji);
+      } catch (reactionError) {
+        logger.error("Failed to add reaction to message:", reactionError);
+        try {
+          await message.delete();
+        } catch (deleteError) {
+          logger.error(
+            "Failed to delete message after reaction error:",
+            deleteError,
+          );
+        }
+        return {
+          success: false,
+          message: `Failed to add reaction to message. The emoji might be invalid.`,
+        };
+      }
 
       logger.info(
         `Created new reaction role message ${message.id} for unarchived role ${roleName}`,
       );
 
-      // Update database
-      config.isArchived = false;
-      config.archivedAt = undefined;
-      config.messageId = message.id;
-      await config.save();
+      // Update database with error handling
+      try {
+        config.isArchived = false;
+        config.archivedAt = undefined;
+        config.messageId = message.id;
+        await config.save();
+      } catch (dbError) {
+        logger.error(
+          "Failed to update database after creating message:",
+          dbError,
+        );
+        // Try to delete the message since DB update failed
+        try {
+          await message.delete();
+        } catch (deleteError) {
+          logger.error("Failed to delete message after DB error:", deleteError);
+        }
+        return {
+          success: false,
+          message: `Failed to update database. Please try again.`,
+        };
+      }
 
       logger.info(`Unarchived reaction role: ${roleName}`);
 

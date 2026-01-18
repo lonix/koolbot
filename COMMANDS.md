@@ -912,7 +912,6 @@ Unarchive a reaction role to re-enable reactions.
 ```text
 📤 Reaction Role Unarchived
 Successfully unarchived reaction role Gaming. Users can now react to get this role again!
-Users can now react to get this role again!
 ```
 
 **Use Cases:**
