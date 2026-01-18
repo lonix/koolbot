@@ -397,7 +397,6 @@ export class PermissionsService {
       // Admin-only commands that should be restricted by default
       const adminCommands = ["dbtrunk", "vc", "config", "setup-lobby"];
 
-      const initialized = 0;
       for (const commandName of adminCommands) {
         // Only set default if no permissions exist yet (idempotent)
         const existing = await CommandPermission.findOne({
@@ -418,9 +417,7 @@ export class PermissionsService {
         }
       }
 
-      logger.info(
-        `Default permissions initialization complete (${initialized} commands configured)`,
-      );
+      logger.info("Default permissions initialization complete");
     } catch (error) {
       logger.error("Error initializing default permissions:", error);
     }

@@ -9,8 +9,6 @@ import {
 import { PermissionsService } from "../services/permissions-service.js";
 import logger from "../utils/logger.js";
 
-const permissionsService = PermissionsService.getInstance;
-
 export const data = new SlashCommandBuilder()
   .setName("permissions")
   .setDescription("Manage command permissions")
@@ -282,7 +280,7 @@ async function handleSet(
 
   await interaction.deferReply({ ephemeral: true });
 
-  const service = permissionsService(interaction.client);
+  const service = PermissionsService.getInstance(interaction.client);
   const roleIds = roles.map((r) => r.id);
 
   await service.setCommandPermissions(guildId, commandName, roleIds);
@@ -335,7 +333,7 @@ async function handleAdd(
 
   await interaction.deferReply({ ephemeral: true });
 
-  const service = permissionsService(interaction.client);
+  const service = PermissionsService.getInstance(interaction.client);
   const roleIds = roles.map((r) => r.id);
 
   await service.addCommandPermissions(guildId, commandName, roleIds);
@@ -388,7 +386,7 @@ async function handleRemove(
 
   await interaction.deferReply({ ephemeral: true });
 
-  const service = permissionsService(interaction.client);
+  const service = PermissionsService.getInstance(interaction.client);
   const roleIds = roles.map((r) => r.id);
 
   await service.removeCommandPermissions(guildId, commandName, roleIds);
@@ -424,7 +422,7 @@ async function handleClear(
 
   await interaction.deferReply({ ephemeral: true });
 
-  const service = permissionsService(interaction.client);
+  const service = PermissionsService.getInstance(interaction.client);
   await service.clearCommandPermissions(guildId, commandName);
 
   await interaction.editReply({
@@ -446,7 +444,7 @@ async function handleList(
 
   await interaction.deferReply({ ephemeral: true });
 
-  const service = permissionsService(interaction.client);
+  const service = PermissionsService.getInstance(interaction.client);
   const permissions = await service.listAllPermissions(guildId);
 
   if (permissions.length === 0) {
@@ -522,7 +520,7 @@ async function handleView(
 
   await interaction.deferReply({ ephemeral: true });
 
-  const service = permissionsService(interaction.client);
+  const service = PermissionsService.getInstance(interaction.client);
 
   if (user) {
     await handleViewUser(interaction, service, user, guildId);
