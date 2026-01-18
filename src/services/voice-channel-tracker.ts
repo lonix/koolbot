@@ -11,6 +11,7 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { connectToDatabase } from "../utils/database.js";
+import { GamificationService } from "./gamification-service.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -305,6 +306,25 @@ export class VoiceChannelTracker {
         logger.info(
           `[DEBUG] Saved voice session for user ${user.username} (${userId}) - Duration: ${duration}s`,
         );
+      }
+
+      // Check for accolades after session ends
+      try {
+        const gamificationService = GamificationService.getInstance(
+          this.client,
+        );
+        const newAccolades = await gamificationService.checkAndAwardAccolades(
+          userId,
+          user.username,
+        );
+
+        if (newAccolades.length > 0) {
+          // Send DM notification
+          await gamificationService.notifyUserOfAccolades(userId, newAccolades);
+        }
+      } catch (error: unknown) {
+        logger.error("Error checking gamification accolades:", error);
+        // Don't let gamification errors break voice tracking
       }
     } catch (error: unknown) {
       logger.error("Error ending voice tracking:", error);
