@@ -18,6 +18,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Discord Logging](#-discord-logging) - Event logging to channels
 - [Fun Features](#-fun-features) - Easter eggs and extras
 - [Rate Limiting](#-rate-limiting) - Command spam protection
+- [Permissions & Access Control](#-permissions--access-control) - Role-based command access
 - [Configuration Management](#-configuration-management) - Using `/config` commands
 - [Quick Reference](#-quick-settings-reference) - All settings table
 
@@ -441,6 +442,147 @@ When a user is rate limited, they receive an ephemeral message like:
 - **Bot testing**: Disable bypass for admins to test rate limiting behavior
 - **Custom limits**: Adjust based on your server size and activity
 - **Security**: Protect against abuse and reduce server load
+
+---
+
+## 🔐 Permissions & Access Control
+
+**Role-Based Command Access** allows you to control which Discord roles can use specific commands. This is a **core feature** that is
+always enabled.
+
+### Key Concepts
+
+**Permission Node Format:** `command:<commandname>` (e.g., `command:quote`, `command:vcstats`)
+
+**Access Logic:**
+
+- **Multi-role support** - Commands can be assigned to multiple roles
+- **OR logic** - Users need ANY of the assigned roles to execute a command
+- **Admin bypass** - Administrators always have access to all commands
+- **Default open** - Commands without permissions are accessible to everyone
+- **Cached** - Permissions are cached in memory for performance
+
+### How It Works
+
+1. **No permissions set** → Everyone can use the command (except admin-only commands)
+2. **Permissions set** → Only users with the specified roles can use the command
+3. **Admins** → Always bypass permission checks
+
+### Managing Permissions
+
+Use the `/permissions` command to manage role-based access:
+
+```bash
+# Set permissions (replaces existing)
+/permissions set command:quote role:@Moderator role:@VIP
+
+# Add roles to existing permissions
+/permissions add command:quote role:@Contributor
+
+# Remove specific roles
+/permissions remove command:quote role:@VIP
+
+# View all permissions
+/permissions list
+
+# Check what a user can access
+/permissions view user:@username
+
+# Check what a role can access
+/permissions view role:@Moderator
+
+# Clear all permissions (make accessible to everyone)
+/permissions clear command:quote
+```
+
+### Use Cases
+
+**Restrict powerful commands:**
+
+```bash
+/permissions set command:dbtrunk role:@ServerAdmin
+/permissions set command:vc role:@Moderator
+```
+
+**Limit resource-intensive commands:**
+
+```bash
+/permissions set command:vcstats role:@Member
+/permissions set command:vctop role:@Member
+```
+
+**Create tiered access:**
+
+```bash
+# Moderators and VIPs can use quote
+/permissions set command:quote role:@Moderator role:@VIP
+
+# Anyone can see stats
+# (no permissions set, default open)
+```
+
+**Audit permissions:**
+
+```bash
+/permissions list
+/permissions view user:@newmember
+```
+
+### Default Behavior
+
+The following commands are **admin-only by default** (require Administrator permission):
+
+- `/config` - Bot configuration
+- `/vc` - Voice channel management
+- `/dbtrunk` - Database cleanup
+- `/setup-lobby` - Initial setup
+- `/permissions` - Permission management
+
+All other commands default to accessible by everyone unless you set permissions.
+
+### Important Notes
+
+- **No database storage** - Permissions are stored in MongoDB
+- **Single guild** - Permissions are per-guild (designed for self-hosted bots)
+- **Immediate effect** - Permission changes take effect immediately
+- **Role IDs** - Uses Discord role IDs internally for consistency
+- **Autocomplete** - Command names have autocomplete in `/permissions` commands
+
+### Examples
+
+#### Example 1: Member-only commands
+
+```bash
+# Restrict voice tracking commands to Members role
+/permissions set command:vcstats role:@Member
+/permissions set command:vctop role:@Member
+/permissions set command:seen role:@Member
+```
+
+#### Example 2: Tiered moderation
+
+```bash
+# Moderators can manage quotes
+/permissions set command:quote role:@Moderator role:@Admin
+
+# Only admins can manage voice channels
+# (already admin-only by default, no action needed)
+```
+
+#### Example 3: Troubleshooting access
+
+```bash
+# User reports they can't use /vcstats
+/permissions view user:@user123
+# Shows: Can access 10 command(s): /ping, /help, /quote, ...
+# (vcstats not in list)
+
+# Check role permissions
+/permissions view role:@Member
+# Shows: Can access 15 command(s): /ping, /help, /vcstats, ...
+
+# Solution: User needs @Member role
+```
 
 ---
 

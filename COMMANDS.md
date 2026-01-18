@@ -11,6 +11,9 @@ Complete reference for all KoolBot commands with examples and detailed explanati
 
 - [User Commands](#-user-commands) - Available to all server members
 - [Admin Commands](#-admin-commands) - Require Administrator permission
+  - [/config](#config) - Configuration management
+  - [/permissions](#permissions) - Role-based access control
+  - [/vc](#vc) - Voice channel management
 - [Configuration Management](#config) - Detailed `/config` command guide
 - [Quick Command Reference](#-quick-command-reference) - Summary table
 
@@ -545,6 +548,236 @@ Import configuration from a YAML file.
 - Restore from backup
 - Clone settings to new instance
 - Bulk configuration updates
+
+---
+
+### `/permissions`
+
+**Description:** Manage role-based command access control. This feature allows admins to restrict which commands can be used by
+specific Discord roles.
+
+**Permission Node Format:** `command:<commandname>` (e.g., `command:quote`, `command:vcstats`)
+
+**Key Features:**
+
+- **Multi-role support** - Assign multiple roles to a single command
+- **OR logic** - Users need ANY of the assigned roles to execute the command
+- **Admin bypass** - Administrators always have access to all commands
+- **Default open** - Commands without permissions are accessible to everyone
+
+**Subcommands:**
+
+#### `/permissions set`
+
+Set command permissions (replaces any existing permissions).
+
+**Usage:**
+
+```bash
+/permissions set command:quote role:@Moderator
+/permissions set command:quote role:@Moderator role:@VIP role:@Admin
+/permissions set command:vcstats role:@Member
+```
+
+**Parameters:**
+
+- `command` (required) - Command name (autocomplete available)
+- `role1` (required) - First role that can use this command
+- `role2-5` (optional) - Additional roles (up to 5 total)
+
+**Example Response:**
+
+```text
+✅ Set permissions for `/quote` to: @Moderator, @VIP, @Admin
+```
+
+**Use Cases:**
+
+- Restrict powerful commands to trusted roles
+- Limit access to resource-intensive commands
+- Create role-specific command sets
+
+#### `/permissions add`
+
+Add roles to existing command permissions without removing current ones.
+
+**Usage:**
+
+```bash
+/permissions add command:quote role:@Contributor
+/permissions add command:quote role:@VIP role:@Premium
+```
+
+**Parameters:**
+
+- `command` (required) - Command name
+- `role1` (required) - First role to add
+- `role2-5` (optional) - Additional roles to add
+
+**Example Response:**
+
+```text
+✅ Added roles to `/quote`: @Contributor
+```
+
+**Use Cases:**
+
+- Incrementally expand access
+- Grant access to new roles without reconfiguring
+
+#### `/permissions remove`
+
+Remove specific roles from command permissions.
+
+**Usage:**
+
+```bash
+/permissions remove command:quote role:@VIP
+/permissions remove command:quote role:@Moderator role:@VIP
+```
+
+**Parameters:**
+
+- `command` (required) - Command name
+- `role1` (required) - First role to remove
+- `role2-5` (optional) - Additional roles to remove
+
+**Example Response:**
+
+```text
+✅ Removed roles from `/quote`: @VIP
+```
+
+**Note:** If all roles are removed, the permission entry is deleted automatically (command becomes accessible to everyone).
+
+**Use Cases:**
+
+- Revoke access from specific roles
+- Clean up outdated permissions
+
+#### `/permissions clear`
+
+Remove all permissions for a command, making it accessible to everyone.
+
+**Usage:**
+
+```bash
+/permissions clear command:quote
+/permissions clear command:vcstats
+```
+
+**Parameters:**
+
+- `command` (required) - Command name
+
+**Example Response:**
+
+```text
+✅ Cleared all permissions for `/quote`. It is now accessible to everyone.
+```
+
+**Use Cases:**
+
+- Reset command to default open access
+- Remove all restrictions
+
+#### `/permissions list`
+
+View the permission matrix showing all commands with role restrictions.
+
+**Usage:**
+
+```bash
+/permissions list
+```
+
+**Example Response:**
+
+```text
+Command Permissions
+
+Commands with role restrictions:
+
+/quote
+@Moderator, @VIP
+
+/vcstats
+@Member
+
+Commands not listed are accessible to everyone.
+Admins bypass all restrictions.
+```
+
+**Use Cases:**
+
+- Audit current permissions
+- Review access control setup
+- Documentation and planning
+
+#### `/permissions view`
+
+Check what commands a specific user or role can access.
+
+**Usage:**
+
+```bash
+/permissions view user:@username
+/permissions view role:@Moderator
+```
+
+**Parameters:**
+
+- `user` (optional) - User to check
+- `role` (optional) - Role to check
+
+**Note:** Must specify either user OR role, not both.
+
+**Example Responses:**
+
+```text
+# View user permissions
+Permissions for username#1234
+Can access 12 command(s):
+`/ping`, `/help`, `/quote`, `/vcstats`, ...
+
+# View role permissions
+Permissions for Moderator
+Can access 15 command(s):
+`/ping`, `/help`, `/quote`, `/vcstats`, `/config`, ...
+```
+
+**Use Cases:**
+
+- Troubleshoot access issues
+- Verify role permissions
+- User support
+
+**Important Notes:**
+
+- **Always enabled** - Permissions are a core feature, no configuration needed
+- **Admin commands** - Commands like `/config`, `/vc`, `/dbtrunk` automatically require Administrator permission
+- **Permission inheritance** - Users inherit permissions from all their roles (OR logic)
+- **Default behavior** - When no permissions are set, everyone has access (except admin-only commands)
+- **Cache** - Permissions are cached for performance; changes take effect immediately
+
+**Examples:**
+
+```bash
+# Restrict quote command to moderators and VIPs
+/permissions set command:quote role:@Moderator role:@VIP
+
+# Add contributors to the allowed list
+/permissions add command:quote role:@Contributor
+
+# Check what @user123 can access
+/permissions view user:@user123
+
+# See all permission rules
+/permissions list
+
+# Make quote accessible to everyone again
+/permissions clear command:quote
+```
 
 ---
 
