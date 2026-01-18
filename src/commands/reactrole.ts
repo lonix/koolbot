@@ -45,6 +45,17 @@ export const data = new SlashCommandBuilder()
   )
   .addSubcommand((subcommand) =>
     subcommand
+      .setName("unarchive")
+      .setDescription("Unarchive a reaction role (re-enable reactions)")
+      .addStringOption((option) =>
+        option
+          .setName("name")
+          .setDescription("Name of the reaction role to unarchive")
+          .setRequired(true),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
       .setName("delete")
       .setDescription(
         "Fully delete a reaction role and all associated resources",
@@ -94,6 +105,9 @@ export async function execute(
         break;
       case "archive":
         await handleArchive(interaction, reactionRoleService);
+        break;
+      case "unarchive":
+        await handleUnarchive(interaction, reactionRoleService);
         break;
       case "delete":
         await handleDelete(interaction, reactionRoleService);
@@ -186,6 +200,37 @@ async function handleArchive(
       .setDescription(result.message)
       .setFooter({
         text: "The reaction message has been removed",
+      })
+      .setTimestamp();
+
+    await interaction.editReply({ embeds: [embed] });
+  } else {
+    await interaction.editReply({
+      content: `❌ ${result.message}`,
+    });
+  }
+}
+
+async function handleUnarchive(
+  interaction: ChatInputCommandInteraction,
+  service: ReactionRoleService,
+): Promise<void> {
+  const name = interaction.options.getString("name", true);
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const result = await service.unarchiveReactionRole(
+    interaction.guild!.id,
+    name,
+  );
+
+  if (result.success) {
+    const embed = new EmbedBuilder()
+      .setColor(0x00ff00)
+      .setTitle("📤 Reaction Role Unarchived")
+      .setDescription(result.message)
+      .setFooter({
+        text: "Users can now react to get this role again!",
       })
       .setTimestamp();
 

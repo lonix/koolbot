@@ -351,6 +351,7 @@ Self-assignable roles via message reactions. Users react to get a role and acces
 
 1. **Lifecycle management:**
    - **Archive:** Disable reactions but keep role/channels (`/reactrole archive`)
+   - **Unarchive:** Re-enable reactions for an archived role (`/reactrole unarchive`)
    - **Delete:** Remove everything permanently (`/reactrole delete`)
 
 ### Features
@@ -358,7 +359,7 @@ Self-assignable roles via message reactions. Users react to get a role and acces
 - **Automatic role assignment** - React to get the role instantly
 - **Private channels** - Category visible only to role members
 - **Permission management** - Bot maintains category permissions
-- **Flexible lifecycle** - Archive or delete as needed
+- **Flexible lifecycle** - Archive, unarchive, or delete as needed
 - **Status tracking** - List and check status of all reaction roles
 
 ### Use Cases
@@ -372,6 +373,7 @@ Self-assignable roles via message reactions. Users react to get a role and acces
 
 - `/reactrole create` - Create a new reaction role
 - `/reactrole archive` - Archive a role (disable reactions)
+- `/reactrole unarchive` - Unarchive a role (re-enable reactions)
 - `/reactrole delete` - Delete a role and all resources
 - `/reactrole list` - List all configured reaction roles
 - `/reactrole status` - Check status of a specific role
@@ -383,7 +385,7 @@ See [Commands Documentation](COMMANDS.md#reactrole) for detailed usage.
 - Use a dedicated channel for reaction role messages (e.g., #get-roles)
 - Pin reaction messages for easy access
 - Choose clear, recognizable emojis
-- Archive seasonal roles instead of deleting them
+- Archive seasonal roles instead of deleting them (use unarchive to reactivate)
 - Use descriptive names for roles and channels
 
 ---

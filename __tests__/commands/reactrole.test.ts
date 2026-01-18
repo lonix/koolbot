@@ -29,11 +29,12 @@ describe("Reactrole Command", () => {
     it("should have all required subcommands", () => {
       const json = data.toJSON();
       expect(json.options).toBeDefined();
-      expect(json.options?.length).toBe(5);
+      expect(json.options?.length).toBe(6);
 
       const subcommands = json.options?.map((opt) => opt.name);
       expect(subcommands).toContain("create");
       expect(subcommands).toContain("archive");
+      expect(subcommands).toContain("unarchive");
       expect(subcommands).toContain("delete");
       expect(subcommands).toContain("list");
       expect(subcommands).toContain("status");
@@ -89,6 +90,33 @@ describe("Reactrole Command", () => {
       const json = data.toJSON();
       const archiveCmd = json.options?.find((opt) => opt.name === "archive");
       const nameOption = archiveCmd?.options?.find(
+        (opt: { name: string }) => opt.name === "name",
+      );
+
+      expect(nameOption).toBeDefined();
+      expect(nameOption?.required).toBe(true);
+      expect(nameOption?.type).toBe(3); // STRING type
+    });
+  });
+
+  describe("unarchive subcommand", () => {
+    it("should have correct metadata", () => {
+      const json = data.toJSON();
+      const unarchiveCmd = json.options?.find(
+        (opt) => opt.name === "unarchive",
+      );
+
+      expect(unarchiveCmd).toBeDefined();
+      expect(unarchiveCmd?.description).toContain("Unarchive");
+      expect(unarchiveCmd?.type).toBe(1); // SUB_COMMAND type
+    });
+
+    it("should have required name parameter", () => {
+      const json = data.toJSON();
+      const unarchiveCmd = json.options?.find(
+        (opt) => opt.name === "unarchive",
+      );
+      const nameOption = unarchiveCmd?.options?.find(
         (opt: { name: string }) => opt.name === "name",
       );
 

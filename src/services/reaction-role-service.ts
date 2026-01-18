@@ -433,6 +433,98 @@ export class ReactionRoleService {
     }
   }
 
+  public async unarchiveReactionRole(
+    guildId: string,
+    roleName: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const config = await ReactionRoleConfig.findOne({
+        guildId,
+        roleName,
+        isArchived: true,
+      });
+
+      if (!config) {
+        return {
+          success: false,
+          message: `Archived reaction role **${roleName}** not found`,
+        };
+      }
+
+      const guild = await this.client.guilds.fetch(guildId);
+
+      // Verify the role still exists
+      const role = await guild.roles.fetch(config.roleId);
+      if (!role) {
+        return {
+          success: false,
+          message: `Role ${config.roleId} no longer exists. Cannot unarchive.`,
+        };
+      }
+
+      // Get the configured message channel
+      const messageChannelId = await this.configService.getString(
+        "reactionroles.message_channel_id",
+        "",
+      );
+
+      if (!messageChannelId) {
+        return {
+          success: false,
+          message:
+            "Reaction role message channel not configured. Set reactionroles.message_channel_id",
+        };
+      }
+
+      const messageChannel = (await guild.channels.fetch(
+        messageChannelId,
+      )) as TextChannel;
+
+      if (!messageChannel || !messageChannel.isTextBased()) {
+        return {
+          success: false,
+          message: `Message channel ${messageChannelId} not found or is not a text channel`,
+        };
+      }
+
+      // Create a new reaction role message
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`${config.emoji} ${config.roleName}`)
+        .setDescription(
+          `React with ${config.emoji} to get access to the **${config.roleName}** role and channels!`,
+        )
+        .setFooter({ text: "Remove your reaction to lose access" })
+        .setTimestamp();
+
+      const message = await messageChannel.send({ embeds: [embed] });
+      await message.react(config.emoji);
+
+      logger.info(
+        `Created new reaction role message ${message.id} for unarchived role ${roleName}`,
+      );
+
+      // Update database
+      config.isArchived = false;
+      config.archivedAt = undefined;
+      config.messageId = message.id;
+      await config.save();
+
+      logger.info(`Unarchived reaction role: ${roleName}`);
+
+      return {
+        success: true,
+        message: `Successfully unarchived reaction role **${roleName}**. Users can now react to get this role again!`,
+      };
+    } catch (error) {
+      logger.error("Error unarchiving reaction role:", error);
+      return {
+        success: false,
+        message: `Failed to unarchive reaction role: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
   public async deleteReactionRole(
     guildId: string,
     roleName: string,

@@ -886,6 +886,41 @@ The reaction message has been removed
 - Preserve channels for existing members
 - Archive inactive communities without deletion
 
+#### `/reactrole unarchive`
+
+Unarchive a reaction role to re-enable reactions.
+
+**Usage:**
+
+```bash
+/reactrole unarchive name:"Gaming"
+```
+
+**Parameters:**
+
+- `name` (required) - Name of the reaction role to unarchive
+
+**What it does:**
+
+- Marks the role as active again
+- Creates a new reaction message in the configured channel
+- Users can now react to get the role again
+- All existing channels and permissions remain unchanged
+
+**Example Response:**
+
+```text
+📤 Reaction Role Unarchived
+Successfully unarchived reaction role Gaming. Users can now react to get this role again!
+Users can now react to get this role again!
+```
+
+**Use Cases:**
+
+- Re-enable sign-ups after a temporary pause
+- Reactivate seasonal communities
+- Resume role assignment after maintenance
+
 #### `/reactrole delete`
 
 Completely delete a reaction role and all associated resources.
@@ -1029,7 +1064,8 @@ Message ID: 444555666
 - Choose easily recognizable emojis
 - Pin the reaction message in the channel
 - Organize reaction messages with category separators
-- Archive roles before deleting to preserve data
+- Archive roles instead of deleting to preserve data and allow reactivation
+- Use unarchive to re-enable roles after maintenance or seasonal breaks
 - Use archived roles for seasonal/temporary communities
 
 ---
