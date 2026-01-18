@@ -6,11 +6,14 @@
 │                    (3 Steps - 5 Minutes to Deploy)                      │
 └─────────────────────────────────────────────────────────────────────────┘
 
-STEP 1: Get the Code
+STEP 1: Get the Files
 ════════════════════════════════════════════════════════════════════════════
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ $ git clone https://github.com/lonix/koolbot.git                        │
-│ $ cd koolbot                                                             │
+│ $ mkdir koolbot && cd koolbot                                            │
+│ $ curl -O https://raw.githubusercontent.com/lonix/koolbot/main/docker-compose.yml │
+│ $ curl -O https://raw.githubusercontent.com/lonix/koolbot/main/.env.example │
+│                                                                           │
+│ Or download manually from GitHub and save to your koolbot directory      │
 └─────────────────────────────────────────────────────────────────────────┘
 
 STEP 2: Configure
@@ -115,9 +118,9 @@ ARCHITECTURE (What Gets Deployed)
 │          └──────────────────────────┘                        │           │
 │               Slash Commands                    Persistent Storage       │
 │                                                                           │
-│    You only configure:                                                   │
-│    • .env file (4 values)                                                │
-│    • docker-compose.yml (provided)                                       │
+│    You only need:                                                        │
+│    • 2 files: docker-compose.yml and .env                               │
+│    • Docker installed on your system                                    │
 │                                                                           │
 └─────────────────────────────────────────────────────────────────────────┘
 
