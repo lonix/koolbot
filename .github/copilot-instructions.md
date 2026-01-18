@@ -280,7 +280,7 @@ The Release Drafter automatically labels PRs based on file patterns, but you can
 - Markdown files → `documentation`
 - package.json changes → `dependencies`
 - .github/workflows → `github-actions`
-- **tests** → `test`
+- `__tests__` directory → `test`
 - Dockerfile → `docker`
 
 ## Task Completion Workflow
