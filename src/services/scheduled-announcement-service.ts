@@ -65,44 +65,37 @@ export class ScheduledAnnouncementService {
     }
 
     return new Promise((resolve) => {
-      const checkReady = () => {
-        if (this.client.isReady()) {
-          resolve();
-        } else {
-          setTimeout(checkReady, 100);
-        }
-      };
-      checkReady();
+      this.client.once("ready", () => {
+        resolve();
+      });
     });
   }
 
-  private processPlaceholders(
+  private async processPlaceholders(
     text: string,
     guildId: string,
-  ): string | Promise<string> {
-    return (async (): Promise<string> => {
-      await this.waitForClientReady();
+  ): Promise<string> {
+    await this.waitForClientReady();
 
-      const guild = await this.client.guilds.fetch(guildId);
-      if (!guild) return text;
+    const guild = await this.client.guilds.fetch(guildId);
+    if (!guild) return text;
 
-      const now = new Date();
-      const replacements: Record<string, string> = {
-        "{server_name}": guild.name,
-        "{member_count}": guild.memberCount.toString(),
-        "{date}": now.toLocaleDateString(),
-        "{time}": now.toLocaleTimeString(),
-        "{day}": now.toLocaleDateString(undefined, { weekday: "long" }),
-        "{month}": now.toLocaleDateString(undefined, { month: "long" }),
-        "{year}": now.getFullYear().toString(),
-      };
+    const now = new Date();
+    const replacements: Record<string, string> = {
+      "{server_name}": guild.name,
+      "{member_count}": guild.memberCount.toString(),
+      "{date}": now.toLocaleDateString(),
+      "{time}": now.toLocaleTimeString(),
+      "{day}": now.toLocaleDateString(undefined, { weekday: "long" }),
+      "{month}": now.toLocaleDateString(undefined, { month: "long" }),
+      "{year}": now.getFullYear().toString(),
+    };
 
-      let result = text;
-      for (const [placeholder, value] of Object.entries(replacements)) {
-        result = result.replace(new RegExp(placeholder, "g"), value);
-      }
-      return result;
-    })();
+    let result = text;
+    for (const [placeholder, value] of Object.entries(replacements)) {
+      result = result.replace(new RegExp(placeholder, "g"), value);
+    }
+    return result;
   }
 
   private async makeAnnouncement(

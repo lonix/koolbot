@@ -5,6 +5,7 @@ import {
   PermissionFlagsBits,
 } from "discord.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
+import { IScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
@@ -152,7 +153,6 @@ async function handleCreate(
     };
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const announcement = await service.createAnnouncement({
     guildId: interaction.guildId,
     channelId: channel.id,
@@ -162,7 +162,7 @@ async function handleCreate(
     placeholders,
     enabled: true,
     createdBy: interaction.user.id,
-  } as any);
+  } as Omit<IScheduledAnnouncement, "createdAt" | "updatedAt">);
 
   const embed = new EmbedBuilder()
     .setColor(0x00ff00)
