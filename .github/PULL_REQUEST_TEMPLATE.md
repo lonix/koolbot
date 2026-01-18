@@ -31,6 +31,7 @@ Fixes #
 - [ ] Tested in Docker environment
 
 **Test Configuration**:
+
 - Node.js version:
 - Discord.js version:
 - Operating System:

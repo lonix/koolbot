@@ -28,34 +28,42 @@ Thank you for your interest in contributing to KoolBot! This document provides g
 ### First Time Setup
 
 1. **Fork the repository** on GitHub
+
 2. **Clone your fork** locally:
+
    ```bash
    git clone https://github.com/YOUR_USERNAME/koolbot.git
    cd koolbot
    ```
 
 3. **Add upstream remote**:
+
    ```bash
    git remote add upstream https://github.com/lonix/koolbot.git
    ```
 
 4. **Install dependencies**:
+
    ```bash
    npm install
    ```
 
 5. **Create your `.env` file**:
+
    ```bash
    cp .env.example .env
    ```
+
    Edit `.env` and add your Discord bot credentials and MongoDB URI.
 
 6. **Build the project**:
+
    ```bash
    npm run build
    ```
 
 7. **Run tests** to ensure everything works:
+
    ```bash
    npm test
    ```
@@ -65,6 +73,7 @@ Thank you for your interest in contributing to KoolBot! This document provides g
 ### Local Development (Without Docker)
 
 1. **Start MongoDB** (if not using Docker):
+
    ```bash
    # Using Docker for MongoDB only
    docker run -d -p 27017:27017 --name mongodb mongo:latest
@@ -73,6 +82,7 @@ Thank you for your interest in contributing to KoolBot! This document provides g
    ```
 
 2. **Run in development mode** (with hot reload):
+
    ```bash
    npm run dev
    ```
@@ -130,6 +140,7 @@ npm run cleanup-global-commands  # Clean up Discord commands
 ### Branch Strategy
 
 1. **Create a feature branch** from `main`:
+
    ```bash
    git checkout main
    git pull upstream main
@@ -139,12 +150,14 @@ npm run cleanup-global-commands  # Clean up Discord commands
 2. **Make your changes** in small, focused commits
 
 3. **Keep your branch updated**:
+
    ```bash
    git fetch upstream
    git rebase upstream/main
    ```
 
 4. **Push to your fork**:
+
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -308,7 +321,7 @@ npm test -- path/to/test.test.ts
 
 We use **conventional commits** format:
 
-```
+```text
 <type>(<scope>): <subject>
 
 <body>
@@ -366,16 +379,19 @@ Add detailed section on writing tests and test coverage expectations.
 ### Before Submitting
 
 1. **Run all quality checks**:
+
    ```bash
    npm run check:all
    ```
 
 2. **Ensure tests pass**:
+
    ```bash
    npm test
    ```
 
 3. **Verify markdown** (if documentation changed):
+
    ```bash
    npx markdownlint "**/*.md" --ignore node_modules --ignore dist
    ```
