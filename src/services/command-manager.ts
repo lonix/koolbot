@@ -11,6 +11,7 @@ import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { CooldownManager } from "./cooldown-manager.js";
+import { PermissionsService } from "./permissions-service.js";
 
 dotenvConfig();
 const isDebug = process.env.DEBUG === "true";
@@ -26,11 +27,13 @@ export class CommandManager {
   private configService: ConfigService;
   private commands: Collection<string, CommandModule>;
   private cooldownManager: CooldownManager;
+  private permissionsService: PermissionsService;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
     this.cooldownManager = new CooldownManager();
+    this.permissionsService = PermissionsService.getInstance(client);
     this.commands = new Collection();
 
     // Configuration reload callback intentionally omitted (manual /config reload only)
@@ -88,6 +91,7 @@ export class CommandManager {
         { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
         { name: "config", configKey: null, file: "config/index" }, // Always enabled
         { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
+        { name: "permissions", configKey: null, file: "permissions" }, // Always enabled for admins
       ];
 
       // Process each command
@@ -307,7 +311,7 @@ export class CommandManager {
         { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
         { name: "config", configKey: null, file: "config/index" }, // Always enabled
         { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
-
+        { name: "permissions", configKey: null, file: "permissions" }, // Always enabled for admins
         { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
       ];
 
@@ -326,6 +330,7 @@ export class CommandManager {
             // Import the command execute function
             const commandModule = await import(`../commands/${config.file}.js`);
             let executeFunction;
+            let autocompleteFunction;
 
             // Handle different export patterns
             if (commandModule.execute) {
@@ -337,7 +342,15 @@ export class CommandManager {
               continue;
             }
 
-            this.client.commands.set(config.name, { execute: executeFunction });
+            // Check for autocomplete function
+            if (commandModule.autocomplete) {
+              autocompleteFunction = commandModule.autocomplete;
+            }
+
+            this.client.commands.set(config.name, {
+              execute: executeFunction,
+              autocomplete: autocompleteFunction,
+            });
 
             if (isDebug) {
               logger.debug(`✓ /${config.name} command loaded`);
@@ -411,6 +424,34 @@ export class CommandManager {
     const trackingId = monitoringService.trackCommandStart(commandName);
 
     try {
+      // Check permissions (admins bypass this check inside the service)
+      const guildId = interaction.guildId;
+      const userId = interaction.user.id;
+
+      if (guildId && userId) {
+        const hasPermission =
+          await this.permissionsService.checkCommandPermission(
+            userId,
+            guildId,
+            commandName,
+          );
+
+        if (!hasPermission) {
+          await interaction.reply({
+            content: "❌ You don't have permission to use this command.",
+            ephemeral: true,
+          });
+
+          monitoringService.trackCommandEnd(
+            commandName,
+            trackingId,
+            startTime,
+            false,
+          );
+          return;
+        }
+      }
+
       // Check rate limiting if enabled
       const rateLimitEnabled = await this.configService.getBoolean(
         "ratelimit.enabled",
