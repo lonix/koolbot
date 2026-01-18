@@ -6,9 +6,6 @@ import {
 } from "discord.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import logger from "../utils/logger.js";
-import { ConfigService } from "../services/config-service.js";
-
-const configService = ConfigService.getInstance();
 
 export const data = new SlashCommandBuilder()
   .setName("announce")
@@ -21,9 +18,7 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("cron")
-          .setDescription(
-            "Cron schedule (e.g., '0 9 * * *' for daily at 9 AM)",
-          )
+          .setDescription("Cron schedule (e.g., '0 9 * * *' for daily at 9 AM)")
           .setRequired(true),
       )
       .addChannelOption((option) =>
@@ -136,7 +131,7 @@ async function handleCreate(
   try {
     const { CronTime } = await import("cron");
     new CronTime(cron);
-  } catch (error) {
+  } catch {
     await interaction.editReply({
       content: `❌ Invalid cron expression: ${cron}\n\nExamples:\n- \`0 9 * * *\` - Daily at 9 AM\n- \`0 12 * * 1\` - Every Monday at noon\n- \`0 0 * * 0\` - Every Sunday at midnight`,
     });
@@ -157,6 +152,7 @@ async function handleCreate(
     };
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const announcement = await service.createAnnouncement({
     guildId: interaction.guildId,
     channelId: channel.id,

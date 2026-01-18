@@ -41,8 +41,9 @@ export class ScheduledAnnouncementService {
 
   public static getInstance(client: Client): ScheduledAnnouncementService {
     if (!ScheduledAnnouncementService.instance) {
-      ScheduledAnnouncementService.instance =
-        new ScheduledAnnouncementService(client);
+      ScheduledAnnouncementService.instance = new ScheduledAnnouncementService(
+        client,
+      );
     }
     return ScheduledAnnouncementService.instance;
   }
@@ -79,7 +80,7 @@ export class ScheduledAnnouncementService {
     text: string,
     guildId: string,
   ): string | Promise<string> {
-    return (async () => {
+    return (async (): Promise<string> => {
       await this.waitForClientReady();
 
       const guild = await this.client.guilds.fetch(guildId);
@@ -237,10 +238,7 @@ export class ScheduledAnnouncementService {
 
       return job;
     } catch (error) {
-      logger.error(
-        `Error scheduling announcement ${announcement._id}:`,
-        error,
-      );
+      logger.error(`Error scheduling announcement ${announcement._id}:`, error);
       return null;
     }
   }
@@ -332,9 +330,8 @@ export class ScheduledAnnouncementService {
     }
 
     // Delete from database
-    const result = await ScheduledAnnouncement.findByIdAndDelete(
-      announcementId,
-    );
+    const result =
+      await ScheduledAnnouncement.findByIdAndDelete(announcementId);
     if (result) {
       logger.info(`Deleted announcement: ${announcementId}`);
       return true;

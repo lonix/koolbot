@@ -891,6 +891,126 @@ Active users: 47
 
 ---
 
+### `/announce`
+
+**Description:** Manage scheduled announcements to automatically send messages to channels on a schedule.
+
+**Configuration:**
+
+```bash
+/config set key:announcements.enabled value:true
+/config reload
+```
+
+**Subcommands:**
+
+#### Create a scheduled announcement
+
+```bash
+/announce create cron:"0 9 * * *" channel:#general message:"Good morning!" placeholders:true
+```
+
+**Parameters:**
+
+- `cron` (required) - Cron schedule expression
+  - `0 9 * * *` - Daily at 9 AM
+  - `0 12 * * 1` - Every Monday at noon
+  - `0 0 * * 0` - Every Sunday at midnight
+  - `*/30 * * * *` - Every 30 minutes
+- `channel` (required) - Channel to send announcements to
+- `message` (required) - Message content
+- `placeholders` (optional) - Enable dynamic placeholders (default: false)
+- `embed_title` (optional) - Add an embed with title
+- `embed_description` (optional) - Embed description
+- `embed_color` (optional) - Embed color (hex code, e.g., #FF0000)
+
+**Supported Placeholders:**
+
+When `placeholders` is enabled, you can use:
+
+- `{server_name}` - Server name
+- `{member_count}` - Current member count
+- `{date}` - Current date
+- `{time}` - Current time
+- `{day}` - Day of week (e.g., Monday)
+- `{month}` - Month name (e.g., January)
+- `{year}` - Current year
+
+**Examples:**
+
+```bash
+# Daily morning announcement
+/announce create cron:"0 9 * * *" channel:#general \
+  message:"Good morning, {server_name}! We have {member_count} members!" \
+  placeholders:true
+
+# Weekly event reminder with embed
+/announce create cron:"0 18 * * 5" channel:#events \
+  message:"Weekly game night starting soon!" \
+  embed_title:"🎮 Game Night" \
+  embed_description:"Join us for games this Friday evening!" \
+  embed_color:#5865F2
+
+# Monthly server stats
+/announce create cron:"0 0 1 * *" channel:#announcements \
+  message:"Monthly server update for {month} {year}" \
+  placeholders:true
+```
+
+#### List scheduled announcements
+
+```bash
+/announce list
+```
+
+Shows all scheduled announcements with their:
+
+- ID
+- Status (enabled/disabled)
+- Channel
+- Cron schedule
+- Message preview
+
+#### Delete an announcement
+
+```bash
+/announce delete id:123abc456def
+```
+
+**Parameters:**
+
+- `id` (required) - Announcement ID from `/announce list`
+
+**Example Response:**
+
+```text
+✅ Announcement Created
+
+Announcement ID: `65f4a3b2c1d9e8f7a6b5c4d3`
+Channel: #general
+Schedule: `0 9 * * *`
+Placeholders: Enabled
+Message: Good morning, {server_name}!
+```
+
+**Use Cases:**
+
+- Daily/weekly automated announcements
+- Event reminders
+- Server updates
+- Community engagement messages
+- Rule reminders
+- Automated status updates
+
+**Notes:**
+
+- Announcements persist across bot restarts
+- All times use the server's timezone
+- Invalid cron expressions are rejected
+- Only administrators can manage announcements
+
+---
+
 ### `/setup-lobby`
 
 **Description:** Configure the voice channel lobby system.
@@ -1069,6 +1189,9 @@ The bot needs these Discord permissions to function:
 # Other Admin
 /setup-lobby                       # Setup voice lobby
 /announce-vc-stats                 # Post stats now
+/announce create                   # Schedule announcement
+/announce list                     # View announcements
+/announce delete                   # Remove announcement
 /botstats                          # Bot statistics
 ```
 
