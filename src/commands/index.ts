@@ -9,7 +9,7 @@ import { execute as transferOwnership } from "./transfer-ownership.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
 import { execute as configCommand } from "./config/index.js";
 import { execute as quoteCommand } from "./quote.js";
-import { execute as excludeChannel } from "./exclude-channel.js";
+
 import { command as setupLobbyCommand } from "./setup-lobby.js";
 import { execute as dbtrunkCommand } from "./dbtrunk.js";
 import { execute as vcCommand } from "./vc.js";
@@ -69,9 +69,7 @@ const commands: Record<
       await quoteCommand(interaction);
     }
   },
-  "exclude-channel": async (interaction) => {
-    await excludeChannel(interaction);
-  },
+
   "setup-lobby": async (interaction) => {
     await setupLobbyCommand.execute(interaction);
   },

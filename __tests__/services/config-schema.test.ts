@@ -61,6 +61,10 @@ describe('Config Schema', () => {
       expect(typeof defaultConfig['quotes.delete_roles']).toBe('string');
     });
 
+    it('should have voicetracking.excluded_channels default to empty string', () => {
+      expect(defaultConfig['voicetracking.excluded_channels']).toBe('');
+    });
+
     it('should have rate limiting disabled by default for security', () => {
       expect(defaultConfig['ratelimit.enabled']).toBe(false);
     });
