@@ -147,14 +147,22 @@ export class ReactionRoleService {
     user: User,
   ): Promise<void> {
     try {
-      // Determine the emoji identifier to query
-      // For custom emojis: reaction.emoji.id
-      // For standard emojis: reaction.emoji.name
-      const emojiIdentifier = reaction.emoji.id || reaction.emoji.name || "";
+      // Build the emoji identifier to match against stored format
+      // For custom emojis: stored as <:name:id> or <a:name:id>
+      // For standard emojis: stored as Unicode character
+      let emojiToMatch: string;
+      if (reaction.emoji.id) {
+        // Custom emoji - reconstruct full format
+        const animated = reaction.emoji.animated ? "a" : "";
+        emojiToMatch = `<${animated}:${reaction.emoji.name}:${reaction.emoji.id}>`;
+      } else {
+        // Standard emoji - use Unicode character
+        emojiToMatch = reaction.emoji.name || "";
+      }
 
       const config = await ReactionRoleConfig.findOne({
         messageId: reaction.message.id,
-        emoji: emojiIdentifier,
+        emoji: emojiToMatch,
         isArchived: false,
       });
 
@@ -197,14 +205,22 @@ export class ReactionRoleService {
     user: User,
   ): Promise<void> {
     try {
-      // Determine the emoji identifier to query
-      // For custom emojis: reaction.emoji.id
-      // For standard emojis: reaction.emoji.name
-      const emojiIdentifier = reaction.emoji.id || reaction.emoji.name || "";
+      // Build the emoji identifier to match against stored format
+      // For custom emojis: stored as <:name:id> or <a:name:id>
+      // For standard emojis: stored as Unicode character
+      let emojiToMatch: string;
+      if (reaction.emoji.id) {
+        // Custom emoji - reconstruct full format
+        const animated = reaction.emoji.animated ? "a" : "";
+        emojiToMatch = `<${animated}:${reaction.emoji.name}:${reaction.emoji.id}>`;
+      } else {
+        // Standard emoji - use Unicode character
+        emojiToMatch = reaction.emoji.name || "";
+      }
 
       const config = await ReactionRoleConfig.findOne({
         messageId: reaction.message.id,
-        emoji: emojiIdentifier,
+        emoji: emojiToMatch,
         isArchived: false,
       });
 
@@ -277,15 +293,14 @@ export class ReactionRoleService {
 
       // Parse emoji to determine if it's custom or standard
       // Custom emoji format: <:name:id> or <a:name:id>
-      let normalizedEmoji: string;
+      // Store the emoji as-is for both standard (Unicode) and custom (full format)
+      let normalizedEmoji: string = emoji;
       const customEmojiMatch = emoji.match(/<a?:(\w+):(\d+)>/);
       if (customEmojiMatch) {
-        // For custom emojis, store just the ID
-        normalizedEmoji = customEmojiMatch[2];
-      } else {
-        // For standard emojis, store the Unicode character
-        normalizedEmoji = emoji;
+        // For custom emojis, store the full markup to preserve name and animated flag
+        normalizedEmoji = customEmojiMatch[0];
       }
+      // For standard emojis, normalizedEmoji is already set to the Unicode character
 
       // Create the role
       role = await guild.roles.create({

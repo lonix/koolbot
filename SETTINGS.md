@@ -313,7 +313,6 @@ Self-assignable roles via message reactions. Users react to get a role and acces
 | --- | --- | --- |
 | `reactionroles.enabled` | `false` | Enable reaction role system |
 | `reactionroles.message_channel_id` | `""` | Channel ID for reaction role messages |
-| `reactionroles.admin_roles` | `""` | Comma-separated role IDs that can manage reaction roles |
 
 ### Setup
 
@@ -323,9 +322,6 @@ Self-assignable roles via message reactions. Users react to get a role and acces
 
 # Set message channel (users react here)
 /config set key:reactionroles.message_channel_id value:"1234567890"
-
-# Optional: Set admin roles
-/config set key:reactionroles.admin_roles value:"111222333,444555666"
 
 /config reload
 ```
@@ -784,7 +780,6 @@ The config system automatically converts values:
 
 - `reactionroles.enabled` (bool, default: false)
 - `reactionroles.message_channel_id` (string, default: "")
-- `reactionroles.admin_roles` (string, default: "")
 
 #### Quote System
 
