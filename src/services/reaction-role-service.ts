@@ -61,6 +61,14 @@ export class ReactionRoleService {
 
     logger.info("Initializing reaction role service...");
 
+    // Prevent duplicate initialization
+    if (this.isInitialized) {
+      logger.info("Reaction role service already initialized");
+      return;
+    }
+
+    this.isInitialized = true;
+
     try {
       await this.waitForClientReady();
 
@@ -72,8 +80,6 @@ export class ReactionRoleService {
         logger.info("Reaction roles feature is disabled");
         return;
       }
-
-      this.isInitialized = true;
 
       // Setup reaction handlers
       this.setupReactionHandlers();
@@ -142,23 +148,30 @@ export class ReactionRoleService {
     );
   }
 
+  /**
+   * Build the emoji identifier to match against stored format
+   * @param reaction The message reaction
+   * @returns The emoji string in the format stored in the database
+   */
+  private buildEmojiIdentifier(reaction: MessageReaction): string {
+    // For custom emojis: stored as <:name:id> or <a:name:id>
+    // For standard emojis: stored as Unicode character
+    if (reaction.emoji.id) {
+      // Custom emoji - reconstruct full format
+      const animated = reaction.emoji.animated ? "a" : "";
+      return `<${animated}:${reaction.emoji.name}:${reaction.emoji.id}>`;
+    }
+
+    // Standard emoji - use Unicode character
+    return reaction.emoji.name || "";
+  }
+
   private async handleReactionAdd(
     reaction: MessageReaction,
     user: User,
   ): Promise<void> {
     try {
-      // Build the emoji identifier to match against stored format
-      // For custom emojis: stored as <:name:id> or <a:name:id>
-      // For standard emojis: stored as Unicode character
-      let emojiToMatch: string;
-      if (reaction.emoji.id) {
-        // Custom emoji - reconstruct full format
-        const animated = reaction.emoji.animated ? "a" : "";
-        emojiToMatch = `<${animated}:${reaction.emoji.name}:${reaction.emoji.id}>`;
-      } else {
-        // Standard emoji - use Unicode character
-        emojiToMatch = reaction.emoji.name || "";
-      }
+      const emojiToMatch = this.buildEmojiIdentifier(reaction);
 
       const config = await ReactionRoleConfig.findOne({
         messageId: reaction.message.id,
@@ -205,18 +218,7 @@ export class ReactionRoleService {
     user: User,
   ): Promise<void> {
     try {
-      // Build the emoji identifier to match against stored format
-      // For custom emojis: stored as <:name:id> or <a:name:id>
-      // For standard emojis: stored as Unicode character
-      let emojiToMatch: string;
-      if (reaction.emoji.id) {
-        // Custom emoji - reconstruct full format
-        const animated = reaction.emoji.animated ? "a" : "";
-        emojiToMatch = `<${animated}:${reaction.emoji.name}:${reaction.emoji.id}>`;
-      } else {
-        // Standard emoji - use Unicode character
-        emojiToMatch = reaction.emoji.name || "";
-      }
+      const emojiToMatch = this.buildEmojiIdentifier(reaction);
 
       const config = await ReactionRoleConfig.findOne({
         messageId: reaction.message.id,
