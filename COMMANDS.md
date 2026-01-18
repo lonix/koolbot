@@ -1041,13 +1041,13 @@ Message ID: 444555666
 /config reload
 ```
 
-1. Create your first reaction role:
+4. Create your first reaction role:
 
 ```bash
 /reactrole create name:"Gaming" emoji:🎮
 ```
 
-1. Users can now react in the configured channel to get roles!
+5. Users can now react in the configured channel to get roles!
 
 **How it works:**
 

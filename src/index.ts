@@ -12,6 +12,7 @@ import {
   REST,
   Routes,
   TextChannel,
+  Partials,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
@@ -78,6 +79,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
   ],
+  partials: [Partials.Message, Partials.Reaction],
 });
 
 // Add commands collection to client

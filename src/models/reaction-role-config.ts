@@ -65,6 +65,7 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
 // Compound index for efficient queries
 ReactionRoleConfigSchema.index({ guildId: 1, messageId: 1, emoji: 1 });
 ReactionRoleConfigSchema.index({ guildId: 1, roleId: 1 });
+ReactionRoleConfigSchema.index({ guildId: 1, roleName: 1 }, { unique: true });
 
 export const ReactionRoleConfig = mongoose.model<IReactionRoleConfig>(
   "ReactionRoleConfig",

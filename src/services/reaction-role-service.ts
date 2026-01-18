@@ -8,6 +8,8 @@ import {
   User,
   PartialMessageReaction,
   PartialUser,
+  Role,
+  Message,
 } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -145,9 +147,14 @@ export class ReactionRoleService {
     user: User,
   ): Promise<void> {
     try {
+      // Determine the emoji identifier to query
+      // For custom emojis: reaction.emoji.id
+      // For standard emojis: reaction.emoji.name
+      const emojiIdentifier = reaction.emoji.id || reaction.emoji.name || "";
+
       const config = await ReactionRoleConfig.findOne({
         messageId: reaction.message.id,
-        emoji: reaction.emoji.name || reaction.emoji.id || "",
+        emoji: emojiIdentifier,
         isArchived: false,
       });
 
@@ -190,9 +197,14 @@ export class ReactionRoleService {
     user: User,
   ): Promise<void> {
     try {
+      // Determine the emoji identifier to query
+      // For custom emojis: reaction.emoji.id
+      // For standard emojis: reaction.emoji.name
+      const emojiIdentifier = reaction.emoji.id || reaction.emoji.name || "";
+
       const config = await ReactionRoleConfig.findOne({
         messageId: reaction.message.id,
-        emoji: reaction.emoji.name || reaction.emoji.id || "",
+        emoji: emojiIdentifier,
         isArchived: false,
       });
 
@@ -242,11 +254,41 @@ export class ReactionRoleService {
     channelId?: string;
     messageId?: string;
   }> {
+    let role: Role | null = null;
+    let category: CategoryChannel | null = null;
+    let channel: TextChannel | null = null;
+    let message: Message | null = null;
+
     try {
+      // Check if a reaction role with this name already exists
+      const existingConfig = await ReactionRoleConfig.findOne({
+        guildId,
+        roleName,
+      });
+
+      if (existingConfig) {
+        return {
+          success: false,
+          message: `A reaction role named **${roleName}** already exists in this server.`,
+        };
+      }
+
       const guild = await this.client.guilds.fetch(guildId);
 
+      // Parse emoji to determine if it's custom or standard
+      // Custom emoji format: <:name:id> or <a:name:id>
+      let normalizedEmoji: string;
+      const customEmojiMatch = emoji.match(/<a?:(\w+):(\d+)>/);
+      if (customEmojiMatch) {
+        // For custom emojis, store just the ID
+        normalizedEmoji = customEmojiMatch[2];
+      } else {
+        // For standard emojis, store the Unicode character
+        normalizedEmoji = emoji;
+      }
+
       // Create the role
-      const role = await guild.roles.create({
+      role = await guild.roles.create({
         name: roleName,
         reason: `Reaction role created: ${roleName}`,
       });
@@ -254,7 +296,7 @@ export class ReactionRoleService {
       logger.info(`Created role: ${role.name} (${role.id})`);
 
       // Create category
-      const category = (await guild.channels.create({
+      category = (await guild.channels.create({
         name: roleName,
         type: ChannelType.GuildCategory,
         reason: `Category for reaction role: ${roleName}`,
@@ -279,12 +321,18 @@ export class ReactionRoleService {
         .replace(/[^a-z0-9-_]/g, "") // Remove special characters
         .substring(0, 100); // Limit to 100 characters
 
-      const channel = await guild.channels.create({
-        name: sanitizedName || "reaction-role-channel", // Fallback if sanitization results in empty string
+      if (!sanitizedName) {
+        throw new Error(
+          "Role name must contain at least one alphanumeric character for channel creation",
+        );
+      }
+
+      channel = (await guild.channels.create({
+        name: sanitizedName,
         type: ChannelType.GuildText,
         parent: category.id,
         reason: `Channel for reaction role: ${roleName}`,
-      });
+      })) as TextChannel;
 
       logger.info(`Created channel: ${channel.name} (${channel.id})`);
 
@@ -295,15 +343,9 @@ export class ReactionRoleService {
       );
 
       if (!messageChannelId) {
-        // Rollback
-        await channel.delete();
-        await category.delete();
-        await role.delete();
-        return {
-          success: false,
-          message:
-            "Reaction role message channel not configured. Set reactionroles.message_channel_id",
-        };
+        throw new Error(
+          "Reaction role message channel not configured. Set reactionroles.message_channel_id",
+        );
       }
 
       const messageChannel = (await guild.channels.fetch(
@@ -311,14 +353,9 @@ export class ReactionRoleService {
       )) as TextChannel;
 
       if (!messageChannel || !messageChannel.isTextBased()) {
-        // Rollback
-        await channel.delete();
-        await category.delete();
-        await role.delete();
-        return {
-          success: false,
-          message: `Message channel ${messageChannelId} not found or is not a text channel`,
-        };
+        throw new Error(
+          `Message channel ${messageChannelId} not found or is not a text channel`,
+        );
       }
 
       // Create the reaction role message
@@ -331,8 +368,17 @@ export class ReactionRoleService {
         .setFooter({ text: "Remove your reaction to lose access" })
         .setTimestamp();
 
-      const message = await messageChannel.send({ embeds: [embed] });
-      await message.react(emoji);
+      message = await messageChannel.send({ embeds: [embed] });
+
+      // Try to add reaction
+      try {
+        await message.react(emoji);
+      } catch (reactionError) {
+        logger.error("Failed to add reaction to message:", reactionError);
+        throw new Error(
+          "Failed to add reaction. The emoji might be invalid or inaccessible.",
+        );
+      }
 
       logger.info(
         `Created reaction role message ${message.id} in channel ${messageChannel.name}`,
@@ -345,12 +391,17 @@ export class ReactionRoleService {
         channelId: channel.id,
         roleId: role.id,
         categoryId: category.id,
-        emoji,
+        emoji: normalizedEmoji,
         roleName,
         isArchived: false,
       });
 
-      await reactionRoleConfig.save();
+      try {
+        await reactionRoleConfig.save();
+      } catch (dbError) {
+        logger.error("Failed to save reaction role config:", dbError);
+        throw new Error("Failed to save configuration to database.");
+      }
 
       logger.info(`Saved reaction role config for ${roleName}`);
 
@@ -363,7 +414,45 @@ export class ReactionRoleService {
         messageId: message.id,
       };
     } catch (error) {
-      logger.error("Error creating reaction role:", error);
+      logger.error("Error creating reaction role, rolling back:", error);
+
+      // Rollback: Delete created resources in reverse order
+      if (message) {
+        try {
+          await message.delete();
+          logger.info("Rolled back: deleted message");
+        } catch (err) {
+          logger.warn("Could not delete message during rollback:", err);
+        }
+      }
+
+      if (channel) {
+        try {
+          await channel.delete();
+          logger.info("Rolled back: deleted channel");
+        } catch (err) {
+          logger.warn("Could not delete channel during rollback:", err);
+        }
+      }
+
+      if (category) {
+        try {
+          await category.delete();
+          logger.info("Rolled back: deleted category");
+        } catch (err) {
+          logger.warn("Could not delete category during rollback:", err);
+        }
+      }
+
+      if (role) {
+        try {
+          await role.delete();
+          logger.info("Rolled back: deleted role");
+        } catch (err) {
+          logger.warn("Could not delete role during rollback:", err);
+        }
+      }
+
       return {
         success: false,
         message: `Failed to create reaction role: ${error instanceof Error ? error.message : "Unknown error"}`,
@@ -602,18 +691,7 @@ export class ReactionRoleService {
         logger.warn("Could not delete reaction message:", error);
       }
 
-      // Delete channel
-      try {
-        const channel = await guild.channels.fetch(config.channelId);
-        if (channel) {
-          await channel.delete();
-          logger.info(`Deleted channel ${config.channelId}`);
-        }
-      } catch (error) {
-        logger.warn("Could not delete channel:", error);
-      }
-
-      // Delete category
+      // Delete category (which will handle all child channels)
       try {
         const category = await guild.channels.fetch(config.categoryId);
         if (category) {

@@ -338,18 +338,18 @@ Self-assignable roles via message reactions. Users react to get a role and acces
 /reactrole create name:"Gaming" emoji:🎮
 ```
 
-1. **Bot automatically creates:**
+2. **Bot automatically creates:**
    - A Discord role named "Gaming"
    - A category channel (visible only to role members)
    - A text channel inside the category
    - A reaction message in the configured message channel
 
-1. **Users can:**
+3. **Users can:**
    - React with 🎮 to get the Gaming role
    - Gain access to the Gaming category and channels
    - Remove reaction to lose the role and access
 
-1. **Lifecycle management:**
+4. **Lifecycle management:**
    - **Archive:** Disable reactions but keep role/channels (`/reactrole archive`)
    - **Unarchive:** Re-enable reactions for an archived role (`/reactrole unarchive`)
    - **Delete:** Remove everything permanently (`/reactrole delete`)
