@@ -506,6 +506,9 @@ export class GamificationService {
         userGamification.accolades.map((a) => a.type),
       );
 
+      // Fetch user tracking data once to avoid multiple DB queries
+      const userTrackingData = await VoiceChannelTracking.findOne({ userId });
+
       // Check each accolade type
       for (const [type, definition] of Object.entries(
         this.accoladeDefinitions,
@@ -514,10 +517,10 @@ export class GamificationService {
           continue; // Already earned
         }
 
-        const earned = await definition.checkFunction(userId, null);
+        const earned = await definition.checkFunction(userId, userTrackingData);
         if (earned) {
           const metadata = definition.metadataFunction
-            ? await definition.metadataFunction(userId, null)
+            ? await definition.metadataFunction(userId, userTrackingData)
             : {};
 
           const accolade: IAccolade = {

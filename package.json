@@ -26,7 +26,6 @@
   },
   "dependencies": {
     "@discordjs/builders": "^1.13.1",
-    "@eslint/js": "^9.39.2",
     "axios": "^1.13.2",
     "cron": "^4.4.0",
     "date-fns": "^4.1.0",
@@ -38,6 +37,7 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@jest/globals": "^30.2.0",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
