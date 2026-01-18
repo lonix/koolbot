@@ -248,8 +248,18 @@ async function handleDelete(
 
   const announcementId = interaction.options.getString("id", true);
 
+  if (!interaction.guildId) {
+    await interaction.editReply({
+      content: "❌ This command can only be used in a server.",
+    });
+    return;
+  }
+
   const service = ScheduledAnnouncementService.getInstance(interaction.client);
-  const deleted = await service.deleteAnnouncement(announcementId);
+  const deleted = await service.deleteAnnouncement(
+    announcementId,
+    interaction.guildId,
+  );
 
   if (deleted) {
     await interaction.editReply({
@@ -257,7 +267,7 @@ async function handleDelete(
     });
   } else {
     await interaction.editReply({
-      content: `❌ Announcement \`${announcementId}\` not found.`,
+      content: `❌ Announcement \`${announcementId}\` not found or access denied.`,
     });
   }
 }

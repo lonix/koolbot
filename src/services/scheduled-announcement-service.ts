@@ -216,7 +216,12 @@ export class ScheduledAnnouncementService {
 
     try {
       const job = new CronJob(announcement.cronSchedule, () => {
-        this.makeAnnouncement(announcement);
+        this.makeAnnouncement(announcement).catch((error) => {
+          logger.error(
+            `Error in scheduled announcement ${announcement._id}:`,
+            error,
+          );
+        });
       });
 
       job.start();
@@ -266,10 +271,16 @@ export class ScheduledAnnouncementService {
       }
 
       // Load all enabled announcements for this guild
-      const announcements = await ScheduledAnnouncement.find({
-        guildId,
-        enabled: true,
-      });
+      let announcements;
+      try {
+        announcements = await ScheduledAnnouncement.find({
+          guildId,
+          enabled: true,
+        });
+      } catch (error) {
+        logger.error("Error loading announcements from database:", error);
+        throw error;
+      }
 
       logger.info(
         `Found ${announcements.length} enabled announcements to schedule`,
@@ -314,7 +325,25 @@ export class ScheduledAnnouncementService {
     return announcement;
   }
 
-  public async deleteAnnouncement(announcementId: string): Promise<boolean> {
+  public async deleteAnnouncement(
+    announcementId: string,
+    guildId?: string,
+  ): Promise<boolean> {
+    // Verify the announcement exists and optionally belongs to the guild
+    const announcement =
+      await ScheduledAnnouncement.findById(announcementId);
+    if (!announcement) {
+      return false;
+    }
+
+    // If guildId is provided, verify it matches
+    if (guildId && announcement.guildId !== guildId) {
+      logger.warn(
+        `Attempted to delete announcement ${announcementId} from wrong guild. Expected: ${announcement.guildId}, Got: ${guildId}`,
+      );
+      return false;
+    }
+
     // Stop the job if it's running
     const scheduledJob = this.jobs.get(announcementId);
     if (scheduledJob) {
@@ -323,14 +352,9 @@ export class ScheduledAnnouncementService {
     }
 
     // Delete from database
-    const result =
-      await ScheduledAnnouncement.findByIdAndDelete(announcementId);
-    if (result) {
-      logger.info(`Deleted announcement: ${announcementId}`);
-      return true;
-    }
-
-    return false;
+    await ScheduledAnnouncement.findByIdAndDelete(announcementId);
+    logger.info(`Deleted announcement: ${announcementId}`);
+    return true;
   }
 
   public async listAnnouncements(
