@@ -4,7 +4,6 @@ Thank you for your interest in contributing to KoolBot! This document provides g
 
 ## Table of Contents
 
-- [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
 - [Development Workflow](#development-workflow)
@@ -14,10 +13,6 @@ Thank you for your interest in contributing to KoolBot! This document provides g
 - [Pull Request Process](#pull-request-process)
 - [Issue Reporting](#issue-reporting)
 - [Community](#community)
-
-## Code of Conduct
-
-This project adheres to a Code of Conduct that all contributors are expected to follow. Please read [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before contributing.
 
 ## Getting Started
 
