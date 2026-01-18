@@ -14,6 +14,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Voice Activity Tracking](#-voice-activity-tracking) - Track user activity
 - [Voice Channel Cleanup](#-voice-channel-cleanup) - Data retention
 - [Announcements](#-announcements) - Automated stats posting
+- [Reaction Roles](#-reaction-roles) - Self-assignable roles via reactions
 - [Quote System](#-quote-system) - Quote management settings
 - [Discord Logging](#-discord-logging) - Event logging to channels
 - [Fun Features](#-fun-features) - Easter eggs and extras
@@ -301,6 +302,89 @@ See [Commands Documentation](COMMANDS.md#announce) for detailed usage.
 - `0 16 * * 5` - Every Friday at 4 PM
 - `0 0 * * 1` - Every Monday at midnight
 - `0 12 * * *` - Every day at noon
+
+---
+
+## 🎭 Reaction Roles
+
+Self-assignable roles via message reactions. Users react to get a role and access to dedicated channels.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `reactionroles.enabled` | `false` | Enable reaction role system |
+| `reactionroles.message_channel_id` | `""` | Channel ID for reaction role messages |
+| `reactionroles.admin_roles` | `""` | Comma-separated role IDs that can manage reaction roles |
+
+### Setup
+
+```bash
+# Enable reaction roles
+/config set key:reactionroles.enabled value:true
+
+# Set message channel (users react here)
+/config set key:reactionroles.message_channel_id value:"1234567890"
+
+# Optional: Set admin roles
+/config set key:reactionroles.admin_roles value:"111222333,444555666"
+
+/config reload
+```
+
+### How it Works
+
+1. **Create a reaction role:**
+
+```bash
+/reactrole create name:"Gaming" emoji:🎮
+```
+
+1. **Bot automatically creates:**
+   - A Discord role named "Gaming"
+   - A category channel (visible only to role members)
+   - A text channel inside the category
+   - A reaction message in the configured message channel
+
+1. **Users can:**
+   - React with 🎮 to get the Gaming role
+   - Gain access to the Gaming category and channels
+   - Remove reaction to lose the role and access
+
+1. **Lifecycle management:**
+   - **Archive:** Disable reactions but keep role/channels (`/reactrole archive`)
+   - **Delete:** Remove everything permanently (`/reactrole delete`)
+
+### Features
+
+- **Automatic role assignment** - React to get the role instantly
+- **Private channels** - Category visible only to role members
+- **Permission management** - Bot maintains category permissions
+- **Flexible lifecycle** - Archive or delete as needed
+- **Status tracking** - List and check status of all reaction roles
+
+### Use Cases
+
+- **Interest groups** - Gaming, movies, music communities
+- **Event participation** - Tournament sign-ups, event attendance
+- **Opt-in announcements** - News, updates for specific topics
+- **Activity organization** - Separate channels for different games/activities
+
+### Commands
+
+- `/reactrole create` - Create a new reaction role
+- `/reactrole archive` - Archive a role (disable reactions)
+- `/reactrole delete` - Delete a role and all resources
+- `/reactrole list` - List all configured reaction roles
+- `/reactrole status` - Check status of a specific role
+
+See [Commands Documentation](COMMANDS.md#reactrole) for detailed usage.
+
+### Best Practices
+
+- Use a dedicated channel for reaction role messages (e.g., #get-roles)
+- Pin reaction messages for easy access
+- Choose clear, recognizable emojis
+- Archive seasonal roles instead of deleting them
+- Use descriptive names for roles and channels
 
 ---
 
@@ -693,6 +777,12 @@ The config system automatically converts values:
 - `amikool.enabled` (bool, default: false)
 - `amikool.role.name` (string, default: "")
 - `quotes.enabled` (bool, default: false)
+
+#### Reaction Roles
+
+- `reactionroles.enabled` (bool, default: false)
+- `reactionroles.message_channel_id` (string, default: "")
+- `reactionroles.admin_roles` (string, default: "")
 
 #### Quote System
 

@@ -46,7 +46,9 @@ export const data = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     subcommand
       .setName("delete")
-      .setDescription("Fully delete a reaction role and all associated resources")
+      .setDescription(
+        "Fully delete a reaction role and all associated resources",
+      )
       .addStringOption((option) =>
         option
           .setName("name")
@@ -175,10 +177,7 @@ async function handleArchive(
 
   await interaction.deferReply({ ephemeral: true });
 
-  const result = await service.archiveReactionRole(
-    interaction.guild!.id,
-    name,
-  );
+  const result = await service.archiveReactionRole(interaction.guild!.id, name);
 
   if (result.success) {
     const embed = new EmbedBuilder()
