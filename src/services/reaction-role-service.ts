@@ -61,12 +61,6 @@ export class ReactionRoleService {
 
     logger.info("Initializing reaction role service...");
 
-    // Prevent duplicate initialization
-    if (this.isInitialized) {
-      logger.info("Reaction role service already initialized");
-      return;
-    }
-
     this.isInitialized = true;
 
     try {
@@ -87,6 +81,8 @@ export class ReactionRoleService {
       logger.info("Reaction role service initialized successfully");
     } catch (error) {
       logger.error("Error initializing reaction role service:", error);
+      // Reset initialization flag on error to allow retry
+      this.isInitialized = false;
     }
   }
 
@@ -329,6 +325,20 @@ export class ReactionRoleService {
       await category.permissionOverwrites.edit(role, {
         ViewChannel: true,
       });
+
+      // Ensure the bot can always manage this category and its channels
+      const botMember = guild.members.me;
+      if (botMember) {
+        await category.permissionOverwrites.edit(botMember, {
+          ViewChannel: true,
+          ManageChannels: true,
+          ManageRoles: true,
+        });
+      } else {
+        logger.warn(
+          `Unable to set category permissions for bot user in guild ${guild.id} - guild.members.me is null`,
+        );
+      }
 
       // Create text channel in the category with sanitized name
       // Discord channel names: lowercase, no spaces, 1-100 chars, alphanumeric + hyphens/underscores
@@ -784,47 +794,6 @@ export class ReactionRoleService {
     } catch (error) {
       logger.error("Error getting reaction role status:", error);
       return null;
-    }
-  }
-
-  public async maintainCategoryPermissions(
-    guildId: string,
-    categoryId: string,
-    roleId: string,
-  ): Promise<void> {
-    try {
-      const guild = await this.client.guilds.fetch(guildId);
-      if (!guild) {
-        logger.warn(`Guild ${guildId} not found`);
-        return;
-      }
-
-      const category = await guild.channels.fetch(categoryId);
-      if (!category || category.type !== ChannelType.GuildCategory) {
-        logger.warn(`Category ${categoryId} not found or invalid type`);
-        return;
-      }
-
-      const role = await guild.roles.fetch(roleId);
-      if (!role) {
-        logger.warn(`Role ${roleId} not found`);
-        return;
-      }
-
-      // Ensure permissions are correct
-      await category.permissionOverwrites.edit(guild.roles.everyone, {
-        ViewChannel: false,
-      });
-
-      await category.permissionOverwrites.edit(role, {
-        ViewChannel: true,
-      });
-
-      logger.debug(
-        `Maintained permissions for category ${category.name} and role ${role.name}`,
-      );
-    } catch (error) {
-      logger.error("Error maintaining category permissions:", error);
     }
   }
 }

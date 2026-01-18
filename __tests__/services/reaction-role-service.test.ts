@@ -48,7 +48,6 @@ describe("ReactionRoleService", () => {
       expect(typeof service.deleteReactionRole).toBe("function");
       expect(typeof service.listReactionRoles).toBe("function");
       expect(typeof service.getReactionRoleStatus).toBe("function");
-      expect(typeof service.maintainCategoryPermissions).toBe("function");
     });
   });
 
@@ -85,10 +84,6 @@ describe("ReactionRoleService", () => {
 
     it("getReactionRoleStatus should accept 2 parameters (guildId, roleName)", () => {
       expect(service.getReactionRoleStatus.length).toBe(2);
-    });
-
-    it("maintainCategoryPermissions should accept 3 parameters (guildId, categoryId, roleId)", () => {
-      expect(service.maintainCategoryPermissions.length).toBe(3);
     });
   });
 
@@ -138,15 +133,6 @@ describe("ReactionRoleService", () => {
 
     it("getReactionRoleStatus should return a Promise", async () => {
       const result = service.getReactionRoleStatus("guild123", "TestRole");
-      expect(result).toBeInstanceOf(Promise);
-    });
-
-    it("maintainCategoryPermissions should return a Promise", async () => {
-      const result = service.maintainCategoryPermissions(
-        "guild123",
-        "category123",
-        "role123",
-      );
       expect(result).toBeInstanceOf(Promise);
     });
   });
