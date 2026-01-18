@@ -141,7 +141,8 @@ export class ScheduledAnnouncementService {
 
     let result = text;
     for (const [placeholder, value] of Object.entries(replacements)) {
-      result = result.replaceAll(placeholder, value);
+      // Use split-join pattern for compatibility with older JS versions
+      result = result.split(placeholder).join(value);
     }
     return result;
   }

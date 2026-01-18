@@ -3,6 +3,7 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   PermissionFlagsBits,
+  ChannelType,
 } from "discord.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import { IScheduledAnnouncement } from "../models/scheduled-announcement.js";
@@ -129,7 +130,12 @@ async function handleCreate(
   }
 
   // Validate that the channel is a text channel
-  if (!channel.isTextBased()) {
+  if (
+    channel.type !== ChannelType.GuildText &&
+    channel.type !== ChannelType.GuildAnnouncement &&
+    channel.type !== ChannelType.PublicThread &&
+    channel.type !== ChannelType.PrivateThread
+  ) {
     await interaction.editReply({
       content:
         "❌ The selected channel must be a text channel. Voice channels and categories are not supported.",
