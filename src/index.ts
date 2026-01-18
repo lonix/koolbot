@@ -21,6 +21,7 @@ import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { VoiceChannelTruncationService } from "./services/voice-channel-truncation.js";
+import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
@@ -394,6 +395,8 @@ const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
 const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
 const voiceChannelTruncation =
   VoiceChannelTruncationService.getInstance(client);
+const scheduledAnnouncementService =
+  ScheduledAnnouncementService.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 const quoteChannelManager = QuoteChannelManager.getInstance(client);
@@ -455,6 +458,7 @@ async function initializeServices(): Promise<void> {
     await voiceChannelTracker.initialize();
     await voiceChannelTruncation.initialize();
     await voiceChannelAnnouncer.start();
+    await scheduledAnnouncementService.start();
     await channelInitializer.initializeChannels(
       await client.guilds.fetch(guildId),
     );

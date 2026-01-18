@@ -34,6 +34,7 @@ const ConfigSchema = new Schema<IConfig>(
         "amikool",
         "quotes",
         "fun",
+        "announcements",
       ],
     },
     updatedAt: {
