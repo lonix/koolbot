@@ -265,6 +265,7 @@ Follow the established architecture:
 
 ```typescript
 import { describe, it, expect } from '@jest/globals';
+import { myFunction } from '../../src/utils/myFunction.js';
 
 describe('MyService', () => {
   describe('myMethod', () => {
