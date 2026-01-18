@@ -228,6 +228,8 @@ To exclude channels, get their IDs (right-click channel → Copy ID with Develop
 
 ## ⏰ Announcements
 
+### Voice Channel Statistics Announcements
+
 Automated voice channel statistics announcements.
 
 | Setting | Default | Description |
@@ -236,7 +238,7 @@ Automated voice channel statistics announcements.
 | `voicetracking.announcements.channel` | `"voice-stats"` | Channel name or ID for announcements |
 | `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM) |
 
-### Example
+**Example:**
 
 ```bash
 # Enable weekly announcements
@@ -245,6 +247,42 @@ Automated voice channel statistics announcements.
 /config set key:voicetracking.announcements.schedule value:"0 16 * * 5"
 /config reload
 ```
+
+### Scheduled Announcements
+
+Custom scheduled announcements system for automated messages.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `announcements.enabled` | `false` | Enable scheduled announcements system |
+
+**Example:**
+
+```bash
+# Enable scheduled announcements
+/config set key:announcements.enabled value:true
+/config reload
+
+# Create announcements using /announce command
+/announce create cron:"0 9 * * *" channel:#general message:"Good morning!"
+```
+
+**Features:**
+
+- Schedule custom messages to any channel
+- Support for cron expressions
+- Embed support with customizable colors
+- Dynamic placeholders ({server_name}, {member_count}, {date}, {time}, etc.)
+- Persistent across bot restarts
+- Manage via `/announce` commands
+
+**Commands:**
+
+- `/announce create` - Create a new scheduled announcement
+- `/announce list` - View all scheduled announcements
+- `/announce delete` - Remove an announcement
+
+See [Commands Documentation](COMMANDS.md#announce) for detailed usage.
 
 ### Cron Schedule Format
 
@@ -684,6 +722,7 @@ The config system automatically converts values:
 - `voicetracking.announcements.enabled` (bool, default: false)
 - `voicetracking.announcements.channel` (string, default: "voice-stats")
 - `voicetracking.announcements.schedule` (string, default: "0 16 ** 5")
+- `announcements.enabled` (bool, default: false)
 
 #### Cleanup
 

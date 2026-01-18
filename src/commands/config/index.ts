@@ -106,6 +106,7 @@ function getCategoryDisplayName(category: string): string {
     quotes: "Quotes",
     core: "Core",
     individual: "Individual Features",
+    announcements: "Scheduled Announcements",
   };
   return displayNames[category] || category;
 }
@@ -203,6 +204,9 @@ function getSettingDescription(key: string): string {
     "core.cron.enabled":
       "Enable/disable Discord logging for scheduled task results",
     "core.cron.channel_id": "Discord channel ID for cron job logging",
+
+    // Scheduled Announcements
+    "announcements.enabled": "Enable/disable scheduled announcements system",
   };
 
   return descriptions[key] || "No description available";
@@ -227,6 +231,7 @@ export const data = new SlashCommandBuilder()
             { name: "Core", value: "core" },
             { name: "Individual Features", value: "individual" },
             { name: "Quote System", value: "quotes" },
+            { name: "Scheduled Announcements", value: "announcements" },
           ),
       ),
   )

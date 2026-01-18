@@ -21,6 +21,7 @@ import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { VoiceChannelTruncationService } from "./services/voice-channel-truncation.js";
+import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
@@ -351,7 +352,16 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Quote channel cleanup job stop",
     );
 
-    // 6. Close database connections - 3 second timeout
+    // 6. Stop scheduled announcements cron jobs - 1 second timeout
+    await runWithTimeout(
+      async () => {
+        scheduledAnnouncementService.destroy();
+      },
+      1000,
+      "Scheduled announcements cleanup",
+    );
+
+    // 7. Close database connections - 3 second timeout
     await runWithTimeout(
       async () => {
         const { default: mongoose } = await import("mongoose");
@@ -395,6 +405,8 @@ const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
 const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
 const voiceChannelTruncation =
   VoiceChannelTruncationService.getInstance(client);
+const scheduledAnnouncementService =
+  ScheduledAnnouncementService.getInstance(client);
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 const quoteChannelManager = QuoteChannelManager.getInstance(client);
@@ -456,6 +468,7 @@ async function initializeServices(): Promise<void> {
     await voiceChannelTracker.initialize();
     await voiceChannelTruncation.initialize();
     await voiceChannelAnnouncer.start();
+    await scheduledAnnouncementService.start();
     await channelInitializer.initializeChannels(
       await client.guilds.fetch(guildId),
     );
@@ -632,6 +645,9 @@ process.on("SIGINT", async () => {
     // Set bot to shutdown status (yellow)
     botStatusService.setShutdownStatus();
 
+    // Stop scheduled announcements
+    scheduledAnnouncementService.destroy();
+
     // Rename lobby to offline before shutting down
     const guildId = await configService.getString("GUILD_ID", "");
     if (guildId) {
@@ -655,6 +671,9 @@ process.on("SIGTERM", async () => {
   try {
     // Set bot to shutdown status (yellow)
     botStatusService.setShutdownStatus();
+
+    // Stop scheduled announcements
+    scheduledAnnouncementService.destroy();
 
     // Rename lobby to offline before shutting down
     const guildId = await configService.getString("GUILD_ID", "");
