@@ -1,12 +1,48 @@
 version: 2
 updates:
+  # NPM dependencies
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
+      time: "09:00"
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+      - "patch"
     commit-message:
-      prefix: "chore"
+      prefix: "chore(deps)"
+      include: "scope"
+    groups:
+      # Group development dependencies together
+      dev-dependencies:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+      # Group production dependencies by update type
+      production-minor:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+      production-patch:
+        dependency-type: "production"
+        update-types:
+          - "patch"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "github-actions"
+      - "dependencies"
+      - "patch"
+    commit-message:
+      prefix: "chore(ci)"
       include: "scope"

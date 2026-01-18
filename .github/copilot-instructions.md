@@ -229,13 +229,24 @@ The repository uses GitHub Actions for automated quality checks. All PRs must pa
   - Prettier formatting verification
   - Jest test suite with coverage
   - Runs on: push to main, PRs, manual trigger
+  - Includes concurrency control to cancel duplicate runs
 
 - **Markdown Lint Workflow** (`.github/workflows/markdown-lint.yml`):
   - Validates all markdown files
   - Runs on: markdown file changes, manual trigger
+  - Includes concurrency control
 
 - **Docker Workflow** (`.github/workflows/docker.yml`):
   - Builds and validates Docker images
+  - Pushes to GitHub Container Registry
+  - Uses Docker layer caching for faster builds
+  - Concurrency control prevents duplicate builds (except on tags)
+
+- **Release Drafter Workflow** (`.github/workflows/release-drafter.yml`):
+  - Automatically drafts release notes from merged PRs
+  - Auto-labels PRs based on changed files
+  - Groups changes by category in release notes
+  - Runs on: push to main, PR label changes
 
 **Local Pre-Push Validation:**
 
@@ -244,6 +255,33 @@ The repository uses GitHub Actions for automated quality checks. All PRs must pa
 npm run check:all  # Build + Lint + Format + Tests
 npx markdownlint "**/*.md" --ignore node_modules --ignore dist
 ```
+
+### PR Labeling Guidelines
+
+The Release Drafter automatically labels PRs based on file patterns, but you can also manually apply labels:
+
+- **Version Labels** (affect semantic versioning):
+  - `major` or `breaking` - Breaking changes (v1.0.0 → v2.0.0)
+  - `minor`, `feature`, `enhancement` - New features (v1.0.0 → v1.1.0)
+  - `patch`, `bug`, `fix` - Bug fixes (v1.0.0 → v1.0.1)
+
+- **Category Labels** (organize release notes):
+  - `feature`, `enhancement` - New features
+  - `bug`, `fix` - Bug fixes
+  - `documentation` - Documentation changes
+  - `dependencies` - Dependency updates
+  - `test` - Test changes
+  - `docker` - Docker-related changes
+  - `github-actions` - CI/CD workflow changes
+  - `chore`, `refactor` - Maintenance work
+
+**Auto-labeling rules** (from `.github/release-drafter.yml`):
+
+- Markdown files → `documentation`
+- package.json changes → `dependencies`
+- .github/workflows → `github-actions`
+- `__tests__` directory → `test`
+- Dockerfile → `docker`
 
 ## Task Completion Workflow
 
