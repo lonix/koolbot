@@ -271,9 +271,16 @@ export class ReactionRoleService {
         ViewChannel: true,
       });
 
-      // Create text channel in the category
+      // Create text channel in the category with sanitized name
+      // Discord channel names: lowercase, no spaces, 1-100 chars, alphanumeric + hyphens/underscores
+      const sanitizedName = roleName
+        .toLowerCase()
+        .replace(/\s+/g, "-") // Replace spaces with hyphens
+        .replace(/[^a-z0-9-_]/g, "") // Remove special characters
+        .substring(0, 100); // Limit to 100 characters
+
       const channel = await guild.channels.create({
-        name: `${roleName.toLowerCase().replace(/\s+/g, "-")}`,
+        name: sanitizedName || "reaction-role-channel", // Fallback if sanitization results in empty string
         type: ChannelType.GuildText,
         parent: category.id,
         reason: `Channel for reaction role: ${roleName}`,
@@ -559,12 +566,16 @@ export class ReactionRoleService {
   }
 
   public async maintainCategoryPermissions(
+    guildId: string,
     categoryId: string,
     roleId: string,
   ): Promise<void> {
     try {
-      const guild = this.client.guilds.cache.first();
-      if (!guild) return;
+      const guild = await this.client.guilds.fetch(guildId);
+      if (!guild) {
+        logger.warn(`Guild ${guildId} not found`);
+        return;
+      }
 
       const category = await guild.channels.fetch(categoryId);
       if (!category || category.type !== ChannelType.GuildCategory) {
