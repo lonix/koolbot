@@ -1,0 +1,158 @@
+name: ✨ Feature Request
+description: Suggest a new feature or enhancement
+title: "[Feature]: "
+labels: ["enhancement"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please provide as much detail as possible to help us understand your idea.
+
+  - type: checkboxes
+    id: existing-issues
+    attributes:
+      label: Is there an existing feature request for this?
+      description: Please search to see if a similar feature request already exists.
+      options:
+        - label: I have searched the existing issues and feature requests
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What problem does this feature solve? Why do you need this feature?
+      placeholder: |
+        I'm always frustrated when...
+        Currently, there's no way to...
+        It would be helpful if...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the solution you'd like to see
+      placeholder: |
+        I would like to be able to...
+        The bot should...
+        A new command called...
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: |
+        I've tried...
+        Another approach could be...
+        Alternatively, we could...
+
+  - type: dropdown
+    id: feature-type
+    attributes:
+      label: Feature Type
+      description: What type of feature is this?
+      options:
+        - New Command
+        - Enhancement to Existing Feature
+        - Configuration Option
+        - Voice Channel Feature
+        - Tracking/Statistics Feature
+        - Performance Improvement
+        - Developer Experience
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature to you?
+      options:
+        - Nice to have
+        - Would be helpful
+        - Important for my use case
+        - Critical for my use case
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use Case
+      description: Describe how you would use this feature
+      placeholder: |
+        As a server admin, I would...
+        When users join voice channels, they could...
+        This would help my community by...
+    validations:
+      required: true
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples
+      description: |
+        Provide examples of how this feature would work
+        Include command syntax, configuration examples, or UI mockups
+      placeholder: |
+        # Command example:
+        /mycommand option:value
+        
+        # Configuration example:
+        myfeature.enabled: true
+        myfeature.option: value
+        
+        # Behavior example:
+        When a user does X, the bot should Y
+
+  - type: textarea
+    id: similar-implementations
+    attributes:
+      label: Similar Implementations
+      description: Are there similar features in other bots or applications?
+      placeholder: |
+        Bot X has a similar feature that...
+        App Y does this by...
+        This is similar to...
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Would you like to help implement this feature?
+      description: |
+        We welcome contributions! Check our CONTRIBUTING.md for guidelines.
+      options:
+        - label: I would like to work on this feature
+        - label: I can help test this feature
+        - label: I can help with documentation
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Context
+      description: Add any other context, screenshots, or information about the feature request
+      placeholder: |
+        - Screenshots or mockups
+        - Links to related discussions
+        - Impact on existing features
+        - Backwards compatibility considerations
+
+  - type: checkboxes
+    id: considerations
+    attributes:
+      label: Feature Considerations
+      description: Please confirm you've thought about these aspects
+      options:
+        - label: This feature would not break existing functionality
+        - label: This feature could be disabled via configuration
+        - label: This feature aligns with KoolBot's purpose
+        - label: I have checked the documentation to ensure this doesn't already exist

@@ -541,6 +541,8 @@ docker-compose restart mongodb
 - **[TESTING.md](TESTING.md)** - Testing guide and best practices
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
 - **[RELEASE_NOTES.md](RELEASE_NOTES.md)** - Version history and changelog
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contribution guidelines for developers
+- **[SECURITY.md](SECURITY.md)** - Security policy and vulnerability reporting
 
 ---
 
@@ -628,6 +630,16 @@ src/
 
 ### Contributing
 
+Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for detailed information on:
+
+- Development setup and workflow
+- Coding standards and best practices
+- Testing requirements
+- Pull request process
+- Issue reporting guidelines
+
+Quick start for contributors:
+
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
@@ -635,6 +647,8 @@ src/
 5. Commit your changes (`git commit -m 'Add amazing feature'`)
 6. Push to the branch (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
+
+For security vulnerabilities, please see our [Security Policy](SECURITY.md).
 
 ---
 
