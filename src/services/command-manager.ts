@@ -429,11 +429,12 @@ export class CommandManager {
       const userId = interaction.user.id;
 
       if (guildId && userId) {
-        const hasPermission = await this.permissionsService.checkCommandPermission(
-          userId,
-          guildId,
-          commandName,
-        );
+        const hasPermission =
+          await this.permissionsService.checkCommandPermission(
+            userId,
+            guildId,
+            commandName,
+          );
 
         if (!hasPermission) {
           await interaction.reply({

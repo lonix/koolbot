@@ -1,5 +1,8 @@
 import { Client } from "discord.js";
-import { CommandPermission, ICommandPermission } from "../models/command-permissions.js";
+import {
+  CommandPermission,
+  ICommandPermission,
+} from "../models/command-permissions.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 
@@ -31,7 +34,9 @@ export class PermissionsService {
     try {
       const guildId = await this.configService.getString("GUILD_ID");
       if (!guildId) {
-        logger.warn("GUILD_ID not set, skipping permissions cache initialization");
+        logger.warn(
+          "GUILD_ID not set, skipping permissions cache initialization",
+        );
         return;
       }
 
@@ -44,7 +49,9 @@ export class PermissionsService {
       }
 
       this.cacheInitialized = true;
-      logger.info(`Permissions cache initialized with ${permissions.length} entries`);
+      logger.info(
+        `Permissions cache initialized with ${permissions.length} entries`,
+      );
     } catch (error) {
       logger.error("Error initializing permissions cache:", error);
     }
@@ -158,14 +165,15 @@ export class PermissionsService {
     roleIds: string[],
   ): Promise<void> {
     try {
-      const existing = await CommandPermission.findOne({ guildId, commandName });
+      const existing = await CommandPermission.findOne({
+        guildId,
+        commandName,
+      });
       const currentRoleIds = existing?.roleIds || [];
       const newRoleIds = [...new Set([...currentRoleIds, ...roleIds])];
 
       await this.setCommandPermissions(guildId, commandName, newRoleIds);
-      logger.info(
-        `Added ${roleIds.length} role(s) to command ${commandName}`,
-      );
+      logger.info(`Added ${roleIds.length} role(s) to command ${commandName}`);
     } catch (error) {
       logger.error("Error adding command permissions:", error);
       throw error;
@@ -184,7 +192,10 @@ export class PermissionsService {
     roleIds: string[],
   ): Promise<void> {
     try {
-      const existing = await CommandPermission.findOne({ guildId, commandName });
+      const existing = await CommandPermission.findOne({
+        guildId,
+        commandName,
+      });
       if (!existing) {
         logger.warn(`No permissions found for command ${commandName}`);
         return;
@@ -367,11 +378,15 @@ export class PermissionsService {
    */
   public async initializeDefaultPermissions(guildId: string): Promise<void> {
     try {
-      logger.info("Initializing default permissions for admin-only commands...");
+      logger.info(
+        "Initializing default permissions for admin-only commands...",
+      );
 
       const guild = await this.client.guilds.fetch(guildId);
       if (!guild) {
-        logger.warn("Guild not found, skipping default permission initialization");
+        logger.warn(
+          "Guild not found, skipping default permission initialization",
+        );
         return;
       }
 

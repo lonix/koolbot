@@ -69,10 +69,7 @@ export const data = new SlashCommandBuilder()
           .setAutocomplete(true),
       )
       .addRoleOption((option) =>
-        option
-          .setName("role1")
-          .setDescription("Role to add")
-          .setRequired(true),
+        option.setName("role1").setDescription("Role to add").setRequired(true),
       )
       .addRoleOption((option) =>
         option
@@ -144,7 +141,9 @@ export const data = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     subcommand
       .setName("clear")
-      .setDescription("Clear all permissions for a command (makes it accessible to everyone)")
+      .setDescription(
+        "Clear all permissions for a command (makes it accessible to everyone)",
+      )
       .addStringOption((option) =>
         option
           .setName("command")
@@ -154,9 +153,7 @@ export const data = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((subcommand) =>
-    subcommand
-      .setName("list")
-      .setDescription("List all command permissions"),
+    subcommand.setName("list").setDescription("List all command permissions"),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -557,7 +554,10 @@ async function handleViewUser(
     const commandList = commands.map((cmd) => `\`/${cmd}\``).join(", ");
     embed.addFields({
       name: "Accessible Commands",
-      value: commandList.length > 1024 ? commandList.substring(0, 1021) + "..." : commandList,
+      value:
+        commandList.length > 1024
+          ? commandList.substring(0, 1021) + "..."
+          : commandList,
       inline: false,
     });
   }
@@ -588,7 +588,10 @@ async function handleViewRole(
     const commandList = commands.map((cmd) => `\`/${cmd}\``).join(", ");
     embed.addFields({
       name: "Accessible Commands",
-      value: commandList.length > 1024 ? commandList.substring(0, 1021) + "..." : commandList,
+      value:
+        commandList.length > 1024
+          ? commandList.substring(0, 1021) + "..."
+          : commandList,
       inline: false,
     });
   }
