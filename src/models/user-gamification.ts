@@ -7,6 +7,7 @@ export interface IAccolade {
   metadata?: {
     value?: number; // The value that earned the badge (hours, sessions, etc.)
     description?: string;
+    unit?: string; // Unit of measurement (e.g., "hrs", "users")
   };
 }
 
@@ -19,6 +20,7 @@ export interface IAchievement {
   metadata?: {
     value?: number;
     description?: string;
+    unit?: string; // Unit of measurement (e.g., "hrs", "users")
   };
 }
 
@@ -44,6 +46,7 @@ const UserGamificationSchema = new Schema({
       metadata: {
         value: { type: Number },
         description: { type: String },
+        unit: { type: String },
       },
     },
   ],
@@ -56,6 +59,7 @@ const UserGamificationSchema = new Schema({
       metadata: {
         value: { type: Number },
         description: { type: String },
+        unit: { type: String },
       },
     },
   ],
