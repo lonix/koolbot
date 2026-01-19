@@ -19,7 +19,7 @@ export type AccoladeType =
   | "marathon_runner"
   | "ultra_marathoner"
   | "social_butterfly"
-  | "channel_hopper"
+  | "connector"
   | "night_owl"
   | "early_bird"
   | "weekend_warrior"
@@ -37,11 +37,14 @@ interface BadgeDefinition {
   emoji: string;
   name: string;
   description: string;
-  checkFunction: (userId: string, tracker: any) => Promise<boolean>;
+  checkFunction: (
+    userId: string,
+    userData: any | null,
+  ) => Promise<boolean>;
   metadataFunction?: (
     userId: string,
-    tracker: any,
-  ) => Promise<{ value?: number; description?: string }>;
+    userData: any | null,
+  ) => Promise<{ value?: number; description?: string; unit?: string }>;
 }
 
 export class GamificationService {
@@ -56,15 +59,18 @@ export class GamificationService {
       emoji: "🎉",
       name: "First Steps",
       description: "Spent your first hour in voice chat",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 3600 : false;
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
           value: Math.floor((user?.totalTime || 0) / 3600),
           description: "1 hour milestone",
+          unit: "hrs",
         };
       },
     },
@@ -72,15 +78,18 @@ export class GamificationService {
       emoji: "🎖️",
       name: "Voice Veteran",
       description: "Reached 100 hours in voice chat",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 360000 : false;
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
           value: Math.floor((user?.totalTime || 0) / 3600),
           description: "100 hours milestone",
+          unit: "hrs",
         };
       },
     },
@@ -88,15 +97,18 @@ export class GamificationService {
       emoji: "🏅",
       name: "Voice Elite",
       description: "Reached 500 hours in voice chat",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 1800000 : false;
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
           value: Math.floor((user?.totalTime || 0) / 3600),
           description: "500 hours milestone",
+          unit: "hrs",
         };
       },
     },
@@ -104,15 +116,18 @@ export class GamificationService {
       emoji: "🏆",
       name: "Voice Master",
       description: "Reached 1000 hours in voice chat",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 3600000 : false;
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
           value: Math.floor((user?.totalTime || 0) / 3600),
           description: "1000 hours milestone",
+          unit: "hrs",
         };
       },
     },
@@ -120,15 +135,18 @@ export class GamificationService {
       emoji: "👑",
       name: "Voice Legend",
       description: "Reached 8765 hours (1 year) in voice chat",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 31554000 : false;
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
           value: Math.floor((user?.totalTime || 0) / 3600),
           description: "8765 hours (1 year) milestone",
+          unit: "hrs",
         };
       },
     },
@@ -136,19 +154,22 @@ export class GamificationService {
       emoji: "🏃",
       name: "Marathon Runner",
       description: "Completed a 4+ hour voice session",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         return user.sessions.some((s) => (s.duration || 0) >= 14400);
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         const maxSession = Math.max(
           ...(user?.sessions.map((s) => s.duration || 0) || [0]),
         );
         return {
           value: Math.floor(maxSession / 3600),
           description: "4+ hour session",
+          unit: "hrs",
         };
       },
     },
@@ -156,19 +177,22 @@ export class GamificationService {
       emoji: "🦸",
       name: "Ultra Marathoner",
       description: "Completed an 8+ hour voice session",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         return user.sessions.some((s) => (s.duration || 0) >= 28800);
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         const maxSession = Math.max(
           ...(user?.sessions.map((s) => s.duration || 0) || [0]),
         );
         return {
           value: Math.floor(maxSession / 3600),
           description: "8+ hour session",
+          unit: "hrs",
         };
       },
     },
@@ -194,10 +218,11 @@ export class GamificationService {
         return {
           value: uniqueUsers.size,
           description: "10+ unique users",
+          unit: "users",
         };
       },
     },
-    channel_hopper: {
+    connector: {
       emoji: "🤝",
       name: "Connector",
       description: "Voiced with 25+ unique users",
@@ -219,6 +244,7 @@ export class GamificationService {
         return {
           value: uniqueUsers.size,
           description: "25+ unique users",
+          unit: "users",
         };
       },
     },
@@ -226,8 +252,9 @@ export class GamificationService {
       emoji: "🦉",
       name: "Night Owl",
       description: "Accumulated 50+ hours during late night (10 PM - 6 AM)",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         let lateNightSeconds = 0;
         for (const session of user.sessions) {
@@ -240,8 +267,9 @@ export class GamificationService {
         }
         return lateNightSeconds >= 180000; // 50 hours
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         let lateNightSeconds = 0;
         if (user) {
           for (const session of user.sessions) {
@@ -256,6 +284,7 @@ export class GamificationService {
         return {
           value: Math.floor(lateNightSeconds / 3600),
           description: "50+ late-night hours",
+          unit: "hrs",
         };
       },
     },
@@ -263,8 +292,9 @@ export class GamificationService {
       emoji: "🐦",
       name: "Early Bird",
       description: "Accumulated 50+ hours during early morning (6 AM - 10 AM)",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         let earlyMorningSeconds = 0;
         for (const session of user.sessions) {
@@ -277,8 +307,9 @@ export class GamificationService {
         }
         return earlyMorningSeconds >= 180000; // 50 hours
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         let earlyMorningSeconds = 0;
         if (user) {
           for (const session of user.sessions) {
@@ -293,6 +324,7 @@ export class GamificationService {
         return {
           value: Math.floor(earlyMorningSeconds / 3600),
           description: "50+ early-morning hours",
+          unit: "hrs",
         };
       },
     },
@@ -300,8 +332,9 @@ export class GamificationService {
       emoji: "🎮",
       name: "Weekend Warrior",
       description: "Accumulated 100+ hours during weekends",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         let weekendSeconds = 0;
         for (const session of user.sessions) {
@@ -314,8 +347,9 @@ export class GamificationService {
         }
         return weekendSeconds >= 360000; // 100 hours
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         let weekendSeconds = 0;
         if (user) {
           for (const session of user.sessions) {
@@ -330,6 +364,7 @@ export class GamificationService {
         return {
           value: Math.floor(weekendSeconds / 3600),
           description: "100+ weekend hours",
+          unit: "hrs",
         };
       },
     },
@@ -337,8 +372,9 @@ export class GamificationService {
       emoji: "💼",
       name: "Weekday Warrior",
       description: "Accumulated 100+ hours during weekdays",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         let weekdaySeconds = 0;
         for (const session of user.sessions) {
@@ -351,8 +387,9 @@ export class GamificationService {
         }
         return weekdaySeconds >= 360000; // 100 hours
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         let weekdaySeconds = 0;
         if (user) {
           for (const session of user.sessions) {
@@ -367,6 +404,7 @@ export class GamificationService {
         return {
           value: Math.floor(weekdaySeconds / 3600),
           description: "100+ weekday hours",
+          unit: "hrs",
         };
       },
     },

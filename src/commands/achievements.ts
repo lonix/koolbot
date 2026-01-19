@@ -58,26 +58,60 @@ export async function execute(
           if (!definition) return null;
 
           const earnedDate = accolade.earnedAt.toLocaleDateString();
+          const metadataUnit = accolade.metadata?.unit ?? "";
           const metadataText = accolade.metadata?.value
-            ? ` - ${accolade.metadata.value} ${accolade.metadata.description?.includes("hour") ? "hrs" : ""}`
+            ? ` - ${accolade.metadata.value}${metadataUnit ? ` ${metadataUnit}` : ""}`
             : "";
 
-          return `${definition.emoji} **${definition.name}**${metadataText}\n*${definition.description}*\nEarned: ${earnedDate}`;
+          const accoladeText = `${definition.emoji} **${definition.name}**${metadataText}\n*${definition.description}*\nEarned: ${earnedDate}`;
+
+          // Ensure no single accolade string can exceed Discord's 1024 character field limit
+          if (accoladeText.length > 1024) {
+            return `${accoladeText.slice(0, 1021)}...`;
+          }
+
+          return accoladeText;
         })
-        .filter(Boolean);
+        .filter((text): text is string => Boolean(text));
 
       if (accoladesList.length > 0) {
-        // Split into chunks if too long
-        const chunkSize = 5;
-        for (let i = 0; i < accoladesList.length; i += chunkSize) {
-          const chunk = accoladesList.slice(i, i + chunkSize);
-          const fieldName = i === 0 ? "🎖️ Accolades (Permanent)" : "\u200B";
+        // Build chunks that respect Discord's 1024 character limit for field values
+        const MAX_FIELD_LENGTH = 1024;
+        const accoladesChunks: string[] = [];
+        let currentChunk = "";
+
+        for (const accoladeText of accoladesList) {
+          const separator = currentChunk.length > 0 ? "\n\n" : "";
+          const potentialLength =
+            currentChunk.length + separator.length + accoladeText.length;
+
+          if (potentialLength > MAX_FIELD_LENGTH) {
+            if (currentChunk.length > 0) {
+              accoladesChunks.push(currentChunk);
+            }
+            // Start a new chunk with the current accolade text
+            currentChunk =
+              accoladeText.length > MAX_FIELD_LENGTH
+                ? `${accoladeText.slice(0, MAX_FIELD_LENGTH - 3)}...`
+                : accoladeText;
+          } else {
+            currentChunk += `${separator}${accoladeText}`;
+          }
+        }
+
+        if (currentChunk.length > 0) {
+          accoladesChunks.push(currentChunk);
+        }
+
+        accoladesChunks.forEach((chunk, index) => {
+          const fieldName =
+            index === 0 ? "🎖️ Accolades (Permanent)" : "\u200B";
           embed.addFields({
             name: fieldName,
-            value: chunk.join("\n\n"),
+            value: chunk,
             inline: false,
           });
-        }
+        });
       }
     }
 
