@@ -97,6 +97,11 @@ export class CommandManager {
         { name: "config", configKey: null, file: "config/index" }, // Always enabled
         { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
         { name: "permissions", configKey: null, file: "permissions" }, // Always enabled for admins
+        {
+          name: "reactrole",
+          configKey: "reactionroles.enabled",
+          file: "reactrole",
+        },
       ];
 
       // Process each command
