@@ -175,42 +175,50 @@ export class GamificationService {
     social_butterfly: {
       emoji: "🦋",
       name: "Social Butterfly",
-      description: "Visited 10+ unique voice channels",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      description: "Voiced with 10+ unique users",
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
-        const uniqueChannels = new Set(user.sessions.map((s) => s.channelId));
-        return uniqueChannels.size >= 10;
+        const uniqueUsers = new Set(
+          user.sessions.flatMap((s) => s.otherUsers || []),
+        );
+        return uniqueUsers.size >= 10;
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
-        const uniqueChannels = new Set(
-          user?.sessions.map((s) => s.channelId) || [],
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        const uniqueUsers = new Set(
+          user?.sessions.flatMap((s) => s.otherUsers || []) || [],
         );
         return {
-          value: uniqueChannels.size,
-          description: "10+ unique channels",
+          value: uniqueUsers.size,
+          description: "10+ unique users",
         };
       },
     },
     channel_hopper: {
-      emoji: "🐰",
-      name: "Channel Hopper",
-      description: "Visited 25+ unique voice channels",
-      checkFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
+      emoji: "🤝",
+      name: "Connector",
+      description: "Voiced with 25+ unique users",
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
-        const uniqueChannels = new Set(user.sessions.map((s) => s.channelId));
-        return uniqueChannels.size >= 25;
+        const uniqueUsers = new Set(
+          user.sessions.flatMap((s) => s.otherUsers || []),
+        );
+        return uniqueUsers.size >= 25;
       },
-      metadataFunction: async (userId: string) => {
-        const user = await VoiceChannelTracking.findOne({ userId });
-        const uniqueChannels = new Set(
-          user?.sessions.map((s) => s.channelId) || [],
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        const uniqueUsers = new Set(
+          user?.sessions.flatMap((s) => s.otherUsers || []) || [],
         );
         return {
-          value: uniqueChannels.size,
-          description: "25+ unique channels",
+          value: uniqueUsers.size,
+          description: "25+ unique users",
         };
       },
     },

@@ -272,8 +272,8 @@ Earned: 2026-01-15
 Completed a 4+ hour voice session
 Earned: 2026-01-12
 
-🦋 Social Butterfly - 15 channels
-Visited 10+ unique voice channels
+🦋 Social Butterfly - 15 users
+Voiced with 10+ unique users
 Earned: 2026-01-14
 
 📊 Summary
@@ -290,8 +290,8 @@ Total Achievements: 0
 - 👑 **Voice Legend** - Reached 8765 hours (1 year!)
 - 🏃 **Marathon Runner** - Completed a 4+ hour session
 - 🦸 **Ultra Marathoner** - Completed an 8+ hour session
-- 🦋 **Social Butterfly** - Visited 10+ unique channels
-- 🐰 **Channel Hopper** - Visited 25+ unique channels
+- 🦋 **Social Butterfly** - Voiced with 10+ unique users
+- 🤝 **Connector** - Voiced with 25+ unique users
 - 🦉 **Night Owl** - 50+ hours late night (10 PM - 6 AM)
 - 🐦 **Early Bird** - 50+ hours early morning (6 AM - 10 AM)
 - 🎮 **Weekend Warrior** - 100+ hours on weekends

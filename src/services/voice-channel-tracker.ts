@@ -236,6 +236,15 @@ export class VoiceChannelTracker {
         channelName,
       });
 
+      // Store channel reference for later use when capturing other users
+      const guild = member.guild;
+      if (guild) {
+        const channel = guild.channels.cache.get(channelId) as VoiceChannel;
+        if (channel) {
+          this.userChannels.set(member.id, channel);
+        }
+      }
+
       if (await this.configService.get("DEBUG")) {
         logger.info(
           `[DEBUG] Started tracking user ${member.displayName} (${member.id}) in channel ${channelName}`,
@@ -278,6 +287,20 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // Capture other users who were in the channel
+      let otherUsers: string[] = [];
+      try {
+        const channel = this.userChannels.get(userId);
+        if (channel && channel.members) {
+          otherUsers = Array.from(channel.members.keys()).filter(
+            (id) => id !== userId,
+          );
+        }
+      } catch (error: unknown) {
+        logger.warn("Could not fetch other users in channel:", error);
+        // Continue without other users data
+      }
+
       // Update or create user tracking record
       await VoiceChannelTracking.findOneAndUpdate(
         { userId },
@@ -294,6 +317,7 @@ export class VoiceChannelTracker {
               duration,
               channelId: session.channelId,
               channelName: session.channelName,
+              otherUsers,
             },
           },
         },
@@ -301,10 +325,11 @@ export class VoiceChannelTracker {
       );
 
       this.activeSessions.delete(userId);
+      this.userChannels.delete(userId);
 
       if (await this.configService.get("DEBUG")) {
         logger.info(
-          `[DEBUG] Saved voice session for user ${user.username} (${userId}) - Duration: ${duration}s`,
+          `[DEBUG] Saved voice session for user ${user.username} (${userId}) - Duration: ${duration}s, Other users: ${otherUsers.length}`,
         );
       }
 

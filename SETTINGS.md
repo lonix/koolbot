@@ -335,8 +335,8 @@ Session Length:
 
 Social Activity:
 
-- Social Butterfly (10+ unique channels)
-- Channel Hopper (25+ unique channels)
+- Social Butterfly (10+ unique users)
+- Connector (25+ unique users)
 
 Time of Day:
 
