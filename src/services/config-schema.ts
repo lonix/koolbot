@@ -61,6 +61,11 @@ export interface ConfigSchema {
 
   // Scheduled Announcements
   "announcements.enabled": boolean;
+
+  // Gamification System
+  "gamification.enabled": boolean;
+  "gamification.announcements.enabled": boolean;
+  "gamification.dm_notifications.enabled": boolean;
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -125,4 +130,9 @@ export const defaultConfig: ConfigSchema = {
 
   // Scheduled Announcements defaults
   "announcements.enabled": false,
+
+  // Gamification defaults
+  "gamification.enabled": false,
+  "gamification.announcements.enabled": true,
+  "gamification.dm_notifications.enabled": true,
 };

@@ -3,6 +3,7 @@ import { CronJob, CronTime } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
+import { GamificationService } from "./gamification-service.js";
 
 export class VoiceChannelAnnouncer {
   private static instance: VoiceChannelAnnouncer;
@@ -209,6 +210,57 @@ export class VoiceChannelAnnouncer {
       ].join("\n");
 
       await channel.send(message);
+
+      // Add accolades announcement if enabled
+      const gamificationEnabled = await this.configService.getBoolean(
+        "gamification.enabled",
+        false,
+      );
+      const announcementsEnabled = await this.configService.getBoolean(
+        "gamification.announcements.enabled",
+        true,
+      );
+
+      if (gamificationEnabled && announcementsEnabled) {
+        try {
+          const gamificationService = GamificationService.getInstance(
+            this.client,
+          );
+          const newAccolades =
+            await gamificationService.getNewAccoladesSinceLastWeek();
+
+          if (newAccolades.length > 0) {
+            const accoladeMessages = newAccolades
+              .flatMap((userAccolades) => {
+                return userAccolades.accolades
+                  .map((accolade) => {
+                    const definition =
+                      gamificationService.getAccoladeDefinition(accolade.type);
+                    if (!definition) return null;
+
+                    return `${definition.emoji} <@${userAccolades.userId}> earned **${definition.name}**!`;
+                  })
+                  .filter(Boolean);
+              })
+              .slice(0, 10); // Limit to 10 announcements
+
+            if (accoladeMessages.length > 0) {
+              const accoladeAnnouncement = [
+                "",
+                "🏆 **New Accolades This Week** 🏆",
+                "",
+                ...accoladeMessages,
+              ].join("\n");
+
+              await channel.send(accoladeAnnouncement);
+            }
+          }
+        } catch (error) {
+          logger.error("Error announcing accolades:", error);
+          // Don't let accolade errors break the main announcement
+        }
+      }
+
       logger.info("Weekly voice channel announcement sent successfully");
     } catch (error) {
       logger.error("Error making voice channel announcement:", error);

@@ -11,6 +11,7 @@ export interface IVoiceChannelTracking extends Document {
     duration?: number; // in seconds
     channelId: string;
     channelName: string;
+    otherUsers?: string[]; // Array of other user IDs who were in the channel during this session
   }>;
   excludedChannels: string[]; // Array of voice channel IDs to exclude from tracking
   // Cleanup-related fields for future use
@@ -43,6 +44,7 @@ const VoiceChannelTrackingSchema = new Schema({
       duration: { type: Number },
       channelId: { type: String, required: true },
       channelName: { type: String, required: true },
+      otherUsers: { type: [String], default: [] },
     },
   ],
   excludedChannels: { type: [String], default: [] },

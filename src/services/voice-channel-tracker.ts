@@ -11,6 +11,7 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { connectToDatabase } from "../utils/database.js";
+import { GamificationService } from "./gamification-service.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -44,6 +45,7 @@ export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
   private activeSessions: Map<string, VoiceSession> = new Map();
   private userChannels: Map<string, VoiceChannel> = new Map();
+  private encounteredUsers: Map<string, Set<string>> = new Map(); // Track all users encountered during each session
   private client: Client;
   private isConnected: boolean = false;
   private configService: ConfigService;
@@ -173,8 +175,38 @@ export class VoiceChannelTracker {
         }
         await this.endTracking(member.id);
       }
+
+      // Track users joining/leaving channels where we have active sessions
+      // This ensures we capture all interactions even if users leave before the session ends
+      if (oldChannel && !newChannel) {
+        // User left a channel - record interaction for all active sessions in that channel
+        this.recordUserInteraction(oldChannel.id, member.id);
+      } else if (!oldChannel && newChannel) {
+        // User joined a channel - record interaction for all active sessions in that channel
+        this.recordUserInteraction(newChannel.id, member.id);
+      } else if (oldChannel && newChannel && oldChannel.id !== newChannel.id) {
+        // User switched channels - record for both
+        this.recordUserInteraction(oldChannel.id, member.id);
+        this.recordUserInteraction(newChannel.id, member.id);
+      }
     } catch (error) {
       logger.error("Error handling voice state update in tracker:", error);
+    }
+  }
+
+  /**
+   * Records that a user was encountered in a channel for all active sessions in that channel
+   */
+  private recordUserInteraction(channelId: string, userId: string): void {
+    // Find all active sessions in this channel
+    for (const [sessionUserId, session] of this.activeSessions.entries()) {
+      if (session.channelId === channelId && sessionUserId !== userId) {
+        // Add this user to the encountered users set for this session
+        const encounteredSet = this.encounteredUsers.get(sessionUserId);
+        if (encounteredSet) {
+          encounteredSet.add(userId);
+        }
+      }
     }
   }
 
@@ -235,9 +267,28 @@ export class VoiceChannelTracker {
         channelName,
       });
 
+      // Initialize encountered users Set with current channel members
+      const encounteredSet = new Set<string>();
+      const guild = member.guild;
+      if (guild) {
+        const channel = guild.channels.cache.get(channelId) as VoiceChannel;
+        if (channel) {
+          this.userChannels.set(member.id, channel);
+          // Add all current members except the joining user
+          if (channel.members) {
+            channel.members.forEach((m) => {
+              if (m.id !== member.id) {
+                encounteredSet.add(m.id);
+              }
+            });
+          }
+        }
+      }
+      this.encounteredUsers.set(member.id, encounteredSet);
+
       if (await this.configService.get("DEBUG")) {
         logger.info(
-          `[DEBUG] Started tracking user ${member.displayName} (${member.id}) in channel ${channelName}`,
+          `[DEBUG] Started tracking user ${member.displayName} (${member.id}) in channel ${channelName}, initial users: ${encounteredSet.size}`,
         );
       }
     } catch (error: unknown) {
@@ -277,6 +328,12 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // Get accumulated users from the encountered users Set
+      const encounteredSet = this.encounteredUsers.get(userId);
+      const otherUsers: string[] = encounteredSet
+        ? Array.from(encounteredSet)
+        : [];
+
       // Update or create user tracking record
       await VoiceChannelTracking.findOneAndUpdate(
         { userId },
@@ -293,6 +350,7 @@ export class VoiceChannelTracker {
               duration,
               channelId: session.channelId,
               channelName: session.channelName,
+              otherUsers,
             },
           },
         },
@@ -300,11 +358,32 @@ export class VoiceChannelTracker {
       );
 
       this.activeSessions.delete(userId);
+      this.userChannels.delete(userId);
+      this.encounteredUsers.delete(userId);
 
       if (await this.configService.get("DEBUG")) {
         logger.info(
-          `[DEBUG] Saved voice session for user ${user.username} (${userId}) - Duration: ${duration}s`,
+          `[DEBUG] Saved voice session for user ${user.username} (${userId}) - Duration: ${duration}s, Other users: ${otherUsers.length}`,
         );
+      }
+
+      // Check for accolades after session ends
+      try {
+        const gamificationService = GamificationService.getInstance(
+          this.client,
+        );
+        const newAccolades = await gamificationService.checkAndAwardAccolades(
+          userId,
+          user.username,
+        );
+
+        if (newAccolades.length > 0) {
+          // Send DM notification
+          await gamificationService.notifyUserOfAccolades(userId, newAccolades);
+        }
+      } catch (error: unknown) {
+        logger.error("Error checking gamification accolades:", error);
+        // Don't let gamification errors break voice tracking
       }
     } catch (error: unknown) {
       logger.error("Error ending voice tracking:", error);

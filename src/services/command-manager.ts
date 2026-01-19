@@ -86,6 +86,11 @@ export class CommandManager {
           configKey: "voicetracking.announcements.enabled",
           file: "announce-vc-stats",
         },
+        {
+          name: "achievements",
+          configKey: "gamification.enabled",
+          file: "achievements",
+        },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
         {
           name: "announce",
