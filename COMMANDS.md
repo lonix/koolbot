@@ -1032,8 +1032,8 @@ Message ID: 444555666
 **Setup Guide:**
 
 1. Create a dedicated channel for reaction role messages (e.g., #get-roles)
-2. Get the channel ID (right-click channel → Copy ID)
-3. Configure the bot:
+1. Get the channel ID (right-click channel → Copy ID)
+1. Configure the bot:
 
 ```bash
 /config set key:reactionroles.enabled value:true
@@ -1041,13 +1041,13 @@ Message ID: 444555666
 /config reload
 ```
 
-4. Create your first reaction role:
+1. Create your first reaction role:
 
 ```bash
 /reactrole create name:"Gaming" emoji:🎮
 ```
 
-5. Users can now react in the configured channel to get roles!
+1. Users can now react in the configured channel to get roles!
 
 **How it works:**
 
