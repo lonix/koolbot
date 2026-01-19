@@ -785,6 +785,290 @@ Can access 15 command(s):
 
 ---
 
+### `/reactrole`
+
+**Description:** Manage reaction-based roles. Allows users to self-assign roles by reacting to a message. Automatically creates
+Discord roles, categories, and channels with proper permissions.
+
+**Configuration:**
+
+```bash
+# Enable reaction roles feature
+/config set key:reactionroles.enabled value:true
+
+# Set channel for reaction role messages
+/config set key:reactionroles.message_channel_id value:"CHANNEL_ID"
+
+# Reload commands
+/config reload
+```
+
+**Permissions:** Requires Administrator permission
+
+**Subcommands:**
+
+#### `/reactrole create`
+
+Create a new reaction role with associated Discord role, category, and channel.
+
+**Usage:**
+
+```bash
+/reactrole create name:"Gaming" emoji:🎮
+/reactrole create name:"Movie Night" emoji:🎬
+/reactrole create name:"Music Lovers" emoji:🎵
+```
+
+**Parameters:**
+
+- `name` (required) - Name for the role, category, and channel
+- `emoji` (required) - Emoji users will react with to get the role
+
+**What it creates:**
+
+1. A Discord role with the specified name
+2. A category channel (visible only to role members)
+3. A text channel inside the category
+4. A reaction message in the configured message channel
+
+**Example Response:**
+
+```text
+✅ Reaction Role Created
+Successfully created reaction role Gaming!
+Role: @Gaming
+Category: #Gaming
+Channel: #gaming
+Users can now react to get this role!
+```
+
+**Use Cases:**
+
+- Create opt-in interest groups (gaming, movies, music)
+- Organize by game/activity with private channels
+- Event-based roles (tournament participants)
+- Community segmentation
+
+#### `/reactrole archive`
+
+Archive a reaction role. Disables reactions but keeps the role, category, and channels.
+
+**Usage:**
+
+```bash
+/reactrole archive name:"Gaming"
+```
+
+**Parameters:**
+
+- `name` (required) - Name of the reaction role to archive
+
+**What it does:**
+
+- Marks the role as archived
+- Removes the reaction message
+- Keeps the Discord role intact
+- Preserves the category and channels
+- Users can no longer get the role via reactions
+- Existing role members keep their access
+
+**Example Response:**
+
+```text
+📦 Reaction Role Archived
+Successfully archived reaction role Gaming. Role and channels are preserved but reactions are disabled.
+The reaction message has been removed
+```
+
+**Use Cases:**
+
+- Temporarily disable new sign-ups
+- Preserve channels for existing members
+- Archive inactive communities without deletion
+
+#### `/reactrole unarchive`
+
+Unarchive a reaction role to re-enable reactions.
+
+**Usage:**
+
+```bash
+/reactrole unarchive name:"Gaming"
+```
+
+**Parameters:**
+
+- `name` (required) - Name of the reaction role to unarchive
+
+**What it does:**
+
+- Marks the role as active again
+- Creates a new reaction message in the configured channel
+- Users can now react to get the role again
+- All existing channels and permissions remain unchanged
+
+**Example Response:**
+
+```text
+📤 Reaction Role Unarchived
+Successfully unarchived reaction role Gaming. Users can now react to get this role again!
+```
+
+**Use Cases:**
+
+- Re-enable sign-ups after a temporary pause
+- Reactivate seasonal communities
+- Resume role assignment after maintenance
+
+#### `/reactrole delete`
+
+Completely delete a reaction role and all associated resources.
+
+**Usage:**
+
+```bash
+/reactrole delete name:"Gaming"
+```
+
+**Parameters:**
+
+- `name` (required) - Name of the reaction role to delete
+
+**What it deletes:**
+
+- The Discord role
+- The category and all channels inside it
+- The reaction message
+- The database configuration
+
+**Example Response:**
+
+```text
+🗑️ Reaction Role Deleted
+Successfully deleted reaction role Gaming and all associated resources.
+All resources have been permanently removed
+```
+
+**Warning:** This action is permanent and cannot be undone!
+
+**Use Cases:**
+
+- Remove obsolete reaction roles
+- Clean up old communities
+- Free up Discord server space
+
+#### `/reactrole list`
+
+List all configured reaction roles.
+
+**Usage:**
+
+```bash
+/reactrole list
+```
+
+**Example Response:**
+
+```text
+📋 Reaction Roles
+Found 3 reaction role(s)
+
+🎮 Gaming
+Status: ✅ Active
+Role: @Gaming
+Category: #Gaming
+Channel: #gaming
+Created: 1/15/2026
+
+🎬 Movie Night
+Status: 📦 Archived
+Role: @Movie Night
+Category: #Movie Night
+Channel: #movie-night
+Created: 1/10/2026
+```
+
+**Use Cases:**
+
+- View all reaction roles at a glance
+- Check which roles are active vs archived
+- Audit reaction role configuration
+
+#### `/reactrole status`
+
+Check detailed status of a specific reaction role.
+
+**Usage:**
+
+```bash
+/reactrole status name:"Gaming"
+```
+
+**Parameters:**
+
+- `name` (required) - Name of the reaction role to check
+
+**Example Response:**
+
+```text
+🎮 Gaming
+Status: ✅ Active
+Role ID: 123456789
+Category ID: 987654321
+Channel ID: 111222333
+Created: 1/15/2026, 3:30:00 PM
+Last Updated: 1/15/2026, 3:30:00 PM
+Message ID: 444555666
+```
+
+**Use Cases:**
+
+- Get IDs for advanced configuration
+- Debug permission issues
+- Verify role configuration
+
+---
+
+**Setup Guide:**
+
+1. Create a dedicated channel for reaction role messages (e.g., #get-roles)
+1. Get the channel ID (right-click channel → Copy ID)
+1. Configure the bot:
+
+```bash
+/config set key:reactionroles.enabled value:true
+/config set key:reactionroles.message_channel_id value:"YOUR_CHANNEL_ID"
+/config reload
+```
+
+1. Create your first reaction role:
+
+```bash
+/reactrole create name:"Gaming" emoji:🎮
+```
+
+1. Users can now react in the configured channel to get roles!
+
+**How it works:**
+
+- Users react to the message with the specified emoji
+- Bot automatically assigns the role
+- Users gain access to the private category and channels
+- Removing the reaction removes the role and access
+- Category permissions are automatically maintained
+
+**Best Practices:**
+
+- Use clear, descriptive names for roles
+- Choose easily recognizable emojis
+- Pin the reaction message in the channel
+- Organize reaction messages with category separators
+- Archive roles instead of deleting to preserve data and allow reactivation
+- Use unarchive to re-enable roles after maintenance or seasonal breaks
+- Use archived roles for seasonal/temporary communities
+
+---
+
 ### `/vc`
 
 **Description:** Voice channel management, cleanup tools, and user customization.

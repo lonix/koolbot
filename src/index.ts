@@ -12,6 +12,7 @@ import {
   REST,
   Routes,
   TextChannel,
+  Partials,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
@@ -29,6 +30,7 @@ import { BotStatusService } from "./services/bot-status-service.js";
 import { QuoteChannelManager } from "./services/quote-channel-manager.js";
 import { PermissionsService } from "./services/permissions-service.js";
 import FriendshipListener from "./services/friendship-listener.js";
+import { ReactionRoleService } from "./services/reaction-role-service.js";
 
 dotenvConfig();
 
@@ -77,6 +79,7 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
   ],
+  partials: [Partials.Message, Partials.Reaction],
 });
 
 // Add commands collection to client
@@ -410,6 +413,7 @@ const scheduledAnnouncementService =
 const channelInitializer = ChannelInitializer.getInstance(client);
 const startupMigrator = StartupMigrator.getInstance();
 const quoteChannelManager = QuoteChannelManager.getInstance(client);
+const reactionRoleService = ReactionRoleService.getInstance(client);
 
 // Bot status service is already initialized above
 
@@ -475,6 +479,9 @@ async function initializeServices(): Promise<void> {
 
     // Initialize quote channel manager
     await quoteChannelManager.initialize();
+
+    // Initialize reaction role service
+    await reactionRoleService.initialize();
 
     // Initialize permissions service and set up default permissions
     const permissionsService = PermissionsService.getInstance(client);
