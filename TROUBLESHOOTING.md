@@ -623,8 +623,8 @@ docker-compose up -d
 /config import
 
 # Restore database (if backup was successful)
-# Replace the date with your actual backup file date (e.g., 20240101)
-docker cp ./koolbot-backup-20240101.archive koolbot-mongodb:/data/db/restore.archive
+# Replace YYYYMMDD with your actual backup file date (e.g., 20240115)
+docker cp ./koolbot-backup-YYYYMMDD.archive koolbot-mongodb:/data/db/restore.archive
 docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
 docker-compose restart bot
 ```
@@ -750,8 +750,8 @@ docker-compose logs -f bot
 /config import
 
 # 9. Restore database
-# Replace the date with your actual backup file date (e.g., 20240101)
-docker cp ./koolbot-backup-20240101.archive koolbot-mongodb:/data/db/restore.archive
+# Replace YYYYMMDD with your actual backup file date (e.g., 20240115)
+docker cp ./koolbot-backup-YYYYMMDD.archive koolbot-mongodb:/data/db/restore.archive
 docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
 docker-compose restart bot
 ```
