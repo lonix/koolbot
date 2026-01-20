@@ -107,6 +107,7 @@ export class CommandManager {
           configKey: "reactionroles.enabled",
           file: "reactrole",
         },
+        { name: "setup", configKey: "wizard.enabled", file: "setup-wizard" },
       ];
 
       // Process each command

@@ -553,6 +553,45 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   }
 
+  // Handle button interactions
+  if (interaction.isButton()) {
+    try {
+      const { handleWizardButton } = await import(
+        "./handlers/wizard-button-handler.js"
+      );
+      await handleWizardButton(interaction);
+    } catch (error) {
+      logger.error("Error handling button interaction:", error);
+    }
+    return;
+  }
+
+  // Handle select menu interactions
+  if (interaction.isStringSelectMenu()) {
+    try {
+      const { handleWizardSelectMenu } = await import(
+        "./handlers/wizard-select-handler.js"
+      );
+      await handleWizardSelectMenu(interaction);
+    } catch (error) {
+      logger.error("Error handling select menu interaction:", error);
+    }
+    return;
+  }
+
+  // Handle modal submit interactions
+  if (interaction.isModalSubmit()) {
+    try {
+      const { handleWizardModal } = await import(
+        "./handlers/wizard-modal-handler.js"
+      );
+      await handleWizardModal(interaction);
+    } catch (error) {
+      logger.error("Error handling modal interaction:", error);
+    }
+    return;
+  }
+
   if (!interaction.isChatInputCommand()) return;
 
   try {
