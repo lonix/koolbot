@@ -543,8 +543,8 @@ docker cp koolbot-mongodb:/data/db/backup.archive ./koolbot-backup-$(date +%Y%m%
 **Restore from backup:**
 
 ```bash
-# Copy backup file to container
-docker cp ./koolbot-backup-20240101.archive koolbot-mongodb:/data/db/restore.archive
+# Copy backup file to container (replace YYYYMMDD with your backup date, e.g., 20240115)
+docker cp ./koolbot-backup-YYYYMMDD.archive koolbot-mongodb:/data/db/restore.archive
 
 # Restore the database
 docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
