@@ -412,21 +412,33 @@ async function gracefulShutdown(signal: string): Promise<void> {
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
+// Service instances (declared outside try-catch for proper scoping)
+let configService: ConfigService;
+let commandManager: CommandManager;
+let voiceChannelManager: VoiceChannelManager;
+let voiceChannelTracker: VoiceChannelTracker;
+let voiceChannelAnnouncer: VoiceChannelAnnouncer;
+let voiceChannelTruncation: VoiceChannelTruncationService;
+let scheduledAnnouncementService: ScheduledAnnouncementService;
+let channelInitializer: ChannelInitializer;
+let startupMigrator: StartupMigrator;
+let quoteChannelManager: QuoteChannelManager;
+let reactionRoleService: ReactionRoleService;
+
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
-  var configService = ConfigService.getInstance();
-  var commandManager = CommandManager.getInstance(client);
-  var voiceChannelManager = VoiceChannelManager.getInstance(client);
-  var voiceChannelTracker = VoiceChannelTracker.getInstance(client);
-  var voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
-  var voiceChannelTruncation =
-    VoiceChannelTruncationService.getInstance(client);
-  var scheduledAnnouncementService =
+  configService = ConfigService.getInstance();
+  commandManager = CommandManager.getInstance(client);
+  voiceChannelManager = VoiceChannelManager.getInstance(client);
+  voiceChannelTracker = VoiceChannelTracker.getInstance(client);
+  voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
+  voiceChannelTruncation = VoiceChannelTruncationService.getInstance(client);
+  scheduledAnnouncementService =
     ScheduledAnnouncementService.getInstance(client);
-  var channelInitializer = ChannelInitializer.getInstance(client);
-  var startupMigrator = StartupMigrator.getInstance();
-  var quoteChannelManager = QuoteChannelManager.getInstance(client);
-  var reactionRoleService = ReactionRoleService.getInstance(client);
+  channelInitializer = ChannelInitializer.getInstance(client);
+  startupMigrator = StartupMigrator.getInstance();
+  quoteChannelManager = QuoteChannelManager.getInstance(client);
+  reactionRoleService = ReactionRoleService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
