@@ -11,10 +11,8 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { WizardService } from "../services/wizard-service.js";
-import { ConfigService } from "../services/config-service.js";
 
 const wizardService = WizardService.getInstance();
-const configService = ConfigService.getInstance();
 
 export async function handleWizardButton(
   interaction: ButtonInteraction,
@@ -195,7 +193,6 @@ async function handleVcExisting(
   if (!state) return;
 
   const categories = state.detectedResources.categories || [];
-  const lobbies = state.detectedResources.voiceChannels || [];
 
   if (categories.length === 0) {
     await interaction.reply({
@@ -558,8 +555,6 @@ async function moveToNextFeature(
   const state = wizardService.getSession(userId, guildId);
   if (!state) return;
 
-  // Find current feature index
-  const currentFeature = state.selectedFeatures[state.currentStep - 1];
   const nextFeatureIndex = state.currentStep;
 
   if (nextFeatureIndex >= state.selectedFeatures.length) {

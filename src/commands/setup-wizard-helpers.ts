@@ -60,9 +60,6 @@ export async function startFeatureConfiguration(
     .setTitle(`${featureInfo.emoji} ${featureInfo.name} Configuration`)
     .setColor(0x5865f2);
 
-  // Import configuration functions from main command
-  const setupWizard = await import("../commands/setup-wizard.js");
-
   // Call appropriate configuration function based on feature
   // Note: These functions are not exported from setup-wizard.ts
   // We need to refactor or handle this differently

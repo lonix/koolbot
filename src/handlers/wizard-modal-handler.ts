@@ -56,7 +56,7 @@ export async function handleWizardModal(
   try {
     switch (modalType) {
       case "vc":
-        await handleVcModal(interaction, guild, userId, guildId, parts);
+        await handleVcModal(interaction, guild, userId, guildId);
         break;
       case "vt":
         await handleVtModal(interaction, guild, userId, guildId);
@@ -81,10 +81,7 @@ async function handleVcModal(
   guild: any,
   userId: string,
   guildId: string,
-  parts: string[],
 ): Promise<void> {
-  const subType = parts.length > 5 ? parts[5] : "new";
-
   const categoryName = interaction.fields.getTextInputValue("category_name");
   const lobbyName = interaction.fields.getTextInputValue("lobby_name");
   const prefix = interaction.fields.getTextInputValue("channel_prefix") || "🎮";

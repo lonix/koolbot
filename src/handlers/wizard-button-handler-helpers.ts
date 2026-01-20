@@ -1,6 +1,5 @@
 import { WizardService } from "../services/wizard-service.js";
 import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
-import logger from "../utils/logger.js";
 
 const wizardService = WizardService.getInstance();
 

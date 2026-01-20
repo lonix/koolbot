@@ -1,4 +1,4 @@
-import { Client, Guild, TextChannel, VoiceChannel, CategoryChannel } from "discord.js";
+import { TextChannel, VoiceChannel, CategoryChannel } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 
@@ -32,7 +32,7 @@ export class WizardService {
   private static instance: WizardService;
   private sessions: Map<string, WizardState> = new Map();
   private readonly SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-  private cleanupInterval: NodeJS.Timeout | null = null;
+  private cleanupInterval: ReturnType<typeof setTimeout> | null = null;
   private configService: ConfigService;
 
   private constructor() {

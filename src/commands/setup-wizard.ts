@@ -6,22 +6,13 @@ import {
   ButtonBuilder,
   StringSelectMenuBuilder,
   ButtonStyle,
-  ComponentType,
   PermissionFlagsBits,
-  TextChannel,
-  CategoryChannel,
-  VoiceChannel,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { WizardService } from "../services/wizard-service.js";
 import { ChannelDetector } from "../utils/channel-detector.js";
-import { ConfigService } from "../services/config-service.js";
 
 const wizardService = WizardService.getInstance();
-const configService = ConfigService.getInstance();
 
 // Feature definitions
 const FEATURES = {
@@ -177,7 +168,7 @@ async function showFeatureSelection(
     )
     .setColor(0x5865f2)
     .addFields(
-      Object.entries(FEATURES).map(([key, feature]) => ({
+      Object.entries(FEATURES).map(([, feature]) => ({
         name: `${feature.emoji} ${feature.name}`,
         value: feature.description,
         inline: false,

@@ -75,13 +75,13 @@ export async function handleWizardSelectMenu(
         await handleFeatureSelection(interaction, guild, userId, guildId);
         break;
       case "vc":
-        await handleVcCategorySelection(interaction, guild, userId, guildId, parts);
+        await handleVcCategorySelection(interaction, guild, userId, guildId);
         break;
       case "quotes":
-        await handleQuotesChannelSelection(interaction, guild, userId, guildId, parts);
+        await handleQuotesChannelSelection(interaction, guild, userId, guildId);
         break;
       case "logging":
-        await handleLoggingChannelSelection(interaction, guild, userId, guildId, parts);
+        await handleLoggingChannelSelection(interaction, guild, userId, guildId);
         break;
       default:
         await interaction.reply({
@@ -132,9 +132,7 @@ async function handleVcCategorySelection(
   guild: any,
   userId: string,
   guildId: string,
-  parts: string[],
 ): Promise<void> {
-  const subType = parts.length > 5 ? parts[5] : "";
   const selectedCategoryId = interaction.values[0];
 
   const category = await guild.channels.fetch(selectedCategoryId);
@@ -190,7 +188,6 @@ async function handleQuotesChannelSelection(
   guild: any,
   userId: string,
   guildId: string,
-  parts: string[],
 ): Promise<void> {
   const selectedChannelId = interaction.values[0];
 
@@ -226,7 +223,6 @@ async function handleLoggingChannelSelection(
   guild: any,
   userId: string,
   guildId: string,
-  parts: string[],
 ): Promise<void> {
   const selectedChannelIds = interaction.values;
 
