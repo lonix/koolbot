@@ -546,12 +546,14 @@ docker cp koolbot-mongodb:/data/db/backup.archive ./koolbot-backup-$(date +%Y%m%
 # Copy backup file to container (replace YYYYMMDD with your backup date, e.g., 20240115)
 docker cp ./koolbot-backup-YYYYMMDD.archive koolbot-mongodb:/data/db/restore.archive
 
-# Restore the database
-docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
+# Restore the database (--drop removes existing collections before restoring)
+docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot --drop
 
 # Restart bot to refresh connections
 docker-compose restart bot
 ```
+
+> **Note:** The `--drop` flag removes existing collections before restoring to avoid data conflicts.
 
 **Automated backups (recommended):**
 
@@ -625,7 +627,7 @@ docker-compose up -d
 # Restore database (if backup was successful)
 # Replace YYYYMMDD with your actual backup file date (e.g., 20240115)
 docker cp ./koolbot-backup-YYYYMMDD.archive koolbot-mongodb:/data/db/restore.archive
-docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
+docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot --drop
 docker-compose restart bot
 ```
 
@@ -752,7 +754,7 @@ docker-compose logs -f bot
 # 9. Restore database
 # Replace YYYYMMDD with your actual backup file date (e.g., 20240115)
 docker cp ./koolbot-backup-YYYYMMDD.archive koolbot-mongodb:/data/db/restore.archive
-docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
+docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot --drop
 docker-compose restart bot
 ```
 
