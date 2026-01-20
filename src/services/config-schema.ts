@@ -62,6 +62,10 @@ export interface ConfigSchema {
   // Scheduled Announcements
   "announcements.enabled": boolean;
 
+  // Gamification System
+  "gamification.enabled": boolean;
+  "gamification.announcements.enabled": boolean;
+  "gamification.dm_notifications.enabled": boolean;
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
@@ -130,6 +134,10 @@ export const defaultConfig: ConfigSchema = {
   // Scheduled Announcements defaults
   "announcements.enabled": false,
 
+  // Gamification defaults
+  "gamification.enabled": false,
+  "gamification.announcements.enabled": true,
+  "gamification.dm_notifications.enabled": true,
   // Reaction Roles defaults
   "reactionroles.enabled": false,
   "reactionroles.message_channel_id": "",

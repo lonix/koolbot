@@ -14,6 +14,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Voice Activity Tracking](#-voice-activity-tracking) - Track user activity
 - [Voice Channel Cleanup](#-voice-channel-cleanup) - Data retention
 - [Announcements](#-announcements) - Automated stats posting
+- [Gamification System](#-gamification-system) - Badges and achievements
 - [Reaction Roles](#-reaction-roles) - Self-assignable roles via reactions
 - [Quote System](#-quote-system) - Quote management settings
 - [Discord Logging](#-discord-logging) - Event logging to channels
@@ -284,6 +285,79 @@ Custom scheduled announcements system for automated messages.
 - `/announce delete` - Remove an announcement
 
 See [Commands Documentation](COMMANDS.md#announce) for detailed usage.
+
+---
+
+## 🏆 Gamification System
+
+Badge and achievement system to encourage voice channel participation.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `gamification.enabled` | `false` | Enable/disable gamification system |
+| `gamification.announcements.enabled` | `true` | Include new accolades in weekly announcements |
+| `gamification.dm_notifications.enabled` | `true` | Send DM to users when they earn accolades |
+
+**Example:**
+
+```bash
+# Enable gamification
+/config set key:gamification.enabled value:true
+/config reload
+
+# Disable DM notifications (keep announcements)
+/config set key:gamification.dm_notifications.enabled value:false
+/config reload
+```
+
+**Features:**
+
+- **Persistent Accolades** - Permanent badges earned once and kept forever
+- **13 Different Accolades** - Milestone-based, time-based, and behavior-based
+- **Automatic Tracking** - Earned automatically based on voice activity
+- **DM Notifications** - Users notified immediately when earning badges
+- **Weekly Announcements** - New accolades announced in voice stats channel
+- **View Command** - Use `/achievements` to see earned badges
+
+**Available Accolades:**
+
+Time Milestones:
+
+- First Steps (1 hour)
+- Voice Veteran (100 hours)
+- Voice Elite (500 hours)
+- Voice Master (1000 hours)
+- Voice Legend (8765 hours / 1 year)
+
+Session Length:
+
+- Marathon Runner (4+ hour session)
+- Ultra Marathoner (8+ hour session)
+
+Social Activity:
+
+- Social Butterfly (10+ unique users)
+- Connector (25+ unique users)
+
+Time of Day:
+
+- Night Owl (50+ late-night hours, 10 PM - 6 AM)
+- Early Bird (50+ early-morning hours, 6 AM - 10 AM)
+
+Day of Week:
+
+- Weekend Warrior (100+ weekend hours)
+- Weekday Warrior (100+ weekday hours)
+
+**Requirements:**
+
+- Requires `voicetracking.enabled` to be `true`
+- Accolades are checked after each voice session ends
+- DMs require user to have DMs enabled for the bot
+
+See [Achievements Command](COMMANDS.md#achievements) for usage details.
+
+---
 
 ### Cron Schedule Format
 
@@ -810,6 +884,12 @@ The config system automatically converts values:
 - `voicetracking.announcements.channel` (string, default: "voice-stats")
 - `voicetracking.announcements.schedule` (string, default: "0 16 ** 5")
 - `announcements.enabled` (bool, default: false)
+
+#### Gamification
+
+- `gamification.enabled` (bool, default: false)
+- `gamification.announcements.enabled` (bool, default: true)
+- `gamification.dm_notifications.enabled` (bool, default: true)
 
 #### Cleanup
 

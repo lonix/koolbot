@@ -230,6 +230,89 @@ Most Active Channel: Gaming Room
 
 ---
 
+### `/achievements`
+
+**Description:** View earned badges and achievements from voice channel activity. Displays persistent accolades earned through milestones and participation.
+
+**Configuration:**
+
+```bash
+# Enable gamification system
+/config set key:gamification.enabled value:true
+/config reload
+```
+
+**Usage:**
+
+```bash
+/achievements                    # View your own achievements
+/achievements user:@Username     # View another user's achievements
+```
+
+**Parameters:**
+
+- `user` (optional) - The user to view achievements for (defaults to yourself)
+
+**Example Response:**
+
+```text
+🏆 Alice's Achievements
+
+🎖️ Accolades (Permanent)
+
+🎉 First Steps - 12 hrs
+Spent your first hour in voice chat
+Earned: 2026-01-10
+
+🎖️ Voice Veteran - 150 hrs
+Reached 100 hours in voice chat
+Earned: 2026-01-15
+
+🏃 Marathon Runner - 6 hrs
+Completed a 4+ hour voice session
+Earned: 2026-01-12
+
+🦋 Social Butterfly - 15 users
+Voiced with 10+ unique users
+Earned: 2026-01-14
+
+📊 Summary
+Total Accolades: 4
+Total Achievements: 0
+```
+
+**Available Accolades:**
+
+- 🎉 **First Steps** - Spent your first hour in voice chat
+- 🎖️ **Voice Veteran** - Reached 100 hours
+- 🏅 **Voice Elite** - Reached 500 hours
+- 🏆 **Voice Master** - Reached 1000 hours
+- 👑 **Voice Legend** - Reached 8765 hours (1 year!)
+- 🏃 **Marathon Runner** - Completed a 4+ hour session
+- 🦸 **Ultra Marathoner** - Completed an 8+ hour session
+- 🦋 **Social Butterfly** - Voiced with 10+ unique users
+- 🤝 **Connector** - Voiced with 25+ unique users
+- 🦉 **Night Owl** - 50+ hours late night (10 PM - 6 AM)
+- 🐦 **Early Bird** - 50+ hours early morning (6 AM - 10 AM)
+- 🎮 **Weekend Warrior** - 100+ hours on weekends
+- 💼 **Weekday Warrior** - 100+ hours on weekdays
+
+**Notification System:**
+
+When you earn a new accolade, you'll receive:
+
+- A DM from the bot with details about your achievement
+- Announcement in the weekly voice stats channel
+
+**Use Cases:**
+
+- Track your voice activity milestones
+- View your collection of earned badges
+- Compare achievements with friends
+- Get motivated to participate more
+
+---
+
 ### `/quote`
 
 **Description:** Add memorable quotes to a dedicated bot-managed channel. All quotes are posted in a channel where users can react with 👍/👎.
@@ -1630,6 +1713,7 @@ Most Used Commands:
 | `/ping` | Everyone | Command must be enabled |
 | `/vctop` | Everyone | Voice tracking enabled |
 | `/vcstats` | Everyone | Voice tracking enabled |
+| `/achievements` | Everyone | Gamification enabled |
 | `/seen` | Everyone | Voice tracking + seen enabled |
 | `/quote` | Everyone* | Quotes enabled (*may be role-restricted) |
 | `/amikool` | Everyone | Command enabled + role configured |
@@ -1681,6 +1765,7 @@ The bot needs these Discord permissions to function:
 /help [command]                     # Get help on commands
 /vctop [period] [limit]            # Voice leaderboards
 /vcstats [period]                  # Your voice stats
+/achievements [user]               # View earned badges
 /seen user:@User                   # Last seen info
 /quote text:"..." author:"@User"   # Add quote to channel
 /amikool                           # Role verification
@@ -1743,11 +1828,15 @@ The bot needs these Discord permissions to function:
 /config set key:voicetracking.announcements.channel value:"voice-stats"
 /config reload
 
-# 5. Setup data cleanup
+# 5. Enable gamification system
+/config set key:gamification.enabled value:true
+/config reload
+
+# 6. Setup data cleanup
 /config set key:voicetracking.cleanup.enabled value:true
 /config reload
 
-# 6. Setup quote channel (optional)
+# 7. Setup quote channel (optional)
 /config set key:quotes.enabled value:true
 /config set key:quotes.channel_id value:"YOUR_QUOTE_CHANNEL_ID"
 /config reload
