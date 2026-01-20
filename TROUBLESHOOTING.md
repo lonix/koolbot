@@ -528,6 +528,47 @@ Error: An invalid token was provided
 /config set key:voicetracking.cleanup.enabled value:false
 ```
 
+### Database Backup and Restore
+
+**Create a backup:**
+
+```bash
+# Backup MongoDB database to archive file
+docker-compose exec mongodb mongodump --archive=/data/db/backup.archive --db=koolbot
+
+# Copy backup to your local machine
+docker cp koolbot-mongodb:/data/db/backup.archive ./koolbot-backup-$(date +%Y%m%d).archive
+```
+
+**Restore from backup:**
+
+```bash
+# Copy backup file to container
+docker cp ./koolbot-backup-20240101.archive koolbot-mongodb:/data/db/restore.archive
+
+# Restore the database
+docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
+
+# Restart bot to refresh connections
+docker-compose restart bot
+```
+
+**Automated backups (recommended):**
+
+Create a cron job or scheduled task to backup regularly:
+
+```bash
+# Example: Daily backup script
+#!/bin/bash
+BACKUP_DIR="/path/to/backups"
+DATE=$(date +%Y%m%d)
+docker-compose exec mongodb mongodump --archive=/data/db/backup.archive --db=koolbot
+docker cp koolbot-mongodb:/data/db/backup.archive "$BACKUP_DIR/koolbot-backup-$DATE.archive"
+
+# Keep only last 7 days of backups
+find "$BACKUP_DIR" -name "koolbot-backup-*.archive" -mtime +7 -delete
+```
+
 ---
 
 ## ⚙ Configuration Issues
@@ -567,7 +608,12 @@ If database is corrupted:
 
 ```bash
 # Backup first!
+# 1. Backup configuration
 /config export
+
+# 2. Backup database (if possible)
+docker-compose exec mongodb mongodump --archive=/data/db/backup.archive --db=koolbot
+docker cp koolbot-mongodb:/data/db/backup.archive ./koolbot-backup-$(date +%Y%m%d).archive
 
 # Reset database
 docker-compose down -v
@@ -575,6 +621,11 @@ docker-compose up -d
 
 # Restore config
 /config import
+
+# Restore database (if backup was successful)
+docker cp ./koolbot-backup-*.archive koolbot-mongodb:/data/db/restore.archive
+docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
+docker-compose restart bot
 ```
 
 ### Can't Import Configuration
@@ -675,23 +726,32 @@ If everything is broken:
 # 1. Backup configuration
 /config export
 
-# 2. Stop everything
+# 2. Backup database
+docker-compose exec mongodb mongodump --archive=/data/db/backup.archive --db=koolbot
+docker cp koolbot-mongodb:/data/db/backup.archive ./koolbot-backup-$(date +%Y%m%d).archive
+
+# 3. Stop everything
 docker-compose down -v
 
-# 3. Verify .env file
+# 4. Verify .env file
 cat .env
 
-# 4. Start fresh
+# 5. Start fresh
 docker-compose up -d
 
-# 5. Wait for startup
+# 6. Wait for startup
 sleep 30
 
-# 6. Check logs
+# 7. Check logs
 docker-compose logs -f bot
 
-# 7. Restore configuration
+# 8. Restore configuration
 /config import
+
+# 9. Restore database
+docker cp ./koolbot-backup-*.archive koolbot-mongodb:/data/db/restore.archive
+docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
+docker-compose restart bot
 ```
 
 ### Get Support

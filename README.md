@@ -398,12 +398,53 @@ This will:
 
 ### Configuration Backup & Restore
 
+**Configuration (Settings) Backup:**
+
 ```bash
 # Export configuration to YAML
 /config export
 
 # Import configuration from YAML (attach file to Discord)
 /config import
+```
+
+**Database (Data) Backup:**
+
+To backup all your data (voice tracking stats, quotes, etc.), backup the MongoDB database:
+
+```bash
+# Create a backup of the MongoDB database
+docker-compose exec mongodb mongodump --archive=/data/db/backup.archive --db=koolbot
+
+# Copy backup file to your local machine
+docker cp koolbot-mongodb:/data/db/backup.archive ./koolbot-backup-$(date +%Y%m%d).archive
+```
+
+**Database Restore:**
+
+```bash
+# Copy backup file to container
+docker cp ./koolbot-backup-20240101.archive koolbot-mongodb:/data/db/restore.archive
+
+# Restore the database
+docker-compose exec mongodb mongorestore --archive=/data/db/restore.archive --db=koolbot
+
+# Restart the bot to refresh connections
+docker-compose restart bot
+```
+
+**Complete Backup (Recommended):**
+
+For a complete backup, save both configuration and database:
+
+```bash
+# 1. Export configuration from Discord
+/config export
+# (Download the YAML file Discord sends you)
+
+# 2. Backup database
+docker-compose exec mongodb mongodump --archive=/data/db/backup.archive --db=koolbot
+docker cp koolbot-mongodb:/data/db/backup.archive ./koolbot-backup-$(date +%Y%m%d).archive
 ```
 
 ---
