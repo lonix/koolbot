@@ -58,6 +58,17 @@ if (process.env.DEBUG === "true") {
   logger.info("Debug mode enabled");
 }
 
+// Register global error handlers EARLY to catch initialization errors
+process.on("unhandledRejection", (error) => {
+  logger.error("Unhandled promise rejection:", error);
+  process.exit(1);
+});
+
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught exception:", error);
+  process.exit(1);
+});
+
 // Extend Client type to include commands collection
 declare module "discord.js" {
   export interface Client {
@@ -401,19 +412,25 @@ async function gracefulShutdown(signal: string): Promise<void> {
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
-const configService = ConfigService.getInstance();
-const commandManager = CommandManager.getInstance(client);
-const voiceChannelManager = VoiceChannelManager.getInstance(client);
-const voiceChannelTracker = VoiceChannelTracker.getInstance(client);
-const voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
-const voiceChannelTruncation =
-  VoiceChannelTruncationService.getInstance(client);
-const scheduledAnnouncementService =
-  ScheduledAnnouncementService.getInstance(client);
-const channelInitializer = ChannelInitializer.getInstance(client);
-const startupMigrator = StartupMigrator.getInstance();
-const quoteChannelManager = QuoteChannelManager.getInstance(client);
-const reactionRoleService = ReactionRoleService.getInstance(client);
+// Wrap service instantiation in try-catch to ensure errors are caught
+try {
+  var configService = ConfigService.getInstance();
+  var commandManager = CommandManager.getInstance(client);
+  var voiceChannelManager = VoiceChannelManager.getInstance(client);
+  var voiceChannelTracker = VoiceChannelTracker.getInstance(client);
+  var voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
+  var voiceChannelTruncation =
+    VoiceChannelTruncationService.getInstance(client);
+  var scheduledAnnouncementService =
+    ScheduledAnnouncementService.getInstance(client);
+  var channelInitializer = ChannelInitializer.getInstance(client);
+  var startupMigrator = StartupMigrator.getInstance();
+  var quoteChannelManager = QuoteChannelManager.getInstance(client);
+  var reactionRoleService = ReactionRoleService.getInstance(client);
+} catch (error) {
+  logger.error("❌ Fatal error during service instantiation:", error);
+  process.exit(1);
+}
 
 // Bot status service is already initialized above
 
@@ -640,68 +657,8 @@ client.on(Events.GuildMemberAdd, async (member) => {
   }
 });
 
-process.on("unhandledRejection", (error) => {
-  logger.error("Unhandled promise rejection:", error);
-});
-
-// Handle graceful shutdown
-process.on("SIGINT", async () => {
-  logger.info("Received SIGINT, shutting down gracefully...");
-
-  try {
-    // Set bot to shutdown status (yellow)
-    botStatusService.setShutdownStatus();
-
-    // Stop scheduled announcements
-    scheduledAnnouncementService.destroy();
-
-    // Rename lobby to offline before shutting down
-    const guildId = await configService.getString("GUILD_ID", "");
-    if (guildId) {
-      const guild = await client.guilds.fetch(guildId);
-      await voiceChannelManager.renameLobbyToOffline(guild);
-      logger.info("Lobby renamed to offline mode");
-    }
-
-    // Clean shutdown of bot status service
-    await botStatusService.shutdown();
-  } catch (error) {
-    logger.error("Error during SIGINT shutdown:", error);
-  }
-
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  logger.info("Received SIGTERM, shutting down gracefully...");
-
-  try {
-    // Set bot to shutdown status (yellow)
-    botStatusService.setShutdownStatus();
-
-    // Stop scheduled announcements
-    scheduledAnnouncementService.destroy();
-
-    // Rename lobby to offline before shutting down
-    const guildId = await configService.getString("GUILD_ID", "");
-    if (guildId) {
-      const guild = await client.guilds.fetch(guildId);
-      await voiceChannelManager.renameLobbyToOffline(guild);
-      logger.info("Lobby renamed to offline mode");
-    }
-
-    // Clean shutdown of bot status service
-    await botStatusService.shutdown();
-  } catch (error) {
-    logger.error("Error during SIGTERM shutdown:", error);
-  }
-
-  process.exit(0);
-});
-
-process.on("uncaughtException", (error) => {
-  logger.error("Uncaught exception:", error);
+// Login to Discord (errors will be caught by global error handlers)
+client.login(process.env.DISCORD_TOKEN).catch((error) => {
+  logger.error("❌ Failed to login to Discord:", error);
   process.exit(1);
 });
-
-client.login(process.env.DISCORD_TOKEN);
