@@ -37,10 +37,7 @@ interface BadgeDefinition {
   emoji: string;
   name: string;
   description: string;
-  checkFunction: (
-    userId: string,
-    userData: any | null,
-  ) => Promise<boolean>;
+  checkFunction: (userId: string, userData: any | null) => Promise<boolean>;
   metadataFunction?: (
     userId: string,
     userData: any | null,
@@ -158,13 +155,13 @@ export class GamificationService {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
-        return user.sessions.some((s) => (s.duration || 0) >= 14400);
+        return user.sessions.some((s: any) => (s.duration || 0) >= 14400);
       },
       metadataFunction: async (userId: string, userData: any | null) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const maxSession = Math.max(
-          ...(user?.sessions.map((s) => s.duration || 0) || [0]),
+          ...(user?.sessions.map((s: any) => s.duration || 0) || [0]),
         );
         return {
           value: Math.floor(maxSession / 3600),
@@ -181,13 +178,13 @@ export class GamificationService {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
-        return user.sessions.some((s) => (s.duration || 0) >= 28800);
+        return user.sessions.some((s: any) => (s.duration || 0) >= 28800);
       },
       metadataFunction: async (userId: string, userData: any | null) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const maxSession = Math.max(
-          ...(user?.sessions.map((s) => s.duration || 0) || [0]),
+          ...(user?.sessions.map((s: any) => s.duration || 0) || [0]),
         );
         return {
           value: Math.floor(maxSession / 3600),
@@ -205,7 +202,7 @@ export class GamificationService {
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         const uniqueUsers = new Set(
-          user.sessions.flatMap((s) => s.otherUsers || []),
+          user.sessions.flatMap((s: any) => s.otherUsers || []),
         );
         return uniqueUsers.size >= 10;
       },
@@ -213,7 +210,7 @@ export class GamificationService {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const uniqueUsers = new Set(
-          user?.sessions.flatMap((s) => s.otherUsers || []) || [],
+          user?.sessions.flatMap((s: any) => s.otherUsers || []) || [],
         );
         return {
           value: uniqueUsers.size,
@@ -231,7 +228,7 @@ export class GamificationService {
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         const uniqueUsers = new Set(
-          user.sessions.flatMap((s) => s.otherUsers || []),
+          user.sessions.flatMap((s: any) => s.otherUsers || []),
         );
         return uniqueUsers.size >= 25;
       },
@@ -239,7 +236,7 @@ export class GamificationService {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const uniqueUsers = new Set(
-          user?.sessions.flatMap((s) => s.otherUsers || []) || [],
+          user?.sessions.flatMap((s: any) => s.otherUsers || []) || [],
         );
         return {
           value: uniqueUsers.size,

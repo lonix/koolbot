@@ -104,8 +104,7 @@ export async function execute(
         }
 
         accoladesChunks.forEach((chunk, index) => {
-          const fieldName =
-            index === 0 ? "🎖️ Accolades (Permanent)" : "\u200B";
+          const fieldName = index === 0 ? "🎖️ Accolades (Permanent)" : "\u200B";
           embed.addFields({
             name: fieldName,
             value: chunk,
