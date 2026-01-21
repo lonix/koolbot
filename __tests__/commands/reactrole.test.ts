@@ -1,6 +1,11 @@
-import { describe, it, expect } from "@jest/globals";
-import { data } from "../../src/commands/reactrole.js";
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import type { ChatInputCommandInteraction, Client } from 'discord.js';
+import { data, execute } from "../../src/commands/reactrole.js";
 import { PermissionFlagsBits } from "discord.js";
+import { ReactionRoleService } from '../../src/services/reaction-role-service.js';
+
+jest.mock('../../src/services/reaction-role-service.js');
+jest.mock('../../src/utils/logger.js');
 
 describe("Reactrole Command", () => {
   describe("command metadata", () => {
@@ -189,6 +194,58 @@ describe("Reactrole Command", () => {
       expect(nameOption).toBeDefined();
       expect(nameOption?.required).toBe(true);
       expect(nameOption?.type).toBe(3); // STRING type
+    });
+  });
+
+  describe('execute', () => {
+    let mockInteraction: Partial<ChatInputCommandInteraction>;
+    let mockReactionRoleService: any;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+
+      mockInteraction = {
+        guildId: 'guild123',
+        client: {} as Client,
+        options: {
+          getSubcommand: jest.fn().mockReturnValue('list'),
+        } as any,
+        reply: jest.fn().mockResolvedValue(undefined),
+      };
+
+      mockReactionRoleService = {
+        listReactionRoles: jest.fn().mockResolvedValue([]),
+      };
+
+      (ReactionRoleService.getInstance as jest.Mock).mockReturnValue(mockReactionRoleService);
+    });
+
+    it('should handle list subcommand', async () => {
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockReactionRoleService.listReactionRoles).toHaveBeenCalled();
+    });
+
+    it('should handle missing guild ID', async () => {
+      mockInteraction.guildId = null;
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ephemeral: true,
+        })
+      );
+    });
+
+    it('should handle errors', async () => {
+      mockInteraction.options!.getSubcommand = jest.fn().mockImplementation(() => {
+        throw new Error('Command error');
+      });
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalled();
     });
   });
 });

@@ -1,5 +1,10 @@
-import { describe, it, expect } from "@jest/globals";
-import { data } from "../../src/commands/announce.js";
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import type { ChatInputCommandInteraction, Client } from 'discord.js';
+import { data, execute } from "../../src/commands/announce.js";
+import { ScheduledAnnouncementService } from '../../src/services/scheduled-announcement-service.js';
+
+jest.mock('../../src/services/scheduled-announcement-service.js');
+jest.mock('../../src/utils/logger.js');
 
 describe("Announce Command", () => {
   describe("command metadata", () => {
@@ -93,6 +98,51 @@ describe("Announce Command", () => {
       const idOption = options.find((opt: any) => opt.name === "id");
       expect(idOption).toBeDefined();
       expect(idOption?.required).toBe(true);
+    });
+  });
+
+  describe('execute', () => {
+    let mockInteraction: Partial<ChatInputCommandInteraction>;
+    let mockAnnouncementService: any;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+
+      mockInteraction = {
+        client: {} as Client,
+        options: {
+          getSubcommand: jest.fn().mockReturnValue('list'),
+        } as any,
+        reply: jest.fn().mockResolvedValue(undefined),
+      };
+
+      mockAnnouncementService = {
+        getAllAnnouncements: jest.fn(),
+      };
+
+      (ScheduledAnnouncementService.getInstance as jest.Mock).mockReturnValue(mockAnnouncementService);
+    });
+
+    it('should handle list subcommand', async () => {
+      mockAnnouncementService.getAllAnnouncements.mockResolvedValue([]);
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockAnnouncementService.getAllAnnouncements).toHaveBeenCalled();
+    });
+
+    it('should handle errors', async () => {
+      mockInteraction.options!.getSubcommand = jest.fn().mockImplementation(() => {
+        throw new Error('Command error');
+      });
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ephemeral: true,
+        })
+      );
     });
   });
 });

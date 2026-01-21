@@ -1,5 +1,12 @@
-import { describe, it, expect } from '@jest/globals';
-import { data } from '../../src/commands/vc.js';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import type { ChatInputCommandInteraction, Guild, GuildMember, Client } from 'discord.js';
+import { data, execute } from '../../src/commands/vc.js';
+import { VoiceChannelManager } from '../../src/services/voice-channel-manager.js';
+
+jest.mock('../../src/services/voice-channel-manager.js');
+jest.mock('../../src/services/config-service.js');
+jest.mock('../../src/models/user-voice-preferences.js');
+jest.mock('../../src/utils/logger.js');
 
 describe('VC Command', () => {
   describe('command metadata', () => {
@@ -174,6 +181,61 @@ describe('VC Command', () => {
       expect(kbpsOption?.required).toBe(true);
       expect(kbpsOption?.min_value).toBe(8);
       expect(kbpsOption?.max_value).toBe(384);
+    });
+  });
+
+  describe('execute', () => {
+    let mockInteraction: Partial<ChatInputCommandInteraction>;
+    let mockVoiceChannelManager: any;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+
+      mockInteraction = {
+        guild: {
+          id: 'guild123',
+        } as Guild,
+        member: {} as GuildMember,
+        client: {} as Client,
+        options: {
+          getSubcommand: jest.fn().mockReturnValue('reload'),
+          getSubcommandGroup: jest.fn().mockReturnValue(null),
+        } as any,
+        reply: jest.fn().mockResolvedValue(undefined),
+        deferReply: jest.fn().mockResolvedValue(undefined),
+        editReply: jest.fn().mockResolvedValue(undefined),
+      };
+
+      mockVoiceChannelManager = {
+        cleanupEmptyChannels: jest.fn().mockResolvedValue(undefined),
+      };
+
+      (VoiceChannelManager.getInstance as jest.Mock).mockReturnValue(mockVoiceChannelManager);
+    });
+
+    it('should handle reload subcommand', async () => {
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockVoiceChannelManager.cleanupEmptyChannels).toHaveBeenCalled();
+    });
+
+    it('should handle missing guild', async () => {
+      mockInteraction.guild = null;
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith({
+        content: expect.stringContaining('server'),
+        ephemeral: true,
+      });
+    });
+
+    it('should handle errors', async () => {
+      mockVoiceChannelManager.cleanupEmptyChannels.mockRejectedValue(new Error('Cleanup error'));
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalled();
     });
   });
 });

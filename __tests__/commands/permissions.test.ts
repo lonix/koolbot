@@ -225,4 +225,53 @@ describe("Permissions Command", () => {
       expect(mockInteraction.respond).not.toHaveBeenCalled();
     });
   });
+
+  describe('execute', () => {
+    let mockInteraction: any;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+
+      mockInteraction = {
+        guildId: 'guild123',
+        options: {
+          getSubcommand: jest.fn().mockReturnValue('list'),
+        },
+        reply: jest.fn().mockResolvedValue(undefined),
+        client: {} as any,
+      };
+    });
+
+    it('should handle list subcommand', async () => {
+      const { execute } = await import('../../src/commands/permissions.js');
+      
+      await execute(mockInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalled();
+    });
+
+    it('should handle missing guild ID', async () => {
+      const { execute } = await import('../../src/commands/permissions.js');
+      mockInteraction.guildId = null;
+
+      await execute(mockInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ephemeral: true,
+        })
+      );
+    });
+
+    it('should handle errors gracefully', async () => {
+      const { execute } = await import('../../src/commands/permissions.js');
+      mockInteraction.options.getSubcommand = jest.fn().mockImplementation(() => {
+        throw new Error('Test error');
+      });
+
+      await execute(mockInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalled();
+    });
+  });
 });

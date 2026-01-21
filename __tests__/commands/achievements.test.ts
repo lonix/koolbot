@@ -1,5 +1,10 @@
-import { describe, it, expect } from '@jest/globals';
-import { data } from '../../src/commands/achievements.js';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import type { ChatInputCommandInteraction, User, Client } from 'discord.js';
+import { data, execute } from '../../src/commands/achievements.js';
+import { GamificationService } from '../../src/services/gamification-service.js';
+
+jest.mock('../../src/services/gamification-service.js');
+jest.mock('../../src/utils/logger.js');
 
 describe('Achievements Command', () => {
   describe('command metadata', () => {
@@ -197,6 +202,129 @@ describe('Achievements Command', () => {
 
       expect(accoladeText).not.toContain(' - ');
       expect(accoladeText).toContain('🏆 **Some Badge**\n');
+    });
+  });
+
+  describe('execute', () => {
+    let mockInteraction: Partial<ChatInputCommandInteraction>;
+    let mockUser: Partial<User>;
+    let mockGamificationService: any;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+
+      mockUser = {
+        id: 'user123',
+        username: 'TestUser',
+        displayAvatarURL: jest.fn().mockReturnValue('https://example.com/avatar.png'),
+      };
+
+      mockInteraction = {
+        user: mockUser as User,
+        client: {} as Client,
+        options: {
+          getUser: jest.fn().mockReturnValue(null),
+        } as any,
+        reply: jest.fn().mockResolvedValue(undefined),
+      };
+
+      mockGamificationService = {
+        getUserGamification: jest.fn(),
+        getAccoladeDefinition: jest.fn(),
+      };
+
+      (GamificationService.getInstance as jest.Mock).mockReturnValue(mockGamificationService);
+    });
+
+    it('should display achievements for user', async () => {
+      const earnedDate = new Date('2024-01-01');
+      mockGamificationService.getUserGamification.mockResolvedValue({
+        accolades: [
+          {
+            type: 'first_hour',
+            earnedAt: earnedDate,
+            metadata: { value: 1, unit: 'hrs' },
+          },
+        ],
+        achievements: [],
+      });
+
+      mockGamificationService.getAccoladeDefinition.mockReturnValue({
+        emoji: '🎉',
+        name: 'First Steps',
+        description: 'Spent your first hour in voice chat',
+      });
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalled();
+    });
+
+    it('should handle user with no achievements', async () => {
+      mockGamificationService.getUserGamification.mockResolvedValue({
+        accolades: [],
+        achievements: [],
+      });
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith({
+        content: expect.stringContaining("hasn't earned any badges yet"),
+        ephemeral: true,
+      });
+    });
+
+    it('should handle null user gamification', async () => {
+      mockGamificationService.getUserGamification.mockResolvedValue(null);
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith({
+        content: expect.stringContaining("hasn't earned any badges yet"),
+        ephemeral: true,
+      });
+    });
+
+    it('should handle errors gracefully', async () => {
+      mockGamificationService.getUserGamification.mockRejectedValue(new Error('Database error'));
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith({
+        content: 'There was an error while executing this command!',
+        ephemeral: true,
+      });
+    });
+
+    it('should display achievements for specified user', async () => {
+      const otherUser = {
+        id: 'user456',
+        username: 'OtherUser',
+        displayAvatarURL: jest.fn().mockReturnValue('https://example.com/avatar2.png'),
+      };
+
+      mockInteraction.options!.getUser = jest.fn().mockReturnValue(otherUser);
+
+      mockGamificationService.getUserGamification.mockResolvedValue({
+        accolades: [
+          {
+            type: 'first_hour',
+            earnedAt: new Date(),
+            metadata: { value: 1, unit: 'hrs' },
+          },
+        ],
+        achievements: [],
+      });
+
+      mockGamificationService.getAccoladeDefinition.mockReturnValue({
+        emoji: '🎉',
+        name: 'First Steps',
+        description: 'Test',
+      });
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockGamificationService.getUserGamification).toHaveBeenCalledWith('user456');
     });
   });
 });
