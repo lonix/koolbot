@@ -605,9 +605,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle select menu interactions
   if (interaction.isStringSelectMenu()) {
     try {
-      const { handleWizardSelectMenu } =
-        await import("./handlers/wizard-select-handler.js");
-      await handleWizardSelectMenu(interaction);
+      // Check if it's a VC transfer select
+      if (interaction.customId.startsWith("vc_transfer_select_")) {
+        const { handleVCTransferSelect } = await import(
+          "./handlers/vc-transfer-select-handler.js"
+        );
+        await handleVCTransferSelect(interaction);
+      } else {
+        // Handle wizard select menus
+        const { handleWizardSelectMenu } = await import(
+          "./handlers/wizard-select-handler.js"
+        );
+        await handleWizardSelectMenu(interaction);
+      }
     } catch (error) {
       logger.error("Error handling select menu interaction:", error);
     }

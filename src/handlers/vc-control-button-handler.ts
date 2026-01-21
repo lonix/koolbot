@@ -10,6 +10,8 @@ import {
   PermissionFlagsBits,
   VoiceChannel,
   ChannelType,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
@@ -181,9 +183,39 @@ async function handleTransfer(
   interaction: ButtonInteraction,
   channel: VoiceChannel,
 ): Promise<void> {
+  // Get members in the channel (excluding the owner)
+  const membersInChannel = Array.from(channel.members.values()).filter(
+    (m) => m.id !== interaction.user.id && !m.user.bot,
+  );
+
+  if (membersInChannel.length === 0) {
+    await interaction.reply({
+      content:
+        "❌ There are no other users in the channel to transfer ownership to. Invite someone to the channel first!",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Create a select menu with members in the channel
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId(`vc_transfer_select_${channel.id}_${interaction.user.id}`)
+    .setPlaceholder("Select a user to transfer ownership to")
+    .addOptions(
+      membersInChannel.slice(0, 25).map((member) => ({
+        label: member.displayName,
+        description: `Transfer ownership to ${member.displayName}`,
+        value: member.id,
+      })),
+    );
+
+  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    selectMenu,
+  );
+
   await interaction.reply({
-    content:
-      "💡 To transfer ownership, use the `/transfer-ownership` command while in this channel.",
+    content: "👑 Select a user to transfer channel ownership:",
+    components: [row],
     ephemeral: true,
   });
 }
