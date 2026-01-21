@@ -54,6 +54,18 @@ describe('CooldownManager', () => {
       expect(result1).toBe(true);
       expect(result2).toBe(false);
     });
+
+    it('should handle zero cooldown duration', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      const result = cooldownManager.isOnCooldown('user1', 'command1', 0);
+      expect(result).toBe(false);
+    });
+
+    it('should handle very long cooldown durations', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      const result = cooldownManager.isOnCooldown('user1', 'command1', 86400); // 24 hours
+      expect(result).toBe(true);
+    });
   });
 
   describe('setCooldown', () => {
@@ -80,6 +92,16 @@ describe('CooldownManager', () => {
       
       expect(cooldownManager.isOnCooldown('user1', 'command1', 60)).toBe(true);
       expect(cooldownManager.isOnCooldown('user1', 'command2', 60)).toBe(true);
+    });
+
+    it('should handle special characters in user IDs', () => {
+      cooldownManager.setCooldown('user-123!@#', 'command1');
+      expect(cooldownManager.isOnCooldown('user-123!@#', 'command1', 60)).toBe(true);
+    });
+
+    it('should handle special characters in command names', () => {
+      cooldownManager.setCooldown('user1', 'command-test_1');
+      expect(cooldownManager.isOnCooldown('user1', 'command-test_1', 60)).toBe(true);
     });
   });
 
@@ -118,6 +140,20 @@ describe('CooldownManager', () => {
       const result = cooldownManager.getRemainingCooldown('user1', 'command1', 60);
       expect(result).toBe(1);
     });
+
+    it('should handle exactly at cooldown boundary', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      jest.advanceTimersByTime(60000); // Exactly 60 seconds
+      
+      const result = cooldownManager.getRemainingCooldown('user1', 'command1', 60);
+      expect(result).toBe(0);
+    });
+
+    it('should return 0 for zero cooldown duration', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      const result = cooldownManager.getRemainingCooldown('user1', 'command1', 0);
+      expect(result).toBe(0);
+    });
   });
 
   describe('clearCooldown', () => {
@@ -152,6 +188,14 @@ describe('CooldownManager', () => {
         cooldownManager.clearCooldown('user1', 'command1');
       }).not.toThrow();
     });
+
+    it('should allow setting cooldown after clearing', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      cooldownManager.clearCooldown('user1', 'command1');
+      cooldownManager.setCooldown('user1', 'command1');
+      
+      expect(cooldownManager.isOnCooldown('user1', 'command1', 60)).toBe(true);
+    });
   });
 
   describe('clearAllCooldowns', () => {
@@ -171,6 +215,56 @@ describe('CooldownManager', () => {
       expect(() => {
         cooldownManager.clearAllCooldowns();
       }).not.toThrow();
+    });
+
+    it('should allow setting new cooldowns after clearing all', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      cooldownManager.clearAllCooldowns();
+      cooldownManager.setCooldown('user1', 'command1');
+      
+      expect(cooldownManager.isOnCooldown('user1', 'command1', 60)).toBe(true);
+    });
+
+    it('should clear many cooldowns efficiently', () => {
+      // Set cooldowns for many users and commands
+      for (let i = 0; i < 100; i++) {
+        cooldownManager.setCooldown(`user${i}`, `command${i}`);
+      }
+      
+      cooldownManager.clearAllCooldowns();
+      
+      // Verify all are cleared
+      for (let i = 0; i < 100; i++) {
+        expect(cooldownManager.isOnCooldown(`user${i}`, `command${i}`, 60)).toBe(false);
+      }
+    });
+  });
+
+  describe('edge cases', () => {
+    it('should handle rapid consecutive setCooldown calls', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      cooldownManager.setCooldown('user1', 'command1');
+      cooldownManager.setCooldown('user1', 'command1');
+      
+      expect(cooldownManager.isOnCooldown('user1', 'command1', 60)).toBe(true);
+    });
+
+    it('should handle empty user ID', () => {
+      cooldownManager.setCooldown('', 'command1');
+      expect(cooldownManager.isOnCooldown('', 'command1', 60)).toBe(true);
+    });
+
+    it('should handle empty command name', () => {
+      cooldownManager.setCooldown('user1', '');
+      expect(cooldownManager.isOnCooldown('user1', '', 60)).toBe(true);
+    });
+
+    it('should handle very short time intervals', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      jest.advanceTimersByTime(1); // 1ms
+      
+      const result = cooldownManager.getRemainingCooldown('user1', 'command1', 1);
+      expect(result).toBeGreaterThanOrEqual(0);
     });
   });
 });
