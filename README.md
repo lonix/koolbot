@@ -739,7 +739,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 <div align="center">
 
-**KoolBot v0.6.0** - Making Discord servers more engaging! 🚀
+**KoolBot v1.0.0** - Making Discord servers more engaging! 🚀
 
 Built with ❤️ using TypeScript and Discord.js
 

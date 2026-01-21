@@ -1809,7 +1809,7 @@ Users joining the lobby will automatically get their own channel.
 🤖 KoolBot Statistics
 
 Uptime: 7 days, 14 hours, 23 minutes
-Version: 0.6.0
+Version: 1.0.0
 
 Performance:
   Memory Usage: 245 MB

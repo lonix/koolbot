@@ -63,6 +63,12 @@ Your bot is now online! Next steps in Discord:
 │ CONFIGURE IN DISCORD (All commands are disabled by default)             │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                           │
+│ Quick Start - Interactive Wizard (Recommended):                         │
+│   /setup wizard                                                          │
+│   # Guided setup for voice channels, tracking, quotes, and more         │
+│                                                                           │
+│ -- OR Manual Configuration --                                            │
+│                                                                           │
 │ Basic Commands:                                                          │
 │   /config set key:ping.enabled value:true                               │
 │   /config reload                                                         │
