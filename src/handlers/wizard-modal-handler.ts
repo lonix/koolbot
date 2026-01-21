@@ -87,15 +87,30 @@ async function handleVcModal(
   const prefix = interaction.fields.getTextInputValue("channel_prefix") || "🎮";
 
   // Save configuration
-  wizardService.addConfiguration(userId, guildId, "voicechannels.enabled", true);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "voicechannels.enabled",
+    true,
+  );
   wizardService.addConfiguration(
     userId,
     guildId,
     "voicechannels.category.name",
     categoryName,
   );
-  wizardService.addConfiguration(userId, guildId, "voicechannels.lobby.name", lobbyName);
-  wizardService.addConfiguration(userId, guildId, "voicechannels.channel.prefix", prefix);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "voicechannels.lobby.name",
+    lobbyName,
+  );
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "voicechannels.channel.prefix",
+    prefix,
+  );
 
   await interaction.deferUpdate();
 
@@ -112,7 +127,8 @@ async function handleVcModal(
   await interaction.followUp({ embeds: [embed], ephemeral: true });
 
   // Import helper to move to next feature
-  const { moveToNextFeature } = await import("./wizard-button-handler-helpers.js");
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
   await moveToNextFeature(interaction.channel!, guild, userId, guildId);
 }
 
@@ -122,12 +138,26 @@ async function handleVtModal(
   userId: string,
   guildId: string,
 ): Promise<void> {
-  const channelName = interaction.fields.getTextInputValue("announcements_channel");
-  const schedule = interaction.fields.getTextInputValue("announcements_schedule") || "0 16 * * 5";
+  const channelName = interaction.fields.getTextInputValue(
+    "announcements_channel",
+  );
+  const schedule =
+    interaction.fields.getTextInputValue("announcements_schedule") ||
+    "0 16 * * 5";
 
   // Save configuration
-  wizardService.addConfiguration(userId, guildId, "voicetracking.enabled", true);
-  wizardService.addConfiguration(userId, guildId, "voicetracking.seen.enabled", true);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "voicetracking.enabled",
+    true,
+  );
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "voicetracking.seen.enabled",
+    true,
+  );
   wizardService.addConfiguration(
     userId,
     guildId,
@@ -162,6 +192,7 @@ async function handleVtModal(
   await interaction.followUp({ embeds: [embed], ephemeral: true });
 
   // Import helper to move to next feature
-  const { moveToNextFeature } = await import("./wizard-button-handler-helpers.js");
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
   await moveToNextFeature(interaction.channel!, guild, userId, guildId);
 }

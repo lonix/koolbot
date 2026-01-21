@@ -1,5 +1,10 @@
 import { WizardService } from "../services/wizard-service.js";
-import { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from "discord.js";
+import {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+} from "discord.js";
 
 const wizardService = WizardService.getInstance();
 
@@ -27,10 +32,16 @@ export async function moveToNextFeature(
     wizardService.updateSession(userId, guildId, state);
 
     const nextFeature = state.selectedFeatures[nextFeatureIndex];
-    
+
     // Import and call feature configuration
-    const { startFeatureConfiguration } = await import("../commands/setup-wizard-helpers.js");
-    await startFeatureConfiguration(interaction, guild, userId, nextFeature as any);
+    const { startFeatureConfiguration } =
+      await import("../commands/setup-wizard-helpers.js");
+    await startFeatureConfiguration(
+      interaction,
+      guild,
+      userId,
+      nextFeature as any,
+    );
   }
 }
 
@@ -93,5 +104,9 @@ async function showSummary(
       .setEmoji("❌"),
   );
 
-  await interaction.followUp({ embeds: [embed], components: [buttons], ephemeral: true });
+  await interaction.followUp({
+    embeds: [embed],
+    components: [buttons],
+    ephemeral: true,
+  });
 }

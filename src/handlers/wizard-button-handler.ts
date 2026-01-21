@@ -73,16 +73,34 @@ export async function handleWizardButton(
         await handleCancel(interaction, userId, guildId);
         break;
       case "vc":
-        await handleVoiceChannelAction(interaction, guild, userId, guildId, parts);
+        await handleVoiceChannelAction(
+          interaction,
+          guild,
+          userId,
+          guildId,
+          parts,
+        );
         break;
       case "vt":
-        await handleVoiceTrackingAction(interaction, guild, userId, guildId, parts);
+        await handleVoiceTrackingAction(
+          interaction,
+          guild,
+          userId,
+          guildId,
+          parts,
+        );
         break;
       case "quotes":
         await handleQuotesAction(interaction, guild, userId, guildId, parts);
         break;
       case "gamif":
-        await handleGamificationAction(interaction, guild, userId, guildId, parts);
+        await handleGamificationAction(
+          interaction,
+          guild,
+          userId,
+          guildId,
+          parts,
+        );
         break;
       case "logging":
         await handleLoggingAction(interaction, guild, userId, guildId, parts);
@@ -137,8 +155,14 @@ async function handleContinue(
   wizardService.updateSession(userId, guildId, state);
 
   // Import the setup-wizard module to call feature configuration
-  const { startFeatureConfiguration } = await import("../commands/setup-wizard-helpers.js");
-  await startFeatureConfiguration(interaction.channel!, guild, userId, firstFeature as any);
+  const { startFeatureConfiguration } =
+    await import("../commands/setup-wizard-helpers.js");
+  await startFeatureConfiguration(
+    interaction.channel!,
+    guild,
+    userId,
+    firstFeature as any,
+  );
 }
 
 async function handleCancel(
@@ -225,7 +249,11 @@ async function handleVcExisting(
     .setDescription("Choose an existing voice category to use:")
     .setColor(0x5865f2);
 
-  await interaction.followUp({ embeds: [embed], components: [row], ephemeral: true });
+  await interaction.followUp({
+    embeds: [embed],
+    components: [row],
+    ephemeral: true,
+  });
 }
 
 async function handleVcNew(
@@ -403,7 +431,11 @@ async function handleQuotesConfigure(
     .setDescription("Choose a channel where quotes will be posted:")
     .setColor(0x5865f2);
 
-  await interaction.followUp({ embeds: [embed], components: [row], ephemeral: true });
+  await interaction.followUp({
+    embeds: [embed],
+    components: [row],
+    ephemeral: true,
+  });
 }
 
 async function handleGamificationAction(
@@ -417,8 +449,19 @@ async function handleGamificationAction(
 
   switch (subAction) {
     case "enable":
-      wizardService.addConfiguration(userId, guildId, "gamification.enabled", true);
-      await handleFeatureComplete(interaction, guild, userId, guildId, "Gamification");
+      wizardService.addConfiguration(
+        userId,
+        guildId,
+        "gamification.enabled",
+        true,
+      );
+      await handleFeatureComplete(
+        interaction,
+        guild,
+        userId,
+        guildId,
+        "Gamification",
+      );
       break;
     case "skip":
       await handleFeatureSkip(interaction, guild, userId, guildId);
@@ -504,7 +547,11 @@ async function handleLoggingConfigure(
     )
     .setColor(0x5865f2);
 
-  await interaction.followUp({ embeds: [embed], components: [row], ephemeral: true });
+  await interaction.followUp({
+    embeds: [embed],
+    components: [row],
+    ephemeral: true,
+  });
 }
 
 async function handleFeatureComplete(
@@ -566,8 +613,14 @@ async function moveToNextFeature(
     wizardService.updateSession(userId, guildId, state);
 
     const nextFeature = state.selectedFeatures[nextFeatureIndex];
-    const { startFeatureConfiguration } = await import("../commands/setup-wizard-helpers.js");
-    await startFeatureConfiguration(interaction, guild, userId, nextFeature as any);
+    const { startFeatureConfiguration } =
+      await import("../commands/setup-wizard-helpers.js");
+    await startFeatureConfiguration(
+      interaction,
+      guild,
+      userId,
+      nextFeature as any,
+    );
   }
 }
 
@@ -626,7 +679,11 @@ async function showSummary(
       .setEmoji("❌"),
   );
 
-  await interaction.followUp({ embeds: [embed], components: [buttons], ephemeral: true });
+  await interaction.followUp({
+    embeds: [embed],
+    components: [buttons],
+    ephemeral: true,
+  });
 }
 
 async function handleFinish(
@@ -663,7 +720,8 @@ async function handleFinish(
       const member = await guild.members.fetch(userId);
       const serverChannel = guild.channels.cache.find(
         (ch: any) =>
-          ch.type === 0 && ch.permissionsFor(guild.members.me).has("SendMessages"),
+          ch.type === 0 &&
+          ch.permissionsFor(guild.members.me).has("SendMessages"),
       );
       if (serverChannel) {
         await serverChannel.send({

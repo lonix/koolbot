@@ -42,9 +42,9 @@ export async function startFeatureConfiguration(
   const guildId = guild.id;
   const state = wizardService.getSession(userId, guildId);
   if (!state) {
-    await interaction.followUp({ 
-      content: "❌ Wizard session expired. Please start again.", 
-      ephemeral: true 
+    await interaction.followUp({
+      content: "❌ Wizard session expired. Please start again.",
+      ephemeral: true,
     });
     return;
   }

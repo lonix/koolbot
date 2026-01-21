@@ -81,7 +81,12 @@ export async function handleWizardSelectMenu(
         await handleQuotesChannelSelection(interaction, guild, userId, guildId);
         break;
       case "logging":
-        await handleLoggingChannelSelection(interaction, guild, userId, guildId);
+        await handleLoggingChannelSelection(
+          interaction,
+          guild,
+          userId,
+          guildId,
+        );
         break;
       default:
         await interaction.reply({
@@ -145,7 +150,12 @@ async function handleVcCategorySelection(
   }
 
   // Save configuration
-  wizardService.addConfiguration(userId, guildId, "voicechannels.enabled", true);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "voicechannels.enabled",
+    true,
+  );
   wizardService.addConfiguration(
     userId,
     guildId,
@@ -179,7 +189,8 @@ async function handleVcCategorySelection(
   await interaction.followUp({ embeds: [embed], ephemeral: true });
 
   // Import helper to move to next feature
-  const { moveToNextFeature } = await import("./wizard-button-handler-helpers.js");
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
   await moveToNextFeature(interaction.channel!, guild, userId, guildId);
 }
 
@@ -202,7 +213,12 @@ async function handleQuotesChannelSelection(
 
   // Save configuration
   wizardService.addConfiguration(userId, guildId, "quotes.enabled", true);
-  wizardService.addConfiguration(userId, guildId, "quotes.channel_id", selectedChannelId);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "quotes.channel_id",
+    selectedChannelId,
+  );
 
   await interaction.deferUpdate();
 
@@ -214,7 +230,8 @@ async function handleQuotesChannelSelection(
   await interaction.followUp({ embeds: [embed], ephemeral: true });
 
   // Import helper to move to next feature
-  const { moveToNextFeature } = await import("./wizard-button-handler-helpers.js");
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
   await moveToNextFeature(interaction.channel!, guild, userId, guildId);
 }
 
@@ -238,11 +255,26 @@ async function handleLoggingChannelSelection(
   const primaryChannel = selectedChannelIds[0];
 
   wizardService.addConfiguration(userId, guildId, "core.startup.enabled", true);
-  wizardService.addConfiguration(userId, guildId, "core.startup.channel_id", primaryChannel);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "core.startup.channel_id",
+    primaryChannel,
+  );
   wizardService.addConfiguration(userId, guildId, "core.errors.enabled", true);
-  wizardService.addConfiguration(userId, guildId, "core.errors.channel_id", primaryChannel);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "core.errors.channel_id",
+    primaryChannel,
+  );
   wizardService.addConfiguration(userId, guildId, "core.config.enabled", true);
-  wizardService.addConfiguration(userId, guildId, "core.config.channel_id", primaryChannel);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "core.config.channel_id",
+    primaryChannel,
+  );
 
   await interaction.deferUpdate();
 
@@ -260,6 +292,7 @@ async function handleLoggingChannelSelection(
   await interaction.followUp({ embeds: [embed], ephemeral: true });
 
   // Import helper to move to next feature
-  const { moveToNextFeature } = await import("./wizard-button-handler-helpers.js");
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
   await moveToNextFeature(interaction.channel!, guild, userId, guildId);
 }

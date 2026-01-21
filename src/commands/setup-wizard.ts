@@ -56,7 +56,9 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("feature")
-          .setDescription("Configure a specific feature (leave empty for full setup)")
+          .setDescription(
+            "Configure a specific feature (leave empty for full setup)",
+          )
           .setRequired(false)
           .addChoices(
             { name: "Voice Channels", value: "voicechannels" },
@@ -122,7 +124,11 @@ async function handleWizard(
 
     // Create wizard session
     const selectedFeatures = featureParam ? [featureParam] : [];
-    const state = wizardService.createSession(userId, guildId, selectedFeatures);
+    const state = wizardService.createSession(
+      userId,
+      guildId,
+      selectedFeatures,
+    );
     state.detectedResources = {
       categories: detectedChannels.voiceCategories,
       voiceChannels: detectedChannels.lobbyChannels,
@@ -133,10 +139,20 @@ async function handleWizard(
     // Start wizard with ephemeral interaction
     if (featureParam) {
       // Direct to specific feature configuration
-      await startFeatureConfiguration(interaction, interaction.guild!, userId, featureParam as FeatureKey);
+      await startFeatureConfiguration(
+        interaction,
+        interaction.guild!,
+        userId,
+        featureParam as FeatureKey,
+      );
     } else {
       // Show feature selection
-      await showFeatureSelection(interaction, interaction.guild!.name, userId, guildId);
+      await showFeatureSelection(
+        interaction,
+        interaction.guild!.name,
+        userId,
+        guildId,
+      );
     }
   } catch (error: any) {
     logger.error("Error starting wizard:", error);
@@ -174,7 +190,9 @@ async function showFeatureSelection(
         inline: false,
       })),
     )
-    .setFooter({ text: "Click buttons below to select features • Session expires in 15 minutes" });
+    .setFooter({
+      text: "Click buttons below to select features • Session expires in 15 minutes",
+    });
 
   // Create select menu for features
   const selectMenu = new StringSelectMenuBuilder()
@@ -312,9 +330,17 @@ async function configureVoiceChannels(
   );
 
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   } else {
-    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   }
 }
 
@@ -346,9 +372,17 @@ async function configureVoiceTracking(
   );
 
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   } else {
-    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   }
 }
 
@@ -382,9 +416,17 @@ async function configureQuotes(
   );
 
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   } else {
-    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   }
 }
 
@@ -416,9 +458,17 @@ async function configureGamification(
   );
 
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   } else {
-    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   }
 }
 
@@ -455,8 +505,16 @@ async function configureLogging(
   );
 
   if (interaction.replied || interaction.deferred) {
-    await interaction.followUp({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   } else {
-    await interaction.reply({ embeds: [embed], components: [buttons], ephemeral: true });
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
   }
 }

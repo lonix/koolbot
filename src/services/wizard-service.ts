@@ -104,7 +104,9 @@ export class WizardService {
     };
 
     this.sessions.set(sessionKey, state);
-    logger.debug(`Created wizard session for user ${userId} in guild ${guildId}`);
+    logger.debug(
+      `Created wizard session for user ${userId} in guild ${guildId}`,
+    );
     return state;
   }
 
@@ -133,7 +135,11 @@ export class WizardService {
   /**
    * Update wizard state
    */
-  updateSession(userId: string, guildId: string, updates: Partial<WizardState>): boolean {
+  updateSession(
+    userId: string,
+    guildId: string,
+    updates: Partial<WizardState>,
+  ): boolean {
     const sessionKey = this.getSessionKey(userId, guildId);
     const state = this.sessions.get(sessionKey);
 
@@ -169,7 +175,11 @@ export class WizardService {
   /**
    * Get configuration value from wizard state
    */
-  getConfiguration(userId: string, guildId: string, key: string): string | number | boolean | undefined {
+  getConfiguration(
+    userId: string,
+    guildId: string,
+    key: string,
+  ): string | number | boolean | undefined {
     const state = this.getSession(userId, guildId);
     if (!state) {
       return undefined;
@@ -237,7 +247,9 @@ export class WizardService {
     }
 
     try {
-      logger.info(`Applying wizard configuration for user ${userId}: ${Object.keys(state.configuration).length} settings`);
+      logger.info(
+        `Applying wizard configuration for user ${userId}: ${Object.keys(state.configuration).length} settings`,
+      );
 
       // Apply each configuration setting
       for (const [key, value] of Object.entries(state.configuration)) {
@@ -249,7 +261,9 @@ export class WizardService {
 
       // Trigger reload to apply changes
       await this.configService.triggerReload();
-      logger.info(`Successfully applied wizard configuration for user ${userId}`);
+      logger.info(
+        `Successfully applied wizard configuration for user ${userId}`,
+      );
 
       return true;
     } catch (error) {
@@ -285,7 +299,8 @@ export class WizardService {
    */
   private getSettingDescription(key: string): string {
     const descriptions: Record<string, string> = {
-      "voicechannels.enabled": "Enable/disable dynamic voice channel management",
+      "voicechannels.enabled":
+        "Enable/disable dynamic voice channel management",
       "voicechannels.category.name": "Name of the category for voice channels",
       "voicechannels.lobby.name": "Name of the lobby channel",
       "voicechannels.lobby.offlinename": "Name of the offline lobby channel",
@@ -293,20 +308,28 @@ export class WizardService {
       "voicechannels.channel.suffix": "Suffix for dynamically created channels",
       "voicetracking.enabled": "Enable/disable voice activity tracking",
       "voicetracking.seen.enabled": "Enable/disable last seen tracking",
-      "voicetracking.announcements.enabled": "Enable/disable weekly voice channel announcements",
-      "voicetracking.announcements.schedule": "Cron expression for weekly announcements",
-      "voicetracking.announcements.channel": "Channel name for voice channel announcements",
-      "voicetracking.admin_roles": "Comma-separated role names that can manage tracking",
+      "voicetracking.announcements.enabled":
+        "Enable/disable weekly voice channel announcements",
+      "voicetracking.announcements.schedule":
+        "Cron expression for weekly announcements",
+      "voicetracking.announcements.channel":
+        "Channel name for voice channel announcements",
+      "voicetracking.admin_roles":
+        "Comma-separated role names that can manage tracking",
       "quotes.enabled": "Enable/disable quote system",
       "quotes.channel_id": "Channel ID for quote messages",
       "quotes.add_roles": "Comma-separated role IDs that can add quotes",
       "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",
       "gamification.enabled": "Enable/disable gamification system",
-      "core.startup.enabled": "Enable/disable Discord logging for bot startup/shutdown events",
-      "core.startup.channel_id": "Discord channel ID for startup/shutdown logging",
-      "core.errors.enabled": "Enable/disable Discord logging for critical errors",
+      "core.startup.enabled":
+        "Enable/disable Discord logging for bot startup/shutdown events",
+      "core.startup.channel_id":
+        "Discord channel ID for startup/shutdown logging",
+      "core.errors.enabled":
+        "Enable/disable Discord logging for critical errors",
       "core.errors.channel_id": "Discord channel ID for error logging",
-      "core.config.enabled": "Enable/disable Discord logging for configuration changes",
+      "core.config.enabled":
+        "Enable/disable Discord logging for configuration changes",
       "core.config.channel_id": "Discord channel ID for config change logging",
     };
 

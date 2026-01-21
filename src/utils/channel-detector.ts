@@ -1,4 +1,10 @@
-import { Guild, ChannelType, CategoryChannel, TextChannel, VoiceChannel } from "discord.js";
+import {
+  Guild,
+  ChannelType,
+  CategoryChannel,
+  TextChannel,
+  VoiceChannel,
+} from "discord.js";
 import logger from "./logger.js";
 
 export interface DetectedChannels {
