@@ -1,0 +1,169 @@
+# GitHub Copilot Setup Steps for KoolBot Development
+# This file provides onboarding instructions for developers setting up the KoolBot project
+
+version: '1.0'
+title: 'KoolBot Development Setup'
+description: 'Setup steps for contributing to KoolBot - A modular Discord bot with voice channel management, activity tracking, and comprehensive configuration'
+
+steps:
+  - title: 'Prerequisites Check'
+    description: 'Ensure you have the required tools installed before starting'
+    commands:
+      - description: 'Check Node.js version (requires 22.0.0 or higher)'
+        command: 'node --version'
+      - description: 'Check npm version'
+        command: 'npm --version'
+      - description: 'Check Docker installation'
+        command: 'docker --version'
+      - description: 'Check Docker Compose installation'
+        command: 'docker-compose --version'
+    notes:
+      - 'Node.js 22.0.0 or higher is required'
+      - 'Docker and Docker Compose are needed for containerized development'
+      - 'You will need a Discord Bot Token from Discord Developer Portal'
+
+  - title: 'Fork and Clone Repository'
+    description: 'Fork the repository on GitHub and clone it locally'
+    commands:
+      - description: 'Clone your forked repository'
+        command: 'git clone https://github.com/YOUR_USERNAME/koolbot.git'
+      - description: 'Navigate to the project directory'
+        command: 'cd koolbot'
+      - description: 'Add upstream remote'
+        command: 'git remote add upstream https://github.com/lonix/koolbot.git'
+
+  - title: 'Install Dependencies'
+    description: 'Install all required npm packages'
+    commands:
+      - description: 'Install project dependencies'
+        command: 'npm install'
+    notes:
+      - 'This may take a few minutes depending on your internet connection'
+      - 'All dependencies will be installed from package-lock.json'
+
+  - title: 'Configure Environment'
+    description: 'Set up your environment variables'
+    commands:
+      - description: 'Copy the example environment file'
+        command: 'cp .env.example .env'
+    notes:
+      - 'Edit .env file with your Discord bot credentials'
+      - 'DISCORD_TOKEN: Get from Discord Developer Portal → Bot tab'
+      - 'CLIENT_ID: Get from Discord Developer Portal → General Information'
+      - 'GUILD_ID: Right-click your Discord server → Copy ID (requires Developer Mode)'
+      - 'MONGODB_URI: Use mongodb://mongodb:27017/koolbot for Docker or your local MongoDB URI'
+
+  - title: 'Build the Project'
+    description: 'Compile TypeScript to JavaScript'
+    commands:
+      - description: 'Build the project'
+        command: 'npm run build'
+    notes:
+      - 'This compiles TypeScript files in src/ to JavaScript in dist/'
+      - 'Build must succeed before running the bot'
+
+  - title: 'Run Tests'
+    description: 'Verify everything works by running the test suite'
+    commands:
+      - description: 'Run all tests'
+        command: 'npm test'
+      - description: 'Run tests with coverage'
+        command: 'npm run test:coverage'
+    notes:
+      - 'All tests should pass before making changes'
+      - 'Coverage reports help identify untested code'
+
+  - title: 'Quality Checks'
+    description: 'Run linting and formatting checks'
+    commands:
+      - description: 'Run ESLint'
+        command: 'npm run lint'
+      - description: 'Check code formatting'
+        command: 'npm run format:check'
+      - description: 'Run all quality checks'
+        command: 'npm run check'
+      - description: 'Lint markdown files'
+        command: 'npx markdownlint "**/*.md" --ignore node_modules --ignore dist'
+    notes:
+      - 'All quality checks must pass before submitting a PR'
+      - 'Use npm run lint:fix to auto-fix linting issues'
+      - 'Use npm run format to auto-format code'
+
+  - title: 'Development Options'
+    description: 'Choose your preferred development setup'
+    options:
+      - name: 'Local Development'
+        description: 'Run the bot locally with hot reload'
+        commands:
+          - description: 'Start MongoDB (if not using Docker)'
+            command: 'docker run -d -p 27017:27017 --name mongodb mongo:latest'
+          - description: 'Run bot in development mode'
+            command: 'npm run dev'
+        notes:
+          - 'Hot reload is enabled - changes auto-restart the bot'
+          - 'Logs appear in your terminal'
+
+      - name: 'Docker Development'
+        description: 'Run everything in Docker containers'
+        commands:
+          - description: 'Start development environment'
+            command: 'docker-compose -f docker-compose.dev.yml up'
+          - description: 'Start in detached mode'
+            command: 'docker-compose -f docker-compose.dev.yml up -d'
+          - description: 'View logs'
+            command: 'docker-compose logs -f bot'
+        notes:
+          - 'Includes MongoDB and bot in containers'
+          - 'Source code is mounted for hot reload'
+          - 'Use docker-compose down to stop'
+
+  - title: 'Explore the Codebase'
+    description: 'Key files and directories to understand'
+    notes:
+      - 'src/index.ts - Main entry point, wires services and registers commands'
+      - 'src/commands/ - Discord slash commands'
+      - 'src/services/ - Core services (config, voice, tracking, logging)'
+      - 'src/models/ - MongoDB schemas'
+      - 'src/utils/ - Utility functions and helpers'
+      - '__tests__/ - Test files mirroring src/ structure'
+      - '.github/copilot-instructions.md - Detailed architecture and coding patterns'
+
+  - title: 'Next Steps'
+    description: 'You are ready to contribute!'
+    notes:
+      - 'Read CONTRIBUTING.md for contribution guidelines'
+      - 'Review COMMANDS.md to understand available commands'
+      - 'Check SETTINGS.md for configuration options'
+      - 'See .github/copilot-instructions.md for architecture details'
+      - 'Create a new branch for your changes: git checkout -b feature/your-feature'
+      - 'Make your changes following the coding standards'
+      - 'Run npm run check:all before committing'
+      - 'Write tests for new functionality'
+      - 'Submit a pull request with a clear description'
+
+resources:
+  - title: 'Documentation'
+    links:
+      - name: 'README'
+        path: 'README.md'
+      - name: 'Contributing Guide'
+        path: 'CONTRIBUTING.md'
+      - name: 'Commands Reference'
+        path: 'COMMANDS.md'
+      - name: 'Settings Reference'
+        path: 'SETTINGS.md'
+      - name: 'Testing Guide'
+        path: 'TESTING.md'
+      - name: 'Copilot Instructions'
+        path: '.github/copilot-instructions.md'
+
+  - title: 'External Resources'
+    links:
+      - name: 'Discord Developer Portal'
+        url: 'https://discord.com/developers/applications'
+      - name: 'Discord.js Documentation'
+        url: 'https://discord.js.org/'
+      - name: 'MongoDB Documentation'
+        url: 'https://www.mongodb.com/docs/'
+      - name: 'TypeScript Documentation'
+        url: 'https://www.typescriptlang.org/docs/'
