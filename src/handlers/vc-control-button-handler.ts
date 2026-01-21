@@ -11,11 +11,8 @@ import {
   VoiceChannel,
   ChannelType,
   StringSelectMenuBuilder,
-  StringSelectMenuInteraction,
 } from "discord.js";
 import logger from "../utils/logger.js";
-import { VoiceChannelManager } from "../services/voice-channel-manager.js";
-import { ChannelInvite } from "../models/channel-invite.js";
 
 export async function handleVCControlButton(
   interaction: ButtonInteraction,
@@ -62,15 +59,10 @@ export async function handleVCControlButton(
         await handleCustomizeName(interaction, channel as VoiceChannel);
         break;
       case "privacy":
-        await handlePrivacy(
-          interaction,
-          channel as VoiceChannel,
-          ownerId,
-          channelId,
-        );
+        await handlePrivacy(interaction, channel as VoiceChannel, ownerId);
         break;
       case "invite":
-        await handleInvite(interaction, channel as VoiceChannel);
+        await handleInvite(interaction);
         break;
       case "transfer":
         await handleTransfer(interaction, channel as VoiceChannel);
@@ -117,7 +109,6 @@ async function handlePrivacy(
   interaction: ButtonInteraction,
   channel: VoiceChannel,
   ownerId: string,
-  channelId: string,
 ): Promise<void> {
   // Check current privacy state by looking at @everyone permissions
   const everyoneRole = interaction.guild?.roles.everyone;
@@ -167,10 +158,7 @@ async function handlePrivacy(
   }
 }
 
-async function handleInvite(
-  interaction: ButtonInteraction,
-  channel: VoiceChannel,
-): Promise<void> {
+async function handleInvite(interaction: ButtonInteraction): Promise<void> {
   // Show modal or user select for inviting
   await interaction.reply({
     content:
