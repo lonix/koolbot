@@ -1,7 +1,5 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import type { ChatInputCommandInteraction, Client } from 'discord.js';
-import { data, execute } from '../../src/commands/dbtrunk.js';
-import { VoiceChannelTruncationService } from '../../src/services/voice-channel-truncation.js';
+import { describe, it, expect, jest } from '@jest/globals';
+import { data } from '../../src/commands/dbtrunk.js';
 
 jest.mock('../../src/services/voice-channel-truncation.js');
 jest.mock('../../src/utils/logger.js');

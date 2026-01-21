@@ -1,6 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { data, execute } from '../../src/commands/help.js';
-import type { ChatInputCommandInteraction, CommandInteractionOptionResolver } from 'discord.js';
+import type { ChatInputCommandInteraction } from 'discord.js';
 
 // Mock logger
 jest.mock('../../src/utils/logger.js');

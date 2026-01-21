@@ -1,6 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { data, execute } from '../../src/commands/amikool.js';
-import type { CommandInteraction, GuildMember, User, Collection, Role } from 'discord.js';
+import type { CommandInteraction, GuildMember, User, Role } from 'discord.js';
 import { createMockCollection } from '../test-utils.js';
 
 // Mock logger

@@ -1,8 +1,6 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { ChatInputCommandInteraction, Client } from 'discord.js';
-import { data, execute } from "../../src/commands/reactrole.js";
+import { describe, it, expect, jest } from "@jest/globals";
+import { data } from "../../src/commands/reactrole.js";
 import { PermissionFlagsBits } from "discord.js";
-import { ReactionRoleService } from '../../src/services/reaction-role-service.js';
 
 jest.mock('../../src/services/reaction-role-service.js');
 jest.mock('../../src/utils/logger.js');

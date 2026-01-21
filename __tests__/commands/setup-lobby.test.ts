@@ -1,8 +1,5 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import type { ChatInputCommandInteraction, Guild, Client } from 'discord.js';
+import { describe, it, expect, jest } from '@jest/globals';
 import { command } from '../../src/commands/setup-lobby.js';
-import { ChannelInitializer } from '../../src/services/channel-initializer.js';
-import { ConfigService } from '../../src/services/config-service.js';
 
 jest.mock('../../src/services/channel-initializer.js');
 jest.mock('../../src/services/config-service.js');

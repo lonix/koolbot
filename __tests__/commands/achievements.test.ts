@@ -1,7 +1,5 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import type { ChatInputCommandInteraction, User, Client } from 'discord.js';
-import { data, execute } from '../../src/commands/achievements.js';
-import { GamificationService } from '../../src/services/gamification-service.js';
+import { describe, it, expect, jest } from '@jest/globals';
+import { data } from '../../src/commands/achievements.js';
 
 jest.mock('../../src/services/gamification-service.js');
 jest.mock('../../src/utils/logger.js');

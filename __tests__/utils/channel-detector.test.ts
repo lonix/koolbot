@@ -1,7 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { ChannelDetector } from '../../src/utils/channel-detector.js';
-import type { Guild, Collection, CategoryChannel, VoiceChannel, TextChannel, GuildBasedChannel } from 'discord.js';
-import { ChannelType } from 'discord.js';
+import { ChannelType, type Guild, type CategoryChannel, type VoiceChannel, type TextChannel, type GuildBasedChannel } from 'discord.js';
 import { createMockCollection } from '../test-utils.js';
 
 describe('ChannelDetector', () => {

@@ -1,7 +1,5 @@
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { ChatInputCommandInteraction, Client } from 'discord.js';
-import { data, execute } from "../../src/commands/announce.js";
-import { ScheduledAnnouncementService } from '../../src/services/scheduled-announcement-service.js';
+import { describe, it, expect, jest } from "@jest/globals";
+import { data } from "../../src/commands/announce.js";
 
 jest.mock('../../src/services/scheduled-announcement-service.js');
 jest.mock('../../src/utils/logger.js');

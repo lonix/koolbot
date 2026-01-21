@@ -1,7 +1,5 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import type { ChatInputCommandInteraction, Guild, GuildMember, VoiceChannel, User, Client } from 'discord.js';
-import { data, execute } from '../../src/commands/transfer-ownership.js';
-import { VoiceChannelManager } from '../../src/services/voice-channel-manager.js';
+import { describe, it, expect, jest } from '@jest/globals';
+import { data } from '../../src/commands/transfer-ownership.js';
 
 jest.mock('../../src/services/voice-channel-manager.js');
 jest.mock('../../src/utils/logger.js');
