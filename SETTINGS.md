@@ -10,13 +10,14 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 
 - [Environment Variables](#-environment-variables) - Required `.env` file settings
 - [Command Enablement](#-command-enablement) - Enable/disable commands
+- [Setup Wizard](#-setup-wizard) - Interactive configuration system
+- [Quote System](#-quote-system) - Quote management settings
 - [Voice Channel Management](#-voice-channel-management) - Dynamic channel settings
 - [Voice Activity Tracking](#-voice-activity-tracking) - Track user activity
 - [Voice Channel Cleanup](#-voice-channel-cleanup) - Data retention
 - [Announcements](#-announcements) - Automated stats posting
 - [Gamification System](#-gamification-system) - Badges and achievements
 - [Reaction Roles](#-reaction-roles) - Self-assignable roles via reactions
-- [Quote System](#-quote-system) - Quote management settings
 - [Discord Logging](#-discord-logging) - Event logging to channels
 - [Fun Features](#-fun-features) - Easter eggs and extras
 - [Rate Limiting](#-rate-limiting) - Command spam protection
@@ -102,6 +103,46 @@ Enable or disable individual commands. **All commands are disabled by default.**
 
 ---
 
+## 🧙 Setup Wizard
+
+Interactive configuration wizard for guided server setup.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `wizard.enabled` | `true` | Enable/disable the interactive setup wizard |
+
+### About the Setup Wizard
+
+The setup wizard (`/setup wizard`) provides an interactive, step-by-step configuration experience for new users. It:
+
+- **Auto-detects resources** - Finds existing categories and channels
+- **Validates settings** - Ensures channels exist before applying configuration
+- **Guides users** - Provides explanations and suggestions for each setting
+- **Bulk configuration** - Sets multiple related settings at once
+- **Feature-specific** - Can configure individual features or all at once
+
+**When to disable:**
+
+- If you prefer manual configuration only
+- To prevent accidental reconfiguration by admins
+- For servers with complex custom setups
+
+### Example
+
+```bash
+# Disable the wizard (not recommended for new users)
+/config set key:wizard.enabled value:false
+/config reload
+
+# Re-enable the wizard
+/config set key:wizard.enabled value:true
+/config reload
+```
+
+**Note:** The wizard is **enabled by default** and is the recommended way to configure KoolBot for first-time users.
+
+---
+
 ## 📣 Quote System
 
 Configure the quote management system.
@@ -109,7 +150,9 @@ Configure the quote management system.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `quotes.enabled` | `false` | Enable/disable the quote system |
+| `quotes.channel_id` | `""` | Channel ID for quote messages (empty = use command channel) |
 | `quotes.cooldown` | `60` | Seconds between quote additions (per user) |
+| `quotes.cleanup_interval` | `5` | Minutes between cleanup of unauthorized quote messages |
 | `quotes.max_length` | `1000` | Maximum character length for quotes |
 | `quotes.add_roles` | `""` | Role IDs allowed to add quotes (comma-separated, empty = all) |
 | `quotes.delete_roles` | `""` | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
@@ -123,7 +166,16 @@ Configure the quote management system.
 /config set key:quotes.max_length value:500
 /config set key:quotes.add_roles value:"123456789,987654321"
 /config reload
+
+# Optionally set a dedicated quote channel
+/config set key:quotes.channel_id value:"1234567890"
+/config reload
 ```
+
+**Notes:**
+
+- `quotes.channel_id` - If set, all quotes will be posted to this channel. If empty, quotes post in the channel where the command was used.
+- `quotes.cleanup_interval` - Controls how often unauthorized quote messages are cleaned up (messages from non-command sources in the quote channel).
 
 ---
 
@@ -850,6 +902,10 @@ The config system automatically converts values:
 - `amikool.role.name` (string, default: "")
 - `quotes.enabled` (bool, default: false)
 
+#### Setup Wizard
+
+- `wizard.enabled` (bool, default: true)
+
 #### Reaction Roles
 
 - `reactionroles.enabled` (bool, default: false)
@@ -857,7 +913,9 @@ The config system automatically converts values:
 
 #### Quote System
 
+- `quotes.channel_id` (string, default: "")
 - `quotes.cooldown` (number, default: 60)
+- `quotes.cleanup_interval` (number, default: 5)
 - `quotes.max_length` (number, default: 1000)
 - `quotes.add_roles` (string, default: "")
 - `quotes.delete_roles` (string, default: "")

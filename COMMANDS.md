@@ -11,6 +11,7 @@ Complete reference for all KoolBot commands with examples and detailed explanati
 
 - [User Commands](#-user-commands) - Available to all server members
 - [Admin Commands](#-admin-commands) - Require Administrator permission
+  - [/setup](#setup) - Interactive setup wizard (recommended for first-time setup)
   - [/config](#config) - Configuration management
   - [/permissions](#permissions) - Role-based access control
   - [/vc](#vc) - Voice channel management
@@ -1615,6 +1616,139 @@ Message: Good morning, {server_name}!
 
 ---
 
+### `/setup`
+
+**Description:** Interactive setup wizard to guide you through configuring KoolBot features.
+This is the recommended way to set up your server for the first time or configure new features.
+
+**Configuration:**
+
+```bash
+/config set key:wizard.enabled value:true  # Enabled by default
+/config reload
+```
+
+**Usage:**
+
+```bash
+/setup wizard                       # Start full setup wizard
+/setup wizard feature:voicechannels # Configure specific feature
+```
+
+**Subcommands:**
+
+#### `/setup wizard [feature]`
+
+Start the interactive configuration wizard. Optionally specify a feature to configure directly.
+
+**Parameters:**
+
+- `feature` (optional) - Choose a specific feature to configure:
+  - `voicechannels` - Dynamic voice channel management
+  - `voicetracking` - Voice activity tracking
+  - `quotes` - Quote system
+  - `gamification` - Achievement badges
+  - `logging` - Core event logging
+
+**What it does:**
+
+The wizard provides a guided, step-by-step setup experience:
+
+1. **Auto-detects existing resources** - Finds existing categories, channels, and suggests using them
+2. **Feature selection** - Choose which features to enable (full wizard) or configure a specific feature
+3. **Interactive configuration** - Uses buttons, select menus, and modals to collect settings
+4. **Validates input** - Ensures channels exist and settings are valid
+5. **Applies configuration** - Automatically sets all related config keys
+6. **Shows summary** - Displays what was configured
+
+**Example Flow (Full Wizard):**
+
+```text
+Step 1: Feature Selection
+┌────────────────────────────────┐
+│ Select features to configure:  │
+│ ☑ Voice Channels              │
+│ ☑ Voice Tracking              │
+│ ☐ Quote System                │
+│ ☐ Gamification                │
+│ ☐ Core Logging                │
+│                                │
+│ [Continue] [Cancel]            │
+└────────────────────────────────┘
+
+Step 2: Voice Channels Setup
+┌────────────────────────────────┐
+│ Voice Channels Configuration   │
+│                                │
+│ Category: Voice Channels       │
+│ Lobby Name: 🟢 Lobby          │
+│                                │
+│ [Next] [Back] [Cancel]         │
+└────────────────────────────────┘
+
+Step 3: Confirmation
+✅ Configuration Complete!
+Voice Channels: Enabled
+Voice Tracking: Enabled
+Quote System: Disabled
+Gamification: Disabled
+Core Logging: Disabled
+
+Run /config reload to apply changes.
+```
+
+#### Example: Specific Feature Setup
+
+```bash
+/setup wizard feature:voicetracking
+```
+
+This will:
+
+- Skip feature selection
+- Go directly to voice tracking configuration
+- Configure tracking settings, excluded channels, and admin roles
+- Enable the feature upon completion
+
+#### Benefits over manual configuration
+
+- **Beginner-friendly** - No need to know exact config keys
+- **Auto-detection** - Suggests existing channels and categories
+- **Guided workflow** - Step-by-step with explanations
+- **Error prevention** - Validates all inputs before applying
+- **Bulk configuration** - Sets multiple related settings at once
+- **Interactive** - Uses Discord's UI components for better UX
+
+**When to use:**
+
+- **First-time setup** - Easiest way to get started
+- **New features** - Enable and configure additional features
+- **Troubleshooting** - Reconfigure features that aren't working
+- **Channel changes** - Update channel references after reorganization
+
+**vs. `/setup-lobby`:**
+
+- `/setup wizard` - Comprehensive, multi-feature setup with guided workflow
+- `/setup-lobby` - Quick voice lobby setup only (legacy command)
+
+**Use Cases:**
+
+- Initial server setup
+- Onboarding new administrators
+- Enabling new features
+- Reconfiguring after channel reorganization
+- Troubleshooting misconfigured features
+
+**Notes:**
+
+- Sessions expire after 15 minutes of inactivity
+- All interactions are ephemeral (only visible to you)
+- Requires Administrator permission
+- Changes take effect after `/config reload`
+- Wizard validates that channels exist before applying
+
+---
+
 ### `/setup-lobby`
 
 **Description:** Configure the voice channel lobby system.
@@ -1725,7 +1859,9 @@ All admin commands require **Administrator** permission in Discord.
 
 | Command | Additional Requirements |
 | --- | --- |
+| `/setup` | Administrator permission |
 | `/config` | Administrator permission |
+| `/permissions` | Administrator permission |
 | `/vc` | Administrator + voice channels enabled |
 | `/dbtrunk` | Administrator + cleanup enabled |
 | `/announce-vc-stats` | Administrator + tracking & announcements enabled |
@@ -1775,6 +1911,10 @@ The bot needs these Discord permissions to function:
 ### Admin Commands Summary
 
 ```bash
+# Initial Setup (Recommended)
+/setup wizard                      # Interactive setup wizard
+/setup wizard feature:...          # Configure specific feature
+
 # Configuration
 /config list                       # List all settings
 /config get key:...                # Get setting value
@@ -1783,6 +1923,15 @@ The bot needs these Discord permissions to function:
 /config reload                     # Reload commands
 /config export                     # Export config
 /config import                     # Import config
+
+# Permissions
+/permissions set command:... role:...   # Set command permissions
+/permissions add command:... role:...   # Add role to command
+/permissions remove command:... role:...# Remove role from command
+/permissions list                       # View all permissions
+/permissions view user:...              # Check user access
+/permissions view role:...              # Check role access
+/permissions clear command:...          # Clear all restrictions
 
 # Voice Management
 /vc reload                         # Clean empty channels
@@ -1793,11 +1942,17 @@ The bot needs these Discord permissions to function:
 /dbtrunk run                       # Run cleanup now
 
 # Other Admin
-/setup-lobby                       # Setup voice lobby
+/setup-lobby                       # Setup voice lobby (legacy)
 /announce-vc-stats                 # Post stats now
 /announce create                   # Schedule announcement
 /announce list                     # View announcements
 /announce delete                   # Remove announcement
+/reactrole create                  # Create reaction role
+/reactrole list                    # View reaction roles
+/reactrole archive                 # Archive reaction role
+/reactrole unarchive               # Unarchive reaction role
+/reactrole delete                  # Delete reaction role
+/reactrole status                  # Check role status
 /botstats                          # Bot statistics
 ```
 
@@ -1806,6 +1961,26 @@ The bot needs these Discord permissions to function:
 ## 🎯 Common Workflows
 
 ### Initial Bot Setup
+
+#### Option 1: Using Setup Wizard (Recommended for beginners)
+
+```bash
+# Use the interactive setup wizard for guided configuration
+/setup wizard
+
+# Or configure specific features
+/setup wizard feature:voicechannels
+/setup wizard feature:voicetracking
+```
+
+The wizard will:
+
+- Auto-detect existing channels
+- Guide you through each feature
+- Validate all settings
+- Apply configuration automatically
+
+#### Option 2: Manual Configuration (Advanced users)
 
 ```bash
 # 1. Enable basic commands
