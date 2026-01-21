@@ -1242,7 +1242,7 @@ Removed 8 channels from Voice Channels category
 
 - **✏️ Rename** - Opens a modal to rename your channel
 - **🔒 Make Private / 🌐 Make Public** - Toggle privacy mode
-- **👥 Invite** - Shows how to invite users (only enabled when private)
+- **👥 Invite** - Invite users to your private channel
 - **👑 Transfer** - Shows how to transfer ownership
 
 **Features:**
@@ -1271,200 +1271,23 @@ Privacy: 🌐 Public
 Only you can see and use these controls
 ```
 
----
+**Available Actions:**
 
-#### `/vc customize name <name>`
+#### Rename Channel
 
-Rename your current voice channel. **Note:** You no longer need to include `{username}` placeholder - you can use any name you want!
+Click the **✏️ Rename** button to open a modal where you can enter a new name for your channel. No placeholder requirements - use any name you want!
 
-**Usage:**
+#### Toggle Privacy
 
-```bash
-/vc customize name name:"🎮 Gaming Room"
-/vc customize name name:"Chill Zone"
-/vc customize name name:"Study Session"
-```
+Click the **🔒 Make Private** button to make your channel invite-only. Only you and invited users will be able to join. Click **🌐 Make Public** to allow anyone to join again.
 
-**Parameters:**
+#### Invite Users
 
-- `name` (required) - New channel name (max 100 characters)
+When your channel is private, click the **👥 Invite** button to see instructions on inviting users. Select a user to grant them permission to join your channel. They'll receive a DM notification.
 
-**Requirements:**
+#### Transfer Ownership
 
-- Must be in a voice channel
-- Must be the owner of the channel
-
-**Example Response:**
-
-```text
-✅ Channel renamed to: **🎮 Gaming Room**
-```
-
-**Use Cases:**
-
-- Personalize your current voice channel
-- Change channel name for different activities
-- Rebrand your space on the fly
-
-#### `/vc customize limit <number>`
-
-Set the user limit for your current voice channel.
-
-**Usage:**
-
-```bash
-/vc customize limit number:5
-/vc customize limit number:10
-/vc customize limit number:0  # Unlimited
-```
-
-**Parameters:**
-
-- `number` (required) - Maximum users allowed (0-99, 0 = unlimited)
-
-**Requirements:**
-
-- Must be in a voice channel
-- Must be the owner of the channel
-
-**Example Response:**
-
-```text
-✅ Channel user limit set to: **5 users**
-```
-
-**Use Cases:**
-
-- Control channel capacity for focused conversations
-- Create intimate spaces for small groups
-- Prevent overcrowding
-
-#### `/vc customize bitrate <kbps>`
-
-Set the audio quality (bitrate) for your current voice channel.
-
-**Usage:**
-
-```bash
-/vc customize bitrate kbps:64   # Standard quality
-/vc customize bitrate kbps:96   # High quality
-/vc customize bitrate kbps:128  # Premium quality (requires server boost)
-```
-
-**Parameters:**
-
-- `kbps` (required) - Bitrate in kilobits per second (8-384)
-  - 8-64 kbps: Low quality (good for voice-only)
-  - 64-96 kbps: Standard quality (recommended)
-  - 96-128 kbps: High quality (clear audio)
-  - 128-384 kbps: Premium quality (requires server boosts)
-
-**Requirements:**
-
-- Must be in a voice channel
-- Must be the owner of the channel
-
-**Note:** Higher bitrates require server boost levels and will be automatically capped at the server's maximum.
-
-**Example Response:**
-
-```text
-✅ Channel bitrate set to: **96 kbps**
-
-Note: Higher bitrates may require server boosts and will be capped at the server's maximum.
-```
-
-**Use Cases:**
-
-- Optimize audio quality for music listening
-- Reduce bandwidth for voice-only conversations
-- Maximize clarity for podcasting or streaming
-
-#### `/vc customize privacy`
-
-Toggle invite-only mode for your current voice channel.
-
-**Usage:**
-
-```bash
-/vc customize privacy  # Toggle between public and private
-```
-
-**Requirements:**
-
-- Must be in a voice channel
-- Must be the owner of the channel
-
-**Response (when making private):**
-
-```text
-🔒 Channel is now **invite-only**! Use `/vc invite` to add users.
-```
-
-**Response (when making public):**
-
-```text
-✅ Channel is now **public**. Anyone can join!
-```
-
-**How it works:**
-
-- **Private:** Only you and invited users can join
-- **Public:** Anyone can join (default)
-- Permission changes apply immediately
-
-**Use Cases:**
-
-- Private meeting or discussion
-- Exclusive group chat
-- Team coordination
-
----
-
-### `/vc invite`
-
-**Description:** Invite a user to your private voice channel. The invited user will receive a DM notification and be granted immediate access.
-
-**Configuration:**
-
-```bash
-/config set key:voicechannels.enabled value:true
-/config reload
-```
-
-**Usage:**
-
-```bash
-/vc invite user:@username
-```
-
-**Parameters:**
-
-- `user` (required) - User to invite to your channel
-
-**Requirements:**
-
-- Must be in a voice channel
-- Must be the owner of the channel
-- Channel must be private (use `/vc customize privacy` first)
-
-**Response:**
-
-```text
-✅ username can now join your channel!
-```
-
-**Notes:**
-
-- Invited user receives DM with channel name and server
-- Permission is granted immediately
-- Invite expires after 15 minutes if not used
-
-**Use Cases:**
-
-- Add friends to private discussion
-- Grant access to specific team members
-- Control who can join your channel
+Click the **👑 Transfer** button to see how to transfer ownership using the `/transfer-ownership` command.
 
 ---
 
@@ -1962,31 +1785,31 @@ Most Used Commands:
 
 ### User Command Permissions
 
-| Command | Permission Level | Additional Requirements |
-| --- | --- | --- |
-| `/ping` | Everyone | Command must be enabled |
-| `/vctop` | Everyone | Voice tracking enabled |
-| `/vcstats` | Everyone | Voice tracking enabled |
-| `/achievements` | Everyone | Gamification enabled |
-| `/seen` | Everyone | Voice tracking + seen enabled |
-| `/quote` | Everyone* | Quotes enabled (*may be role-restricted) |
-| `/amikool` | Everyone | Command enabled + role configured |
-| `/transfer-ownership` | Channel Owner | Must own a voice channel |
+| Command               | Permission Level | Additional Requirements                   |
+| --------------------- | ---------------- | ----------------------------------------- |
+| `/ping`               | Everyone         | Command must be enabled                   |
+| `/vctop`              | Everyone         | Voice tracking enabled                    |
+| `/vcstats`            | Everyone         | Voice tracking enabled                    |
+| `/achievements`       | Everyone         | Gamification enabled                      |
+| `/seen`               | Everyone         | Voice tracking + seen enabled             |
+| `/quote`              | Everyone\*       | Quotes enabled (\*may be role-restricted) |
+| `/amikool`            | Everyone         | Command enabled + role configured         |
+| `/transfer-ownership` | Channel Owner    | Must own a voice channel                  |
 
 ### Admin Command Permissions
 
 All admin commands require **Administrator** permission in Discord.
 
-| Command | Additional Requirements |
-| --- | --- |
-| `/setup` | Administrator permission |
-| `/config` | Administrator permission |
-| `/permissions` | Administrator permission |
-| `/vc` | Administrator + voice channels enabled |
-| `/dbtrunk` | Administrator + cleanup enabled |
+| Command              | Additional Requirements                          |
+| -------------------- | ------------------------------------------------ |
+| `/setup`             | Administrator permission                         |
+| `/config`            | Administrator permission                         |
+| `/permissions`       | Administrator permission                         |
+| `/vc`                | Administrator + voice channels enabled           |
+| `/dbtrunk`           | Administrator + cleanup enabled                  |
 | `/announce-vc-stats` | Administrator + tracking & announcements enabled |
-| `/setup-lobby` | Administrator + voice channels enabled |
-| `/botstats` | Administrator permission |
+| `/setup-lobby`       | Administrator + voice channels enabled           |
+| `/botstats`          | Administrator permission                         |
 
 ### Bot Permissions Required
 

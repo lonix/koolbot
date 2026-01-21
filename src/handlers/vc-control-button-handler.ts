@@ -169,9 +169,10 @@ async function handleInvite(
   interaction: ButtonInteraction,
   channel: VoiceChannel,
 ): Promise<void> {
+  // Show modal or user select for inviting
   await interaction.reply({
     content:
-      "💡 To invite someone, use the command `/vc invite user:<@user>` while in this channel.",
+      "💡 To invite someone to your private channel, grant them permission by right-clicking their name and selecting 'Edit Permissions' for this channel. They'll be notified when you do.",
     ephemeral: true,
   });
 }
