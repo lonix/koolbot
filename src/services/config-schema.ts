@@ -69,6 +69,9 @@ export interface ConfigSchema {
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
+
+  // Setup Wizard
+  "wizard.enabled": boolean;
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -141,4 +144,7 @@ export const defaultConfig: ConfigSchema = {
   // Reaction Roles defaults
   "reactionroles.enabled": false,
   "reactionroles.message_channel_id": "",
+
+  // Setup Wizard defaults
+  "wizard.enabled": true,
 };
