@@ -1188,7 +1188,8 @@ Removed 8 channels from Voice Channels category
 
 ### Voice Channel Control Panel
 
-**Description:** When you create a voice channel, an interactive control panel is automatically sent to the channel's text chat (if available). This provides quick access to customization options.
+**Description:** When you create a voice channel, an interactive control panel is automatically sent to the channel's text chat (if
+available). This provides quick access to customization options.
 
 **Configuration:**
 
@@ -1238,11 +1239,13 @@ Click the **✏️ Rename** button to open a modal where you can enter a new nam
 
 #### Toggle Privacy
 
-Click the **🔒 Make Private** button to make your channel invite-only. Only you and invited users will be able to join. Click **🌐 Make Public** to allow anyone to join again.
+Click the **🔒 Make Private** button to make your channel invite-only. Only you and invited users will be able to join. Click **🌐
+Make Public** to allow anyone to join again.
 
 #### Invite Users
 
-When your channel is private, click the **👥 Invite** button to see instructions on inviting users. Select a user to grant them permission to join your channel. They'll receive a DM notification.
+When your channel is private, click the **👥 Invite** button to see instructions on inviting users. Select a user to grant them
+permission to join your channel. They'll receive a DM notification.
 
 #### Transfer Ownership
 
