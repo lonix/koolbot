@@ -443,47 +443,6 @@ Each quote appears as an embed with:
 
 ---
 
-### `/transfer-ownership`
-
-**Description:** Transfer ownership of your voice channel to another user.
-
-**Configuration:**
-
-```bash
-/config set key:voicechannels.enabled value:true
-/config reload
-```
-
-**Usage:**
-
-```bash
-/transfer-ownership user:@NewOwner
-```
-
-**Requirements:**
-
-- You must be the current channel owner
-- You must be in a voice channel
-- Voice channel management must be enabled
-
-**Parameters:**
-
-- `user` (required) - The user to transfer ownership to
-
-**Example Response:**
-
-```text
-✅ Channel ownership transferred to @NewOwner
-```
-
-**Use Cases:**
-
-- Leave while keeping the channel active
-- Delegate channel control
-- Hand off to another organizer
-
----
-
 ## 🔧 Admin Commands
 
 Commands that require Administrator permission in Discord.
@@ -1287,7 +1246,7 @@ When your channel is private, click the **👥 Invite** button to see instructio
 
 #### Transfer Ownership
 
-Click the **👑 Transfer** button to see how to transfer ownership using the `/transfer-ownership` command.
+Click the **👑 Transfer** button to select a user from a dropdown menu. Only users currently in the channel will appear. Transfer ownership instantly.
 
 ---
 
@@ -1785,16 +1744,15 @@ Most Used Commands:
 
 ### User Command Permissions
 
-| Command               | Permission Level | Additional Requirements                   |
-| --------------------- | ---------------- | ----------------------------------------- |
-| `/ping`               | Everyone         | Command must be enabled                   |
-| `/vctop`              | Everyone         | Voice tracking enabled                    |
-| `/vcstats`            | Everyone         | Voice tracking enabled                    |
-| `/achievements`       | Everyone         | Gamification enabled                      |
-| `/seen`               | Everyone         | Voice tracking + seen enabled             |
-| `/quote`              | Everyone\*       | Quotes enabled (\*may be role-restricted) |
-| `/amikool`            | Everyone         | Command enabled + role configured         |
-| `/transfer-ownership` | Channel Owner    | Must own a voice channel                  |
+| Command         | Permission Level | Additional Requirements                   |
+| --------------- | ---------------- | ----------------------------------------- |
+| `/ping`         | Everyone         | Command must be enabled                   |
+| `/vctop`        | Everyone         | Voice tracking enabled                    |
+| `/vcstats`      | Everyone         | Voice tracking enabled                    |
+| `/achievements` | Everyone         | Gamification enabled                      |
+| `/seen`         | Everyone         | Voice tracking + seen enabled             |
+| `/quote`        | Everyone\*       | Quotes enabled (\*may be role-restricted) |
+| `/amikool`      | Everyone         | Command enabled + role configured         |
 
 ### Admin Command Permissions
 
@@ -1848,7 +1806,6 @@ The bot needs these Discord permissions to function:
 /seen user:@User                   # Last seen info
 /quote text:"..." author:"@User"   # Add quote to channel
 /amikool                           # Role verification
-/transfer-ownership user:@User     # Transfer channel
 ```
 
 ### Admin Commands Summary

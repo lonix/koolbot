@@ -607,15 +607,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     try {
       // Check if it's a VC transfer select
       if (interaction.customId.startsWith("vc_transfer_select_")) {
-        const { handleVCTransferSelect } = await import(
-          "./handlers/vc-transfer-select-handler.js"
-        );
+        const { handleVCTransferSelect } =
+          await import("./handlers/vc-transfer-select-handler.js");
         await handleVCTransferSelect(interaction);
       } else {
         // Handle wizard select menus
-        const { handleWizardSelectMenu } = await import(
-          "./handlers/wizard-select-handler.js"
-        );
+        const { handleWizardSelectMenu } =
+          await import("./handlers/wizard-select-handler.js");
         await handleWizardSelectMenu(interaction);
       }
     } catch (error) {
