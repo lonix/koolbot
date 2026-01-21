@@ -116,13 +116,17 @@ docker-compose logs -f bot
 
 **Admin Commands:**
 
+- `/setup` - Interactive setup wizard (recommended for first-time configuration)
 - `/config` - Manage all bot settings
+- `/permissions` - Manage role-based command access
 - `/vc` - Voice channel management
 - `/dbtrunk` - Database cleanup management
-- `/setup-lobby` - Configure voice lobby
+- `/setup-lobby` - Configure voice lobby (legacy, use `/setup wizard` instead)
 - `/exclude-channel` - Exclude channels from tracking
 - `/botstats` - View bot performance metrics
 - `/announce-vc-stats` - Manually trigger voice channel stats announcements
+- `/announce` - Manage scheduled announcements
+- `/reactrole` - Manage reaction roles
 
 📖 **[Complete Command Reference →](COMMANDS.md)**
 
@@ -135,6 +139,21 @@ All bot features are **disabled by default** for security. You enable and config
 ### Initial Setup
 
 Once your bot is running, configure it from Discord:
+
+#### Option 1: Interactive Setup Wizard (Recommended for beginners)
+
+```bash
+# Use the guided setup wizard for easy configuration
+/setup wizard
+
+# The wizard will:
+# - Auto-detect your existing channels
+# - Guide you through each feature
+# - Help you configure voice channels, tracking, quotes, and more
+# - Apply all settings for you
+```
+
+#### Option 2: Manual Configuration (Advanced users)
 
 ```bash
 # Enable the ping command
@@ -720,7 +739,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 <div align="center">
 
-**KoolBot v0.6.0** - Making Discord servers more engaging! 🚀
+**KoolBot v1.0.0** - Making Discord servers more engaging! 🚀
 
 Built with ❤️ using TypeScript and Discord.js
 
