@@ -6,6 +6,7 @@ export interface ConfigSchema {
   "voicechannels.lobby.offlinename": string;
   "voicechannels.channel.prefix": string;
   "voicechannels.channel.suffix": string;
+  "voicechannels.controlpanel.enabled": boolean;
 
   // Voice Activity Tracking
   "voicetracking.enabled": boolean;
@@ -82,6 +83,7 @@ export const defaultConfig: ConfigSchema = {
   "voicechannels.lobby.offlinename": "Offline Lobby",
   "voicechannels.channel.prefix": "🎮",
   "voicechannels.channel.suffix": "",
+  "voicechannels.controlpanel.enabled": true,
 
   // Voice Activity Tracking
   "voicetracking.enabled": false,

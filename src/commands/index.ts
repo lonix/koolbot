@@ -5,7 +5,6 @@ import { execute as amikool } from "./amikool.js";
 import { execute as vctop } from "./vctop.js";
 import { execute as vcstats } from "./vcstats.js";
 import { execute as seen } from "./seen.js";
-import { execute as transferOwnership } from "./transfer-ownership.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
 import { execute as configCommand } from "./config/index.js";
 import { execute as quoteCommand } from "./quote.js";
@@ -48,11 +47,6 @@ const commands: Record<
   },
   config: async (interaction) => {
     await configCommand(interaction);
-  },
-  "transfer-ownership": async (interaction) => {
-    if (await configService.getBoolean("voicechannels.enabled", false)) {
-      await transferOwnership(interaction);
-    }
   },
   "announce-vc-stats": async (interaction) => {
     if (
