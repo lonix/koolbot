@@ -2,19 +2,20 @@ import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { ChannelDetector } from '../../src/utils/channel-detector.js';
 import type { Guild, Collection, CategoryChannel, VoiceChannel, TextChannel, GuildBasedChannel } from 'discord.js';
 import { ChannelType } from 'discord.js';
+import { createMockCollection } from '../test-utils.js';
 
 describe('ChannelDetector', () => {
   let mockGuild: Partial<Guild>;
-  let mockChannels: Map<string, Partial<GuildBasedChannel>>;
+  let mockChannels: any;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockChannels = new Map();
+    mockChannels = createMockCollection<string, Partial<GuildBasedChannel>>([]);
 
     mockGuild = {
       fetch: jest.fn().mockResolvedValue(undefined),
       channels: {
-        fetch: jest.fn().mockResolvedValue(mockChannels as Collection<string, GuildBasedChannel>),
+        fetch: jest.fn().mockResolvedValue(mockChannels),
       } as any,
     };
   });

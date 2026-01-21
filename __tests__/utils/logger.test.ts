@@ -186,9 +186,9 @@ describe('Logger Error Handling', () => {
 
   describe('Actual Logger Instance', () => {
     it('should export a valid logger instance', () => {
-      expect(testLogger).toBeDefined();
+      expect(logger).toBeDefined();
       expect(typeof logger.info).toBe('function');
-      expect(typeof testLogger.error).toBe('function');
+      expect(typeof logger.error).toBe('function');
       expect(typeof logger.debug).toBe('function');
       expect(typeof logger.warn).toBe('function');
     });
@@ -201,7 +201,7 @@ describe('Logger Error Handling', () => {
 
     it('should log error messages', () => {
       expect(() => {
-        testLogger.error('Test error message');
+        logger.error('Test error message');
       }).not.toThrow();
     });
 
@@ -214,7 +214,7 @@ describe('Logger Error Handling', () => {
     it('should log errors with stack traces', () => {
       const error = new Error('Test error');
       expect(() => {
-        testLogger.error('Error occurred:', error);
+        logger.error('Error occurred:', error);
       }).not.toThrow();
     });
   });

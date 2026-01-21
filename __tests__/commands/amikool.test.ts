@@ -1,11 +1,10 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { data, execute } from '../../src/commands/amikool.js';
 import type { CommandInteraction, GuildMember, User, Collection, Role } from 'discord.js';
+import { createMockCollection } from '../test-utils.js';
 
 // Mock logger
 jest.mock('../../src/utils/logger.js');
-// Mock mongoose to avoid database connections
-jest.mock('mongoose');
 
 describe('Amikool Command', () => {
   describe('command metadata', () => {
@@ -35,12 +34,13 @@ describe('Amikool Command', () => {
         tag: 'TestUser#1234',
       };
 
-      const mockRoles = new Map();
-      mockRoles.set('role1', { name: 'Kool', id: 'role1' } as Role);
+      const mockRoles = createMockCollection<string, Role>([
+        ['role1', { name: 'Kool', id: 'role1' } as Role],
+      ]);
       
       mockMember = {
         roles: {
-          cache: mockRoles as Collection<string, Role>,
+          cache: mockRoles,
         } as any,
       };
 
@@ -71,7 +71,7 @@ describe('Amikool Command', () => {
 
     it('should reply with not kool response if user does not have kool role', async () => {
       mockMember!.roles = {
-        cache: new Map() as Collection<string, Role>,
+        cache: createMockCollection<string, Role>([]),
       } as any;
 
       await execute(mockInteraction as CommandInteraction);
@@ -96,6 +96,7 @@ describe('Amikool Command', () => {
 
       await execute(mockInteraction as CommandInteraction);
 
+      // When error occurs, command should still try to reply
       expect(mockInteraction.reply).toHaveBeenCalled();
     });
   });

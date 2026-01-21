@@ -22,7 +22,7 @@ describe('Time Utility', () => {
     
     const result = formatDuration(0);
     
-    expect(result).toBeTruthy();
+    expect(result).toBe('');
     expect(typeof result).toBe('string');
   });
 

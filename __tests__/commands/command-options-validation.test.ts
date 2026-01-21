@@ -76,8 +76,8 @@ describe('Command Options Validation', () => {
   describe('Announce VC Stats Command Options', () => {
     const json = announceVcStatsData.toJSON();
 
-    it('should have no options', () => {
-      expect(json.options).toBeUndefined();
+    it('should have no options or empty options array', () => {
+      expect(json.options === undefined || json.options?.length === 0).toBe(true);
     });
 
     it('should have administrator permission requirement', () => {

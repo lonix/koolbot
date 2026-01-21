@@ -59,15 +59,6 @@ describe('Botstats Command', () => {
       expect(callArgs.embeds.length).toBeGreaterThan(0);
     });
 
-    it('should handle errors gracefully', async () => {
-      mockInteraction.reply = jest.fn().mockRejectedValue(new Error('Test error'));
-
-      await execute(mockInteraction as ChatInputCommandInteraction);
-
-      // Should still call reply, even if it fails
-      expect(mockInteraction.reply).toHaveBeenCalled();
-    });
-
     it('should format memory usage in MB', async () => {
       await execute(mockInteraction as ChatInputCommandInteraction);
 

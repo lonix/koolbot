@@ -4,8 +4,6 @@ import type { ChatInputCommandInteraction, CommandInteractionOptionResolver } fr
 
 // Mock logger
 jest.mock('../../src/utils/logger.js');
-// Mock mongoose to avoid database connections
-jest.mock('mongoose');
 
 describe('Help Command', () => {
   describe('command metadata', () => {

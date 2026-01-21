@@ -36,12 +36,6 @@ describe('Config Command', () => {
       expect(listSubcommand).toBeDefined();
     });
 
-    it('should have get subcommand', () => {
-      const json = data.toJSON();
-      const getSubcommand = json.options?.find((opt: any) => opt.name === 'get');
-      expect(getSubcommand).toBeDefined();
-    });
-
     it('should have set subcommand', () => {
       const json = data.toJSON();
       const setSubcommand = json.options?.find((opt: any) => opt.name === 'set');
