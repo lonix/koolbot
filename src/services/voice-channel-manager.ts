@@ -6,11 +6,15 @@ import {
   GuildMember,
   Guild,
   Client,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  TextChannel,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
-import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 
 const configService = ConfigService.getInstance();
 
@@ -36,6 +40,13 @@ export class VoiceChannelManager {
       VoiceChannelManager.instance = new VoiceChannelManager(client);
     }
     return VoiceChannelManager.instance;
+  }
+
+  /**
+   * Get the voice channel owned by a specific user
+   */
+  public getUserChannel(userId: string): VoiceChannel | undefined {
+    return this.userChannels.get(userId);
   }
 
   private async getGuild(guildId: string): Promise<Guild | null> {
@@ -452,40 +463,24 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Load user preferences
-      const userPrefs = await UserVoicePreferences.findOne({
-        userId: member.id,
-      });
+      // Determine channel name using default naming
+      const suffix =
+        (await configService.getString("voicechannels.channel.suffix")) ||
+        (await configService.getString("voice_channel.suffix")) ||
+        (await configService.getString("VC_SUFFIX")) ||
+        "'s Room";
+      const prefix = await configService.getString(
+        "voicechannels.channel.prefix",
+        "🎮",
+      );
+      const channelName = `${prefix} ${member.displayName}${suffix}`;
 
-      // Determine channel name
-      let channelName: string;
-      if (userPrefs?.namePattern) {
-        // Use custom name pattern
-        channelName = userPrefs.namePattern.replace(
-          "{username}",
-          member.displayName,
-        );
-      } else {
-        // Use default naming
-        const suffix =
-          (await configService.getString("voicechannels.channel.suffix")) ||
-          (await configService.getString("voice_channel.suffix")) ||
-          (await configService.getString("VC_SUFFIX")) ||
-          "'s Room";
-        const prefix = await configService.getString(
-          "voicechannels.channel.prefix",
-          "🎮",
-        );
-        channelName = `${prefix} ${member.displayName}${suffix}`;
-      }
-
-      // Create channel with preferences
+      // Create channel with default settings
       const channel = await guild.channels.create({
         name: channelName,
         type: ChannelType.GuildVoice,
         parent: category,
-        userLimit: userPrefs?.userLimit ?? 0, // 0 = unlimited
-        bitrate: userPrefs?.bitrate ? userPrefs.bitrate * 1000 : undefined, // Convert kbps to bps (Discord API requires bitrate in bits per second, not kilobits)
+        userLimit: 0, // 0 = unlimited by default
       });
 
       this.userChannels.set(member.id, channel);
@@ -493,8 +488,115 @@ export class VoiceChannelManager {
       logger.info(
         `Created voice channel ${channelName} for ${member.displayName}`,
       );
+
+      // Send control panel if enabled
+      await this.sendControlPanel(channel, member.id);
     } catch (error) {
       logger.error("Error creating user channel:", error);
+    }
+  }
+
+  /**
+   * Send control panel to voice channel's text chat
+   */
+  private async sendControlPanel(
+    channel: VoiceChannel,
+    ownerId: string,
+  ): Promise<void> {
+    try {
+      // Check if control panel is enabled
+      const controlPanelEnabled = await configService.getBoolean(
+        "voicechannels.controlpanel.enabled",
+        true,
+      );
+
+      if (!controlPanelEnabled) {
+        logger.info("Control panel is disabled, skipping");
+        return;
+      }
+
+      // Find the text channel associated with this voice channel
+      // Discord creates a text channel with the same name when a voice channel is created in a stage/voice category
+      // However, for dynamic voice channels, we need to check if there's a text channel
+      // For now, we'll look for a text channel with a similar name or in the same category
+      const category = channel.parent;
+      if (!category) {
+        logger.warn(
+          `No category found for channel ${channel.name}, cannot send control panel`,
+        );
+        return;
+      }
+
+      // Try to find the text channel in the category
+      let textChannel: TextChannel | null = null;
+
+      // Option 1: Look for a text channel with the same name
+      const sameNameChannel = category.children.cache.find(
+        (ch) =>
+          ch.type === ChannelType.GuildText && ch.name === channel.name,
+      );
+      if (sameNameChannel && sameNameChannel.type === ChannelType.GuildText) {
+        textChannel = sameNameChannel as TextChannel;
+      }
+
+      // Option 2: Since Discord voice channels don't automatically have text channels,
+      // we should send the control panel to a designated control/bot channel
+      // For now, log that we can't find a text channel
+      if (!textChannel) {
+        logger.info(
+          `No text channel found for voice channel ${channel.name}, control panel will be sent via DM or ephemeral message`,
+        );
+        // In Discord, voice channels can have associated text channels if they're in a community server
+        // Since this is a dynamic voice channel, we'll skip sending to a text channel
+        // Users can use slash commands instead
+        return;
+      }
+
+      // Create the control panel embed
+      const embed = new EmbedBuilder()
+        .setTitle("🎮 Voice Channel Controls")
+        .setDescription(
+          `Welcome to your voice channel: **${channel.name}**\n\n` +
+            `Use the buttons below to customize your channel!`,
+        )
+        .setColor(0x00ff00)
+        .setFooter({ text: "Only you can see and use these controls" });
+
+      const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`vc_control_name_${channel.id}_${ownerId}`)
+          .setLabel("Rename")
+          .setStyle(ButtonStyle.Primary)
+          .setEmoji("✏️"),
+        new ButtonBuilder()
+          .setCustomId(`vc_control_privacy_${channel.id}_${ownerId}`)
+          .setLabel("Make Private")
+          .setStyle(ButtonStyle.Danger)
+          .setEmoji("🔒"),
+        new ButtonBuilder()
+          .setCustomId(`vc_control_invite_${channel.id}_${ownerId}`)
+          .setLabel("Invite")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("👥")
+          .setDisabled(true), // Disabled until channel is private
+        new ButtonBuilder()
+          .setCustomId(`vc_control_transfer_${channel.id}_${ownerId}`)
+          .setLabel("Transfer")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("👑"),
+      );
+
+      await textChannel.send({
+        content: `<@${ownerId}>`,
+        embeds: [embed],
+        components: [buttons],
+      });
+
+      logger.info(
+        `Sent control panel for channel ${channel.name} to text channel ${textChannel.name}`,
+      );
+    } catch (error) {
+      logger.error("Error sending control panel:", error);
     }
   }
 
@@ -580,38 +682,33 @@ export class VoiceChannelManager {
         return null;
       }
 
-      // Load user preferences
-      const userPrefs = await UserVoicePreferences.findOne({ userId });
       const member = await guild.members.fetch(userId);
 
       // Determine channel name
       let finalChannelName: string;
       if (channelName) {
         finalChannelName = channelName;
-      } else if (userPrefs?.namePattern && member) {
-        // Use custom name pattern
-        finalChannelName = userPrefs.namePattern.replace(
-          "{username}",
-          member.displayName,
-        );
       } else {
         // Use default naming
         const channelPrefix = await configService.getString(
           "voicechannels.channel.prefix",
           "🎮",
         );
+        const channelSuffix = await configService.getString(
+          "voicechannels.channel.suffix",
+          "'s Room",
+        );
         finalChannelName = member
-          ? `${channelPrefix} ${member.displayName}`
+          ? `${channelPrefix} ${member.displayName}${channelSuffix}`
           : `${channelPrefix} ${userId}`;
       }
 
-      // Create the dynamic channel with preferences
+      // Create the dynamic channel with default settings
       const newChannel = await guild.channels.create({
         name: finalChannelName,
         type: ChannelType.GuildVoice,
         parent: category,
-        userLimit: userPrefs?.userLimit ?? 0,
-        bitrate: userPrefs?.bitrate ? userPrefs.bitrate * 1000 : undefined,
+        userLimit: 0, // Default unlimited
         permissionOverwrites: [
           {
             id: userId,
@@ -623,6 +720,12 @@ export class VoiceChannelManager {
           },
         ],
       });
+
+      // Store ownership
+      this.userChannels.set(userId, newChannel);
+
+      // Send control panel
+      await this.sendControlPanel(newChannel, userId);
 
       logger.info(
         `Created dynamic voice channel: ${newChannel.name} for user ${userId}`,

@@ -2,47 +2,60 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   PermissionFlagsBits,
+  ChannelType,
+  VoiceChannel,
 } from "discord.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
-import { UserVoicePreferences } from "../models/user-voice-preferences.js";
+import { ChannelInvite } from "../models/channel-invite.js";
 import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("vc")
   .setDescription("Voice channel management")
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addSubcommand((subcommand) =>
     subcommand
       .setName("reload")
-      .setDescription("Clean up empty voice channels"),
+      .setDescription("Clean up empty voice channels")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
   )
   .addSubcommand((subcommand) =>
     subcommand
       .setName("force-reload")
-      .setDescription("Force cleanup of ALL unmanaged channels in category"),
+      .setDescription("Force cleanup of ALL unmanaged channels in category")
+      .setDefaultMemberPermissions(PermissionFlagsBits.Administrator),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("invite")
+      .setDescription("Invite a user to your voice channel")
+      .addUserOption((option) =>
+        option
+          .setName("user")
+          .setDescription("User to invite")
+          .setRequired(true),
+      ),
   )
   .addSubcommandGroup((group) =>
     group
       .setName("customize")
-      .setDescription("Customize your voice channel settings")
+      .setDescription("Customize your current voice channel")
       .addSubcommand((subcommand) =>
         subcommand
           .setName("name")
-          .setDescription("Set custom channel naming pattern")
+          .setDescription("Rename your current voice channel")
           .addStringOption((option) =>
             option
-              .setName("pattern")
-              .setDescription(
-                'Pattern for channel name (use {username} as placeholder, e.g., "🎮 {username}\'s Room")',
-              )
-              .setRequired(true),
+              .setName("name")
+              .setDescription("New channel name")
+              .setRequired(true)
+              .setMaxLength(100),
           ),
       )
       .addSubcommand((subcommand) =>
         subcommand
           .setName("limit")
-          .setDescription("Set user limit for your voice channel")
+          .setDescription("Set user limit for your current voice channel")
           .addIntegerOption((option) =>
             option
               .setName("number")
@@ -55,7 +68,7 @@ export const data = new SlashCommandBuilder()
       .addSubcommand((subcommand) =>
         subcommand
           .setName("bitrate")
-          .setDescription("Set audio quality for your voice channel")
+          .setDescription("Set audio quality for your current voice channel")
           .addIntegerOption((option) =>
             option
               .setName("kbps")
@@ -69,8 +82,8 @@ export const data = new SlashCommandBuilder()
       )
       .addSubcommand((subcommand) =>
         subcommand
-          .setName("reset")
-          .setDescription("Reset all your voice channel customizations"),
+          .setName("privacy")
+          .setDescription("Toggle invite-only mode for your current channel"),
       ),
   );
 
@@ -83,6 +96,8 @@ export async function execute(
 
     if (subcommandGroup === "customize") {
       await handleCustomize(interaction, subcommand);
+    } else if (subcommand === "invite") {
+      await handleInvite(interaction);
     } else {
       await handleSubcommand(interaction, subcommand);
     }
@@ -99,6 +114,27 @@ async function handleSubcommand(
   interaction: ChatInputCommandInteraction,
   subcommand: string,
 ): Promise<void> {
+  // Check admin permissions for reload commands
+  if (!interaction.member || !("permissions" in interaction.member)) {
+    await interaction.reply({
+      content: "❌ Could not verify your permissions.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const hasAdmin = interaction.member.permissions instanceof PermissionFlagsBits ||
+    (typeof interaction.member.permissions === 'object' && 'has' in interaction.member.permissions &&
+    interaction.member.permissions.has(PermissionFlagsBits.Administrator));
+
+  if (!hasAdmin) {
+    await interaction.reply({
+      content: "❌ You need Administrator permission to use this command.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   switch (subcommand) {
     case "reload":
       await handleReload(interaction);
@@ -193,21 +229,58 @@ async function handleCustomize(
   interaction: ChatInputCommandInteraction,
   subcommand: string,
 ): Promise<void> {
-  const userId = interaction.user.id;
+  // Check if user is in a voice channel
+  if (!interaction.guild || !interaction.member) {
+    await interaction.reply({
+      content: "❌ This command can only be used in a server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const member = interaction.guild.members.cache.get(interaction.user.id);
+  if (!member || !member.voice.channel) {
+    await interaction.reply({
+      content: "❌ You must be in a voice channel to use this command!",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const voiceChannel = member.voice.channel;
+  if (voiceChannel.type !== ChannelType.GuildVoice) {
+    await interaction.reply({
+      content: "❌ This command only works in voice channels.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Check if user is the owner of the channel
+  const voiceManager = VoiceChannelManager.getInstance(interaction.client);
+  const ownedChannel = voiceManager.getUserChannel(member.id);
+
+  if (!ownedChannel || ownedChannel.id !== voiceChannel.id) {
+    await interaction.reply({
+      content: "❌ You can only customize voice channels that you own!",
+      ephemeral: true,
+    });
+    return;
+  }
 
   try {
     switch (subcommand) {
       case "name":
-        await handleCustomizeName(interaction, userId);
+        await handleCustomizeName(interaction, voiceChannel);
         break;
       case "limit":
-        await handleCustomizeLimit(interaction, userId);
+        await handleCustomizeLimit(interaction, voiceChannel);
         break;
       case "bitrate":
-        await handleCustomizeBitrate(interaction, userId);
+        await handleCustomizeBitrate(interaction, voiceChannel);
         break;
-      case "reset":
-        await handleCustomizeReset(interaction, userId);
+      case "privacy":
+        await handleCustomizePrivacy(interaction, voiceChannel);
         break;
       default:
         await interaction.reply({
@@ -219,7 +292,7 @@ async function handleCustomize(
     logger.error("Error handling vc customize:", error);
     await interaction.reply({
       content:
-        "❌ An error occurred while customizing your voice channel settings.",
+        "❌ An error occurred while customizing your voice channel.",
       ephemeral: true,
     });
   }
@@ -227,46 +300,30 @@ async function handleCustomize(
 
 async function handleCustomizeName(
   interaction: ChatInputCommandInteraction,
-  userId: string,
+  channel: VoiceChannel,
 ): Promise<void> {
-  const pattern = interaction.options.getString("pattern", true);
+  const newName = interaction.options.getString("name", true);
 
-  // Validate pattern contains {username} placeholder
-  if (!pattern.includes("{username}")) {
+  // Validate name length
+  if (newName.length > 100) {
     await interaction.reply({
-      content:
-        '❌ Name pattern must include {username} placeholder. Example: "🎮 {username}\'s Room"',
-      ephemeral: true,
-    });
-    return;
-  }
-
-  // Validate pattern length (Discord channel name limit is 100 characters)
-  const testName = pattern.replace("{username}", "A".repeat(32)); // Max Discord display name length (upper bound for validation)
-  if (testName.length > 100) {
-    await interaction.reply({
-      content:
-        "❌ Name pattern is too long. It must be less than 100 characters when username is applied.",
+      content: "❌ Channel name must be 100 characters or less.",
       ephemeral: true,
     });
     return;
   }
 
   try {
-    await UserVoicePreferences.findOneAndUpdate(
-      { userId },
-      { namePattern: pattern },
-      { upsert: true, new: true },
-    );
+    await channel.setName(newName);
 
     await interaction.reply({
-      content: `✅ Your channel name pattern has been set to: **${pattern}**\n\nExample: ${pattern.replace("{username}", interaction.user.username)}`,
+      content: `✅ Channel renamed to: **${newName}**`,
       ephemeral: true,
     });
   } catch (error) {
-    logger.error("Error saving name pattern:", error);
+    logger.error("Error renaming channel:", error);
     await interaction.reply({
-      content: "❌ Failed to save name pattern. Please try again.",
+      content: "❌ Failed to rename channel. Please try again.",
       ephemeral: true,
     });
   }
@@ -274,26 +331,22 @@ async function handleCustomizeName(
 
 async function handleCustomizeLimit(
   interaction: ChatInputCommandInteraction,
-  userId: string,
+  channel: VoiceChannel,
 ): Promise<void> {
   const limit = interaction.options.getInteger("number", true);
 
   try {
-    await UserVoicePreferences.findOneAndUpdate(
-      { userId },
-      { userLimit: limit },
-      { upsert: true, new: true },
-    );
+    await channel.setUserLimit(limit);
 
     const limitText = limit === 0 ? "unlimited" : `${limit} users`;
     await interaction.reply({
-      content: `✅ Your channel user limit has been set to: **${limitText}**`,
+      content: `✅ Channel user limit set to: **${limitText}**`,
       ephemeral: true,
     });
   } catch (error) {
-    logger.error("Error saving user limit:", error);
+    logger.error("Error setting user limit:", error);
     await interaction.reply({
-      content: "❌ Failed to save user limit. Please try again.",
+      content: "❌ Failed to set user limit. Please try again.",
       ephemeral: true,
     });
   }
@@ -301,53 +354,192 @@ async function handleCustomizeLimit(
 
 async function handleCustomizeBitrate(
   interaction: ChatInputCommandInteraction,
-  userId: string,
+  channel: VoiceChannel,
 ): Promise<void> {
   const bitrate = interaction.options.getInteger("kbps", true);
 
   try {
-    await UserVoicePreferences.findOneAndUpdate(
-      { userId },
-      { bitrate },
-      { upsert: true, new: true },
-    );
+    // Convert kbps to bps (Discord API expects bitrate in bits per second)
+    await channel.setBitrate(bitrate * 1000);
 
     await interaction.reply({
-      content: `✅ Your channel bitrate has been set to: **${bitrate} kbps**\n\nNote: Higher bitrates may require server boosts and will be capped at the server's maximum.`,
+      content: `✅ Channel bitrate set to: **${bitrate} kbps**\n\nNote: Higher bitrates may require server boosts and will be capped at the server's maximum.`,
       ephemeral: true,
     });
   } catch (error) {
-    logger.error("Error saving bitrate:", error);
+    logger.error("Error setting bitrate:", error);
     await interaction.reply({
-      content: "❌ Failed to save bitrate. Please try again.",
+      content: "❌ Failed to set bitrate. Please try again.",
       ephemeral: true,
     });
   }
 }
 
-async function handleCustomizeReset(
+async function handleCustomizePrivacy(
   interaction: ChatInputCommandInteraction,
-  userId: string,
+  channel: VoiceChannel,
 ): Promise<void> {
   try {
-    const result = await UserVoicePreferences.findOneAndDelete({ userId });
-
-    if (result) {
+    const everyoneRole = interaction.guild?.roles.everyone;
+    if (!everyoneRole) {
       await interaction.reply({
-        content:
-          "✅ All your voice channel customizations have been reset to defaults.",
+        content: "❌ Could not find @everyone role.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    // Check current privacy state
+    const permissions = channel.permissionOverwrites.cache.get(everyoneRole.id);
+    const isPrivate = permissions?.deny.has(PermissionFlagsBits.Connect);
+
+    if (isPrivate) {
+      // Make public
+      await channel.permissionOverwrites.delete(everyoneRole.id);
+
+      await interaction.reply({
+        content: "✅ Channel is now **public**. Anyone can join!",
         ephemeral: true,
       });
     } else {
+      // Make private
+      await channel.permissionOverwrites.create(everyoneRole, {
+        Connect: false,
+        ViewChannel: false,
+      });
+
+      // Ensure owner has access
+      await channel.permissionOverwrites.create(interaction.user.id, {
+        Connect: true,
+        ViewChannel: true,
+      });
+
       await interaction.reply({
-        content: "ℹ️ You don't have any customizations set.",
+        content:
+          "🔒 Channel is now **invite-only**! Use `/vc invite` to add users.",
         ephemeral: true,
       });
     }
   } catch (error) {
-    logger.error("Error resetting preferences:", error);
+    logger.error("Error toggling privacy:", error);
     await interaction.reply({
-      content: "❌ Failed to reset preferences. Please try again.",
+      content: "❌ Failed to toggle privacy. Please try again.",
+      ephemeral: true,
+    });
+  }
+}
+
+async function handleInvite(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  // Check if user is in a voice channel
+  if (!interaction.guild || !interaction.member) {
+    await interaction.reply({
+      content: "❌ This command can only be used in a server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const member = interaction.guild.members.cache.get(interaction.user.id);
+  if (!member || !member.voice.channel) {
+    await interaction.reply({
+      content: "❌ You must be in a voice channel to invite users!",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const voiceChannel = member.voice.channel;
+  if (voiceChannel.type !== ChannelType.GuildVoice) {
+    await interaction.reply({
+      content: "❌ This command only works in voice channels.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Check if user is the owner
+  const voiceManager = VoiceChannelManager.getInstance(interaction.client);
+  const ownedChannel = voiceManager.getUserChannel(member.id);
+
+  if (!ownedChannel || ownedChannel.id !== voiceChannel.id) {
+    await interaction.reply({
+      content: "❌ You can only invite users to voice channels that you own!",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Check if channel is private
+  const everyoneRole = interaction.guild.roles.everyone;
+  const permissions = voiceChannel.permissionOverwrites.cache.get(
+    everyoneRole.id,
+  );
+  const isPrivate = permissions?.deny.has(PermissionFlagsBits.Connect);
+
+  if (!isPrivate) {
+    await interaction.reply({
+      content:
+        "❌ Your channel is public. Use `/vc customize privacy` to make it private first!",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Get the user to invite
+  const userToInvite = interaction.options.getUser("user", true);
+
+  if (userToInvite.id === interaction.user.id) {
+    await interaction.reply({
+      content: "❌ You cannot invite yourself!",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (userToInvite.bot) {
+    await interaction.reply({
+      content: "❌ You cannot invite bots!",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  try {
+    // Grant permission to the invited user
+    await voiceChannel.permissionOverwrites.create(userToInvite.id, {
+      Connect: true,
+      ViewChannel: true,
+    });
+
+    // Save invite to database
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    await ChannelInvite.create({
+      channelId: voiceChannel.id,
+      userId: userToInvite.id,
+      invitedBy: interaction.user.id,
+      status: "accepted", // Automatically accepted since we granted permissions
+      expiresAt,
+    });
+
+    await interaction.reply({
+      content: `✅ ${userToInvite.username} can now join your channel!`,
+      ephemeral: true,
+    });
+
+    // Try to notify the invited user
+    try {
+      await userToInvite.send(
+        `📩 ${interaction.user.username} invited you to their voice channel **${voiceChannel.name}** in ${interaction.guild.name}!`,
+      );
+    } catch (error) {
+      logger.info(`Could not DM user ${userToInvite.username}:`, error);
+    }
+  } catch (error) {
+    logger.error("Error inviting user:", error);
+    await interaction.reply({
+      content: "❌ Failed to invite user. Please try again.",
       ephemeral: true,
     });
   }
