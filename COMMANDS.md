@@ -443,47 +443,6 @@ Each quote appears as an embed with:
 
 ---
 
-### `/transfer-ownership`
-
-**Description:** Transfer ownership of your voice channel to another user.
-
-**Configuration:**
-
-```bash
-/config set key:voicechannels.enabled value:true
-/config reload
-```
-
-**Usage:**
-
-```bash
-/transfer-ownership user:@NewOwner
-```
-
-**Requirements:**
-
-- You must be the current channel owner
-- You must be in a voice channel
-- Voice channel management must be enabled
-
-**Parameters:**
-
-- `user` (required) - The user to transfer ownership to
-
-**Example Response:**
-
-```text
-✅ Channel ownership transferred to @NewOwner
-```
-
-**Use Cases:**
-
-- Leave while keeping the channel active
-- Delegate channel control
-- Hand off to another organizer
-
----
-
 ## 🔧 Admin Commands
 
 Commands that require Administrator permission in Discord.
@@ -1225,128 +1184,74 @@ Removed 8 channels from Voice Channels category
 - Fix corrupted channel states
 - Emergency cleanup
 
-#### `/vc customize name <pattern>`
+---
 
-Set a custom naming pattern for your dynamically created voice channels.
+### Voice Channel Control Panel
 
-**Usage:**
+**Description:** When you create a voice channel, an interactive control panel is automatically sent to the channel's text chat (if
+available). This provides quick access to customization options.
+
+**Configuration:**
 
 ```bash
-/vc customize name pattern:"🎮 {username}'s Gaming Room"
-/vc customize name pattern:"🎵 {username} Vibes"
-/vc customize name pattern:"{username}'s Chill Zone"
+/config set key:voicechannels.controlpanel.enabled value:true  # Default: true
+/config reload
 ```
 
-**Parameters:**
+**Control Panel Buttons:**
 
-- `pattern` (required) - Channel name template. Use `{username}` as placeholder for your display name.
+- **✏️ Rename** - Opens a modal to rename your channel
+- **🔒 Make Private / 🌐 Make Public** - Toggle privacy mode
+- **👥 Invite** - Invite users to your private channel
+- **👑 Transfer** - Shows how to transfer ownership
+
+**Features:**
+
+- Only visible to channel owner
+- Updates dynamically when privacy mode changes
+- Persists until channel is deleted
+- Posted every time a new channel is created
 
 **Requirements:**
 
-- Pattern must include `{username}` placeholder
-- Final channel name must be under 100 characters
+- Server must have text channels associated with voice channels (community servers)
+- `voicechannels.controlpanel.enabled` must be `true`
 
-**Example Response:**
-
-```text
-✅ Your channel name pattern has been set to: 🎮 {username}'s Gaming Room
-
-Example: 🎮 Alice's Gaming Room
-```
-
-**Use Cases:**
-
-- Personalize your voice channel names
-- Match channel names to your activity (gaming, music, studying)
-- Stand out with custom branding
-
-#### `/vc customize limit <number>`
-
-Set the user limit for your dynamically created voice channels.
-
-**Usage:**
-
-```bash
-/vc customize limit number:5
-/vc customize limit number:10
-/vc customize limit number:0  # Unlimited
-```
-
-**Parameters:**
-
-- `number` (required) - Maximum users allowed (0-99, 0 = unlimited)
-
-**Example Response:**
+**Example Control Panel:**
 
 ```text
-✅ Your channel user limit has been set to: 5 users
+🎮 Voice Channel Controls
+
+Manage your voice channel: **Your Channel Name**
+
+Privacy: 🌐 Public
+
+[✏️ Rename] [🔒 Make Private] [👥 Invite] [👑 Transfer]
+
+Only you can see and use these controls
 ```
 
-**Use Cases:**
+**Available Actions:**
 
-- Control channel capacity for focused conversations
-- Create intimate spaces for small groups
-- Prevent overcrowding
+#### Rename Channel
 
-#### `/vc customize bitrate <kbps>`
+Click the **✏️ Rename** button to open a modal where you can enter a new name for your channel. No placeholder requirements - use any name you want!
 
-Set the audio quality (bitrate) for your dynamically created voice channels.
+#### Toggle Privacy
 
-**Usage:**
+Click the **🔒 Make Private** button to make your channel invite-only. Only you and invited users will be able to join. Click **🌐
+Make Public** to allow anyone to join again.
 
-```bash
-/vc customize bitrate kbps:64   # Standard quality
-/vc customize bitrate kbps:96   # High quality
-/vc customize bitrate kbps:128  # Premium quality (requires server boost)
-```
+#### Invite Users
 
-**Parameters:**
+When your channel is private, click the **👥 Invite** button to see instructions on inviting users. Select a user to grant them
+permission to join your channel. They'll receive a DM notification.
 
-- `kbps` (required) - Bitrate in kilobits per second (8-384)
-  - 8-64 kbps: Low quality (good for voice-only)
-  - 64-96 kbps: Standard quality (recommended)
-  - 96-128 kbps: High quality (clear audio)
-  - 128-384 kbps: Premium quality (requires server boosts)
+#### Transfer Ownership
 
-**Note:** Higher bitrates require server boost levels and will be automatically capped at the server's maximum.
+Click the **👑 Transfer** button to select a user from a dropdown menu. Only users currently in the channel will appear. Transfer ownership instantly.
 
-**Example Response:**
-
-```text
-✅ Your channel bitrate has been set to: 96 kbps
-
-Note: Higher bitrates may require server boosts and will be capped at the server's maximum.
-```
-
-**Use Cases:**
-
-- Optimize audio quality for music listening
-- Reduce bandwidth for voice-only conversations
-- Maximize clarity for podcasting or streaming
-
-#### `/vc customize reset`
-
-Reset all your voice channel customizations to server defaults.
-
-**Usage:**
-
-```bash
-/vc customize reset
-```
-
-**What it does:**
-
-- Removes custom name pattern (uses default naming)
-- Resets user limit to unlimited
-- Resets bitrate to server default
-
-**Example Response:**
-
-```text
-✅ All your voice channel customizations have been reset to defaults.
-```
-
-**Use Cases:**
+---
 
 - Return to default settings
 - Fix misconfigured preferences
@@ -1842,31 +1747,30 @@ Most Used Commands:
 
 ### User Command Permissions
 
-| Command | Permission Level | Additional Requirements |
-| --- | --- | --- |
-| `/ping` | Everyone | Command must be enabled |
-| `/vctop` | Everyone | Voice tracking enabled |
-| `/vcstats` | Everyone | Voice tracking enabled |
-| `/achievements` | Everyone | Gamification enabled |
-| `/seen` | Everyone | Voice tracking + seen enabled |
-| `/quote` | Everyone* | Quotes enabled (*may be role-restricted) |
-| `/amikool` | Everyone | Command enabled + role configured |
-| `/transfer-ownership` | Channel Owner | Must own a voice channel |
+| Command         | Permission Level | Additional Requirements                   |
+| --------------- | ---------------- | ----------------------------------------- |
+| `/ping`         | Everyone         | Command must be enabled                   |
+| `/vctop`        | Everyone         | Voice tracking enabled                    |
+| `/vcstats`      | Everyone         | Voice tracking enabled                    |
+| `/achievements` | Everyone         | Gamification enabled                      |
+| `/seen`         | Everyone         | Voice tracking + seen enabled             |
+| `/quote`        | Everyone\*       | Quotes enabled (\*may be role-restricted) |
+| `/amikool`      | Everyone         | Command enabled + role configured         |
 
 ### Admin Command Permissions
 
 All admin commands require **Administrator** permission in Discord.
 
-| Command | Additional Requirements |
-| --- | --- |
-| `/setup` | Administrator permission |
-| `/config` | Administrator permission |
-| `/permissions` | Administrator permission |
-| `/vc` | Administrator + voice channels enabled |
-| `/dbtrunk` | Administrator + cleanup enabled |
+| Command              | Additional Requirements                          |
+| -------------------- | ------------------------------------------------ |
+| `/setup`             | Administrator permission                         |
+| `/config`            | Administrator permission                         |
+| `/permissions`       | Administrator permission                         |
+| `/vc`                | Administrator + voice channels enabled           |
+| `/dbtrunk`           | Administrator + cleanup enabled                  |
 | `/announce-vc-stats` | Administrator + tracking & announcements enabled |
-| `/setup-lobby` | Administrator + voice channels enabled |
-| `/botstats` | Administrator permission |
+| `/setup-lobby`       | Administrator + voice channels enabled           |
+| `/botstats`          | Administrator permission                         |
 
 ### Bot Permissions Required
 
@@ -1905,7 +1809,6 @@ The bot needs these Discord permissions to function:
 /seen user:@User                   # Last seen info
 /quote text:"..." author:"@User"   # Add quote to channel
 /amikool                           # Role verification
-/transfer-ownership user:@User     # Transfer channel
 ```
 
 ### Admin Commands Summary

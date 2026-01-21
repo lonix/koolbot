@@ -585,9 +585,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle button interactions
   if (interaction.isButton()) {
     try {
-      const { handleWizardButton } =
-        await import("./handlers/wizard-button-handler.js");
-      await handleWizardButton(interaction);
+      // Check if it's a VC control button
+      if (interaction.customId.startsWith("vc_control_")) {
+        const { handleVCControlButton } =
+          await import("./handlers/vc-control-button-handler.js");
+        await handleVCControlButton(interaction);
+      } else {
+        // Handle wizard buttons
+        const { handleWizardButton } =
+          await import("./handlers/wizard-button-handler.js");
+        await handleWizardButton(interaction);
+      }
     } catch (error) {
       logger.error("Error handling button interaction:", error);
     }
@@ -597,9 +605,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle select menu interactions
   if (interaction.isStringSelectMenu()) {
     try {
-      const { handleWizardSelectMenu } =
-        await import("./handlers/wizard-select-handler.js");
-      await handleWizardSelectMenu(interaction);
+      // Check if it's a VC transfer select
+      if (interaction.customId.startsWith("vc_transfer_select_")) {
+        const { handleVCTransferSelect } =
+          await import("./handlers/vc-transfer-select-handler.js");
+        await handleVCTransferSelect(interaction);
+      } else {
+        // Handle wizard select menus
+        const { handleWizardSelectMenu } =
+          await import("./handlers/wizard-select-handler.js");
+        await handleWizardSelectMenu(interaction);
+      }
     } catch (error) {
       logger.error("Error handling select menu interaction:", error);
     }
@@ -609,9 +625,17 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle modal submit interactions
   if (interaction.isModalSubmit()) {
     try {
-      const { handleWizardModal } =
-        await import("./handlers/wizard-modal-handler.js");
-      await handleWizardModal(interaction);
+      // Check if it's a VC modal
+      if (interaction.customId.startsWith("vc_modal_")) {
+        const { handleVCModal } =
+          await import("./handlers/vc-modal-handler.js");
+        await handleVCModal(interaction);
+      } else {
+        // Handle wizard modals
+        const { handleWizardModal } =
+          await import("./handlers/wizard-modal-handler.js");
+        await handleWizardModal(interaction);
+      }
     } catch (error) {
       logger.error("Error handling modal interaction:", error);
     }
