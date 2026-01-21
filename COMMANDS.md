@@ -1225,44 +1225,90 @@ Removed 8 channels from Voice Channels category
 - Fix corrupted channel states
 - Emergency cleanup
 
-#### `/vc customize name <pattern>`
+---
 
-Set a custom naming pattern for your dynamically created voice channels.
+### Voice Channel Control Panel
+
+**Description:** When you create a voice channel, an interactive control panel is automatically sent to the channel's text chat (if available). This provides quick access to customization options.
+
+**Configuration:**
+
+```bash
+/config set key:voicechannels.controlpanel.enabled value:true  # Default: true
+/config reload
+```
+
+**Control Panel Buttons:**
+
+- **✏️ Rename** - Opens a modal to rename your channel
+- **🔒 Make Private / 🌐 Make Public** - Toggle privacy mode
+- **👥 Invite** - Shows how to invite users (only enabled when private)
+- **👑 Transfer** - Shows how to transfer ownership
+
+**Features:**
+
+- Only visible to channel owner
+- Updates dynamically when privacy mode changes
+- Persists until channel is deleted
+- Posted every time a new channel is created
+
+**Requirements:**
+
+- Server must have text channels associated with voice channels (community servers)
+- `voicechannels.controlpanel.enabled` must be `true`
+
+**Example Control Panel:**
+
+```text
+🎮 Voice Channel Controls
+
+Manage your voice channel: **Your Channel Name**
+
+Privacy: 🌐 Public
+
+[✏️ Rename] [🔒 Make Private] [👥 Invite] [👑 Transfer]
+
+Only you can see and use these controls
+```
+
+---
+
+#### `/vc customize name <name>`
+
+Rename your current voice channel. **Note:** You no longer need to include `{username}` placeholder - you can use any name you want!
 
 **Usage:**
 
 ```bash
-/vc customize name pattern:"🎮 {username}'s Gaming Room"
-/vc customize name pattern:"🎵 {username} Vibes"
-/vc customize name pattern:"{username}'s Chill Zone"
+/vc customize name name:"🎮 Gaming Room"
+/vc customize name name:"Chill Zone"
+/vc customize name name:"Study Session"
 ```
 
 **Parameters:**
 
-- `pattern` (required) - Channel name template. Use `{username}` as placeholder for your display name.
+- `name` (required) - New channel name (max 100 characters)
 
 **Requirements:**
 
-- Pattern must include `{username}` placeholder
-- Final channel name must be under 100 characters
+- Must be in a voice channel
+- Must be the owner of the channel
 
 **Example Response:**
 
 ```text
-✅ Your channel name pattern has been set to: 🎮 {username}'s Gaming Room
-
-Example: 🎮 Alice's Gaming Room
+✅ Channel renamed to: **🎮 Gaming Room**
 ```
 
 **Use Cases:**
 
-- Personalize your voice channel names
-- Match channel names to your activity (gaming, music, studying)
-- Stand out with custom branding
+- Personalize your current voice channel
+- Change channel name for different activities
+- Rebrand your space on the fly
 
 #### `/vc customize limit <number>`
 
-Set the user limit for your dynamically created voice channels.
+Set the user limit for your current voice channel.
 
 **Usage:**
 
@@ -1276,10 +1322,15 @@ Set the user limit for your dynamically created voice channels.
 
 - `number` (required) - Maximum users allowed (0-99, 0 = unlimited)
 
+**Requirements:**
+
+- Must be in a voice channel
+- Must be the owner of the channel
+
 **Example Response:**
 
 ```text
-✅ Your channel user limit has been set to: 5 users
+✅ Channel user limit set to: **5 users**
 ```
 
 **Use Cases:**
@@ -1290,7 +1341,7 @@ Set the user limit for your dynamically created voice channels.
 
 #### `/vc customize bitrate <kbps>`
 
-Set the audio quality (bitrate) for your dynamically created voice channels.
+Set the audio quality (bitrate) for your current voice channel.
 
 **Usage:**
 
@@ -1308,12 +1359,17 @@ Set the audio quality (bitrate) for your dynamically created voice channels.
   - 96-128 kbps: High quality (clear audio)
   - 128-384 kbps: Premium quality (requires server boosts)
 
+**Requirements:**
+
+- Must be in a voice channel
+- Must be the owner of the channel
+
 **Note:** Higher bitrates require server boost levels and will be automatically capped at the server's maximum.
 
 **Example Response:**
 
 ```text
-✅ Your channel bitrate has been set to: 96 kbps
+✅ Channel bitrate set to: **96 kbps**
 
 Note: Higher bitrates may require server boosts and will be capped at the server's maximum.
 ```
@@ -1324,29 +1380,93 @@ Note: Higher bitrates may require server boosts and will be capped at the server
 - Reduce bandwidth for voice-only conversations
 - Maximize clarity for podcasting or streaming
 
-#### `/vc customize reset`
+#### `/vc customize privacy`
 
-Reset all your voice channel customizations to server defaults.
+Toggle invite-only mode for your current voice channel.
 
 **Usage:**
 
 ```bash
-/vc customize reset
+/vc customize privacy  # Toggle between public and private
 ```
 
-**What it does:**
+**Requirements:**
 
-- Removes custom name pattern (uses default naming)
-- Resets user limit to unlimited
-- Resets bitrate to server default
+- Must be in a voice channel
+- Must be the owner of the channel
 
-**Example Response:**
+**Response (when making private):**
 
 ```text
-✅ All your voice channel customizations have been reset to defaults.
+🔒 Channel is now **invite-only**! Use `/vc invite` to add users.
 ```
 
+**Response (when making public):**
+
+```text
+✅ Channel is now **public**. Anyone can join!
+```
+
+**How it works:**
+
+- **Private:** Only you and invited users can join
+- **Public:** Anyone can join (default)
+- Permission changes apply immediately
+
 **Use Cases:**
+
+- Private meeting or discussion
+- Exclusive group chat
+- Team coordination
+
+---
+
+### `/vc invite`
+
+**Description:** Invite a user to your private voice channel. The invited user will receive a DM notification and be granted immediate access.
+
+**Configuration:**
+
+```bash
+/config set key:voicechannels.enabled value:true
+/config reload
+```
+
+**Usage:**
+
+```bash
+/vc invite user:@username
+```
+
+**Parameters:**
+
+- `user` (required) - User to invite to your channel
+
+**Requirements:**
+
+- Must be in a voice channel
+- Must be the owner of the channel
+- Channel must be private (use `/vc customize privacy` first)
+
+**Response:**
+
+```text
+✅ username can now join your channel!
+```
+
+**Notes:**
+
+- Invited user receives DM with channel name and server
+- Permission is granted immediately
+- Invite expires after 15 minutes if not used
+
+**Use Cases:**
+
+- Add friends to private discussion
+- Grant access to specific team members
+- Control who can join your channel
+
+---
 
 - Return to default settings
 - Fix misconfigured preferences

@@ -191,6 +191,7 @@ Dynamic voice channel creation and management.
 | `voicechannels.lobby.offlinename` | `"Offline Lobby"` | Lobby channel name when bot is offline |
 | `voicechannels.channel.prefix` | `"🎮"` | Prefix for user-created channels |
 | `voicechannels.channel.suffix` | `""` | Suffix for user-created channels |
+| `voicechannels.controlpanel.enabled` | `true` | Show interactive control panel in channel text chat |
 
 ### Example
 
@@ -928,6 +929,7 @@ The config system automatically converts values:
 - `voicechannels.lobby.offlinename` (string, default: "Offline Lobby")
 - `voicechannels.channel.prefix` (string, default: "🎮")
 - `voicechannels.channel.suffix` (string, default: "")
+- `voicechannels.controlpanel.enabled` (bool, default: true)
 
 #### Voice Tracking
 

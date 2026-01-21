@@ -532,8 +532,7 @@ export class VoiceChannelManager {
 
       // Option 1: Look for a text channel with the same name
       const sameNameChannel = category.children.cache.find(
-        (ch) =>
-          ch.type === ChannelType.GuildText && ch.name === channel.name,
+        (ch) => ch.type === ChannelType.GuildText && ch.name === channel.name,
       );
       if (sameNameChannel && sameNameChannel.type === ChannelType.GuildText) {
         textChannel = sameNameChannel as TextChannel;

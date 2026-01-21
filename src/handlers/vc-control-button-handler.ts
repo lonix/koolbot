@@ -171,7 +171,7 @@ async function handleInvite(
 ): Promise<void> {
   await interaction.reply({
     content:
-      '💡 To invite someone, use the command `/vc invite user:<@user>` while in this channel.',
+      "💡 To invite someone, use the command `/vc invite user:<@user>` while in this channel.",
     ephemeral: true,
   });
 }

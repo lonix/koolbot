@@ -123,9 +123,11 @@ async function handleSubcommand(
     return;
   }
 
-  const hasAdmin = interaction.member.permissions instanceof PermissionFlagsBits ||
-    (typeof interaction.member.permissions === 'object' && 'has' in interaction.member.permissions &&
-    interaction.member.permissions.has(PermissionFlagsBits.Administrator));
+  const hasAdmin =
+    interaction.member.permissions instanceof PermissionFlagsBits ||
+    (typeof interaction.member.permissions === "object" &&
+      "has" in interaction.member.permissions &&
+      interaction.member.permissions.has(PermissionFlagsBits.Administrator));
 
   if (!hasAdmin) {
     await interaction.reply({
@@ -291,8 +293,7 @@ async function handleCustomize(
   } catch (error) {
     logger.error("Error handling vc customize:", error);
     await interaction.reply({
-      content:
-        "❌ An error occurred while customizing your voice channel.",
+      content: "❌ An error occurred while customizing your voice channel.",
       ephemeral: true,
     });
   }
