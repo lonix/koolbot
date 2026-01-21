@@ -304,6 +304,7 @@ export class CommandManager {
       // Define command configurations with their requirements
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
+        { name: "help", configKey: "help.enabled", file: "help" },
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
         { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {
@@ -322,12 +323,28 @@ export class CommandManager {
           configKey: "voicetracking.announcements.enabled",
           file: "announce-vc-stats",
         },
+        {
+          name: "achievements",
+          configKey: "gamification.enabled",
+          file: "achievements",
+        },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
+        {
+          name: "announce",
+          configKey: "announcements.enabled",
+          file: "announce",
+        },
         { name: "dbtrunk", configKey: null, file: "dbtrunk" }, // Always enabled for admins
         { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
         { name: "config", configKey: null, file: "config/index" }, // Always enabled
         { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
         { name: "permissions", configKey: null, file: "permissions" }, // Always enabled for admins
+        {
+          name: "reactrole",
+          configKey: "reactionroles.enabled",
+          file: "reactrole",
+        },
+        { name: "setup", configKey: "wizard.enabled", file: "setup-wizard" },
         { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
       ];
 

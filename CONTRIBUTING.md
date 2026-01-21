@@ -235,6 +235,39 @@ Follow the established architecture:
    - Well-documented and tested
    - Reusable across the codebase
 
+### Adding New Commands
+
+**CRITICAL:** When adding a new command, you must update **TWO** places in `src/services/command-manager.ts`:
+
+1. **`loadCommandsDynamically()` method** - Registers command with Discord API
+   - Add `{ name, configKey, file }` to the `commandConfigs` array
+
+2. **`populateClientCommands()` method** - Loads execute handler into client
+   - Add the **same** `{ name, configKey, file }` to the `commandConfigs` array
+
+**Why both?** These methods serve different purposes:
+
+- `loadCommandsDynamically()` tells Discord about your command (makes it appear in the UI)
+- `populateClientCommands()` gives the bot the code to execute when the command is used
+
+**Failure Mode:** If you only update `loadCommandsDynamically()`, the command will appear in Discord but
+will fail with "The application did not respond" because the bot has no handler for it.
+
+**Example:**
+
+```typescript
+// In BOTH loadCommandsDynamically() and populateClientCommands()
+{ name: "mycmd", configKey: "mycmd.enabled", file: "mycmd" }
+```
+
+**Checklist for adding a command:**
+
+1. ✅ Create `src/commands/mycmd.ts` with `data` and `execute` exports
+2. ✅ Add to `commandConfigs` in `loadCommandsDynamically()`
+3. ✅ Add to `commandConfigs` in `populateClientCommands()`
+4. ✅ Add `mycmd.enabled` to `config-schema.ts`
+5. ✅ Document in `COMMANDS.md`
+
 ### Configuration
 
 - **All new features must be toggleable** via configuration

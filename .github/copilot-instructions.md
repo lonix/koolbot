@@ -26,21 +26,30 @@ Registration is automatic; DO NOT manually push to client collections outside `C
 To add a command:
 
 1. Create `src/commands/mycmd.ts` exporting `data` + `execute`.
-2. Add `{ name, configKey, file }` entry to `commandConfigs` in `CommandManager`.
+2. **CRITICAL:** Add `{ name, configKey, file }` entry to `commandConfigs` in **BOTH** methods in `CommandManager`:
+   - `loadCommandsDynamically()` - registers command with Discord API
+   - `populateClientCommands()` - loads execute handler into client
+   - **Both arrays must stay in sync** or commands will appear but not respond
 3. Add schema key `mycmd.enabled` (default) in `config-schema.ts`.
 4. Document in `COMMANDS.md` if user-facing.
+
+**Common Pitfall:** Adding command only to `loadCommandsDynamically()` without adding to
+`populateClientCommands()` causes "The application did not respond" error because Discord knows
+about the command but the bot has no handler.
 
 ## Setup Wizard
 
 The `/setup wizard` command provides interactive onboarding for configuring features. When adding new features:
 
 **User-Facing Features:** Consider adding wizard support for user-facing features that require configuration.
+
 - Add feature configuration to `src/commands/setup-wizard.ts` in the `FEATURES` constant
 - Implement feature-specific configuration function (e.g., `configureMyFeature`)
 - Add interaction handlers in `src/handlers/wizard-*-handler.ts` if needed
 - Update auto-detection logic in `src/utils/channel-detector.ts` for resource discovery
 
 **Wizard Architecture:**
+
 - Ephemeral interactions in server (not DMs)
 - Session-based state management via `WizardService` (15-min timeout)
 - Button/select menu/modal interactions for multi-step configuration
@@ -48,6 +57,7 @@ The `/setup wizard` command provides interactive onboarding for configuring feat
 - Bulk configuration with single `ConfigService.triggerReload()` on completion
 
 **When to Use Wizard vs Manual Config:**
+
 - Wizard: Multi-setting features requiring guided setup (voice channels, tracking, quotes)
 - Manual `/config set`: Single-setting features or advanced configuration
 
