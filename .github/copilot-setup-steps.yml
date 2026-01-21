@@ -20,7 +20,7 @@ steps:
     notes:
       - 'Node.js 22.0.0 or higher is required'
       - 'Docker and Docker Compose are needed for containerized development'
-      - 'You will need a Discord Bot Token from Discord Developer Portal'
+      - 'Discord Bot Token is OPTIONAL - tests use mocks and you can develop without real credentials'
 
   - title: 'Fork and Clone Repository'
     description: 'Fork the repository on GitHub and clone it locally'
@@ -41,16 +41,18 @@ steps:
       - 'This may take a few minutes depending on your internet connection'
       - 'All dependencies will be installed from package-lock.json'
 
-  - title: 'Configure Environment'
-    description: 'Set up your environment variables'
+  - title: 'Configure Environment (Optional for Testing)'
+    description: 'Set up environment variables - OPTIONAL for running tests or working on code'
     commands:
       - description: 'Copy the example environment file'
         command: 'cp .env.example .env'
     notes:
-      - 'Edit .env file with your Discord bot credentials'
-      - 'DISCORD_TOKEN: Get from Discord Developer Portal → Bot tab'
-      - 'CLIENT_ID: Get from Discord Developer Portal → General Information'
-      - 'GUILD_ID: Right-click your Discord server → Copy ID (requires Developer Mode)'
+      - 'OPTIONAL: Discord credentials are NOT required for testing or development'
+      - 'Tests use mocked Discord.js objects - no real bot connection needed'
+      - 'Only needed if you want to run the actual bot in a Discord server:'
+      - '  • DISCORD_TOKEN: Get from Discord Developer Portal → Bot tab'
+      - '  • CLIENT_ID: Get from Discord Developer Portal → General Information'
+      - '  • GUILD_ID: Right-click your Discord server → Copy ID (requires Developer Mode)'
       - 'MONGODB_URI: Use mongodb://mongodb:27017/koolbot for Docker or your local MongoDB URI'
 
   - title: 'Build the Project'
@@ -63,13 +65,15 @@ steps:
       - 'Build must succeed before running the bot'
 
   - title: 'Run Tests'
-    description: 'Verify everything works by running the test suite'
+    description: 'Verify everything works by running the test suite (no Discord connection needed)'
     commands:
       - description: 'Run all tests'
         command: 'npm test'
       - description: 'Run tests with coverage'
         command: 'npm run test:coverage'
     notes:
+      - 'Tests use MOCKED Discord.js, MongoDB, and external dependencies'
+      - 'No real Discord bot token or connection required'
       - 'All tests should pass before making changes'
       - 'Coverage reports help identify untested code'
 
@@ -92,18 +96,35 @@ steps:
   - title: 'Development Options'
     description: 'Choose your preferred development setup'
     options:
-      - name: 'Local Development'
-        description: 'Run the bot locally with hot reload'
+      - name: 'Code Development (No Discord Connection)'
+        description: 'Work on code, run tests, no real bot needed'
+        commands:
+          - description: 'Run tests with mocked dependencies'
+            command: 'npm test'
+          - description: 'Run tests in watch mode while developing'
+            command: 'npm run test:watch'
+          - description: 'Build and validate code'
+            command: 'npm run check'
+        notes:
+          - 'Recommended for most development work'
+          - 'All tests use mocked Discord.js and MongoDB'
+          - 'No Discord credentials needed'
+          - 'Fast feedback loop for code changes'
+
+      - name: 'Local Bot Testing (Discord Connection Required)'
+        description: 'Run the actual bot locally to test in a real Discord server'
         commands:
           - description: 'Start MongoDB (if not using Docker)'
             command: 'docker run -d -p 27017:27017 --name mongodb mongo:latest'
           - description: 'Run bot in development mode'
             command: 'npm run dev'
         notes:
+          - 'Requires Discord bot token in .env file'
           - 'Hot reload is enabled - changes auto-restart the bot'
           - 'Logs appear in your terminal'
+          - 'Use for end-to-end testing in a real Discord server'
 
-      - name: 'Docker Development'
+      - name: 'Docker Development (Discord Connection Required)'
         description: 'Run everything in Docker containers'
         commands:
           - description: 'Start development environment'
@@ -113,6 +134,7 @@ steps:
           - description: 'View logs'
             command: 'docker-compose logs -f bot'
         notes:
+          - 'Requires Discord bot token in .env file'
           - 'Includes MongoDB and bot in containers'
           - 'Source code is mounted for hot reload'
           - 'Use docker-compose down to stop'
