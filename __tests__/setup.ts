@@ -27,7 +27,7 @@ class MockSchema {
     Boolean: Boolean,
     Date: Date,
   };
-  index() {
+  index(): this {
     return this;
   }
 }
