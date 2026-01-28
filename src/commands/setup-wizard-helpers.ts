@@ -1,6 +1,7 @@
 import {
   Guild,
   ChatInputCommandInteraction,
+  ButtonInteraction,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
@@ -74,7 +75,7 @@ export type { FeatureKey };
  * Start configuration for a specific feature
  */
 export async function startFeatureConfiguration(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   feature: FeatureKey,
@@ -141,7 +142,7 @@ export async function startFeatureConfiguration(
 }
 
 async function configureVoiceChannels(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -204,7 +205,7 @@ async function configureVoiceChannels(
 }
 
 async function configureVoiceTracking(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -246,7 +247,7 @@ async function configureVoiceTracking(
 }
 
 async function configureQuotes(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -290,7 +291,7 @@ async function configureQuotes(
 }
 
 async function configureGamification(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -332,7 +333,7 @@ async function configureGamification(
 }
 
 async function configureLogging(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -379,7 +380,7 @@ async function configureLogging(
 }
 
 async function configureAmikool(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -418,7 +419,7 @@ async function configureAmikool(
 }
 
 async function configureReactionRoles(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -462,7 +463,7 @@ async function configureReactionRoles(
 }
 
 async function configureAnnouncements(
-  interaction: ChatInputCommandInteraction,
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
