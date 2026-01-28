@@ -19,9 +19,9 @@ export async function handleWizardButton(
 ): Promise<void> {
   const customId = interaction.customId;
 
-  // Parse custom ID: wizard_{action}_{userId}_{guildId}
-  const parts = customId.split("_");
-  if (parts.length < 4 || parts[0] !== "wizard") {
+  // Parse custom ID: wizard_{action}__{userId}_{guildId}
+  // Extract the parts after "wizard_"
+  if (!customId.startsWith("wizard_")) {
     await interaction.reply({
       content: "❌ Invalid button interaction.",
       ephemeral: true,
@@ -29,9 +29,30 @@ export async function handleWizardButton(
     return;
   }
 
-  const action = parts[1];
-  const targetUserId = parts[2];
-  const guildId = parts[3];
+  const afterWizard = customId.substring(7); // Remove "wizard_"
+  const doubleSplit = afterWizard.split("__");
+
+  if (doubleSplit.length !== 2) {
+    await interaction.reply({
+      content: "❌ Invalid button interaction format.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const action = doubleSplit[0];
+  const userGuildParts = doubleSplit[1].split("_");
+
+  if (userGuildParts.length !== 2) {
+    await interaction.reply({
+      content: "❌ Invalid button interaction format.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const targetUserId = userGuildParts[0];
+  const guildId = userGuildParts[1];
   const userId = interaction.user.id;
 
   // Verify user owns this wizard session
@@ -72,40 +93,52 @@ export async function handleWizardButton(
       case "cancel":
         await handleCancel(interaction, userId, guildId);
         break;
-      case "vc":
-        await handleVoiceChannelAction(
+      case "vc_existing":
+        await handleVcExisting(interaction, guild, userId, guildId);
+        break;
+      case "vc_new":
+        await handleVcNew(interaction, userId, guildId);
+        break;
+      case "vc_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
+      case "vt_enable":
+        await handleVtEnable(interaction, userId, guildId);
+        break;
+      case "vt_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
+      case "quotes_configure":
+        await handleQuotesConfigure(interaction, guild, userId, guildId);
+        break;
+      case "quotes_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
+      case "gamif_enable":
+        wizardService.addConfiguration(
+          userId,
+          guildId,
+          "gamification.enabled",
+          true,
+        );
+        await handleFeatureComplete(
           interaction,
           guild,
           userId,
           guildId,
-          parts,
+          "Gamification",
         );
         break;
-      case "vt":
-        await handleVoiceTrackingAction(
-          interaction,
-          guild,
-          userId,
-          guildId,
-          parts,
-        );
+      case "gamif_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
         break;
-      case "quotes":
-        await handleQuotesAction(interaction, guild, userId, guildId, parts);
+      case "logging_configure":
+        await handleLoggingConfigure(interaction, guild, userId, guildId);
         break;
-      case "gamif":
-        await handleGamificationAction(
-          interaction,
-          guild,
-          userId,
-          guildId,
-          parts,
-        );
+      case "logging_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
         break;
-      case "logging":
-        await handleLoggingAction(interaction, guild, userId, guildId, parts);
-        break;
-      case "finish":
+      case "finish_confirm":
         await handleFinish(interaction, guild, userId, guildId);
         break;
       case "back":
@@ -180,33 +213,6 @@ async function handleCancel(
   await interaction.update({ embeds: [embed], components: [] });
 }
 
-async function handleVoiceChannelAction(
-  interaction: ButtonInteraction,
-  guild: any,
-  userId: string,
-  guildId: string,
-  parts: string[],
-): Promise<void> {
-  const subAction = parts.length > 4 ? parts[4] : "";
-
-  switch (subAction) {
-    case "existing":
-      await handleVcExisting(interaction, guild, userId, guildId);
-      break;
-    case "new":
-      await handleVcNew(interaction, userId, guildId);
-      break;
-    case "skip":
-      await handleFeatureSkip(interaction, guild, userId, guildId);
-      break;
-    default:
-      await interaction.reply({
-        content: "❌ Unknown voice channel action.",
-        ephemeral: true,
-      });
-  }
-}
-
 async function handleVcExisting(
   interaction: ButtonInteraction,
   guild: any,
@@ -230,7 +236,7 @@ async function handleVcExisting(
 
   // Show select menu for existing categories
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`wizard_select_vc_category_${userId}_${guildId}`)
+    .setCustomId(`wizard_select_vc_category__${userId}_${guildId}`)
     .setPlaceholder("Select a voice category")
     .addOptions(
       categories.slice(0, 25).map((cat) => ({
@@ -263,7 +269,7 @@ async function handleVcNew(
 ): Promise<void> {
   // Show modal for new voice channel configuration
   const modal = new ModalBuilder()
-    .setCustomId(`wizard_modal_vc_new_${userId}_${guildId}`)
+    .setCustomId(`wizard_modal_vc_new__${userId}_${guildId}`)
     .setTitle("Voice Channel Configuration");
 
   const categoryInput = new TextInputBuilder()
@@ -304,30 +310,6 @@ async function handleVcNew(
   await interaction.showModal(modal);
 }
 
-async function handleVoiceTrackingAction(
-  interaction: ButtonInteraction,
-  guild: any,
-  userId: string,
-  guildId: string,
-  parts: string[],
-): Promise<void> {
-  const subAction = parts.length > 4 ? parts[4] : "";
-
-  switch (subAction) {
-    case "enable":
-      await handleVtEnable(interaction, userId, guildId);
-      break;
-    case "skip":
-      await handleFeatureSkip(interaction, guild, userId, guildId);
-      break;
-    default:
-      await interaction.reply({
-        content: "❌ Unknown voice tracking action.",
-        ephemeral: true,
-      });
-  }
-}
-
 async function handleVtEnable(
   interaction: ButtonInteraction,
   userId: string,
@@ -335,7 +317,7 @@ async function handleVtEnable(
 ): Promise<void> {
   // Show modal for voice tracking configuration
   const modal = new ModalBuilder()
-    .setCustomId(`wizard_modal_vt_${userId}_${guildId}`)
+    .setCustomId(`wizard_modal_vt__${userId}_${guildId}`)
     .setTitle("Voice Tracking Configuration");
 
   const channelInput = new TextInputBuilder()
@@ -366,30 +348,6 @@ async function handleVtEnable(
   await interaction.showModal(modal);
 }
 
-async function handleQuotesAction(
-  interaction: ButtonInteraction,
-  guild: any,
-  userId: string,
-  guildId: string,
-  parts: string[],
-): Promise<void> {
-  const subAction = parts.length > 4 ? parts[4] : "";
-
-  switch (subAction) {
-    case "configure":
-      await handleQuotesConfigure(interaction, guild, userId, guildId);
-      break;
-    case "skip":
-      await handleFeatureSkip(interaction, guild, userId, guildId);
-      break;
-    default:
-      await interaction.reply({
-        content: "❌ Unknown quotes action.",
-        ephemeral: true,
-      });
-  }
-}
-
 async function handleQuotesConfigure(
   interaction: ButtonInteraction,
   guild: any,
@@ -413,7 +371,7 @@ async function handleQuotesConfigure(
 
   // Show select menu for quotes channel
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`wizard_select_quotes_channel_${userId}_${guildId}`)
+    .setCustomId(`wizard_select_quotes_channel__${userId}_${guildId}`)
     .setPlaceholder("Select a channel for quotes")
     .addOptions(
       textChannels.slice(0, 25).map((ch) => ({
@@ -436,66 +394,6 @@ async function handleQuotesConfigure(
     components: [row],
     ephemeral: true,
   });
-}
-
-async function handleGamificationAction(
-  interaction: ButtonInteraction,
-  guild: any,
-  userId: string,
-  guildId: string,
-  parts: string[],
-): Promise<void> {
-  const subAction = parts.length > 4 ? parts[4] : "";
-
-  switch (subAction) {
-    case "enable":
-      wizardService.addConfiguration(
-        userId,
-        guildId,
-        "gamification.enabled",
-        true,
-      );
-      await handleFeatureComplete(
-        interaction,
-        guild,
-        userId,
-        guildId,
-        "Gamification",
-      );
-      break;
-    case "skip":
-      await handleFeatureSkip(interaction, guild, userId, guildId);
-      break;
-    default:
-      await interaction.reply({
-        content: "❌ Unknown gamification action.",
-        ephemeral: true,
-      });
-  }
-}
-
-async function handleLoggingAction(
-  interaction: ButtonInteraction,
-  guild: any,
-  userId: string,
-  guildId: string,
-  parts: string[],
-): Promise<void> {
-  const subAction = parts.length > 4 ? parts[4] : "";
-
-  switch (subAction) {
-    case "configure":
-      await handleLoggingConfigure(interaction, guild, userId, guildId);
-      break;
-    case "skip":
-      await handleFeatureSkip(interaction, guild, userId, guildId);
-      break;
-    default:
-      await interaction.reply({
-        content: "❌ Unknown logging action.",
-        ephemeral: true,
-      });
-  }
 }
 
 async function handleLoggingConfigure(
@@ -521,7 +419,7 @@ async function handleLoggingConfigure(
 
   // Show select menu for logging channels
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`wizard_select_logging_channel_${userId}_${guildId}`)
+    .setCustomId(`wizard_select_logging_channel__${userId}_${guildId}`)
     .setPlaceholder("Select logging channels")
     .setMinValues(1)
     .setMaxValues(Math.min(3, textChannels.length))
@@ -668,12 +566,12 @@ async function showSummary(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_finish_confirm_${userId}_${guildId}`)
+      .setCustomId(`wizard_finish_confirm__${userId}_${guildId}`)
       .setLabel("Apply Configuration")
       .setStyle(ButtonStyle.Success)
       .setEmoji("✅"),
     new ButtonBuilder()
-      .setCustomId(`wizard_cancel_${userId}_${guildId}`)
+      .setCustomId(`wizard_cancel__${userId}_${guildId}`)
       .setLabel("Cancel")
       .setStyle(ButtonStyle.Danger)
       .setEmoji("❌"),

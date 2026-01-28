@@ -9,9 +9,9 @@ export async function handleWizardSelectMenu(
 ): Promise<void> {
   const customId = interaction.customId;
 
-  // Parse custom ID: wizard_select_{type}_{userId}_{guildId} or wizard_features_{userId}_{guildId}
-  const parts = customId.split("_");
-  if (parts.length < 4 || parts[0] !== "wizard") {
+  // Parse custom ID: wizard_{action}__{userId}_{guildId}
+  // Extract the parts after "wizard_"
+  if (!customId.startsWith("wizard_")) {
     await interaction.reply({
       content: "❌ Invalid select menu interaction.",
       ephemeral: true,
@@ -19,25 +19,31 @@ export async function handleWizardSelectMenu(
     return;
   }
 
-  let userId: string, guildId: string, selectType: string;
+  const afterWizard = customId.substring(7); // Remove "wizard_"
+  const doubleSplit = afterWizard.split("__");
 
-  if (parts[1] === "features") {
-    // Format: wizard_features_{userId}_{guildId}
-    userId = parts[2];
-    guildId = parts[3];
-    selectType = "features";
-  } else if (parts[1] === "select") {
-    // Format: wizard_select_{type}_{userId}_{guildId}
-    selectType = parts[2];
-    userId = parts[3];
-    guildId = parts[4];
-  } else {
+  if (doubleSplit.length !== 2) {
     await interaction.reply({
-      content: "❌ Invalid select menu format.",
+      content: "❌ Invalid select menu interaction format.",
       ephemeral: true,
     });
     return;
   }
+
+  const action = doubleSplit[0];
+  const userGuildParts = doubleSplit[1].split("_");
+
+  if (userGuildParts.length !== 2) {
+    await interaction.reply({
+      content: "❌ Invalid select menu interaction format.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const userId = userGuildParts[0];
+  const guildId = userGuildParts[1];
+  const selectType = action;
 
   // Verify user owns this wizard session
   if (userId !== interaction.user.id) {
@@ -74,13 +80,13 @@ export async function handleWizardSelectMenu(
       case "features":
         await handleFeatureSelection(interaction, guild, userId, guildId);
         break;
-      case "vc":
+      case "select_vc_category":
         await handleVcCategorySelection(interaction, guild, userId, guildId);
         break;
-      case "quotes":
+      case "select_quotes_channel":
         await handleQuotesChannelSelection(interaction, guild, userId, guildId);
         break;
-      case "logging":
+      case "select_logging_channel":
         await handleLoggingChannelSelection(
           interaction,
           guild,
