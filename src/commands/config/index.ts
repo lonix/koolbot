@@ -19,7 +19,7 @@ import { fetch } from "undici";
 const configService = ConfigService.getInstance();
 
 // Constants
-const AUTOCOMPLETE_DESCRIPTION_MAX_LENGTH = 80;
+const AUTOCOMPLETE_CHOICE_MAX_LENGTH = 100; // Discord's limit for autocomplete choice names
 
 // Helper function to check if a key is a role or channel setting
 function isRoleOrChannelSetting(key: string): boolean {
@@ -847,13 +847,36 @@ export async function autocomplete(
       // Filter keys based on user input
       const choices = allKeys
         .filter((key) => key.toLowerCase().includes(focusedValue))
-        .map((key) => ({
-          name: `${key} - ${getSettingDescription(key).substring(0, AUTOCOMPLETE_DESCRIPTION_MAX_LENGTH)}`,
-          value: key,
-        }))
+        .map((key) => {
+          const description = getSettingDescription(key);
+          const separator = " - ";
+
+          // Calculate max description length to keep total under Discord's 100 char limit
+          const maxDescLength =
+            AUTOCOMPLETE_CHOICE_MAX_LENGTH - key.length - separator.length;
+
+          // If key is too long, show just the key without description
+          // Otherwise truncate description to fit, with minimum of 10 chars if possible
+          let name: string;
+          if (maxDescLength < 10) {
+            // Key is too long to include meaningful description
+            name = key.substring(0, AUTOCOMPLETE_CHOICE_MAX_LENGTH);
+          } else {
+            const truncatedDesc = description.substring(0, maxDescLength);
+            name = `${key}${separator}${truncatedDesc}`;
+          }
+
+          return {
+            name,
+            value: key,
+          };
+        })
         .slice(0, 25); // Discord limits to 25 choices
 
       await interaction.respond(choices);
+    } else {
+      // Respond with empty array for other options (e.g., "value" in /config set)
+      await interaction.respond([]);
     }
   } catch (error) {
     logger.error("Error in config autocomplete:", error);
