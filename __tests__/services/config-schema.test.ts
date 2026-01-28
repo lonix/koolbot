@@ -3,7 +3,8 @@ import { defaultConfig } from "../../src/services/config-schema.js";
 
 describe("Config Schema", () => {
   describe("defaultConfig", () => {
-    it("should have all core features disabled by default for security", () => {
+    it("should have most core features disabled by default for security", () => {
+      // Most features start disabled for security
       expect(defaultConfig["voicechannels.enabled"]).toBe(false);
       expect(defaultConfig["voicetracking.enabled"]).toBe(false);
       expect(defaultConfig["ping.enabled"]).toBe(false);
