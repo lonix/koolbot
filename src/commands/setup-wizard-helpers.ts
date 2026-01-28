@@ -16,22 +16,27 @@ const FEATURES = {
   voicechannels: {
     name: "Voice Channels",
     emoji: "🎤",
+    description: "Dynamic voice channel management with lobby",
   },
   voicetracking: {
     name: "Voice Tracking",
     emoji: "📊",
+    description: "Track voice activity and generate statistics",
   },
   quotes: {
     name: "Quote System",
     emoji: "💬",
+    description: "Collect and share memorable quotes",
   },
   gamification: {
     name: "Gamification",
     emoji: "🏆",
+    description: "Achievement system for voice activity",
   },
   logging: {
     name: "Core Logging",
     emoji: "📝",
+    description: "Bot event logging to Discord channels",
   },
 } as const;
 
@@ -41,7 +46,7 @@ type FeatureKey = keyof typeof FEATURES;
  * Start configuration for a specific feature
  */
 export async function startFeatureConfiguration(
-  interaction: ChatInputCommandInteraction | any,
+  interaction: ChatInputCommandInteraction,
   guild: Guild,
   userId: string,
   feature: FeatureKey,
@@ -65,6 +70,7 @@ export async function startFeatureConfiguration(
   const featureInfo = FEATURES[feature];
   const embed = new EmbedBuilder()
     .setTitle(`${featureInfo.emoji} ${featureInfo.name} Configuration`)
+    .setDescription(featureInfo.description)
     .setColor(0x5865f2);
 
   // Call appropriate configuration function based on feature
@@ -86,12 +92,18 @@ export async function startFeatureConfiguration(
     case "logging":
       await configureLogging(interaction, guild, userId, guildId, embed);
       break;
+    default:
+      logger.error(`Unknown feature type: ${feature}`);
+      await interaction.followUp({
+        content: `❌ Unknown feature type: ${feature}`,
+        ephemeral: true,
+      });
   }
 }
 
 async function configureVoiceChannels(
-  interaction: ChatInputCommandInteraction | any,
-  guild: any,
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
   userId: string,
   guildId: string,
   embed: EmbedBuilder,
@@ -153,8 +165,8 @@ async function configureVoiceChannels(
 }
 
 async function configureVoiceTracking(
-  interaction: ChatInputCommandInteraction | any,
-  guild: any,
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
   userId: string,
   guildId: string,
   embed: EmbedBuilder,
@@ -195,8 +207,8 @@ async function configureVoiceTracking(
 }
 
 async function configureQuotes(
-  interaction: ChatInputCommandInteraction | any,
-  guild: any,
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
   userId: string,
   guildId: string,
   embed: EmbedBuilder,
@@ -239,8 +251,8 @@ async function configureQuotes(
 }
 
 async function configureGamification(
-  interaction: ChatInputCommandInteraction | any,
-  guild: any,
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
   userId: string,
   guildId: string,
   embed: EmbedBuilder,
@@ -281,8 +293,8 @@ async function configureGamification(
 }
 
 async function configureLogging(
-  interaction: ChatInputCommandInteraction | any,
-  guild: any,
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
   userId: string,
   guildId: string,
   embed: EmbedBuilder,
