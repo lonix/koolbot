@@ -346,8 +346,10 @@ export class CommandManager {
 
           // Check configuration if required
           if (config.configKey) {
-            const configValue = await this.configService.get(config.configKey);
-            shouldEnable = configValue === true;
+            shouldEnable = await this.configService.getBoolean(
+              config.configKey,
+              false,
+            );
           }
 
           if (shouldEnable) {
