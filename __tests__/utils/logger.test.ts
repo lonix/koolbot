@@ -1,10 +1,11 @@
 import { describe, it, expect } from '@jest/globals';
 import winston from 'winston';
+import logger from '../../src/utils/logger.js';
 
 describe('Logger Error Handling', () => {
   describe('Logger Configuration', () => {
     it('should create logger with error serialization format', () => {
-      const logger = winston.createLogger({
+      const testLogger = winston.createLogger({
         level: 'info',
         format: winston.format.combine(
           winston.format.timestamp(),
@@ -33,12 +34,12 @@ describe('Logger Error Handling', () => {
         ],
       });
 
-      expect(logger).toBeDefined();
-      expect(logger.level).toBe('info');
+      expect(testLogger).toBeDefined();
+      expect(testLogger.level).toBe('info');
     });
 
     it('should handle Error objects without crashing', () => {
-      const logger = winston.createLogger({
+      const testLogger = winston.createLogger({
         level: 'info',
         format: winston.format.combine(
           winston.format.timestamp(),
@@ -62,12 +63,12 @@ describe('Logger Error Handling', () => {
       
       // Should not throw when logging error objects
       expect(() => {
-        logger.error('Uncaught exception:', testError);
+        testLogger.error('Uncaught exception:', testError);
       }).not.toThrow();
     });
 
     it('should handle TypeError objects without crashing', () => {
-      const logger = winston.createLogger({
+      const testLogger = winston.createLogger({
         level: 'info',
         format: winston.format.combine(
           winston.format.timestamp(),
@@ -90,12 +91,12 @@ describe('Logger Error Handling', () => {
       const typeError = new TypeError('Invalid type');
       
       expect(() => {
-        logger.error('Type error occurred:', typeError);
+        testLogger.error('Type error occurred:', typeError);
       }).not.toThrow();
     });
 
     it('should handle ReferenceError objects without crashing', () => {
-      const logger = winston.createLogger({
+      const testLogger = winston.createLogger({
         level: 'info',
         format: winston.format.combine(
           winston.format.timestamp(),
@@ -118,12 +119,12 @@ describe('Logger Error Handling', () => {
       const refError = new ReferenceError('Variable not defined');
       
       expect(() => {
-        logger.error('Reference error:', refError);
+        testLogger.error('Reference error:', refError);
       }).not.toThrow();
     });
 
     it('should handle custom error objects without crashing', () => {
-      const logger = winston.createLogger({
+      const testLogger = winston.createLogger({
         level: 'info',
         format: winston.format.combine(
           winston.format.timestamp(),
@@ -146,12 +147,12 @@ describe('Logger Error Handling', () => {
       const customError = { message: 'Custom error object' };
       
       expect(() => {
-        logger.error('Custom error:', customError);
+        testLogger.error('Custom error:', customError);
       }).not.toThrow();
     });
 
     it('should handle metadata without crashing', () => {
-      const logger = winston.createLogger({
+      const testLogger = winston.createLogger({
         level: 'info',
         format: winston.format.combine(
           winston.format.timestamp(),
@@ -178,7 +179,42 @@ describe('Logger Error Handling', () => {
       });
 
       expect(() => {
-        logger.error('Error with metadata', { userId: '123', action: 'login' });
+        testLogger.error('Error with metadata', { userId: '123', action: 'login' });
+      }).not.toThrow();
+    });
+  });
+
+  describe('Actual Logger Instance', () => {
+    it('should export a valid logger instance', () => {
+      expect(logger).toBeDefined();
+      expect(typeof logger.info).toBe('function');
+      expect(typeof logger.error).toBe('function');
+      expect(typeof logger.debug).toBe('function');
+      expect(typeof logger.warn).toBe('function');
+    });
+
+    it('should log info messages', () => {
+      expect(() => {
+        logger.info('Test info message');
+      }).not.toThrow();
+    });
+
+    it('should log error messages', () => {
+      expect(() => {
+        logger.error('Test error message');
+      }).not.toThrow();
+    });
+
+    it('should log with metadata', () => {
+      expect(() => {
+        logger.info('Test with metadata', { key: 'value' });
+      }).not.toThrow();
+    });
+
+    it('should log errors with stack traces', () => {
+      const error = new Error('Test error');
+      expect(() => {
+        logger.error('Error occurred:', error);
       }).not.toThrow();
     });
   });

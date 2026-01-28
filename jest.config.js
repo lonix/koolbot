@@ -43,4 +43,5 @@ export default {
   testTimeout: 10000,
   verbose: true,
   roots: ['<rootDir>/src', '<rootDir>/__tests__'],
+  setupFilesAfterEnv: ['<rootDir>/__tests__/setup.ts'],
 };

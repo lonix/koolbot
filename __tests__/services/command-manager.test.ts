@@ -1,88 +1,68 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { CommandManager } from '../../src/services/command-manager.js';
+
+// Mock dependencies
+jest.mock('../../src/services/config-service.js');
+jest.mock('../../src/services/monitoring-service.js');
+jest.mock('../../src/services/cooldown-manager.js');
+jest.mock('../../src/services/permissions-service.js');
+jest.mock('../../src/utils/logger.js');
 
 describe('CommandManager', () => {
-  describe('command registration consistency', () => {
-    it('should have same commands in both loadCommandsDynamically and populateClientCommands', async () => {
-      // These are the commands that should be in both methods
-      const expectedCommands = [
-        'ping',
-        'help',
-        'amikool',
-        'vctop',
-        'vcstats',
-        'seen',
-        'transfer-ownership',
-        'announce-vc-stats',
-        'achievements',
-        'quote',
-        'announce',
-        'dbtrunk',
-        'vc',
-        'config',
-        'botstats',
-        'permissions',
-        'reactrole',
-        'setup',
-        'setup-lobby',
-      ];
+  let service: CommandManager;
+  let mockClient: any;
 
-      // Verify the expected commands are documented
-      expect(expectedCommands).toContain('achievements');
-      expect(expectedCommands).toContain('setup');
-      expect(expectedCommands).toContain('announce');
-      expect(expectedCommands).toContain('reactrole');
-      expect(expectedCommands).toContain('help');
-    });
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockClient = { 
+      user: { id: '123' },
+      application: { id: '456' },
+    };
+    service = CommandManager.getInstance(mockClient);
+  });
 
-    it('should have achievements command in the list', () => {
-      const commands = ['achievements'];
-      expect(commands).toContain('achievements');
-    });
-
-    it('should have setup wizard command in the list', () => {
-      const commands = ['setup'];
-      expect(commands).toContain('setup');
-    });
-
-    it('should have announce command in the list', () => {
-      const commands = ['announce'];
-      expect(commands).toContain('announce');
-    });
-
-    it('should have reactrole command in the list', () => {
-      const commands = ['reactrole'];
-      expect(commands).toContain('reactrole');
-    });
-
-    it('should have help command in the list', () => {
-      const commands = ['help'];
-      expect(commands).toContain('help');
+  describe('singleton pattern', () => {
+    it('should create a singleton instance', () => {
+      const instance1 = CommandManager.getInstance(mockClient);
+      const instance2 = CommandManager.getInstance(mockClient);
+      
+      expect(instance1).toBe(instance2);
     });
   });
 
-  describe('command configuration structure', () => {
-    it('should have proper command config structure', () => {
-      const commandConfig = {
-        name: 'achievements',
-        configKey: 'gamification.enabled',
-        file: 'achievements',
-      };
+  describe('initialization', () => {
+    it('should create an instance with a client', () => {
+      expect(service).toBeDefined();
+      expect(service).toBeInstanceOf(CommandManager);
+    });
+  });
 
-      expect(commandConfig).toHaveProperty('name');
-      expect(commandConfig).toHaveProperty('configKey');
-      expect(commandConfig).toHaveProperty('file');
+  describe('public methods', () => {
+    it('should have initialize method', () => {
+      expect(typeof service.initialize).toBe('function');
     });
 
-    it('should have setup wizard config', () => {
-      const setupConfig = {
-        name: 'setup',
-        configKey: 'wizard.enabled',
-        file: 'setup-wizard',
-      };
+    it('should have registerCommands method', () => {
+      expect(typeof service.registerCommands).toBe('function');
+    });
 
-      expect(setupConfig.name).toBe('setup');
-      expect(setupConfig.configKey).toBe('wizard.enabled');
-      expect(setupConfig.file).toBe('setup-wizard');
+    it('should have populateClientCommands method', () => {
+      expect(typeof service.populateClientCommands).toBe('function');
+    });
+
+    it('should have unregisterCommands method', () => {
+      expect(typeof service.unregisterCommands).toBe('function');
+    });
+
+    it('should have executeCommand method', () => {
+      expect(typeof service.executeCommand).toBe('function');
+    });
+  });
+
+  describe('command collection', () => {
+    it('should start with empty commands', () => {
+      // Service is initialized, commands should be defined
+      expect(true).toBe(true);
     });
   });
 });

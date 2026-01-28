@@ -1,6 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 
-describe('GamificationService', () => {
+describe('StartupMigrator Methods', () => {
   it('placeholder test', () => {
     expect(true).toBe(true);
   });
