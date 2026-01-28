@@ -10,41 +10,15 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { WizardService } from "../services/wizard-service.js";
+import { ConfigService } from "../services/config-service.js";
 import { ChannelDetector } from "../utils/channel-detector.js";
-import { startFeatureConfiguration } from "./setup-wizard-helpers.js";
+import {
+  startFeatureConfiguration,
+  FEATURES,
+  type FeatureKey,
+} from "./setup-wizard-helpers.js";
 
 const wizardService = WizardService.getInstance();
-
-// Feature definitions
-const FEATURES = {
-  voicechannels: {
-    name: "Voice Channels",
-    emoji: "🎤",
-    description: "Dynamic voice channel management with lobby",
-  },
-  voicetracking: {
-    name: "Voice Tracking",
-    emoji: "📊",
-    description: "Track voice activity and generate statistics",
-  },
-  quotes: {
-    name: "Quote System",
-    emoji: "💬",
-    description: "Collect and share memorable quotes",
-  },
-  gamification: {
-    name: "Gamification",
-    emoji: "🏆",
-    description: "Achievement system for voice activity",
-  },
-  logging: {
-    name: "Core Logging",
-    emoji: "📝",
-    description: "Bot event logging to Discord channels",
-  },
-} as const;
-
-type FeatureKey = keyof typeof FEATURES;
 
 export const data = new SlashCommandBuilder()
   .setName("setup")
@@ -67,6 +41,9 @@ export const data = new SlashCommandBuilder()
             { name: "Quote System", value: "quotes" },
             { name: "Gamification", value: "gamification" },
             { name: "Core Logging", value: "logging" },
+            { name: "Am I Kool", value: "amikool" },
+            { name: "Reaction Roles", value: "reactionroles" },
+            { name: "Announcements", value: "announcements" },
           ),
       ),
   );
@@ -177,16 +154,32 @@ async function showFeatureSelection(
   userId: string,
   guildId: string,
 ): Promise<void> {
+  // Get current feature statuses
+  const featureStatuses = await Promise.all(
+    Object.entries(FEATURES).map(async ([key, feature]) => {
+      const enabled = await ConfigService.getInstance().getBoolean(
+        feature.configKey,
+        false,
+      );
+      return {
+        key,
+        feature,
+        enabled,
+      };
+    }),
+  );
+
   const embed = new EmbedBuilder()
     .setTitle(`🧙‍♂️ Setup Wizard for ${guildName}`)
     .setDescription(
       "Welcome to the interactive setup wizard! Select the features you want to configure:\n\n" +
+        "✅ = Enabled | ⚪ = Disabled\n" +
         "You can select multiple features or configure them one at a time.",
     )
     .setColor(0x5865f2)
     .addFields(
-      Object.entries(FEATURES).map(([, feature]) => ({
-        name: `${feature.emoji} ${feature.name}`,
+      featureStatuses.map(({ feature, enabled }) => ({
+        name: `${enabled ? "✅" : "⚪"} ${feature.emoji} ${feature.name}`,
         value: feature.description,
         inline: false,
       })),
@@ -202,10 +195,10 @@ async function showFeatureSelection(
     .setMinValues(1)
     .setMaxValues(Object.keys(FEATURES).length)
     .addOptions(
-      Object.entries(FEATURES).map(([key, feature]) => ({
-        label: feature.name,
+      featureStatuses.map(({ key, feature, enabled }) => ({
+        label: `${enabled ? "✅" : "⚪"} ${feature.name}`,
         value: key,
-        description: feature.description,
+        description: feature.description.substring(0, 100), // Discord limit
         emoji: feature.emoji,
       })),
     );

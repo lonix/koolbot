@@ -7,40 +7,68 @@ import {
   ButtonStyle,
 } from "discord.js";
 import { WizardService } from "../services/wizard-service.js";
+import { ConfigService } from "../services/config-service.js";
 import logger from "../utils/logger.js";
 
 const wizardService = WizardService.getInstance();
+const configService = ConfigService.getInstance();
 
-// Features configuration
-const FEATURES = {
+// Features configuration - exported for use in setup-wizard.ts
+export const FEATURES = {
   voicechannels: {
     name: "Voice Channels",
     emoji: "🎤",
     description: "Dynamic voice channel management with lobby",
+    configKey: "voicechannels.enabled",
   },
   voicetracking: {
     name: "Voice Tracking",
     emoji: "📊",
     description: "Track voice activity and generate statistics",
+    configKey: "voicetracking.enabled",
   },
   quotes: {
     name: "Quote System",
     emoji: "💬",
     description: "Collect and share memorable quotes",
+    configKey: "quotes.enabled",
   },
   gamification: {
     name: "Gamification",
     emoji: "🏆",
     description: "Achievement system for voice activity",
+    configKey: "gamification.enabled",
   },
   logging: {
     name: "Core Logging",
     emoji: "📝",
     description: "Bot event logging to Discord channels",
+    configKey: "core.startup.enabled", // Using startup as main indicator
+  },
+  amikool: {
+    name: "Am I Kool",
+    emoji: "😎",
+    description: "Fun command to check kool status based on role",
+    configKey: "amikool.enabled",
+  },
+  reactionroles: {
+    name: "Reaction Roles",
+    emoji: "⭐",
+    description: "Let users self-assign roles via reactions",
+    configKey: "reactionroles.enabled",
+  },
+  announcements: {
+    name: "Announcements",
+    emoji: "📢",
+    description: "Schedule automated announcements",
+    configKey: "announcements.enabled",
   },
 } as const;
 
 type FeatureKey = keyof typeof FEATURES;
+
+// Export for testing
+export type { FeatureKey };
 
 /**
  * Start configuration for a specific feature
@@ -92,7 +120,18 @@ export async function startFeatureConfiguration(
     case "logging":
       await configureLogging(interaction, guild, userId, guildId, embed);
       break;
+    case "amikool":
+      await configureAmikool(interaction, guild, userId, guildId, embed);
+      break;
+    case "reactionroles":
+      await configureReactionRoles(interaction, guild, userId, guildId, embed);
+      break;
+    case "announcements":
+      await configureAnnouncements(interaction, guild, userId, guildId, embed);
+      break;
     default:
+      // This case is unreachable due to TypeScript's type system (FeatureKey guarantees valid keys)
+      // However, we keep it for defensive programming in case features are added at runtime
       logger.error(`Unknown feature type: ${feature}`);
       await interaction.followUp({
         content: `❌ Unknown feature type: ${feature}`,
@@ -320,6 +359,128 @@ async function configureLogging(
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(`wizard_logging_skip__${userId}_${guildId}`)
+      .setLabel("Skip")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  } else {
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  }
+}
+
+async function configureAmikool(
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+  embed: EmbedBuilder,
+): Promise<void> {
+  embed.setDescription(
+    "**Am I Kool Configuration**\n\n" +
+      "Fun command that checks if users have a specific role.\n\n" +
+      "Users with the configured role will be told they are 'kool'!",
+  );
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`wizard_amikool_configure__${userId}_${guildId}`)
+      .setLabel("Configure Role")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`wizard_amikool_skip__${userId}_${guildId}`)
+      .setLabel("Skip")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  } else {
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  }
+}
+
+async function configureReactionRoles(
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+  embed: EmbedBuilder,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const textChannels = state.detectedResources.textChannels || [];
+
+  embed.setDescription(
+    "**Reaction Roles Configuration**\n\n" +
+      "Allow users to self-assign roles by reacting to messages.\n\n" +
+      `I found ${textChannels.length} text channels where you can post reaction role messages.`,
+  );
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`wizard_reactrole_configure__${userId}_${guildId}`)
+      .setLabel("Configure")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`wizard_reactrole_skip__${userId}_${guildId}`)
+      .setLabel("Skip")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  } else {
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  }
+}
+
+async function configureAnnouncements(
+  interaction: ChatInputCommandInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+  embed: EmbedBuilder,
+): Promise<void> {
+  embed.setDescription(
+    "**Announcements Configuration**\n\n" +
+      "Schedule automated announcements to channels.\n\n" +
+      "You can create recurring announcements with custom schedules.",
+  );
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`wizard_announce_configure__${userId}_${guildId}`)
+      .setLabel("Configure")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`wizard_announce_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
