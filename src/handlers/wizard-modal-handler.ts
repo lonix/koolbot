@@ -33,7 +33,7 @@ export async function handleWizardModal(
   const modalType = doubleSplit[0];
   const userGuildParts = doubleSplit[1].split("_");
 
-  if (userGuildParts.length < 2) {
+  if (userGuildParts.length !== 2) {
     await interaction.reply({
       content: "❌ Invalid modal interaction format.",
       ephemeral: true,

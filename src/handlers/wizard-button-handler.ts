@@ -43,7 +43,7 @@ export async function handleWizardButton(
   const action = doubleSplit[0];
   const userGuildParts = doubleSplit[1].split("_");
 
-  if (userGuildParts.length < 2) {
+  if (userGuildParts.length !== 2) {
     await interaction.reply({
       content: "❌ Invalid button interaction format.",
       ephemeral: true,

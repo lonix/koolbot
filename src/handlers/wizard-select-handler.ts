@@ -33,7 +33,7 @@ export async function handleWizardSelectMenu(
   const action = doubleSplit[0];
   const userGuildParts = doubleSplit[1].split("_");
 
-  if (userGuildParts.length < 2) {
+  if (userGuildParts.length !== 2) {
     await interaction.reply({
       content: "❌ Invalid select menu interaction format.",
       ephemeral: true,
