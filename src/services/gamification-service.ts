@@ -23,7 +23,10 @@ export type AccoladeType =
   | "night_owl"
   | "early_bird"
   | "weekend_warrior"
-  | "weekday_warrior";
+  | "weekday_warrior"
+  | "consistent_week"
+  | "consistent_fortnight"
+  | "consistent_month";
 
 export type AchievementType =
   | "weekly_champion"
@@ -405,6 +408,90 @@ export class GamificationService {
         };
       },
     },
+    consistent_week: {
+      emoji: "📅",
+      name: "Week Streak",
+      description: "Connected for 7 consecutive days (5+ min/day)",
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        if (!user) return false;
+        const { longestStreak } = this.calculateConsecutiveDays(
+          user.sessions,
+          300,
+        );
+        return longestStreak >= 7;
+      },
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        const { longestStreak } = this.calculateConsecutiveDays(
+          user?.sessions || [],
+          300,
+        );
+        return {
+          value: longestStreak,
+          description: "7+ day streak",
+          unit: "days",
+        };
+      },
+    },
+    consistent_fortnight: {
+      emoji: "📆",
+      name: "Fortnight Streak",
+      description: "Connected for 14 consecutive days (5+ min/day)",
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        if (!user) return false;
+        const { longestStreak } = this.calculateConsecutiveDays(
+          user.sessions,
+          300,
+        );
+        return longestStreak >= 14;
+      },
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        const { longestStreak } = this.calculateConsecutiveDays(
+          user?.sessions || [],
+          300,
+        );
+        return {
+          value: longestStreak,
+          description: "14+ day streak",
+          unit: "days",
+        };
+      },
+    },
+    consistent_month: {
+      emoji: "🗓️",
+      name: "Month Streak",
+      description: "Connected for 30 consecutive days (5+ min/day)",
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        if (!user) return false;
+        const { longestStreak } = this.calculateConsecutiveDays(
+          user.sessions,
+          300,
+        );
+        return longestStreak >= 30;
+      },
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        const { longestStreak } = this.calculateConsecutiveDays(
+          user?.sessions || [],
+          300,
+        );
+        return {
+          value: longestStreak,
+          description: "30+ day streak",
+          unit: "days",
+        };
+      },
+    },
   };
 
   private constructor(client: Client) {
@@ -511,6 +598,92 @@ export class GamificationService {
     }
 
     return totalSeconds;
+  }
+
+  /**
+   * Calculate the longest streak of consecutive days with at least minDuration seconds per day
+   * @param sessions Array of user sessions
+   * @param minDuration Minimum duration in seconds per day (default: 300 = 5 minutes)
+   * @returns Object with currentStreak and longestStreak
+   */
+  private calculateConsecutiveDays(
+    sessions: Array<{ startTime: Date; duration?: number }>,
+    minDuration: number = 300,
+  ): { currentStreak: number; longestStreak: number } {
+    if (!sessions || sessions.length === 0) {
+      return { currentStreak: 0, longestStreak: 0 };
+    }
+
+    // Group sessions by day (using UTC date)
+    const dayTotals = new Map<string, number>();
+
+    for (const session of sessions) {
+      if (session.startTime && session.duration) {
+        const date = new Date(session.startTime);
+        const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+        const currentTotal = dayTotals.get(dayKey) || 0;
+        dayTotals.set(dayKey, currentTotal + session.duration);
+      }
+    }
+
+    // Filter days that meet minimum duration
+    const qualifyingDays = Array.from(dayTotals.entries())
+      .filter(([, duration]) => duration >= minDuration)
+      .map(([day]) => day)
+      .sort();
+
+    if (qualifyingDays.length === 0) {
+      return { currentStreak: 0, longestStreak: 0 };
+    }
+
+    // Calculate streaks
+    let longestStreak = 1;
+    let currentStreak = 1;
+    const today = new Date();
+    const todayKey = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}-${String(today.getUTCDate()).padStart(2, "0")}`;
+    const yesterdayKey = new Date(today.getTime() - 86400000)
+      .toISOString()
+      .split("T")[0];
+
+    for (let i = 1; i < qualifyingDays.length; i++) {
+      const prevDate = new Date(qualifyingDays[i - 1]);
+      const currDate = new Date(qualifyingDays[i]);
+      const diffDays = Math.floor(
+        (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
+      );
+
+      if (diffDays === 1) {
+        currentStreak++;
+        longestStreak = Math.max(longestStreak, currentStreak);
+      } else {
+        currentStreak = 1;
+      }
+    }
+
+    // Calculate current active streak (if last qualifying day is today or yesterday)
+    const lastDay = qualifyingDays[qualifyingDays.length - 1];
+    if (lastDay !== todayKey && lastDay !== yesterdayKey) {
+      // Streak is broken
+      currentStreak = 0;
+    } else {
+      // The current streak is the streak ending on the last qualifying day
+      currentStreak = 1;
+      for (let i = qualifyingDays.length - 2; i >= 0; i--) {
+        const prevDate = new Date(qualifyingDays[i]);
+        const currDate = new Date(qualifyingDays[i + 1]);
+        const diffDays = Math.floor(
+          (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
+        );
+
+        if (diffDays === 1) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    return { currentStreak, longestStreak };
   }
 
   /**
