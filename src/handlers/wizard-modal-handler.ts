@@ -9,9 +9,9 @@ export async function handleWizardModal(
 ): Promise<void> {
   const customId = interaction.customId;
 
-  // Parse custom ID: wizard_modal_{type}_{userId}_{guildId}
-  const parts = customId.split("_");
-  if (parts.length < 5 || parts[0] !== "wizard" || parts[1] !== "modal") {
+  // Parse custom ID: wizard_{action}__{userId}_{guildId}
+  // Extract the parts after "wizard_"
+  if (!customId.startsWith("wizard_")) {
     await interaction.reply({
       content: "❌ Invalid modal interaction.",
       ephemeral: true,
@@ -19,9 +19,30 @@ export async function handleWizardModal(
     return;
   }
 
-  const modalType = parts[2];
-  const userId = parts[3];
-  const guildId = parts[4];
+  const afterWizard = customId.substring(7); // Remove "wizard_"
+  const doubleSplit = afterWizard.split("__");
+
+  if (doubleSplit.length !== 2) {
+    await interaction.reply({
+      content: "❌ Invalid modal interaction format.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const modalType = doubleSplit[0];
+  const userGuildParts = doubleSplit[1].split("_");
+
+  if (userGuildParts.length < 2) {
+    await interaction.reply({
+      content: "❌ Invalid modal interaction format.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const userId = userGuildParts[0];
+  const guildId = userGuildParts[1];
 
   // Verify user owns this wizard session
   if (userId !== interaction.user.id) {
@@ -55,10 +76,10 @@ export async function handleWizardModal(
 
   try {
     switch (modalType) {
-      case "vc":
+      case "modal_vc_new":
         await handleVcModal(interaction, guild, userId, guildId);
         break;
-      case "vt":
+      case "modal_vt":
         await handleVtModal(interaction, guild, userId, guildId);
         break;
       default:

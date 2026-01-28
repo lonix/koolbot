@@ -93,12 +93,12 @@ async function showSummary(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_finish_confirm_${userId}_${guildId}`)
+      .setCustomId(`wizard_finish_confirm__${userId}_${guildId}`)
       .setLabel("Apply Configuration")
       .setStyle(ButtonStyle.Success)
       .setEmoji("✅"),
     new ButtonBuilder()
-      .setCustomId(`wizard_cancel_${userId}_${guildId}`)
+      .setCustomId(`wizard_cancel__${userId}_${guildId}`)
       .setLabel("Cancel")
       .setStyle(ButtonStyle.Danger)
       .setEmoji("❌"),

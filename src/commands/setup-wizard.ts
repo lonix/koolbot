@@ -196,7 +196,7 @@ async function showFeatureSelection(
 
   // Create select menu for features
   const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`wizard_features_${userId}_${guildId}`)
+    .setCustomId(`wizard_features__${userId}_${guildId}`)
     .setPlaceholder("Select features to configure")
     .setMinValues(1)
     .setMaxValues(Object.keys(FEATURES).length)
@@ -215,12 +215,12 @@ async function showFeatureSelection(
 
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_continue_${userId}_${guildId}`)
+      .setCustomId(`wizard_continue__${userId}_${guildId}`)
       .setLabel("Continue")
       .setStyle(ButtonStyle.Primary)
       .setEmoji("▶️"),
     new ButtonBuilder()
-      .setCustomId(`wizard_cancel_${userId}_${guildId}`)
+      .setCustomId(`wizard_cancel__${userId}_${guildId}`)
       .setLabel("Cancel")
       .setStyle(ButtonStyle.Danger)
       .setEmoji("❌"),
@@ -315,16 +315,16 @@ async function configureVoiceChannels(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_vc_existing_${userId}_${guildId}`)
+      .setCustomId(`wizard_vc_existing__${userId}_${guildId}`)
       .setLabel("Use Existing")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(existingCategories.length === 0),
     new ButtonBuilder()
-      .setCustomId(`wizard_vc_new_${userId}_${guildId}`)
+      .setCustomId(`wizard_vc_new__${userId}_${guildId}`)
       .setLabel("Create New")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`wizard_vc_skip_${userId}_${guildId}`)
+      .setCustomId(`wizard_vc_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -362,11 +362,11 @@ async function configureVoiceTracking(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_vt_enable_${userId}_${guildId}`)
+      .setCustomId(`wizard_vt_enable__${userId}_${guildId}`)
       .setLabel("Enable & Configure")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`wizard_vt_skip_${userId}_${guildId}`)
+      .setCustomId(`wizard_vt_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -406,11 +406,11 @@ async function configureQuotes(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_quotes_configure_${userId}_${guildId}`)
+      .setCustomId(`wizard_quotes_configure__${userId}_${guildId}`)
       .setLabel("Configure")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`wizard_quotes_skip_${userId}_${guildId}`)
+      .setCustomId(`wizard_quotes_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -448,11 +448,11 @@ async function configureGamification(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_gamif_enable_${userId}_${guildId}`)
+      .setCustomId(`wizard_gamif_enable__${userId}_${guildId}`)
       .setLabel("Enable")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`wizard_gamif_skip_${userId}_${guildId}`)
+      .setCustomId(`wizard_gamif_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
@@ -495,11 +495,11 @@ async function configureLogging(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_logging_configure_${userId}_${guildId}`)
+      .setCustomId(`wizard_logging_configure__${userId}_${guildId}`)
       .setLabel("Configure")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`wizard_logging_skip_${userId}_${guildId}`)
+      .setCustomId(`wizard_logging_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
