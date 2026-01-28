@@ -1,5 +1,6 @@
-import { describe, it, expect } from '@jest/globals';
-import { data } from '../../src/commands/config/index.js';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { data, autocomplete } from '../../src/commands/config/index.js';
+import { AutocompleteInteraction } from 'discord.js';
 
 describe('Config Command', () => {
   describe('command metadata', () => {
@@ -58,6 +59,158 @@ describe('Config Command', () => {
       const json = data.toJSON();
       const reloadSubcommand = json.options?.find((opt: any) => opt.name === 'reload');
       expect(reloadSubcommand).toBeDefined();
+    });
+
+    it('should have autocomplete enabled on set subcommand key option', () => {
+      const json = data.toJSON();
+      const setSubcommand = json.options?.find((opt: any) => opt.name === 'set');
+      const keyOption = setSubcommand?.options?.find((opt: any) => opt.name === 'key');
+      expect(keyOption).toBeDefined();
+      expect(keyOption?.autocomplete).toBe(true);
+    });
+
+    it('should have autocomplete enabled on reset subcommand key option', () => {
+      const json = data.toJSON();
+      const resetSubcommand = json.options?.find((opt: any) => opt.name === 'reset');
+      const keyOption = resetSubcommand?.options?.find((opt: any) => opt.name === 'key');
+      expect(keyOption).toBeDefined();
+      expect(keyOption?.autocomplete).toBe(true);
+    });
+  });
+
+  describe('autocomplete function', () => {
+    let mockInteraction: any;
+    let mockRespond: jest.Mock;
+
+    beforeEach(() => {
+      mockRespond = jest.fn();
+      mockInteraction = {
+        options: {
+          getFocused: jest.fn(),
+        },
+        respond: mockRespond,
+      } as unknown as AutocompleteInteraction;
+    });
+
+    it('should respond with config keys when focused option is "key"', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
+        name: 'key',
+        value: 'voice',
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      const response = mockRespond.mock.calls[0][0];
+      expect(Array.isArray(response)).toBe(true);
+      expect(response.length).toBeGreaterThan(0);
+      // Should include voice-related keys
+      expect(response.some((choice: any) => choice.value.includes('voice'))).toBe(true);
+    });
+
+    it('should respond with empty array when focused option is not "key"', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
+        name: 'value',
+        value: 'test',
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      expect(mockRespond).toHaveBeenCalledWith([]);
+    });
+
+    it('should limit results to 25 choices', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
+        name: 'key',
+        value: '', // Empty search should return all keys
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      const response = mockRespond.mock.calls[0][0];
+      expect(response.length).toBeLessThanOrEqual(25);
+    });
+
+    it('should filter keys case-insensitively', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
+        name: 'key',
+        value: 'VOICE',
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      const response = mockRespond.mock.calls[0][0];
+      expect(response.length).toBeGreaterThan(0);
+      expect(response.some((choice: any) => choice.value.includes('voice'))).toBe(true);
+    });
+
+    it('should respond with empty array on error', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockImplementation(() => {
+        throw new Error('Test error');
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      expect(mockRespond).toHaveBeenCalledWith([]);
+    });
+
+    it('should include description in choice names', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
+        name: 'key',
+        value: 'ping.enabled',
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      const response = mockRespond.mock.calls[0][0];
+      expect(response.length).toBeGreaterThan(0);
+      const pingChoice = response.find((choice: any) => choice.value === 'ping.enabled');
+      expect(pingChoice).toBeDefined();
+      expect(pingChoice.name).toContain('ping.enabled');
+      expect(pingChoice.name).toContain('-'); // Description separator
+    });
+
+    it('should ensure all choice names are within Discord 100 character limit', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
+        name: 'key',
+        value: '', // Empty search to get all keys
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      const response = mockRespond.mock.calls[0][0];
+      
+      // Verify all choice names are within Discord's 100 character limit
+      response.forEach((choice: any) => {
+        expect(choice.name.length).toBeGreaterThan(0);
+        expect(choice.name.length).toBeLessThanOrEqual(100);
+      });
+    });
+
+    it('should truncate descriptions for long keys to fit 100 char limit', async () => {
+      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
+        name: 'key',
+        value: 'voicetracking.cleanup.retention', // Long key prefix
+      });
+
+      await autocomplete(mockInteraction);
+
+      expect(mockRespond).toHaveBeenCalledTimes(1);
+      const response = mockRespond.mock.calls[0][0];
+      
+      // Should have results for long keys
+      expect(response.length).toBeGreaterThan(0);
+      
+      // All names should still be within limit
+      response.forEach((choice: any) => {
+        expect(choice.name.length).toBeLessThanOrEqual(100);
+      });
     });
   });
 });
