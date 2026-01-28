@@ -555,9 +555,9 @@ Automatic cleanup of old tracking data with data aggregation.
 
 The cleanup job deletes session history older than `detailed_sessions_days`. This affects consecutive day streak calculations:
 
-- **Default retention (30 days):** Supports up to 30-day streaks
-- **For 30-day "No-Lifer" accolade:** Increase retention to at least **45 days** to ensure streak data is preserved
-- **For longer custom streaks:** Set retention to streak length + 15 days buffer
+- **Default retention (30 days):** Supports streaks up to ~25 days (some buffer needed)
+- **For 30-day "No-Lifer" accolade:** Increase retention to at least **60 days** (30-day streak + 30-day buffer for safety)
+- **Formula:** Set retention to (longest streak × 2) for safe operation
 
 **Recommended configuration for accolades:**
 

@@ -15,14 +15,20 @@ jest.mock('../../src/utils/logger.js');
 jest.mock('../../src/services/config-service.js');
 
 describe('GamificationService - Consecutive Days Calculation', () => {
+  // Helper to create a date in YYYY-MM-DD format
+  const createDate = (daysAgo: number): Date => {
+    const date = new Date();
+    date.setUTCDate(date.getUTCDate() - daysAgo);
+    date.setUTCHours(12, 0, 0, 0); // Noon UTC
+    return date;
+  };
+
+  // Helper to format date as YYYY-MM-DD (matches implementation)
+  const formatDateKeyUTC = (date: Date): string => {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+  };
+
   describe('consecutive days streak logic', () => {
-    // Helper to create a date in YYYY-MM-DD format
-    const createDate = (daysAgo: number): Date => {
-      const date = new Date();
-      date.setUTCDate(date.getUTCDate() - daysAgo);
-      date.setUTCHours(12, 0, 0, 0); // Noon UTC
-      return date;
-    };
 
     it('should calculate 0 streak for empty sessions', () => {
       const sessions: Array<{ startTime: Date; duration?: number }> = [];
@@ -47,7 +53,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
@@ -72,7 +78,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
@@ -101,7 +107,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
@@ -128,7 +134,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
@@ -146,8 +152,8 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       let currentStreak = 1;
 
       for (let i = 1; i < qualifyingDays.length; i++) {
-        const prevDate = new Date(qualifyingDays[i - 1]);
-        const currDate = new Date(qualifyingDays[i]);
+        const prevDate = new Date(qualifyingDays[i - 1] + 'T00:00:00Z');
+        const currDate = new Date(qualifyingDays[i] + 'T00:00:00Z');
         const diffDays = Math.floor(
           (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
         );
@@ -182,7 +188,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
@@ -200,8 +206,8 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       let currentStreak = 1;
 
       for (let i = 1; i < qualifyingDays.length; i++) {
-        const prevDate = new Date(qualifyingDays[i - 1]);
-        const currDate = new Date(qualifyingDays[i]);
+        const prevDate = new Date(qualifyingDays[i - 1] + 'T00:00:00Z');
+        const currDate = new Date(qualifyingDays[i] + 'T00:00:00Z');
         const diffDays = Math.floor(
           (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
         );
@@ -229,7 +235,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
@@ -246,8 +252,8 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       let currentStreak = 1;
 
       for (let i = 1; i < qualifyingDays.length; i++) {
-        const prevDate = new Date(qualifyingDays[i - 1]);
-        const currDate = new Date(qualifyingDays[i]);
+        const prevDate = new Date(qualifyingDays[i - 1] + 'T00:00:00Z');
+        const currDate = new Date(qualifyingDays[i] + 'T00:00:00Z');
         const diffDays = Math.floor(
           (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
         );
@@ -275,7 +281,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
@@ -301,7 +307,7 @@ describe('GamificationService - Consecutive Days Calculation', () => {
       for (const session of sessions) {
         if (session.startTime && session.duration) {
           const date = new Date(session.startTime);
-          const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+          const dayKey = formatDateKeyUTC(date);
           const currentTotal = dayTotals.get(dayKey) || 0;
           dayTotals.set(dayKey, currentTotal + session.duration);
         }
