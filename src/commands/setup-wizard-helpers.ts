@@ -8,11 +8,9 @@ import {
   ButtonStyle,
 } from "discord.js";
 import { WizardService } from "../services/wizard-service.js";
-import { ConfigService } from "../services/config-service.js";
 import logger from "../utils/logger.js";
 
 const wizardService = WizardService.getInstance();
-const configService = ConfigService.getInstance();
 
 // Features configuration - exported for use in setup-wizard.ts
 export const FEATURES = {
