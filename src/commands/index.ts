@@ -8,8 +8,7 @@ import { execute as seen } from "./seen.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
 import { execute as configCommand } from "./config/index.js";
 import { execute as quoteCommand } from "./quote.js";
-
-import { command as setupLobbyCommand } from "./setup-lobby.js";
+import { execute as setupLobbyCommand } from "./setup-lobby.js";
 import { execute as dbtrunkCommand } from "./dbtrunk.js";
 import { execute as vcCommand } from "./vc.js";
 import { ConfigService } from "../services/config-service.js";
@@ -65,7 +64,7 @@ const commands: Record<
   },
 
   "setup-lobby": async (interaction) => {
-    await setupLobbyCommand.execute(interaction);
+    await setupLobbyCommand(interaction);
   },
   dbtrunk: async (interaction) => {
     await dbtrunkCommand(interaction);
