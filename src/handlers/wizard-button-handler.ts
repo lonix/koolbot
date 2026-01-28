@@ -191,7 +191,7 @@ async function handleContinue(
   const { startFeatureConfiguration } =
     await import("../commands/setup-wizard-helpers.js");
   await startFeatureConfiguration(
-    interaction.channel!,
+    interaction,
     guild,
     userId,
     firstFeature as any,
