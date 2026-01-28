@@ -53,6 +53,9 @@ export class GamificationService {
   private configService: ConfigService;
   private isConnected: boolean = false;
 
+  // Minimum duration threshold for consecutive days (5 minutes in seconds)
+  private static readonly MIN_DAILY_DURATION_SECONDS = 300;
+
   // Accolade definitions (persistent badges)
   private accoladeDefinitions: Record<AccoladeType, BadgeDefinition> = {
     first_hour: {
@@ -418,16 +421,23 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          300,
+          GamificationService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 7;
       },
       metadataFunction: async (userId: string, userData: any | null) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
+        if (!user) {
+          return {
+            value: 0,
+            description: "7+ day streak",
+            unit: "days",
+          };
+        }
         const { longestStreak } = this.calculateConsecutiveDays(
-          user?.sessions || [],
-          300,
+          user.sessions,
+          GamificationService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -446,16 +456,23 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          300,
+          GamificationService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 14;
       },
       metadataFunction: async (userId: string, userData: any | null) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
+        if (!user) {
+          return {
+            value: 0,
+            description: "14+ day streak",
+            unit: "days",
+          };
+        }
         const { longestStreak } = this.calculateConsecutiveDays(
-          user?.sessions || [],
-          300,
+          user.sessions,
+          GamificationService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -474,16 +491,23 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          300,
+          GamificationService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 30;
       },
       metadataFunction: async (userId: string, userData: any | null) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
+        if (!user) {
+          return {
+            value: 0,
+            description: "30+ day streak",
+            unit: "days",
+          };
+        }
         const { longestStreak } = this.calculateConsecutiveDays(
-          user?.sessions || [],
-          300,
+          user.sessions,
+          GamificationService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -601,21 +625,28 @@ export class GamificationService {
   }
 
   /**
+   * Format a date as YYYY-MM-DD string using UTC
+   */
+  private formatDateKeyUTC(date: Date): string {
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+  }
+
+  /**
    * Calculate the longest streak of consecutive days with at least minDuration seconds per day
-   * 
-   * IMPORTANT: This function relies on session history. The database cleanup job 
+   *
+   * IMPORTANT: This function relies on session history. The database cleanup job
    * (voicetracking.cleanup.retention.detailed_sessions_days) deletes old sessions.
    * To support longer streaks, ensure retention is configured appropriately:
    * - For 30-day streaks: Set detailed_sessions_days to at least 45 days
    * - For longer streaks: Increase retention accordingly
-   * 
+   *
    * @param sessions Array of user sessions
-   * @param minDuration Minimum duration in seconds per day (default: 300 = 5 minutes)
+   * @param minDuration Minimum duration in seconds per day (default: MIN_DAILY_DURATION_SECONDS)
    * @returns Object with currentStreak and longestStreak
    */
   private calculateConsecutiveDays(
     sessions: Array<{ startTime: Date; duration?: number }>,
-    minDuration: number = 300,
+    minDuration: number = GamificationService.MIN_DAILY_DURATION_SECONDS,
   ): { currentStreak: number; longestStreak: number } {
     if (!sessions || sessions.length === 0) {
       return { currentStreak: 0, longestStreak: 0 };
@@ -627,7 +658,7 @@ export class GamificationService {
     for (const session of sessions) {
       if (session.startTime && session.duration) {
         const date = new Date(session.startTime);
-        const dayKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+        const dayKey = this.formatDateKeyUTC(date);
         const currentTotal = dayTotals.get(dayKey) || 0;
         dayTotals.set(dayKey, currentTotal + session.duration);
       }
@@ -647,14 +678,13 @@ export class GamificationService {
     let longestStreak = 1;
     let currentStreak = 1;
     const today = new Date();
-    const todayKey = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}-${String(today.getUTCDate()).padStart(2, "0")}`;
-    const yesterdayKey = new Date(today.getTime() - 86400000)
-      .toISOString()
-      .split("T")[0];
+    const todayKey = this.formatDateKeyUTC(today);
+    const yesterday = new Date(today.getTime() - 86400000);
+    const yesterdayKey = this.formatDateKeyUTC(yesterday);
 
     for (let i = 1; i < qualifyingDays.length; i++) {
-      const prevDate = new Date(qualifyingDays[i - 1]);
-      const currDate = new Date(qualifyingDays[i]);
+      const prevDate = new Date(qualifyingDays[i - 1] + "T00:00:00Z");
+      const currDate = new Date(qualifyingDays[i] + "T00:00:00Z");
       const diffDays = Math.floor(
         (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
       );
@@ -676,8 +706,8 @@ export class GamificationService {
       // The current streak is the streak ending on the last qualifying day
       currentStreak = 1;
       for (let i = qualifyingDays.length - 2; i >= 0; i--) {
-        const prevDate = new Date(qualifyingDays[i]);
-        const currDate = new Date(qualifyingDays[i + 1]);
+        const prevDate = new Date(qualifyingDays[i] + "T00:00:00Z");
+        const currDate = new Date(qualifyingDays[i + 1] + "T00:00:00Z");
         const diffDays = Math.floor(
           (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
         );
