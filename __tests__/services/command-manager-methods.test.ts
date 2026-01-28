@@ -1,19 +1,19 @@
-import { describe, it, expect } from '@jest/globals';
-import * as fs from 'fs';
-import * as path from 'path';
-import { fileURLToPath } from 'url';
+import { describe, it, expect } from "@jest/globals";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-describe('CommandManager Methods', () => {
-  it('should have matching command arrays in loadCommandsDynamically and populateClientCommands', () => {
+describe("CommandManager Methods", () => {
+  it("should have matching command arrays in loadCommandsDynamically and populateClientCommands", () => {
     // Read the command-manager.ts file
     const filePath = path.join(
       __dirname,
-      '../../src/services/command-manager.ts',
+      "../../src/services/command-manager.ts",
     );
-    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    const fileContent = fs.readFileSync(filePath, "utf-8");
 
     // Extract command names from both arrays
     const loadCommandsMatch = fileContent.match(
@@ -48,19 +48,19 @@ describe('CommandManager Methods', () => {
       expect(loadCommandNames).toEqual(populateCommandNames);
 
       // Specifically check for critical commands that must be in sync
-      expect(loadCommandNames).toContain('setup');
-      expect(loadCommandNames).toContain('setup-lobby');
-      expect(populateCommandNames).toContain('setup');
-      expect(populateCommandNames).toContain('setup-lobby');
+      expect(loadCommandNames).toContain("setup");
+      expect(loadCommandNames).toContain("setup-lobby");
+      expect(populateCommandNames).toContain("setup");
+      expect(populateCommandNames).toContain("setup-lobby");
     }
   });
 
-  it('should have setup command without wizard.enabled gate', () => {
+  it("should have setup command without wizard.enabled gate", () => {
     const filePath = path.join(
       __dirname,
-      '../../src/services/command-manager.ts',
+      "../../src/services/command-manager.ts",
     );
-    const fileContent = fs.readFileSync(filePath, 'utf-8');
+    const fileContent = fs.readFileSync(filePath, "utf-8");
 
     // Check that setup command has configKey: null (always enabled)
     const setupCommandPatterns = [
@@ -76,5 +76,38 @@ describe('CommandManager Methods', () => {
     }
 
     expect(foundSetupWithNull).toBe(true);
+  });
+
+  it("should use getBoolean() for config checks in both loadCommandsDynamically and populateClientCommands", () => {
+    const filePath = path.join(
+      __dirname,
+      "../../src/services/command-manager.ts",
+    );
+    const fileContent = fs.readFileSync(filePath, "utf-8");
+
+    // Extract the methods
+    const loadCommandsMethod = fileContent.match(
+      /private async loadCommandsDynamically[\s\S]*?^\s{2}\}/m,
+    );
+    const populateCommandsMethod = fileContent.match(
+      /public async populateClientCommands[\s\S]*?^\s{2}\}/m,
+    );
+
+    expect(loadCommandsMethod).toBeTruthy();
+    expect(populateCommandsMethod).toBeTruthy();
+
+    if (loadCommandsMethod && populateCommandsMethod) {
+      const loadCommandsCode = loadCommandsMethod[0];
+      const populateCommandsCode = populateCommandsMethod[0];
+
+      // Both should use getBoolean() for consistency
+      expect(loadCommandsCode).toMatch(/getBoolean\s*\(/);
+      expect(populateCommandsCode).toMatch(/getBoolean\s*\(/);
+
+      // Neither should use the problematic pattern: get() with strict equality
+      const problematicPattern =
+        /configService\.get\([^)]+\)[\s\S]*?===\s*true/;
+      expect(populateCommandsCode).not.toMatch(problematicPattern);
+    }
   });
 });
