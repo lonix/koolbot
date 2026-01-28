@@ -140,7 +140,7 @@ export const defaultConfig: ConfigSchema = {
   "announcements.enabled": false,
 
   // Gamification defaults
-  "gamification.enabled": false,
+  "gamification.enabled": true,
   "gamification.announcements.enabled": true,
   "gamification.dm_notifications.enabled": true,
   // Reaction Roles defaults

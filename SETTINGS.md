@@ -81,12 +81,12 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/koolbot
 
 Enable or disable individual commands. **All commands are disabled by default.**
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `ping.enabled` | `false` | Enable/disable the `/ping` command |
-| `amikool.enabled` | `false` | Enable/disable the `/amikool` command |
-| `amikool.role.name` | `""` | Role name to check for `/amikool` verification |
-| `quotes.enabled` | `false` | Enable/disable the quote system |
+| Setting             | Default | Description                                    |
+| ------------------- | ------- | ---------------------------------------------- |
+| `ping.enabled`      | `false` | Enable/disable the `/ping` command             |
+| `amikool.enabled`   | `false` | Enable/disable the `/amikool` command          |
+| `amikool.role.name` | `""`    | Role name to check for `/amikool` verification |
+| `quotes.enabled`    | `false` | Enable/disable the quote system                |
 
 ### Example
 
@@ -107,9 +107,9 @@ Enable or disable individual commands. **All commands are disabled by default.**
 
 Interactive configuration wizard for guided server setup.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `wizard.enabled` | `true` | Enable/disable the interactive setup wizard |
+| Setting          | Default | Description                                 |
+| ---------------- | ------- | ------------------------------------------- |
+| `wizard.enabled` | `true`  | Enable/disable the interactive setup wizard |
 
 ### About the Setup Wizard
 
@@ -147,15 +147,15 @@ The setup wizard (`/setup wizard`) provides an interactive, step-by-step configu
 
 Configure the quote management system.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `quotes.enabled` | `false` | Enable/disable the quote system |
-| `quotes.channel_id` | `""` | Channel ID for quote messages (empty = use command channel) |
-| `quotes.cooldown` | `60` | Seconds between quote additions (per user) |
-| `quotes.cleanup_interval` | `5` | Minutes between cleanup of unauthorized quote messages |
-| `quotes.max_length` | `1000` | Maximum character length for quotes |
-| `quotes.add_roles` | `""` | Role IDs allowed to add quotes (comma-separated, empty = all) |
-| `quotes.delete_roles` | `""` | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
+| Setting                   | Default | Description                                                              |
+| ------------------------- | ------- | ------------------------------------------------------------------------ |
+| `quotes.enabled`          | `false` | Enable/disable the quote system                                          |
+| `quotes.channel_id`       | `""`    | Channel ID for quote messages (empty = use command channel)              |
+| `quotes.cooldown`         | `60`    | Seconds between quote additions (per user)                               |
+| `quotes.cleanup_interval` | `5`     | Minutes between cleanup of unauthorized quote messages                   |
+| `quotes.max_length`       | `1000`  | Maximum character length for quotes                                      |
+| `quotes.add_roles`        | `""`    | Role IDs allowed to add quotes (comma-separated, empty = all)            |
+| `quotes.delete_roles`     | `""`    | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
 
 ### Example
 
@@ -183,15 +183,15 @@ Configure the quote management system.
 
 Dynamic voice channel creation and management.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicechannels.enabled` | `false` | Enable dynamic voice channel management |
-| `voicechannels.category.name` | `"Voice Channels"` | Discord category name for managed channels |
-| `voicechannels.lobby.name` | `"Lobby"` | Lobby channel name when bot is online |
-| `voicechannels.lobby.offlinename` | `"Offline Lobby"` | Lobby channel name when bot is offline |
-| `voicechannels.channel.prefix` | `"🎮"` | Prefix for user-created channels |
-| `voicechannels.channel.suffix` | `""` | Suffix for user-created channels |
-| `voicechannels.controlpanel.enabled` | `true` | Show interactive control panel in channel text chat |
+| Setting                              | Default            | Description                                         |
+| ------------------------------------ | ------------------ | --------------------------------------------------- |
+| `voicechannels.enabled`              | `false`            | Enable dynamic voice channel management             |
+| `voicechannels.category.name`        | `"Voice Channels"` | Discord category name for managed channels          |
+| `voicechannels.lobby.name`           | `"Lobby"`          | Lobby channel name when bot is online               |
+| `voicechannels.lobby.offlinename`    | `"Offline Lobby"`  | Lobby channel name when bot is offline              |
+| `voicechannels.channel.prefix`       | `"🎮"`             | Prefix for user-created channels                    |
+| `voicechannels.channel.suffix`       | `""`               | Suffix for user-created channels                    |
+| `voicechannels.controlpanel.enabled` | `true`             | Show interactive control panel in channel text chat |
 
 ### Example
 
@@ -216,12 +216,12 @@ Dynamic voice channel creation and management.
 
 Track user voice channel activity and generate statistics.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicetracking.enabled` | `false` | Enable voice channel activity tracking |
-| `voicetracking.seen.enabled` | `false` | Enable `/seen` command for last-seen tracking |
-| `voicetracking.excluded_channels` | `""` | Channel IDs to exclude from tracking (comma-separated) |
-| `voicetracking.admin_roles` | `""` | Role names with tracking admin powers (comma-separated) |
+| Setting                           | Default | Description                                             |
+| --------------------------------- | ------- | ------------------------------------------------------- |
+| `voicetracking.enabled`           | `false` | Enable voice channel activity tracking                  |
+| `voicetracking.seen.enabled`      | `false` | Enable `/seen` command for last-seen tracking           |
+| `voicetracking.excluded_channels` | `""`    | Channel IDs to exclude from tracking (comma-separated)  |
+| `voicetracking.admin_roles`       | `""`    | Role names with tracking admin powers (comma-separated) |
 
 ### Example
 
@@ -287,11 +287,11 @@ To exclude channels, get their IDs (right-click channel → Copy ID with Develop
 
 Automated voice channel statistics announcements.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicetracking.announcements.enabled` | `false` | Enable weekly stats announcements |
-| `voicetracking.announcements.channel` | `"voice-stats"` | Channel name or ID for announcements |
-| `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM) |
+| Setting                                | Default         | Description                           |
+| -------------------------------------- | --------------- | ------------------------------------- |
+| `voicetracking.announcements.enabled`  | `false`         | Enable weekly stats announcements     |
+| `voicetracking.announcements.channel`  | `"voice-stats"` | Channel name or ID for announcements  |
+| `voicetracking.announcements.schedule` | `"0 16 * * 5"`  | Cron schedule (default: Fridays 4 PM) |
 
 **Example:**
 
@@ -307,8 +307,8 @@ Automated voice channel statistics announcements.
 
 Custom scheduled announcements system for automated messages.
 
-| Setting | Default | Description |
-| --- | --- | --- |
+| Setting                 | Default | Description                           |
+| ----------------------- | ------- | ------------------------------------- |
 | `announcements.enabled` | `false` | Enable scheduled announcements system |
 
 **Example:**
@@ -345,11 +345,11 @@ See [Commands Documentation](COMMANDS.md#announce) for detailed usage.
 
 Badge and achievement system to encourage voice channel participation.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `gamification.enabled` | `false` | Enable/disable gamification system |
-| `gamification.announcements.enabled` | `true` | Include new accolades in weekly announcements |
-| `gamification.dm_notifications.enabled` | `true` | Send DM to users when they earn accolades |
+| Setting                                 | Default | Description                                   |
+| --------------------------------------- | ------- | --------------------------------------------- |
+| `gamification.enabled`                  | `true`  | Enable/disable gamification system            |
+| `gamification.announcements.enabled`    | `true`  | Include new accolades in weekly announcements |
+| `gamification.dm_notifications.enabled` | `true`  | Send DM to users when they earn accolades     |
 
 **Example:**
 
@@ -443,10 +443,10 @@ See [Achievements Command](COMMANDS.md#achievements) for usage details.
 
 Self-assignable roles via message reactions. Users react to get a role and access to dedicated channels.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `reactionroles.enabled` | `false` | Enable reaction role system |
-| `reactionroles.message_channel_id` | `""` | Channel ID for reaction role messages |
+| Setting                            | Default | Description                           |
+| ---------------------------------- | ------- | ------------------------------------- |
+| `reactionroles.enabled`            | `false` | Enable reaction role system           |
+| `reactionroles.message_channel_id` | `""`    | Channel ID for reaction role messages |
 
 ### Setup
 
@@ -524,13 +524,13 @@ See [Commands Documentation](COMMANDS.md#reactrole) for detailed usage.
 
 Automatic cleanup of old tracking data with data aggregation.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `voicetracking.cleanup.enabled` | `false` | Enable automatic data cleanup |
-| `voicetracking.cleanup.schedule` | `"0 0 * * *"` | Cron schedule (default: daily at midnight) |
-| `voicetracking.cleanup.retention.detailed_sessions_days` | `30` | Days to keep detailed session data |
-| `voicetracking.cleanup.retention.monthly_summaries_months` | `6` | Months to keep monthly summaries |
-| `voicetracking.cleanup.retention.yearly_summaries_years` | `1` | Years to keep yearly summaries |
+| Setting                                                    | Default       | Description                                |
+| ---------------------------------------------------------- | ------------- | ------------------------------------------ |
+| `voicetracking.cleanup.enabled`                            | `false`       | Enable automatic data cleanup              |
+| `voicetracking.cleanup.schedule`                           | `"0 0 * * *"` | Cron schedule (default: daily at midnight) |
+| `voicetracking.cleanup.retention.detailed_sessions_days`   | `30`          | Days to keep detailed session data         |
+| `voicetracking.cleanup.retention.monthly_summaries_months` | `6`           | Months to keep monthly summaries           |
+| `voicetracking.cleanup.retention.yearly_summaries_years`   | `1`           | Years to keep yearly summaries             |
 
 ### Example
 
@@ -574,38 +574,38 @@ Send bot events and logs to Discord channels.
 
 ### Startup/Shutdown Logging
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.startup.enabled` | `false` | Enable startup/shutdown event logging |
-| `core.startup.channel_id` | `""` | Channel ID for startup/shutdown logs |
+| Setting                   | Default | Description                           |
+| ------------------------- | ------- | ------------------------------------- |
+| `core.startup.enabled`    | `false` | Enable startup/shutdown event logging |
+| `core.startup.channel_id` | `""`    | Channel ID for startup/shutdown logs  |
 
 ### Error Logging
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.errors.enabled` | `false` | Enable error logging |
-| `core.errors.channel_id` | `""` | Channel ID for error logs |
+| Setting                  | Default | Description               |
+| ------------------------ | ------- | ------------------------- |
+| `core.errors.enabled`    | `false` | Enable error logging      |
+| `core.errors.channel_id` | `""`    | Channel ID for error logs |
 
 ### Cleanup Logging
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.cleanup.enabled` | `false` | Enable cleanup operation logging |
-| `core.cleanup.channel_id` | `""` | Channel ID for cleanup logs |
+| Setting                   | Default | Description                      |
+| ------------------------- | ------- | -------------------------------- |
+| `core.cleanup.enabled`    | `false` | Enable cleanup operation logging |
+| `core.cleanup.channel_id` | `""`    | Channel ID for cleanup logs      |
 
 ### Configuration Logging
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.config.enabled` | `false` | Enable configuration change logging |
-| `core.config.channel_id` | `""` | Channel ID for config logs |
+| Setting                  | Default | Description                         |
+| ------------------------ | ------- | ----------------------------------- |
+| `core.config.enabled`    | `false` | Enable configuration change logging |
+| `core.config.channel_id` | `""`    | Channel ID for config logs          |
 
 ### Cron Job Logging
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.cron.enabled` | `false` | Enable scheduled task logging |
-| `core.cron.channel_id` | `""` | Channel ID for cron logs |
+| Setting                | Default | Description                   |
+| ---------------------- | ------- | ----------------------------- |
+| `core.cron.enabled`    | `false` | Enable scheduled task logging |
+| `core.cron.channel_id` | `""`    | Channel ID for cron logs      |
 
 ### Example
 
@@ -647,8 +647,8 @@ Send bot events and logs to Discord channels.
 
 Easter eggs and passive listeners.
 
-| Setting | Default | Description |
-| --- | --- | --- |
+| Setting          | Default | Description                                      |
+| ---------------- | ------- | ------------------------------------------------ |
 | `fun.friendship` | `false` | Respond to "best ship" and "worst ship" mentions |
 
 ### Example
@@ -666,12 +666,12 @@ This enables passive responses when users mention "best ship" or "worst ship" in
 
 Protect your bot from command spam with global rate limiting.
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `ratelimit.enabled` | `false` | Enable global rate limiting for all commands |
-| `ratelimit.max_commands` | `5` | Maximum number of commands allowed per time window |
-| `ratelimit.window_seconds` | `10` | Time window in seconds for rate limit tracking |
-| `ratelimit.bypass_admin` | `true` | Allow administrators to bypass rate limits |
+| Setting                    | Default | Description                                        |
+| -------------------------- | ------- | -------------------------------------------------- |
+| `ratelimit.enabled`        | `false` | Enable global rate limiting for all commands       |
+| `ratelimit.max_commands`   | `5`     | Maximum number of commands allowed per time window |
+| `ratelimit.window_seconds` | `10`    | Time window in seconds for rate limit tracking     |
+| `ratelimit.bypass_admin`   | `true`  | Allow administrators to bypass rate limits         |
 
 ### How Rate Limiting Works
 
@@ -964,19 +964,19 @@ The config system automatically converts values:
 
 - `voicetracking.announcements.enabled` (bool, default: false)
 - `voicetracking.announcements.channel` (string, default: "voice-stats")
-- `voicetracking.announcements.schedule` (string, default: "0 16 ** 5")
+- `voicetracking.announcements.schedule` (string, default: "0 16 \*\* 5")
 - `announcements.enabled` (bool, default: false)
 
 #### Gamification
 
-- `gamification.enabled` (bool, default: false)
+- `gamification.enabled` (bool, default: true)
 - `gamification.announcements.enabled` (bool, default: true)
 - `gamification.dm_notifications.enabled` (bool, default: true)
 
 #### Cleanup
 
 - `voicetracking.cleanup.enabled` (bool, default: false)
-- `voicetracking.cleanup.schedule` (string, default: "0 0 ** *")
+- `voicetracking.cleanup.schedule` (string, default: "0 0 \*\* \*")
 - `voicetracking.cleanup.retention.detailed_sessions_days` (number, default: 30)
 - `voicetracking.cleanup.retention.monthly_summaries_months` (number, default: 6)
 - `voicetracking.cleanup.retention.yearly_summaries_years` (number, default: 1)
