@@ -854,13 +854,20 @@ export async function autocomplete(
           // Calculate max description length to keep total under Discord's 100 char limit
           const maxDescLength =
             AUTOCOMPLETE_CHOICE_MAX_LENGTH - key.length - separator.length;
-          const truncatedDesc = description.substring(
-            0,
-            Math.max(0, maxDescLength),
-          );
+
+          // If key is too long, show just the key without description
+          // Otherwise truncate description to fit, with minimum of 10 chars if possible
+          let name: string;
+          if (maxDescLength < 10) {
+            // Key is too long to include meaningful description
+            name = key.substring(0, AUTOCOMPLETE_CHOICE_MAX_LENGTH);
+          } else {
+            const truncatedDesc = description.substring(0, maxDescLength);
+            name = `${key}${separator}${truncatedDesc}`;
+          }
 
           return {
-            name: `${key}${separator}${truncatedDesc}`,
+            name,
             value: key,
           };
         })
