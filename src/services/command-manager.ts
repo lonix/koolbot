@@ -107,7 +107,8 @@ export class CommandManager {
           configKey: "reactionroles.enabled",
           file: "reactrole",
         },
-        { name: "setup", configKey: "wizard.enabled", file: "setup-wizard" },
+        { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
+        { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
       ];
 
       // Process each command
@@ -344,7 +345,7 @@ export class CommandManager {
           configKey: "reactionroles.enabled",
           file: "reactrole",
         },
-        { name: "setup", configKey: "wizard.enabled", file: "setup-wizard" },
+        { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
         { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
       ];
 
