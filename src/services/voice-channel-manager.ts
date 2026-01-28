@@ -549,53 +549,57 @@ export class VoiceChannelManager {
           .setEmoji("👑"),
       );
 
-      // Discord voice channels now have built-in text chat in v14+
-      // Try sending directly to the voice channel
-      try {
-        await channel.send({
-          content: `<@${ownerId}>`,
-          embeds: [embed],
-          components: [buttons],
-        });
-
-        logger.info(
-          `Sent control panel for channel ${channel.name} to voice channel text chat`,
-        );
-        return;
-      } catch {
-        // If voice channel doesn't support messages, try to find a text channel
-        logger.debug(
-          `Voice channel ${channel.name} doesn't support direct messages, trying alternative`,
-        );
-
-        const category = channel.parent;
-        if (!category) {
-          logger.warn(
-            `No category found for channel ${channel.name}, cannot send control panel`,
-          );
-          return;
-        }
-
-        // Try to find a text channel in the same category
-        const textChannel = category.children.cache.find(
-          (ch) => ch.type === ChannelType.GuildText && ch.name === channel.name,
-        ) as TextChannel | undefined;
-
-        if (textChannel) {
-          await textChannel.send({
+      // In Discord, voice channels can have built-in text chat enabled
+      // This feature is available in some servers but not all
+      // Try to send to the voice channel if it supports messaging
+      if ("send" in channel && typeof channel.send === "function") {
+        try {
+          await channel.send({
             content: `<@${ownerId}>`,
             embeds: [embed],
             components: [buttons],
           });
 
           logger.info(
-            `Sent control panel for channel ${channel.name} to text channel ${textChannel.name}`,
+            `Sent control panel for channel ${channel.name} to voice channel text chat`,
           );
-        } else {
-          logger.info(
-            `No text channel found for voice channel ${channel.name}, control panel not sent. Users can use /vc commands instead.`,
+          return;
+        } catch (error) {
+          logger.debug(
+            `Failed to send control panel to voice channel ${channel.name}, trying fallback`,
+            error,
           );
         }
+      }
+
+      // Fallback: Look for a separate text channel in the same category
+      const category = channel.parent;
+      if (!category) {
+        logger.info(
+          `No category found for channel ${channel.name}, cannot send control panel`,
+        );
+        return;
+      }
+
+      // Try to find a text channel in the same category with the same name
+      const textChannel = category.children.cache.find(
+        (ch) => ch.type === ChannelType.GuildText && ch.name === channel.name,
+      ) as TextChannel | undefined;
+
+      if (textChannel) {
+        await textChannel.send({
+          content: `<@${ownerId}>`,
+          embeds: [embed],
+          components: [buttons],
+        });
+
+        logger.info(
+          `Sent control panel for channel ${channel.name} to text channel ${textChannel.name}`,
+        );
+      } else {
+        logger.info(
+          `No text channel found for voice channel ${channel.name}, control panel not sent. Users can use /vc commands instead.`,
+        );
       }
     } catch (error) {
       logger.error("Error sending control panel:", error);
