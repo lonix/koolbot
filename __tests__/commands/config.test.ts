@@ -213,16 +213,12 @@ describe('Config Command', () => {
       });
     });
 
-    it('should show only key name when key is too long for description', async () => {
-      // Mock a hypothetical extremely long key (for testing edge case)
-      const longKey = 'a'.repeat(95); // 95 chars - too long for meaningful description
-      
-      // We can't easily add a key to defaultConfig in test, so we'll test the logic
-      // by checking that any key that would result in < 10 chars for description
-      // would be handled properly. Instead, let's just verify current keys work.
+    it('should handle all current config keys properly', async () => {
+      // Verify that all existing config keys (even the longest ones) are handled correctly
+      // The longest current key is ~57 chars, well within safe range
       (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
         name: 'key',
-        value: 'voicetracking', // Get all voicetracking keys
+        value: 'voicetracking', // Get all voicetracking keys (some are long)
       });
 
       await autocomplete(mockInteraction);
@@ -230,12 +226,11 @@ describe('Config Command', () => {
       expect(mockRespond).toHaveBeenCalledTimes(1);
       const response = mockRespond.mock.calls[0][0];
       
-      // Even longest keys should be handled
+      // All keys should be handled properly
       response.forEach((choice: any) => {
         expect(choice.name.length).toBeGreaterThan(0);
         expect(choice.name.length).toBeLessThanOrEqual(100);
-        // Key should always be included
-        expect(choice.name).toBeTruthy();
+        expect(choice.value).toBeTruthy();
       });
     });
   });
