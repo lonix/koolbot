@@ -366,7 +366,7 @@ Badge and achievement system to encourage voice channel participation.
 **Features:**
 
 - **Persistent Accolades** - Permanent badges earned once and kept forever
-- **13 Different Accolades** - Milestone-based, time-based, and behavior-based
+- **16 Different Accolades** - Milestone-based, time-based, behavior-based, and streak-based
 - **Automatic Tracking** - Earned automatically based on voice activity
 - **DM Notifications** - Users notified immediately when earning badges
 - **Weekly Announcements** - New accolades announced in voice stats channel
@@ -402,11 +402,18 @@ Day of Week:
 - Weekend Warrior (100+ weekend hours)
 - Weekday Warrior (100+ weekday hours)
 
+Consecutive Days (NEW):
+
+- 🔥 On a Roll (7 consecutive days, 5+ min/day)
+- ⚡ Dedicated AF (14 consecutive days, 5+ min/day)
+- 💀 No-Lifer (30 consecutive days, 5+ min/day)
+
 **Requirements:**
 
 - Requires `voicetracking.enabled` to be `true`
 - Accolades are checked after each voice session ends
 - DMs require user to have DMs enabled for the bot
+- **For consecutive days accolades:** Ensure `voicetracking.cleanup.retention.detailed_sessions_days` is at least **60 days** to preserve streak history
 
 See [Achievements Command](COMMANDS.md#achievements) for usage details.
 
@@ -543,6 +550,21 @@ Automatic cleanup of old tracking data with data aggregation.
 2. Data is aggregated into monthly/yearly summaries before deletion
 3. Statistics are preserved even after detailed data is removed
 4. Manual cleanup available with `/dbtrunk run`
+
+⚠️ **Important for Consecutive Days Accolades:**
+
+The cleanup job deletes session history older than `detailed_sessions_days`. This affects consecutive day streak calculations:
+
+- **Default retention (30 days):** Supports up to 30-day streaks
+- **For 30-day "No-Lifer" accolade:** Increase retention to at least **45 days** to ensure streak data is preserved
+- **For longer custom streaks:** Set retention to streak length + 15 days buffer
+
+**Recommended configuration for accolades:**
+
+```bash
+# Recommended: 60 days to safely support all default accolades
+/config set key:voicetracking.cleanup.retention.detailed_sessions_days value:60
+```
 
 ---
 

@@ -409,8 +409,8 @@ export class GamificationService {
       },
     },
     consistent_week: {
-      emoji: "📅",
-      name: "Week Streak",
+      emoji: "🔥",
+      name: "On a Roll",
       description: "Connected for 7 consecutive days (5+ min/day)",
       checkFunction: async (userId: string, userData: any | null) => {
         const user =
@@ -437,8 +437,8 @@ export class GamificationService {
       },
     },
     consistent_fortnight: {
-      emoji: "📆",
-      name: "Fortnight Streak",
+      emoji: "⚡",
+      name: "Dedicated AF",
       description: "Connected for 14 consecutive days (5+ min/day)",
       checkFunction: async (userId: string, userData: any | null) => {
         const user =
@@ -465,8 +465,8 @@ export class GamificationService {
       },
     },
     consistent_month: {
-      emoji: "🗓️",
-      name: "Month Streak",
+      emoji: "💀",
+      name: "No-Lifer",
       description: "Connected for 30 consecutive days (5+ min/day)",
       checkFunction: async (userId: string, userData: any | null) => {
         const user =
@@ -602,6 +602,13 @@ export class GamificationService {
 
   /**
    * Calculate the longest streak of consecutive days with at least minDuration seconds per day
+   * 
+   * IMPORTANT: This function relies on session history. The database cleanup job 
+   * (voicetracking.cleanup.retention.detailed_sessions_days) deletes old sessions.
+   * To support longer streaks, ensure retention is configured appropriately:
+   * - For 30-day streaks: Set detailed_sessions_days to at least 45 days
+   * - For longer streaks: Increase retention accordingly
+   * 
    * @param sessions Array of user sessions
    * @param minDuration Minimum duration in seconds per day (default: 300 = 5 minutes)
    * @returns Object with currentStreak and longestStreak
