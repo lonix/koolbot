@@ -515,42 +515,6 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Find the text channel associated with this voice channel
-      // Discord creates a text channel with the same name when a voice channel is created in a stage/voice category
-      // However, for dynamic voice channels, we need to check if there's a text channel
-      // For now, we'll look for a text channel with a similar name or in the same category
-      const category = channel.parent;
-      if (!category) {
-        logger.warn(
-          `No category found for channel ${channel.name}, cannot send control panel`,
-        );
-        return;
-      }
-
-      // Try to find the text channel in the category
-      let textChannel: TextChannel | null = null;
-
-      // Option 1: Look for a text channel with the same name
-      const sameNameChannel = category.children.cache.find(
-        (ch) => ch.type === ChannelType.GuildText && ch.name === channel.name,
-      );
-      if (sameNameChannel && sameNameChannel.type === ChannelType.GuildText) {
-        textChannel = sameNameChannel as TextChannel;
-      }
-
-      // Option 2: Since Discord voice channels don't automatically have text channels,
-      // we should send the control panel to a designated control/bot channel
-      // For now, log that we can't find a text channel
-      if (!textChannel) {
-        logger.info(
-          `No text channel found for voice channel ${channel.name}, control panel will be sent via DM or ephemeral message`,
-        );
-        // In Discord, voice channels can have associated text channels if they're in a community server
-        // Since this is a dynamic voice channel, we'll skip sending to a text channel
-        // Users can use slash commands instead
-        return;
-      }
-
       // Create the control panel embed
       const embed = new EmbedBuilder()
         .setTitle("🎮 Voice Channel Controls")
@@ -559,7 +523,7 @@ export class VoiceChannelManager {
             `Use the buttons below to customize your channel!`,
         )
         .setColor(0x00ff00)
-        .setFooter({ text: "Only you can see and use these controls" });
+        .setFooter({ text: "Only the channel owner can use these controls" });
 
       const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
@@ -585,15 +549,58 @@ export class VoiceChannelManager {
           .setEmoji("👑"),
       );
 
-      await textChannel.send({
-        content: `<@${ownerId}>`,
-        embeds: [embed],
-        components: [buttons],
-      });
+      // In Discord, voice channels can have built-in text chat enabled
+      // This feature is available in some servers but not all
+      // Try to send to the voice channel if it supports messaging
+      if ("send" in channel && typeof channel.send === "function") {
+        try {
+          await channel.send({
+            content: `<@${ownerId}>`,
+            embeds: [embed],
+            components: [buttons],
+          });
 
-      logger.info(
-        `Sent control panel for channel ${channel.name} to text channel ${textChannel.name}`,
-      );
+          logger.info(
+            `Sent control panel for channel ${channel.name} to voice channel text chat`,
+          );
+          return;
+        } catch (error) {
+          logger.debug(
+            `Failed to send control panel to voice channel ${channel.name}, trying fallback`,
+            error,
+          );
+        }
+      }
+
+      // Fallback: Look for a separate text channel in the same category
+      const category = channel.parent;
+      if (!category) {
+        logger.info(
+          `No category found for channel ${channel.name}, cannot send control panel`,
+        );
+        return;
+      }
+
+      // Try to find a text channel in the same category with the same name
+      const textChannel = category.children.cache.find(
+        (ch) => ch.type === ChannelType.GuildText && ch.name === channel.name,
+      ) as TextChannel | undefined;
+
+      if (textChannel) {
+        await textChannel.send({
+          content: `<@${ownerId}>`,
+          embeds: [embed],
+          components: [buttons],
+        });
+
+        logger.info(
+          `Sent control panel for channel ${channel.name} to text channel ${textChannel.name}`,
+        );
+      } else {
+        logger.info(
+          `No text channel found for voice channel ${channel.name}, control panel not sent. Users can use /vc commands instead.`,
+        );
+      }
     } catch (error) {
       logger.error("Error sending control panel:", error);
     }

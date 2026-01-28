@@ -1526,12 +1526,7 @@ Message: Good morning, {server_name}!
 **Description:** Interactive setup wizard to guide you through configuring KoolBot features.
 This is the recommended way to set up your server for the first time or configure new features.
 
-**Configuration:**
-
-```bash
-/config set key:wizard.enabled value:true  # Enabled by default
-/config reload
-```
+**Note:** This command is always available to administrators as a core feature.
 
 **Usage:**
 
