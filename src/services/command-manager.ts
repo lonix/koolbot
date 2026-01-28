@@ -77,11 +77,6 @@ export class CommandManager {
         },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
         {
-          name: "transfer-ownership",
-          configKey: "voicechannels.enabled",
-          file: "transfer-ownership",
-        },
-        {
           name: "announce-vc-stats",
           configKey: "voicetracking.announcements.enabled",
           file: "announce-vc-stats",
@@ -313,11 +308,6 @@ export class CommandManager {
           file: "vcstats",
         },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
-        {
-          name: "transfer-ownership",
-          configKey: "voicechannels.enabled",
-          file: "transfer-ownership",
-        },
         {
           name: "announce-vc-stats",
           configKey: "voicetracking.announcements.enabled",

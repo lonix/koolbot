@@ -56,11 +56,6 @@ const commandDetails: Record<
     usage: "/seen <user>",
     configKey: "voicetracking.seen.enabled",
   },
-  "transfer-ownership": {
-    description: "Transfer ownership of your voice channel to another user.",
-    usage: "/transfer-ownership <user>",
-    configKey: "voicechannels.enabled",
-  },
   "announce-vc-stats": {
     description: "Manually trigger voice channel statistics announcement.",
     usage: "/announce-vc-stats",
