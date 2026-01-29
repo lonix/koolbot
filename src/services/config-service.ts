@@ -130,8 +130,9 @@ export class ConfigService {
   /**
    * Clean up old/unknown settings from the database
    * This removes settings that are not in the current config schema
-   * Note: Critical settings (GUILD_ID, CLIENT_ID, DISCORD_TOKEN, MONGODB_URI, DEBUG, NODE_ENV)
-   * should ONLY come from environment variables, not the database, so they will be removed if found.
+   * Note: Critical settings (GUILD_ID, CLIENT_ID, DISCORD_TOKEN, MONGODB_URI, DEBUG, NODE_ENV) must ONLY come
+   * from environment variables. MONGODB_URI is needed to establish the database connection, and the others
+   * are security-sensitive or required before database access. They will be removed from the database if found.
    */
   private async cleanupUnknownSettings(): Promise<void> {
     try {
@@ -161,18 +162,97 @@ export class ConfigService {
         "QUOTE_DELETE_ROLES",
         "QUOTE_MAX_LENGTH",
         "QUOTE_COOLDOWN",
+        // Old dot-notation keys used as fallbacks during migration
+        "voice_channel.enabled",
+        "voice_channel.category_name",
+        "voice_channel.lobby_channel_name",
+        "voice_channel.lobby_channel_name_offline",
+        "voice_channel.suffix",
+        "tracking.enabled",
+        "tracking.weekly_announcement_channel",
       ];
       knownOldKeys.forEach((key) => validKeys.add(key));
 
       // Get all settings from database
       const allSettings = await Config.find({});
       const unknownSettings: string[] = [];
+      const invalidCategorySettings: Array<{
+        key: string;
+        currentCategory: string;
+        correctCategory: string;
+      }> = [];
 
-      // Find unknown settings
+      // Valid categories from the enum
+      const validCategories = new Set([
+        "amikool",
+        "announcements",
+        "core",
+        "fun",
+        "gamification",
+        "help",
+        "ping",
+        "quotes",
+        "ratelimit",
+        "reactionroles",
+        "voicechannels",
+        "voicetracking",
+        "wizard",
+      ]);
+
+      // Category mapping for old to new categories
+      const categoryMapping: Record<string, string> = {
+        voice_channel: "voicechannels",
+        tracking: "voicetracking",
+      };
+
+      // Find unknown settings and settings with invalid categories
       for (const setting of allSettings) {
         if (!validKeys.has(setting.key)) {
           unknownSettings.push(setting.key);
+        } else if (!validCategories.has(setting.category)) {
+          // Category is invalid, try to fix it
+          const correctCategory =
+            categoryMapping[setting.category] ||
+            setting.key.split(".")[0]; // Use key prefix as category
+          if (validCategories.has(correctCategory)) {
+            invalidCategorySettings.push({
+              key: setting.key,
+              currentCategory: setting.category,
+              correctCategory,
+            });
+          } else {
+            // Can't fix category, delete the setting
+            unknownSettings.push(setting.key);
+          }
         }
+      }
+
+      // Fix invalid categories
+      if (invalidCategorySettings.length > 0) {
+        logger.info(
+          `🔧 Found ${invalidCategorySettings.length} settings with invalid categories, fixing them...`,
+        );
+
+        for (const { key, currentCategory, correctCategory } of invalidCategorySettings) {
+          try {
+            await Config.updateOne(
+              { key },
+              { category: correctCategory },
+            );
+            logger.info(
+              `  ✓ Fixed category for ${key}: ${currentCategory} → ${correctCategory}`,
+            );
+          } catch (error) {
+            logger.error(
+              `  ✗ Failed to fix category for ${key}:`,
+              error,
+            );
+          }
+        }
+
+        logger.info(
+          `✅ Category fix complete: updated ${invalidCategorySettings.length} settings`,
+        );
       }
 
       // Delete unknown settings

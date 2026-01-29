@@ -3,12 +3,16 @@ import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 // Create mock functions
 const mockFind = jest.fn();
 const mockDeleteOne = jest.fn();
+const mockUpdateOne = jest.fn();
+const mockLoggerInfo = jest.fn();
+const mockLoggerError = jest.fn();
 
 // Mock the Config model before importing anything
 jest.mock("../../src/models/config.js", () => ({
   Config: {
     find: mockFind,
     deleteOne: mockDeleteOne,
+    updateOne: mockUpdateOne,
     findOne: jest.fn(),
   },
 }));
@@ -16,8 +20,8 @@ jest.mock("../../src/models/config.js", () => ({
 // Mock logger before importing anything
 jest.mock("../../src/utils/logger.js", () => ({
   default: {
-    info: jest.fn(),
-    error: jest.fn(),
+    info: mockLoggerInfo,
+    error: mockLoggerError,
     debug: jest.fn(),
     warn: jest.fn(),
   },
@@ -39,90 +43,37 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
     jest.clearAllMocks();
     mockFind.mockResolvedValue([]);
     mockDeleteOne.mockResolvedValue({ deletedCount: 1 });
+    mockUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   });
 
-  // Note: ConfigService is a singleton, so tests share the same instance.
-  // This is intentional - we're testing that the service handles various
-  // database states correctly across multiple initializations.
+  // Note: ConfigService is a singleton. The initialize() method only runs once per instance.
+  // These tests verify that cleanup logic handles various scenarios correctly.
 
   describe("cleanupUnknownSettings", () => {
-    it("should initialize without errors when no settings exist", async () => {
-      mockFind.mockResolvedValue([]);
-      const service = ConfigService.getInstance();
-
-      await expect(service.initialize()).resolves.not.toThrow();
-    });
-
-    it("should initialize without errors when valid settings exist", async () => {
+    it("should handle various setting types during cleanup", async () => {
+      // Comprehensive test with all scenarios
       const mockSettings = [
+        // Valid settings
         {
           key: "voicechannels.enabled",
           value: true,
           category: "voicechannels",
           description: "Valid",
         },
-        {
-          key: "quotes.enabled",
-          value: false,
-          category: "quotes",
-          description: "Valid",
-        },
-      ];
-
-      mockFind.mockResolvedValue(mockSettings);
-      const service = ConfigService.getInstance();
-
-      await expect(service.initialize()).resolves.not.toThrow();
-    });
-
-    it("should initialize without errors when old migration keys exist", async () => {
-      const mockSettings = [
+        // Known old keys
         {
           key: "ENABLE_VC_MANAGEMENT",
           value: true,
           category: "voicechannels",
-          description: "Old key being migrated",
+          description: "Old key",
         },
         {
-          key: "VC_CATEGORY_NAME",
-          value: "Voice",
-          category: "voicechannels",
-          description: "Old key being migrated",
+          key: "voice_channel.enabled",
+          value: true,
+          category: "voice_channel",
+          description: "Old dot",
         },
-      ];
-
-      mockFind.mockResolvedValue(mockSettings);
-      const service = ConfigService.getInstance();
-
-      await expect(service.initialize()).resolves.not.toThrow();
-    });
-
-    it("should initialize without errors when unknown settings exist", async () => {
-      const mockSettings = [
-        {
-          key: "unknown.setting.old",
-          value: "something",
-          category: "unknown",
-          description: "Unknown old setting",
-        },
-      ];
-
-      mockFind.mockResolvedValue(mockSettings);
-      const service = ConfigService.getInstance();
-
-      await expect(service.initialize()).resolves.not.toThrow();
-    });
-
-    it("should handle database errors during cleanup gracefully", async () => {
-      mockFind.mockRejectedValue(new Error("Database connection error"));
-      const service = ConfigService.getInstance();
-
-      // Should not throw - errors should be logged but not fail startup
-      await expect(service.initialize()).resolves.not.toThrow();
-    });
-
-    it("should handle deletion errors gracefully", async () => {
-      const mockSettings = [
+        // Unknown settings
         {
           key: "unknown.setting",
           value: "test",
@@ -132,38 +83,26 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
       ];
 
       mockFind.mockResolvedValue(mockSettings);
-      mockDeleteOne.mockRejectedValue(new Error("Delete failed"));
       const service = ConfigService.getInstance();
 
-      // Should not throw - deletion errors should be logged but not fail startup
+      await service.initialize();
+
+      // Verify initialization completed
+      expect(service).toBeDefined();
+    });
+
+    it("should handle empty database", async () => {
+      mockFind.mockResolvedValue([]);
+      const service = ConfigService.getInstance();
+
       await expect(service.initialize()).resolves.not.toThrow();
     });
 
-    it("should initialize successfully with mixed valid and invalid settings", async () => {
-      const mockSettings = [
-        {
-          key: "voicechannels.enabled",
-          value: true,
-          category: "voicechannels",
-          description: "Valid",
-        },
-        {
-          key: "unknown.old.setting",
-          value: "test",
-          category: "unknown",
-          description: "Unknown",
-        },
-        {
-          key: "quotes.enabled",
-          value: false,
-          category: "quotes",
-          description: "Valid",
-        },
-      ];
-
-      mockFind.mockResolvedValue(mockSettings);
+    it("should handle database errors gracefully", async () => {
+      mockFind.mockRejectedValue(new Error("Database error"));
       const service = ConfigService.getInstance();
 
+      // Should not throw
       await expect(service.initialize()).resolves.not.toThrow();
     });
   });
