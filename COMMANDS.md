@@ -288,10 +288,20 @@ Total Achievements: 0
 - 🦸 **Ultra Marathoner** - Completed an 8+ hour session
 - 🦋 **Social Butterfly** - Voiced with 10+ unique users
 - 🤝 **Connector** - Voiced with 25+ unique users
-- 🦉 **Night Owl** - 50+ hours late night (10 PM - 6 AM)
-- 🐦 **Early Bird** - 50+ hours early morning (6 AM - 10 AM)
+- 🦉 **Night Owl** - 50+ hours late night (10 PM - 6 AM UTC)
+- 🐦 **Early Bird** - 50+ hours early morning (6 AM - 10 AM UTC)
 - 🎮 **Weekend Warrior** - 100+ hours on weekends
 - 💼 **Weekday Warrior** - 100+ hours on weekdays
+- 🔥 **On a Roll** - Connected for 7 consecutive days (5+ min/day)
+- ⚡ **Dedicated AF** - Connected for 14 consecutive days (5+ min/day)
+- 💀 **No-Lifer** - Connected for 30 consecutive days (5+ min/day)
+
+**Note on Time-Based Accolades:**
+
+- **Night Owl** and **Early Bird** times are calculated in **UTC timezone** (the bot's server time)
+- These times may differ from your local timezone depending on your location
+- **Weekend Warrior** and **Weekday Warrior** use UTC for determining day of week
+- Calculate your local time offset from UTC to know when these periods occur in your timezone
 
 **Notification System:**
 
