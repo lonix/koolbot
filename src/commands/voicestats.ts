@@ -3,7 +3,15 @@ import {
   VoiceChannelTracker,
   TimePeriod,
 } from "../services/voice-channel-tracker.js";
+import { ConfigService } from "../services/config-service.js";
 import logger from "../utils/logger.js";
+
+// Helper function to format time in hours and minutes
+function formatTime(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const remainingMinutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${remainingMinutes}m`;
+}
 
 export const data = new SlashCommandBuilder()
   .setName("voicestats")
@@ -71,6 +79,21 @@ async function executeTop(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
+    const configService = ConfigService.getInstance();
+    const topEnabled = await configService.getBoolean(
+      "voicetracking.stats.top.enabled",
+      false,
+    );
+
+    if (!topEnabled) {
+      await interaction.reply({
+        content:
+          "The voice statistics leaderboard feature is currently disabled.",
+        ephemeral: true,
+      });
+      return;
+    }
+
     const limit = interaction.options.getInteger("limit") || 10;
     const period = (interaction.options.getString("period") ||
       "week") as TimePeriod;
@@ -83,12 +106,6 @@ async function executeTop(
       );
       return;
     }
-
-    const formatTime = (seconds: number): string => {
-      const hours = Math.floor(seconds / 3600);
-      const remainingMinutes = Math.floor((seconds % 3600) / 60);
-      return `${hours}h ${remainingMinutes}m`;
-    };
 
     const response = topUsers
       .map((user, index) => {
@@ -110,10 +127,19 @@ async function executeTop(
     );
   } catch (error) {
     logger.error("Error in voicestats top command:", error);
-    await interaction.reply({
-      content: "There was an error while executing this command!",
-      ephemeral: true,
-    });
+
+    // Check if interaction was already replied to
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+    }
   }
 }
 
@@ -121,6 +147,20 @@ async function executeUser(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
+    const configService = ConfigService.getInstance();
+    const userEnabled = await configService.getBoolean(
+      "voicetracking.stats.user.enabled",
+      false,
+    );
+
+    if (!userEnabled) {
+      await interaction.reply({
+        content: "The voice statistics feature is currently disabled.",
+        ephemeral: true,
+      });
+      return;
+    }
+
     const user = interaction.options.getUser("user") || interaction.user;
     const period = (interaction.options.getString("period") ||
       "week") as TimePeriod;
@@ -133,12 +173,6 @@ async function executeUser(
       );
       return;
     }
-
-    const formatTime = (seconds: number): string => {
-      const hours = Math.floor(seconds / 3600);
-      const remainingMinutes = Math.floor((seconds % 3600) / 60);
-      return `${hours}h ${remainingMinutes}m`;
-    };
 
     const response = [
       `**Voice Channel Statistics for ${user.username} (${period})**`,
@@ -157,9 +191,18 @@ async function executeUser(
     await interaction.reply(response);
   } catch (error) {
     logger.error("Error in voicestats user command:", error);
-    await interaction.reply({
-      content: "There was an error while executing this command!",
-      ephemeral: true,
-    });
+
+    // Check if interaction was already replied to
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+    }
   }
 }
