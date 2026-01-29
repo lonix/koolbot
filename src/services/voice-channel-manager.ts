@@ -457,7 +457,10 @@ export class VoiceChannelManager {
         `[Manual Transfer] Successfully completed manual ownership transfer for channel ${channel.name} from ${currentOwnerId} to ${newOwnerId}`,
       );
     } catch (error) {
-      logger.error("[Manual Transfer] Error transferring channel ownership:", error);
+      logger.error(
+        "[Manual Transfer] Error transferring channel ownership:",
+        error,
+      );
       throw error;
     }
   }
@@ -1611,7 +1614,10 @@ export class VoiceChannelManager {
         `[Ownership Transfer] Successfully completed ownership transfer for channel ${channel.name} to ${newOwner.displayName} (${newOwner.id})`,
       );
     } catch (error) {
-      logger.error("[Ownership Transfer] Error updating channel ownership:", error);
+      logger.error(
+        "[Ownership Transfer] Error updating channel ownership:",
+        error,
+      );
     }
   }
 
@@ -1637,13 +1643,16 @@ export class VoiceChannelManager {
       }
 
       // Try to find the control panel message in the voice channel
-      if ("messages" in channel && typeof channel.messages?.fetch === "function") {
+      if (
+        "messages" in channel &&
+        typeof channel.messages?.fetch === "function"
+      ) {
         try {
           logger.info(
             `[Control Panel] Fetching messages from voice channel ${channel.name}`,
           );
           const messages = await channel.messages.fetch({ limit: 50 });
-          
+
           // Find the control panel message (look for the embed with specific title)
           const controlPanelMessage = messages.find(
             (msg) =>
@@ -1676,7 +1685,9 @@ export class VoiceChannelManager {
                   `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}`,
               )
               .setColor(isPrivate ? 0xff0000 : 0x00ff00)
-              .setFooter({ text: "Only the channel owner can use these controls" });
+              .setFooter({
+                text: "Only the channel owner can use these controls",
+              });
 
             const privacyButton = new ButtonBuilder()
               .setCustomId(`vc_control_privacy_${channel.id}_${newOwnerId}`)
