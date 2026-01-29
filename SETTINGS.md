@@ -258,6 +258,18 @@ Dynamic voice channel creation and management.
 | `voicechannels.channel.prefix` | `"🎮"` | Prefix for user-created channels |
 | `voicechannels.channel.suffix` | `""` | Suffix for user-created channels |
 | `voicechannels.controlpanel.enabled` | `true` | Show interactive control panel in channel text chat |
+| `voicechannels.ownership.grace_period_seconds` | `30` | Grace period (seconds) before transferring ownership when owner disconnects |
+
+### Ownership Grace Period
+
+When a channel owner disconnects (e.g., network issue, client restart), the bot waits for the grace period before transferring ownership.
+If the owner rejoins within this time, they retain ownership. This prevents accidental ownership transfers during brief disconnects.
+
+**Recommended values:**
+
+- `30` (default) - Good balance for most servers
+- `60` - For servers with frequent connection issues
+- `10` - For faster ownership transfers
 
 ### Example
 
@@ -268,6 +280,10 @@ Dynamic voice channel creation and management.
 /config set key:voicechannels.lobby.name value:"🟢 Join Here"
 /config set key:voicechannels.channel.prefix value:"🎮"
 /config set key:voicechannels.channel.suffix value:"'s Room"
+
+# Set ownership grace period to 60 seconds
+/config set key:voicechannels.ownership.grace_period_seconds value:60
+
 /config reload
 ```
 
