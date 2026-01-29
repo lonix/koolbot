@@ -23,6 +23,7 @@ export class VoiceChannelManager {
   private userChannels: Map<string, VoiceChannel> = new Map();
   private ownershipQueue: Map<string, string[]> = new Map(); // channelId -> array of userIds
   private customChannelNames: Map<string, string> = new Map(); // channelId -> custom name
+  private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
@@ -672,6 +673,8 @@ export class VoiceChannelManager {
         this.userChannels.delete(userId);
         // Clean up custom name tracking
         this.customChannelNames.delete(channel.id);
+        // Clean up ownership queue
+        this.ownershipQueue.delete(channel.id);
         logger.info(`Cleaned up voice channel ${channel.name}`);
       }
     } catch (error) {
@@ -690,27 +693,37 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Check if this is a managed channel (either in userChannels or has custom name)
-      const isManaged =
-        Array.from(this.userChannels.values()).some(
-          (ch) => ch.id === channel.id,
-        ) || this.hasCustomName(channel.id);
+      // Check if channel is already being deleted to prevent race conditions
+      if (this.channelsBeingDeleted.has(channel.id)) {
+        return;
+      }
+
+      // Check if this is a managed channel and find the owner in one pass
+      let ownerId: string | null = null;
+      for (const [userId, userChannel] of this.userChannels.entries()) {
+        if (userChannel.id === channel.id) {
+          ownerId = userId;
+          break;
+        }
+      }
+
+      const isManaged = ownerId !== null || this.hasCustomName(channel.id);
 
       if (!isManaged) {
         // Not a managed channel, don't clean up
         return;
       }
 
+      // Mark channel as being deleted
+      this.channelsBeingDeleted.add(channel.id);
+
       // Delete the channel
       await channel.delete();
       logger.info(`Cleaned up empty voice channel ${channel.name}`);
 
       // Clean up all tracking for this channel
-      // Find and remove from userChannels
-      for (const [userId, userChannel] of this.userChannels.entries()) {
-        if (userChannel.id === channel.id) {
-          this.userChannels.delete(userId);
-        }
+      if (ownerId) {
+        this.userChannels.delete(ownerId);
       }
 
       // Clean up custom name tracking
@@ -718,8 +731,13 @@ export class VoiceChannelManager {
 
       // Clean up ownership queue
       this.ownershipQueue.delete(channel.id);
+
+      // Remove from deletion tracking
+      this.channelsBeingDeleted.delete(channel.id);
     } catch (error) {
       logger.error("Error cleaning up empty channel:", error);
+      // Ensure we remove from deletion tracking even if there was an error
+      this.channelsBeingDeleted.delete(channel.id);
     }
   }
 
@@ -1508,5 +1526,7 @@ export class VoiceChannelManager {
     }
     this.userChannels.clear();
     this.customChannelNames.clear();
+    this.ownershipQueue.clear();
+    this.channelsBeingDeleted.clear();
   }
 }
