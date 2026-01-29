@@ -210,9 +210,6 @@ Dynamic voice channel creation and management.
 /config set key:voicechannels.channel.prefix value:"🎮"
 /config set key:voicechannels.channel.suffix value:"'s Room"
 /config reload
-
-# Run lobby setup
-/setup-lobby
 ```
 
 **Result:** User "Alice" joining creates: **🎮 Alice's Room**
@@ -823,8 +820,8 @@ The following commands are **admin-only by default** (require Administrator perm
 - `/config` - Bot configuration
 - `/vc` - Voice channel management
 - `/dbtrunk` - Database cleanup
-- `/setup-lobby` - Initial setup
 - `/permissions` - Permission management
+- `/setup` - Setup wizard
 
 All other commands default to accessible by everyone unless you set permissions.
 

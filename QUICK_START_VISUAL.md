@@ -74,9 +74,7 @@ Your bot is now online! Next steps in Discord:
 │   /config reload                                                         │
 │                                                                           │
 │ Voice Channels (Dynamic Creation):                                      │
-│   /config set key:voicechannels.enabled value:true                      │
-│   /config set key:voicechannels.category.name value:"Voice Channels"    │
-│   /setup-lobby                                                           │
+│   /setup wizard feature:voicechannels                                    │
 │   /config reload                                                         │
 │                                                                           │
 │ Activity Tracking:                                                       │

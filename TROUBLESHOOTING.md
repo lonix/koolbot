@@ -343,10 +343,10 @@ Error: An invalid token was provided
    /config reload
    ```
 
-2. **Run lobby setup:**
+2. **Run setup wizard:**
 
    ```bash
-   /setup-lobby
+   /setup wizard feature:voicechannels
    ```
 
 3. **Verify category exists:**

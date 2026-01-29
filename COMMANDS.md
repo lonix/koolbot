@@ -1684,11 +1684,6 @@ This will:
 - **Troubleshooting** - Reconfigure features that aren't working
 - **Channel changes** - Update channel references after reorganization
 
-**vs. `/setup-lobby`:**
-
-- `/setup wizard` - Comprehensive, multi-feature setup with guided workflow
-- `/setup-lobby` - Quick voice lobby setup only (legacy command)
-
 **Use Cases:**
 
 - Initial server setup
@@ -1704,50 +1699,6 @@ This will:
 - Requires Administrator permission
 - Changes take effect after `/config reload`
 - Wizard validates that channels exist before applying
-
----
-
-### `/setup-lobby`
-
-**Description:** Configure the voice channel lobby system.
-
-**Configuration:**
-
-```bash
-/config set key:voicechannels.enabled value:true
-/config reload
-```
-
-**Usage:**
-
-```bash
-/setup-lobby
-```
-
-**What it does:**
-
-- Creates the voice category if missing
-- Creates/updates the lobby channel
-- Configures proper permissions
-- Sets up dynamic channel creation
-
-**Example Response:**
-
-```text
-✅ Lobby setup complete!
-
-Category: Voice Channels
-Lobby Channel: 🟢 Lobby
-Status: Ready for users
-
-Users joining the lobby will automatically get their own channel.
-```
-
-**Use Cases:**
-
-- Initial bot setup
-- Fix broken lobby configuration
-- Recreate deleted channels
 
 ---
 
@@ -1821,7 +1772,6 @@ All admin commands require **Administrator** permission in Discord.
 | `/vc`                | Administrator + voice channels enabled           |
 | `/dbtrunk`           | Administrator + cleanup enabled                  |
 | `/announce-vc-stats` | Administrator + tracking & announcements enabled |
-| `/setup-lobby`       | Administrator + voice channels enabled           |
 | `/botstats`          | Administrator permission                         |
 
 ### Bot Permissions Required
@@ -1900,7 +1850,6 @@ The bot needs these Discord permissions to function:
 /dbtrunk run                       # Run cleanup now
 
 # Other Admin
-/setup-lobby                       # Setup voice lobby (legacy)
 /announce-vc-stats                 # Post stats now
 /announce create                   # Schedule announcement
 /announce list                     # View announcements
@@ -1945,10 +1894,8 @@ The wizard will:
 /config set key:ping.enabled value:true
 /config reload
 
-# 2. Setup voice channels
-/config set key:voicechannels.enabled value:true
-/config set key:voicechannels.category.name value:"Voice Channels"
-/setup-lobby
+# 2. Setup voice channels (use wizard)
+/setup wizard feature:voicechannels
 /config reload
 
 # 3. Enable tracking

@@ -121,7 +121,6 @@ docker-compose logs -f bot
 - `/permissions` - Manage role-based command access
 - `/vc` - Voice channel management
 - `/dbtrunk` - Database cleanup management
-- `/setup-lobby` - Configure voice lobby (legacy, use `/setup wizard` instead)
 - `/exclude-channel` - Exclude channels from tracking
 - `/botstats` - View bot performance metrics
 - `/announce-vc-stats` - Manually trigger voice channel stats announcements

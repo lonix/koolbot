@@ -501,7 +501,7 @@ export class PermissionsService {
       // Users can manually configure these using /permissions commands
 
       // Admin-only commands that should be restricted by default
-      const adminCommands = ["dbtrunk", "vc", "config", "setup-lobby"];
+      const adminCommands = ["dbtrunk", "vc", "config"];
 
       for (const commandName of adminCommands) {
         // Only set default if no permissions exist yet (idempotent)
