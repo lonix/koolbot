@@ -138,7 +138,7 @@ export async function execute(
 
       if (achievementsList.length > 0) {
         embed.addFields({
-          name: "🏅 Achievements (This Week)",
+          name: "🏅 Recent Achievements (Time-Based)",
           value: achievementsList.join("\n\n"),
           inline: false,
         });

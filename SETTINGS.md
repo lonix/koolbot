@@ -16,7 +16,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Voice Activity Tracking](#-voice-activity-tracking) - Track user activity
 - [Voice Channel Cleanup](#-voice-channel-cleanup) - Data retention
 - [Announcements](#-announcements) - Automated stats posting
-- [Achievements System](#-gamification-system) - Badges and achievements
+- [Achievements System](#-achievements-system) - Badges and achievements
 - [Reaction Roles](#-reaction-roles) - Self-assignable roles via reactions
 - [Discord Logging](#-discord-logging) - Event logging to channels
 - [Fun Features](#-fun-features) - Easter eggs and extras
@@ -354,7 +354,7 @@ Badge and achievement system to encourage voice channel participation.
 **Example:**
 
 ```bash
-# Enable gamification
+# Enable achievements
 /config set key:achievements.enabled value:true
 /config reload
 

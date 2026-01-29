@@ -33,7 +33,7 @@ const ConfigSchema = new Schema<IConfig>(
         "announcements",
         "core",
         "fun",
-        "gamification",
+        "gamification", // Kept for backward compatibility during migration
         "help",
         "ping",
         "quotes",

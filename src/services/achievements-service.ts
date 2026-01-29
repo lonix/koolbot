@@ -756,13 +756,21 @@ export class AchievementsService {
         return 0;
       }
 
-      // Get start of this week (Monday at 00:00:00)
+      // Get start of this week (Monday at 00:00:00 UTC)
       const now = new Date();
-      const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
       const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday, go back 6 days
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - daysToMonday);
-      startOfWeek.setHours(0, 0, 0, 0);
+      const startOfWeek = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate() - daysToMonday,
+          0,
+          0,
+          0,
+          0,
+        ),
+      );
 
       // Calculate total time for sessions that overlap with this week
       let weeklyTime = 0;

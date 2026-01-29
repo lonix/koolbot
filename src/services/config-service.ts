@@ -314,10 +314,7 @@ export class ConfigService {
           await this.set(
             key,
             oldConfig.value,
-            oldConfig.description.replace(
-              /gamification/gi,
-              "achievements",
-            ) as string,
+            oldConfig.description.replace(/gamification/gi, "achievements"),
             "achievements",
           );
           // Delete the old key
