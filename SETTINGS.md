@@ -394,8 +394,8 @@ Social Activity:
 
 Time of Day:
 
-- Night Owl (50+ late-night hours, 10 PM - 6 AM)
-- Early Bird (50+ early-morning hours, 6 AM - 10 AM)
+- Night Owl (50+ late-night hours, 10 PM - 6 AM UTC)
+- Early Bird (50+ early-morning hours, 6 AM - 10 AM UTC)
 
 Day of Week:
 
@@ -407,6 +407,12 @@ Consecutive Days (NEW):
 - 🔥 On a Roll (7 consecutive days, 5+ min/day)
 - ⚡ Dedicated AF (14 consecutive days, 5+ min/day)
 - 💀 No-Lifer (30 consecutive days, 5+ min/day)
+
+**Important Notes:**
+
+- **Time-based accolades** (Night Owl, Early Bird, Weekend Warrior, Weekday Warrior) use **UTC timezone**
+- Time of day calculations are based on the bot's server time (UTC), not user's local time
+- Weekend/weekday determination uses UTC day of week
 
 **Requirements:**
 
