@@ -2,6 +2,7 @@ import { Config, IConfig } from "../models/config.js";
 import logger from "../utils/logger.js";
 import { Client } from "discord.js";
 import mongoose from "mongoose";
+import { defaultConfig } from "./config-schema.js";
 
 export class ConfigService {
   private static instance: ConfigService;
@@ -115,11 +116,170 @@ export class ConfigService {
         }
       }
 
+      // Clean up old/unknown settings from database
+      await this.cleanupUnknownSettings();
+
       this.initialized = true;
       logger.info("Configuration service initialized");
     } catch (error) {
       logger.error("Error initializing configuration service:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Clean up old/unknown settings from the database
+   * This removes settings that are not in the current config schema
+   * Note: Critical settings (GUILD_ID, CLIENT_ID, DISCORD_TOKEN, MONGODB_URI, DEBUG, NODE_ENV) must ONLY come
+   * from environment variables. MONGODB_URI is needed to establish the database connection, and the others
+   * are security-sensitive or required before database access. They will be removed from the database if found.
+   */
+  private async cleanupUnknownSettings(): Promise<void> {
+    try {
+      // Get all valid config keys from the schema
+      const validKeys = new Set(Object.keys(defaultConfig));
+
+      // Old keys that are known but being migrated (keep them for now)
+      const knownOldKeys = [
+        "ENABLE_VC_MANAGEMENT",
+        "VC_CATEGORY_NAME",
+        "LOBBY_CHANNEL_NAME",
+        "LOBBY_CHANNEL_NAME_OFFLINE",
+        "VC_CHANNEL_PREFIX",
+        "VC_SUFFIX",
+        "ENABLE_VC_TRACKING",
+        "ENABLE_SEEN",
+        "EXCLUDED_VC_CHANNELS",
+        "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
+        "VC_ANNOUNCEMENT_SCHEDULE",
+        "VC_ANNOUNCEMENT_CHANNEL",
+        "VC_TRACKING_ADMIN_ROLES",
+        "ENABLE_PING",
+        "ENABLE_AMIKOOL",
+        "COOL_ROLE_NAME",
+        "ENABLE_QUOTES",
+        "QUOTE_ADD_ROLES",
+        "QUOTE_DELETE_ROLES",
+        "QUOTE_MAX_LENGTH",
+        "QUOTE_COOLDOWN",
+        // Old dot-notation keys used as fallbacks during migration
+        "voice_channel.enabled",
+        "voice_channel.category_name",
+        "voice_channel.lobby_channel_name",
+        "voice_channel.lobby_channel_name_offline",
+        "voice_channel.suffix",
+        "tracking.enabled",
+        "tracking.weekly_announcement_channel",
+      ];
+      knownOldKeys.forEach((key) => validKeys.add(key));
+
+      // Get all settings from database
+      const allSettings = await Config.find({});
+      const unknownSettings: string[] = [];
+      const invalidCategorySettings: Array<{
+        key: string;
+        currentCategory: string;
+        correctCategory: string;
+      }> = [];
+
+      // Valid categories from the enum
+      const validCategories = new Set([
+        "amikool",
+        "announcements",
+        "core",
+        "fun",
+        "gamification",
+        "help",
+        "ping",
+        "quotes",
+        "ratelimit",
+        "reactionroles",
+        "voicechannels",
+        "voicetracking",
+        "wizard",
+      ]);
+
+      // Category mapping for old to new categories
+      const categoryMapping: Record<string, string> = {
+        voice_channel: "voicechannels",
+        tracking: "voicetracking",
+      };
+
+      // Find unknown settings and settings with invalid categories
+      for (const setting of allSettings) {
+        if (!validKeys.has(setting.key)) {
+          unknownSettings.push(setting.key);
+        } else if (!validCategories.has(setting.category)) {
+          // Category is invalid, try to fix it
+          const correctCategory =
+            categoryMapping[setting.category] || setting.key.split(".")[0]; // Use key prefix as category
+          if (validCategories.has(correctCategory)) {
+            invalidCategorySettings.push({
+              key: setting.key,
+              currentCategory: setting.category,
+              correctCategory,
+            });
+          } else {
+            // Can't fix category, delete the setting
+            unknownSettings.push(setting.key);
+          }
+        }
+      }
+
+      // Fix invalid categories
+      if (invalidCategorySettings.length > 0) {
+        logger.info(
+          `🔧 Found ${invalidCategorySettings.length} settings with invalid categories, fixing them...`,
+        );
+
+        for (const {
+          key,
+          currentCategory,
+          correctCategory,
+        } of invalidCategorySettings) {
+          try {
+            await Config.updateOne(
+              { key },
+              { $set: { category: correctCategory } },
+            );
+            logger.info(
+              `  ✓ Fixed category for ${key}: ${currentCategory} → ${correctCategory}`,
+            );
+          } catch (error) {
+            logger.error(`  ✗ Failed to fix category for ${key}:`, error);
+          }
+        }
+
+        logger.info(
+          `✅ Category fix complete: updated ${invalidCategorySettings.length} settings`,
+        );
+      }
+
+      // Delete unknown settings
+      if (unknownSettings.length > 0) {
+        logger.info(
+          `🧹 Found ${unknownSettings.length} unknown/old settings in database, removing them...`,
+        );
+
+        for (const key of unknownSettings) {
+          try {
+            await Config.deleteOne({ key });
+            this.cache.delete(key);
+            logger.info(`  ✓ Deleted unknown setting: ${key}`);
+          } catch (error) {
+            logger.error(`  ✗ Failed to delete setting ${key}:`, error);
+          }
+        }
+
+        logger.info(
+          `✅ Cleanup complete: removed ${unknownSettings.length} unknown settings`,
+        );
+      } else {
+        logger.info("✅ No unknown settings found in database");
+      }
+    } catch (error) {
+      logger.error("Error cleaning up unknown settings:", error);
+      // Don't throw - this is not critical to startup
     }
   }
 
@@ -277,37 +437,37 @@ export class ConfigService {
       // Voice Channel Management
       {
         key: "ENABLE_VC_MANAGEMENT",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Enable/disable voice channel management",
         defaultValue: "true",
       },
       {
         key: "VC_CATEGORY_NAME",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Name of the category for voice channels",
         defaultValue: "Voice Channels",
       },
       {
         key: "LOBBY_CHANNEL_NAME",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Name of the lobby channel",
         defaultValue: "Lobby",
       },
       {
         key: "LOBBY_CHANNEL_NAME_OFFLINE",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Name of the offline lobby channel",
         defaultValue: "Offline Lobby",
       },
       {
         key: "VC_CHANNEL_PREFIX",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Prefix for dynamically created channels",
         defaultValue: "🎮",
       },
       {
         key: "VC_SUFFIX",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Suffix for dynamically created channels",
         defaultValue: "",
       },
@@ -315,38 +475,38 @@ export class ConfigService {
       // Voice Channel Tracking
       {
         key: "ENABLE_VC_TRACKING",
-        category: "tracking",
+        category: "voicetracking",
         description: "Enable/disable voice channel tracking",
         defaultValue: "true",
       },
       {
         key: "ENABLE_SEEN",
-        category: "tracking",
+        category: "voicetracking",
         description: "Enable/disable last seen tracking",
         defaultValue: "true",
       },
       {
         key: "EXCLUDED_VC_CHANNELS",
-        category: "tracking",
+        category: "voicetracking",
         description:
           "Comma-separated list of voice channel IDs to exclude from tracking",
         defaultValue: "",
       },
       {
         key: "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
-        category: "tracking",
+        category: "voicetracking",
         description: "Enable/disable weekly voice channel announcements",
         defaultValue: "true",
       },
       {
         key: "VC_ANNOUNCEMENT_SCHEDULE",
-        category: "tracking",
+        category: "voicetracking",
         description: "Cron expression for weekly announcements",
         defaultValue: "0 16 * * 5",
       },
       {
         key: "VC_ANNOUNCEMENT_CHANNEL",
-        category: "tracking",
+        category: "voicetracking",
         description: "Channel name for voice channel announcements",
         defaultValue: "voice-stats",
       },
