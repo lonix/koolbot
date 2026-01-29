@@ -1,9 +1,9 @@
 import { Client } from "discord.js";
 import {
-  UserGamification,
+  UserAchievements,
   IAccolade,
   IAchievement,
-} from "../models/user-gamification.js";
+} from "../models/user-achievements.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -47,8 +47,8 @@ interface BadgeDefinition {
   ) => Promise<{ value?: number; description?: string; unit?: string }>;
 }
 
-export class GamificationService {
-  private static instance: GamificationService;
+export class AchievementsService {
+  private static instance: AchievementsService;
   private client: Client;
   private configService: ConfigService;
   private isConnected: boolean = false;
@@ -421,7 +421,7 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 7;
       },
@@ -437,7 +437,7 @@ export class GamificationService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -456,7 +456,7 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 14;
       },
@@ -472,7 +472,7 @@ export class GamificationService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -491,7 +491,7 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 30;
       },
@@ -507,7 +507,7 @@ export class GamificationService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -527,17 +527,17 @@ export class GamificationService {
   private setupMongoConnectionHandlers(): void {
     mongoose.connection.on("connected", () => {
       this.isConnected = true;
-      logger.info("MongoDB connection established for gamification service");
+      logger.info("MongoDB connection established for achievements service");
     });
 
     mongoose.connection.on("disconnected", () => {
       this.isConnected = false;
-      logger.warn("MongoDB connection lost for gamification service");
+      logger.warn("MongoDB connection lost for achievements service");
     });
 
     mongoose.connection.on("error", (error: Error) => {
       this.isConnected = false;
-      logger.error("MongoDB connection error in gamification service:", error);
+      logger.error("MongoDB connection error in achievements service:", error);
     });
   }
 
@@ -550,7 +550,7 @@ export class GamificationService {
             "mongodb://mongodb:27017/koolbot",
           ),
         );
-        logger.info("Reconnected to MongoDB for gamification service");
+        logger.info("Reconnected to MongoDB for achievements service");
       } catch (error: unknown) {
         logger.error("Error reconnecting to MongoDB:", error);
         throw error;
@@ -558,11 +558,11 @@ export class GamificationService {
     }
   }
 
-  public static getInstance(client: Client): GamificationService {
-    if (!GamificationService.instance) {
-      GamificationService.instance = new GamificationService(client);
+  public static getInstance(client: Client): AchievementsService {
+    if (!AchievementsService.instance) {
+      AchievementsService.instance = new AchievementsService(client);
     }
-    return GamificationService.instance;
+    return AchievementsService.instance;
   }
 
   /**
@@ -646,7 +646,7 @@ export class GamificationService {
    */
   private calculateConsecutiveDays(
     sessions: Array<{ startTime: Date; duration?: number }>,
-    minDuration: number = GamificationService.MIN_DAILY_DURATION_SECONDS,
+    minDuration: number = AchievementsService.MIN_DAILY_DURATION_SECONDS,
   ): { currentStreak: number; longestStreak: number } {
     if (!sessions || sessions.length === 0) {
       return { currentStreak: 0, longestStreak: 0 };
@@ -735,17 +735,17 @@ export class GamificationService {
       await this.ensureConnection();
 
       const isEnabled = await this.configService.getBoolean(
-        "gamification.enabled",
+        "achievements.enabled",
         false,
       );
       if (!isEnabled) {
         return [];
       }
 
-      // Get or create user gamification record
-      let userGamification = await UserGamification.findOne({ userId });
-      if (!userGamification) {
-        userGamification = new UserGamification({
+      // Get or create user achievements record
+      let userAchievements = await UserAchievements.findOne({ userId });
+      if (!userAchievements) {
+        userAchievements = new UserAchievements({
           userId,
           username,
           accolades: [],
@@ -756,7 +756,7 @@ export class GamificationService {
 
       const newAccolades: IAccolade[] = [];
       const existingAccoladeTypes = new Set(
-        userGamification.accolades.map((a) => a.type),
+        userAchievements.accolades.map((a) => a.type),
       );
 
       // Fetch user tracking data once to avoid multiple DB queries
@@ -783,8 +783,8 @@ export class GamificationService {
           };
 
           newAccolades.push(accolade);
-          userGamification.accolades.push(accolade);
-          userGamification.statistics.totalAccolades += 1;
+          userAchievements.accolades.push(accolade);
+          userAchievements.statistics.totalAccolades += 1;
 
           logger.info(
             `User ${username} (${userId}) earned accolade: ${definition.name}`,
@@ -793,7 +793,7 @@ export class GamificationService {
       }
 
       if (newAccolades.length > 0) {
-        await userGamification.save();
+        await userAchievements.save();
       }
 
       return newAccolades;
@@ -806,7 +806,7 @@ export class GamificationService {
   /**
    * Get all accolades and achievements for a user
    */
-  public async getUserGamification(userId: string): Promise<{
+  public async getUserAchievements(userId: string): Promise<{
     accolades: IAccolade[];
     achievements: IAchievement[];
     statistics: { totalAccolades: number; totalAchievements: number };
@@ -814,18 +814,18 @@ export class GamificationService {
     try {
       await this.ensureConnection();
 
-      const userGamification = await UserGamification.findOne({ userId });
-      if (!userGamification) {
+      const userAchievements = await UserAchievements.findOne({ userId });
+      if (!userAchievements) {
         return null;
       }
 
       return {
-        accolades: userGamification.accolades,
-        achievements: userGamification.achievements,
-        statistics: userGamification.statistics,
+        accolades: userAchievements.accolades,
+        achievements: userAchievements.achievements,
+        statistics: userAchievements.statistics,
       };
     } catch (error) {
-      logger.error("Error getting user gamification:", error);
+      logger.error("Error getting user achievements:", error);
       return null;
     }
   }
@@ -846,7 +846,7 @@ export class GamificationService {
   ): Promise<void> {
     try {
       const dmEnabled = await this.configService.getBoolean(
-        "gamification.dm_notifications.enabled",
+        "achievements.dm_notifications.enabled",
         true,
       );
 
@@ -903,7 +903,7 @@ export class GamificationService {
 
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-      const users = await UserGamification.find({
+      const users = await UserAchievements.find({
         "accolades.earnedAt": { $gte: oneWeekAgo },
       });
 
@@ -920,3 +920,6 @@ export class GamificationService {
     }
   }
 }
+
+// Legacy export for backward compatibility
+export const GamificationService = AchievementsService;

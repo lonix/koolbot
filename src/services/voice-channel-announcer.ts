@@ -3,7 +3,7 @@ import { CronJob, CronTime } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
-import { GamificationService } from "./gamification-service.js";
+import { AchievementsService } from "./achievements-service.js";
 
 export class VoiceChannelAnnouncer {
   private static instance: VoiceChannelAnnouncer;
@@ -223,11 +223,11 @@ export class VoiceChannelAnnouncer {
 
       if (gamificationEnabled && announcementsEnabled) {
         try {
-          const gamificationService = GamificationService.getInstance(
+          const achievementsService = AchievementsService.getInstance(
             this.client,
           );
           const newAccolades =
-            await gamificationService.getNewAccoladesSinceLastWeek();
+            await achievementsService.getNewAccoladesSinceLastWeek();
 
           if (newAccolades.length > 0) {
             const accoladeMessages = newAccolades
@@ -235,7 +235,7 @@ export class VoiceChannelAnnouncer {
                 return userAccolades.accolades
                   .map((accolade) => {
                     const definition =
-                      gamificationService.getAccoladeDefinition(accolade.type);
+                      achievementsService.getAccoladeDefinition(accolade.type);
                     if (!definition) return null;
 
                     return `${definition.emoji} <@${userAccolades.userId}> earned **${definition.name}**!`;

@@ -28,6 +28,7 @@ const ConfigSchema = new Schema<IConfig>(
       type: String,
       required: true,
       enum: [
+        "achievements",
         "amikool",
         "announcements",
         "core",

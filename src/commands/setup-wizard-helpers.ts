@@ -32,11 +32,11 @@ export const FEATURES = {
     description: "Collect and share memorable quotes",
     configKey: "quotes.enabled",
   },
-  gamification: {
-    name: "Gamification",
+  achievements: {
+    name: "Achievements",
     emoji: "🏆",
     description: "Achievement system for voice activity",
-    configKey: "gamification.enabled",
+    configKey: "achievements.enabled",
   },
   logging: {
     name: "Core Logging",
@@ -113,8 +113,8 @@ export async function startFeatureConfiguration(
     case "quotes":
       await configureQuotes(interaction, guild, userId, guildId, embed);
       break;
-    case "gamification":
-      await configureGamification(interaction, guild, userId, guildId, embed);
+    case "achievements":
+      await configureAchievements(interaction, guild, userId, guildId, embed);
       break;
     case "logging":
       await configureLogging(interaction, guild, userId, guildId, embed);
@@ -288,7 +288,7 @@ async function configureQuotes(
   }
 }
 
-async function configureGamification(
+async function configureAchievements(
   interaction: ChatInputCommandInteraction | ButtonInteraction,
   guild: Guild,
   userId: string,
@@ -296,7 +296,7 @@ async function configureGamification(
   embed: EmbedBuilder,
 ): Promise<void> {
   embed.setDescription(
-    "**Gamification Configuration**\n\n" +
+    "**Achievements Configuration**\n\n" +
       "Enable achievement system for voice activity?\n\n" +
       "Features:\n" +
       "• Unlock achievements for milestones\n" +
@@ -306,11 +306,11 @@ async function configureGamification(
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId(`wizard_gamif_enable__${userId}_${guildId}`)
+      .setCustomId(`wizard_achiv_enable__${userId}_${guildId}`)
       .setLabel("Enable")
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(`wizard_gamif_skip__${userId}_${guildId}`)
+      .setCustomId(`wizard_achiv_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
