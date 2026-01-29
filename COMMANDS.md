@@ -460,7 +460,7 @@ Edit an existing notice.
 
 **Parameters:**
 
-- `id` (required) - Notice ID (from `/notice list`)
+- `id` (required) - Notice ID (visible in notice channel footer)
 - `title` (optional) - New title
 - `content` (optional) - New content
 - `category` (optional) - New category
@@ -479,7 +479,7 @@ Delete a notice.
 
 **Parameters:**
 
-- `id` (required) - Notice ID (from `/notice list`)
+- `id` (required) - Notice ID (visible in notice channel footer)
 
 **Usage:**
 
@@ -487,33 +487,7 @@ Delete a notice.
 /notice delete id:"abc123"
 ```
 
-#### `/notice list`
-
-List all notices organized by category.
-
-**Usage:**
-
-```bash
-/notice list
-```
-
-**Example Response:**
-
-```text
-📋 Server Notices
-Total: 5 notices
-
-RULES
-`abc123` - **Server Rules** (Order: 1)
-`def456` - **Code of Conduct** (Order: 2)
-
-GAME-SERVERS
-`ghi789` - **Minecraft Server** (Order: 10)
-`jkl012` - **Terraria Server** (Order: 11)
-
-HELP
-`mno345` - **Bot Commands Help** (Order: 20)
-```
+**Note:** You can find notice IDs by viewing the notices in the channel - each notice shows its ID in the footer.
 
 #### `/notice sync`
 
@@ -529,11 +503,13 @@ Recreate all notices in the channel (useful after cleanup or channel issues).
 
 1. Admin creates notices using `/notice add` with title, content, and category
 2. Bot posts each notice as a rich embed in the configured notices channel
-3. Notices are displayed in order by category, then by custom order number
-4. Channel is read-only for regular users (only bot can post)
-5. Bot automatically removes any unauthorized messages every 5 minutes
-6. An informational header post explains the channel purpose (auto-recreated if deleted)
-7. Notices persist in database and survive bot restarts
+3. Bot automatically creates a "Bot Features" notice listing enabled features
+4. Notices are displayed in order by category, then by custom order number
+5. Channel is read-only for regular users (only bot can post)
+6. Bot automatically removes any unauthorized messages every 5 minutes
+7. An informational header post explains the channel purpose (auto-recreated if deleted)
+8. Notices persist in database and survive bot restarts
+9. Notice IDs are visible in each notice's footer for editing/deletion
 
 **Security Features:**
 

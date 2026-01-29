@@ -232,16 +232,17 @@ Bot-managed protected channel for server notices, rules, and help information.
 **Commands:**
 
 - `/notice add` - Create a new notice
-- `/notice edit` - Update existing notice
-- `/notice delete` - Remove a notice
-- `/notice list` - View all notices
+- `/notice edit` - Update existing notice (ID visible in notice footer)
+- `/notice delete` - Remove a notice (ID visible in notice footer)
 - `/notice sync` - Recreate all notices in channel
 
 **Notes:**
 
 - The channel is automatically configured with strict permissions
+- Bot automatically creates a "Features" notice listing enabled bot features
 - Header post explains the channel purpose and is auto-recreated if deleted
 - Notices persist in the database and are automatically reposted on bot restart
+- Notice IDs are displayed in each notice's footer for editing/deletion
 - Perfect for rules, game server info, bot help, and important announcements
 
 ## 🎙 Voice Channel Management

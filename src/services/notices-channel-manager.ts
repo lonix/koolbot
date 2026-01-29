@@ -110,6 +110,9 @@ export class NoticesChannelManager {
       // Ensure header post exists
       await this.ensureHeaderPost(channel);
 
+      // Ensure bot info notice exists
+      await this.ensureBotInfoNotice();
+
       // Sync all notices to channel
       await this.syncNotices();
 
@@ -264,6 +267,150 @@ export class NoticesChannelManager {
     } catch (error) {
       logger.error("Error creating header post:", error);
     }
+  }
+  /**
+   * Ensure the bot info notice exists with current enabled features
+   * This auto-generates a notice listing bot features with examples
+   */
+  private async ensureBotInfoNotice(): Promise<void> {
+    try {
+      // Check if a bot info notice already exists
+      const existingNotice = await Notice.findOne({
+        title: "KoolBot Features & Commands",
+        category: "help",
+      });
+
+      // Generate current bot info content
+      const botInfoContent = await this.generateBotInfoContent();
+
+      if (existingNotice) {
+        // Update existing notice if content changed
+        if (existingNotice.content !== botInfoContent) {
+          existingNotice.content = botInfoContent;
+          existingNotice.updatedAt = new Date();
+          await existingNotice.save();
+          logger.info("Updated bot info notice with current features");
+
+          // Delete old message and post new one
+          if (existingNotice.messageId) {
+            await this.deleteNoticeMessage(existingNotice.messageId);
+          }
+          const messageId = await this.postNotice(existingNotice);
+          if (messageId) {
+            existingNotice.messageId = messageId;
+            await existingNotice.save();
+          }
+        }
+      } else {
+        // Create new bot info notice
+        const botInfoNotice = new Notice({
+          title: "KoolBot Features & Commands",
+          content: botInfoContent,
+          category: "help",
+          order: -1000, // Display first in help category
+          createdBy: this.client.user?.id || "system",
+        });
+        await botInfoNotice.save();
+        logger.info("Created bot info notice");
+
+        // Post to channel
+        const messageId = await this.postNotice(botInfoNotice);
+        if (messageId) {
+          botInfoNotice.messageId = messageId;
+          await botInfoNotice.save();
+        }
+      }
+    } catch (error) {
+      logger.error("Error ensuring bot info notice:", error);
+    }
+  }
+
+  /**
+   * Generate bot info content based on enabled features
+   */
+  private async generateBotInfoContent(): Promise<string> {
+    const features: string[] = [];
+
+    // Check for enabled features and add descriptions
+    const quotesEnabled = await this.configService.getBoolean(
+      "quotes.enabled",
+      false,
+    );
+    if (quotesEnabled) {
+      features.push(
+        '**📝 Quotes** - Save memorable quotes with `/quote text:"..." author:@user`',
+      );
+    }
+
+    const voiceChannelsEnabled = await this.configService.getBoolean(
+      "voicechannels.enabled",
+      false,
+    );
+    if (voiceChannelsEnabled) {
+      features.push(
+        "**🎤 Voice Channels** - Dynamic voice channel creation (join lobby to create)",
+      );
+    }
+
+    const voiceTrackingEnabled = await this.configService.getBoolean(
+      "voicetracking.enabled",
+      false,
+    );
+    if (voiceTrackingEnabled) {
+      features.push(
+        "**📊 Voice Tracking** - Track your voice activity with `/voicestats`",
+      );
+    }
+
+    const achievementsEnabled = await this.configService.getBoolean(
+      "achievements.enabled",
+      false,
+    );
+    if (achievementsEnabled) {
+      features.push(
+        "**🏆 Achievements** - Earn badges for voice activity milestones",
+      );
+    }
+
+    const announcementsEnabled = await this.configService.getBoolean(
+      "announcements.enabled",
+      false,
+    );
+    if (announcementsEnabled) {
+      features.push("**📢 Announcements** - Scheduled automated announcements");
+    }
+
+    const reactionRolesEnabled = await this.configService.getBoolean(
+      "reactionroles.enabled",
+      false,
+    );
+    if (reactionRolesEnabled) {
+      features.push(
+        "**⭐ Reaction Roles** - Self-assign roles by reacting to messages",
+      );
+    }
+
+    // Always available commands
+    features.push("**❓ Help** - Use `/help` to see all available commands");
+
+    // Build the content
+    let content =
+      "Welcome! Here are the features currently available on this server:\n\n";
+
+    if (features.length > 1) {
+      // More than just help
+      content += features.join("\n\n");
+    } else {
+      content += "**❓ Help** - Use `/help` to see all available commands\n\n";
+      content += "*More features can be enabled by server administrators.*";
+    }
+
+    content += "\n\n📚 **Getting Started:**\n";
+    content += "• Use `/help` to see detailed command information\n";
+    content += "• Commands are organized by feature category\n";
+    content += "• Some features may require specific roles or permissions";
+
+    return content;
   }
 
   private async startCleanupJob(): Promise<void> {

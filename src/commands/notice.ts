@@ -62,7 +62,7 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("id")
-          .setDescription("Notice ID (get from /notice list)")
+          .setDescription("Notice ID (view in notices channel footer)")
           .setRequired(true),
       )
       .addStringOption((option) =>
@@ -107,12 +107,9 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("id")
-          .setDescription("Notice ID (get from /notice list)")
+          .setDescription("Notice ID (view in notices channel footer)")
           .setRequired(true),
       ),
-  )
-  .addSubcommand((subcommand) =>
-    subcommand.setName("list").setDescription("List all notices"),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -146,9 +143,6 @@ export async function execute(
         break;
       case "delete":
         await handleDelete(interaction);
-        break;
-      case "list":
-        await handleList(interaction);
         break;
       case "sync":
         await handleSync(interaction);
@@ -241,7 +235,7 @@ async function handleEdit(
     const notice = await Notice.findById(id);
     if (!notice) {
       await interaction.editReply({
-        content: `❌ Notice with ID ${id} not found`,
+        content: `❌ Notice with ID ${id} not found. Check the notice channel for valid IDs.`,
       });
       return;
     }
@@ -296,7 +290,7 @@ async function handleDelete(
     const notice = await Notice.findById(id);
     if (!notice) {
       await interaction.editReply({
-        content: `❌ Notice with ID ${id} not found`,
+        content: `❌ Notice with ID ${id} not found. Check the notice channel for valid IDs.`,
       });
       return;
     }
@@ -323,63 +317,6 @@ async function handleDelete(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error deleting notice:", error);
-    throw error;
-  }
-}
-
-async function handleList(
-  interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
-
-  try {
-    const notices = await Notice.find().sort({ category: 1, order: 1 });
-
-    if (notices.length === 0) {
-      await interaction.editReply({
-        content: "📋 No notices found. Use `/notice add` to create one.",
-      });
-      return;
-    }
-
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle("📋 Server Notices")
-      .setDescription(`Total: ${notices.length} notices`)
-      .setTimestamp();
-
-    // Group by category
-    const categorized: Record<string, INotice[]> = {};
-    notices.forEach((notice) => {
-      if (!categorized[notice.category]) {
-        categorized[notice.category] = [];
-      }
-      categorized[notice.category].push(notice);
-    });
-
-    // Add fields for each category
-    for (const [category, categoryNotices] of Object.entries(categorized)) {
-      const noticesList = categoryNotices
-        .map(
-          (n) =>
-            `\`${n._id.toString().slice(-6)}\` - **${n.title}** (Order: ${n.order})`,
-        )
-        .join("\n");
-
-      embed.addFields({
-        name: `${category.toUpperCase()}`,
-        value: noticesList || "No notices",
-        inline: false,
-      });
-    }
-
-    embed.setFooter({
-      text: "Use notice ID with /notice edit or /notice delete",
-    });
-
-    await interaction.editReply({ embeds: [embed] });
-  } catch (error) {
-    logger.error("Error listing notices:", error);
     throw error;
   }
 }
