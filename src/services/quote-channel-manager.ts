@@ -451,6 +451,42 @@ export class QuoteChannelManager {
     }
   }
 
+  public async updateQuoteMessage(
+    messageId: string,
+    quoteId: string,
+    content: string,
+    authorId: string,
+    addedById: string,
+  ): Promise<void> {
+    try {
+      const channel = await this.getQuoteChannel();
+      if (!channel) {
+        throw new Error("Quote channel not configured or not found");
+      }
+
+      const message = await channel.messages.fetch(messageId);
+      if (!message) {
+        throw new Error("Quote message not found");
+      }
+
+      const embed = new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setDescription(`"${content}"`)
+        .addFields(
+          { name: "Author", value: `<@${authorId}>`, inline: true },
+          { name: "Added by", value: `<@${addedById}>`, inline: true },
+        )
+        .setFooter({ text: `ID: ${quoteId}` })
+        .setTimestamp();
+
+      await message.edit({ embeds: [embed] });
+      logger.info(`Updated quote message ${messageId}`);
+    } catch (error) {
+      logger.error(`Error updating quote message ${messageId}:`, error);
+      throw error;
+    }
+  }
+
   public async updateQuoteReactions(messageId: string): Promise<void> {
     try {
       const channel = await this.getQuoteChannel();

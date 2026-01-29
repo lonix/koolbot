@@ -5,7 +5,7 @@ import { CooldownManager } from "./cooldown-manager.js";
 
 const configService = ConfigService.getInstance();
 
-interface IQuote extends Document {
+export interface IQuote extends Document {
   content: string;
   authorId: string;
   addedById: string;
@@ -156,6 +156,30 @@ export class QuoteService {
     messageId: string,
   ): Promise<void> {
     await this.model.findByIdAndUpdate(quoteId, { messageId });
+  }
+
+  async editQuote(
+    quoteId: string,
+    content: string,
+    authorId: string,
+  ): Promise<void> {
+    const quote = await this.model.findById(quoteId);
+    if (!quote) {
+      throw new Error("Quote not found");
+    }
+
+    // Check quote length
+    const maxLength = await configService.getNumber("quotes.max_length", 1000);
+    if (content.length > maxLength) {
+      throw new Error(
+        `Quote is too long. Maximum length is ${maxLength} characters`,
+      );
+    }
+
+    await this.model.findByIdAndUpdate(quoteId, {
+      content,
+      authorId,
+    });
   }
 
   async getAllQuotes(): Promise<IQuote[]> {
