@@ -226,6 +226,43 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       // Assert: Channel should NOT be deleted
       expect(mockChannel.delete).not.toHaveBeenCalled();
     });
+
+    it("should prevent race condition when both cleanupUserChannel and cleanupEmptyChannel are called", async () => {
+      // Setup: Channel is owned by owner and is empty
+      manager.setCustomChannelName("channel-id", "Custom Channel Name");
+
+      // Simulate channel in userChannels map
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (manager as any).userChannels.set("owner-id", mockChannel);
+
+      // Simulate the channel is empty
+      mockMembers.clear();
+      Object.defineProperty(mockChannel, "members", {
+        value: mockMembers as Collection<string, GuildMember>,
+        writable: true,
+      });
+
+      // Create mock voice states for owner leaving
+      const oldState: Partial<VoiceState> = {
+        channel: mockChannel as VoiceChannel,
+        member: mockOwner as GuildMember,
+      };
+      const newState: Partial<VoiceState> = {
+        channel: null,
+        member: mockOwner as GuildMember,
+      };
+
+      // Act: User leaves the channel
+      // This will trigger both cleanupUserChannel (line 421) and cleanupEmptyChannel (line 426)
+      await manager.handleVoiceStateUpdate(
+        oldState as VoiceState,
+        newState as VoiceState,
+      );
+
+      // Assert: Channel.delete should only be called once, not twice
+      // This verifies the channelsBeingDeleted Set prevents double deletion
+      expect(mockChannel.delete).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe("Custom name tracking cleanup", () => {
