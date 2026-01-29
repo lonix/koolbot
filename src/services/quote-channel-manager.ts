@@ -14,6 +14,38 @@ export class QuoteChannelManager {
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+
+    // Register configuration reload callback to reinitialize when quotes settings change
+    this.configService.registerReloadCallback(async () => {
+      try {
+        logger.info(
+          "Quote channel configuration changed, reinitializing...",
+        );
+
+        // Check if the feature is enabled
+        const enabled = await this.configService.getBoolean(
+          "quotes.enabled",
+          false,
+        );
+
+        if (!enabled && this.isInitialized) {
+          // Feature disabled, clean up
+          logger.info("Quote system disabled, cleaning up...");
+          await this.stop();
+          this.isInitialized = false;
+        } else if (enabled) {
+          // Feature enabled or still enabled, reinitialize
+          // Reset initialization flag to allow re-initialization
+          this.isInitialized = false;
+          await this.initialize();
+        }
+      } catch (error) {
+        logger.error(
+          "Error reinitializing quote channel after configuration change:",
+          error,
+        );
+      }
+    });
   }
 
   public static getInstance(client: Client): QuoteChannelManager {
