@@ -100,9 +100,9 @@ Status: ✅ Enabled
 
 ---
 
-### `/vctop`
+### `/voicestats`
 
-**Description:** View voice channel activity leaderboards showing top users by time spent.
+**Description:** Voice channel statistics and leaderboards. This unified command combines leaderboard (`top`) and personal stats (`user`) functionality.
 
 **Configuration:**
 
@@ -110,15 +110,24 @@ Status: ✅ Enabled
 # Requires voice tracking to be enabled
 /config set key:voicetracking.enabled value:true
 /config reload
+
+# Optional: Enable individual subcommands
+/config set key:voicetracking.stats.top.enabled value:true
+/config set key:voicetracking.stats.user.enabled value:true
+/config reload
 ```
+
+#### Subcommand: `top`
+
+**Description:** View voice channel activity leaderboards showing top users by time spent.
 
 **Usage:**
 
 ```bash
-/vctop
-/vctop limit:20
-/vctop period:month
-/vctop period:alltime limit:10
+/voicestats top
+/voicestats top limit:20
+/voicestats top period:month
+/voicestats top period:alltime limit:10
 ```
 
 **Parameters:**
@@ -143,47 +152,43 @@ Top Voice Channel Users (week):
 - Create friendly competition
 - Recognize community engagement
 
----
+#### Subcommand: `user`
 
-### `/vcstats`
-
-**Description:** View your personal voice channel statistics and activity history.
-
-**Configuration:**
-
-```bash
-# Requires voice tracking to be enabled
-/config set key:voicetracking.enabled value:true
-/config reload
-```
+**Description:** View personal voice channel statistics and activity history for yourself or another user.
 
 **Usage:**
 
 ```bash
-/vcstats
-/vcstats period:month
-/vcstats period:alltime
+/voicestats user
+/voicestats user user:@Alice
+/voicestats user period:month
+/voicestats user user:@Alice period:alltime
 ```
 
 **Parameters:**
 
+- `user` (optional) - The user to show statistics for (defaults to yourself)
 - `period` (optional) - Time period: `week`, `month`, `alltime` (default: week)
 
 **Example Response:**
 
 ```json
-Your Voice Channel Stats (week):
+Voice Channel Statistics for Alice (week):
 Total Time: 24h 15m
-Sessions: 12
-Average Session: 2h 1m
-Most Active Channel: Gaming Room
+Last Seen: 2026-01-29 12:00:00
+
+Recent Sessions:
+• Gaming Room: 3h 45m
+• Study Hall: 2h 15m
+• Music Lounge: 1h 30m
 ```
 
 **Use Cases:**
 
 - Track your own voice channel usage
-- See your activity trends
-- Check your ranking position
+- View another user's activity
+- See activity trends
+- Check recent session history
 
 ---
 
@@ -612,7 +617,7 @@ Import configuration from a YAML file.
 **Description:** Manage role-based command access control. This feature allows admins to restrict which commands can be used by
 specific Discord roles.
 
-**Command Name Format:** Command names are used directly (e.g., `quote`, `vcstats`)
+**Command Name Format:** Command names are used directly (e.g., `quote`, `voicestats`)
 
 **Key Features:**
 
@@ -636,7 +641,7 @@ Set command permissions (replaces any existing permissions).
 ```bash
 /permissions set command:quote role:@Moderator
 /permissions set command:quote role:@Moderator role:@VIP role:@Admin
-/permissions set command:vcstats role:@Member
+/permissions set command:voicestats role:@Member
 ```
 
 **Parameters:**
@@ -789,7 +794,7 @@ Commands with role restrictions:
 /quote
 @Moderator, @VIP
 
-/vcstats
+/voicestats
 @Member
 
 Commands not listed are accessible to everyone.
@@ -838,12 +843,12 @@ Check what commands a specific user or role can access.
 # View user permissions
 Permissions for username#1234
 Can access 12 command(s):
-`/ping`, `/help`, `/quote`, `/vcstats`, ...
+`/ping`, `/help`, `/quote`, `/voicestats`, ...
 
 # View role permissions
 Permissions for Moderator
 Can access 15 command(s):
-`/ping`, `/help`, `/quote`, `/vcstats`, `/config`, ...
+`/ping`, `/help`, `/quote`, `/voicestats`, `/config`, ...
 ```
 
 **Use Cases:**
@@ -1777,9 +1782,9 @@ Activity:
   Commands Executed: 2,451
 
 Most Used Commands:
-  1. /vctop - 892 times
-  2. /vcstats - 634 times
-  3. /ping - 421 times
+  1. /voicestats - 1,526 times
+  2. /ping - 421 times
+  3. /quote - 315 times
 ```
 
 **Use Cases:**
@@ -1798,8 +1803,7 @@ Most Used Commands:
 | Command         | Permission Level | Additional Requirements                   |
 | --------------- | ---------------- | ----------------------------------------- |
 | `/ping`         | Everyone         | Command must be enabled                   |
-| `/vctop`        | Everyone         | Voice tracking enabled                    |
-| `/vcstats`      | Everyone         | Voice tracking enabled                    |
+| `/voicestats`   | Everyone         | Voice tracking enabled                    |
 | `/achievements` | Everyone         | Achievements enabled                      |
 | `/seen`         | Everyone         | Voice tracking + seen enabled             |
 | `/quote`        | Everyone\*       | Quotes enabled (\*may be role-restricted) |
@@ -1851,8 +1855,8 @@ The bot needs these Discord permissions to function:
 ```bash
 /ping                               # Check bot status
 /help [command]                     # Get help on commands
-/vctop [period] [limit]            # Voice leaderboards
-/vcstats [period]                  # Your voice stats
+/voicestats top [period] [limit]   # Voice leaderboards
+/voicestats user [user] [period]   # Voice channel stats
 /achievements [user]               # View earned badges
 /seen user:@User                   # Last seen info
 /quote text:"..." author:"@User"   # Add quote to channel

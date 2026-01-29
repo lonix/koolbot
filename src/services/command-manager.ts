@@ -69,11 +69,10 @@ export class CommandManager {
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "help", configKey: null, file: "help" }, // Always enabled - core feature
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {
-          name: "vcstats",
+          name: "voicestats",
           configKey: "voicetracking.enabled",
-          file: "vcstats",
+          file: "voicestats",
         },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
         {
@@ -302,11 +301,10 @@ export class CommandManager {
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "help", configKey: null, file: "help" }, // Always enabled - core feature
         { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
-        { name: "vctop", configKey: "voicetracking.enabled", file: "vctop" },
         {
-          name: "vcstats",
+          name: "voicestats",
           configKey: "voicetracking.enabled",
-          file: "vcstats",
+          file: "voicestats",
         },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
         {
