@@ -1,5 +1,6 @@
 import { ModalSubmitInteraction, ChannelType } from "discord.js";
 import logger from "../utils/logger.js";
+import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 
 export async function handleVCModal(
   interaction: ModalSubmitInteraction,
@@ -93,6 +94,10 @@ async function handleNameModal(
     }
 
     await channel.setName(newName);
+
+    // Mark this channel as having a custom name
+    const manager = VoiceChannelManager.getInstance(interaction.client);
+    manager.setCustomChannelName(channelId, newName);
 
     await interaction.reply({
       content: `✅ Channel renamed to: **${newName}**`,
