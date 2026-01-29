@@ -23,6 +23,7 @@ export class VoiceChannelManager {
   private userChannels: Map<string, VoiceChannel> = new Map();
   private ownershipQueue: Map<string, string[]> = new Map(); // channelId -> array of userIds
   private customChannelNames: Map<string, string> = new Map(); // channelId -> custom name
+  private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
@@ -418,6 +419,12 @@ export class VoiceChannelManager {
           }
         }
         await this.cleanupUserChannel(member.id);
+
+        // Always check if the old channel is now empty and should be cleaned up
+        // This handles the case where ownership was transferred but the channel is now empty
+        if (oldChannel.type === ChannelType.GuildVoice) {
+          await this.cleanupEmptyChannel(oldChannel);
+        }
       }
       // User switched channels
       else if (oldChannel && newChannel) {
@@ -438,6 +445,10 @@ export class VoiceChannelManager {
             }
             await this.cleanupUserChannel(member.id);
           }
+          // Check if old channel is now empty
+          if (oldChannel.type === ChannelType.GuildVoice) {
+            await this.cleanupEmptyChannel(oldChannel);
+          }
           await this.createUserChannel(member);
         }
         // If user is moving to the "New Channel", create a personal channel
@@ -453,6 +464,10 @@ export class VoiceChannelManager {
             }
             await this.cleanupUserChannel(member.id);
           }
+          // Check if old channel is now empty
+          if (oldChannel.type === ChannelType.GuildVoice) {
+            await this.cleanupEmptyChannel(oldChannel);
+          }
           await this.createUserChannel(member);
         }
         // If user is moving from their personal channel to another channel, clean up the old one
@@ -464,6 +479,10 @@ export class VoiceChannelManager {
             await this.handleChannelOwnershipChange(oldChannel);
           }
           await this.cleanupUserChannel(member.id);
+          // Check if old channel is now empty
+          if (oldChannel.type === ChannelType.GuildVoice) {
+            await this.cleanupEmptyChannel(oldChannel);
+          }
         }
       }
     } catch (error) {
@@ -654,10 +673,71 @@ export class VoiceChannelManager {
         this.userChannels.delete(userId);
         // Clean up custom name tracking
         this.customChannelNames.delete(channel.id);
+        // Clean up ownership queue
+        this.ownershipQueue.delete(channel.id);
         logger.info(`Cleaned up voice channel ${channel.name}`);
       }
     } catch (error) {
       logger.error("Error cleaning up user channel:", error);
+    }
+  }
+
+  /**
+   * Clean up a channel if it's empty, regardless of who the current owner is
+   * This is needed when ownership has been transferred but the channel becomes empty
+   */
+  private async cleanupEmptyChannel(channel: VoiceChannel): Promise<void> {
+    try {
+      // Only clean up if the channel is empty
+      if (channel.members.size !== 0) {
+        return;
+      }
+
+      // Check if channel is already being deleted to prevent race conditions
+      if (this.channelsBeingDeleted.has(channel.id)) {
+        return;
+      }
+
+      // Check if this is a managed channel and find the owner in one pass
+      let ownerId: string | null = null;
+      for (const [userId, userChannel] of this.userChannels.entries()) {
+        if (userChannel.id === channel.id) {
+          ownerId = userId;
+          break;
+        }
+      }
+
+      const isManaged = ownerId !== null || this.hasCustomName(channel.id);
+
+      if (!isManaged) {
+        // Not a managed channel, don't clean up
+        return;
+      }
+
+      // Mark channel as being deleted
+      this.channelsBeingDeleted.add(channel.id);
+
+      // Delete the channel
+      await channel.delete();
+      logger.info(`Cleaned up empty voice channel ${channel.name}`);
+
+      // Clean up all tracking for this channel
+      if (ownerId) {
+        this.userChannels.delete(ownerId);
+      }
+
+      // Clean up custom name tracking
+      this.customChannelNames.delete(channel.id);
+
+      // Clean up ownership queue
+      this.ownershipQueue.delete(channel.id);
+
+      // Remove from deletion tracking
+      this.channelsBeingDeleted.delete(channel.id);
+    } catch (error) {
+      logger.error("Error cleaning up empty channel:", error);
+      // Ensure we remove from deletion tracking even if there was an error
+      this.channelsBeingDeleted.delete(channel.id);
     }
   }
 
@@ -1446,5 +1526,7 @@ export class VoiceChannelManager {
     }
     this.userChannels.clear();
     this.customChannelNames.clear();
+    this.ownershipQueue.clear();
+    this.channelsBeingDeleted.clear();
   }
 }
