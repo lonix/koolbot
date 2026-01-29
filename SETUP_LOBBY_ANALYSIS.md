@@ -1,12 +1,60 @@
-# Setup-Lobby Command Analysis
+# Setup-Lobby Command Analysis & Removal
 
 ## Executive Summary
 
 **Command:** `/setup-lobby`  
-**Status:** 🟡 Legacy (Superseded by `/setup wizard`)  
-**Recommendation:** ⚠️ Consider deprecation with migration path
+**Status:** ✅ **REMOVED** (January 29, 2026)  
+**Reason:** Superseded by `/setup wizard`
 
 ---
+
+## Removal Summary
+
+The `/setup-lobby` command has been completely removed from the codebase. All functionality is now available through the superior `/setup wizard` command.
+
+### What Was Removed
+
+**Files Deleted:**
+- `src/commands/setup-lobby.ts` - Command implementation (50 lines)
+- `__tests__/commands/setup-lobby.test.ts` - Unit tests
+
+**Code References Removed:**
+- `src/commands/index.ts` - Import and routing
+- `src/services/command-manager.ts` - Registration in both methods (loadCommandsDynamically & populateClientCommands)
+- `src/services/permissions-service.ts` - Admin commands list
+- `src/commands/help.ts` - Command details
+- `__tests__/services/command-manager-methods.test.ts` - Test assertions
+- `src/scripts/update-settings-references.ts` - Documentation reference
+
+**Documentation Updated:**
+- `README.md` - Removed from admin commands list
+- `COMMANDS.md` - Removed entire command section and references (3 locations)
+- `QUICK_START_VISUAL.md` - Replaced with setup wizard
+- `SETTINGS.md` - Removed references and updated examples (2 locations)  
+- `TROUBLESHOOTING.md` - Replaced with setup wizard
+
+### Migration Path
+
+**Old Command:**
+```bash
+/setup-lobby
+```
+
+**New Command:**
+```bash
+/setup wizard feature:voicechannels
+```
+
+The new command provides:
+- Auto-detection of existing channels
+- Interactive channel selection
+- Validation before applying changes
+- Better error handling
+- Consistent UX with other features
+
+---
+
+## Original Analysis
 
 ## What Does `/setup-lobby` Do?
 
