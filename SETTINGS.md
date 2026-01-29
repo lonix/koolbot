@@ -219,6 +219,8 @@ Track user voice channel activity and generate statistics.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `voicetracking.enabled` | `false` | Enable voice channel activity tracking |
+| `voicetracking.stats.top.enabled` | `false` | Enable `/voicestats top` subcommand |
+| `voicetracking.stats.user.enabled` | `false` | Enable `/voicestats user` subcommand |
 | `voicetracking.seen.enabled` | `false` | Enable `/seen` command for last-seen tracking |
 | `voicetracking.excluded_channels` | `""` | Channel IDs to exclude from tracking (comma-separated) |
 | `voicetracking.admin_roles` | `""` | Role names with tracking admin powers (comma-separated) |
@@ -226,8 +228,10 @@ Track user voice channel activity and generate statistics.
 ### Example
 
 ```bash
-# Enable tracking
+# Enable tracking and voicestats command
 /config set key:voicetracking.enabled value:true
+/config set key:voicetracking.stats.top.enabled value:true
+/config set key:voicetracking.stats.user.enabled value:true
 /config set key:voicetracking.seen.enabled value:true
 
 # Exclude AFK channels
@@ -727,7 +731,7 @@ always enabled.
 
 ### Key Concepts
 
-**Command Name Format:** Command names are used directly (e.g., `quote`, `vcstats`)
+**Command Name Format:** Command names are used directly (e.g., `quote`, `voicestats`)
 
 **Access Logic:**
 
@@ -785,8 +789,7 @@ Use the `/permissions` command to manage role-based access:
 **Limit resource-intensive commands:**
 
 ```bash
-/permissions set command:vcstats role:@Member
-/permissions set command:vctop role:@Member
+/permissions set command:voicestats role:@Member
 ```
 
 **Create tiered access:**
@@ -832,8 +835,7 @@ All other commands default to accessible by everyone unless you set permissions.
 
 ```bash
 # Restrict voice tracking commands to Members role
-/permissions set command:vcstats role:@Member
-/permissions set command:vctop role:@Member
+/permissions set command:voicestats role:@Member
 /permissions set command:seen role:@Member
 ```
 
@@ -850,14 +852,14 @@ All other commands default to accessible by everyone unless you set permissions.
 #### Example 3: Troubleshooting access
 
 ```bash
-# User reports they can't use /vcstats
+# User reports they can't use /voicestats
 /permissions view user:@user123
 # Shows: Can access 10 command(s): /ping, /help, /quote, ...
-# (vcstats not in list)
+# (voicestats not in list)
 
 # Check role permissions
 /permissions view role:@Member
-# Shows: Can access 15 command(s): /ping, /help, /vcstats, ...
+# Shows: Can access 15 command(s): /ping, /help, /voicestats, ...
 
 # Solution: User needs @Member role
 ```
