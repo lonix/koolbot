@@ -274,6 +274,102 @@ export class PermissionsService {
   }
 
   /**
+   * Clear a specific role from all commands
+   * @param guildId - Discord guild ID
+   * @param roleId - Role ID to remove from all commands
+   * @returns Number of commands affected
+   */
+  public async clearRoleFromAllCommands(
+    guildId: string,
+    roleId: string,
+  ): Promise<number> {
+    try {
+      const permissions = await CommandPermission.find({ guildId });
+      let clearedCount = 0;
+
+      for (const perm of permissions) {
+        if (perm.roleIds.includes(roleId)) {
+          const newRoleIds = perm.roleIds.filter((id) => id !== roleId);
+
+          if (newRoleIds.length === 0) {
+            // If no roles left, delete the permission entry
+            await CommandPermission.deleteOne({
+              guildId,
+              commandName: perm.commandName,
+            });
+            this.permissionsCache.delete(`${guildId}:${perm.commandName}`);
+          } else {
+            // Update with remaining roles
+            await this.setCommandPermissions(
+              guildId,
+              perm.commandName,
+              newRoleIds,
+            );
+          }
+          clearedCount++;
+        }
+      }
+
+      logger.info(
+        `Cleared role ${roleId} from ${clearedCount} command(s) in guild ${guildId}`,
+      );
+      return clearedCount;
+    } catch (error) {
+      logger.error("Error clearing role from all commands:", error);
+      throw error;
+    }
+  }
+
+  /**
+   * Clear multiple roles from all commands
+   * @param guildId - Discord guild ID
+   * @param roleIds - Array of role IDs to remove from all commands
+   * @returns Number of commands affected
+   */
+  public async clearRolesFromAllCommands(
+    guildId: string,
+    roleIds: string[],
+  ): Promise<number> {
+    try {
+      const permissions = await CommandPermission.find({ guildId });
+      let clearedCount = 0;
+
+      for (const perm of permissions) {
+        const hasAnyRole = perm.roleIds.some((id) => roleIds.includes(id));
+
+        if (hasAnyRole) {
+          const newRoleIds = perm.roleIds.filter((id) => !roleIds.includes(id));
+
+          if (newRoleIds.length === 0) {
+            // If no roles left, delete the permission entry
+            await CommandPermission.deleteOne({
+              guildId,
+              commandName: perm.commandName,
+            });
+            this.permissionsCache.delete(`${guildId}:${perm.commandName}`);
+          } else {
+            // Update with remaining roles
+            await this.setCommandPermissions(
+              guildId,
+              perm.commandName,
+              newRoleIds,
+            );
+          }
+          clearedCount++;
+        }
+      }
+
+      logger.info(
+        `Cleared ${roleIds.length} role(s) from ${clearedCount} command(s) in guild ${guildId}`,
+      );
+      return clearedCount;
+    } catch (error) {
+      logger.error("Error clearing roles from all commands:", error);
+      throw error;
+    }
+  }
+
+  /**
    * List all permissions for a guild
    * @param guildId - Discord guild ID
    * @returns Array of permission entries

@@ -253,6 +253,131 @@ describe("PermissionsService", () => {
     });
   });
 
+  describe("clearRoleFromAllCommands", () => {
+    it("should remove a role from all commands", async () => {
+      const mockPermissions = [
+        {
+          guildId: "guild123",
+          commandName: "quote",
+          roleIds: ["role1", "role2"],
+        },
+        {
+          guildId: "guild123",
+          commandName: "vcstats",
+          roleIds: ["role1", "role3"],
+        },
+        {
+          guildId: "guild123",
+          commandName: "ping",
+          roleIds: ["role3"],
+        },
+      ];
+
+      const mockFind = jest.fn().mockResolvedValue(mockPermissions);
+      const mockDeleteOne = jest.fn().mockResolvedValue({ deletedCount: 1 });
+      const mockFindOneAndUpdate = jest.fn().mockResolvedValue({});
+
+      (CommandPermission.find as jest.Mock) = mockFind;
+      (CommandPermission.deleteOne as jest.Mock) = mockDeleteOne;
+      (CommandPermission.findOneAndUpdate as jest.Mock) =
+        mockFindOneAndUpdate;
+
+      const clearedCount = await service.clearRoleFromAllCommands(
+        "guild123",
+        "role1",
+      );
+
+      expect(clearedCount).toBe(2); // quote and vcstats
+      expect(mockFind).toHaveBeenCalledWith({ guildId: "guild123" });
+    });
+
+    it("should delete command permission when removing last role", async () => {
+      const mockPermissions = [
+        {
+          guildId: "guild123",
+          commandName: "quote",
+          roleIds: ["role1"],
+        },
+      ];
+
+      const mockFind = jest.fn().mockResolvedValue(mockPermissions);
+      const mockDeleteOne = jest.fn().mockResolvedValue({ deletedCount: 1 });
+
+      (CommandPermission.find as jest.Mock) = mockFind;
+      (CommandPermission.deleteOne as jest.Mock) = mockDeleteOne;
+
+      const clearedCount = await service.clearRoleFromAllCommands(
+        "guild123",
+        "role1",
+      );
+
+      expect(clearedCount).toBe(1);
+      expect(mockDeleteOne).toHaveBeenCalledWith({
+        guildId: "guild123",
+        commandName: "quote",
+      });
+    });
+  });
+
+  describe("clearRolesFromAllCommands", () => {
+    it("should remove multiple roles from all commands", async () => {
+      const mockPermissions = [
+        {
+          guildId: "guild123",
+          commandName: "quote",
+          roleIds: ["role1", "role2", "role3"],
+        },
+        {
+          guildId: "guild123",
+          commandName: "vcstats",
+          roleIds: ["role1", "role4"],
+        },
+      ];
+
+      const mockFind = jest.fn().mockResolvedValue(mockPermissions);
+      const mockFindOneAndUpdate = jest.fn().mockResolvedValue({});
+
+      (CommandPermission.find as jest.Mock) = mockFind;
+      (CommandPermission.findOneAndUpdate as jest.Mock) =
+        mockFindOneAndUpdate;
+
+      const clearedCount = await service.clearRolesFromAllCommands(
+        "guild123",
+        ["role1", "role2"],
+      );
+
+      expect(clearedCount).toBe(2); // quote and vcstats affected
+      expect(mockFind).toHaveBeenCalledWith({ guildId: "guild123" });
+    });
+
+    it("should delete permission entry when all roles removed", async () => {
+      const mockPermissions = [
+        {
+          guildId: "guild123",
+          commandName: "quote",
+          roleIds: ["role1", "role2"],
+        },
+      ];
+
+      const mockFind = jest.fn().mockResolvedValue(mockPermissions);
+      const mockDeleteOne = jest.fn().mockResolvedValue({ deletedCount: 1 });
+
+      (CommandPermission.find as jest.Mock) = mockFind;
+      (CommandPermission.deleteOne as jest.Mock) = mockDeleteOne;
+
+      const clearedCount = await service.clearRolesFromAllCommands(
+        "guild123",
+        ["role1", "role2"],
+      );
+
+      expect(clearedCount).toBe(1);
+      expect(mockDeleteOne).toHaveBeenCalledWith({
+        guildId: "guild123",
+        commandName: "quote",
+      });
+    });
+  });
+
   describe("listAllPermissions", () => {
     it("should return all permissions for a guild", async () => {
       const mockPermissions = [

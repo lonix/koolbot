@@ -61,26 +61,48 @@ describe("Permissions Command", () => {
       );
     });
 
-    it("should have clear subcommand", () => {
+    it("should have clear subcommand with optional parameters", () => {
       const json = data.toJSON();
       const clearSubcommand = json.options?.find(
         (opt: { name: string }) => opt.name === "clear",
       );
       expect(clearSubcommand).toBeDefined();
-      expect(clearSubcommand?.description).toContain(
-        "Clear all permissions",
+      expect(clearSubcommand?.description).toContain("Clear permissions");
+      
+      // Check that command, role, and user options exist and are optional
+      const commandOption = clearSubcommand?.options?.find(
+        (opt: { name: string }) => opt.name === "command",
       );
+      expect(commandOption).toBeDefined();
+      expect(commandOption?.required).toBe(false);
+
+      const roleOption = clearSubcommand?.options?.find(
+        (opt: { name: string }) => opt.name === "role",
+      );
+      expect(roleOption).toBeDefined();
+      expect(roleOption?.required).toBe(false);
+
+      const userOption = clearSubcommand?.options?.find(
+        (opt: { name: string }) => opt.name === "user",
+      );
+      expect(userOption).toBeDefined();
+      expect(userOption?.required).toBe(false);
     });
 
-    it("should have list subcommand", () => {
+    it("should have list subcommand with optional command filter", () => {
       const json = data.toJSON();
       const listSubcommand = json.options?.find(
         (opt: { name: string }) => opt.name === "list",
       );
       expect(listSubcommand).toBeDefined();
-      expect(listSubcommand?.description).toBe(
-        "List all command permissions",
+      expect(listSubcommand?.description).toBe("List command permissions");
+      
+      // Check that command option exists and is optional
+      const commandOption = listSubcommand?.options?.find(
+        (opt: { name: string }) => opt.name === "command",
       );
+      expect(commandOption).toBeDefined();
+      expect(commandOption?.required).toBe(false);
     });
 
     it("should have view subcommand", () => {
