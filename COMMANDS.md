@@ -418,6 +418,146 @@ Each quote appears as an embed with:
 5. Reload: `/config reload`
 6. Bot will automatically set strict permissions on the channel
 
+---
+
+### `/notice`
+
+**Description:** Manage server notices in a protected bot-controlled channel. Perfect for server rules, game server info, bot feature help, and important announcements.
+
+**Configuration:**
+
+```bash
+# Enable notices and set channel
+/config set key:notices.enabled value:true
+/config set key:notices.channel_id value:"YOUR_CHANNEL_ID"
+/config reload
+```
+
+**Subcommands:**
+
+#### `/notice add`
+
+Add a new notice to the channel.
+
+**Parameters:**
+
+- `title` (required) - Notice title (max 256 characters)
+- `content` (required) - Notice content (max 4000 characters)
+- `category` (required) - Category: General, Rules, Information, Help, or Game Servers
+- `order` (optional) - Display order (lower numbers appear first, default: 0)
+
+**Usage:**
+
+```bash
+/notice add title:"Server Rules" content:"1. Be respectful\n2. No spam..." category:"Rules" order:1
+/notice add title:"Minecraft Server" content:"IP: mc.example.com\nPort: 25565" category:"Game Servers" order:10
+/notice add title:"Bot Commands Help" content:"Use /help to see available commands" category:"Help" order:20
+```
+
+#### `/notice edit`
+
+Edit an existing notice.
+
+**Parameters:**
+
+- `id` (required) - Notice ID (visible in notice channel footer)
+- `title` (optional) - New title
+- `content` (optional) - New content
+- `category` (optional) - New category
+- `order` (optional) - New display order
+
+**Usage:**
+
+```bash
+/notice edit id:"abc123" title:"Updated Rules" content:"New rules text..."
+/notice edit id:"abc123" order:5
+```
+
+#### `/notice delete`
+
+Delete a notice.
+
+**Parameters:**
+
+- `id` (required) - Notice ID (visible in notice channel footer)
+
+**Usage:**
+
+```bash
+/notice delete id:"abc123"
+```
+
+**Note:** You can find notice IDs by viewing the notices in the channel - each notice shows its ID in the footer.
+
+#### `/notice sync`
+
+Recreate all notices in the channel (useful after cleanup or channel issues).
+
+**Usage:**
+
+```bash
+/notice sync
+```
+
+**How It Works:**
+
+1. Admin creates notices using `/notice add` with title, content, and category
+2. Bot posts each notice as a rich embed in the configured notices channel
+3. Bot automatically creates a "Bot Features" notice listing enabled features
+4. Notices are displayed in order by category, then by custom order number
+5. Channel is read-only for regular users (only bot can post)
+6. Bot automatically removes any unauthorized messages every 5 minutes
+7. An informational header post explains the channel purpose (auto-recreated if deleted)
+8. Notices persist in database and survive bot restarts
+9. Notice IDs are visible in each notice's footer for editing/deletion
+
+**Security Features:**
+
+- **Strict Permissions**: Channel is automatically configured so only the bot can post messages
+- **Auto-Cleanup**: Removes any non-bot messages every 5 minutes (configurable)
+- **User Access**: Users can view, read history, and add reactions only
+- **Persistent**: Notices stored in MongoDB, auto-repost on bot restart
+- **Informational Header**: Pinned post explains the channel's purpose
+
+**Notice Categories:**
+
+- **📋 General** - General server information
+- **📜 Rules** - Server rules and guidelines
+- **ℹ️ Information** - Important server info
+- **❓ Help** - Bot feature help and guides
+- **🎮 Game Servers** - Game server connection information
+
+**Advanced Configuration:**
+
+```bash
+# Set cleanup interval (minutes, default: 5)
+/config set key:notices.cleanup_interval value:10
+
+# Disable header post (default: enabled)
+/config set key:notices.header_enabled value:false
+
+# Disable header pinning (default: enabled)
+/config set key:notices.header_pin_enabled value:false
+```
+
+**Use Cases:**
+
+- Post server rules that can't be deleted/modified by users
+- Share game server connection info that stays up-to-date
+- Provide bot feature help and usage guides
+- Important announcements that need to stay visible
+- Protected information channel that prevents spam
+
+**Setup Steps:**
+
+1. Create a dedicated text channel for notices (e.g., #notices or #info)
+2. Get the channel ID (right-click channel → Copy ID)
+3. Configure: `/config set key:notices.channel_id value:"CHANNEL_ID"`
+4. Enable: `/config set key:notices.enabled value:true`
+5. Reload: `/config reload`
+6. Bot will automatically set strict permissions on the channel
+7. Add your first notice: `/notice add title:"Welcome" content:"Welcome to our server!" category:"General"`
+
 **Permissions:**
 
 - Everyone can view quotes in the channel

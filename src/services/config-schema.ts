@@ -78,6 +78,14 @@ export interface ConfigSchema {
 
   // Setup Wizard
   "wizard.enabled": boolean;
+
+  // Notices System
+  "notices.enabled": boolean;
+  "notices.channel_id": string; // Channel ID for notice messages
+  "notices.cleanup_interval": number; // Cleanup interval in minutes
+  "notices.header_enabled": boolean; // Enable header post in notices channel
+  "notices.header_message_id": string; // Message ID of the header post
+  "notices.header_pin_enabled": boolean; // Pin the header post
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -159,4 +167,12 @@ export const defaultConfig: ConfigSchema = {
 
   // Setup Wizard defaults
   "wizard.enabled": true,
+
+  // Notices System defaults
+  "notices.enabled": false,
+  "notices.channel_id": "",
+  "notices.cleanup_interval": 5, // Clean up unauthorized messages every 5 minutes
+  "notices.header_enabled": true, // Enable informational header post
+  "notices.header_message_id": "", // Stores header message ID
+  "notices.header_pin_enabled": true, // Pin header for easy access
 };

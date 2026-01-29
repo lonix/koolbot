@@ -12,6 +12,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Command Enablement](#-command-enablement) - Enable/disable commands
 - [Setup Wizard](#-setup-wizard) - Interactive configuration system
 - [Quote System](#-quote-system) - Quote management settings
+- [Notices System](#-notices-system) - Protected notices channel settings
 - [Voice Channel Management](#-voice-channel-management) - Dynamic channel settings
 - [Voice Activity Tracking](#-voice-activity-tracking) - Track user activity
 - [Voice Channel Cleanup](#-voice-channel-cleanup) - Data retention
@@ -185,6 +186,64 @@ Configure the quote management system.
 - `quotes.header_message_id` - Automatically managed by the bot; stores the message ID of the header post.
 
 ---
+
+## 📋 Notices System
+
+Bot-managed protected channel for server notices, rules, and help information.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `notices.enabled` | `false` | Enable/disable the notices system |
+| `notices.channel_id` | `""` | Channel ID for notice messages |
+| `notices.cleanup_interval` | `5` | Minutes between cleanup of unauthorized messages |
+| `notices.header_enabled` | `true` | Show informational header post in notices channel |
+| `notices.header_pin_enabled` | `true` | Pin the header post for easy access |
+| `notices.header_message_id` | `""` | Stores header message ID (managed automatically) |
+
+### Example
+
+```bash
+# Enable notices
+/config set key:notices.enabled value:true
+/config set key:notices.channel_id value:"1234567890"
+/config reload
+
+# Add your first notice
+/notice add title:"Server Rules" content:"1. Be respectful..." category:"Rules"
+```
+
+**Features:**
+
+- **Bot-Only Channel**: Only bot can post, users can only read
+- **Auto-Cleanup**: Removes unauthorized messages every 5 minutes
+- **Persistent**: Notices stored in MongoDB, survive bot restarts
+- **Organized**: Sort by category (Rules, Info, Help, Game Servers, General)
+- **Custom Order**: Control display order with order parameter
+- **Rich Embeds**: Each notice displayed as a formatted embed with color-coded categories
+
+**Notice Categories:**
+
+- **General** (📋) - General server information
+- **Rules** (📜) - Server rules and guidelines
+- **Information** (ℹ️) - Important server info
+- **Help** (❓) - Bot feature help and guides
+- **Game Servers** (🎮) - Game server connection information
+
+**Commands:**
+
+- `/notice add` - Create a new notice
+- `/notice edit` - Update existing notice (ID visible in notice footer)
+- `/notice delete` - Remove a notice (ID visible in notice footer)
+- `/notice sync` - Recreate all notices in channel
+
+**Notes:**
+
+- The channel is automatically configured with strict permissions
+- Bot automatically creates a "Features" notice listing enabled bot features
+- Header post explains the channel purpose and is auto-recreated if deleted
+- Notices persist in the database and are automatically reposted on bot restart
+- Notice IDs are displayed in each notice's footer for editing/deletion
+- Perfect for rules, game server info, bot help, and important announcements
 
 ## 🎙 Voice Channel Management
 
