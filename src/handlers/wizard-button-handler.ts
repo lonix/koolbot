@@ -699,9 +699,7 @@ async function showChannelSelectionPage(
           "• Error notifications\n" +
           "• Configuration changes\n\n" +
           `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
-          (totalPages > 1
-            ? `\nPage ${currentPage + 1} of ${totalPages}`
-            : "") +
+          (totalPages > 1 ? `\nPage ${currentPage + 1} of ${totalPages}` : "") +
           "\n\nYou can select 1-3 channels.",
       )
       .setColor(0x5865f2);
@@ -734,20 +732,21 @@ async function showChannelSelectionPage(
 
   // Add pagination buttons if needed
   if (totalPages > 1) {
-    const paginationButtons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`wizard_channel_page_prev__${userId}_${guildId}`)
-        .setLabel("Previous")
-        .setStyle(ButtonStyle.Secondary)
-        .setEmoji("◀️")
-        .setDisabled(currentPage === 0),
-      new ButtonBuilder()
-        .setCustomId(`wizard_channel_page_next__${userId}_${guildId}`)
-        .setLabel("Next")
-        .setStyle(ButtonStyle.Secondary)
-        .setEmoji("▶️")
-        .setDisabled(currentPage === totalPages - 1),
-    );
+    const paginationButtons =
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`wizard_channel_page_prev__${userId}_${guildId}`)
+          .setLabel("Previous")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("◀️")
+          .setDisabled(currentPage === 0),
+        new ButtonBuilder()
+          .setCustomId(`wizard_channel_page_next__${userId}_${guildId}`)
+          .setLabel("Next")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("▶️")
+          .setDisabled(currentPage === totalPages - 1),
+      );
     components.push(paginationButtons);
   }
 

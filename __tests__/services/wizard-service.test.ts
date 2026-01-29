@@ -152,6 +152,23 @@ describe('WizardService', () => {
       const state = service.getSession(mockUserId, mockGuildId);
       expect(state?.currentStep).toBe(0);
     });
+
+    it('should initialize channelPage to 0 when creating session', () => {
+      const state = service.createSession(mockUserId, mockGuildId);
+      
+      expect(state.channelPage).toBe(0);
+    });
+
+    it('should update channelPage in session', () => {
+      service.createSession(mockUserId, mockGuildId);
+      const updated = service.updateSession(mockUserId, mockGuildId, {
+        channelPage: 2,
+      });
+      
+      expect(updated).toBe(true);
+      const state = service.getSession(mockUserId, mockGuildId);
+      expect(state?.channelPage).toBe(2);
+    });
   });
 
   describe('shutdown', () => {
