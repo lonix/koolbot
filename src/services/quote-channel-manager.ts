@@ -4,6 +4,8 @@ import {
   EmbedBuilder,
   MessageReaction,
   User,
+  PartialMessageReaction,
+  PartialUser,
 } from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
@@ -17,10 +19,16 @@ export class QuoteChannelManager {
   private isInitialized: boolean = false;
   private cleanupJob: CronJob | null = null;
   private reactionAddHandler:
-    | ((reaction: MessageReaction, user: User) => Promise<void>)
+    | ((
+        reaction: MessageReaction | PartialMessageReaction,
+        user: User | PartialUser,
+      ) => Promise<void>)
     | null = null;
   private reactionRemoveHandler:
-    | ((reaction: MessageReaction, user: User) => Promise<void>)
+    | ((
+        reaction: MessageReaction | PartialMessageReaction,
+        user: User | PartialUser,
+      ) => Promise<void>)
     | null = null;
 
   private constructor(client: Client) {
@@ -566,6 +574,14 @@ export class QuoteChannelManager {
       if (user.bot) return;
 
       try {
+        // Fetch partial data if needed
+        if (reaction.partial) {
+          await reaction.fetch();
+        }
+        if (user.partial) {
+          await user.fetch();
+        }
+
         const channel = await this.getQuoteChannel();
         if (!channel || reaction.message.channelId !== channel.id) {
           return;
@@ -583,6 +599,14 @@ export class QuoteChannelManager {
       if (user.bot) return;
 
       try {
+        // Fetch partial data if needed
+        if (reaction.partial) {
+          await reaction.fetch();
+        }
+        if (user.partial) {
+          await user.fetch();
+        }
+
         const channel = await this.getQuoteChannel();
         if (!channel || reaction.message.channelId !== channel.id) {
           return;
