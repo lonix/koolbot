@@ -22,6 +22,7 @@ export interface WizardState {
   startTime: Date;
   messageId?: string;
   allowNavigation: boolean;
+  channelPage?: number; // Track current page for channel selection
 }
 
 /**
@@ -101,6 +102,7 @@ export class WizardService {
       detectedResources: {},
       startTime: new Date(),
       allowNavigation: true,
+      channelPage: 0,
     };
 
     this.sessions.set(sessionKey, state);

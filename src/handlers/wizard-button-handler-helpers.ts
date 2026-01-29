@@ -29,6 +29,7 @@ export async function moveToNextFeature(
   } else {
     // Move to next feature
     state.currentStep++;
+    state.channelPage = 0; // Reset channel pagination for next feature
     wizardService.updateSession(userId, guildId, state);
 
     const nextFeature = state.selectedFeatures[nextFeatureIndex];

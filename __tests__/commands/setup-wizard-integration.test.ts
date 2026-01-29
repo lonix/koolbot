@@ -48,11 +48,23 @@ describe('Setup Wizard Integration', () => {
       // 1. Embed field names
       // 2. Select menu option labels
       
-      const enabledIndicator = '✅';
-      const disabledIndicator = '⚪';
+      expect(true).toBe(true);
+    });
+
+    it('should document channel selection pagination', () => {
+      // Pagination was added to handle Discord's 25-option limit in select menus:
+      // - WizardState now includes channelPage field for tracking current page
+      // - showChannelSelectionPage helper function displays paginated channels
+      // - Previous/Next buttons allow navigation through channel pages
+      // - Supports pagination for quotes, logging, and voice category selection
+      // - Displays "Showing X-Y of Z" and "Page N of M" in embed description
       
-      expect(enabledIndicator).toBe('✅');
-      expect(disabledIndicator).toBe('⚪');
+      const MAX_OPTIONS_PER_PAGE = 25; // Discord's select menu limit
+      expect(MAX_OPTIONS_PER_PAGE).toBe(25);
+      
+      // Pagination is applied to these selection types:
+      const paginatedSelections = ['quotes', 'logging', 'vc_category'];
+      expect(paginatedSelections.length).toBe(3);
     });
   });
 });

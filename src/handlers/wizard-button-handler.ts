@@ -8,6 +8,9 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  Guild,
+  TextChannel,
+  CategoryChannel,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { WizardService } from "../services/wizard-service.js";
@@ -147,6 +150,12 @@ export async function handleWizardButton(
       case "next":
         await handleNext(interaction, guild, userId, guildId);
         break;
+      case "channel_page_next":
+        await handleChannelPageNext(interaction, guild, userId, guildId);
+        break;
+      case "channel_page_prev":
+        await handleChannelPagePrev(interaction, guild, userId, guildId);
+        break;
       default:
         await interaction.reply({
           content: "❌ Unknown action.",
@@ -234,32 +243,20 @@ async function handleVcExisting(
 
   await interaction.deferUpdate();
 
-  // Show select menu for existing categories
-  const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`wizard_select_vc_category__${userId}_${guildId}`)
-    .setPlaceholder("Select a voice category")
-    .addOptions(
-      categories.slice(0, 25).map((cat) => ({
-        label: cat.name,
-        value: cat.id,
-        description: `Category with ${cat.children.cache.size} channels`,
-      })),
-    );
+  // Initialize page to 0 if not set
+  if (state.channelPage === undefined) {
+    state.channelPage = 0;
+    wizardService.updateSession(userId, guildId, state);
+  }
 
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    selectMenu,
+  await showChannelSelectionPage(
+    interaction,
+    guild,
+    userId,
+    guildId,
+    categories,
+    "vc_category",
   );
-
-  const embed = new EmbedBuilder()
-    .setTitle("🎤 Select Voice Category")
-    .setDescription("Choose an existing voice category to use:")
-    .setColor(0x5865f2);
-
-  await interaction.followUp({
-    embeds: [embed],
-    components: [row],
-    ephemeral: true,
-  });
 }
 
 async function handleVcNew(
@@ -369,31 +366,20 @@ async function handleQuotesConfigure(
 
   await interaction.deferUpdate();
 
-  // Show select menu for quotes channel
-  const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`wizard_select_quotes_channel__${userId}_${guildId}`)
-    .setPlaceholder("Select a channel for quotes")
-    .addOptions(
-      textChannels.slice(0, 25).map((ch) => ({
-        label: `#${ch.name}`,
-        value: ch.id,
-      })),
-    );
+  // Initialize page to 0 if not set
+  if (state.channelPage === undefined) {
+    state.channelPage = 0;
+    wizardService.updateSession(userId, guildId, state);
+  }
 
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    selectMenu,
+  await showChannelSelectionPage(
+    interaction,
+    guild,
+    userId,
+    guildId,
+    textChannels,
+    "quotes",
   );
-
-  const embed = new EmbedBuilder()
-    .setTitle("💬 Select Quotes Channel")
-    .setDescription("Choose a channel where quotes will be posted:")
-    .setColor(0x5865f2);
-
-  await interaction.followUp({
-    embeds: [embed],
-    components: [row],
-    ephemeral: true,
-  });
 }
 
 async function handleLoggingConfigure(
@@ -417,39 +403,20 @@ async function handleLoggingConfigure(
 
   await interaction.deferUpdate();
 
-  // Show select menu for logging channels
-  const selectMenu = new StringSelectMenuBuilder()
-    .setCustomId(`wizard_select_logging_channel__${userId}_${guildId}`)
-    .setPlaceholder("Select logging channels")
-    .setMinValues(1)
-    .setMaxValues(Math.min(3, textChannels.length))
-    .addOptions(
-      textChannels.slice(0, 25).map((ch) => ({
-        label: `#${ch.name}`,
-        value: ch.id,
-      })),
-    );
+  // Initialize page to 0 if not set
+  if (state.channelPage === undefined) {
+    state.channelPage = 0;
+    wizardService.updateSession(userId, guildId, state);
+  }
 
-  const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-    selectMenu,
+  await showChannelSelectionPage(
+    interaction,
+    guild,
+    userId,
+    guildId,
+    textChannels,
+    "logging",
   );
-
-  const embed = new EmbedBuilder()
-    .setTitle("📝 Select Logging Channels")
-    .setDescription(
-      "Choose channels for bot logging:\n" +
-        "• Startup/shutdown events\n" +
-        "• Error notifications\n" +
-        "• Configuration changes\n\n" +
-        "You can select 1-3 channels.",
-    )
-    .setColor(0x5865f2);
-
-  await interaction.followUp({
-    embeds: [embed],
-    components: [row],
-    ephemeral: true,
-  });
 }
 
 async function handleFeatureComplete(
@@ -668,4 +635,281 @@ async function handleNext(
     content: "➡️ Moved to next step.",
     ephemeral: true,
   });
+}
+
+/**
+ * Helper function to show channel selection with pagination
+ */
+async function showChannelSelectionPage(
+  interaction: ButtonInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+  channels: TextChannel[] | CategoryChannel[],
+  selectionType: "quotes" | "logging" | "vc_category",
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const CHANNELS_PER_PAGE = 25;
+  const totalPages = Math.ceil(channels.length / CHANNELS_PER_PAGE);
+
+  // Validate page bounds
+  if ((state.channelPage || 0) >= totalPages && totalPages > 0) {
+    state.channelPage = 0;
+    wizardService.updateSession(userId, guildId, state);
+  }
+
+  // Use the validated page value consistently
+  const effectivePage = state.channelPage || 0;
+  const startIndex = effectivePage * CHANNELS_PER_PAGE;
+  const endIndex = Math.min(startIndex + CHANNELS_PER_PAGE, channels.length);
+  const channelsOnPage = channels.slice(startIndex, endIndex);
+
+  // Validate we have channels to display
+  if (channelsOnPage.length === 0) {
+    await interaction.followUp({
+      content: "❌ No channels available on this page.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Build select menu based on type
+  let selectMenu: StringSelectMenuBuilder;
+  let embed: EmbedBuilder;
+
+  if (selectionType === "quotes") {
+    selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`wizard_select_quotes_channel__${userId}_${guildId}`)
+      .setPlaceholder("Select a channel for quotes")
+      .addOptions(
+        channelsOnPage.map((ch) => ({
+          label: `#${ch.name}`,
+          value: ch.id,
+        })),
+      );
+
+    embed = new EmbedBuilder()
+      .setTitle("💬 Select Quotes Channel")
+      .setDescription(
+        `Choose a channel where quotes will be posted:\n\n` +
+          `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : ""),
+      )
+      .setColor(0x5865f2);
+  } else if (selectionType === "logging") {
+    selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`wizard_select_logging_channel__${userId}_${guildId}`)
+      .setPlaceholder("Select logging channels")
+      .setMinValues(1)
+      .setMaxValues(Math.min(3, channelsOnPage.length))
+      .addOptions(
+        channelsOnPage.map((ch) => ({
+          label: `#${ch.name}`,
+          value: ch.id,
+        })),
+      );
+
+    embed = new EmbedBuilder()
+      .setTitle("📝 Select Logging Channels")
+      .setDescription(
+        "Choose channels for bot logging:\n" +
+          "• Startup/shutdown events\n" +
+          "• Error notifications\n" +
+          "• Configuration changes\n\n" +
+          `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : "") +
+          "\n\nYou can select 1-3 channels.",
+      )
+      .setColor(0x5865f2);
+  } else {
+    // vc_category
+    selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`wizard_select_vc_category__${userId}_${guildId}`)
+      .setPlaceholder("Select a voice category")
+      .addOptions(
+        channelsOnPage.map((cat) => {
+          const category = cat as CategoryChannel;
+          return {
+            label: category.name,
+            value: category.id,
+            description: `Category with ${category.children.cache.size} channels`,
+          };
+        }),
+      );
+
+    embed = new EmbedBuilder()
+      .setTitle("🎤 Select Voice Category")
+      .setDescription(
+        `Choose an existing voice category to use:\n\n` +
+          `Showing categories ${startIndex + 1}-${endIndex} of ${channels.length}` +
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : ""),
+      )
+      .setColor(0x5865f2);
+  }
+
+  const components: ActionRowBuilder<any>[] = [
+    new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu),
+  ];
+
+  // Add pagination buttons if needed
+  if (totalPages > 1) {
+    const paginationButtons =
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`wizard_channel_page_prev__${userId}_${guildId}`)
+          .setLabel("Previous")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("◀️")
+          .setDisabled(effectivePage === 0),
+        new ButtonBuilder()
+          .setCustomId(`wizard_channel_page_next__${userId}_${guildId}`)
+          .setLabel("Next")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("▶️")
+          .setDisabled(effectivePage === totalPages - 1),
+      );
+    components.push(paginationButtons);
+  }
+
+  await interaction.followUp({
+    embeds: [embed],
+    components: components,
+    ephemeral: true,
+  });
+}
+
+/**
+ * Refresh the channel selection page based on current wizard state
+ */
+async function refreshChannelSelectionPage(
+  interaction: ButtonInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const textChannels = state.detectedResources.textChannels || [];
+  const categories = state.detectedResources.categories || [];
+  const currentFeature = state.selectedFeatures[state.currentStep - 1];
+
+  if (currentFeature === "quotes") {
+    await showChannelSelectionPage(
+      interaction,
+      guild,
+      userId,
+      guildId,
+      textChannels,
+      "quotes",
+    );
+  } else if (currentFeature === "logging") {
+    await showChannelSelectionPage(
+      interaction,
+      guild,
+      userId,
+      guildId,
+      textChannels,
+      "logging",
+    );
+  } else if (currentFeature === "voicechannels") {
+    await showChannelSelectionPage(
+      interaction,
+      guild,
+      userId,
+      guildId,
+      categories,
+      "vc_category",
+    );
+  } else {
+    logger.warn(
+      `Unexpected feature type for channel pagination: ${currentFeature}`,
+    );
+    await interaction.followUp({
+      content: "❌ Unable to display channel selection for this feature.",
+      ephemeral: true,
+    });
+  }
+}
+
+/**
+ * Handle next page button for channel selection
+ */
+async function handleChannelPageNext(
+  interaction: ButtonInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const currentPage = state.channelPage || 0;
+
+  // Get total channels to validate bounds
+  const textChannels = state.detectedResources.textChannels || [];
+  const categories = state.detectedResources.categories || [];
+  const currentFeature = state.selectedFeatures[state.currentStep - 1];
+
+  let totalChannels = 0;
+  if (currentFeature === "quotes" || currentFeature === "logging") {
+    totalChannels = textChannels.length;
+  } else if (currentFeature === "voicechannels") {
+    totalChannels = categories.length;
+  }
+
+  const totalPages = Math.ceil(totalChannels / 25);
+
+  // Validate we're not already on the last page
+  if (currentPage >= totalPages - 1) {
+    await interaction.reply({
+      content: "❌ Already on the last page.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  state.channelPage = currentPage + 1;
+  wizardService.updateSession(userId, guildId, state);
+
+  await interaction.deferUpdate();
+  await refreshChannelSelectionPage(interaction, guild, userId, guildId);
+}
+
+/**
+ * Handle previous page button for channel selection
+ */
+async function handleChannelPagePrev(
+  interaction: ButtonInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const currentPage = state.channelPage || 0;
+
+  // Validate we're not already on the first page
+  if (currentPage <= 0) {
+    await interaction.reply({
+      content: "❌ Already on the first page.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  state.channelPage = Math.max(0, currentPage - 1);
+  wizardService.updateSession(userId, guildId, state);
+
+  await interaction.deferUpdate();
+  await refreshChannelSelectionPage(interaction, guild, userId, guildId);
 }
