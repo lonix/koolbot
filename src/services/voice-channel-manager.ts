@@ -22,6 +22,7 @@ export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
   private ownershipQueue: Map<string, string[]> = new Map(); // channelId -> array of userIds
+  private customChannelNames: Map<string, string> = new Map(); // channelId -> custom name
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
   private client: Client;
@@ -47,6 +48,27 @@ export class VoiceChannelManager {
    */
   public getUserChannel(userId: string): VoiceChannel | undefined {
     return this.userChannels.get(userId);
+  }
+
+  /**
+   * Mark a channel as having a custom name
+   */
+  public setCustomChannelName(channelId: string, name: string): void {
+    this.customChannelNames.set(channelId, name);
+  }
+
+  /**
+   * Check if a channel has a custom name
+   */
+  public hasCustomName(channelId: string): boolean {
+    return this.customChannelNames.has(channelId);
+  }
+
+  /**
+   * Get custom channel name
+   */
+  public getCustomChannelName(channelId: string): string | undefined {
+    return this.customChannelNames.get(channelId);
   }
 
   private async getGuild(guildId: string): Promise<Guild | null> {
@@ -290,9 +312,27 @@ export class VoiceChannelManager {
         throw new Error("New owner is not in the channel");
       }
 
-      // Update channel name
-      const newChannelName = `${newOwner.displayName}'s Channel`;
-      await channel.setName(newChannelName);
+      // Update permissions: grant ManageChannels to new owner
+      await channel.permissionOverwrites.create(newOwnerId, {
+        ManageChannels: true,
+        Connect: true,
+        Speak: true,
+        ViewChannel: true,
+      });
+
+      // Remove ManageChannels from previous owner (keep other permissions)
+      await channel.permissionOverwrites.create(currentOwnerId, {
+        ManageChannels: false,
+        Connect: true,
+        Speak: true,
+        ViewChannel: true,
+      });
+
+      // Only rename if channel doesn't have a custom name
+      if (!this.hasCustomName(channelId)) {
+        const newChannelName = `${newOwner.displayName}'s Channel`;
+        await channel.setName(newChannelName);
+      }
 
       // Update ownership tracking
       this.userChannels.delete(currentOwnerId);
@@ -612,6 +652,8 @@ export class VoiceChannelManager {
       if (channel && channel.members.size === 0) {
         await channel.delete();
         this.userChannels.delete(userId);
+        // Clean up custom name tracking
+        this.customChannelNames.delete(channel.id);
         logger.info(`Cleaned up voice channel ${channel.name}`);
       }
     } catch (error) {
@@ -1150,6 +1192,8 @@ export class VoiceChannelManager {
 
           // Delete unmanaged channels (empty or not)
           await channel.delete("Bot cleanup - unmanaged channel");
+          // Clean up custom name tracking
+          this.customChannelNames.delete(channel.id);
           logger.info(`Deleted unmanaged channel: ${channel.name}`);
         } catch (error) {
           logger.error(`Error deleting channel ${channel.name}:`, error);
@@ -1168,6 +1212,8 @@ export class VoiceChannelManager {
       for (const channel of emptyManagedChannels.values()) {
         try {
           await channel.delete("Bot cleanup - empty managed channel");
+          // Clean up custom name tracking
+          this.customChannelNames.delete(channel.id);
           logger.info(`Deleted empty managed channel: ${channel.name}`);
         } catch (error) {
           logger.error(`Error deleting channel ${channel.name}:`, error);
@@ -1297,14 +1343,36 @@ export class VoiceChannelManager {
     newOwner: GuildMember,
   ): Promise<void> {
     try {
-      // Update channel name
-      const newChannelName = `${newOwner.displayName}'s Channel`;
-      await channel.setName(newChannelName);
-
-      // Update ownership tracking
+      // Get current owner ID
       const currentOwnerId = Array.from(this.userChannels.entries()).find(
         ([, userChannel]) => userChannel.id === channel.id,
       )?.[0];
+
+      // Update permissions: grant ManageChannels to new owner
+      await channel.permissionOverwrites.create(newOwner.id, {
+        ManageChannels: true,
+        Connect: true,
+        Speak: true,
+        ViewChannel: true,
+      });
+
+      // Remove ManageChannels from previous owner if exists
+      if (currentOwnerId) {
+        await channel.permissionOverwrites.create(currentOwnerId, {
+          ManageChannels: false,
+          Connect: true,
+          Speak: true,
+          ViewChannel: true,
+        });
+      }
+
+      // Only rename if channel doesn't have a custom name
+      if (!this.hasCustomName(channel.id)) {
+        const newChannelName = `${newOwner.displayName}'s Channel`;
+        await channel.setName(newChannelName);
+      }
+
+      // Update ownership tracking
       if (currentOwnerId) {
         this.userChannels.delete(currentOwnerId);
       }
@@ -1377,5 +1445,6 @@ export class VoiceChannelManager {
       this.healthCheckInterval = null;
     }
     this.userChannels.clear();
+    this.customChannelNames.clear();
   }
 }
