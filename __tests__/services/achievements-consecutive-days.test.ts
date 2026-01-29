@@ -14,7 +14,7 @@ jest.mock('mongoose', () => ({
 jest.mock('../../src/utils/logger.js');
 jest.mock('../../src/services/config-service.js');
 
-describe('GamificationService - Consecutive Days Calculation', () => {
+describe('AchievementsService - Consecutive Days Calculation', () => {
   // Helper to create a date in YYYY-MM-DD format
   const createDate = (daysAgo: number): Date => {
     const date = new Date();
