@@ -348,12 +348,14 @@ When you earn a new accolade, you'll receive:
 4. Users browse quotes by scrolling through the channel
 5. Users react with 👍 or 👎 to vote on quotes
 6. Bot automatically cleans up any unauthorized messages (every 5 minutes)
+7. An informational header post explains the channel usage (auto-recreated if deleted)
 
 **Security Features:**
 
 - **Strict Permissions**: Channel is automatically configured so only the bot can post messages
 - **Auto-Cleanup**: Removes any non-bot messages every 5 minutes (configurable)
 - **User Access**: Users can view, read history, and add reactions only
+- **Informational Header**: Pinned post explains how the quote channel works
 
 **Example Response:**
 
@@ -385,6 +387,12 @@ Each quote appears as an embed with:
 
 # Set cleanup interval (minutes, default: 5)
 /config set key:quotes.cleanup_interval value:10
+
+# Disable header post (default: enabled)
+/config set key:quotes.header_enabled value:false
+
+# Disable header pinning (default: enabled)
+/config set key:quotes.header_pin_enabled value:false
 ```
 
 **Use Cases:**

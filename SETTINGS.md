@@ -156,6 +156,9 @@ Configure the quote management system.
 | `quotes.max_length` | `1000` | Maximum character length for quotes |
 | `quotes.add_roles` | `""` | Role IDs allowed to add quotes (comma-separated, empty = all) |
 | `quotes.delete_roles` | `""` | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
+| `quotes.header_enabled` | `true` | Show informational header post in quote channel |
+| `quotes.header_pin_enabled` | `true` | Pin the header post for easy access |
+| `quotes.header_message_id` | `""` | Stores header message ID (managed automatically) |
 
 ### Example
 
@@ -176,6 +179,10 @@ Configure the quote management system.
 
 - `quotes.channel_id` - If set, all quotes will be posted to this channel. If empty, quotes post in the channel where the command was used.
 - `quotes.cleanup_interval` - Controls how often unauthorized quote messages are cleaned up (messages from non-command sources in the quote channel).
+- `quotes.header_enabled` - When enabled, displays an informational header post explaining how the quote channel works.
+  The header is automatically recreated if deleted.
+- `quotes.header_pin_enabled` - Controls whether the header post is pinned for easy visibility.
+- `quotes.header_message_id` - Automatically managed by the bot; stores the message ID of the header post.
 
 ---
 

@@ -163,12 +163,15 @@ export class QuoteChannelManager {
       if (storedHeaderId) {
         try {
           const existingMessage = await channel.messages.fetch(storedHeaderId);
-          if (existingMessage && existingMessage.author.id === this.client.user?.id) {
+          if (
+            existingMessage &&
+            existingMessage.author.id === this.client.user?.id
+          ) {
             headerExists = true;
             logger.debug("Quote channel header post already exists");
             return;
           }
-        } catch (error) {
+        } catch {
           logger.debug("Stored header message not found, will recreate");
         }
       }
@@ -197,7 +200,7 @@ export class QuoteChannelManager {
           {
             name: "📥 How to Add a Quote",
             value:
-              "Use the `/quote` command anywhere in the server to submit a quote.\nExample: `/quote text:\"Great quote!\" author:@Alice`",
+              'Use the `/quote` command anywhere in the server to submit a quote.\nExample: `/quote text:"Great quote!" author:@Alice`',
             inline: false,
           },
           {
@@ -229,7 +232,10 @@ export class QuoteChannelManager {
           await headerMessage.pin();
           logger.info("Pinned quote channel header post");
         } catch (error) {
-          logger.warn("Failed to pin header post (missing permissions?):", error);
+          logger.warn(
+            "Failed to pin header post (missing permissions?):",
+            error,
+          );
         }
       }
 
