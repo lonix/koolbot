@@ -62,6 +62,12 @@ export const FEATURES = {
     description: "Schedule automated announcements",
     configKey: "announcements.enabled",
   },
+  notices: {
+    name: "Notices",
+    emoji: "📋",
+    description: "Protected channel for server notices and help",
+    configKey: "notices.enabled",
+  },
 } as const;
 
 type FeatureKey = keyof typeof FEATURES;
@@ -127,6 +133,9 @@ export async function startFeatureConfiguration(
       break;
     case "announcements":
       await configureAnnouncements(interaction, guild, userId, guildId, embed);
+      break;
+    case "notices":
+      await configureNotices(interaction, guild, userId, guildId, embed);
       break;
     default:
       // This case is unreachable due to TypeScript's type system (FeatureKey guarantees valid keys)
@@ -480,6 +489,54 @@ async function configureAnnouncements(
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(`wizard_announce_skip__${userId}_${guildId}`)
+      .setLabel("Skip")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  } else {
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  }
+}
+
+async function configureNotices(
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+  embed: EmbedBuilder,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const textChannels = state.detectedResources.textChannels || [];
+
+  embed.setDescription(
+    "**Notices Channel Configuration**\n\n" +
+      "Set up a protected channel for server notices, rules, and help information.\n\n" +
+      `I found ${textChannels.length} text channels in your server.\n\n` +
+      "**Features:**\n" +
+      "• Bot-only posting (users can't send messages)\n" +
+      "• Auto-cleanup of unauthorized messages\n" +
+      "• Organize notices by category (rules, info, help, game servers)",
+  );
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`wizard_notices_configure__${userId}_${guildId}`)
+      .setLabel("Configure")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`wizard_notices_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
