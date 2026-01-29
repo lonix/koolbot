@@ -220,3 +220,45 @@ async function handleVtModal(
     await import("./wizard-button-handler-helpers.js");
   await moveToNextFeature(interaction, guild, userId, guildId);
 }
+
+async function handleAmikoolModal(
+  interaction: ModalSubmitInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  await interaction.deferUpdate();
+
+  const roleName = interaction.fields.getTextInputValue("role_name").trim();
+
+  if (!roleName) {
+    await interaction.followUp({
+      content: "❌ Role name cannot be empty.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Save configuration
+  wizardService.addConfiguration(userId, guildId, "amikool.enabled", true);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "amikool.role.name",
+    roleName,
+  );
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Am I Kool Configured")
+    .setDescription(
+      `Users with the role **${roleName}** will be told they are kool!`,
+    )
+    .setColor(0x00ff00);
+
+  await interaction.followUp({ embeds: [embed], ephemeral: true });
+
+  // Import helper to move to next feature
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
+  await moveToNextFeature(interaction, guild, userId, guildId);
+}

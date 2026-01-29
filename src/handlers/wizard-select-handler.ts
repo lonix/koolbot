@@ -94,6 +94,14 @@ export async function handleWizardSelectMenu(
           guildId,
         );
         break;
+      case "select_notices_channel":
+        await handleNoticesChannelSelection(
+          interaction,
+          guild,
+          userId,
+          guildId,
+        );
+        break;
       default:
         await interaction.reply({
           content: "❌ Unknown select menu type.",
@@ -292,6 +300,53 @@ async function handleLoggingChannelSelection(
         "• Startup/shutdown events\n" +
         "• Error notifications\n" +
         "• Configuration changes",
+    )
+    .setColor(0x00ff00);
+
+  await interaction.followUp({ embeds: [embed], ephemeral: true });
+
+  // Import helper to move to next feature
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
+  await moveToNextFeature(interaction, guild, userId, guildId);
+}
+
+async function handleNoticesChannelSelection(
+  interaction: StringSelectMenuInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const selectedChannelId = interaction.values[0];
+
+  const channel = await guild.channels.fetch(selectedChannelId);
+  if (!channel) {
+    await interaction.reply({
+      content: "❌ Could not find the selected channel.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Save configuration
+  wizardService.addConfiguration(userId, guildId, "notices.enabled", true);
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "notices.channel_id",
+    selectedChannelId,
+  );
+
+  await interaction.deferUpdate();
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Notices Channel Configured")
+    .setDescription(
+      `Notices will be posted in: <#${selectedChannelId}>\n\n` +
+        "Features enabled:\n" +
+        "• Bot-only posting\n" +
+        "• Auto-cleanup of unauthorized messages\n" +
+        "• Organized by category",
     )
     .setColor(0x00ff00);
 

@@ -147,6 +147,24 @@ export async function handleWizardButton(
       case "amikool_skip":
         await handleFeatureSkip(interaction, guild, userId, guildId);
         break;
+      case "reactrole_configure":
+        await handleReactionRoleConfigure(interaction, guild, userId, guildId);
+        break;
+      case "reactrole_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
+      case "announce_configure":
+        await handleAnnounceConfigure(interaction, guild, userId, guildId);
+        break;
+      case "announce_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
+      case "notices_configure":
+        await handleNoticesConfigure(interaction, guild, userId, guildId);
+        break;
+      case "notices_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
       case "finish_confirm":
         await handleFinish(interaction, guild, userId, guildId);
         break;
@@ -453,6 +471,118 @@ async function handleAmikoolConfigure(
   await interaction.showModal(modal);
 }
 
+async function handleReactionRoleConfigure(
+  interaction: ButtonInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const textChannels = state.detectedResources.textChannels || [];
+
+  if (textChannels.length === 0) {
+    await interaction.reply({
+      content: "❌ No text channels found in your server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // For now, just enable the feature - channel selection can be done via /config later
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "reactionroles.enabled",
+    true,
+  );
+
+  await interaction.deferUpdate();
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Reaction Roles Enabled")
+    .setDescription(
+      "Reaction Roles feature has been enabled!\n\n" +
+        "Use the `/reactionrole` command to create reaction role messages in your channels.",
+    )
+    .setColor(0x00ff00);
+
+  await interaction.followUp({ embeds: [embed], ephemeral: true });
+
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
+  await moveToNextFeature(interaction, guild, userId, guildId);
+}
+
+async function handleAnnounceConfigure(
+  interaction: ButtonInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  // For announcements, just enable the feature - detailed setup done via commands
+  wizardService.addConfiguration(
+    userId,
+    guildId,
+    "announcements.enabled",
+    true,
+  );
+
+  await interaction.deferUpdate();
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Announcements Enabled")
+    .setDescription(
+      "Announcements feature has been enabled!\n\n" +
+        "Use the `/announcement` command to create and schedule automated announcements.",
+    )
+    .setColor(0x00ff00);
+
+  await interaction.followUp({ embeds: [embed], ephemeral: true });
+
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
+  await moveToNextFeature(interaction, guild, userId, guildId);
+}
+
+async function handleNoticesConfigure(
+  interaction: ButtonInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const textChannels = state.detectedResources.textChannels || [];
+
+  if (textChannels.length === 0) {
+    await interaction.reply({
+      content: "❌ No text channels found in your server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferUpdate();
+
+  // Initialize page to 0 if not set
+  if (state.channelPage === undefined) {
+    state.channelPage = 0;
+    wizardService.updateSession(userId, guildId, state);
+  }
+
+  await showChannelSelectionPage(
+    interaction,
+    guild,
+    userId,
+    guildId,
+    textChannels,
+    "notices",
+  );
+}
+
 async function handleFeatureComplete(
   interaction: ButtonInteraction,
   guild: any,
@@ -680,7 +810,7 @@ async function showChannelSelectionPage(
   userId: string,
   guildId: string,
   channels: TextChannel[] | CategoryChannel[],
-  selectionType: "quotes" | "logging" | "vc_category",
+  selectionType: "quotes" | "logging" | "vc_category" | "notices",
 ): Promise<void> {
   const state = wizardService.getSession(userId, guildId);
   if (!state) return;
@@ -761,7 +891,7 @@ async function showChannelSelectionPage(
           "\n\nYou can select 1-3 channels.",
       )
       .setColor(0x5865f2);
-  } else {
+  } else if (selectionType === "vc_category") {
     // vc_category
     selectMenu = new StringSelectMenuBuilder()
       .setCustomId(`wizard_select_vc_category__${userId}_${guildId}`)
@@ -782,6 +912,31 @@ async function showChannelSelectionPage(
       .setDescription(
         `Choose an existing voice category to use:\n\n` +
           `Showing categories ${startIndex + 1}-${endIndex} of ${channels.length}` +
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : ""),
+      )
+      .setColor(0x5865f2);
+  } else {
+    // notices
+    selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`wizard_select_notices_channel__${userId}_${guildId}`)
+      .setPlaceholder("Select a channel for notices")
+      .addOptions(
+        channelsOnPage.map((ch) => ({
+          label: `#${ch.name}`,
+          value: ch.id,
+        })),
+      );
+
+    embed = new EmbedBuilder()
+      .setTitle("📋 Select Notices Channel")
+      .setDescription(
+        "Choose a channel for server notices:\n" +
+          "• Bot-only posting (users can't send messages)\n" +
+          "• Auto-cleanup of unauthorized messages\n" +
+          "• Organize notices by category\n\n" +
+          `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
           (totalPages > 1
             ? `\nPage ${effectivePage + 1} of ${totalPages}`
             : ""),
@@ -813,11 +968,22 @@ async function showChannelSelectionPage(
     components.push(paginationButtons);
   }
 
-  await interaction.followUp({
-    embeds: [embed],
-    components: components,
-    ephemeral: true,
-  });
+  // For pagination refresh, we should edit the existing message instead of creating a new one
+  // Check if this is being called from pagination buttons (interaction was already deferred)
+  if (interaction.deferred || interaction.replied) {
+    // This is a refresh from pagination - edit the deferred response
+    await interaction.editReply({
+      embeds: [embed],
+      components: components,
+    });
+  } else {
+    // This is initial display - use followUp
+    await interaction.followUp({
+      embeds: [embed],
+      components: components,
+      ephemeral: true,
+    });
+  }
 }
 
 /**
@@ -863,6 +1029,15 @@ async function refreshChannelSelectionPage(
       categories,
       "vc_category",
     );
+  } else if (currentFeature === "notices") {
+    await showChannelSelectionPage(
+      interaction,
+      guild,
+      userId,
+      guildId,
+      textChannels,
+      "notices",
+    );
   } else {
     logger.warn(
       `Unexpected feature type for channel pagination: ${currentFeature}`,
@@ -894,7 +1069,11 @@ async function handleChannelPageNext(
   const currentFeature = state.selectedFeatures[state.currentStep - 1];
 
   let totalChannels = 0;
-  if (currentFeature === "quotes" || currentFeature === "logging") {
+  if (
+    currentFeature === "quotes" ||
+    currentFeature === "logging" ||
+    currentFeature === "notices"
+  ) {
     totalChannels = textChannels.length;
   } else if (currentFeature === "voicechannels") {
     totalChannels = categories.length;
