@@ -1,4 +1,12 @@
-import { Client, TextChannel, EmbedBuilder } from "discord.js";
+import {
+  Client,
+  TextChannel,
+  EmbedBuilder,
+  MessageReaction,
+  User,
+  PartialMessageReaction,
+  PartialUser,
+} from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -10,10 +18,56 @@ export class QuoteChannelManager {
   private configService: ConfigService;
   private isInitialized: boolean = false;
   private cleanupJob: CronJob | null = null;
+  private reactionAddHandler:
+    | ((
+        reaction: MessageReaction | PartialMessageReaction,
+        user: User | PartialUser,
+      ) => Promise<void>)
+    | null = null;
+  private reactionRemoveHandler:
+    | ((
+        reaction: MessageReaction | PartialMessageReaction,
+        user: User | PartialUser,
+      ) => Promise<void>)
+    | null = null;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+
+    // Register configuration reload callback to reinitialize when quotes settings change
+    this.configService.registerReloadCallback(async () => {
+      try {
+        logger.info("Quote channel configuration changed, reinitializing...");
+
+        // Check if the feature is enabled
+        const enabled = await this.configService.getBoolean(
+          "quotes.enabled",
+          false,
+        );
+
+        if (!enabled && this.isInitialized) {
+          // Feature disabled, clean up
+          logger.info("Quote system disabled, cleaning up...");
+          await this.stop();
+          this.isInitialized = false;
+        } else if (enabled) {
+          // Feature enabled or still enabled, reinitialize
+          // Stop existing resources before reinitializing
+          if (this.isInitialized) {
+            await this.stop();
+          }
+          // Reset initialization flag to allow re-initialization
+          this.isInitialized = false;
+          await this.initialize();
+        }
+      } catch (error) {
+        logger.error(
+          "Error reinitializing quote channel after configuration change:",
+          error,
+        );
+      }
+    });
   }
 
   public static getInstance(client: Client): QuoteChannelManager {
@@ -290,6 +344,13 @@ export class QuoteChannelManager {
   }
 
   private async startCleanupJob(): Promise<void> {
+    // Stop existing cleanup job if any
+    if (this.cleanupJob) {
+      this.cleanupJob.stop();
+      this.cleanupJob = null;
+      logger.debug("Stopped existing cleanup job before starting new one");
+    }
+
     // Get cleanup interval from config (in minutes)
     const intervalMinutes = await this.configService.getNumber(
       "quotes.cleanup_interval",
@@ -367,9 +428,27 @@ export class QuoteChannelManager {
   }
 
   public async stop(): Promise<void> {
+    // Stop cleanup job
     if (this.cleanupJob) {
       this.cleanupJob.stop();
+      this.cleanupJob = null;
       logger.info("Stopped quote channel cleanup job");
+    }
+
+    // Remove reaction handlers
+    if (this.reactionAddHandler) {
+      this.client.removeListener("messageReactionAdd", this.reactionAddHandler);
+      this.reactionAddHandler = null;
+      logger.debug("Removed messageReactionAdd handler");
+    }
+
+    if (this.reactionRemoveHandler) {
+      this.client.removeListener(
+        "messageReactionRemove",
+        this.reactionRemoveHandler,
+      );
+      this.reactionRemoveHandler = null;
+      logger.debug("Removed messageReactionRemove handler");
     }
   }
 
@@ -479,11 +558,30 @@ export class QuoteChannelManager {
   }
 
   private setupReactionHandlers(): void {
-    // Listen for reactions added
-    this.client.on("messageReactionAdd", async (reaction, user) => {
+    // Remove existing handlers if any to prevent duplicates
+    if (this.reactionAddHandler) {
+      this.client.removeListener("messageReactionAdd", this.reactionAddHandler);
+    }
+    if (this.reactionRemoveHandler) {
+      this.client.removeListener(
+        "messageReactionRemove",
+        this.reactionRemoveHandler,
+      );
+    }
+
+    // Create and store handler for reactions added
+    this.reactionAddHandler = async (reaction, user) => {
       if (user.bot) return;
 
       try {
+        // Fetch partial data if needed
+        if (reaction.partial) {
+          await reaction.fetch();
+        }
+        if (user.partial) {
+          await user.fetch();
+        }
+
         const channel = await this.getQuoteChannel();
         if (!channel || reaction.message.channelId !== channel.id) {
           return;
@@ -494,13 +592,21 @@ export class QuoteChannelManager {
       } catch (error) {
         logger.error("Error handling reaction add:", error);
       }
-    });
+    };
 
-    // Listen for reactions removed
-    this.client.on("messageReactionRemove", async (reaction, user) => {
+    // Create and store handler for reactions removed
+    this.reactionRemoveHandler = async (reaction, user) => {
       if (user.bot) return;
 
       try {
+        // Fetch partial data if needed
+        if (reaction.partial) {
+          await reaction.fetch();
+        }
+        if (user.partial) {
+          await user.fetch();
+        }
+
         const channel = await this.getQuoteChannel();
         if (!channel || reaction.message.channelId !== channel.id) {
           return;
@@ -511,7 +617,11 @@ export class QuoteChannelManager {
       } catch (error) {
         logger.error("Error handling reaction remove:", error);
       }
-    });
+    };
+
+    // Register handlers
+    this.client.on("messageReactionAdd", this.reactionAddHandler);
+    this.client.on("messageReactionRemove", this.reactionRemoveHandler);
   }
 
   private async syncExistingQuotes(): Promise<void> {
