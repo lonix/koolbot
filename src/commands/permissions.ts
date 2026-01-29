@@ -445,6 +445,17 @@ async function handleClear(
     return;
   }
 
+  // Validate that only one parameter is provided (prevent ambiguity)
+  const paramCount = [commandName, role, user].filter(Boolean).length;
+  if (paramCount > 1) {
+    await interaction.reply({
+      content:
+        "❌ Please specify only one parameter: command, role, or user (not multiple).",
+      ephemeral: true,
+    });
+    return;
+  }
+
   // If command is specified, use the original behavior
   if (commandName) {
     // Validate command exists
@@ -497,7 +508,17 @@ async function handleClear(
 
     try {
       const member = await guild.members.fetch(user.id);
-      const userRoleIds = member.roles.cache.map((r) => r.id);
+      // Filter out @everyone role (guild.id) as it's the default role for all members
+      const userRoleIds = member.roles.cache
+        .filter((r) => r.id !== guild.id)
+        .map((r) => r.id);
+
+      if (userRoleIds.length === 0) {
+        await interaction.editReply({
+          content: `ℹ️ ${user.toString()} has no roles to clear (excluding @everyone).`,
+        });
+        return;
+      }
 
       const service = PermissionsService.getInstance(interaction.client);
       const clearedCount = await service.clearRolesFromAllCommands(
