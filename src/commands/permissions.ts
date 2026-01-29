@@ -141,18 +141,39 @@ export const data = new SlashCommandBuilder()
     subcommand
       .setName("clear")
       .setDescription(
-        "Clear all permissions for a command (makes it accessible to everyone)",
+        "Clear permissions for a command, or all commands for a role/user",
       )
       .addStringOption((option) =>
         option
           .setName("command")
-          .setDescription("Command name")
-          .setRequired(true)
+          .setDescription("Command name (leave empty to clear by role/user)")
+          .setRequired(false)
           .setAutocomplete(true),
+      )
+      .addRoleOption((option) =>
+        option
+          .setName("role")
+          .setDescription("Clear all commands for this role")
+          .setRequired(false),
+      )
+      .addUserOption((option) =>
+        option
+          .setName("user")
+          .setDescription("Clear all commands accessible via user's roles")
+          .setRequired(false),
       ),
   )
   .addSubcommand((subcommand) =>
-    subcommand.setName("list").setDescription("List all command permissions"),
+    subcommand
+      .setName("list")
+      .setDescription("List command permissions")
+      .addStringOption((option) =>
+        option
+          .setName("command")
+          .setDescription("Filter by specific command (optional)")
+          .setRequired(false)
+          .setAutocomplete(true),
+      ),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -401,16 +422,9 @@ async function handleRemove(
 async function handleClear(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
-  const commandName = interaction.options.getString("command", true);
-
-  // Validate command exists
-  if (!interaction.client.commands.has(commandName)) {
-    await interaction.reply({
-      content: `❌ Command \`${commandName}\` does not exist.`,
-      ephemeral: true,
-    });
-    return;
-  }
+  const commandName = interaction.options.getString("command");
+  const role = interaction.options.getRole("role") as Role | null;
+  const user = interaction.options.getUser("user");
 
   const guildId = interaction.guildId;
   if (!guildId) {
@@ -421,19 +435,113 @@ async function handleClear(
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  // Validate that at least one parameter is provided
+  if (!commandName && !role && !user) {
+    await interaction.reply({
+      content:
+        "❌ You must specify either a command, role, or user to clear permissions.",
+      ephemeral: true,
+    });
+    return;
+  }
 
-  const service = PermissionsService.getInstance(interaction.client);
-  await service.clearCommandPermissions(guildId, commandName);
+  // Validate that only one parameter is provided (prevent ambiguity)
+  const paramCount = [commandName, role, user].filter(Boolean).length;
+  if (paramCount > 1) {
+    await interaction.reply({
+      content:
+        "❌ Please specify only one parameter: command, role, or user (not multiple).",
+      ephemeral: true,
+    });
+    return;
+  }
 
-  await interaction.editReply({
-    content: `✅ Cleared all permissions for \`/${commandName}\`. It is now accessible to everyone.`,
-  });
+  // If command is specified, use the original behavior
+  if (commandName) {
+    // Validate command exists
+    if (!interaction.client.commands.has(commandName)) {
+      await interaction.reply({
+        content: `❌ Command \`${commandName}\` does not exist.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const service = PermissionsService.getInstance(interaction.client);
+    await service.clearCommandPermissions(guildId, commandName);
+
+    await interaction.editReply({
+      content: `✅ Cleared all permissions for \`/${commandName}\`. It is now accessible to everyone.`,
+    });
+    return;
+  }
+
+  // If role is specified, clear all commands that have this role
+  if (role) {
+    await interaction.deferReply({ ephemeral: true });
+
+    const service = PermissionsService.getInstance(interaction.client);
+    const clearedCount = await service.clearRoleFromAllCommands(
+      guildId,
+      role.id,
+    );
+
+    await interaction.editReply({
+      content: `✅ Removed ${role.toString()} from ${clearedCount} command(s).`,
+    });
+    return;
+  }
+
+  // If user is specified, clear all commands accessible via the user's roles
+  if (user) {
+    await interaction.deferReply({ ephemeral: true });
+
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.editReply({
+        content: "❌ Could not fetch guild information.",
+      });
+      return;
+    }
+
+    try {
+      const member = await guild.members.fetch(user.id);
+      // Filter out @everyone role (guild.id) as it's the default role for all members
+      const userRoleIds = member.roles.cache
+        .filter((r) => r.id !== guild.id)
+        .map((r) => r.id);
+
+      if (userRoleIds.length === 0) {
+        await interaction.editReply({
+          content: `ℹ️ ${user.toString()} has no roles to clear (excluding @everyone).`,
+        });
+        return;
+      }
+
+      const service = PermissionsService.getInstance(interaction.client);
+      const clearedCount = await service.clearRolesFromAllCommands(
+        guildId,
+        userRoleIds,
+      );
+
+      await interaction.editReply({
+        content: `✅ Removed ${user.toString()}'s roles from ${clearedCount} command(s).`,
+      });
+    } catch (error) {
+      logger.error("Error fetching member for clear command:", error);
+      await interaction.editReply({
+        content: `❌ Could not fetch member information for ${user.toString()}.`,
+      });
+    }
+  }
 }
 
 async function handleList(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  const commandName = interaction.options.getString("command");
   const guildId = interaction.guildId;
   if (!guildId) {
     await interaction.reply({
@@ -446,6 +554,66 @@ async function handleList(
   await interaction.deferReply({ ephemeral: true });
 
   const service = PermissionsService.getInstance(interaction.client);
+
+  // If a specific command is requested, show only that command's permissions
+  if (commandName) {
+    // Validate command exists
+    if (!interaction.client.commands.has(commandName)) {
+      await interaction.editReply({
+        content: `❌ Command \`${commandName}\` does not exist.`,
+      });
+      return;
+    }
+
+    const roleIds = await service.getCommandPermissions(guildId, commandName);
+
+    if (!roleIds || roleIds.length === 0) {
+      await interaction.editReply({
+        content: `ℹ️ No permissions configured for \`/${commandName}\`. It is accessible to everyone.`,
+      });
+      return;
+    }
+
+    const guild = interaction.guild;
+    if (!guild) {
+      await interaction.editReply({
+        content: "❌ Could not fetch guild information.",
+      });
+      return;
+    }
+
+    const roles = await Promise.all(
+      roleIds.map(async (roleId) => {
+        try {
+          const role = await guild.roles.fetch(roleId);
+          return role ? role.toString() : `<@&${roleId}>`;
+        } catch {
+          return `<@&${roleId}>`;
+        }
+      }),
+    );
+
+    const embed = new EmbedBuilder()
+      .setTitle(`Permissions for /${commandName}`)
+      .setDescription("Roles that can use this command:")
+      .setColor(0x00ae86)
+      .setTimestamp();
+
+    embed.addFields({
+      name: "Allowed Roles",
+      value: roles.join(", ") || "No roles",
+      inline: false,
+    });
+
+    embed.setFooter({
+      text: "Admins bypass all restrictions.",
+    });
+
+    await interaction.editReply({ embeds: [embed] });
+    return;
+  }
+
+  // Original behavior: list all permissions
   const permissions = await service.listAllPermissions(guildId);
 
   if (permissions.length === 0) {

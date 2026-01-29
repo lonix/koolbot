@@ -709,43 +709,71 @@ Remove specific roles from command permissions.
 
 #### `/permissions clear`
 
-Remove all permissions for a command, making it accessible to everyone.
+Remove all permissions for a command, or remove all commands from a role/user.
 
 **Usage:**
 
 ```bash
+# Clear permissions for a specific command
 /permissions clear command:quote
-/permissions clear command:vcstats
+
+# Clear all commands that have a specific role
+/permissions clear role:@Moderator
+
+# Clear all commands accessible via a user's roles
+/permissions clear user:@username
 ```
 
 **Parameters:**
 
-- `command` (required) - Command name
+- `command` (optional) - Command name to clear permissions for
+- `role` (optional) - Remove this role from all commands
+- `user` (optional) - Remove all of this user's roles from all commands
 
-**Example Response:**
+**Note:** You must specify at least one parameter (command, role, or user).
+
+**Example Responses:**
 
 ```text
+# Clearing a command
 ✅ Cleared all permissions for `/quote`. It is now accessible to everyone.
+
+# Clearing a role from all commands
+✅ Removed @Moderator from 3 command(s).
+
+# Clearing a user's roles from all commands
+✅ Removed @username's roles from 5 command(s).
 ```
 
 **Use Cases:**
 
 - Reset command to default open access
-- Remove all restrictions
+- Remove all restrictions for a command
+- Remove a role from all commands when role is being deleted
+- Clean up permissions when removing a user's access
 
 #### `/permissions list`
 
-View the permission matrix showing all commands with role restrictions.
+View the permission matrix showing all commands with role restrictions, or filter by a specific command.
 
 **Usage:**
 
 ```bash
+# List all command permissions
 /permissions list
+
+# View permissions for a specific command
+/permissions list command:quote
 ```
 
-**Example Response:**
+**Parameters:**
+
+- `command` (optional) - Filter by specific command name
+
+**Example Responses:**
 
 ```text
+# Listing all permissions
 Command Permissions
 
 Commands with role restrictions:
@@ -758,6 +786,17 @@ Commands with role restrictions:
 
 Commands not listed are accessible to everyone.
 Admins bypass all restrictions.
+
+# Listing a specific command
+Permissions for /quote
+
+Roles that can use this command:
+@Moderator, @VIP
+
+Admins bypass all restrictions.
+
+# When command has no permissions
+ℹ️ No permissions configured for `/quote`. It is accessible to everyone.
 ```
 
 **Use Cases:**
@@ -765,6 +804,7 @@ Admins bypass all restrictions.
 - Audit current permissions
 - Review access control setup
 - Documentation and planning
+- Check permissions for a specific command
 
 #### `/permissions view`
 
@@ -1832,9 +1872,12 @@ The bot needs these Discord permissions to function:
 /permissions add command:... role:...   # Add role to command
 /permissions remove command:... role:...# Remove role from command
 /permissions list                       # View all permissions
+/permissions list command:...           # View permissions for a command
 /permissions view user:...              # Check user access
 /permissions view role:...              # Check role access
-/permissions clear command:...          # Clear all restrictions
+/permissions clear command:...          # Clear command restrictions
+/permissions clear role:...             # Remove role from all commands
+/permissions clear user:...             # Remove user's roles from all commands
 
 # Voice Management
 /vc reload                         # Clean empty channels
