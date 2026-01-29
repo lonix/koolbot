@@ -13,6 +13,7 @@ import {
   Routes,
   TextChannel,
   Partials,
+  AuditLogEvent,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "./utils/logger.js";
@@ -712,6 +713,55 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     }
   } catch (error) {
     logger.error("Error handling voice state update:", error);
+  }
+});
+
+// Handle channel updates to detect renames
+client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
+  try {
+    // Only track voice channel updates
+    if (newChannel.type !== ChannelType.GuildVoice) {
+      return;
+    }
+
+    // Type guard - ensure we're working with guild-based channels
+    if (!("name" in oldChannel) || !("name" in newChannel)) {
+      return;
+    }
+
+    // Check if the channel name changed
+    if (oldChannel.name !== newChannel.name) {
+      logger.info(
+        `Channel renamed: "${oldChannel.name}" → "${newChannel.name}" (${newChannel.id})`,
+      );
+
+      // Try to identify who renamed the channel by checking audit logs
+      try {
+        const auditLogs = await newChannel.guild.fetchAuditLogs({
+          type: AuditLogEvent.ChannelUpdate,
+          limit: 1,
+        });
+
+        const entry = auditLogs.entries.first();
+        if (
+          entry &&
+          entry.targetId === newChannel.id &&
+          Date.now() - entry.createdTimestamp < 5000
+        ) {
+          const executor = entry.executor;
+          logger.info(
+            `Channel renamed by: ${executor?.displayName || executor?.username || "Unknown"} (${executor?.id || "Unknown"})`,
+          );
+        }
+      } catch (auditError) {
+        logger.debug(
+          "Could not fetch audit logs for channel rename:",
+          auditError,
+        );
+      }
+    }
+  } catch (error) {
+    logger.error("Error handling channel update:", error);
   }
 });
 

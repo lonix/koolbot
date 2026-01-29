@@ -93,11 +93,16 @@ async function handleNameModal(
       return;
     }
 
+    const oldName = channel.name;
     await channel.setName(newName);
 
     // Mark this channel as having a custom name
     const manager = VoiceChannelManager.getInstance(interaction.client);
     manager.setCustomChannelName(channelId, newName);
+
+    logger.info(
+      `User ${interaction.user.displayName} (${interaction.user.id}) renamed channel "${oldName}" → "${newName}" (${channelId})`,
+    );
 
     await interaction.reply({
       content: `✅ Channel renamed to: **${newName}**`,

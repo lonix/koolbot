@@ -51,6 +51,7 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       customId: 'vc_modal_name_test-channel-id_test-user-id',
       user: {
         id: 'test-user-id',
+        displayName: 'TestUser',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       fields: {
