@@ -2,8 +2,7 @@ import { ChatInputCommandInteraction } from "discord.js";
 import logger from "../utils/logger.js";
 import { execute as ping } from "./ping.js";
 import { execute as amikool } from "./amikool.js";
-import { execute as vctop } from "./vctop.js";
-import { execute as vcstats } from "./vcstats.js";
+import { execute as voicestats } from "./voicestats.js";
 import { execute as seen } from "./seen.js";
 import { execute as announceVcStats } from "./announce-vc-stats.js";
 import { execute as configCommand } from "./config/index.js";
@@ -29,14 +28,9 @@ const commands: Record<
       await amikool(interaction);
     }
   },
-  vctop: async (interaction) => {
+  voicestats: async (interaction) => {
     if (await configService.getBoolean("voicetracking.enabled", false)) {
-      await vctop(interaction);
-    }
-  },
-  vcstats: async (interaction) => {
-    if (await configService.getBoolean("voicetracking.enabled", false)) {
-      await vcstats(interaction);
+      await voicestats(interaction);
     }
   },
   seen: async (interaction) => {
