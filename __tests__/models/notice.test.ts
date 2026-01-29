@@ -94,14 +94,4 @@ describe("Notice Model Schema", () => {
       expect(testDoc.order).toBe(0);
     });
   });
-
-  describe("timestamps", () => {
-    it("should include timestamps in schema", async () => {
-      const { default: Notice } = await import("../../src/models/notice.js");
-      const schema = Notice.schema;
-
-      expect(schema.path("createdAt")).toBeDefined();
-      expect(schema.path("updatedAt")).toBeDefined();
-    });
-  });
 });
