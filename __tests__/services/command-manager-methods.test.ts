@@ -78,6 +78,29 @@ describe("CommandManager Methods", () => {
     expect(foundSetupWithNull).toBe(true);
   });
 
+  it("should have help command without help.enabled gate", () => {
+    const filePath = path.join(
+      __dirname,
+      "../../src/services/command-manager.ts",
+    );
+    const fileContent = fs.readFileSync(filePath, "utf-8");
+
+    // Check that help command has configKey: null (always enabled)
+    const helpCommandPatterns = [
+      /{\s*name:\s*"help",\s*configKey:\s*null,\s*file:\s*"help"\s*}/,
+    ];
+
+    let foundHelpWithNull = false;
+    for (const pattern of helpCommandPatterns) {
+      if (pattern.test(fileContent)) {
+        foundHelpWithNull = true;
+        break;
+      }
+    }
+
+    expect(foundHelpWithNull).toBe(true);
+  });
+
   it("should use getBoolean() for config checks in both loadCommandsDynamically and populateClientCommands", () => {
     const filePath = path.join(
       __dirname,

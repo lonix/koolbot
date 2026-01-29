@@ -29,7 +29,6 @@ const commandDetails: Record<
   help: {
     description: "Get help with KoolBot commands.",
     usage: "/help [command]",
-    configKey: "help.enabled",
   },
   quote: {
     description: "Add a new quote to the quote channel.",
