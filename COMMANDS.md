@@ -292,6 +292,9 @@ Total Achievements: 0
 - 🐦 **Early Bird** - 50+ hours early morning (6 AM - 10 AM)
 - 🎮 **Weekend Warrior** - 100+ hours on weekends
 - 💼 **Weekday Warrior** - 100+ hours on weekdays
+- 🔥 **On a Roll** - Connected for 7 consecutive days (5+ min/day)
+- ⚡ **Dedicated AF** - Connected for 14 consecutive days (5+ min/day)
+- 💀 **No-Lifer** - Connected for 30 consecutive days (5+ min/day)
 
 **Notification System:**
 
