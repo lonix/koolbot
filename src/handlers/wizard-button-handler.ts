@@ -651,9 +651,25 @@ async function showChannelSelectionPage(
   const CHANNELS_PER_PAGE = 25;
   const currentPage = state.channelPage || 0;
   const totalPages = Math.ceil(channels.length / CHANNELS_PER_PAGE);
-  const startIndex = currentPage * CHANNELS_PER_PAGE;
+
+  // Validate page bounds
+  if (currentPage >= totalPages && totalPages > 0) {
+    state.channelPage = 0;
+    wizardService.updateSession(userId, guildId, state);
+  }
+
+  const startIndex = (state.channelPage || 0) * CHANNELS_PER_PAGE;
   const endIndex = Math.min(startIndex + CHANNELS_PER_PAGE, channels.length);
   const channelsOnPage = channels.slice(startIndex, endIndex);
+
+  // Validate we have channels to display
+  if (channelsOnPage.length === 0) {
+    await interaction.followUp({
+      content: "❌ No channels available on this page.",
+      ephemeral: true,
+    });
+    return;
+  }
 
   // Build select menu based on type
   let selectMenu: StringSelectMenuBuilder;
@@ -758,9 +774,9 @@ async function showChannelSelectionPage(
 }
 
 /**
- * Handle next page button for channel selection
+ * Refresh the channel selection page based on current wizard state
  */
-async function handleChannelPageNext(
+async function refreshChannelSelectionPage(
   interaction: ButtonInteraction,
   guild: any,
   userId: string,
@@ -769,17 +785,8 @@ async function handleChannelPageNext(
   const state = wizardService.getSession(userId, guildId);
   if (!state) return;
 
-  const currentPage = state.channelPage || 0;
-  state.channelPage = currentPage + 1;
-  wizardService.updateSession(userId, guildId, state);
-
-  await interaction.deferUpdate();
-
-  // Determine which type of channel selection we're doing
   const textChannels = state.detectedResources.textChannels || [];
   const categories = state.detectedResources.categories || [];
-
-  // Check which feature we're configuring based on selected features and current step
   const currentFeature = state.selectedFeatures[state.currentStep - 1];
 
   if (currentFeature === "quotes") {
@@ -809,7 +816,59 @@ async function handleChannelPageNext(
       categories,
       "vc_category",
     );
+  } else {
+    logger.warn(
+      `Unexpected feature type for channel pagination: ${currentFeature}`,
+    );
+    await interaction.followUp({
+      content: "❌ Unable to display channel selection for this feature.",
+      ephemeral: true,
+    });
   }
+}
+
+/**
+ * Handle next page button for channel selection
+ */
+async function handleChannelPageNext(
+  interaction: ButtonInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const currentPage = state.channelPage || 0;
+
+  // Get total channels to validate bounds
+  const textChannels = state.detectedResources.textChannels || [];
+  const categories = state.detectedResources.categories || [];
+  const currentFeature = state.selectedFeatures[state.currentStep - 1];
+
+  let totalChannels = 0;
+  if (currentFeature === "quotes" || currentFeature === "logging") {
+    totalChannels = textChannels.length;
+  } else if (currentFeature === "voicechannels") {
+    totalChannels = categories.length;
+  }
+
+  const totalPages = Math.ceil(totalChannels / 25);
+
+  // Validate we're not already on the last page
+  if (currentPage >= totalPages - 1) {
+    await interaction.reply({
+      content: "❌ Already on the last page.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  state.channelPage = currentPage + 1;
+  wizardService.updateSession(userId, guildId, state);
+
+  await interaction.deferUpdate();
+  await refreshChannelSelectionPage(interaction, guild, userId, guildId);
 }
 
 /**
@@ -825,44 +884,19 @@ async function handleChannelPagePrev(
   if (!state) return;
 
   const currentPage = state.channelPage || 0;
+
+  // Validate we're not already on the first page
+  if (currentPage <= 0) {
+    await interaction.reply({
+      content: "❌ Already on the first page.",
+      ephemeral: true,
+    });
+    return;
+  }
+
   state.channelPage = Math.max(0, currentPage - 1);
   wizardService.updateSession(userId, guildId, state);
 
   await interaction.deferUpdate();
-
-  // Determine which type of channel selection we're doing
-  const textChannels = state.detectedResources.textChannels || [];
-  const categories = state.detectedResources.categories || [];
-
-  // Check which feature we're configuring based on selected features and current step
-  const currentFeature = state.selectedFeatures[state.currentStep - 1];
-
-  if (currentFeature === "quotes") {
-    await showChannelSelectionPage(
-      interaction,
-      guild,
-      userId,
-      guildId,
-      textChannels,
-      "quotes",
-    );
-  } else if (currentFeature === "logging") {
-    await showChannelSelectionPage(
-      interaction,
-      guild,
-      userId,
-      guildId,
-      textChannels,
-      "logging",
-    );
-  } else if (currentFeature === "voicechannels") {
-    await showChannelSelectionPage(
-      interaction,
-      guild,
-      userId,
-      guildId,
-      categories,
-      "vc_category",
-    );
-  }
+  await refreshChannelSelectionPage(interaction, guild, userId, guildId);
 }
