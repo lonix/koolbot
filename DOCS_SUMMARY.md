@@ -14,7 +14,16 @@ This file provides an overview of the complete documentation structure.
    - Docker management commands
    - Developer section
 
-2. **COMMANDS.md** (934 lines)
+2. **DEVELOPER_GUIDE.md** (NEW)
+   - Architecture overview and patterns
+   - Bot-controlled channel header posts (reusable pattern)
+   - Service singleton pattern
+   - Configuration management
+   - Feature development checklist
+   - Testing guidelines
+   - Code style standards
+
+3. **COMMANDS.md** (934 lines)
    - Complete command reference
    - User commands with examples
    - Admin commands with detailed subcommands
@@ -22,7 +31,7 @@ This file provides an overview of the complete documentation structure.
    - Common workflows
    - Troubleshooting command issues
 
-3. **SETTINGS.md** (481 lines)
+4. **SETTINGS.md** (481 lines)
    - Environment variables guide
    - All configuration options
    - Category-organized settings
@@ -30,7 +39,7 @@ This file provides an overview of the complete documentation structure.
    - Quick reference table
    - Configuration management guide
 
-4. **TROUBLESHOOTING.md** (668 lines)
+5. **TROUBLESHOOTING.md** (668 lines)
    - Initial setup issues
    - Docker problems
    - Discord connection issues
@@ -41,7 +50,7 @@ This file provides an overview of the complete documentation structure.
    - Performance optimization
    - Emergency procedures
 
-5. **RELEASE_NOTES.md** (existing, 150 lines)
+6. **RELEASE_NOTES.md** (existing, 150 lines)
    - Version history
    - Feature changes
    - Migration notes
@@ -182,8 +191,9 @@ All documentation files cross-reference each other:
 ### When Adding Features
 
 - [ ] Update README.md (features section)
-- [ ] Add command to COMMANDS.md
+- [ ] Add command to COMMANDS.md (if user-facing)
 - [ ] Add settings to SETTINGS.md
+- [ ] Add to DEVELOPER_GUIDE.md (if reusable pattern)
 - [ ] Add troubleshooting to TROUBLESHOOTING.md
 - [ ] Update examples
 - [ ] Update RELEASE_NOTES.md

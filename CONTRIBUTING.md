@@ -13,6 +13,18 @@ Thank you for your interest in contributing to KoolBot! This document provides g
 - [Pull Request Process](#pull-request-process)
 - [Issue Reporting](#issue-reporting)
 - [Community](#community)
+- [Developer Resources](#developer-resources)
+
+## Developer Resources
+
+For detailed technical guidance on extending KoolBot:
+
+- **[DEVELOPER_GUIDE.md](./DEVELOPER_GUIDE.md)** - Comprehensive developer documentation
+  - Architecture overview and patterns
+  - Bot-controlled channel header posts pattern (reusable)
+  - Service implementation examples
+  - Configuration management
+  - Code style and best practices
 
 ## Getting Started
 
