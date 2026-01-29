@@ -41,6 +41,10 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
     mockDeleteOne.mockResolvedValue({ deletedCount: 1 });
   });
 
+  // Note: ConfigService is a singleton, so tests share the same instance.
+  // This is intentional - we're testing that the service handles various
+  // database states correctly across multiple initializations.
+
   describe("cleanupUnknownSettings", () => {
     it("should initialize without errors when no settings exist", async () => {
       mockFind.mockResolvedValue([]);
