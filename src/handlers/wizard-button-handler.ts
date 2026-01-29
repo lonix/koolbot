@@ -8,6 +8,9 @@ import {
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
+  Guild,
+  TextChannel,
+  CategoryChannel,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { WizardService } from "../services/wizard-service.js";
@@ -639,26 +642,27 @@ async function handleNext(
  */
 async function showChannelSelectionPage(
   interaction: ButtonInteraction,
-  guild: any,
+  guild: Guild,
   userId: string,
   guildId: string,
-  channels: any[],
+  channels: TextChannel[] | CategoryChannel[],
   selectionType: "quotes" | "logging" | "vc_category",
 ): Promise<void> {
   const state = wizardService.getSession(userId, guildId);
   if (!state) return;
 
   const CHANNELS_PER_PAGE = 25;
-  const currentPage = state.channelPage || 0;
   const totalPages = Math.ceil(channels.length / CHANNELS_PER_PAGE);
 
   // Validate page bounds
-  if (currentPage >= totalPages && totalPages > 0) {
+  if ((state.channelPage || 0) >= totalPages && totalPages > 0) {
     state.channelPage = 0;
     wizardService.updateSession(userId, guildId, state);
   }
 
-  const startIndex = (state.channelPage || 0) * CHANNELS_PER_PAGE;
+  // Use the validated page value consistently
+  const effectivePage = state.channelPage || 0;
+  const startIndex = effectivePage * CHANNELS_PER_PAGE;
   const endIndex = Math.min(startIndex + CHANNELS_PER_PAGE, channels.length);
   const channelsOnPage = channels.slice(startIndex, endIndex);
 
@@ -691,7 +695,9 @@ async function showChannelSelectionPage(
       .setDescription(
         `Choose a channel where quotes will be posted:\n\n` +
           `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
-          (totalPages > 1 ? `\nPage ${currentPage + 1} of ${totalPages}` : ""),
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : ""),
       )
       .setColor(0x5865f2);
   } else if (selectionType === "logging") {
@@ -715,7 +721,9 @@ async function showChannelSelectionPage(
           "• Error notifications\n" +
           "• Configuration changes\n\n" +
           `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
-          (totalPages > 1 ? `\nPage ${currentPage + 1} of ${totalPages}` : "") +
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : "") +
           "\n\nYou can select 1-3 channels.",
       )
       .setColor(0x5865f2);
@@ -737,7 +745,9 @@ async function showChannelSelectionPage(
       .setDescription(
         `Choose an existing voice category to use:\n\n` +
           `Showing categories ${startIndex + 1}-${endIndex} of ${channels.length}` +
-          (totalPages > 1 ? `\nPage ${currentPage + 1} of ${totalPages}` : ""),
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : ""),
       )
       .setColor(0x5865f2);
   }
@@ -755,13 +765,13 @@ async function showChannelSelectionPage(
           .setLabel("Previous")
           .setStyle(ButtonStyle.Secondary)
           .setEmoji("◀️")
-          .setDisabled(currentPage === 0),
+          .setDisabled(effectivePage === 0),
         new ButtonBuilder()
           .setCustomId(`wizard_channel_page_next__${userId}_${guildId}`)
           .setLabel("Next")
           .setStyle(ButtonStyle.Secondary)
           .setEmoji("▶️")
-          .setDisabled(currentPage === totalPages - 1),
+          .setDisabled(effectivePage === totalPages - 1),
       );
     components.push(paginationButtons);
   }
@@ -778,7 +788,7 @@ async function showChannelSelectionPage(
  */
 async function refreshChannelSelectionPage(
   interaction: ButtonInteraction,
-  guild: any,
+  guild: Guild,
   userId: string,
   guildId: string,
 ): Promise<void> {
@@ -832,7 +842,7 @@ async function refreshChannelSelectionPage(
  */
 async function handleChannelPageNext(
   interaction: ButtonInteraction,
-  guild: any,
+  guild: Guild,
   userId: string,
   guildId: string,
 ): Promise<void> {
@@ -876,7 +886,7 @@ async function handleChannelPageNext(
  */
 async function handleChannelPagePrev(
   interaction: ButtonInteraction,
-  guild: any,
+  guild: Guild,
   userId: string,
   guildId: string,
 ): Promise<void> {
