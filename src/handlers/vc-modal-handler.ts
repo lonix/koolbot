@@ -101,7 +101,7 @@ async function handleNameModal(
     manager.setCustomChannelName(channelId, newName);
 
     logger.info(
-      `User ${interaction.user.displayName} (${interaction.user.id}) renamed channel "${oldName}" → "${newName}" (${channelId})`,
+      `User ${interaction.user.displayName || interaction.user.username} (${interaction.user.id}) renamed channel "${oldName}" → "${newName}" (${channelId})`,
     );
 
     await interaction.reply({
