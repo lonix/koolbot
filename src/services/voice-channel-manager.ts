@@ -11,6 +11,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   TextChannel,
+  PermissionFlagsBits,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
@@ -26,6 +27,10 @@ export class VoiceChannelManager {
   private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private ownershipTransferTimers: Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; originalOwnerId: string }
+  > = new Map(); // channelId -> timer and original owner info
   private client: Client;
   private configService: ConfigService;
 
@@ -222,44 +227,118 @@ export class VoiceChannelManager {
       // Check if current owner is still in the channel
       const currentOwner = channel.members.get(currentOwnerId);
       if (currentOwner) {
-        // Owner is still in the channel, no need to change
+        // Owner is still in the channel, cancel any pending ownership transfer
+        this.cancelOwnershipTransfer(channel.id);
         return;
       }
 
-      // Get members in the channel
-      const members = Array.from(channel.members.values());
-      if (members.length === 0) {
-        logger.error(`No members found in channel ${channel.name}`);
-        return;
-      }
-
-      // Get voice channel tracker instance
-      const tracker = VoiceChannelTracker.getInstance(this.client);
-
-      // Get voice time stats for all members in the channel for the last 7 days
-      const memberStats = await Promise.all(
-        members.map(async (member) => {
-          const stats = await tracker.getUserStats(member.id, "week");
-          return {
-            member,
-            totalTime: stats?.totalTime || 0,
-          };
-        }),
+      // Get grace period from config
+      const gracePeriodSeconds = await this.configService.getNumber(
+        "voicechannels.ownership.grace_period_seconds",
+        30,
       );
 
-      // Sort members by their voice time in the last 7 days
-      memberStats.sort((a, b) => b.totalTime - a.totalTime);
+      // Check if there's already a pending ownership transfer for this channel
+      if (this.ownershipTransferTimers.has(channel.id)) {
+        logger.info(
+          `Ownership transfer already scheduled for channel ${channel.name}`,
+        );
+        return;
+      }
 
-      // Select the member with the most voice time
-      const newOwner = memberStats[0].member;
-
-      // Update channel ownership
-      await this.updateChannelOwnership(channel, newOwner);
       logger.info(
-        `Channel ${channel.name} ownership transferred to ${newOwner.displayName} based on voice time`,
+        `Owner ${currentOwnerId} left channel ${channel.name}. Scheduling ownership transfer in ${gracePeriodSeconds} seconds...`,
       );
+
+      // Schedule ownership transfer after grace period
+      const timer = setTimeout(async () => {
+        try {
+          // Double-check that the owner hasn't rejoined
+          const channelNow = (await this.client.channels.fetch(
+            channel.id,
+          )) as VoiceChannel;
+          if (!channelNow) {
+            logger.warn(
+              `Channel ${channel.id} no longer exists, skipping ownership transfer`,
+            );
+            this.ownershipTransferTimers.delete(channel.id);
+            return;
+          }
+
+          // Check if the original owner has rejoined
+          if (channelNow.members.has(currentOwnerId)) {
+            logger.info(
+              `Original owner ${currentOwnerId} rejoined channel ${channelNow.name}, canceling ownership transfer`,
+            );
+            this.ownershipTransferTimers.delete(channel.id);
+            return;
+          }
+
+          // Get members in the channel
+          const members = Array.from(channelNow.members.values());
+          if (members.length === 0) {
+            logger.info(
+              `Channel ${channelNow.name} is now empty, no ownership transfer needed`,
+            );
+            this.ownershipTransferTimers.delete(channel.id);
+            return;
+          }
+
+          // Get voice channel tracker instance
+          const tracker = VoiceChannelTracker.getInstance(this.client);
+
+          // Get voice time stats for all members in the channel for the last 7 days
+          const memberStats = await Promise.all(
+            members.map(async (member) => {
+              const stats = await tracker.getUserStats(member.id, "week");
+              return {
+                member,
+                totalTime: stats?.totalTime || 0,
+              };
+            }),
+          );
+
+          // Sort members by their voice time in the last 7 days
+          memberStats.sort((a, b) => b.totalTime - a.totalTime);
+
+          // Select the member with the most voice time
+          const newOwner = memberStats[0].member;
+
+          // Update channel ownership
+          await this.updateChannelOwnership(channelNow, newOwner);
+          logger.info(
+            `Channel ${channelNow.name} ownership transferred to ${newOwner.displayName} based on voice time`,
+          );
+
+          // Clear the timer from the map
+          this.ownershipTransferTimers.delete(channel.id);
+        } catch (error) {
+          logger.error("Error during scheduled ownership transfer:", error);
+          this.ownershipTransferTimers.delete(channel.id);
+        }
+      }, gracePeriodSeconds * 1000);
+
+      // Store the timer and original owner info
+      this.ownershipTransferTimers.set(channel.id, {
+        timer,
+        originalOwnerId: currentOwnerId,
+      });
     } catch (error) {
       logger.error("Error handling channel ownership change:", error);
+    }
+  }
+
+  /**
+   * Cancel a pending ownership transfer for a channel
+   */
+  private cancelOwnershipTransfer(channelId: string): void {
+    const timerInfo = this.ownershipTransferTimers.get(channelId);
+    if (timerInfo) {
+      clearTimeout(timerInfo.timer);
+      this.ownershipTransferTimers.delete(channelId);
+      logger.info(
+        `Canceled pending ownership transfer for channel ${channelId}`,
+      );
     }
   }
 
@@ -313,7 +392,18 @@ export class VoiceChannelManager {
         throw new Error("New owner is not in the channel");
       }
 
+      logger.info(
+        `[Manual Transfer] Starting manual ownership transfer for channel ${channel.name} (${channelId})`,
+      );
+      logger.info(`[Manual Transfer] Current owner: ${currentOwnerId}`);
+      logger.info(
+        `[Manual Transfer] New owner: ${newOwner.displayName} (${newOwnerId})`,
+      );
+
       // Update permissions: grant ManageChannels to new owner
+      logger.info(
+        `[Manual Transfer] Granting ManageChannels permission to new owner ${newOwnerId}`,
+      );
       await channel.permissionOverwrites.create(newOwnerId, {
         ManageChannels: true,
         Connect: true,
@@ -322,6 +412,9 @@ export class VoiceChannelManager {
       });
 
       // Remove ManageChannels from previous owner (keep other permissions)
+      logger.info(
+        `[Manual Transfer] Removing ManageChannels permission from previous owner ${currentOwnerId}`,
+      );
       await channel.permissionOverwrites.create(currentOwnerId, {
         ManageChannels: false,
         Connect: true,
@@ -332,26 +425,42 @@ export class VoiceChannelManager {
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channelId)) {
         const newChannelName = `${newOwner.displayName}'s Channel`;
+        logger.info(`[Manual Transfer] Renaming channel to: ${newChannelName}`);
         await channel.setName(newChannelName);
+      } else {
+        logger.info(
+          `[Manual Transfer] Channel has custom name, skipping rename`,
+        );
       }
 
       // Update ownership tracking
       this.userChannels.delete(currentOwnerId);
       this.userChannels.set(newOwnerId, channel);
+      logger.info(`[Manual Transfer] Updated ownership tracking map`);
 
       // Clear the ownership queue for this channel
       this.ownershipQueue.delete(channelId);
 
+      // Update control panel message with new owner
+      logger.info(`[Manual Transfer] Updating control panel message`);
+      await this.updateControlPanelOwnership(channel, newOwnerId);
+
       // Notify channel members
+      logger.info(
+        `[Manual Transfer] Sending ownership change notification to channel`,
+      );
       await channel.send(
         `Channel ownership has been transferred to ${newOwner.displayName}`,
       );
 
       logger.info(
-        `Ownership of channel ${channel.name} manually transferred from ${currentOwnerId} to ${newOwnerId}`,
+        `[Manual Transfer] Successfully completed manual ownership transfer for channel ${channel.name} from ${currentOwnerId} to ${newOwnerId}`,
       );
     } catch (error) {
-      logger.error("Error transferring channel ownership:", error);
+      logger.error(
+        "[Manual Transfer] Error transferring channel ownership:",
+        error,
+      );
       throw error;
     }
   }
@@ -1428,7 +1537,20 @@ export class VoiceChannelManager {
         ([, userChannel]) => userChannel.id === channel.id,
       )?.[0];
 
+      logger.info(
+        `[Ownership Transfer] Starting ownership transfer for channel ${channel.name} (${channel.id})`,
+      );
+      logger.info(
+        `[Ownership Transfer] Current owner: ${currentOwnerId || "unknown"}`,
+      );
+      logger.info(
+        `[Ownership Transfer] New owner: ${newOwner.displayName} (${newOwner.id})`,
+      );
+
       // Update permissions: grant ManageChannels to new owner
+      logger.info(
+        `[Ownership Transfer] Granting ManageChannels permission to new owner ${newOwner.id}`,
+      );
       await channel.permissionOverwrites.create(newOwner.id, {
         ManageChannels: true,
         Connect: true,
@@ -1438,6 +1560,9 @@ export class VoiceChannelManager {
 
       // Remove ManageChannels from previous owner if exists
       if (currentOwnerId) {
+        logger.info(
+          `[Ownership Transfer] Removing ManageChannels permission from previous owner ${currentOwnerId}`,
+        );
         await channel.permissionOverwrites.create(currentOwnerId, {
           ManageChannels: false,
           Connect: true,
@@ -1449,7 +1574,14 @@ export class VoiceChannelManager {
       // Only rename if channel doesn't have a custom name
       if (!this.hasCustomName(channel.id)) {
         const newChannelName = `${newOwner.displayName}'s Channel`;
+        logger.info(
+          `[Ownership Transfer] Renaming channel to: ${newChannelName}`,
+        );
         await channel.setName(newChannelName);
+      } else {
+        logger.info(
+          `[Ownership Transfer] Channel has custom name, skipping rename`,
+        );
       }
 
       // Update ownership tracking
@@ -1457,21 +1589,165 @@ export class VoiceChannelManager {
         this.userChannels.delete(currentOwnerId);
       }
       this.userChannels.set(newOwner.id, channel);
+      logger.info(`[Ownership Transfer] Updated ownership tracking map`);
+
+      // Update control panel message with new owner
+      logger.info(`[Ownership Transfer] Updating control panel message`);
+      await this.updateControlPanelOwnership(channel, newOwner.id);
 
       // Notify channel members about the ownership change
       try {
+        logger.info(
+          `[Ownership Transfer] Sending ownership change notification to channel`,
+        );
         await channel.send(
           `Channel ownership has been transferred to ${newOwner.displayName} based on voice time in the last 7 days`,
         );
       } catch (error) {
-        logger.error("Error sending ownership change notification:", error);
+        logger.error(
+          "[Ownership Transfer] Error sending ownership change notification:",
+          error,
+        );
       }
 
       logger.info(
-        `Changed ownership of channel ${channel.name} to ${newOwner.id}`,
+        `[Ownership Transfer] Successfully completed ownership transfer for channel ${channel.name} to ${newOwner.displayName} (${newOwner.id})`,
       );
     } catch (error) {
-      logger.error("Error updating channel ownership:", error);
+      logger.error(
+        "[Ownership Transfer] Error updating channel ownership:",
+        error,
+      );
+    }
+  }
+
+  /**
+   * Update control panel message to reflect new owner
+   */
+  private async updateControlPanelOwnership(
+    channel: VoiceChannel,
+    newOwnerId: string,
+  ): Promise<void> {
+    try {
+      // Check if control panel is enabled
+      const controlPanelEnabled = await configService.getBoolean(
+        "voicechannels.controlpanel.enabled",
+        true,
+      );
+
+      if (!controlPanelEnabled) {
+        logger.info(
+          "[Control Panel] Control panel is disabled, skipping update",
+        );
+        return;
+      }
+
+      // Try to find the control panel message in the voice channel
+      if (
+        "messages" in channel &&
+        typeof channel.messages?.fetch === "function"
+      ) {
+        try {
+          logger.info(
+            `[Control Panel] Fetching messages from voice channel ${channel.name}`,
+          );
+          const messages = await channel.messages.fetch({ limit: 50 });
+
+          // Find the control panel message (look for the embed with specific title)
+          const controlPanelMessage = messages.find(
+            (msg) =>
+              msg.author.id === this.client.user?.id &&
+              msg.embeds.length > 0 &&
+              msg.embeds[0].title === "🎮 Voice Channel Controls",
+          );
+
+          if (controlPanelMessage) {
+            logger.info(
+              `[Control Panel] Found control panel message ${controlPanelMessage.id}, updating with new owner ${newOwnerId}`,
+            );
+
+            // Get current privacy state
+            const guild = channel.guild;
+            const everyoneRole = guild.roles.everyone;
+            const permissions = channel.permissionOverwrites.cache.get(
+              everyoneRole.id,
+            );
+            const isPrivate = permissions?.deny.has(
+              PermissionFlagsBits.Connect,
+            );
+
+            // Recreate the embed and buttons with new owner ID
+            const embed = new EmbedBuilder()
+              .setTitle("🎮 Voice Channel Controls")
+              .setDescription(
+                `Welcome to your voice channel: **${channel.name}**\n\n` +
+                  `Use the buttons below to customize your channel!\n` +
+                  `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}`,
+              )
+              .setColor(isPrivate ? 0xff0000 : 0x00ff00)
+              .setFooter({
+                text: "Only the channel owner can use these controls",
+              });
+
+            const privacyButton = new ButtonBuilder()
+              .setCustomId(`vc_control_privacy_${channel.id}_${newOwnerId}`)
+              .setLabel(isPrivate ? "Make Public" : "Make Private")
+              .setStyle(isPrivate ? ButtonStyle.Success : ButtonStyle.Danger)
+              .setEmoji(isPrivate ? "🌐" : "🔒");
+
+            const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`vc_control_name_${channel.id}_${newOwnerId}`)
+                .setLabel("Rename")
+                .setStyle(ButtonStyle.Primary)
+                .setEmoji("✏️"),
+              privacyButton,
+              new ButtonBuilder()
+                .setCustomId(`vc_control_invite_${channel.id}_${newOwnerId}`)
+                .setLabel("Invite")
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji("👥")
+                .setDisabled(!isPrivate),
+              new ButtonBuilder()
+                .setCustomId(`vc_control_transfer_${channel.id}_${newOwnerId}`)
+                .setLabel("Transfer")
+                .setStyle(ButtonStyle.Secondary)
+                .setEmoji("👑"),
+            );
+
+            // Update the message
+            await controlPanelMessage.edit({
+              content: `<@${newOwnerId}>`,
+              embeds: [embed],
+              components: [buttons],
+            });
+
+            logger.info(
+              `[Control Panel] Successfully updated control panel message for new owner ${newOwnerId}`,
+            );
+          } else {
+            logger.warn(
+              `[Control Panel] Control panel message not found in voice channel ${channel.name}, creating new one`,
+            );
+            // If no control panel exists, create a new one
+            await this.sendControlPanel(channel, newOwnerId);
+          }
+        } catch (error) {
+          logger.error(
+            "[Control Panel] Error updating control panel message:",
+            error,
+          );
+        }
+      } else {
+        logger.info(
+          "[Control Panel] Voice channel doesn't support text messages, skipping control panel update",
+        );
+      }
+    } catch (error) {
+      logger.error(
+        "[Control Panel] Error in updateControlPanelOwnership:",
+        error,
+      );
     }
   }
 
