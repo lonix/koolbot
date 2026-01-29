@@ -44,6 +44,7 @@ export const data = new SlashCommandBuilder()
             { name: "Am I Kool", value: "amikool" },
             { name: "Reaction Roles", value: "reactionroles" },
             { name: "Announcements", value: "announcements" },
+            { name: "Notices", value: "notices" },
           ),
       ),
   );

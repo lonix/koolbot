@@ -6,9 +6,17 @@ import Notice, { INotice } from "../models/notice.js";
 
 // Category colors and emojis
 const CATEGORY_CONFIG = {
-  general: { emoji: "📋", color: 0x5865f2 as ColorResolvable, label: "General" },
+  general: {
+    emoji: "📋",
+    color: 0x5865f2 as ColorResolvable,
+    label: "General",
+  },
   rules: { emoji: "📜", color: 0xe74c3c as ColorResolvable, label: "Rules" },
-  info: { emoji: "ℹ️", color: 0x3498db as ColorResolvable, label: "Information" },
+  info: {
+    emoji: "ℹ️",
+    color: 0x3498db as ColorResolvable,
+    label: "Information",
+  },
   help: { emoji: "❓", color: 0x9b59b6 as ColorResolvable, label: "Help" },
   "game-servers": {
     emoji: "🎮",
@@ -388,7 +396,9 @@ export class NoticesChannelManager {
 
       const message = await channel.send({ embeds: [embed] });
 
-      logger.info(`Posted notice ${notice._id} to channel as message ${message.id}`);
+      logger.info(
+        `Posted notice ${notice._id} to channel as message ${message.id}`,
+      );
       return message.id;
     } catch (error) {
       logger.error("Error posting notice to channel:", error);
@@ -440,10 +450,7 @@ export class NoticesChannelManager {
 
       // Delete all bot messages except the header
       for (const message of messages.values()) {
-        if (
-          message.author.id === botId &&
-          message.id !== headerMessageId
-        ) {
+        if (message.author.id === botId && message.id !== headerMessageId) {
           try {
             await message.delete();
           } catch (error) {

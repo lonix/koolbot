@@ -197,9 +197,7 @@ async function handleAdd(
     });
 
     await notice.save();
-    logger.info(
-      `Notice created: ${notice._id} by ${interaction.user.tag}`,
-    );
+    logger.info(`Notice created: ${notice._id} by ${interaction.user.tag}`);
 
     // Post to channel
     const manager = noticesChannelManager(interaction.client);
@@ -375,7 +373,9 @@ async function handleList(
       });
     }
 
-    embed.setFooter({ text: "Use notice ID with /notice edit or /notice delete" });
+    embed.setFooter({
+      text: "Use notice ID with /notice edit or /notice delete",
+    });
 
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
