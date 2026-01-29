@@ -237,7 +237,7 @@ export class ConfigService {
           try {
             await Config.updateOne(
               { key },
-              { category: correctCategory },
+              { $set: { category: correctCategory } },
             );
             logger.info(
               `  ✓ Fixed category for ${key}: ${currentCategory} → ${correctCategory}`,
