@@ -233,8 +233,8 @@ Most Active Channel: Gaming Room
 **Configuration:**
 
 ```bash
-# Enable gamification system
-/config set key:gamification.enabled value:true
+# Enable achievements system
+/config set key:achievements.enabled value:true
 /config reload
 ```
 
@@ -1565,7 +1565,7 @@ Step 1: Feature Selection
 │ ☑ Voice Channels              │
 │ ☑ Voice Tracking              │
 │ ☐ Quote System                │
-│ ☐ Gamification                │
+│ ☐ Achievements                │
 │ ☐ Core Logging                │
 │                                │
 │ [Continue] [Cancel]            │
@@ -1586,7 +1586,7 @@ Step 3: Confirmation
 Voice Channels: Enabled
 Voice Tracking: Enabled
 Quote System: Disabled
-Gamification: Disabled
+Achievements: Disabled
 Core Logging: Disabled
 
 Run /config reload to apply changes.
@@ -1742,7 +1742,7 @@ Most Used Commands:
 | `/ping`         | Everyone         | Command must be enabled                   |
 | `/vctop`        | Everyone         | Voice tracking enabled                    |
 | `/vcstats`      | Everyone         | Voice tracking enabled                    |
-| `/achievements` | Everyone         | Gamification enabled                      |
+| `/achievements` | Everyone         | Achievements enabled                      |
 | `/seen`         | Everyone         | Voice tracking + seen enabled             |
 | `/quote`        | Everyone\*       | Quotes enabled (\*may be role-restricted) |
 | `/amikool`      | Everyone         | Command enabled + role configured         |
@@ -1896,8 +1896,8 @@ The wizard will:
 /config set key:voicetracking.announcements.channel value:"voice-stats"
 /config reload
 
-# 5. Enable gamification system
-/config set key:gamification.enabled value:true
+# 5. Enable achievements system
+/config set key:achievements.enabled value:true
 /config reload
 
 # 6. Setup data cleanup

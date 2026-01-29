@@ -117,11 +117,11 @@ export async function handleWizardButton(
       case "quotes_skip":
         await handleFeatureSkip(interaction, guild, userId, guildId);
         break;
-      case "gamif_enable":
+      case "achiv_enable":
         wizardService.addConfiguration(
           userId,
           guildId,
-          "gamification.enabled",
+          "achievements.enabled",
           true,
         );
         await handleFeatureComplete(
@@ -129,10 +129,10 @@ export async function handleWizardButton(
           guild,
           userId,
           guildId,
-          "Gamification",
+          "Achievements",
         );
         break;
-      case "gamif_skip":
+      case "achiv_skip":
         await handleFeatureSkip(interaction, guild, userId, guildId);
         break;
       case "logging_configure":

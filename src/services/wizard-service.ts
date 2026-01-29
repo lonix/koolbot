@@ -322,7 +322,7 @@ export class WizardService {
       "quotes.channel_id": "Channel ID for quote messages",
       "quotes.add_roles": "Comma-separated role IDs that can add quotes",
       "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",
-      "gamification.enabled": "Enable/disable gamification system",
+      "achievements.enabled": "Enable/disable achievements system",
       "core.startup.enabled":
         "Enable/disable Discord logging for bot startup/shutdown events",
       "core.startup.channel_id":

@@ -88,7 +88,7 @@ Based on comprehensive codebase research, here are feature suggestions organized
 ## 🎮 Fun & Engagement
 
 ### 15. **Voice Activity Achievements**
-**Gap**: No gamification of voice activity
+**Gap**: No achievements of voice activity
 **Suggestions**:
 - Award badges: "Night Owl" (most late-night hours), "Marathon" (longest session), "Social Butterfly" (most unique channels)
 - `/achievements` - View earned badges

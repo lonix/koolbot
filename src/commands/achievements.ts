@@ -3,7 +3,7 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
 } from "discord.js";
-import { GamificationService } from "../services/gamification-service.js";
+import { AchievementsService } from "../services/achievements-service.js";
 import logger from "../utils/logger.js";
 
 export const data = new SlashCommandBuilder()
@@ -21,18 +21,18 @@ export async function execute(
 ): Promise<void> {
   try {
     const targetUser = interaction.options.getUser("user") || interaction.user;
-    const gamificationService = GamificationService.getInstance(
+    const achievementsService = AchievementsService.getInstance(
       interaction.client,
     );
 
-    const userGamification = await gamificationService.getUserGamification(
+    const userAchievements = await achievementsService.getUserAchievements(
       targetUser.id,
     );
 
     if (
-      !userGamification ||
-      (userGamification.accolades.length === 0 &&
-        userGamification.achievements.length === 0)
+      !userAchievements ||
+      (userAchievements.accolades.length === 0 &&
+        userAchievements.achievements.length === 0)
     ) {
       await interaction.reply({
         content: `${targetUser.username} hasn't earned any badges yet. Keep participating in voice channels!`,
@@ -48,11 +48,11 @@ export async function execute(
       .setTimestamp();
 
     // Add accolades section
-    if (userGamification.accolades.length > 0) {
-      const accoladesList = userGamification.accolades
+    if (userAchievements.accolades.length > 0) {
+      const accoladesList = userAchievements.accolades
         .sort((a, b) => b.earnedAt.getTime() - a.earnedAt.getTime())
         .map((accolade) => {
-          const definition = gamificationService.getAccoladeDefinition(
+          const definition = achievementsService.getAccoladeDefinition(
             accolade.type,
           );
           if (!definition) return null;
@@ -114,10 +114,41 @@ export async function execute(
       }
     }
 
+    // Add achievements section (time-based)
+    if (userAchievements.achievements.length > 0) {
+      const achievementsList = userAchievements.achievements
+        .sort((a, b) => b.earnedAt.getTime() - a.earnedAt.getTime())
+        .slice(0, 10) // Limit to most recent 10
+        .map((achievement) => {
+          const definition = achievementsService.getAchievementDefinition(
+            achievement.type,
+          );
+          if (!definition) return null;
+
+          const earnedDate = achievement.earnedAt.toLocaleDateString();
+          const period = achievement.period || "N/A";
+          const metadataUnit = achievement.metadata?.unit ?? "";
+          const metadataText = achievement.metadata?.value
+            ? ` - ${achievement.metadata.value}${metadataUnit ? ` ${metadataUnit}` : ""}`
+            : "";
+
+          return `${definition.emoji} **${definition.name}**${metadataText}\n*${definition.description}* (${period})\nEarned: ${earnedDate}`;
+        })
+        .filter((text): text is string => Boolean(text));
+
+      if (achievementsList.length > 0) {
+        embed.addFields({
+          name: "🏅 Recent Achievements (Time-Based)",
+          value: achievementsList.join("\n\n"),
+          inline: false,
+        });
+      }
+    }
+
     // Add summary
     embed.addFields({
       name: "📊 Summary",
-      value: `Total Accolades: ${userGamification.statistics.totalAccolades}\nTotal Achievements: ${userGamification.statistics.totalAchievements}`,
+      value: `Total Accolades: ${userAchievements.statistics.totalAccolades}\nTotal Achievements: ${userAchievements.statistics.totalAchievements}`,
       inline: false,
     });
 

@@ -24,7 +24,7 @@ export interface IAchievement {
   };
 }
 
-export interface IUserGamification extends Document {
+export interface IUserAchievements extends Document {
   userId: string;
   username: string;
   accolades: IAccolade[]; // Persistent badges
@@ -36,7 +36,7 @@ export interface IUserGamification extends Document {
   };
 }
 
-const UserGamificationSchema = new Schema({
+const UserAchievementsSchema = new Schema({
   userId: { type: String, required: true, unique: true },
   username: { type: String, required: true },
   accolades: [
@@ -70,7 +70,11 @@ const UserGamificationSchema = new Schema({
   },
 });
 
-export const UserGamification = mongoose.model<IUserGamification>(
-  "UserGamification",
-  UserGamificationSchema,
+export const UserAchievements = mongoose.model<IUserAchievements>(
+  "UserGamification", // Keep old collection name for backward compatibility
+  UserAchievementsSchema,
 );
+
+// Legacy export for backward compatibility
+export const UserGamification = UserAchievements;
+export type IUserGamification = IUserAchievements;

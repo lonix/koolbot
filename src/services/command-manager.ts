@@ -83,7 +83,7 @@ export class CommandManager {
         },
         {
           name: "achievements",
-          configKey: "gamification.enabled",
+          configKey: "achievements.enabled",
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
@@ -316,7 +316,7 @@ export class CommandManager {
         },
         {
           name: "achievements",
-          configKey: "gamification.enabled",
+          configKey: "achievements.enabled",
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },

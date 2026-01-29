@@ -39,7 +39,7 @@ export const data = new SlashCommandBuilder()
             { name: "Voice Channels", value: "voicechannels" },
             { name: "Voice Tracking", value: "voicetracking" },
             { name: "Quote System", value: "quotes" },
-            { name: "Gamification", value: "gamification" },
+            { name: "Achievements", value: "achievements" },
             { name: "Core Logging", value: "logging" },
             { name: "Am I Kool", value: "amikool" },
             { name: "Reaction Roles", value: "reactionroles" },

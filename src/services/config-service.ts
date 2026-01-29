@@ -162,6 +162,10 @@ export class ConfigService {
         "QUOTE_DELETE_ROLES",
         "QUOTE_MAX_LENGTH",
         "QUOTE_COOLDOWN",
+        // Old gamification keys (renamed to achievements)
+        "gamification.enabled",
+        "gamification.announcements.enabled",
+        "gamification.dm_notifications.enabled",
         // Old dot-notation keys used as fallbacks during migration
         "voice_channel.enabled",
         "voice_channel.category_name",
@@ -184,11 +188,11 @@ export class ConfigService {
 
       // Valid categories from the enum
       const validCategories = new Set([
+        "achievements",
         "amikool",
         "announcements",
         "core",
         "fun",
-        "gamification",
         "help",
         "ping",
         "quotes",
@@ -203,6 +207,7 @@ export class ConfigService {
       const categoryMapping: Record<string, string> = {
         voice_channel: "voicechannels",
         tracking: "voicetracking",
+        gamification: "achievements",
       };
 
       // Find unknown settings and settings with invalid categories
@@ -295,6 +300,27 @@ export class ConfigService {
       if (config) {
         this.cache.set(key, config.value);
         return config.value;
+      }
+
+      // Handle backward compatibility for gamification -> achievements migration
+      if (key.startsWith("achievements.")) {
+        const oldKey = key.replace("achievements.", "gamification.");
+        const oldConfig = await Config.findOne({ key: oldKey });
+        if (oldConfig) {
+          logger.info(
+            `⚠️  Found old gamification config key: ${oldKey}, migrating to ${key}`,
+          );
+          // Migrate the old key to new key
+          await this.set(
+            key,
+            oldConfig.value,
+            oldConfig.description.replace(/gamification/gi, "achievements"),
+            "achievements",
+          );
+          // Delete the old key
+          await Config.deleteOne({ key: oldKey });
+          return oldConfig.value;
+        }
       }
 
       // If not found, try to get from environment variables (for backward compatibility)

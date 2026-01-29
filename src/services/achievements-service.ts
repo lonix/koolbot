@@ -1,9 +1,9 @@
 import { Client } from "discord.js";
 import {
-  UserGamification,
+  UserAchievements,
   IAccolade,
   IAchievement,
-} from "../models/user-gamification.js";
+} from "../models/user-achievements.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -47,8 +47,8 @@ interface BadgeDefinition {
   ) => Promise<{ value?: number; description?: string; unit?: string }>;
 }
 
-export class GamificationService {
-  private static instance: GamificationService;
+export class AchievementsService {
+  private static instance: AchievementsService;
   private client: Client;
   private configService: ConfigService;
   private isConnected: boolean = false;
@@ -421,7 +421,7 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 7;
       },
@@ -437,7 +437,7 @@ export class GamificationService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -456,7 +456,7 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 14;
       },
@@ -472,7 +472,7 @@ export class GamificationService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
@@ -491,7 +491,7 @@ export class GamificationService {
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 30;
       },
@@ -507,12 +507,35 @@ export class GamificationService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
-          GamificationService.MIN_DAILY_DURATION_SECONDS,
+          AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
           value: longestStreak,
           description: "30+ day streak",
           unit: "days",
+        };
+      },
+    },
+  };
+
+  // Achievement definitions (time-based, not announced)
+  private achievementDefinitions: Partial<
+    Record<AchievementType, BadgeDefinition>
+  > = {
+    weekly_active: {
+      emoji: "⚡",
+      name: "Active",
+      description: "Reached 10 hours in voice chat this week",
+      checkFunction: async (userId: string) => {
+        const weeklyTime = await this.getWeeklyTimeForUser(userId);
+        return weeklyTime >= 36000; // 10 hours = 36000 seconds
+      },
+      metadataFunction: async (userId: string) => {
+        const weeklyTime = await this.getWeeklyTimeForUser(userId);
+        return {
+          value: Math.floor(weeklyTime / 3600),
+          description: "Hours this week",
+          unit: "hrs",
         };
       },
     },
@@ -527,17 +550,17 @@ export class GamificationService {
   private setupMongoConnectionHandlers(): void {
     mongoose.connection.on("connected", () => {
       this.isConnected = true;
-      logger.info("MongoDB connection established for gamification service");
+      logger.info("MongoDB connection established for achievements service");
     });
 
     mongoose.connection.on("disconnected", () => {
       this.isConnected = false;
-      logger.warn("MongoDB connection lost for gamification service");
+      logger.warn("MongoDB connection lost for achievements service");
     });
 
     mongoose.connection.on("error", (error: Error) => {
       this.isConnected = false;
-      logger.error("MongoDB connection error in gamification service:", error);
+      logger.error("MongoDB connection error in achievements service:", error);
     });
   }
 
@@ -550,7 +573,7 @@ export class GamificationService {
             "mongodb://mongodb:27017/koolbot",
           ),
         );
-        logger.info("Reconnected to MongoDB for gamification service");
+        logger.info("Reconnected to MongoDB for achievements service");
       } catch (error: unknown) {
         logger.error("Error reconnecting to MongoDB:", error);
         throw error;
@@ -558,11 +581,11 @@ export class GamificationService {
     }
   }
 
-  public static getInstance(client: Client): GamificationService {
-    if (!GamificationService.instance) {
-      GamificationService.instance = new GamificationService(client);
+  public static getInstance(client: Client): AchievementsService {
+    if (!AchievementsService.instance) {
+      AchievementsService.instance = new AchievementsService(client);
     }
-    return GamificationService.instance;
+    return AchievementsService.instance;
   }
 
   /**
@@ -646,7 +669,7 @@ export class GamificationService {
    */
   private calculateConsecutiveDays(
     sessions: Array<{ startTime: Date; duration?: number }>,
-    minDuration: number = GamificationService.MIN_DAILY_DURATION_SECONDS,
+    minDuration: number = AchievementsService.MIN_DAILY_DURATION_SECONDS,
   ): { currentStreak: number; longestStreak: number } {
     if (!sessions || sessions.length === 0) {
       return { currentStreak: 0, longestStreak: 0 };
@@ -724,6 +747,61 @@ export class GamificationService {
   }
 
   /**
+   * Get total voice time for a user this week
+   */
+  private async getWeeklyTimeForUser(userId: string): Promise<number> {
+    try {
+      const user = await VoiceChannelTracking.findOne({ userId });
+      if (!user || !user.sessions || user.sessions.length === 0) {
+        return 0;
+      }
+
+      // Get start of this week (Monday at 00:00:00 UTC)
+      const now = new Date();
+      const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday, go back 6 days
+      const startOfWeek = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate() - daysToMonday,
+          0,
+          0,
+          0,
+          0,
+        ),
+      );
+
+      // Calculate total time for sessions that overlap with this week
+      let weeklyTime = 0;
+      for (const session of user.sessions) {
+        if (!session.endTime || !session.duration) continue;
+
+        // Check if session overlaps with this week
+        const sessionEnd = new Date(session.endTime);
+        if (sessionEnd >= startOfWeek) {
+          const sessionStart = new Date(session.startTime);
+
+          // If session started before the week, only count time from start of week
+          const effectiveStart =
+            sessionStart < startOfWeek ? startOfWeek : sessionStart;
+
+          // Calculate the duration within this week
+          const durationInWeek = Math.floor(
+            (sessionEnd.getTime() - effectiveStart.getTime()) / 1000,
+          );
+          weeklyTime += Math.max(0, durationInWeek);
+        }
+      }
+
+      return weeklyTime;
+    } catch (error) {
+      logger.error("Error getting weekly time for user:", error);
+      return 0;
+    }
+  }
+
+  /**
    * Check and award accolades (persistent badges) to a user
    * Returns newly earned accolades
    */
@@ -735,17 +813,17 @@ export class GamificationService {
       await this.ensureConnection();
 
       const isEnabled = await this.configService.getBoolean(
-        "gamification.enabled",
+        "achievements.enabled",
         false,
       );
       if (!isEnabled) {
         return [];
       }
 
-      // Get or create user gamification record
-      let userGamification = await UserGamification.findOne({ userId });
-      if (!userGamification) {
-        userGamification = new UserGamification({
+      // Get or create user achievements record
+      let userAchievements = await UserAchievements.findOne({ userId });
+      if (!userAchievements) {
+        userAchievements = new UserAchievements({
           userId,
           username,
           accolades: [],
@@ -756,7 +834,7 @@ export class GamificationService {
 
       const newAccolades: IAccolade[] = [];
       const existingAccoladeTypes = new Set(
-        userGamification.accolades.map((a) => a.type),
+        userAchievements.accolades.map((a) => a.type),
       );
 
       // Fetch user tracking data once to avoid multiple DB queries
@@ -783,8 +861,8 @@ export class GamificationService {
           };
 
           newAccolades.push(accolade);
-          userGamification.accolades.push(accolade);
-          userGamification.statistics.totalAccolades += 1;
+          userAchievements.accolades.push(accolade);
+          userAchievements.statistics.totalAccolades += 1;
 
           logger.info(
             `User ${username} (${userId}) earned accolade: ${definition.name}`,
@@ -793,7 +871,7 @@ export class GamificationService {
       }
 
       if (newAccolades.length > 0) {
-        await userGamification.save();
+        await userAchievements.save();
       }
 
       return newAccolades;
@@ -804,9 +882,109 @@ export class GamificationService {
   }
 
   /**
+   * Check and award achievements (time-based) to a user for the current week
+   * Returns newly earned achievements
+   */
+  public async checkAndAwardAchievements(
+    userId: string,
+    username: string,
+  ): Promise<IAchievement[]> {
+    try {
+      await this.ensureConnection();
+
+      const isEnabled = await this.configService.getBoolean(
+        "achievements.enabled",
+        false,
+      );
+
+      if (!isEnabled) {
+        return [];
+      }
+
+      // Get or create user achievements record
+      let userAchievements = await UserAchievements.findOne({ userId });
+      if (!userAchievements) {
+        userAchievements = new UserAchievements({
+          userId,
+          username,
+          accolades: [],
+          achievements: [],
+          lastChecked: new Date(),
+          statistics: { totalAccolades: 0, totalAchievements: 0 },
+        });
+      }
+
+      // Get current week period string (e.g., "2026-W05")
+      const now = new Date();
+      const weekNumber = this.getWeekNumber(now);
+      const currentPeriod = `${now.getFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+
+      // Check if user already has this week's achievements
+      const existingAchievementTypes = userAchievements.achievements
+        .filter((a) => a.period === currentPeriod)
+        .map((a) => a.type);
+
+      const newAchievements: IAchievement[] = [];
+
+      // Check each achievement type
+      for (const [type, definition] of Object.entries(
+        this.achievementDefinitions,
+      )) {
+        if (!definition || existingAchievementTypes.includes(type)) {
+          continue;
+        }
+
+        const earned = await definition.checkFunction(userId, null);
+        if (earned) {
+          const metadata = definition.metadataFunction
+            ? await definition.metadataFunction(userId, null)
+            : undefined;
+
+          const achievement: IAchievement = {
+            type,
+            earnedAt: new Date(),
+            period: currentPeriod,
+            metadata,
+          };
+
+          newAchievements.push(achievement);
+          userAchievements.achievements.push(achievement);
+          userAchievements.statistics.totalAchievements += 1;
+
+          logger.info(
+            `User ${username} (${userId}) earned achievement: ${definition.name} for ${currentPeriod}`,
+          );
+        }
+      }
+
+      if (newAchievements.length > 0) {
+        await userAchievements.save();
+      }
+
+      return newAchievements;
+    } catch (error) {
+      logger.error("Error checking and awarding achievements:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Get ISO week number for a date
+   */
+  private getWeekNumber(date: Date): number {
+    const d = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
+    );
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  }
+
+  /**
    * Get all accolades and achievements for a user
    */
-  public async getUserGamification(userId: string): Promise<{
+  public async getUserAchievements(userId: string): Promise<{
     accolades: IAccolade[];
     achievements: IAchievement[];
     statistics: { totalAccolades: number; totalAchievements: number };
@@ -814,18 +992,18 @@ export class GamificationService {
     try {
       await this.ensureConnection();
 
-      const userGamification = await UserGamification.findOne({ userId });
-      if (!userGamification) {
+      const userAchievements = await UserAchievements.findOne({ userId });
+      if (!userAchievements) {
         return null;
       }
 
       return {
-        accolades: userGamification.accolades,
-        achievements: userGamification.achievements,
-        statistics: userGamification.statistics,
+        accolades: userAchievements.accolades,
+        achievements: userAchievements.achievements,
+        statistics: userAchievements.statistics,
       };
     } catch (error) {
-      logger.error("Error getting user gamification:", error);
+      logger.error("Error getting user achievements:", error);
       return null;
     }
   }
@@ -837,6 +1015,10 @@ export class GamificationService {
     return this.accoladeDefinitions[type as AccoladeType];
   }
 
+  public getAchievementDefinition(type: string): BadgeDefinition | undefined {
+    return this.achievementDefinitions[type as AchievementType];
+  }
+
   /**
    * Send DM to user about newly earned accolades
    */
@@ -846,7 +1028,7 @@ export class GamificationService {
   ): Promise<void> {
     try {
       const dmEnabled = await this.configService.getBoolean(
-        "gamification.dm_notifications.enabled",
+        "achievements.dm_notifications.enabled",
         true,
       );
 
@@ -903,7 +1085,7 @@ export class GamificationService {
 
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-      const users = await UserGamification.find({
+      const users = await UserAchievements.find({
         "accolades.earnedAt": { $gte: oneWeekAgo },
       });
 
@@ -920,3 +1102,6 @@ export class GamificationService {
     }
   }
 }
+
+// Legacy export for backward compatibility
+export const GamificationService = AchievementsService;

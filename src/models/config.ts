@@ -28,11 +28,12 @@ const ConfigSchema = new Schema<IConfig>(
       type: String,
       required: true,
       enum: [
+        "achievements",
         "amikool",
         "announcements",
         "core",
         "fun",
-        "gamification",
+        "gamification", // Kept for backward compatibility during migration
         "help",
         "ping",
         "quotes",

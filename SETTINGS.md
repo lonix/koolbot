@@ -16,7 +16,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Voice Activity Tracking](#-voice-activity-tracking) - Track user activity
 - [Voice Channel Cleanup](#-voice-channel-cleanup) - Data retention
 - [Announcements](#-announcements) - Automated stats posting
-- [Gamification System](#-gamification-system) - Badges and achievements
+- [Achievements System](#-achievements-system) - Badges and achievements
 - [Reaction Roles](#-reaction-roles) - Self-assignable roles via reactions
 - [Discord Logging](#-discord-logging) - Event logging to channels
 - [Fun Features](#-fun-features) - Easter eggs and extras
@@ -341,25 +341,25 @@ See [Commands Documentation](COMMANDS.md#announce) for detailed usage.
 
 ---
 
-## 🏆 Gamification System
+## 🏆 Achievements System
 
 Badge and achievement system to encourage voice channel participation.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `gamification.enabled` | `false` | Enable/disable gamification system |
-| `gamification.announcements.enabled` | `true` | Include new accolades in weekly announcements |
-| `gamification.dm_notifications.enabled` | `true` | Send DM to users when they earn accolades |
+| `achievements.enabled` | `false` | Enable/disable achievements system |
+| `achievements.announcements.enabled` | `true` | Include new accolades in weekly announcements |
+| `achievements.dm_notifications.enabled` | `true` | Send DM to users when they earn accolades |
 
 **Example:**
 
 ```bash
-# Enable gamification
-/config set key:gamification.enabled value:true
+# Enable achievements
+/config set key:achievements.enabled value:true
 /config reload
 
 # Disable DM notifications (keep announcements)
-/config set key:gamification.dm_notifications.enabled value:false
+/config set key:achievements.dm_notifications.enabled value:false
 /config reload
 ```
 
@@ -969,9 +969,9 @@ The config system automatically converts values:
 
 #### Gamification
 
-- `gamification.enabled` (bool, default: false)
-- `gamification.announcements.enabled` (bool, default: true)
-- `gamification.dm_notifications.enabled` (bool, default: true)
+- `achievements.enabled` (bool, default: false)
+- `achievements.announcements.enabled` (bool, default: true)
+- `achievements.dm_notifications.enabled` (bool, default: true)
 
 #### Cleanup
 

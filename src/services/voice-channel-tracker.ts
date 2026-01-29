@@ -11,7 +11,7 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { connectToDatabase } from "../utils/database.js";
-import { GamificationService } from "./gamification-service.js";
+import { AchievementsService } from "./achievements-service.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
 
@@ -367,23 +367,29 @@ export class VoiceChannelTracker {
         );
       }
 
-      // Check for accolades after session ends
+      // Check for accolades and achievements after session ends
       try {
-        const gamificationService = GamificationService.getInstance(
+        const achievementsService = AchievementsService.getInstance(
           this.client,
         );
-        const newAccolades = await gamificationService.checkAndAwardAccolades(
+        const newAccolades = await achievementsService.checkAndAwardAccolades(
           userId,
           user.username,
         );
 
         if (newAccolades.length > 0) {
-          // Send DM notification
-          await gamificationService.notifyUserOfAccolades(userId, newAccolades);
+          // Send DM notification for accolades
+          await achievementsService.notifyUserOfAccolades(userId, newAccolades);
         }
+
+        // Check for weekly achievements (these are NOT sent as DM notifications)
+        await achievementsService.checkAndAwardAchievements(
+          userId,
+          user.username,
+        );
       } catch (error: unknown) {
-        logger.error("Error checking gamification accolades:", error);
-        // Don't let gamification errors break voice tracking
+        logger.error("Error checking achievements/accolades:", error);
+        // Don't let achievement errors break voice tracking
       }
     } catch (error: unknown) {
       logger.error("Error ending voice tracking:", error);
