@@ -326,7 +326,7 @@ When you earn a new accolade, you'll receive:
 
 ### `/quote`
 
-**Description:** Add memorable quotes to a dedicated bot-managed channel. All quotes are posted in a channel where users can react with 👍/👎.
+**Description:** Add and manage memorable quotes in a dedicated bot-managed channel. All quotes are posted in a channel where users can react with 👍/👎.
 
 **Configuration:**
 
@@ -339,21 +339,69 @@ When you earn a new accolade, you'll receive:
 /config reload
 ```
 
+**Subcommands:**
+
+#### `/quote add`
+
+Add a new quote to the quote channel.
+
 **Usage:**
 
 ```bash
-/quote text:"Great quote!" author:"@Alice"
+/quote add text:"Great quote!" author:@Alice
+```
+
+**Parameters:**
+
+- `text` (required): The quote text to add
+- `author` (required): The user who said the quote (mention/select the user)
+
+**Example Response:**
+
+```text
+✅ Quote added successfully and posted to the quote channel!
+```
+
+#### `/quote edit`
+
+Edit an existing quote that you added.
+
+**Usage:**
+
+```bash
+/quote edit id:"697bdfe2808f7d245289392c" text:"Updated quote!"
+/quote edit id:"697bdfe2808f7d245289392c" author:@Bob
+/quote edit id:"697bdfe2808f7d245289392c" text:"New text" author:@Bob
+```
+
+**Parameters:**
+
+- `id` (required): The quote ID (found in the quote footer in the channel)
+- `text` (optional): The new quote text
+- `author` (optional): The new author (mention/select the user)
+
+**Notes:**
+
+- You can only edit quotes that you added
+- At least one field (text or author) must be provided
+- The quote message in the channel will be updated automatically
+
+**Example Response:**
+
+```text
+✅ Quote updated successfully!
 ```
 
 **How It Works:**
 
-1. User submits a quote using `/quote` command
+1. User submits a quote using `/quote add` command
 2. Bot posts the quote as an embed in the configured quote channel
 3. Bot automatically adds 👍 and 👎 reactions to the message
 4. Users browse quotes by scrolling through the channel
 5. Users react with 👍 or 👎 to vote on quotes
-6. Bot automatically cleans up any unauthorized messages (every 5 minutes)
-7. An informational header post explains the channel usage (auto-recreated if deleted)
+6. Users can edit their own quotes using `/quote edit` with the quote ID
+7. Bot automatically cleans up any unauthorized messages (every 5 minutes)
+8. An informational header post explains the channel usage (auto-recreated if deleted)
 
 **Security Features:**
 
