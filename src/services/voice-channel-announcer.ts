@@ -212,16 +212,16 @@ export class VoiceChannelAnnouncer {
       await channel.send(message);
 
       // Add accolades announcement if enabled
-      const gamificationEnabled = await this.configService.getBoolean(
-        "gamification.enabled",
+      const achievementsEnabled = await this.configService.getBoolean(
+        "achievements.enabled",
         false,
       );
       const announcementsEnabled = await this.configService.getBoolean(
-        "gamification.announcements.enabled",
+        "achievements.announcements.enabled",
         true,
       );
 
-      if (gamificationEnabled && announcementsEnabled) {
+      if (achievementsEnabled && announcementsEnabled) {
         try {
           const achievementsService = AchievementsService.getInstance(
             this.client,

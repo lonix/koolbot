@@ -12,6 +12,7 @@ import mongoose from "mongoose";
 // Badge type definitions
 export type AccoladeType =
   | "first_hour"
+  | "active_10hrs"
   | "voice_veteran_100"
   | "voice_veteran_500"
   | "voice_veteran_1000"
@@ -73,6 +74,25 @@ export class AchievementsService {
         return {
           value: Math.floor((user?.totalTime || 0) / 3600),
           description: "1 hour milestone",
+          unit: "hrs",
+        };
+      },
+    },
+    active_10hrs: {
+      emoji: "⚡",
+      name: "Active",
+      description: "Reached 10 hours in voice chat",
+      checkFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        return user ? user.totalTime >= 36000 : false; // 10 hours = 36000 seconds
+      },
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const user =
+          userData || (await VoiceChannelTracking.findOne({ userId }));
+        return {
+          value: Math.floor((user?.totalTime || 0) / 3600),
+          description: "10 hours milestone",
           unit: "hrs",
         };
       },
