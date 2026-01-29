@@ -150,7 +150,7 @@ async function handleVcModal(
   // Import helper to move to next feature
   const { moveToNextFeature } =
     await import("./wizard-button-handler-helpers.js");
-  await moveToNextFeature(interaction.channel!, guild, userId, guildId);
+  await moveToNextFeature(interaction, guild, userId, guildId);
 }
 
 async function handleVtModal(
@@ -215,5 +215,5 @@ async function handleVtModal(
   // Import helper to move to next feature
   const { moveToNextFeature } =
     await import("./wizard-button-handler-helpers.js");
-  await moveToNextFeature(interaction.channel!, guild, userId, guildId);
+  await moveToNextFeature(interaction, guild, userId, guildId);
 }

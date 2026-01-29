@@ -115,4 +115,67 @@ describe('Wizard Select Handler', () => {
       });
     });
   });
+
+  describe('Quotes channel selection with followUp', () => {
+    it('should successfully configure quotes channel using interaction with followUp method', async () => {
+      const mockChannel = { id: 'test-channel-id', name: 'test-channel' };
+      
+      mockInteraction.customId = 'wizard_select_quotes_channel__test-user-id_test-guild-id';
+      mockInteraction.values = ['test-channel-id'];
+      
+      const mockGetSession = jest.fn().mockReturnValue({
+        userId: 'test-user-id',
+        guildId: 'test-guild-id',
+        currentStep: 0,
+        selectedFeatures: ['quotes'],
+        configuration: {},
+        detectedResources: {},
+        startTime: new Date(),
+        allowNavigation: true,
+      });
+
+      const mockAddConfiguration = jest.fn();
+      const mockGetInstance = jest.fn(() => ({
+        getSession: mockGetSession,
+        updateSession: jest.fn(),
+        addConfiguration: mockAddConfiguration,
+      }));
+
+      (mockWizardService.getInstance as unknown as jest.Mock) = mockGetInstance;
+
+      mockGuild.channels = {
+        fetch: jest.fn().mockResolvedValue(mockChannel),
+      } as any;
+
+      // Mock moveToNextFeature dynamically imported
+      jest.unstable_mockModule('../../src/handlers/wizard-button-handler-helpers.js', () => ({
+        moveToNextFeature: jest.fn().mockResolvedValue(undefined),
+      }));
+
+      await handleWizardSelectMenu(mockInteraction as StringSelectMenuInteraction);
+
+      // Verify interaction was deferred and followUp was called
+      expect(mockInteraction.deferUpdate).toHaveBeenCalled();
+      expect(mockInteraction.followUp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          embeds: expect.any(Array),
+          ephemeral: true,
+        })
+      );
+      
+      // Verify configuration was added
+      expect(mockAddConfiguration).toHaveBeenCalledWith(
+        'test-user-id',
+        'test-guild-id',
+        'quotes.enabled',
+        true
+      );
+      expect(mockAddConfiguration).toHaveBeenCalledWith(
+        'test-user-id',
+        'test-guild-id',
+        'quotes.channel_id',
+        'test-channel-id'
+      );
+    });
+  });
 });
