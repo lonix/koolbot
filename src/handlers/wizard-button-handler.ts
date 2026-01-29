@@ -733,11 +733,14 @@ async function showChannelSelectionPage(
       .setCustomId(`wizard_select_vc_category__${userId}_${guildId}`)
       .setPlaceholder("Select a voice category")
       .addOptions(
-        channelsOnPage.map((cat) => ({
-          label: cat.name,
-          value: cat.id,
-          description: `Category with ${cat.children.cache.size} channels`,
-        })),
+        channelsOnPage.map((cat) => {
+          const category = cat as CategoryChannel;
+          return {
+            label: category.name,
+            value: category.id,
+            description: `Category with ${category.children.cache.size} channels`,
+          };
+        }),
       );
 
     embed = new EmbedBuilder()
