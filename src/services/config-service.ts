@@ -212,8 +212,7 @@ export class ConfigService {
         } else if (!validCategories.has(setting.category)) {
           // Category is invalid, try to fix it
           const correctCategory =
-            categoryMapping[setting.category] ||
-            setting.key.split(".")[0]; // Use key prefix as category
+            categoryMapping[setting.category] || setting.key.split(".")[0]; // Use key prefix as category
           if (validCategories.has(correctCategory)) {
             invalidCategorySettings.push({
               key: setting.key,
@@ -233,7 +232,11 @@ export class ConfigService {
           `🔧 Found ${invalidCategorySettings.length} settings with invalid categories, fixing them...`,
         );
 
-        for (const { key, currentCategory, correctCategory } of invalidCategorySettings) {
+        for (const {
+          key,
+          currentCategory,
+          correctCategory,
+        } of invalidCategorySettings) {
           try {
             await Config.updateOne(
               { key },
@@ -243,10 +246,7 @@ export class ConfigService {
               `  ✓ Fixed category for ${key}: ${currentCategory} → ${correctCategory}`,
             );
           } catch (error) {
-            logger.error(
-              `  ✗ Failed to fix category for ${key}:`,
-              error,
-            );
+            logger.error(`  ✗ Failed to fix category for ${key}:`, error);
           }
         }
 
