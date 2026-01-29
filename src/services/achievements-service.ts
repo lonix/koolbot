@@ -519,7 +519,9 @@ export class AchievementsService {
   };
 
   // Achievement definitions (time-based, not announced)
-  private achievementDefinitions: Partial<Record<AchievementType, BadgeDefinition>> = {
+  private achievementDefinitions: Partial<
+    Record<AchievementType, BadgeDefinition>
+  > = {
     weekly_active: {
       emoji: "⚡",
       name: "Active",
@@ -771,12 +773,15 @@ export class AchievementsService {
         const sessionEnd = new Date(session.endTime);
         if (sessionEnd >= startOfWeek) {
           const sessionStart = new Date(session.startTime);
-          
+
           // If session started before the week, only count time from start of week
-          const effectiveStart = sessionStart < startOfWeek ? startOfWeek : sessionStart;
-          
+          const effectiveStart =
+            sessionStart < startOfWeek ? startOfWeek : sessionStart;
+
           // Calculate the duration within this week
-          const durationInWeek = Math.floor((sessionEnd.getTime() - effectiveStart.getTime()) / 1000);
+          const durationInWeek = Math.floor(
+            (sessionEnd.getTime() - effectiveStart.getTime()) / 1000,
+          );
           weeklyTime += Math.max(0, durationInWeek);
         }
       }
@@ -959,13 +964,14 @@ export class AchievementsService {
    * Get ISO week number for a date
    */
   private getWeekNumber(date: Date): number {
-    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const d = new Date(
+      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
+    );
     const dayNum = d.getUTCDay() || 7;
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   }
-
 
   /**
    * Get all accolades and achievements for a user
