@@ -94,6 +94,23 @@ Voice tracking: append session objects (`voice-channel-tracking.ts` shape). Keep
 4. Register reload callback if runtime adjust needed post `/config reload`.
 5. Log lifecycle via `DiscordLogger` if user-visible.
 
+## Reusable Patterns
+
+### Bot-Controlled Channel Header Posts
+
+When implementing bot-controlled channels (quotes, stats, achievements), add informational headers:
+
+**Pattern Location**: See `QuoteChannelManager.ensureHeaderPost()` and `DEVELOPER_GUIDE.md`
+
+**Quick Implementation**:
+1. Add config keys: `feature.header_enabled`, `feature.header_pin_enabled`, `feature.header_message_id`
+2. Copy `ensureHeaderPost()` and `createHeaderPost()` methods from `quote-channel-manager.ts`
+3. Customize embed content for your channel's purpose
+4. Call `ensureHeaderPost()` in `initialize()` and cleanup jobs
+5. Test header creation, validation, and auto-recreation
+
+See **DEVELOPER_GUIDE.md** "Bot-Controlled Channel Header Posts" for complete implementation guide with examples.
+
 ## Docker & Scripts
 
 Dev: `npm run dev` | Build: `npm run build` | Quality: `npm run check`.
