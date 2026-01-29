@@ -38,6 +38,9 @@ export interface ConfigSchema {
   "quotes.max_length": number; // Maximum quote length
   "quotes.cooldown": number; // Cooldown in seconds between quote additions
   "quotes.cleanup_interval": number; // Cleanup interval in minutes (default: 5)
+  "quotes.header_enabled": boolean; // Enable header post in quote channel
+  "quotes.header_message_id": string; // Message ID of the header post
+  "quotes.header_pin_enabled": boolean; // Pin the header post
 
   // Core Bot Logging (Discord) - Defaults to disabled
   "core.startup.enabled": boolean;
@@ -115,6 +118,9 @@ export const defaultConfig: ConfigSchema = {
   "quotes.max_length": 1000,
   "quotes.cooldown": 60,
   "quotes.cleanup_interval": 5, // Clean up unauthorized messages every 5 minutes
+  "quotes.header_enabled": true, // Enable informational header post
+  "quotes.header_message_id": "", // Stores header message ID
+  "quotes.header_pin_enabled": true, // Pin header for easy access
 
   // Core Bot Logging (Discord) - Defaults to disabled
   "core.startup.enabled": false,

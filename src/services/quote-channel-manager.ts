@@ -86,6 +86,9 @@ export class QuoteChannelManager {
       // Setup strict permissions on the channel
       await this.setupChannelPermissions(channel);
 
+      // Ensure header post exists
+      await this.ensureHeaderPost(channel);
+
       // Setup reaction handlers
       this.setupReactionHandlers();
 
@@ -133,6 +136,115 @@ export class QuoteChannelManager {
     }
   }
 
+  /**
+   * Ensure the informational header post exists in the quote channel
+   * Creates and pins a header post explaining how the quote channel works
+   */
+  private async ensureHeaderPost(channel: TextChannel): Promise<void> {
+    try {
+      // Check if header is enabled
+      const headerEnabled = await this.configService.getBoolean(
+        "quotes.header_enabled",
+        true,
+      );
+      if (!headerEnabled) {
+        logger.debug("Quote channel header is disabled");
+        return;
+      }
+
+      // Get stored header message ID
+      const storedHeaderId = await this.configService.getString(
+        "quotes.header_message_id",
+        "",
+      );
+
+      // Try to fetch existing header message
+      let headerExists = false;
+      if (storedHeaderId) {
+        try {
+          const existingMessage = await channel.messages.fetch(storedHeaderId);
+          if (existingMessage && existingMessage.author.id === this.client.user?.id) {
+            headerExists = true;
+            logger.debug("Quote channel header post already exists");
+            return;
+          }
+        } catch (error) {
+          logger.debug("Stored header message not found, will recreate");
+        }
+      }
+
+      // Create header post if it doesn't exist
+      if (!headerExists) {
+        await this.createHeaderPost(channel);
+      }
+    } catch (error) {
+      logger.error("Error ensuring header post:", error);
+    }
+  }
+
+  /**
+   * Create the header post with information about the quote channel
+   */
+  private async createHeaderPost(channel: TextChannel): Promise<void> {
+    try {
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2) // Discord blurple
+        .setTitle("📝 Welcome to the Quote Channel!")
+        .setDescription(
+          "This channel is managed by KoolBot to showcase memorable quotes from server members.",
+        )
+        .addFields(
+          {
+            name: "📥 How to Add a Quote",
+            value:
+              "Use the `/quote` command anywhere in the server to submit a quote.\nExample: `/quote text:\"Great quote!\" author:@Alice`",
+            inline: false,
+          },
+          {
+            name: "👍 How to Vote",
+            value:
+              "React with 👍 or 👎 to show your appreciation (or not!) for quotes.",
+            inline: false,
+          },
+          {
+            name: "🔒 Channel Rules",
+            value:
+              "• Only bot messages are allowed here\n• All other messages will be automatically removed\n• Browse and enjoy past quotes by scrolling up!",
+            inline: false,
+          },
+        )
+        .setFooter({ text: "KoolBot Quote System" })
+        .setTimestamp();
+
+      const headerMessage = await channel.send({ embeds: [embed] });
+      logger.info(`Created quote channel header post: ${headerMessage.id}`);
+
+      // Pin the message if enabled
+      const pinEnabled = await this.configService.getBoolean(
+        "quotes.header_pin_enabled",
+        true,
+      );
+      if (pinEnabled) {
+        try {
+          await headerMessage.pin();
+          logger.info("Pinned quote channel header post");
+        } catch (error) {
+          logger.warn("Failed to pin header post (missing permissions?):", error);
+        }
+      }
+
+      // Store the header message ID (this will persist across bot restarts)
+      await this.configService.set(
+        "quotes.header_message_id",
+        headerMessage.id,
+        "Message ID of the quote channel header post",
+        "quotes",
+      );
+    } catch (error) {
+      logger.error("Error creating header post:", error);
+    }
+  }
+
   private async startCleanupJob(): Promise<void> {
     // Get cleanup interval from config (in minutes)
     const intervalMinutes = await this.configService.getNumber(
@@ -164,6 +276,9 @@ export class QuoteChannelManager {
       if (!channel) {
         return;
       }
+
+      // Ensure header post exists (recreate if missing as per requirement)
+      await this.ensureHeaderPost(channel);
 
       // Fetch recent messages (up to 100)
       const messages = await channel.messages.fetch({ limit: 100 });
