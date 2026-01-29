@@ -10,6 +10,8 @@ export interface ConfigSchema {
 
   // Voice Activity Tracking
   "voicetracking.enabled": boolean;
+  "voicetracking.stats.top.enabled": boolean; // Enable /voicestats top subcommand
+  "voicetracking.stats.user.enabled": boolean; // Enable /voicestats user subcommand
   "voicetracking.seen.enabled": boolean;
   "voicetracking.excluded_channels": string; // Comma-separated channel IDs
   "voicetracking.announcements.enabled": boolean;
@@ -87,6 +89,8 @@ export const defaultConfig: ConfigSchema = {
 
   // Voice Activity Tracking
   "voicetracking.enabled": false,
+  "voicetracking.stats.top.enabled": false,
+  "voicetracking.stats.user.enabled": false,
   "voicetracking.seen.enabled": false,
   "voicetracking.excluded_channels": "",
   "voicetracking.announcements.enabled": false,
