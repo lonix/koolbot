@@ -5,7 +5,7 @@ import {
   PermissionFlagsBits,
 } from "discord.js";
 import logger from "../utils/logger.js";
-import Notice, { INotice } from "../models/notice.js";
+import Notice from "../models/notice.js";
 import { NoticesChannelManager } from "../services/notices-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
 
