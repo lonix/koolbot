@@ -87,7 +87,7 @@ describe("CommandManager Methods", () => {
 
     // Check that help command has configKey: null (always enabled)
     const helpCommandPatterns = [
-      /{\s*name:\s*"help",\s*configKey:\s*null,\s*file:\s*"help"\s*}/g,
+      /{\s*name:\s*"help",\s*configKey:\s*null,\s*file:\s*"help"\s*}/,
     ];
 
     let foundHelpWithNull = false;
