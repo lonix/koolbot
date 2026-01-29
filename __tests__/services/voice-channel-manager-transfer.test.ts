@@ -13,7 +13,6 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
   let manager: VoiceChannelManager;
   let mockClient: Partial<Client>;
   let mockChannel: Partial<VoiceChannel>;
-  let mockOldOwner: Partial<GuildMember>;
   let mockNewOwner: Partial<GuildMember>;
   let mockPermissionOverwrites: {
     create: jest.Mock;
@@ -40,13 +39,6 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
         }
         return undefined;
       }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
-
-    // Mock owners
-    mockOldOwner = {
-      id: 'old-owner-id',
-      displayName: 'OldOwner',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 

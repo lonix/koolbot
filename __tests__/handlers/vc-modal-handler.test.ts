@@ -1,6 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import type { ModalSubmitInteraction, Guild, VoiceChannel, Client } from 'discord.js';
-import { ChannelType } from 'discord.js';
+import { ChannelType, type ModalSubmitInteraction, type Guild, type VoiceChannel, type Client } from 'discord.js';
 
 // Mock dependencies before importing
 jest.mock('../../src/utils/logger.js');
