@@ -138,25 +138,25 @@ export class QuoteChannelManager {
 
   /**
    * Ensure the informational header post exists in the quote channel
-   * 
+   *
    * This method validates that a header post exists by checking the stored message ID.
    * If the header is missing or invalid, it creates a new one. The header provides
    * users with context about the channel's purpose and usage.
-   * 
+   *
    * **Pattern for Reuse**: This pattern can be applied to any bot-controlled channel:
    * 1. Check if header is enabled via config
    * 2. Validate existing header by stored message ID
    * 3. Create new header if missing or invalid
    * 4. Store message ID for future validation
-   * 
+   *
    * See DEVELOPER_GUIDE.md "Bot-Controlled Channel Header Posts" for implementation guide.
-   * 
+   *
    * @param channel - The Discord text channel to manage
    * @throws {Error} If channel access fails (logged but doesn't throw)
    * @example
    * // Called during initialization
    * await this.ensureHeaderPost(channel);
-   * 
+   *
    * // Called during cleanup to auto-recreate if deleted
    * await this.ensureHeaderPost(channel);
    */
@@ -207,19 +207,19 @@ export class QuoteChannelManager {
 
   /**
    * Create the header post with information about the quote channel
-   * 
+   *
    * Generates an embedded message with Discord blurple color that explains:
    * - How to add quotes (via /quote command)
    * - How to vote on quotes (👍/👎 reactions)
    * - Channel rules (bot-only messages, auto-cleanup)
-   * 
+   *
    * The message is pinned (if enabled) and its ID is stored in the config database
    * for validation on subsequent bot restarts.
-   * 
+   *
    * **Customization**: When reusing this pattern, modify the embed content to match
    * your channel's purpose while maintaining the same structure (title, description,
    * fields, footer).
-   * 
+   *
    * @param channel - The Discord text channel to post in
    * @throws {Error} If message creation fails (logged but doesn't throw)
    * @example
