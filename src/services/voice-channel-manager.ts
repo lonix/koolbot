@@ -418,6 +418,12 @@ export class VoiceChannelManager {
           }
         }
         await this.cleanupUserChannel(member.id);
+
+        // Always check if the old channel is now empty and should be cleaned up
+        // This handles the case where ownership was transferred but the channel is now empty
+        if (oldChannel.type === ChannelType.GuildVoice) {
+          await this.cleanupEmptyChannel(oldChannel);
+        }
       }
       // User switched channels
       else if (oldChannel && newChannel) {
@@ -438,6 +444,10 @@ export class VoiceChannelManager {
             }
             await this.cleanupUserChannel(member.id);
           }
+          // Check if old channel is now empty
+          if (oldChannel.type === ChannelType.GuildVoice) {
+            await this.cleanupEmptyChannel(oldChannel);
+          }
           await this.createUserChannel(member);
         }
         // If user is moving to the "New Channel", create a personal channel
@@ -453,6 +463,10 @@ export class VoiceChannelManager {
             }
             await this.cleanupUserChannel(member.id);
           }
+          // Check if old channel is now empty
+          if (oldChannel.type === ChannelType.GuildVoice) {
+            await this.cleanupEmptyChannel(oldChannel);
+          }
           await this.createUserChannel(member);
         }
         // If user is moving from their personal channel to another channel, clean up the old one
@@ -464,6 +478,10 @@ export class VoiceChannelManager {
             await this.handleChannelOwnershipChange(oldChannel);
           }
           await this.cleanupUserChannel(member.id);
+          // Check if old channel is now empty
+          if (oldChannel.type === ChannelType.GuildVoice) {
+            await this.cleanupEmptyChannel(oldChannel);
+          }
         }
       }
     } catch (error) {
@@ -658,6 +676,50 @@ export class VoiceChannelManager {
       }
     } catch (error) {
       logger.error("Error cleaning up user channel:", error);
+    }
+  }
+
+  /**
+   * Clean up a channel if it's empty, regardless of who the current owner is
+   * This is needed when ownership has been transferred but the channel becomes empty
+   */
+  private async cleanupEmptyChannel(channel: VoiceChannel): Promise<void> {
+    try {
+      // Only clean up if the channel is empty
+      if (channel.members.size !== 0) {
+        return;
+      }
+
+      // Check if this is a managed channel (either in userChannels or has custom name)
+      const isManaged =
+        Array.from(this.userChannels.values()).some(
+          (ch) => ch.id === channel.id,
+        ) || this.hasCustomName(channel.id);
+
+      if (!isManaged) {
+        // Not a managed channel, don't clean up
+        return;
+      }
+
+      // Delete the channel
+      await channel.delete();
+      logger.info(`Cleaned up empty voice channel ${channel.name}`);
+
+      // Clean up all tracking for this channel
+      // Find and remove from userChannels
+      for (const [userId, userChannel] of this.userChannels.entries()) {
+        if (userChannel.id === channel.id) {
+          this.userChannels.delete(userId);
+        }
+      }
+
+      // Clean up custom name tracking
+      this.customChannelNames.delete(channel.id);
+
+      // Clean up ownership queue
+      this.ownershipQueue.delete(channel.id);
+    } catch (error) {
+      logger.error("Error cleaning up empty channel:", error);
     }
   }
 
