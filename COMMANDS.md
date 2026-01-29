@@ -61,12 +61,7 @@ API Latency: 123ms
 
 **Description:** Get help with KoolBot commands. Lists all available commands or shows detailed information about a specific command.
 
-**Configuration:**
-
-```bash
-/config set key:help.enabled value:true
-/config reload
-```
+**Note:** This is a core command that is **always enabled** and does not require configuration.
 
 **Usage:**
 
