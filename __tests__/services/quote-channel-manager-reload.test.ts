@@ -16,6 +16,8 @@ describe("QuoteChannelManager - Configuration Reload", () => {
       channels: {
         fetch: jest.fn(),
       },
+      on: jest.fn(),
+      removeListener: jest.fn(),
     } as unknown as Client;
 
     // Get instances
