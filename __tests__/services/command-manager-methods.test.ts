@@ -49,9 +49,7 @@ describe("CommandManager Methods", () => {
 
       // Specifically check for critical commands that must be in sync
       expect(loadCommandNames).toContain("setup");
-      expect(loadCommandNames).toContain("setup-lobby");
       expect(populateCommandNames).toContain("setup");
-      expect(populateCommandNames).toContain("setup-lobby");
     }
   });
 

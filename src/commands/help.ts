@@ -77,11 +77,6 @@ const commandDetails: Record<
     description: "Database truncation commands (Admin only).",
     usage: "/dbtrunk <subcommand>",
   },
-  "setup-lobby": {
-    description: "Set up voice channel lobby (Admin only).",
-    usage: "/setup-lobby",
-    configKey: "voicechannels.enabled",
-  },
   "exclude-channel": {
     description: "Manage voice channel tracking exclusions (Admin only).",
     usage: "/exclude-channel <subcommand> [channel]",

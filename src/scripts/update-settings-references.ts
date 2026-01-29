@@ -125,7 +125,6 @@ async function updateSettingsReferences(): Promise<void> {
     );
     logger.info("");
     logger.info("Files that likely need updates:");
-    logger.info("- src/commands/setup-lobby.ts");
     logger.info("- src/services/channel-initializer.ts");
     logger.info("- src/services/voice-channel-manager.ts");
     logger.info("- src/services/command-manager.ts");

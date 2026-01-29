@@ -103,7 +103,6 @@ export class CommandManager {
           file: "reactrole",
         },
         { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
-        { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
       ];
 
       // Process each command
@@ -336,7 +335,6 @@ export class CommandManager {
           file: "reactrole",
         },
         { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
-        { name: "setup-lobby", configKey: null, file: "setup-lobby" }, // Always enabled
       ];
 
       // Process each command
