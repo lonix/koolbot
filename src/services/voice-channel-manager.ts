@@ -26,6 +26,10 @@ export class VoiceChannelManager {
   private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+  private ownershipTransferTimers: Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; originalOwnerId: string }
+  > = new Map(); // channelId -> timer and original owner info
   private client: Client;
   private configService: ConfigService;
 
@@ -222,44 +226,118 @@ export class VoiceChannelManager {
       // Check if current owner is still in the channel
       const currentOwner = channel.members.get(currentOwnerId);
       if (currentOwner) {
-        // Owner is still in the channel, no need to change
+        // Owner is still in the channel, cancel any pending ownership transfer
+        this.cancelOwnershipTransfer(channel.id);
         return;
       }
 
-      // Get members in the channel
-      const members = Array.from(channel.members.values());
-      if (members.length === 0) {
-        logger.error(`No members found in channel ${channel.name}`);
-        return;
-      }
-
-      // Get voice channel tracker instance
-      const tracker = VoiceChannelTracker.getInstance(this.client);
-
-      // Get voice time stats for all members in the channel for the last 7 days
-      const memberStats = await Promise.all(
-        members.map(async (member) => {
-          const stats = await tracker.getUserStats(member.id, "week");
-          return {
-            member,
-            totalTime: stats?.totalTime || 0,
-          };
-        }),
+      // Get grace period from config
+      const gracePeriodSeconds = await this.configService.getNumber(
+        "voicechannels.ownership.grace_period_seconds",
+        30,
       );
 
-      // Sort members by their voice time in the last 7 days
-      memberStats.sort((a, b) => b.totalTime - a.totalTime);
+      // Check if there's already a pending ownership transfer for this channel
+      if (this.ownershipTransferTimers.has(channel.id)) {
+        logger.info(
+          `Ownership transfer already scheduled for channel ${channel.name}`,
+        );
+        return;
+      }
 
-      // Select the member with the most voice time
-      const newOwner = memberStats[0].member;
-
-      // Update channel ownership
-      await this.updateChannelOwnership(channel, newOwner);
       logger.info(
-        `Channel ${channel.name} ownership transferred to ${newOwner.displayName} based on voice time`,
+        `Owner ${currentOwnerId} left channel ${channel.name}. Scheduling ownership transfer in ${gracePeriodSeconds} seconds...`,
       );
+
+      // Schedule ownership transfer after grace period
+      const timer = setTimeout(async () => {
+        try {
+          // Double-check that the owner hasn't rejoined
+          const channelNow = (await this.client.channels.fetch(
+            channel.id,
+          )) as VoiceChannel;
+          if (!channelNow) {
+            logger.warn(
+              `Channel ${channel.id} no longer exists, skipping ownership transfer`,
+            );
+            this.ownershipTransferTimers.delete(channel.id);
+            return;
+          }
+
+          // Check if the original owner has rejoined
+          if (channelNow.members.has(currentOwnerId)) {
+            logger.info(
+              `Original owner ${currentOwnerId} rejoined channel ${channelNow.name}, canceling ownership transfer`,
+            );
+            this.ownershipTransferTimers.delete(channel.id);
+            return;
+          }
+
+          // Get members in the channel
+          const members = Array.from(channelNow.members.values());
+          if (members.length === 0) {
+            logger.info(
+              `Channel ${channelNow.name} is now empty, no ownership transfer needed`,
+            );
+            this.ownershipTransferTimers.delete(channel.id);
+            return;
+          }
+
+          // Get voice channel tracker instance
+          const tracker = VoiceChannelTracker.getInstance(this.client);
+
+          // Get voice time stats for all members in the channel for the last 7 days
+          const memberStats = await Promise.all(
+            members.map(async (member) => {
+              const stats = await tracker.getUserStats(member.id, "week");
+              return {
+                member,
+                totalTime: stats?.totalTime || 0,
+              };
+            }),
+          );
+
+          // Sort members by their voice time in the last 7 days
+          memberStats.sort((a, b) => b.totalTime - a.totalTime);
+
+          // Select the member with the most voice time
+          const newOwner = memberStats[0].member;
+
+          // Update channel ownership
+          await this.updateChannelOwnership(channelNow, newOwner);
+          logger.info(
+            `Channel ${channelNow.name} ownership transferred to ${newOwner.displayName} based on voice time`,
+          );
+
+          // Clear the timer from the map
+          this.ownershipTransferTimers.delete(channel.id);
+        } catch (error) {
+          logger.error("Error during scheduled ownership transfer:", error);
+          this.ownershipTransferTimers.delete(channel.id);
+        }
+      }, gracePeriodSeconds * 1000);
+
+      // Store the timer and original owner info
+      this.ownershipTransferTimers.set(channel.id, {
+        timer,
+        originalOwnerId: currentOwnerId,
+      });
     } catch (error) {
       logger.error("Error handling channel ownership change:", error);
+    }
+  }
+
+  /**
+   * Cancel a pending ownership transfer for a channel
+   */
+  private cancelOwnershipTransfer(channelId: string): void {
+    const timerInfo = this.ownershipTransferTimers.get(channelId);
+    if (timerInfo) {
+      clearTimeout(timerInfo.timer);
+      this.ownershipTransferTimers.delete(channelId);
+      logger.info(
+        `Canceled pending ownership transfer for channel ${channelId}`,
+      );
     }
   }
 
