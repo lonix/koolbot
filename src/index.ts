@@ -28,6 +28,7 @@ import { StartupMigrator } from "./services/startup-migrator.js";
 import { DiscordLogger } from "./services/discord-logger.js";
 import { BotStatusService } from "./services/bot-status-service.js";
 import { QuoteChannelManager } from "./services/quote-channel-manager.js";
+import { NoticesChannelManager } from "./services/notices-channel-manager.js";
 import { PermissionsService } from "./services/permissions-service.js";
 import FriendshipListener from "./services/friendship-listener.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
@@ -423,6 +424,7 @@ let scheduledAnnouncementService: ScheduledAnnouncementService;
 let channelInitializer: ChannelInitializer;
 let startupMigrator: StartupMigrator;
 let quoteChannelManager: QuoteChannelManager;
+let noticesChannelManager: NoticesChannelManager;
 let reactionRoleService: ReactionRoleService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
@@ -438,6 +440,7 @@ try {
   channelInitializer = ChannelInitializer.getInstance(client);
   startupMigrator = StartupMigrator.getInstance();
   quoteChannelManager = QuoteChannelManager.getInstance(client);
+  noticesChannelManager = NoticesChannelManager.getInstance(client);
   reactionRoleService = ReactionRoleService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
@@ -508,6 +511,9 @@ async function initializeServices(): Promise<void> {
 
     // Initialize quote channel manager
     await quoteChannelManager.initialize();
+
+    // Initialize notices channel manager
+    await noticesChannelManager.initialize();
 
     // Initialize reaction role service
     await reactionRoleService.initialize();

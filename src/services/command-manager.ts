@@ -86,6 +86,7 @@ export class CommandManager {
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
+        { name: "notice", configKey: "notices.enabled", file: "notice" },
         {
           name: "announce",
           configKey: "announcements.enabled",
@@ -318,6 +319,7 @@ export class CommandManager {
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
+        { name: "notice", configKey: "notices.enabled", file: "notice" },
         {
           name: "announce",
           configKey: "announcements.enabled",
