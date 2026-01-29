@@ -367,7 +367,7 @@ export class VoiceChannelTracker {
         );
       }
 
-      // Check for accolades after session ends
+      // Check for accolades and achievements after session ends
       try {
         const achievementsService = AchievementsService.getInstance(
           this.client,
@@ -378,12 +378,18 @@ export class VoiceChannelTracker {
         );
 
         if (newAccolades.length > 0) {
-          // Send DM notification
+          // Send DM notification for accolades
           await achievementsService.notifyUserOfAccolades(userId, newAccolades);
         }
+
+        // Check for weekly achievements (these are NOT sent as DM notifications)
+        await achievementsService.checkAndAwardAchievements(
+          userId,
+          user.username,
+        );
       } catch (error: unknown) {
-        logger.error("Error checking gamification accolades:", error);
-        // Don't let gamification errors break voice tracking
+        logger.error("Error checking achievements/accolades:", error);
+        // Don't let achievement errors break voice tracking
       }
     } catch (error: unknown) {
       logger.error("Error ending voice tracking:", error);

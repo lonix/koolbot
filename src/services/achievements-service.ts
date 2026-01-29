@@ -12,7 +12,6 @@ import mongoose from "mongoose";
 // Badge type definitions
 export type AccoladeType =
   | "first_hour"
-  | "active_10hrs"
   | "voice_veteran_100"
   | "voice_veteran_500"
   | "voice_veteran_1000"
@@ -74,25 +73,6 @@ export class AchievementsService {
         return {
           value: Math.floor((user?.totalTime || 0) / 3600),
           description: "1 hour milestone",
-          unit: "hrs",
-        };
-      },
-    },
-    active_10hrs: {
-      emoji: "⚡",
-      name: "Active",
-      description: "Reached 10 hours in voice chat",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const user =
-          userData || (await VoiceChannelTracking.findOne({ userId }));
-        return user ? user.totalTime >= 36000 : false; // 10 hours = 36000 seconds
-      },
-      metadataFunction: async (userId: string, userData: any | null) => {
-        const user =
-          userData || (await VoiceChannelTracking.findOne({ userId }));
-        return {
-          value: Math.floor((user?.totalTime || 0) / 3600),
-          description: "10 hours milestone",
           unit: "hrs",
         };
       },
@@ -538,6 +518,27 @@ export class AchievementsService {
     },
   };
 
+  // Achievement definitions (time-based, not announced)
+  private achievementDefinitions: Partial<Record<AchievementType, BadgeDefinition>> = {
+    weekly_active: {
+      emoji: "⚡",
+      name: "Active",
+      description: "Reached 10 hours in voice chat this week",
+      checkFunction: async (userId: string) => {
+        const weeklyTime = await this.getWeeklyTimeForUser(userId);
+        return weeklyTime >= 36000; // 10 hours = 36000 seconds
+      },
+      metadataFunction: async (userId: string) => {
+        const weeklyTime = await this.getWeeklyTimeForUser(userId);
+        return {
+          value: Math.floor(weeklyTime / 3600),
+          description: "Hours this week",
+          unit: "hrs",
+        };
+      },
+    },
+  };
+
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
@@ -744,6 +745,50 @@ export class AchievementsService {
   }
 
   /**
+   * Get total voice time for a user this week
+   */
+  private async getWeeklyTimeForUser(userId: string): Promise<number> {
+    try {
+      const user = await VoiceChannelTracking.findOne({ userId });
+      if (!user || !user.sessions || user.sessions.length === 0) {
+        return 0;
+      }
+
+      // Get start of this week (Monday at 00:00:00)
+      const now = new Date();
+      const dayOfWeek = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday, go back 6 days
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - daysToMonday);
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      // Calculate total time for sessions that overlap with this week
+      let weeklyTime = 0;
+      for (const session of user.sessions) {
+        if (!session.endTime || !session.duration) continue;
+
+        // Check if session overlaps with this week
+        const sessionEnd = new Date(session.endTime);
+        if (sessionEnd >= startOfWeek) {
+          const sessionStart = new Date(session.startTime);
+          
+          // If session started before the week, only count time from start of week
+          const effectiveStart = sessionStart < startOfWeek ? startOfWeek : sessionStart;
+          
+          // Calculate the duration within this week
+          const durationInWeek = Math.floor((sessionEnd.getTime() - effectiveStart.getTime()) / 1000);
+          weeklyTime += Math.max(0, durationInWeek);
+        }
+      }
+
+      return weeklyTime;
+    } catch (error) {
+      logger.error("Error getting weekly time for user:", error);
+      return 0;
+    }
+  }
+
+  /**
    * Check and award accolades (persistent badges) to a user
    * Returns newly earned accolades
    */
@@ -824,6 +869,105 @@ export class AchievementsService {
   }
 
   /**
+   * Check and award achievements (time-based) to a user for the current week
+   * Returns newly earned achievements
+   */
+  public async checkAndAwardAchievements(
+    userId: string,
+    username: string,
+  ): Promise<IAchievement[]> {
+    try {
+      await this.ensureConnection();
+
+      const isEnabled = await this.configService.getBoolean(
+        "achievements.enabled",
+        false,
+      );
+
+      if (!isEnabled) {
+        return [];
+      }
+
+      // Get or create user achievements record
+      let userAchievements = await UserAchievements.findOne({ userId });
+      if (!userAchievements) {
+        userAchievements = new UserAchievements({
+          userId,
+          username,
+          accolades: [],
+          achievements: [],
+          lastChecked: new Date(),
+          statistics: { totalAccolades: 0, totalAchievements: 0 },
+        });
+      }
+
+      // Get current week period string (e.g., "2026-W05")
+      const now = new Date();
+      const weekNumber = this.getWeekNumber(now);
+      const currentPeriod = `${now.getFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+
+      // Check if user already has this week's achievements
+      const existingAchievementTypes = userAchievements.achievements
+        .filter((a) => a.period === currentPeriod)
+        .map((a) => a.type);
+
+      const newAchievements: IAchievement[] = [];
+
+      // Check each achievement type
+      for (const [type, definition] of Object.entries(
+        this.achievementDefinitions,
+      )) {
+        if (!definition || existingAchievementTypes.includes(type)) {
+          continue;
+        }
+
+        const earned = await definition.checkFunction(userId, null);
+        if (earned) {
+          const metadata = definition.metadataFunction
+            ? await definition.metadataFunction(userId, null)
+            : undefined;
+
+          const achievement: IAchievement = {
+            type,
+            earnedAt: new Date(),
+            period: currentPeriod,
+            metadata,
+          };
+
+          newAchievements.push(achievement);
+          userAchievements.achievements.push(achievement);
+          userAchievements.statistics.totalAchievements += 1;
+
+          logger.info(
+            `User ${username} (${userId}) earned achievement: ${definition.name} for ${currentPeriod}`,
+          );
+        }
+      }
+
+      if (newAchievements.length > 0) {
+        await userAchievements.save();
+      }
+
+      return newAchievements;
+    } catch (error) {
+      logger.error("Error checking and awarding achievements:", error);
+      return [];
+    }
+  }
+
+  /**
+   * Get ISO week number for a date
+   */
+  private getWeekNumber(date: Date): number {
+    const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    const dayNum = d.getUTCDay() || 7;
+    d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+    return Math.ceil((((d.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  }
+
+
+  /**
    * Get all accolades and achievements for a user
    */
   public async getUserAchievements(userId: string): Promise<{
@@ -855,6 +999,10 @@ export class AchievementsService {
    */
   public getAccoladeDefinition(type: string): BadgeDefinition | undefined {
     return this.accoladeDefinitions[type as AccoladeType];
+  }
+
+  public getAchievementDefinition(type: string): BadgeDefinition | undefined {
+    return this.achievementDefinitions[type as AchievementType];
   }
 
   /**

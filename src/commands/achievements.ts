@@ -114,6 +114,37 @@ export async function execute(
       }
     }
 
+    // Add achievements section (time-based)
+    if (userAchievements.achievements.length > 0) {
+      const achievementsList = userAchievements.achievements
+        .sort((a, b) => b.earnedAt.getTime() - a.earnedAt.getTime())
+        .slice(0, 10) // Limit to most recent 10
+        .map((achievement) => {
+          const definition = achievementsService.getAchievementDefinition(
+            achievement.type,
+          );
+          if (!definition) return null;
+
+          const earnedDate = achievement.earnedAt.toLocaleDateString();
+          const period = achievement.period || "N/A";
+          const metadataUnit = achievement.metadata?.unit ?? "";
+          const metadataText = achievement.metadata?.value
+            ? ` - ${achievement.metadata.value}${metadataUnit ? ` ${metadataUnit}` : ""}`
+            : "";
+
+          return `${definition.emoji} **${definition.name}**${metadataText}\n*${definition.description}* (${period})\nEarned: ${earnedDate}`;
+        })
+        .filter((text): text is string => Boolean(text));
+
+      if (achievementsList.length > 0) {
+        embed.addFields({
+          name: "🏅 Achievements (This Week)",
+          value: achievementsList.join("\n\n"),
+          inline: false,
+        });
+      }
+    }
+
     // Add summary
     embed.addFields({
       name: "📊 Summary",
