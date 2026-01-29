@@ -82,6 +82,9 @@ export async function handleWizardModal(
       case "modal_vt":
         await handleVtModal(interaction, guild, userId, guildId);
         break;
+      case "modal_amikool":
+        await handleAmikoolModal(interaction, guild, userId, guildId);
+        break;
       default:
         await interaction.reply({
           content: "❌ Unknown modal type.",

@@ -141,6 +141,12 @@ export async function handleWizardButton(
       case "logging_skip":
         await handleFeatureSkip(interaction, guild, userId, guildId);
         break;
+      case "amikool_configure":
+        await handleAmikoolConfigure(interaction, guild, userId, guildId);
+        break;
+      case "amikool_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
       case "finish_confirm":
         await handleFinish(interaction, guild, userId, guildId);
         break;
@@ -417,6 +423,34 @@ async function handleLoggingConfigure(
     textChannels,
     "logging",
   );
+}
+
+async function handleAmikoolConfigure(
+  interaction: ButtonInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  // Show modal to get role name
+  const modal = new ModalBuilder()
+    .setCustomId(`wizard_modal_amikool__${userId}_${guildId}`)
+    .setTitle("Configure Am I Kool");
+
+  const roleNameInput = new TextInputBuilder()
+    .setCustomId("role_name")
+    .setLabel("Role Name")
+    .setStyle(TextInputStyle.Short)
+    .setPlaceholder("Enter the role name (e.g., Kool)")
+    .setRequired(true)
+    .setMaxLength(100);
+
+  const row = new ActionRowBuilder<TextInputBuilder>().addComponents(
+    roleNameInput,
+  );
+
+  modal.addComponents(row);
+
+  await interaction.showModal(modal);
 }
 
 async function handleFeatureComplete(
