@@ -2,6 +2,7 @@ import { Config, IConfig } from "../models/config.js";
 import logger from "../utils/logger.js";
 import { Client } from "discord.js";
 import mongoose from "mongoose";
+import { defaultConfig } from "./config-schema.js";
 
 export class ConfigService {
   private static instance: ConfigService;
@@ -115,11 +116,90 @@ export class ConfigService {
         }
       }
 
+      // Clean up old/unknown settings from database
+      await this.cleanupUnknownSettings();
+
       this.initialized = true;
       logger.info("Configuration service initialized");
     } catch (error) {
       logger.error("Error initializing configuration service:", error);
       throw error;
+    }
+  }
+
+  /**
+   * Clean up old/unknown settings from the database
+   * This removes settings that are not in the current config schema
+   * Note: Critical settings (GUILD_ID, CLIENT_ID, DISCORD_TOKEN, MONGODB_URI, DEBUG, NODE_ENV)
+   * should ONLY come from environment variables, not the database, so they will be removed if found.
+   */
+  private async cleanupUnknownSettings(): Promise<void> {
+    try {
+      // Get all valid config keys from the schema
+      const validKeys = new Set(Object.keys(defaultConfig));
+
+      // Old keys that are known but being migrated (keep them for now)
+      const knownOldKeys = [
+        "ENABLE_VC_MANAGEMENT",
+        "VC_CATEGORY_NAME",
+        "LOBBY_CHANNEL_NAME",
+        "LOBBY_CHANNEL_NAME_OFFLINE",
+        "VC_CHANNEL_PREFIX",
+        "VC_SUFFIX",
+        "ENABLE_VC_TRACKING",
+        "ENABLE_SEEN",
+        "EXCLUDED_VC_CHANNELS",
+        "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
+        "VC_ANNOUNCEMENT_SCHEDULE",
+        "VC_ANNOUNCEMENT_CHANNEL",
+        "VC_TRACKING_ADMIN_ROLES",
+        "ENABLE_PING",
+        "ENABLE_AMIKOOL",
+        "COOL_ROLE_NAME",
+        "ENABLE_QUOTES",
+        "QUOTE_ADD_ROLES",
+        "QUOTE_DELETE_ROLES",
+        "QUOTE_MAX_LENGTH",
+        "QUOTE_COOLDOWN",
+      ];
+      knownOldKeys.forEach((key) => validKeys.add(key));
+
+      // Get all settings from database
+      const allSettings = await Config.find({});
+      const unknownSettings: string[] = [];
+
+      // Find unknown settings
+      for (const setting of allSettings) {
+        if (!validKeys.has(setting.key)) {
+          unknownSettings.push(setting.key);
+        }
+      }
+
+      // Delete unknown settings
+      if (unknownSettings.length > 0) {
+        logger.info(
+          `🧹 Found ${unknownSettings.length} unknown/old settings in database, removing them...`,
+        );
+
+        for (const key of unknownSettings) {
+          try {
+            await Config.deleteOne({ key });
+            this.cache.delete(key);
+            logger.info(`  ✓ Deleted unknown setting: ${key}`);
+          } catch (error) {
+            logger.error(`  ✗ Failed to delete setting ${key}:`, error);
+          }
+        }
+
+        logger.info(
+          `✅ Cleanup complete: removed ${unknownSettings.length} unknown settings`,
+        );
+      } else {
+        logger.info("✅ No unknown settings found in database");
+      }
+    } catch (error) {
+      logger.error("Error cleaning up unknown settings:", error);
+      // Don't throw - this is not critical to startup
     }
   }
 
@@ -277,37 +357,37 @@ export class ConfigService {
       // Voice Channel Management
       {
         key: "ENABLE_VC_MANAGEMENT",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Enable/disable voice channel management",
         defaultValue: "true",
       },
       {
         key: "VC_CATEGORY_NAME",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Name of the category for voice channels",
         defaultValue: "Voice Channels",
       },
       {
         key: "LOBBY_CHANNEL_NAME",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Name of the lobby channel",
         defaultValue: "Lobby",
       },
       {
         key: "LOBBY_CHANNEL_NAME_OFFLINE",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Name of the offline lobby channel",
         defaultValue: "Offline Lobby",
       },
       {
         key: "VC_CHANNEL_PREFIX",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Prefix for dynamically created channels",
         defaultValue: "🎮",
       },
       {
         key: "VC_SUFFIX",
-        category: "voice_channel",
+        category: "voicechannels",
         description: "Suffix for dynamically created channels",
         defaultValue: "",
       },
@@ -315,38 +395,38 @@ export class ConfigService {
       // Voice Channel Tracking
       {
         key: "ENABLE_VC_TRACKING",
-        category: "tracking",
+        category: "voicetracking",
         description: "Enable/disable voice channel tracking",
         defaultValue: "true",
       },
       {
         key: "ENABLE_SEEN",
-        category: "tracking",
+        category: "voicetracking",
         description: "Enable/disable last seen tracking",
         defaultValue: "true",
       },
       {
         key: "EXCLUDED_VC_CHANNELS",
-        category: "tracking",
+        category: "voicetracking",
         description:
           "Comma-separated list of voice channel IDs to exclude from tracking",
         defaultValue: "",
       },
       {
         key: "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
-        category: "tracking",
+        category: "voicetracking",
         description: "Enable/disable weekly voice channel announcements",
         defaultValue: "true",
       },
       {
         key: "VC_ANNOUNCEMENT_SCHEDULE",
-        category: "tracking",
+        category: "voicetracking",
         description: "Cron expression for weekly announcements",
         defaultValue: "0 16 * * 5",
       },
       {
         key: "VC_ANNOUNCEMENT_CHANNEL",
-        category: "tracking",
+        category: "voicetracking",
         description: "Channel name for voice channel announcements",
         defaultValue: "voice-stats",
       },
