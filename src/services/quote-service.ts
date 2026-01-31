@@ -5,7 +5,31 @@ import { CooldownManager } from "./cooldown-manager.js";
 
 const configService = ConfigService.getInstance();
 
-interface IQuote extends Document {
+/**
+ * Normalize a Discord user ID from various formats to a clean numeric ID
+ * Handles: <@123>, <@!123>, @username, or plain 123
+ * Returns the numeric ID or the original string if not parseable
+ */
+function normalizeUserId(input: string): string {
+  // Extract ID from mention formats: <@123> or <@!123>
+  const mentionMatch = input.match(/^<@!?(\d+)>$/);
+  if (mentionMatch) {
+    return mentionMatch[1];
+  }
+
+  // Remove leading @ if present
+  const cleanInput = input.replace(/^@/, "");
+
+  // If it's a numeric ID, return it
+  if (/^\d+$/.test(cleanInput)) {
+    return cleanInput;
+  }
+
+  // Return original if we can't parse it (might be a username)
+  return input;
+}
+
+export interface IQuote extends Document {
   content: string;
   authorId: string;
   addedById: string;
@@ -156,6 +180,40 @@ export class QuoteService {
     messageId: string,
   ): Promise<void> {
     await this.model.findByIdAndUpdate(quoteId, { messageId });
+  }
+
+  async editQuote(
+    quoteId: string,
+    content: string,
+    authorId: string,
+  ): Promise<void> {
+    const quote = await this.model.findById(quoteId);
+    if (!quote) {
+      throw new Error("Quote not found");
+    }
+
+    // Check quote length
+    const maxLength = await configService.getNumber("quotes.max_length", 1000);
+    if (content.length > maxLength) {
+      throw new Error(
+        `Quote is too long. Maximum length is ${maxLength} characters`,
+      );
+    }
+
+    // Normalize authorId to prevent double @ issues with legacy data
+    const normalizedAuthorId = normalizeUserId(authorId);
+
+    // Validate that the normalized authorId is a valid Discord user ID (numeric)
+    if (!/^\d+$/.test(normalizedAuthorId)) {
+      throw new Error(
+        "Invalid author ID format. Please select a valid Discord user.",
+      );
+    }
+
+    await this.model.findByIdAndUpdate(quoteId, {
+      content,
+      authorId: normalizedAuthorId,
+    });
   }
 
   async getAllQuotes(): Promise<IQuote[]> {

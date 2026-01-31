@@ -12,6 +12,30 @@ import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { quoteService } from "./quote-service.js";
 
+/**
+ * Normalize a Discord user ID from various formats to a clean numeric ID
+ * Handles: <@123>, <@!123>, @username, or plain 123
+ * Returns the numeric ID or the original string if not parseable
+ */
+function normalizeUserId(input: string): string {
+  // Extract ID from mention formats: <@123> or <@!123>
+  const mentionMatch = input.match(/^<@!?(\d+)>$/);
+  if (mentionMatch) {
+    return mentionMatch[1];
+  }
+
+  // Remove leading @ if present
+  const cleanInput = input.replace(/^@/, "");
+
+  // If it's a numeric ID, return it
+  if (/^\d+$/.test(cleanInput)) {
+    return cleanInput;
+  }
+
+  // Return original if we can't parse it (might be a username)
+  return input;
+}
+
 export class QuoteChannelManager {
   private static instance: QuoteChannelManager;
   private client: Client;
@@ -487,12 +511,20 @@ export class QuoteChannelManager {
         throw new Error("Quote channel not configured or not found");
       }
 
+      // Normalize user IDs to handle legacy formats and prevent double @
+      const normalizedAuthorId = normalizeUserId(authorId);
+      const normalizedAddedById = normalizeUserId(addedById);
+
       const embed = new EmbedBuilder()
         .setColor(0x0099ff)
         .setDescription(`"${content}"`)
         .addFields(
-          { name: "Author", value: `<@${authorId}>`, inline: true },
-          { name: "Added by", value: `<@${addedById}>`, inline: true },
+          { name: "Author", value: `<@${normalizedAuthorId}>`, inline: true },
+          {
+            name: "Added by",
+            value: `<@${normalizedAddedById}>`,
+            inline: true,
+          },
         )
         .setFooter({ text: `ID: ${quoteId}` })
         .setTimestamp();
@@ -527,6 +559,54 @@ export class QuoteChannelManager {
       }
     } catch (error) {
       logger.error(`Error deleting quote message ${messageId}:`, error);
+    }
+  }
+
+  public async updateQuoteMessage(
+    messageId: string,
+    quoteId: string,
+    content: string,
+    authorId: string,
+    addedById: string,
+  ): Promise<void> {
+    try {
+      const channel = await this.getQuoteChannel();
+      if (!channel) {
+        throw new Error("Quote channel not configured or not found");
+      }
+
+      const message = await channel.messages.fetch(messageId);
+      if (!message) {
+        throw new Error("Quote message not found");
+      }
+
+      // Normalize user IDs to handle legacy formats and prevent double @
+      const normalizedAuthorId = normalizeUserId(authorId);
+      const normalizedAddedById = normalizeUserId(addedById);
+
+      const embed = new EmbedBuilder()
+        .setColor(0x0099ff)
+        .setDescription(`"${content}"`)
+        .addFields(
+          {
+            name: "Author",
+            value: `<@${normalizedAuthorId}>`,
+            inline: true,
+          },
+          {
+            name: "Added by",
+            value: `<@${normalizedAddedById}>`,
+            inline: true,
+          },
+        )
+        .setFooter({ text: `ID: ${quoteId}` })
+        .setTimestamp();
+
+      await message.edit({ embeds: [embed] });
+      logger.info(`Updated quote message ${messageId}`);
+    } catch (error) {
+      logger.error(`Error updating quote message ${messageId}:`, error);
+      throw error;
     }
   }
 
