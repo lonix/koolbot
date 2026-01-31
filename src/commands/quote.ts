@@ -3,6 +3,30 @@ import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
 import logger from "../utils/logger.js";
 
+/**
+ * Normalize a Discord user ID from various formats to a clean numeric ID
+ * Handles: <@123>, <@!123>, @username, or plain 123
+ * Returns the numeric ID or the original string if not parseable
+ */
+function normalizeUserId(input: string): string {
+  // Extract ID from mention formats: <@123> or <@!123>
+  const mentionMatch = input.match(/^<@!?(\d+)>$/);
+  if (mentionMatch) {
+    return mentionMatch[1];
+  }
+
+  // Remove leading @ if present
+  const cleanInput = input.replace(/^@/, "");
+
+  // If it's a numeric ID, return it
+  if (/^\d+$/.test(cleanInput)) {
+    return cleanInput;
+  }
+
+  // Return original if we can't parse it (might be a username)
+  return input;
+}
+
 export const data = new SlashCommandBuilder()
   .setName("quote")
   .setDescription("Manage quotes in the quote channel")
@@ -157,24 +181,43 @@ async function handleEdit(
     return;
   }
 
-  // Update quote in database
-  await quoteService.editQuote(
-    quoteId,
-    newText ?? existingQuote.content,
-    newAuthor?.id ?? existingQuote.authorId,
-  );
+  // Normalize authorId from existing quote (handles legacy formats)
+  const normalizedExistingAuthorId = normalizeUserId(existingQuote.authorId);
+  const normalizedAddedById = normalizeUserId(existingQuote.addedById);
 
-  // Update the message in the quote channel
+  const finalContent = newText ?? existingQuote.content;
+  const finalAuthorId = newAuthor?.id ?? normalizedExistingAuthorId;
+
+  // First, try to update the message in the quote channel
+  // This ensures we don't persist changes if the message can't be updated
   const quoteChannelManager = QuoteChannelManager.getInstance(
     interaction.client,
   );
-  await quoteChannelManager.updateQuoteMessage(
-    existingQuote.messageId,
-    quoteId,
-    newText ?? existingQuote.content,
-    newAuthor?.id ?? existingQuote.authorId,
-    existingQuote.addedById,
-  );
+
+  try {
+    await quoteChannelManager.updateQuoteMessage(
+      existingQuote.messageId,
+      quoteId,
+      finalContent,
+      finalAuthorId,
+      normalizedAddedById,
+    );
+  } catch (error) {
+    logger.error(
+      `Failed to update quote message for quote ${quoteId} (messageId=${existingQuote.messageId}):`,
+      error,
+    );
+
+    await interaction.reply({
+      content:
+        "❌ I couldn't find or update the quote message in the quote channel. The quote may not have been posted successfully, or the message was deleted. Please contact a server admin.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Only update quote in database after the message was successfully updated
+  await quoteService.editQuote(quoteId, finalContent, finalAuthorId);
 
   await interaction.reply({
     content: "✅ Quote updated successfully!",

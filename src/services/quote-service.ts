@@ -5,6 +5,30 @@ import { CooldownManager } from "./cooldown-manager.js";
 
 const configService = ConfigService.getInstance();
 
+/**
+ * Normalize a Discord user ID from various formats to a clean numeric ID
+ * Handles: <@123>, <@!123>, @username, or plain 123
+ * Returns the numeric ID or the original string if not parseable
+ */
+function normalizeUserId(input: string): string {
+  // Extract ID from mention formats: <@123> or <@!123>
+  const mentionMatch = input.match(/^<@!?(\d+)>$/);
+  if (mentionMatch) {
+    return mentionMatch[1];
+  }
+
+  // Remove leading @ if present
+  const cleanInput = input.replace(/^@/, "");
+
+  // If it's a numeric ID, return it
+  if (/^\d+$/.test(cleanInput)) {
+    return cleanInput;
+  }
+
+  // Return original if we can't parse it (might be a username)
+  return input;
+}
+
 export interface IQuote extends Document {
   content: string;
   authorId: string;
@@ -176,9 +200,19 @@ export class QuoteService {
       );
     }
 
+    // Normalize authorId to prevent double @ issues with legacy data
+    const normalizedAuthorId = normalizeUserId(authorId);
+
+    // Validate that the normalized authorId is a valid Discord user ID (numeric)
+    if (!/^\d+$/.test(normalizedAuthorId)) {
+      throw new Error(
+        "Invalid author ID format. Please select a valid Discord user.",
+      );
+    }
+
     await this.model.findByIdAndUpdate(quoteId, {
       content,
-      authorId,
+      authorId: normalizedAuthorId,
     });
   }
 
