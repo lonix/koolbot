@@ -219,6 +219,45 @@ export class QuoteService {
   async getAllQuotes(): Promise<IQuote[]> {
     return this.model.find().sort({ createdAt: -1 });
   }
+
+  /**
+   * Get the count of quotes added by a specific user
+   */
+  async getQuotesAddedByUser(userId: string): Promise<number> {
+    return this.model.countDocuments({ addedById: userId });
+  }
+
+  /**
+   * Get the count of quotes where a specific user is the author (being quoted)
+   */
+  async getQuotesAuthoredByUser(userId: string): Promise<number> {
+    return this.model.countDocuments({ authorId: userId });
+  }
+
+  /**
+   * Get the most liked quote for a specific author
+   */
+  async getMostLikedQuoteByAuthor(authorId: string): Promise<IQuote | null> {
+    const quotes = await this.model
+      .find({ authorId })
+      .sort({ likes: -1 })
+      .limit(1);
+    return quotes.length > 0 ? quotes[0] : null;
+  }
+
+  /**
+   * Check if user has a quote with at least the specified number of likes
+   */
+  async hasQuoteWithLikes(
+    authorId: string,
+    minLikes: number,
+  ): Promise<boolean> {
+    const count = await this.model.countDocuments({
+      authorId,
+      likes: { $gte: minLikes },
+    });
+    return count > 0;
+  }
 }
 
 export const quoteService = new QuoteService();

@@ -8,6 +8,7 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import mongoose from "mongoose";
+import { quoteService } from "./quote-service.js";
 
 // Badge type definitions
 export type AccoladeType =
@@ -26,7 +27,14 @@ export type AccoladeType =
   | "weekday_warrior"
   | "consistent_week"
   | "consistent_fortnight"
-  | "consistent_month";
+  | "consistent_month"
+  | "quotable"
+  | "quote_master"
+  | "quote_collector"
+  | "quote_legend"
+  | "widely_quoted"
+  | "quote_icon"
+  | "viral_quote";
 
 export type AchievementType =
   | "weekly_champion"
@@ -513,6 +521,124 @@ export class AchievementsService {
           value: longestStreak,
           description: "30+ day streak",
           unit: "days",
+        };
+      },
+    },
+    quotable: {
+      emoji: "🗣️",
+      name: "Quotable",
+      description: "Been quoted for the first time",
+      checkFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
+        return count >= 1;
+      },
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
+        return {
+          value: count,
+          description: "First quote",
+          unit: "quotes",
+        };
+      },
+    },
+    quote_master: {
+      emoji: "📝",
+      name: "Quote Master",
+      description: "Added 10 quotes to the collection",
+      checkFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
+        return count >= 10;
+      },
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
+        return {
+          value: count,
+          description: "10+ quotes added",
+          unit: "quotes",
+        };
+      },
+    },
+    quote_collector: {
+      emoji: "📚",
+      name: "Quote Collector",
+      description: "Added 50 quotes to the collection",
+      checkFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
+        return count >= 50;
+      },
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
+        return {
+          value: count,
+          description: "50+ quotes added",
+          unit: "quotes",
+        };
+      },
+    },
+    quote_legend: {
+      emoji: "🏆",
+      name: "Quote Legend",
+      description: "Added 100 quotes to the collection",
+      checkFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
+        return count >= 100;
+      },
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
+        return {
+          value: count,
+          description: "100+ quotes added",
+          unit: "quotes",
+        };
+      },
+    },
+    widely_quoted: {
+      emoji: "⭐",
+      name: "Widely Quoted",
+      description: "Been quoted 25 times",
+      checkFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
+        return count >= 25;
+      },
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
+        return {
+          value: count,
+          description: "25+ times quoted",
+          unit: "quotes",
+        };
+      },
+    },
+    quote_icon: {
+      emoji: "💫",
+      name: "Quote Icon",
+      description: "Been quoted 50 times",
+      checkFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
+        return count >= 50;
+      },
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
+        return {
+          value: count,
+          description: "50+ times quoted",
+          unit: "quotes",
+        };
+      },
+    },
+    viral_quote: {
+      emoji: "🔥",
+      name: "Viral Quote",
+      description: "Have a quote with 10+ likes",
+      checkFunction: async (userId: string) => {
+        return await quoteService.hasQuoteWithLikes(userId, 10);
+      },
+      metadataFunction: async (userId: string) => {
+        const mostLiked = await quoteService.getMostLikedQuoteByAuthor(userId);
+        return {
+          value: mostLiked?.likes || 0,
+          description: "10+ likes on a quote",
+          unit: "likes",
         };
       },
     },
