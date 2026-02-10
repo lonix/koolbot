@@ -36,22 +36,4 @@ describe("QuoteService - Achievement Methods", () => {
       expect(quoteService.hasQuoteWithLikes.length).toBe(2);
     });
   });
-
-  describe("method signatures", () => {
-    it("getQuotesAddedByUser should accept userId parameter", () => {
-      expect(quoteService.getQuotesAddedByUser.length).toBe(1);
-    });
-
-    it("getQuotesAuthoredByUser should accept userId parameter", () => {
-      expect(quoteService.getQuotesAuthoredByUser.length).toBe(1);
-    });
-
-    it("getMostLikedQuoteByAuthor should accept authorId parameter", () => {
-      expect(quoteService.getMostLikedQuoteByAuthor.length).toBe(1);
-    });
-
-    it("hasQuoteWithLikes should accept authorId and minLikes parameters", () => {
-      expect(quoteService.hasQuoteWithLikes.length).toBe(2);
-    });
-  });
 });
