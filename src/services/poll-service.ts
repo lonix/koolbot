@@ -39,7 +39,10 @@ export class PollService {
       try {
         logger.info("Poll service configuration changed, reloading...");
 
-        const enabled = await this.configService.getBoolean("polls.enabled", false);
+        const enabled = await this.configService.getBoolean(
+          "polls.enabled",
+          false,
+        );
 
         if (!enabled && this.isInitialized) {
           logger.info("Poll service disabled, cleaning up jobs...");
@@ -48,7 +51,10 @@ export class PollService {
           await this.reload();
         }
       } catch (error) {
-        logger.error("Error reloading poll service after configuration change:", error);
+        logger.error(
+          "Error reloading poll service after configuration change:",
+          error,
+        );
       }
     });
   }
@@ -105,7 +111,9 @@ export class PollService {
 
         elapsed += pollIntervalMs;
         if (elapsed >= maxWaitMs) {
-          logger.warn("PollService: client did not become ready within expected time; continuing anyway.");
+          logger.warn(
+            "PollService: client did not become ready within expected time; continuing anyway.",
+          );
           cleanup();
           resolve();
         }
@@ -119,7 +127,10 @@ export class PollService {
    * Select a poll item from the database that hasn't been used recently
    */
   private async selectPollItem(guildId: string): Promise<IPollItem | null> {
-    const cooldownDays = await this.configService.getNumber("polls.cooldown_days", 7);
+    const cooldownDays = await this.configService.getNumber(
+      "polls.cooldown_days",
+      7,
+    );
     const cooldownDate = new Date();
     cooldownDate.setDate(cooldownDate.getDate() - cooldownDays);
 
@@ -143,7 +154,10 @@ export class PollService {
     }
 
     // Randomize selection among the least-used polls (top 20% or minimum 3)
-    const selectionPoolSize = Math.max(3, Math.ceil(eligiblePolls.length * 0.2));
+    const selectionPoolSize = Math.max(
+      3,
+      Math.ceil(eligiblePolls.length * 0.2),
+    );
     const selectionPool = eligiblePolls.slice(0, selectionPoolSize);
     const randomIndex = Math.floor(Math.random() * selectionPool.length);
 
@@ -159,13 +173,17 @@ export class PollService {
 
       const guild = await this.client.guilds.fetch(schedule.guildId);
       if (!guild) {
-        logger.error(`Guild not found with ID: ${schedule.guildId} for schedule ${schedule._id}`);
+        logger.error(
+          `Guild not found with ID: ${schedule.guildId} for schedule ${schedule._id}`,
+        );
         return;
       }
 
       const channel = await guild.channels.fetch(schedule.channelId);
       if (!channel || !(channel instanceof TextChannel)) {
-        logger.error(`Channel not found or not a text channel: ${schedule.channelId} for schedule ${schedule._id}`);
+        logger.error(
+          `Channel not found or not a text channel: ${schedule.channelId} for schedule ${schedule._id}`,
+        );
         return;
       }
 
@@ -208,7 +226,9 @@ export class PollService {
       schedule.lastRun = new Date();
       await schedule.save();
 
-      logger.info(`Posted poll "${pollItem.question}" to channel ${schedule.channelId} (schedule ${schedule._id})`);
+      logger.info(
+        `Posted poll "${pollItem.question}" to channel ${schedule.channelId} (schedule ${schedule._id})`,
+      );
     } catch (error) {
       logger.error(`Error posting poll for schedule ${schedule._id}:`, error);
     }
@@ -216,7 +236,9 @@ export class PollService {
 
   private schedulePoll(schedule: IPollSchedule): CronJob | null {
     if (!this.validateCronExpression(schedule.cronSchedule)) {
-      logger.error(`Invalid cron schedule for poll ${schedule._id}: ${schedule.cronSchedule}`);
+      logger.error(
+        `Invalid cron schedule for poll ${schedule._id}: ${schedule.cronSchedule}`,
+      );
       return null;
     }
 
@@ -224,7 +246,8 @@ export class PollService {
       const job = new CronJob(schedule.cronSchedule, async () => {
         try {
           // Fetch fresh schedule data from database to handle updates
-          const latestSchedule = (await PollSchedule.findById(schedule._id)) ?? schedule;
+          const latestSchedule =
+            (await PollSchedule.findById(schedule._id)) ?? schedule;
           await this.postPoll(latestSchedule);
         } catch (error) {
           logger.error(`Error in scheduled poll ${schedule._id}:`, error);
@@ -232,10 +255,14 @@ export class PollService {
       });
 
       job.start();
-      logger.info(`Scheduled poll ${schedule._id} with cron: ${schedule.cronSchedule}`);
+      logger.info(
+        `Scheduled poll ${schedule._id} with cron: ${schedule.cronSchedule}`,
+      );
 
       const nextRun = job.nextDate();
-      logger.info(`Next poll ${schedule._id} scheduled for: ${nextRun.toLocaleString()}`);
+      logger.info(
+        `Next poll ${schedule._id} scheduled for: ${nextRun.toLocaleString()}`,
+      );
 
       return job;
     } catch (error) {
@@ -255,7 +282,10 @@ export class PollService {
     try {
       await this.waitForClientReady();
 
-      const enabled = await this.configService.getBoolean("polls.enabled", false);
+      const enabled = await this.configService.getBoolean(
+        "polls.enabled",
+        false,
+      );
 
       if (!enabled) {
         logger.info("Poll service is disabled");
@@ -354,7 +384,9 @@ export class PollService {
         }
 
         if (poll.question.length > 300) {
-          results.errors.push(`Poll ${i + 1}: Question too long (max 300 chars)`);
+          results.errors.push(
+            `Poll ${i + 1}: Question too long (max 300 chars)`,
+          );
           results.skipped++;
           continue;
         }
@@ -386,7 +418,9 @@ export class PollService {
           });
           results.imported++;
         } catch (error) {
-          results.errors.push(`Poll ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`);
+          results.errors.push(
+            `Poll ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          );
           results.skipped++;
         }
       }
@@ -395,14 +429,20 @@ export class PollService {
         if (error.code === "ECONNABORTED") {
           results.errors.push("Request timeout - URL took too long to respond");
         } else if (error.response) {
-          results.errors.push(`HTTP ${error.response.status}: ${error.response.statusText}`);
+          results.errors.push(
+            `HTTP ${error.response.status}: ${error.response.statusText}`,
+          );
         } else if (error.request) {
-          results.errors.push("No response from URL - check if URL is accessible");
+          results.errors.push(
+            "No response from URL - check if URL is accessible",
+          );
         } else {
           results.errors.push(`Request error: ${error.message}`);
         }
       } else {
-        results.errors.push(`Error: ${error instanceof Error ? error.message : "Unknown error"}`);
+        results.errors.push(
+          `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
+        );
       }
     }
 
@@ -437,14 +477,19 @@ export class PollService {
   /**
    * Delete a poll schedule
    */
-  public async deleteSchedule(scheduleId: string, guildId?: string): Promise<boolean> {
+  public async deleteSchedule(
+    scheduleId: string,
+    guildId?: string,
+  ): Promise<boolean> {
     const schedule = await PollSchedule.findById(scheduleId);
     if (!schedule) {
       return false;
     }
 
     if (guildId && schedule.guildId !== guildId) {
-      logger.warn(`Attempted to delete schedule ${scheduleId} from wrong guild`);
+      logger.warn(
+        `Attempted to delete schedule ${scheduleId} from wrong guild`,
+      );
       return false;
     }
 
@@ -478,7 +523,10 @@ export class PollService {
    * Create a poll item manually
    */
   public async createPollItem(
-    data: Omit<IPollItem, "createdAt" | "updatedAt" | "usageCount" | "lastUsed">,
+    data: Omit<
+      IPollItem,
+      "createdAt" | "updatedAt" | "usageCount" | "lastUsed"
+    >,
   ): Promise<IPollItem> {
     const pollItem = new PollItem(data);
     await pollItem.save();
@@ -496,7 +544,10 @@ export class PollService {
   /**
    * Delete a poll item
    */
-  public async deletePollItem(itemId: string, guildId?: string): Promise<boolean> {
+  public async deletePollItem(
+    itemId: string,
+    guildId?: string,
+  ): Promise<boolean> {
     const item = await PollItem.findById(itemId);
     if (!item) {
       return false;

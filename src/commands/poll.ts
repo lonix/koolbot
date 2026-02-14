@@ -28,7 +28,9 @@ export const data = new SlashCommandBuilder()
       .addStringOption((option) =>
         option
           .setName("schedule")
-          .setDescription("Cron schedule (e.g., '0 12 * * *' for daily at noon)")
+          .setDescription(
+            "Cron schedule (e.g., '0 12 * * *' for daily at noon)",
+          )
           .setRequired(true),
       )
       .addIntegerOption((option) =>
@@ -47,9 +49,7 @@ export const data = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((subcommand) =>
-    subcommand
-      .setName("list")
-      .setDescription("List all poll schedules"),
+    subcommand.setName("list").setDescription("List all poll schedules"),
   )
   .addSubcommand((subcommand) =>
     subcommand
@@ -362,7 +362,10 @@ async function handleAddItem(
   }
 
   // Parse answers
-  const answers = answersStr.split(",").map((a) => a.trim()).filter((a) => a);
+  const answers = answersStr
+    .split(",")
+    .map((a) => a.trim())
+    .filter((a) => a);
 
   if (answers.length < 2 || answers.length > 10) {
     await interaction.editReply({
@@ -373,7 +376,10 @@ async function handleAddItem(
 
   // Parse tags
   const tags = tagsStr
-    ? tagsStr.split(",").map((t) => t.trim()).filter((t) => t)
+    ? tagsStr
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t)
     : [];
 
   const service = PollService.getInstance(interaction.client);

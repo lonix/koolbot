@@ -1758,6 +1758,288 @@ Message: Good morning, {server_name}!
 - Rule reminders
 - Automated status updates
 
+---
+
+### `/poll`
+
+**Description:** Manage periodic polls for icebreaker discussions and community engagement.
+Posts Discord native polls on a schedule with questions from URL sources or database storage.
+
+**Configuration:**
+
+```bash
+/config set key:polls.enabled value:true
+/config set key:polls.default_duration_hours value:24    # Default poll duration
+/config set key:polls.cooldown_days value:7              # Days before reusing poll
+/config reload
+```
+
+**Features:**
+
+- 🗳️ **Native Discord Polls** - Uses Discord's built-in poll feature
+- 📅 **Scheduled Posting** - Automatic polls via cron schedules  
+- 📥 **URL Import** - Fetch poll questions from YAML/JSON files
+- 🔄 **Smart Rotation** - Avoid repeating polls within cooldown period
+- 💾 **Database Storage** - Store and manage poll questions locally
+- 🔔 **Role Pinging** - Optional role mentions when posting
+- 🎲 **Multi-Select** - Support for multiple answer selections
+
+**Subcommands:**
+
+#### Create a poll schedule
+
+```bash
+/poll create channel:#daily-questions schedule:"0 12 * * *" duration:24 ping_role:@Everyone
+```
+
+**Parameters:**
+
+- `channel` (required) - Channel to post polls in
+- `schedule` (required) - Cron schedule expression
+  - `0 12 * * *` - Daily at noon
+  - `0 9 * * 1` - Every Monday at 9 AM
+  - `0 18 * * 5` - Every Friday at 6 PM
+- `duration` (optional) - Poll duration in hours (1-768, default: 24)
+- `ping_role` (optional) - Role to mention when posting polls
+
+**Example:**
+
+```bash
+/poll create channel:#icebreakers schedule:"0 14 * * *" duration:48 ping_role:@Community
+```
+
+#### Import poll questions from URL
+
+```bash
+/poll import-url url:https://example.com/polls.yaml
+```
+
+Imports poll questions from a remote YAML or JSON file and saves them to the database.
+
+**Supported URL Formats:**
+
+**YAML:**
+
+```yaml
+polls:
+  - question: "What's your favorite programming language?"
+    answers:
+      - "JavaScript"
+      - "Python"
+      - "Go"
+      - "Rust"
+    multiselect: false
+    tags: ["tech", "icebreaker"]
+  
+  - question: "Would you rather fight 100 duck-sized horses or 1 horse-sized duck?"
+    answers:
+      - "100 duck-sized horses"
+      - "1 horse-sized duck"
+      - "Neither, I'm out!"
+    multiselect: false
+    tags: ["funny", "absurd"]
+```
+
+**JSON:**
+
+```json
+{
+  "polls": [
+    {
+      "question": "What's your favorite season?",
+      "answers": ["Spring", "Summer", "Fall", "Winter"],
+      "multiselect": false,
+      "tags": ["general"]
+    }
+  ]
+}
+```
+
+**Import Result:**
+
+```text
+📥 Import Results
+
+Imported: 15
+Skipped: 3
+Errors: 0
+```
+
+#### Add a poll question manually
+
+```bash
+/poll add-item question:"What's your favorite food?" \
+  answers:"Pizza, Tacos, Sushi, Burgers" \
+  multiselect:false \
+  tags:"food,icebreaker"
+```
+
+**Parameters:**
+
+- `question` (required) - Poll question (max 300 characters)
+- `answers` (required) - Comma-separated list of 2-10 answers
+- `multiselect` (optional) - Allow multiple selections (default: false)
+- `tags` (optional) - Comma-separated tags for categorization
+
+#### List poll schedules
+
+```bash
+/poll list
+```
+
+Shows all configured poll schedules with:
+
+- Schedule ID
+- Status (enabled/disabled)
+- Target channel
+- Cron schedule
+- Poll duration
+- Ping role
+- Last run time
+
+**Example Response:**
+
+```text
+📊 Poll Schedules
+Total: 2 schedule(s)
+
+✅ 65f8a9b3c2d1e4f6a7b8c5d4
+Channel: #daily-questions
+Schedule: `0 12 * * *`
+Duration: 24h
+Ping Role: @Everyone
+Last Run: 2/14/2026, 12:00:00 PM
+
+✅ 65f8b2c4d3e5f7a8b9c6d5e4
+Channel: #friday-fun
+Schedule: `0 18 * * 5`
+Duration: 48h
+Ping Role: None
+Last Run: Never
+```
+
+#### List poll questions
+
+```bash
+/poll list-items
+```
+
+Shows all stored poll questions with:
+
+- Poll ID
+- Status (enabled/disabled)
+- Question text (truncated)
+- Number of answers
+- Usage count
+- Last used date
+
+**Example Response:**
+
+```text
+📊 Poll Questions
+Total: 25 question(s)
+
+✅ 65f8c3d4e5f6a7b8c9d6e5f6
+Q: What's your favorite programming language?
+Answers: 4
+Used: 3 times
+Last: 2/10/2026, 2:00:00 PM
+
+✅ 65f8d4e5f6a7b8c9d6e5f7a8
+Q: Would you rather fight 100 duck-sized horses...
+Answers: 3
+Used: 1 times
+Last: 1/28/2026, 12:00:00 PM
+```
+
+#### Delete a poll schedule
+
+```bash
+/poll delete id:65f8a9b3c2d1e4f6a7b8c5d4
+```
+
+**Parameters:**
+
+- `id` (required) - Schedule ID from `/poll list`
+
+#### Delete a poll question
+
+```bash
+/poll delete-item id:65f8c3d4e5f6a7b8c9d6e5f6
+```
+
+**Parameters:**
+
+- `id` (required) - Poll item ID from `/poll list-items`
+
+#### Test a poll schedule
+
+```bash
+/poll test schedule_id:65f8a9b3c2d1e4f6a7b8c5d4
+```
+
+Posts a poll immediately from the specified schedule for testing purposes.
+
+**Parameters:**
+
+- `schedule_id` (required) - Schedule ID to test
+
+**Poll Selection Logic:**
+
+The bot intelligently selects polls to avoid repetition:
+
+1. **Cooldown Period** - Polls used within the cooldown period (default 7 days) are skipped
+2. **Usage Count** - Prioritizes less-used polls
+3. **Randomization** - Randomly selects from the top 20% least-used eligible polls
+4. **Fallback** - If all polls are within cooldown, uses the oldest-used poll
+
+**Example Workflow:**
+
+```bash
+# 1. Enable the feature
+/config set key:polls.enabled value:true
+/config reload
+
+# 2. Import poll questions from a URL
+/poll import-url url:https://mysite.com/icebreaker-polls.yaml
+→ Imported: 20 polls
+
+# 3. Or add polls manually
+/poll add-item question:"Cats or dogs?" answers:"Cats, Dogs, Both!, Neither" multiselect:false
+
+# 4. Create a schedule
+/poll create channel:#daily-questions schedule:"0 12 * * *" duration:24 ping_role:@Community
+
+# 5. Test it immediately
+/poll test schedule_id:65f8a9b3c2d1e4f6a7b8c5d4
+→ ✅ Test poll posted successfully
+
+# 6. View schedules
+/poll list
+
+# 7. View all poll questions
+/poll list-items
+```
+
+**Use Cases:**
+
+- Daily icebreaker questions to spark conversations
+- Weekly "Would You Rather" discussions
+- Team building and getting-to-know-you activities
+- Community engagement and feedback polls
+- Fun hypothetical scenarios
+- Topic voting for events or discussions
+
+**Tips:**
+
+- **Start Small** - Import 10-15 polls initially to test the rotation
+- **Diversify** - Mix serious and funny questions for variety
+- **Tag Wisely** - Use tags to organize polls by theme
+- **Monitor Usage** - Check `/poll list-items` to see which polls are popular
+- **Update Regularly** - Add new polls monthly to keep content fresh
+- **Cooldown Balance** - Adjust cooldown period based on pool size (more polls = longer cooldown works better)
+
+---
 **Notes:**
 
 - Announcements persist across bot restarts
