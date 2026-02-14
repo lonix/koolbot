@@ -33,6 +33,7 @@ import { NoticesChannelManager } from "./services/notices-channel-manager.js";
 import { PermissionsService } from "./services/permissions-service.js";
 import FriendshipListener from "./services/friendship-listener.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
+import { PollService } from "./services/poll-service.js";
 
 dotenvConfig();
 
@@ -427,6 +428,7 @@ let startupMigrator: StartupMigrator;
 let quoteChannelManager: QuoteChannelManager;
 let noticesChannelManager: NoticesChannelManager;
 let reactionRoleService: ReactionRoleService;
+let pollService: PollService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
@@ -443,6 +445,7 @@ try {
   quoteChannelManager = QuoteChannelManager.getInstance(client);
   noticesChannelManager = NoticesChannelManager.getInstance(client);
   reactionRoleService = ReactionRoleService.getInstance(client);
+  pollService = PollService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
@@ -518,6 +521,9 @@ async function initializeServices(): Promise<void> {
 
     // Initialize reaction role service
     await reactionRoleService.initialize();
+
+    // Initialize poll service
+    await pollService.start();
 
     // Initialize permissions service and set up default permissions
     const permissionsService = PermissionsService.getInstance(client);

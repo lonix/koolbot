@@ -87,6 +87,11 @@ export interface ConfigSchema {
   "notices.header_enabled": boolean; // Enable header post in notices channel
   "notices.header_message_id": string; // Message ID of the header post
   "notices.header_pin_enabled": boolean; // Pin the header post
+
+  // Poll System
+  "polls.enabled": boolean;
+  "polls.default_duration_hours": number; // Default poll duration in hours (1-768)
+  "polls.cooldown_days": number; // Minimum days between reusing same poll
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -177,4 +182,9 @@ export const defaultConfig: ConfigSchema = {
   "notices.header_enabled": true, // Enable informational header post
   "notices.header_message_id": "", // Stores header message ID
   "notices.header_pin_enabled": true, // Pin header for easy access
+
+  // Poll System defaults
+  "polls.enabled": false,
+  "polls.default_duration_hours": 24, // Default 24 hours
+  "polls.cooldown_days": 7, // Minimum 7 days between reusing same poll
 };
