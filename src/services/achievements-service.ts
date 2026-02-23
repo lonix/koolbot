@@ -528,12 +528,19 @@ export class AchievementsService {
       emoji: "🗣️",
       name: "Quotable",
       description: "Been quoted for the first time",
-      checkFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAuthoredByUser(userId);
-        return count >= 1;
+      checkFunction: async (userId: string, userData: any | null) => {
+        const quoteStats = userData?.quoteStats || {
+          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
+          addedCount: await quoteService.getQuotesAddedByUser(userId),
+          mostLikedLikes:
+            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
+        };
+        return quoteStats.authoredCount >= 1;
       },
-      metadataFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAuthoredByUser(userId);
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const count =
+          userData?.quoteStats?.authoredCount ||
+          (await quoteService.getQuotesAuthoredByUser(userId));
         return {
           value: count,
           description: "First quote",
@@ -545,12 +552,19 @@ export class AchievementsService {
       emoji: "📝",
       name: "Quote Master",
       description: "Added 10 quotes to the collection",
-      checkFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAddedByUser(userId);
-        return count >= 10;
+      checkFunction: async (userId: string, userData: any | null) => {
+        const quoteStats = userData?.quoteStats || {
+          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
+          addedCount: await quoteService.getQuotesAddedByUser(userId),
+          mostLikedLikes:
+            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
+        };
+        return quoteStats.addedCount >= 10;
       },
-      metadataFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAddedByUser(userId);
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const count =
+          userData?.quoteStats?.addedCount ||
+          (await quoteService.getQuotesAddedByUser(userId));
         return {
           value: count,
           description: "10+ quotes added",
@@ -562,12 +576,19 @@ export class AchievementsService {
       emoji: "📚",
       name: "Quote Collector",
       description: "Added 50 quotes to the collection",
-      checkFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAddedByUser(userId);
-        return count >= 50;
+      checkFunction: async (userId: string, userData: any | null) => {
+        const quoteStats = userData?.quoteStats || {
+          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
+          addedCount: await quoteService.getQuotesAddedByUser(userId),
+          mostLikedLikes:
+            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
+        };
+        return quoteStats.addedCount >= 50;
       },
-      metadataFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAddedByUser(userId);
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const count =
+          userData?.quoteStats?.addedCount ||
+          (await quoteService.getQuotesAddedByUser(userId));
         return {
           value: count,
           description: "50+ quotes added",
@@ -579,12 +600,19 @@ export class AchievementsService {
       emoji: "🏆",
       name: "Quote Legend",
       description: "Added 100 quotes to the collection",
-      checkFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAddedByUser(userId);
-        return count >= 100;
+      checkFunction: async (userId: string, userData: any | null) => {
+        const quoteStats = userData?.quoteStats || {
+          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
+          addedCount: await quoteService.getQuotesAddedByUser(userId),
+          mostLikedLikes:
+            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
+        };
+        return quoteStats.addedCount >= 100;
       },
-      metadataFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAddedByUser(userId);
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const count =
+          userData?.quoteStats?.addedCount ||
+          (await quoteService.getQuotesAddedByUser(userId));
         return {
           value: count,
           description: "100+ quotes added",
@@ -596,12 +624,19 @@ export class AchievementsService {
       emoji: "⭐",
       name: "Widely Quoted",
       description: "Been quoted 25 times",
-      checkFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAuthoredByUser(userId);
-        return count >= 25;
+      checkFunction: async (userId: string, userData: any | null) => {
+        const quoteStats = userData?.quoteStats || {
+          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
+          addedCount: await quoteService.getQuotesAddedByUser(userId),
+          mostLikedLikes:
+            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
+        };
+        return quoteStats.authoredCount >= 25;
       },
-      metadataFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAuthoredByUser(userId);
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const count =
+          userData?.quoteStats?.authoredCount ||
+          (await quoteService.getQuotesAuthoredByUser(userId));
         return {
           value: count,
           description: "25+ times quoted",
@@ -613,12 +648,19 @@ export class AchievementsService {
       emoji: "💫",
       name: "Quote Icon",
       description: "Been quoted 50 times",
-      checkFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAuthoredByUser(userId);
-        return count >= 50;
+      checkFunction: async (userId: string, userData: any | null) => {
+        const quoteStats = userData?.quoteStats || {
+          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
+          addedCount: await quoteService.getQuotesAddedByUser(userId),
+          mostLikedLikes:
+            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
+        };
+        return quoteStats.authoredCount >= 50;
       },
-      metadataFunction: async (userId: string) => {
-        const count = await quoteService.getQuotesAuthoredByUser(userId);
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const count =
+          userData?.quoteStats?.authoredCount ||
+          (await quoteService.getQuotesAuthoredByUser(userId));
         return {
           value: count,
           description: "50+ times quoted",
@@ -630,13 +672,21 @@ export class AchievementsService {
       emoji: "🔥",
       name: "Viral Quote",
       description: "Have a quote with 10+ likes",
-      checkFunction: async (userId: string) => {
-        return await quoteService.hasQuoteWithLikes(userId, 10);
+      checkFunction: async (userId: string, userData: any | null) => {
+        const quoteStats = userData?.quoteStats || {
+          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
+          addedCount: await quoteService.getQuotesAddedByUser(userId),
+          mostLikedLikes:
+            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
+        };
+        return quoteStats.mostLikedLikes >= 10;
       },
-      metadataFunction: async (userId: string) => {
-        const mostLiked = await quoteService.getMostLikedQuoteByAuthor(userId);
+      metadataFunction: async (userId: string, userData: any | null) => {
+        const mostLikedLikes =
+          userData?.quoteStats?.mostLikedLikes ??
+          ((await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0);
         return {
-          value: mostLiked?.likes || 0,
+          value: mostLikedLikes,
           description: "10+ likes on a quote",
           unit: "likes",
         };
