@@ -1518,7 +1518,6 @@ Click **🔴 Go Live** to mark your channel as live. This will:
 - Add a `🔴` prefix to your channel name (auto-removed when you go offline)
 - Post a disclaimer in the channel text chat about platform Terms of Service
 - Notify anyone who joins the channel that it is live
-- Auto-detect when you start/stop streaming via Discord and toggle live status accordingly
 
 Click **⬜ Go Offline** to remove the live indicator.
 

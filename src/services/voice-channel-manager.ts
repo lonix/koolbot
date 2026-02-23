@@ -33,7 +33,6 @@ export class VoiceChannelManager {
     { timer: ReturnType<typeof setTimeout>; originalOwnerId: string }
   > = new Map(); // channelId -> timer and original owner info
   private liveChannels: Set<string> = new Set(); // channelIds currently marked as live
-  private autoLiveChannels: Set<string> = new Set(); // channelIds auto-marked live via streaming detection
   private waitingRooms: Map<string, string> = new Map(); // mainChannelId -> waitingRoomChannelId
   private waitingRoomToMain: Map<string, string> = new Map(); // waitingRoomChannelId -> mainChannelId
   private client: Client;
@@ -90,7 +89,6 @@ export class VoiceChannelManager {
       this.liveChannels.add(channelId);
     } else {
       this.liveChannels.delete(channelId);
-      this.autoLiveChannels.delete(channelId);
     }
   }
 
@@ -633,15 +631,6 @@ export class VoiceChannelManager {
         `New channel: ${newChannel?.name || "none"} (${newChannel?.id || "none"})`,
       );
 
-      // Auto-detect streaming state changes for live indicator
-      if (oldState.streaming !== newState.streaming && newChannel) {
-        await this.handleStreamingStateChange(
-          member,
-          newChannel as VoiceChannel,
-          newState.streaming ?? false,
-        );
-      }
-
       // User joined a channel
       if (!oldChannel && newChannel) {
         // Check if joining a waiting room
@@ -766,43 +755,6 @@ export class VoiceChannelManager {
       }
     } catch (error) {
       logger.error("Error handling voice state update:", error);
-    }
-  }
-
-  /**
-   * Handle owner streaming state change for auto live-detection
-   */
-  private async handleStreamingStateChange(
-    member: GuildMember,
-    channel: VoiceChannel,
-    isStreaming: boolean,
-  ): Promise<void> {
-    // Check if this member owns this channel
-    const ownerEntry = Array.from(this.userChannels.entries()).find(
-      ([, uc]) => uc.id === channel.id,
-    );
-    if (!ownerEntry || ownerEntry[0] !== member.id) return;
-
-    if (isStreaming && !this.liveChannels.has(channel.id)) {
-      // Owner started streaming - auto-mark as live
-      this.liveChannels.add(channel.id);
-      this.autoLiveChannels.add(channel.id);
-      await this.applyLiveIndicator(channel, true);
-      await this.sendLiveAnnouncement(channel, true);
-      await this.updateControlPanelLiveStatus(channel, member.id);
-      logger.info(
-        `Auto-marked channel ${channel.name} as live (streaming detected)`,
-      );
-    } else if (!isStreaming && this.autoLiveChannels.has(channel.id)) {
-      // Owner stopped streaming and it was auto-detected - auto-unmark
-      this.liveChannels.delete(channel.id);
-      this.autoLiveChannels.delete(channel.id);
-      await this.applyLiveIndicator(channel, false);
-      await this.sendLiveAnnouncement(channel, false);
-      await this.updateControlPanelLiveStatus(channel, member.id);
-      logger.info(
-        `Auto-unmarked channel ${channel.name} as live (streaming stopped)`,
-      );
     }
   }
 
@@ -1139,7 +1091,6 @@ export class VoiceChannelManager {
         await this.removeWaitingRoom(channel.id);
         // Clean up live status
         this.liveChannels.delete(channel.id);
-        this.autoLiveChannels.delete(channel.id);
         await channel.delete();
         this.userChannels.delete(userId);
         // Clean up custom name tracking
@@ -1205,7 +1156,6 @@ export class VoiceChannelManager {
 
       // Clean up live status
       this.liveChannels.delete(channel.id);
-      this.autoLiveChannels.delete(channel.id);
 
       // Clean up waiting room (fire-and-forget after channel deleted to avoid race conditions)
       const waitingRoomId = this.waitingRooms.get(channel.id);
@@ -2203,7 +2153,6 @@ export class VoiceChannelManager {
     this.ownershipQueue.clear();
     this.channelsBeingDeleted.clear();
     this.liveChannels.clear();
-    this.autoLiveChannels.clear();
     this.waitingRooms.clear();
     this.waitingRoomToMain.clear();
   }
