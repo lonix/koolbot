@@ -68,6 +68,12 @@ export const FEATURES = {
     description: "Protected channel for server notices and help",
     configKey: "notices.enabled",
   },
+  polls: {
+    name: "Polls",
+    emoji: "🗳️",
+    description: "Periodic polls for icebreaker discussions",
+    configKey: "polls.enabled",
+  },
 } as const;
 
 type FeatureKey = keyof typeof FEATURES;
@@ -136,6 +142,9 @@ export async function startFeatureConfiguration(
       break;
     case "notices":
       await configureNotices(interaction, guild, userId, guildId, embed);
+      break;
+    case "polls":
+      await configurePolls(interaction, guild, userId, guildId, embed);
       break;
     default:
       // This case is unreachable due to TypeScript's type system (FeatureKey guarantees valid keys)
@@ -537,6 +546,56 @@ async function configureNotices(
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId(`wizard_notices_skip__${userId}_${guildId}`)
+      .setLabel("Skip")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  if (interaction.replied || interaction.deferred) {
+    await interaction.followUp({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  } else {
+    await interaction.reply({
+      embeds: [embed],
+      components: [buttons],
+      ephemeral: true,
+    });
+  }
+}
+
+async function configurePolls(
+  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  guild: Guild,
+  userId: string,
+  guildId: string,
+  embed: EmbedBuilder,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const textChannels = state.detectedResources.textChannels || [];
+
+  embed.setDescription(
+    "**Polls Configuration**\n\n" +
+      "Set up periodic polls for icebreaker discussions and community engagement.\n\n" +
+      `I found ${textChannels.length} text channels in your server.\n\n` +
+      "**Features:**\n" +
+      "• Discord native polls with multiple choice options\n" +
+      "• Smart rotation to avoid repeating questions\n" +
+      "• Import polls from YAML/JSON URLs\n" +
+      "• Schedule with cron expressions (e.g., daily at noon)\n" +
+      "• Optional role pinging when posting polls",
+  );
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`wizard_polls_configure__${userId}_${guildId}`)
+      .setLabel("Configure")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`wizard_polls_skip__${userId}_${guildId}`)
       .setLabel("Skip")
       .setStyle(ButtonStyle.Secondary),
   );
