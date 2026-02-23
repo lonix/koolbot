@@ -13,6 +13,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Setup Wizard](#-setup-wizard) - Interactive configuration system
 - [Quote System](#-quote-system) - Quote management settings
 - [Notices System](#-notices-system) - Protected notices channel settings
+- [Poll System](#️-poll-system) - Periodic poll settings
 - [Voice Channel Management](#-voice-channel-management) - Dynamic channel settings
 - [Voice Activity Tracking](#-voice-activity-tracking) - Track user activity
 - [Voice Channel Cleanup](#-voice-channel-cleanup) - Data retention
@@ -244,6 +245,113 @@ Bot-managed protected channel for server notices, rules, and help information.
 - Notices persist in the database and are automatically reposted on bot restart
 - Notice IDs are displayed in each notice's footer for editing/deletion
 - Perfect for rules, game server info, bot help, and important announcements
+
+---
+
+## 🗳️ Poll System
+
+Periodic polls for icebreaker discussions and community engagement using Discord's native poll feature.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `polls.enabled` | `false` | Enable/disable the poll system |
+| `polls.default_duration_hours` | `24` | Default poll duration in hours (1-768, max 32 days) |
+| `polls.cooldown_days` | `7` | Minimum days before reusing the same poll question |
+
+### Example
+
+```bash
+# Enable polls
+/config set key:polls.enabled value:true
+/config set key:polls.default_duration_hours value:24
+/config set key:polls.cooldown_days value:7
+/config reload
+
+# Import poll questions from a URL
+/poll import-url url:https://example.com/polls.yaml
+
+# Create a schedule
+/poll create channel:#daily-questions schedule:"0 12 * * *" duration:24 ping_role:@Community
+```
+
+**Features:**
+
+- **Native Polls**: Uses Discord's built-in poll feature for a polished experience
+- **Scheduled Posting**: Automatic polls based on cron schedules  
+- **URL Import**: Fetch poll questions from YAML or JSON files (and save to database)
+- **Smart Rotation**: Intelligently avoids repeating polls within the cooldown period
+- **Database Storage**: Store and manage poll questions locally
+- **Role Pinging**: Optional role mentions when posting polls
+- **Multi-Select Support**: Polls can allow multiple answer selections
+
+**Poll Sources:**
+
+The bot stores all poll questions in the database. You can populate the database by:
+
+1. **URL Import** - Fetch polls from a remote YAML/JSON file (copies to database)
+2. **Manual Entry** - Add individual poll questions via `/poll add-item`
+
+**URL Format (YAML):**
+
+```yaml
+polls:
+  - question: "What's your favorite programming language?"
+    answers: ["JavaScript", "Python", "Go", "Rust"]
+    multiselect: false
+    tags: ["tech", "icebreaker"]
+  
+  - question: "Would you rather fight 100 duck-sized horses or 1 horse-sized duck?"
+    answers: ["100 duck-sized horses", "1 horse-sized duck", "Neither!"]
+    multiselect: false
+    tags: ["funny", "absurd"]
+```
+
+**URL Format (JSON):**
+
+```json
+{
+  "polls": [
+    {
+      "question": "What's your favorite season?",
+      "answers": ["Spring", "Summer", "Fall", "Winter"],
+      "multiselect": false,
+      "tags": ["general"]
+    }
+  ]
+}
+```
+
+**Commands:**
+
+- `/poll create` - Schedule periodic polls
+- `/poll list` - View all poll schedules
+- `/poll delete` - Remove a poll schedule
+- `/poll test` - Post a test poll immediately
+- `/poll add-item` - Add a poll question to the database
+- `/poll list-items` - View all stored poll questions
+- `/poll delete-item` - Remove a poll question
+- `/poll import-url` - Import polls from YAML/JSON URL
+
+**Smart Poll Selection:**
+
+The bot intelligently selects which poll to post:
+
+1. **Cooldown Filter** - Excludes polls used within the cooldown period
+2. **Usage Priority** - Prioritizes polls with lower usage counts
+3. **Random Selection** - Randomly picks from top 20% least-used eligible polls
+4. **Fallback** - If all polls are within cooldown, uses the oldest one
+
+**Notes:**
+
+- Poll questions must have 2-10 answer options (Discord limitation)
+- Questions limited to 300 characters (Discord limitation)
+- Polls can run for 1 hour to 32 days (768 hours)
+- Import from URL copies all polls to the database for local management
+- Usage statistics track how often each poll is used
+- Tags help organize polls but don't affect selection logic
+- Perfect for daily icebreakers, team building, and community engagement
+
+---
 
 ## 🎙 Voice Channel Management
 

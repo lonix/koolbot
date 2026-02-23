@@ -102,6 +102,7 @@ export class CommandManager {
           configKey: "reactionroles.enabled",
           file: "reactrole",
         },
+        { name: "poll", configKey: "polls.enabled", file: "poll" },
         { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
       ];
 
@@ -334,6 +335,7 @@ export class CommandManager {
           configKey: "reactionroles.enabled",
           file: "reactrole",
         },
+        { name: "poll", configKey: "polls.enabled", file: "poll" },
         { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
       ];
 

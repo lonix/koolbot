@@ -45,6 +45,7 @@ export const data = new SlashCommandBuilder()
             { name: "Reaction Roles", value: "reactionroles" },
             { name: "Announcements", value: "announcements" },
             { name: "Notices", value: "notices" },
+            { name: "Polls", value: "polls" },
           ),
       ),
   );

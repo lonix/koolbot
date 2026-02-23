@@ -165,6 +165,12 @@ export async function handleWizardButton(
       case "notices_skip":
         await handleFeatureSkip(interaction, guild, userId, guildId);
         break;
+      case "polls_configure":
+        await handlePollsConfigure(interaction, guild, userId, guildId);
+        break;
+      case "polls_skip":
+        await handleFeatureSkip(interaction, guild, userId, guildId);
+        break;
       case "finish_confirm":
         await handleFinish(interaction, guild, userId, guildId);
         break;
@@ -583,6 +589,43 @@ async function handleNoticesConfigure(
   );
 }
 
+async function handlePollsConfigure(
+  interaction: ButtonInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const state = wizardService.getSession(userId, guildId);
+  if (!state) return;
+
+  const textChannels = state.detectedResources.textChannels || [];
+
+  if (textChannels.length === 0) {
+    await interaction.reply({
+      content: "❌ No text channels found in your server.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferUpdate();
+
+  // Initialize page to 0 if not set
+  if (state.channelPage === undefined) {
+    state.channelPage = 0;
+    wizardService.updateSession(userId, guildId, state);
+  }
+
+  await showChannelSelectionPage(
+    interaction,
+    guild,
+    userId,
+    guildId,
+    textChannels,
+    "polls",
+  );
+}
+
 async function handleFeatureComplete(
   interaction: ButtonInteraction,
   guild: any,
@@ -810,7 +853,7 @@ async function showChannelSelectionPage(
   userId: string,
   guildId: string,
   channels: TextChannel[] | CategoryChannel[],
-  selectionType: "quotes" | "logging" | "vc_category" | "notices",
+  selectionType: "quotes" | "logging" | "vc_category" | "notices" | "polls",
 ): Promise<void> {
   const state = wizardService.getSession(userId, guildId);
   if (!state) return;
@@ -917,7 +960,7 @@ async function showChannelSelectionPage(
             : ""),
       )
       .setColor(0x5865f2);
-  } else {
+  } else if (selectionType === "notices") {
     // notices
     selectMenu = new StringSelectMenuBuilder()
       .setCustomId(`wizard_select_notices_channel__${userId}_${guildId}`)
@@ -936,6 +979,31 @@ async function showChannelSelectionPage(
           "• Bot-only posting (users can't send messages)\n" +
           "• Auto-cleanup of unauthorized messages\n" +
           "• Organize notices by category\n\n" +
+          `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
+          (totalPages > 1
+            ? `\nPage ${effectivePage + 1} of ${totalPages}`
+            : ""),
+      )
+      .setColor(0x5865f2);
+  } else {
+    // polls
+    selectMenu = new StringSelectMenuBuilder()
+      .setCustomId(`wizard_select_polls_channel__${userId}_${guildId}`)
+      .setPlaceholder("Select a channel for polls")
+      .addOptions(
+        channelsOnPage.map((ch) => ({
+          label: `#${ch.name}`,
+          value: ch.id,
+        })),
+      );
+
+    embed = new EmbedBuilder()
+      .setTitle("🗳️ Select Polls Channel")
+      .setDescription(
+        "Choose a channel for periodic polls:\n" +
+          "• Discord native polls for icebreaker questions\n" +
+          "• Smart rotation avoids repeating questions\n" +
+          "• Schedule with cron expressions\n\n" +
           `Showing channels ${startIndex + 1}-${endIndex} of ${channels.length}` +
           (totalPages > 1
             ? `\nPage ${effectivePage + 1} of ${totalPages}`

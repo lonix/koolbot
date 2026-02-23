@@ -102,6 +102,9 @@ export async function handleWizardSelectMenu(
           guildId,
         );
         break;
+      case "select_polls_channel":
+        await handlePollsChannelSelection(interaction, guild, userId, guildId);
+        break;
       default:
         await interaction.reply({
           content: "❌ Unknown select menu type.",
@@ -347,6 +350,48 @@ async function handleNoticesChannelSelection(
         "• Bot-only posting\n" +
         "• Auto-cleanup of unauthorized messages\n" +
         "• Organized by category",
+    )
+    .setColor(0x00ff00);
+
+  await interaction.followUp({ embeds: [embed], ephemeral: true });
+
+  // Import helper to move to next feature
+  const { moveToNextFeature } =
+    await import("./wizard-button-handler-helpers.js");
+  await moveToNextFeature(interaction, guild, userId, guildId);
+}
+
+async function handlePollsChannelSelection(
+  interaction: StringSelectMenuInteraction,
+  guild: any,
+  userId: string,
+  guildId: string,
+): Promise<void> {
+  const selectedChannelId = interaction.values[0];
+
+  const channel = await guild.channels.fetch(selectedChannelId);
+  if (!channel) {
+    await interaction.reply({
+      content: "❌ Could not find the selected channel.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Save configuration - enable polls feature
+  wizardService.addConfiguration(userId, guildId, "polls.enabled", true);
+
+  await interaction.deferUpdate();
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ Polls Feature Enabled")
+    .setDescription(
+      `Polls can be posted in: <#${selectedChannelId}>\n\n` +
+        "Features enabled:\n" +
+        "• Discord native polls\n" +
+        "• Smart rotation to avoid repeats\n" +
+        "• Schedule with cron expressions\n\n" +
+        'Use `/poll create channel:#${channel.name} schedule:"0 12 * * *"` to create your first poll schedule!',
     )
     .setColor(0x00ff00);
 
