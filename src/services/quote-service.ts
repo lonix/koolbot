@@ -219,6 +219,87 @@ export class QuoteService {
   async getAllQuotes(): Promise<IQuote[]> {
     return this.model.find().sort({ createdAt: -1 });
   }
+
+  /**
+   * Get the count of quotes added by a specific user
+   * Handles legacy quote data with various ID formats (<@123>, <@!123>, @123, 123)
+   */
+  async getQuotesAddedByUser(userId: string): Promise<number> {
+    const normalizedId = normalizeUserId(userId);
+    // Query for both normalized ID and common legacy formats
+    return this.model.countDocuments({
+      addedById: {
+        $in: [
+          normalizedId,
+          `<@${normalizedId}>`,
+          `<@!${normalizedId}>`,
+          `@${normalizedId}`,
+        ],
+      },
+    });
+  }
+
+  /**
+   * Get the count of quotes where a specific user is the author (being quoted)
+   * Handles legacy quote data with various ID formats (<@123>, <@!123>, @123, 123)
+   */
+  async getQuotesAuthoredByUser(userId: string): Promise<number> {
+    const normalizedId = normalizeUserId(userId);
+    // Query for both normalized ID and common legacy formats
+    return this.model.countDocuments({
+      authorId: {
+        $in: [
+          normalizedId,
+          `<@${normalizedId}>`,
+          `<@!${normalizedId}>`,
+          `@${normalizedId}`,
+        ],
+      },
+    });
+  }
+
+  /**
+   * Get the most liked quote for a specific author
+   * Handles legacy quote data with various ID formats
+   */
+  async getMostLikedQuoteByAuthor(authorId: string): Promise<IQuote | null> {
+    const normalizedId = normalizeUserId(authorId);
+    return this.model
+      .findOne({
+        authorId: {
+          $in: [
+            normalizedId,
+            `<@${normalizedId}>`,
+            `<@!${normalizedId}>`,
+            `@${normalizedId}`,
+          ],
+        },
+      })
+      .sort({ likes: -1 });
+  }
+
+  /**
+   * Check if user has a quote with at least the specified number of likes
+   * Handles legacy quote data with various ID formats
+   */
+  async hasQuoteWithLikes(
+    authorId: string,
+    minLikes: number,
+  ): Promise<boolean> {
+    const normalizedId = normalizeUserId(authorId);
+    const count = await this.model.countDocuments({
+      authorId: {
+        $in: [
+          normalizedId,
+          `<@${normalizedId}>`,
+          `<@!${normalizedId}>`,
+          `@${normalizedId}`,
+        ],
+      },
+      likes: { $gte: minLikes },
+    });
+    return count > 0;
+  }
 }
 
 export const quoteService = new QuoteService();

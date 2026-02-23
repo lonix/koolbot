@@ -300,6 +300,13 @@ Total Achievements: 0
 - 🔥 **On a Roll** - Connected for 7 consecutive days (5+ min/day)
 - ⚡ **Dedicated AF** - Connected for 14 consecutive days (5+ min/day)
 - 💀 **No-Lifer** - Connected for 30 consecutive days (5+ min/day)
+- 🗣️ **Quotable** - Been quoted for the first time
+- 📝 **Quote Master** - Added 10 quotes to the collection
+- 📚 **Quote Collector** - Added 50 quotes to the collection
+- 🏆 **Quote Legend** - Added 100 quotes to the collection
+- ⭐ **Widely Quoted** - Been quoted 25 times
+- 💫 **Quote Icon** - Been quoted 50 times
+- 🔥 **Viral Quote** - Have a quote with 10+ likes
 
 **Note on Time-Based Accolades:**
 
