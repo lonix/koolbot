@@ -103,12 +103,7 @@ export async function handleWizardSelectMenu(
         );
         break;
       case "select_polls_channel":
-        await handlePollsChannelSelection(
-          interaction,
-          guild,
-          userId,
-          guildId,
-        );
+        await handlePollsChannelSelection(interaction, guild, userId, guildId);
         break;
       default:
         await interaction.reply({
@@ -396,7 +391,7 @@ async function handlePollsChannelSelection(
         "• Discord native polls\n" +
         "• Smart rotation to avoid repeats\n" +
         "• Schedule with cron expressions\n\n" +
-        "Use `/poll create channel:#${channel.name} schedule:\"0 12 * * *\"` to create your first poll schedule!",
+        'Use `/poll create channel:#${channel.name} schedule:"0 12 * * *"` to create your first poll schedule!',
     )
     .setColor(0x00ff00);
 
