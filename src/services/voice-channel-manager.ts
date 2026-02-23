@@ -12,6 +12,7 @@ import {
   ButtonStyle,
   TextChannel,
   PermissionFlagsBits,
+  Message,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
@@ -2008,7 +2009,7 @@ export class VoiceChannelManager {
   public async rebuildControlPanel(
     channel: VoiceChannel,
     ownerId: string,
-    message: { edit: (data: unknown) => Promise<unknown> },
+    message: Message,
   ): Promise<void> {
     const guild = channel.guild;
     const everyoneRole = guild.roles.everyone;
