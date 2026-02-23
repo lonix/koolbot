@@ -12,7 +12,6 @@ import {
   ButtonStyle,
   TextChannel,
   PermissionFlagsBits,
-  Message,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
@@ -97,6 +96,47 @@ export class VoiceChannelManager {
    */
   public isLive(channelId: string): boolean {
     return this.liveChannels.has(channelId);
+  }
+
+  /**
+   * Toggle the live status of a channel, applying suffix indicator and posting announcements.
+   * Returns true if the channel is now live, false if it went offline.
+   */
+  public async toggleLive(channel: VoiceChannel): Promise<boolean> {
+    const isNowLive = !this.liveChannels.has(channel.id);
+    this.setLiveStatus(channel.id, isNowLive);
+
+    // Apply or remove 🔴 suffix from channel name (suffix preserves the managed prefix)
+    const liveSuffix = " 🔴";
+    const currentName = channel.name;
+    try {
+      if (isNowLive && !currentName.endsWith(liveSuffix)) {
+        await channel.setName(`${currentName}${liveSuffix}`);
+      } else if (!isNowLive && currentName.endsWith(liveSuffix)) {
+        await channel.setName(currentName.slice(0, -liveSuffix.length));
+      }
+    } catch (error) {
+      logger.error("Error applying live suffix to channel name:", error);
+    }
+
+    // Post announcement in the channel text chat
+    try {
+      if ("send" in channel && typeof channel.send === "function") {
+        if (isNowLive) {
+          await channel.send(
+            "🔴 **This channel is now LIVE!** The host may be streaming on " +
+              "Twitch, YouTube, or another platform. Be mindful of their " +
+              "platform's Terms of Service while in this channel.",
+          );
+        } else {
+          await channel.send("⬜ The channel is no longer live.");
+        }
+      }
+    } catch (error) {
+      logger.error("Error sending live announcement:", error);
+    }
+
+    return isNowLive;
   }
 
   /**
@@ -759,51 +799,6 @@ export class VoiceChannelManager {
   }
 
   /**
-   * Apply or remove the 🔴 live prefix from the channel name
-   */
-  private async applyLiveIndicator(
-    channel: VoiceChannel,
-    isLive: boolean,
-  ): Promise<void> {
-    try {
-      const livePrefix = "🔴 ";
-      const currentName = channel.name;
-
-      if (isLive && !currentName.startsWith(livePrefix)) {
-        await channel.setName(`${livePrefix}${currentName}`);
-      } else if (!isLive && currentName.startsWith(livePrefix)) {
-        await channel.setName(currentName.slice(livePrefix.length));
-      }
-    } catch (error) {
-      logger.error("Error applying live indicator to channel name:", error);
-    }
-  }
-
-  /**
-   * Send a live/offline announcement in the voice channel text chat
-   */
-  private async sendLiveAnnouncement(
-    channel: VoiceChannel,
-    isLive: boolean,
-  ): Promise<void> {
-    try {
-      if ("send" in channel && typeof channel.send === "function") {
-        if (isLive) {
-          await channel.send(
-            "🔴 **This channel is now LIVE!** The host may be streaming on " +
-              "Twitch, YouTube, or another platform. Be mindful of their " +
-              "platform's Terms of Service while in this channel.",
-          );
-        } else {
-          await channel.send("⬜ The channel is no longer live.");
-        }
-      }
-    } catch (error) {
-      logger.error("Error sending live announcement:", error);
-    }
-  }
-
-  /**
    * Send a live disclaimer to a member that just joined a live channel
    */
   private async sendLiveDisclaimer(
@@ -819,35 +814,6 @@ export class VoiceChannelManager {
       }
     } catch (error) {
       logger.error("Error sending live disclaimer:", error);
-    }
-  }
-
-  /**
-   * Update the control panel to reflect current live status
-   */
-  private async updateControlPanelLiveStatus(
-    channel: VoiceChannel,
-    ownerId: string,
-  ): Promise<void> {
-    try {
-      if (
-        "messages" in channel &&
-        typeof channel.messages?.fetch === "function"
-      ) {
-        const messages = await channel.messages.fetch({ limit: 50 });
-        const controlPanelMessage = messages.find(
-          (msg: Message) =>
-            msg.author.id === this.client.user?.id &&
-            msg.embeds.length > 0 &&
-            msg.embeds[0].title === "🎮 Voice Channel Controls",
-        );
-
-        if (controlPanelMessage) {
-          await this.rebuildControlPanel(channel, ownerId, controlPanelMessage);
-        }
-      }
-    } catch (error) {
-      logger.error("Error updating control panel live status:", error);
     }
   }
 
@@ -1705,6 +1671,12 @@ export class VoiceChannelManager {
           // Skip if it's a managed channel
           if (managedChannelNames.has(channel.name)) {
             logger.debug(`Skipping managed channel: ${channel.name}`);
+            continue;
+          }
+
+          // Skip if it's a waiting room managed by this bot
+          if (this.waitingRoomToMain.has(channel.id)) {
+            logger.debug(`Skipping waiting room channel: ${channel.name}`);
             continue;
           }
 

@@ -16,24 +16,24 @@ describe('VCControlButtonHandler', () => {
   let mockGuild: Partial<Guild>;
   let mockChannel: Partial<VoiceChannel>;
   let mockManagerInstance: {
-    isLive: jest.Mock;
-    setLiveStatus: jest.Mock;
+    toggleLive: jest.Mock;
     getWaitingRoom: jest.Mock;
     createWaitingRoom: jest.Mock;
     removeWaitingRoom: jest.Mock;
     rebuildControlPanel: jest.Mock;
+    getUserChannel: jest.Mock;
   };
 
   beforeEach(() => {
     jest.clearAllMocks();
 
     mockManagerInstance = {
-      isLive: jest.fn().mockReturnValue(false),
-      setLiveStatus: jest.fn(),
+      toggleLive: jest.fn().mockResolvedValue(true),
       getWaitingRoom: jest.fn().mockReturnValue(undefined),
       createWaitingRoom: jest.fn().mockResolvedValue({ name: '⏳ Test Waiting' }),
       removeWaitingRoom: jest.fn().mockResolvedValue(undefined),
       rebuildControlPanel: jest.fn().mockResolvedValue(undefined),
+      getUserChannel: jest.fn().mockReturnValue({ id: 'channel-id' }),
     };
 
     (mockVoiceChannelManager.getInstance as unknown as jest.Mock) = jest.fn(
@@ -110,25 +110,25 @@ describe('VCControlButtonHandler', () => {
   });
 
   describe('Live toggle', () => {
-    it('should mark channel as live when not currently live', async () => {
-      mockManagerInstance.isLive.mockReturnValue(false);
+    it('should delegate to manager.toggleLive and report LIVE when going live', async () => {
+      mockManagerInstance.toggleLive.mockResolvedValue(true);
       mockInteraction.customId = 'vc_control_live_channel-id_owner-id';
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
-      expect(mockManagerInstance.setLiveStatus).toHaveBeenCalledWith('channel-id', true);
+      expect(mockManagerInstance.toggleLive).toHaveBeenCalledWith(mockChannel);
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining('LIVE') }),
       );
     });
 
-    it('should mark channel as offline when currently live', async () => {
-      mockManagerInstance.isLive.mockReturnValue(true);
+    it('should delegate to manager.toggleLive and report offline when going offline', async () => {
+      mockManagerInstance.toggleLive.mockResolvedValue(false);
       mockInteraction.customId = 'vc_control_live_channel-id_owner-id';
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
-      expect(mockManagerInstance.setLiveStatus).toHaveBeenCalledWith('channel-id', false);
+      expect(mockManagerInstance.toggleLive).toHaveBeenCalledWith(mockChannel);
       expect(mockInteraction.reply).toHaveBeenCalledWith(
         expect.objectContaining({ content: expect.stringContaining('offline') }),
       );
@@ -165,7 +165,7 @@ describe('VCControlButtonHandler', () => {
   });
 
   describe('Let In action', () => {
-    it('should reject non-owner let-in attempt', async () => {
+    it('should reject non-owner let-in attempt (stale button check)', async () => {
       mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
       mockInteraction.user = { id: 'someone-else', displayName: 'Other' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
@@ -176,14 +176,42 @@ describe('VCControlButtonHandler', () => {
       );
     });
 
-    it('should handle let-in action as owner', async () => {
+    it('should reject if user is no longer the current owner', async () => {
+      // getUserChannel returns a different channel (ownership transferred)
+      mockManagerInstance.getUserChannel.mockReturnValue({ id: 'different-channel-id' });
       mockManagerInstance.getWaitingRoom.mockReturnValue('waiting-room-id');
       mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
       mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
-      // Should try to fetch the main channel and move the user
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('current owner') }),
+      );
+    });
+
+    it('should reject if waiting room no longer exists', async () => {
+      mockManagerInstance.getUserChannel.mockReturnValue({ id: 'channel-id' });
+      mockManagerInstance.getWaitingRoom.mockReturnValue(undefined);
+      mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
+      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.stringContaining('waiting room') }),
+      );
+    });
+
+    it('should move user when owner is valid and user is in waiting room', async () => {
+      mockManagerInstance.getUserChannel.mockReturnValue({ id: 'channel-id' });
+      mockManagerInstance.getWaitingRoom.mockReturnValue('waiting-room-id');
+      mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
+      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+      await handleVCControlButton(mockInteraction as ButtonInteraction);
+
+      // Should fetch the main channel
       expect(mockGuild!.channels!.fetch).toHaveBeenCalledWith('channel-id');
     });
   });

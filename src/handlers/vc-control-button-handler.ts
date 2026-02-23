@@ -245,39 +245,7 @@ async function handleLive(
   ownerId: string,
 ): Promise<void> {
   const manager = VoiceChannelManager.getInstance(interaction.client);
-  const isNowLive = !manager.isLive(channel.id);
-
-  manager.setLiveStatus(channel.id, isNowLive);
-
-  // Apply or remove 🔴 prefix from channel name
-  const livePrefix = "🔴 ";
-  const currentName = channel.name;
-  try {
-    if (isNowLive && !currentName.startsWith(livePrefix)) {
-      await channel.setName(`${livePrefix}${currentName}`);
-    } else if (!isNowLive && currentName.startsWith(livePrefix)) {
-      await channel.setName(currentName.slice(livePrefix.length));
-    }
-  } catch {
-    // Name change may fail due to rate limits; continue anyway
-  }
-
-  // Send live/offline announcement in the channel text chat
-  try {
-    if ("send" in channel && typeof channel.send === "function") {
-      if (isNowLive) {
-        await channel.send(
-          "🔴 **This channel is now LIVE!** The host may be streaming on " +
-            "Twitch, YouTube, or another platform. Be mindful of their " +
-            "platform's Terms of Service while in this channel.",
-        );
-      } else {
-        await channel.send("⬜ The channel is no longer live.");
-      }
-    }
-  } catch {
-    // Ignore send errors
-  }
+  const isNowLive = await manager.toggleLive(channel);
 
   await interaction.reply({
     content: isNowLive
@@ -360,7 +328,27 @@ async function handleLetIn(
   }
 
   const manager = VoiceChannelManager.getInstance(interaction.client);
+
+  // Validate current ownership (not just the stale ownerId encoded in the button)
+  const currentOwnerChannel = manager.getUserChannel(interaction.user.id);
+  if (!currentOwnerChannel || currentOwnerChannel.id !== mainChannelId) {
+    await interaction.reply({
+      content:
+        "❌ Only the current owner of this voice channel can let users in.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Require the waiting room to still exist
   const waitingRoomId = manager.getWaitingRoom(mainChannelId);
+  if (!waitingRoomId) {
+    await interaction.reply({
+      content: "⚠️ The waiting room no longer exists.",
+      ephemeral: true,
+    });
+    return;
+  }
 
   let waitingMember;
   try {
@@ -373,8 +361,8 @@ async function handleLetIn(
     return;
   }
 
-  // Check if user is in the waiting room
-  if (waitingRoomId && waitingMember.voice.channelId !== waitingRoomId) {
+  // Confirm user is still in the waiting room
+  if (waitingMember.voice.channelId !== waitingRoomId) {
     await interaction.reply({
       content: `⚠️ **${waitingMember.displayName}** is no longer in the waiting room.`,
       ephemeral: true,
