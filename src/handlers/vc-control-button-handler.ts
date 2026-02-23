@@ -1,9 +1,6 @@
 import {
   ButtonInteraction,
-  EmbedBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -13,6 +10,7 @@ import {
   StringSelectMenuBuilder,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 
 export async function handleVCControlButton(
   interaction: ButtonInteraction,
@@ -30,6 +28,33 @@ export async function handleVCControlButton(
   }
 
   const action = parts[2];
+
+  // letin uses a different format: vc_control_letin_{mainChannelId}_{waitingUserId}_{ownerId}
+  if (action === "letin") {
+    const mainChannelId = parts[3];
+    const waitingUserId = parts[4];
+    const ownerId = parts[5];
+
+    if (!mainChannelId || !waitingUserId || !ownerId) {
+      await interaction.reply({
+        content: "❌ Invalid let-in button interaction.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (interaction.user.id !== ownerId) {
+      await interaction.reply({
+        content: "❌ Only the channel owner can let users in.",
+        ephemeral: true,
+      });
+      return;
+    }
+
+    await handleLetIn(interaction, mainChannelId, waitingUserId);
+    return;
+  }
+
   const channelId = parts[3];
   const ownerId = parts[4];
   const userId = interaction.user.id;
@@ -66,6 +91,12 @@ export async function handleVCControlButton(
         break;
       case "transfer":
         await handleTransfer(interaction, channel as VoiceChannel);
+        break;
+      case "live":
+        await handleLive(interaction, channel as VoiceChannel, ownerId);
+        break;
+      case "waitingroom":
+        await handleWaitingRoom(interaction, channel as VoiceChannel, ownerId);
         break;
       default:
         await interaction.reply({
@@ -133,7 +164,7 @@ async function handlePrivacy(
     });
 
     // Update control panel
-    await updateControlPanel(interaction, channel, ownerId, false);
+    await updateControlPanel(interaction, channel, ownerId);
   } else {
     // Make private
     await channel.permissionOverwrites.create(everyoneRole, {
@@ -154,7 +185,7 @@ async function handlePrivacy(
     });
 
     // Update control panel
-    await updateControlPanel(interaction, channel, ownerId, true);
+    await updateControlPanel(interaction, channel, ownerId);
   }
 }
 
@@ -208,54 +239,172 @@ async function handleTransfer(
   });
 }
 
+async function handleLive(
+  interaction: ButtonInteraction,
+  channel: VoiceChannel,
+  ownerId: string,
+): Promise<void> {
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  const isNowLive = !manager.isLive(channel.id);
+
+  manager.setLiveStatus(channel.id, isNowLive);
+
+  // Apply or remove 🔴 prefix from channel name
+  const livePrefix = "🔴 ";
+  const currentName = channel.name;
+  try {
+    if (isNowLive && !currentName.startsWith(livePrefix)) {
+      await channel.setName(`${livePrefix}${currentName}`);
+    } else if (!isNowLive && currentName.startsWith(livePrefix)) {
+      await channel.setName(currentName.slice(livePrefix.length));
+    }
+  } catch {
+    // Name change may fail due to rate limits; continue anyway
+  }
+
+  // Send live/offline announcement in the channel text chat
+  try {
+    if ("send" in channel && typeof channel.send === "function") {
+      if (isNowLive) {
+        await channel.send(
+          "🔴 **This channel is now LIVE!** The host may be streaming on " +
+            "Twitch, YouTube, or another platform. Be mindful of their " +
+            "platform's Terms of Service while in this channel.",
+        );
+      } else {
+        await channel.send("⬜ The channel is no longer live.");
+      }
+    }
+  } catch {
+    // Ignore send errors
+  }
+
+  await interaction.reply({
+    content: isNowLive
+      ? "🔴 Channel marked as **LIVE**! A disclaimer has been posted."
+      : "⬜ Channel is now marked as **offline**.",
+    ephemeral: true,
+  });
+
+  // Update the control panel
+  if (interaction.message && "edit" in interaction.message) {
+    await manager
+      .rebuildControlPanel(channel, ownerId, interaction.message)
+      .catch((err) => logger.error("Error rebuilding control panel:", err));
+  }
+}
+
+async function handleWaitingRoom(
+  interaction: ButtonInteraction,
+  channel: VoiceChannel,
+  ownerId: string,
+): Promise<void> {
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  const existingWaitingRoom = manager.getWaitingRoom(channel.id);
+
+  if (existingWaitingRoom) {
+    // Remove waiting room
+    await manager.removeWaitingRoom(channel.id);
+    await interaction.reply({
+      content: "🗑️ Waiting room removed.",
+      ephemeral: true,
+    });
+  } else {
+    // Create waiting room
+    const waitingRoom = await manager.createWaitingRoom(channel, ownerId);
+    if (waitingRoom) {
+      await interaction.reply({
+        content: `⏳ Waiting room **${waitingRoom.name}** created! Users who join it will notify you here.`,
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({
+        content: "❌ Failed to create waiting room.",
+        ephemeral: true,
+      });
+      return;
+    }
+  }
+
+  // Update the control panel
+  if (interaction.message && "edit" in interaction.message) {
+    await manager
+      .rebuildControlPanel(channel, ownerId, interaction.message)
+      .catch((err) => logger.error("Error rebuilding control panel:", err));
+  }
+}
+
+async function handleLetIn(
+  interaction: ButtonInteraction,
+  mainChannelId: string,
+  waitingUserId: string,
+): Promise<void> {
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.reply({
+      content: "❌ Guild not found.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const mainChannel = (await guild.channels
+    .fetch(mainChannelId)
+    .catch(() => null)) as VoiceChannel | null;
+  if (!mainChannel || mainChannel.type !== ChannelType.GuildVoice) {
+    await interaction.reply({
+      content: "❌ Main channel not found.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const manager = VoiceChannelManager.getInstance(interaction.client);
+  const waitingRoomId = manager.getWaitingRoom(mainChannelId);
+
+  let waitingMember;
+  try {
+    waitingMember = await guild.members.fetch(waitingUserId);
+  } catch {
+    await interaction.reply({
+      content: "❌ Could not find the waiting user.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Check if user is in the waiting room
+  if (waitingRoomId && waitingMember.voice.channelId !== waitingRoomId) {
+    await interaction.reply({
+      content: `⚠️ **${waitingMember.displayName}** is no longer in the waiting room.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  try {
+    await waitingMember.voice.setChannel(mainChannel);
+    await interaction.reply({
+      content: `✅ **${waitingMember.displayName}** has been let into the channel!`,
+      ephemeral: true,
+    });
+  } catch {
+    await interaction.reply({
+      content: `❌ Failed to move **${waitingMember.displayName}** into the channel.`,
+      ephemeral: true,
+    });
+  }
+}
+
 async function updateControlPanel(
   interaction: ButtonInteraction,
   channel: VoiceChannel,
   ownerId: string,
-  isPrivate: boolean,
 ): Promise<void> {
   try {
-    // Find the original message and update it
     if (interaction.message && "edit" in interaction.message) {
-      const embed = new EmbedBuilder()
-        .setTitle("🎮 Voice Channel Controls")
-        .setDescription(
-          `Manage your voice channel: **${channel.name}**\n\n` +
-            `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}`,
-        )
-        .setColor(isPrivate ? 0xff0000 : 0x00ff00)
-        .setFooter({ text: "Only you can see and use these controls" });
-
-      const privacyButton = new ButtonBuilder()
-        .setCustomId(`vc_control_privacy_${channel.id}_${ownerId}`)
-        .setLabel(isPrivate ? "Make Public" : "Make Private")
-        .setStyle(isPrivate ? ButtonStyle.Success : ButtonStyle.Danger)
-        .setEmoji(isPrivate ? "🌐" : "🔒");
-
-      const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`vc_control_name_${channel.id}_${ownerId}`)
-          .setLabel("Rename")
-          .setStyle(ButtonStyle.Primary)
-          .setEmoji("✏️"),
-        privacyButton,
-        new ButtonBuilder()
-          .setCustomId(`vc_control_invite_${channel.id}_${ownerId}`)
-          .setLabel("Invite")
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji("👥")
-          .setDisabled(!isPrivate),
-        new ButtonBuilder()
-          .setCustomId(`vc_control_transfer_${channel.id}_${ownerId}`)
-          .setLabel("Transfer")
-          .setStyle(ButtonStyle.Secondary)
-          .setEmoji("👑"),
-      );
-
-      await interaction.message.edit({
-        embeds: [embed],
-        components: [buttons],
-      });
+      const manager = VoiceChannelManager.getInstance(interaction.client);
+      await manager.rebuildControlPanel(channel, ownerId, interaction.message);
     }
   } catch (error) {
     logger.error("Error updating control panel:", error);
