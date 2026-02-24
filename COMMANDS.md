@@ -1451,17 +1451,22 @@ available). This provides quick access to customization options.
 /config reload
 ```
 
-**Control Panel Buttons:**
+**Control Panel Buttons (Row 1):**
 
 - **✏️ Rename** - Opens a modal to rename your channel
 - **🔒 Make Private / 🌐 Make Public** - Toggle privacy mode
 - **👥 Invite** - Invite users to your private channel
 - **👑 Transfer** - Shows how to transfer ownership
 
+**Control Panel Buttons (Row 2):**
+
+- **🔴 Go Live / ⬜ Go Offline** - Mark your channel as live (streaming disclaimer)
+- **⏳ Waiting Room / 🗑️ Remove Waiting Room** - Toggle a companion waiting room channel
+
 **Features:**
 
 - Only visible to channel owner
-- Updates dynamically when privacy mode changes
+- Updates dynamically when privacy mode, live status, or waiting room changes
 - Persists until channel is deleted
 - Posted every time a new channel is created
 
@@ -1478,8 +1483,10 @@ available). This provides quick access to customization options.
 Manage your voice channel: **Your Channel Name**
 
 Privacy: 🌐 Public
+🔴 LIVE
 
 [✏️ Rename] [🔒 Make Private] [👥 Invite] [👑 Transfer]
+[⬜ Go Offline] [🗑️ Remove Waiting Room]
 
 Only you can see and use these controls
 ```
@@ -1503,6 +1510,25 @@ permission to join your channel. They'll receive a DM notification.
 #### Transfer Ownership
 
 Click the **👑 Transfer** button to select a user from a dropdown menu. Only users currently in the channel will appear. Transfer ownership instantly.
+
+#### Go Live
+
+Click **🔴 Go Live** to mark your channel as live. This will:
+
+- Add a `🔴` prefix to your channel name (auto-removed when you go offline)
+- Post a disclaimer in the channel text chat about platform Terms of Service
+- Notify anyone who joins the channel that it is live
+
+Click **⬜ Go Offline** to remove the live indicator.
+
+#### Waiting Room
+
+Click **⏳ Waiting Room** to create a companion waiting room channel for your voice channel. Users can join the waiting room and
+you (the owner) will receive a notification in the channel with a **🚪 Let In** button to move them into your channel.
+
+- Waiting room users cannot speak (mic muted)
+- When deleted or when you remove it, remaining users are automatically moved into your channel
+- Click **🗑️ Remove Waiting Room** to delete it
 
 ---
 

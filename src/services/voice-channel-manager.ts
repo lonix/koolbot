@@ -12,6 +12,7 @@ import {
   ButtonStyle,
   TextChannel,
   PermissionFlagsBits,
+  Message,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
@@ -31,6 +32,9 @@ export class VoiceChannelManager {
     string,
     { timer: ReturnType<typeof setTimeout>; originalOwnerId: string }
   > = new Map(); // channelId -> timer and original owner info
+  private liveChannels: Set<string> = new Set(); // channelIds currently marked as live
+  private waitingRooms: Map<string, string> = new Map(); // mainChannelId -> waitingRoomChannelId
+  private waitingRoomToMain: Map<string, string> = new Map(); // waitingRoomChannelId -> mainChannelId
   private client: Client;
   private configService: ConfigService;
 
@@ -75,6 +79,178 @@ export class VoiceChannelManager {
    */
   public getCustomChannelName(channelId: string): string | undefined {
     return this.customChannelNames.get(channelId);
+  }
+
+  /**
+   * Set the live status of a channel
+   */
+  public setLiveStatus(channelId: string, isLive: boolean): void {
+    if (isLive) {
+      this.liveChannels.add(channelId);
+    } else {
+      this.liveChannels.delete(channelId);
+    }
+  }
+
+  /**
+   * Check if a channel is marked as live
+   */
+  public isLive(channelId: string): boolean {
+    return this.liveChannels.has(channelId);
+  }
+
+  /**
+   * Toggle the live status of a channel, applying suffix indicator and posting announcements.
+   * Returns true if the channel is now live, false if it went offline.
+   */
+  public async toggleLive(channel: VoiceChannel): Promise<boolean> {
+    const isNowLive = !this.liveChannels.has(channel.id);
+    this.setLiveStatus(channel.id, isNowLive);
+
+    // Apply or remove 🔴 suffix from channel name (suffix preserves the managed prefix)
+    const liveSuffix = " 🔴";
+    const currentName = channel.name;
+    try {
+      if (isNowLive && !currentName.endsWith(liveSuffix)) {
+        await channel.setName(`${currentName}${liveSuffix}`);
+      } else if (!isNowLive && currentName.endsWith(liveSuffix)) {
+        await channel.setName(currentName.slice(0, -liveSuffix.length));
+      }
+    } catch (error) {
+      logger.error("Error applying live suffix to channel name:", error);
+    }
+
+    // Post announcement in the channel text chat
+    try {
+      if ("send" in channel && typeof channel.send === "function") {
+        if (isNowLive) {
+          await channel.send(
+            "🔴 **This channel is now LIVE!** The host may be streaming on " +
+              "Twitch, YouTube, or another platform. Be mindful of their " +
+              "platform's Terms of Service while in this channel.",
+          );
+        } else {
+          await channel.send("⬜ The channel is no longer live.");
+        }
+      }
+    } catch (error) {
+      logger.error("Error sending live announcement:", error);
+    }
+
+    return isNowLive;
+  }
+
+  /**
+   * Get the waiting room channel ID for a main channel
+   */
+  public getWaitingRoom(channelId: string): string | undefined {
+    return this.waitingRooms.get(channelId);
+  }
+
+  /**
+   * Get the main channel ID for a waiting room channel
+   */
+  public getMainChannelForWaitingRoom(
+    waitingRoomId: string,
+  ): string | undefined {
+    return this.waitingRoomToMain.get(waitingRoomId);
+  }
+
+  /**
+   * Create a waiting room for a channel
+   */
+  public async createWaitingRoom(
+    channel: VoiceChannel,
+    ownerId: string,
+  ): Promise<VoiceChannel | null> {
+    try {
+      if (this.waitingRooms.has(channel.id)) {
+        logger.info(`Waiting room already exists for channel ${channel.name}`);
+        return null;
+      }
+
+      const guild = channel.guild;
+      const waitingRoomName = `⏳ ${channel.name} Waiting`;
+
+      // Create the waiting room in the same category
+      const waitingRoom = await guild.channels.create({
+        name: waitingRoomName,
+        type: ChannelType.GuildVoice,
+        parent: channel.parent,
+        permissionOverwrites: [
+          {
+            id: guild.roles.everyone.id,
+            allow: [
+              PermissionFlagsBits.Connect,
+              PermissionFlagsBits.ViewChannel,
+            ],
+            deny: [PermissionFlagsBits.Speak],
+          },
+          {
+            id: ownerId,
+            allow: [
+              PermissionFlagsBits.Connect,
+              PermissionFlagsBits.ViewChannel,
+              PermissionFlagsBits.MoveMembers,
+            ],
+          },
+        ],
+      });
+
+      this.waitingRooms.set(channel.id, waitingRoom.id);
+      this.waitingRoomToMain.set(waitingRoom.id, channel.id);
+
+      logger.info(
+        `Created waiting room ${waitingRoom.name} for channel ${channel.name}`,
+      );
+      return waitingRoom;
+    } catch (error) {
+      logger.error("Error creating waiting room:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Remove the waiting room for a channel
+   */
+  public async removeWaitingRoom(channelId: string): Promise<void> {
+    try {
+      const waitingRoomId = this.waitingRooms.get(channelId);
+      if (!waitingRoomId) return;
+
+      const waitingRoom = this.client.channels.cache.get(waitingRoomId) as
+        | VoiceChannel
+        | undefined;
+
+      if (waitingRoom) {
+        // Move waiting users to main channel or disconnect them
+        if (waitingRoom.members.size > 0) {
+          const mainChannel = this.client.channels.cache.get(channelId) as
+            | VoiceChannel
+            | undefined;
+
+          if (mainChannel) {
+            for (const member of waitingRoom.members.values()) {
+              try {
+                await member.voice.setChannel(mainChannel);
+              } catch {
+                // If we can't move them, disconnect them
+                await member.voice.disconnect().catch(() => undefined);
+              }
+            }
+          }
+        }
+
+        await waitingRoom.delete("Waiting room removed by owner");
+      }
+
+      this.waitingRooms.delete(channelId);
+      this.waitingRoomToMain.delete(waitingRoomId);
+
+      logger.info(`Removed waiting room for channel ${channelId}`);
+    } catch (error) {
+      logger.error("Error removing waiting room:", error);
+    }
   }
 
   private async getGuild(guildId: string): Promise<Guild | null> {
@@ -498,6 +674,18 @@ export class VoiceChannelManager {
 
       // User joined a channel
       if (!oldChannel && newChannel) {
+        // Check if joining a waiting room
+        const mainChannelId = this.waitingRoomToMain.get(newChannel.id);
+        if (mainChannelId) {
+          await this.notifyOwnerUserWaiting(mainChannelId, member);
+          return;
+        }
+
+        // Check if joining a live channel - send disclaimer
+        if (this.liveChannels.has(newChannel.id)) {
+          await this.sendLiveDisclaimer(newChannel as VoiceChannel, member);
+        }
+
         const lobbyChannelName =
           (await configService.getString("voicechannels.lobby.name")) ||
           (await configService.getString("voice_channel.lobby_channel_name")) ||
@@ -537,6 +725,18 @@ export class VoiceChannelManager {
       }
       // User switched channels
       else if (oldChannel && newChannel) {
+        // Check if joining a waiting room
+        const mainChannelId = this.waitingRoomToMain.get(newChannel.id);
+        if (mainChannelId) {
+          await this.notifyOwnerUserWaiting(mainChannelId, member);
+          return;
+        }
+
+        // Check if joining a live channel - send disclaimer
+        if (this.liveChannels.has(newChannel.id)) {
+          await this.sendLiveDisclaimer(newChannel as VoiceChannel, member);
+        }
+
         const lobbyChannelName = await configService.getString(
           "voicechannels.lobby.name",
           "Lobby",
@@ -596,6 +796,65 @@ export class VoiceChannelManager {
       }
     } catch (error) {
       logger.error("Error handling voice state update:", error);
+    }
+  }
+
+  /**
+   * Send a live disclaimer to a member that just joined a live channel
+   */
+  private async sendLiveDisclaimer(
+    channel: VoiceChannel,
+    member: GuildMember,
+  ): Promise<void> {
+    try {
+      if ("send" in channel && typeof channel.send === "function") {
+        await channel.send(
+          `<@${member.id}> 🔴 **Heads up!** This channel is currently LIVE. ` +
+            "The host may be streaming — please be mindful of their platform's Terms of Service.",
+        );
+      }
+    } catch (error) {
+      logger.error("Error sending live disclaimer:", error);
+    }
+  }
+
+  /**
+   * Notify the channel owner that someone is waiting in the waiting room
+   */
+  private async notifyOwnerUserWaiting(
+    mainChannelId: string,
+    waitingMember: GuildMember,
+  ): Promise<void> {
+    try {
+      const mainChannel = this.client.channels.cache.get(mainChannelId) as
+        | VoiceChannel
+        | undefined;
+      if (!mainChannel) return;
+
+      // Find the owner
+      const ownerId = Array.from(this.userChannels.entries()).find(
+        ([, uc]) => uc.id === mainChannelId,
+      )?.[0];
+      if (!ownerId) return;
+
+      if ("send" in mainChannel && typeof mainChannel.send === "function") {
+        const letin = new ButtonBuilder()
+          .setCustomId(
+            `vc_control_letin_${mainChannelId}_${waitingMember.id}_${ownerId}`,
+          )
+          .setLabel(`Let In ${waitingMember.displayName}`)
+          .setStyle(ButtonStyle.Success)
+          .setEmoji("🚪");
+
+        const row = new ActionRowBuilder<ButtonBuilder>().addComponents(letin);
+
+        await mainChannel.send({
+          content: `<@${ownerId}> ⏳ **${waitingMember.displayName}** is waiting to join your channel!`,
+          components: [row],
+        });
+      }
+    } catch (error) {
+      logger.error("Error notifying owner of waiting user:", error);
     }
   }
 
@@ -683,17 +942,21 @@ export class VoiceChannelManager {
         return;
       }
 
+      const isLive = this.liveChannels.has(channel.id);
+      const hasWaitingRoom = this.waitingRooms.has(channel.id);
+
       // Create the control panel embed
       const embed = new EmbedBuilder()
         .setTitle("🎮 Voice Channel Controls")
         .setDescription(
-          `Welcome to your voice channel: **${channel.name}**\n\n` +
-            `Use the buttons below to customize your channel!`,
+          `Manage your voice channel: **${channel.name}**\n\n` +
+            `Privacy: 🌐 Public` +
+            (isLive ? "\n🔴 **LIVE**" : ""),
         )
-        .setColor(0x00ff00)
+        .setColor(isLive ? 0xff0000 : 0x00ff00)
         .setFooter({ text: "Only the channel owner can use these controls" });
 
-      const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(`vc_control_name_${channel.id}_${ownerId}`)
           .setLabel("Rename")
@@ -717,6 +980,19 @@ export class VoiceChannelManager {
           .setEmoji("👑"),
       );
 
+      const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`vc_control_live_${channel.id}_${ownerId}`)
+          .setLabel(isLive ? "Go Offline" : "Go Live")
+          .setStyle(isLive ? ButtonStyle.Secondary : ButtonStyle.Danger)
+          .setEmoji(isLive ? "⬜" : "🔴"),
+        new ButtonBuilder()
+          .setCustomId(`vc_control_waitingroom_${channel.id}_${ownerId}`)
+          .setLabel(hasWaitingRoom ? "Remove Waiting Room" : "Waiting Room")
+          .setStyle(hasWaitingRoom ? ButtonStyle.Danger : ButtonStyle.Secondary)
+          .setEmoji(hasWaitingRoom ? "🗑️" : "⏳"),
+      );
+
       // In Discord, voice channels can have built-in text chat enabled
       // This feature is available in some servers but not all
       // Try to send to the voice channel if it supports messaging
@@ -725,7 +1001,7 @@ export class VoiceChannelManager {
           await channel.send({
             content: `<@${ownerId}>`,
             embeds: [embed],
-            components: [buttons],
+            components: [row1, row2],
           });
 
           logger.info(
@@ -758,7 +1034,7 @@ export class VoiceChannelManager {
         await textChannel.send({
           content: `<@${ownerId}>`,
           embeds: [embed],
-          components: [buttons],
+          components: [row1, row2],
         });
 
         logger.info(
@@ -778,6 +1054,10 @@ export class VoiceChannelManager {
     try {
       const channel = this.userChannels.get(userId);
       if (channel && channel.members.size === 0) {
+        // Clean up waiting room if one exists
+        await this.removeWaitingRoom(channel.id);
+        // Clean up live status
+        this.liveChannels.delete(channel.id);
         await channel.delete();
         this.userChannels.delete(userId);
         // Clean up custom name tracking
@@ -840,6 +1120,22 @@ export class VoiceChannelManager {
 
       // Clean up ownership queue
       this.ownershipQueue.delete(channel.id);
+
+      // Clean up live status
+      this.liveChannels.delete(channel.id);
+
+      // Clean up waiting room (fire-and-forget after channel deleted to avoid race conditions)
+      const waitingRoomId = this.waitingRooms.get(channel.id);
+      if (waitingRoomId) {
+        this.waitingRooms.delete(channel.id);
+        this.waitingRoomToMain.delete(waitingRoomId);
+        try {
+          const waitingRoom = this.client.channels.cache.get(waitingRoomId);
+          if (waitingRoom) await waitingRoom.delete();
+        } catch {
+          // Ignore errors cleaning up waiting room
+        }
+      }
 
       // Remove from deletion tracking
       this.channelsBeingDeleted.delete(channel.id);
@@ -1379,6 +1675,12 @@ export class VoiceChannelManager {
             continue;
           }
 
+          // Skip if it's a waiting room managed by this bot
+          if (this.waitingRoomToMain.has(channel.id)) {
+            logger.debug(`Skipping waiting room channel: ${channel.name}`);
+            continue;
+          }
+
           // Delete unmanaged channels (empty or not)
           await channel.delete("Bot cleanup - unmanaged channel");
           // Clean up custom name tracking
@@ -1666,61 +1968,11 @@ export class VoiceChannelManager {
               `[Control Panel] Found control panel message ${controlPanelMessage.id}, updating with new owner ${newOwnerId}`,
             );
 
-            // Get current privacy state
-            const guild = channel.guild;
-            const everyoneRole = guild.roles.everyone;
-            const permissions = channel.permissionOverwrites.cache.get(
-              everyoneRole.id,
+            await this.rebuildControlPanel(
+              channel,
+              newOwnerId,
+              controlPanelMessage,
             );
-            const isPrivate = permissions?.deny.has(
-              PermissionFlagsBits.Connect,
-            );
-
-            // Recreate the embed and buttons with new owner ID
-            const embed = new EmbedBuilder()
-              .setTitle("🎮 Voice Channel Controls")
-              .setDescription(
-                `Welcome to your voice channel: **${channel.name}**\n\n` +
-                  `Use the buttons below to customize your channel!\n` +
-                  `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}`,
-              )
-              .setColor(isPrivate ? 0xff0000 : 0x00ff00)
-              .setFooter({
-                text: "Only the channel owner can use these controls",
-              });
-
-            const privacyButton = new ButtonBuilder()
-              .setCustomId(`vc_control_privacy_${channel.id}_${newOwnerId}`)
-              .setLabel(isPrivate ? "Make Public" : "Make Private")
-              .setStyle(isPrivate ? ButtonStyle.Success : ButtonStyle.Danger)
-              .setEmoji(isPrivate ? "🌐" : "🔒");
-
-            const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`vc_control_name_${channel.id}_${newOwnerId}`)
-                .setLabel("Rename")
-                .setStyle(ButtonStyle.Primary)
-                .setEmoji("✏️"),
-              privacyButton,
-              new ButtonBuilder()
-                .setCustomId(`vc_control_invite_${channel.id}_${newOwnerId}`)
-                .setLabel("Invite")
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji("👥")
-                .setDisabled(!isPrivate),
-              new ButtonBuilder()
-                .setCustomId(`vc_control_transfer_${channel.id}_${newOwnerId}`)
-                .setLabel("Transfer")
-                .setStyle(ButtonStyle.Secondary)
-                .setEmoji("👑"),
-            );
-
-            // Update the message
-            await controlPanelMessage.edit({
-              content: `<@${newOwnerId}>`,
-              embeds: [embed],
-              components: [buttons],
-            });
 
             logger.info(
               `[Control Panel] Successfully updated control panel message for new owner ${newOwnerId}`,
@@ -1749,6 +2001,75 @@ export class VoiceChannelManager {
         error,
       );
     }
+  }
+
+  /**
+   * Rebuild (edit) an existing control panel message with up-to-date state
+   */
+  public async rebuildControlPanel(
+    channel: VoiceChannel,
+    ownerId: string,
+    message: Message,
+  ): Promise<void> {
+    const guild = channel.guild;
+    const everyoneRole = guild.roles.everyone;
+    const permissions = channel.permissionOverwrites.cache.get(everyoneRole.id);
+    const isPrivate = permissions?.deny.has(PermissionFlagsBits.Connect);
+    const isLive = this.liveChannels.has(channel.id);
+    const hasWaitingRoom = this.waitingRooms.has(channel.id);
+
+    const embed = new EmbedBuilder()
+      .setTitle("🎮 Voice Channel Controls")
+      .setDescription(
+        `Manage your voice channel: **${channel.name}**\n\n` +
+          `Privacy: ${isPrivate ? "🔒 Invite-Only" : "🌐 Public"}` +
+          (isLive ? "\n🔴 **LIVE**" : ""),
+      )
+      .setColor(isLive ? 0xff0000 : isPrivate ? 0xff6600 : 0x00ff00)
+      .setFooter({ text: "Only the channel owner can use these controls" });
+
+    const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`vc_control_name_${channel.id}_${ownerId}`)
+        .setLabel("Rename")
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji("✏️"),
+      new ButtonBuilder()
+        .setCustomId(`vc_control_privacy_${channel.id}_${ownerId}`)
+        .setLabel(isPrivate ? "Make Public" : "Make Private")
+        .setStyle(isPrivate ? ButtonStyle.Success : ButtonStyle.Danger)
+        .setEmoji(isPrivate ? "🌐" : "🔒"),
+      new ButtonBuilder()
+        .setCustomId(`vc_control_invite_${channel.id}_${ownerId}`)
+        .setLabel("Invite")
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji("👥")
+        .setDisabled(!isPrivate),
+      new ButtonBuilder()
+        .setCustomId(`vc_control_transfer_${channel.id}_${ownerId}`)
+        .setLabel("Transfer")
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji("👑"),
+    );
+
+    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`vc_control_live_${channel.id}_${ownerId}`)
+        .setLabel(isLive ? "Go Offline" : "Go Live")
+        .setStyle(isLive ? ButtonStyle.Secondary : ButtonStyle.Danger)
+        .setEmoji(isLive ? "⬜" : "🔴"),
+      new ButtonBuilder()
+        .setCustomId(`vc_control_waitingroom_${channel.id}_${ownerId}`)
+        .setLabel(hasWaitingRoom ? "Remove Waiting Room" : "Waiting Room")
+        .setStyle(hasWaitingRoom ? ButtonStyle.Danger : ButtonStyle.Secondary)
+        .setEmoji(hasWaitingRoom ? "🗑️" : "⏳"),
+    );
+
+    await message.edit({
+      content: `<@${ownerId}>`,
+      embeds: [embed],
+      components: [row1, row2],
+    });
   }
 
   /**
@@ -1804,5 +2125,8 @@ export class VoiceChannelManager {
     this.customChannelNames.clear();
     this.ownershipQueue.clear();
     this.channelsBeingDeleted.clear();
+    this.liveChannels.clear();
+    this.waitingRooms.clear();
+    this.waitingRoomToMain.clear();
   }
 }
