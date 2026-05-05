@@ -29,7 +29,7 @@
   },
   "dependencies": {
     "@discordjs/builders": "^1.14.1",
-    "axios": "^1.15.1",
+    "axios": "^1.16.0",
     "cron": "^4.4.0",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
@@ -37,7 +37,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "js-yaml": "^4.1.1",
-    "mongoose": "^9.4.1",
+    "mongoose": "^9.6.1",
     "winston": "^3.19.0"
   },
   "devDependencies": {
