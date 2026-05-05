@@ -10,7 +10,6 @@ import logger from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
-import { connectToDatabase } from "../utils/database.js";
 import { AchievementsService } from "./achievements-service.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
@@ -49,7 +48,6 @@ export class VoiceChannelTracker {
   private client: Client;
   private isConnected: boolean = false;
   private configService: ConfigService;
-  private db: any;
 
   private constructor(client: Client) {
     this.client = client;
@@ -630,7 +628,7 @@ export class VoiceChannelTracker {
 
   async initialize() {
     try {
-      this.db = await connectToDatabase();
+      await this.ensureConnection();
       logger.info("VoiceChannelTracker initialized");
     } catch (error) {
       logger.error("Error initializing VoiceChannelTracker:", error);
