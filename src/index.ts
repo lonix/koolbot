@@ -34,6 +34,7 @@ import { PermissionsService } from "./services/permissions-service.js";
 import FriendshipListener from "./services/friendship-listener.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
+import mongoose from "mongoose";
 
 dotenvConfig();
 
@@ -104,9 +105,6 @@ let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
 // Healthcheck endpoint for Docker (start only after bot is ready)
-
-// ...existing code...
-import mongoose from "mongoose";
 
 function startHealthServer(): void {
   const healthApp = express();
