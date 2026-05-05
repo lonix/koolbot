@@ -49,7 +49,6 @@ export class VoiceChannelTracker {
   private client: Client;
   private isConnected: boolean = false;
   private configService: ConfigService;
-  private db: any;
 
   private constructor(client: Client) {
     this.client = client;
