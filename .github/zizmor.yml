@@ -1,0 +1,21 @@
+# zizmor workflow security audit configuration.
+# https://docs.zizmor.sh/configuration/
+
+rules:
+  unpinned-uses:
+    config:
+      # Tiered pinning policy: well-known first-party publishers may use ref
+      # (tag/branch) pins; everything else must be pinned by SHA.
+      # Dependabot keeps tag pins up to date for these publishers.
+      policies:
+        actions/*: ref-pin
+        github/*: ref-pin
+        docker/*: ref-pin
+        DavidAnson/*: ref-pin
+        hadolint/*: ref-pin
+        aquasecurity/*: ref-pin
+        sigstore/*: ref-pin
+        reviewdog/*: ref-pin
+        zizmorcore/*: ref-pin
+        release-drafter/*: ref-pin
+        '*': hash-pin
