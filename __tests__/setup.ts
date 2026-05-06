@@ -37,6 +37,7 @@ jest.mock('mongoose', () => ({
   default: {
     connect: jest.fn().mockResolvedValue(undefined),
     connection: {
+      on: jest.fn(),
       close: jest.fn().mockResolvedValue(undefined),
       readyState: 1,
     },
@@ -45,11 +46,15 @@ jest.mock('mongoose', () => ({
       find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue(null),
       findOneAndUpdate: jest.fn().mockResolvedValue(null),
+      deleteMany: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({}),
+      countDocuments: jest.fn().mockResolvedValue(0),
+      aggregate: jest.fn().mockResolvedValue([]),
     }),
   },
   connect: jest.fn().mockResolvedValue(undefined),
   connection: {
+    on: jest.fn(),
     close: jest.fn().mockResolvedValue(undefined),
     readyState: 1,
   },
@@ -58,6 +63,9 @@ jest.mock('mongoose', () => ({
     find: jest.fn().mockResolvedValue([]),
     findOne: jest.fn().mockResolvedValue(null),
     findOneAndUpdate: jest.fn().mockResolvedValue(null),
+    deleteMany: jest.fn().mockResolvedValue(null),
     create: jest.fn().mockResolvedValue({}),
+    countDocuments: jest.fn().mockResolvedValue(0),
+    aggregate: jest.fn().mockResolvedValue([]),
   }),
 }));

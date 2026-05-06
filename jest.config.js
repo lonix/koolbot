@@ -29,15 +29,15 @@ export default {
   ],
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html'],
-  // Starting with minimal thresholds matching current baseline (~2.7%)
-  // Prevents regression while allowing incremental improvement
-  // Goal: 70-80% for critical modules (services, commands)
+  // Incrementally raised from 2% baseline toward the stated 70-80% goal.
+  // Current achieved coverage: ~23% statements/lines, ~36% functions, ~17% branches.
+  // Raise these thresholds by ~10 percentage points each sprint.
   coverageThreshold: {
     global: {
-      branches: 2,
-      functions: 2,
-      lines: 2,
-      statements: 2,
+      branches: 15,
+      functions: 25,
+      lines: 20,
+      statements: 20,
     },
   },
   testTimeout: 10000,
