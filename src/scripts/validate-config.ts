@@ -89,7 +89,7 @@ async function validateConfiguration(): Promise<void> {
     logger.info("Starting configuration validation...");
 
     await mongoose.connect(
-      process.env.MONGODB_URI || "mongodb://localhost:27017/koolbot",
+      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
     );
 
     const configService = ConfigService.getInstance();
@@ -195,7 +195,9 @@ async function validateConfiguration(): Promise<void> {
     }
   } catch (error) {
     logger.error("Fatal error during configuration validation:", error);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    await mongoose.disconnect();
   }
 }
 

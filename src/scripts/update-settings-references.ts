@@ -102,7 +102,7 @@ async function updateSettingsReferences(): Promise<void> {
     logger.info("Starting settings reference update...");
 
     await mongoose.connect(
-      process.env.MONGODB_URI || "mongodb://localhost:27017/koolbot",
+      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
     );
 
     const configService = ConfigService.getInstance();
@@ -134,7 +134,9 @@ async function updateSettingsReferences(): Promise<void> {
     logger.info("- src/index.ts");
   } catch (error) {
     logger.error("Error during settings reference update:", error);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    await mongoose.disconnect();
   }
 }
 

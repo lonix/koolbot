@@ -166,7 +166,7 @@ async function migrateConfiguration(): Promise<void> {
     logger.info("Starting configuration migration...");
 
     await mongoose.connect(
-      process.env.MONGODB_URI || "mongodb://localhost:27017/koolbot",
+      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
     );
 
     const configService = ConfigService.getInstance();
@@ -241,7 +241,9 @@ async function migrateConfiguration(): Promise<void> {
     }
   } catch (error) {
     logger.error("Fatal error during configuration migration:", error);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    await mongoose.disconnect();
   }
 }
 
