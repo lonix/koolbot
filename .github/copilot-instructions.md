@@ -103,6 +103,7 @@ When implementing bot-controlled channels (quotes, stats, achievements), add inf
 **Pattern Location**: See `QuoteChannelManager.ensureHeaderPost()` and `DEVELOPER_GUIDE.md`
 
 **Quick Implementation**:
+
 1. Add config keys: `feature.header_enabled`, `feature.header_pin_enabled`, `feature.header_message_id`
 2. Copy `ensureHeaderPost()` and `createHeaderPost()` methods from `quote-channel-manager.ts`
 3. Customize embed content for your channel's purpose

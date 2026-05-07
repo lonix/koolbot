@@ -41,3 +41,4 @@ jobs:
             !node_modules
             !dist
             !coverage
+            !.github/prompts
