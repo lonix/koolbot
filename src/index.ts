@@ -34,6 +34,8 @@ import { PermissionsService } from "./services/permissions-service.js";
 import FriendshipListener from "./services/friendship-listener.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
+import { WizardService } from "./services/wizard-service.js";
+import { MonitoringService } from "./services/monitoring-service.js";
 import mongoose from "mongoose";
 
 dotenvConfig();
@@ -376,7 +378,25 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Scheduled announcements cleanup",
     );
 
-    // 7. Close database connections - 3 second timeout
+    // 7. Stop remaining timer-owning services so their intervals/timeouts
+    //    don't fire against a half-closed Discord client or MongoDB
+    //    connection during the rest of the shutdown sequence.
+    await runWithTimeout(
+      async () => {
+        voiceChannelManager.destroy();
+        voiceChannelAnnouncer.destroy();
+        voiceChannelTruncation.destroy();
+        await noticesChannelManager.stop();
+        pollService.destroy();
+        WizardService.getInstance().shutdown();
+        MonitoringService.getInstance().destroy();
+        await botStatusService.shutdown();
+      },
+      2000,
+      "Service timer cleanup",
+    );
+
+    // 8. Close database connections - 3 second timeout
     await runWithTimeout(
       async () => {
         const { default: mongoose } = await import("mongoose");
@@ -389,7 +409,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Database connection closure",
     );
 
-    // 7. Destroy Discord client - 5 second timeout
+    // 9. Destroy Discord client - 5 second timeout
     await runWithTimeout(
       async () => {
         await client.destroy();

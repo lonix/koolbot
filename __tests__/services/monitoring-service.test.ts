@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { MonitoringService } from '../../src/services/monitoring-service.js';
 
 // Mock logger
@@ -159,10 +159,85 @@ describe('MonitoringService', () => {
 
     it('should format uptime as string', () => {
       const uptime = service.formatUptime();
-      
+
       expect(typeof uptime).toBe('string');
     });
   });
 
+  describe('destroy', () => {
+    let fresh: MonitoringService;
+
+    beforeEach(() => {
+      // The outer beforeEach instantiated the singleton with real timers.
+      // Destroy it (now that destroy() exists) and reset the singleton
+      // before switching to fake timers, so we don't leak the original
+      // real interval and don't mix real+fake timer state.
+      service.destroy();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (MonitoringService as any).instance = undefined;
+
+      jest.useFakeTimers();
+      fresh = MonitoringService.getInstance();
+    });
+
+    afterEach(() => {
+      // Make sure each test leaves no live interval before resetting the
+      // singleton, even when the test itself didn't call destroy().
+      fresh.destroy();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (MonitoringService as any).instance = undefined;
+      jest.useRealTimers();
+    });
+
+    it('captures the periodic logging interval handle on construction', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const handle = (fresh as any).periodicLoggingInterval;
+      expect(handle).not.toBeNull();
+      expect(handle).toBeDefined();
+    });
+
+    it('clears the periodic logging interval and nulls the handle', () => {
+      const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const handle = (fresh as any).periodicLoggingInterval;
+
+      fresh.destroy();
+
+      expect(clearIntervalSpy).toHaveBeenCalledWith(handle);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((fresh as any).periodicLoggingInterval).toBeNull();
+
+      clearIntervalSpy.mockRestore();
+    });
+
+    it('does not fire the periodic logger after destroy()', () => {
+      const getPerfSpy = jest.spyOn(fresh, 'getPerformanceMetrics');
+
+      fresh.destroy();
+      // Advance well past the 1-hour interval.
+      jest.advanceTimersByTime(2 * 60 * 60 * 1000);
+
+      expect(getPerfSpy).not.toHaveBeenCalled();
+
+      getPerfSpy.mockRestore();
+    });
+
+    it('is idempotent — repeated calls are safe', () => {
+      const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
+
+      expect(() => {
+        fresh.destroy();
+        fresh.destroy();
+        fresh.destroy();
+      }).not.toThrow();
+
+      // Only the first call should have anything to clear.
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      expect((fresh as any).periodicLoggingInterval).toBeNull();
+
+      clearIntervalSpy.mockRestore();
+    });
+  });
 
 });
