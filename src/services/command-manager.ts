@@ -5,9 +5,12 @@ import {
   Collection,
   SlashCommandBuilder,
   ChatInputCommandInteraction,
+  DiscordAPIError,
+  HTTPError,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
 import logger from "../utils/logger.js";
+import { getErrorMessage } from "../utils/error-guards.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { CooldownManager } from "./cooldown-manager.js";
@@ -178,17 +181,28 @@ export class CommandManager {
         }
         return result;
       } catch (error: unknown) {
-        const err = error as {
-          code?: number;
-          message?: string;
-          retry_after?: number;
-        };
+        const message = getErrorMessage(error);
+
+        // HTTP 429 surfaces as DiscordAPIError or HTTPError with status 429.
+        // The retry delay is in `rawError.retry_after` (seconds) on
+        // DiscordAPIError; HTTPError doesn't expose it, so fall back to a
+        // conservative default.
+        const httpStatus =
+          error instanceof DiscordAPIError || error instanceof HTTPError
+            ? error.status
+            : undefined;
         const isRateLimit =
-          err.code === 429 || err.message?.includes("rate limit");
-        const isTimeout = err.message?.includes("timeout");
+          httpStatus === 429 || message.toLowerCase().includes("rate limit");
+        const isTimeout = message.toLowerCase().includes("timeout");
 
         if (isRateLimit) {
-          const retryAfter = err.retry_after || 5;
+          let retryAfter = 5;
+          if (error instanceof DiscordAPIError) {
+            const raw = error.rawError as { retry_after?: number } | undefined;
+            if (typeof raw?.retry_after === "number") {
+              retryAfter = raw.retry_after;
+            }
+          }
           logger.warn(
             `⚠️ Discord rate limited for ${operationName}, retrying in ${retryAfter}s (attempt ${attempt}/${maxRetries})`,
           );
@@ -203,8 +217,8 @@ export class CommandManager {
             await new Promise((resolve) => setTimeout(resolve, 2000 * attempt)); // Exponential backoff
           }
         } else {
-          logger.error(`❌ Discord API error for ${operationName}:`, err);
-          throw err;
+          logger.error(`❌ Discord API error for ${operationName}:`, error);
+          throw error;
         }
 
         if (attempt === maxRetries) {
