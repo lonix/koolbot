@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import type { ConfigService as ConfigServiceType } from '../../src/services/config-service.js';
 
 const mockFindOne = jest.fn();
 const mockFind = jest.fn();
@@ -41,7 +42,7 @@ jest.unstable_mockModule('mongoose', () => ({
 const { ConfigService } = await import('../../src/services/config-service.js');
 
 describe('ConfigService - Methods', () => {
-  let service: ConfigService;
+  let service: ConfigServiceType;
   const originalEnv = process.env;
 
   beforeEach(() => {
