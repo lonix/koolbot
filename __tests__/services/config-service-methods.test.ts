@@ -1,23 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import type { ConfigService as ConfigServiceType } from '../../src/services/config-service.js';
 
-// Create mock functions for Config model
 const mockFindOne = jest.fn();
 const mockFind = jest.fn();
 const mockFindOneAndUpdate = jest.fn();
 const mockDeleteOne = jest.fn();
+const mockUpdateOne = jest.fn();
 
-// Mock the Config model
-jest.mock('../../src/models/config.js', () => ({
+jest.unstable_mockModule('../../src/models/config.js', () => ({
   Config: {
     findOne: mockFindOne,
     find: mockFind,
     findOneAndUpdate: mockFindOneAndUpdate,
     deleteOne: mockDeleteOne,
+    updateOne: mockUpdateOne,
   },
 }));
 
-// Mock logger
-jest.mock('../../src/utils/logger.js', () => ({
+jest.unstable_mockModule('../../src/utils/logger.js', () => ({
   default: {
     info: jest.fn(),
     error: jest.fn(),
@@ -26,19 +26,23 @@ jest.mock('../../src/utils/logger.js', () => ({
   },
 }));
 
-// Mock mongoose with readyState: 1 (connected)
-jest.mock('mongoose', () => ({
+const mongooseMock = {
   connection: {
     readyState: 1,
     on: jest.fn(),
   },
   connect: jest.fn(),
+};
+
+jest.unstable_mockModule('mongoose', () => ({
+  ...mongooseMock,
+  default: mongooseMock,
 }));
 
-import { ConfigService } from '../../src/services/config-service.js';
+const { ConfigService } = await import('../../src/services/config-service.js');
 
 describe('ConfigService - Methods', () => {
-  let service: ConfigService;
+  let service: ConfigServiceType;
   const originalEnv = process.env;
 
   beforeEach(() => {
@@ -401,15 +405,15 @@ describe('ConfigService - Methods', () => {
     });
 
     it('should load configs from database on initialization', async () => {
+      // Use a key that exists in defaultConfig so cleanupUnknownSettings doesn't evict it
       mockFind.mockResolvedValue([
-        { key: 'loaded.key', value: 'loaded-value' },
+        { key: 'voicechannels.enabled', value: true, category: 'voicechannels' },
       ]);
 
       await service.initialize();
 
-      // The config should now be in cache
-      const result = await service.get('loaded.key');
-      expect(result).toBe('loaded-value');
+      const result = await service.get('voicechannels.enabled');
+      expect(result).toBe(true);
     });
 
     it('should prioritize critical env settings over database', async () => {
