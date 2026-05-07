@@ -8,7 +8,7 @@ contributors edit copy without touching unrelated code.
 ## What lives here
 
 | File | Used by | What it is |
-|---|---|---|
+| --- | --- | --- |
 | `statuses.ts` | `services/bot-status-service.ts` | Random-rotation Discord presence pools (lonely / single-user / multi-user) |
 | `amikool-responses.ts` | `commands/amikool.ts` | Reply pools for the `/amikool` command |
 | `friendship-triggers.ts` | `services/friendship-listener.ts` | Phrase triggers for the passive "best ship is friendship" reply |
