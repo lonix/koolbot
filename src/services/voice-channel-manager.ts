@@ -82,6 +82,19 @@ export class VoiceChannelManager {
   }
 
   /**
+   * Resolve the lobby channel name, checking the current and legacy config keys
+   * in priority order. Used everywhere the lobby is identified by name so the
+   * different code paths agree on what counts as the lobby.
+   */
+  private async getLobbyChannelName(): Promise<string> {
+    return (
+      (await configService.getString("voicechannels.lobby.name")) ||
+      (await configService.getString("voice_channel.lobby_channel_name")) ||
+      (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
+    );
+  }
+
+  /**
    * Set the live status of a channel
    */
   public setLiveStatus(channelId: string, isLive: boolean): void {
@@ -322,10 +335,7 @@ export class VoiceChannelManager {
           "Dynamic Voice Channels",
         ));
 
-      const lobbyChannelName =
-        (await configService.getString("voicechannels.lobby.name")) ||
-        (await configService.getString("voice_channel.lobby_channel_name")) ||
-        (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+      const lobbyChannelName = await this.getLobbyChannelName();
 
       const offlineLobbyName =
         (await configService.getString("voicechannels.lobby.offlinename")) ||
@@ -686,10 +696,7 @@ export class VoiceChannelManager {
           await this.sendLiveDisclaimer(newChannel as VoiceChannel, member);
         }
 
-        const lobbyChannelName =
-          (await configService.getString("voicechannels.lobby.name")) ||
-          (await configService.getString("voice_channel.lobby_channel_name")) ||
-          (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+        const lobbyChannelName = await this.getLobbyChannelName();
         logger.info(
           `User joined channel. Lobby name: "${lobbyChannelName}", Channel name: "${newChannel.name}"`,
         );
@@ -737,10 +744,7 @@ export class VoiceChannelManager {
           await this.sendLiveDisclaimer(newChannel as VoiceChannel, member);
         }
 
-        const lobbyChannelName = await configService.getString(
-          "voicechannels.lobby.name",
-          "Lobby",
-        );
+        const lobbyChannelName = await this.getLobbyChannelName();
         // If user is moving to the Lobby, create a new channel
         if (newChannel.name === lobbyChannelName) {
           // Clean up the old channel if it was a personal channel
@@ -910,8 +914,31 @@ export class VoiceChannelManager {
         userLimit: 0, // 0 = unlimited by default
       });
 
+      // Move the user before recording ownership: if the move fails (which can
+      // happen when the gateway voice state is stale, e.g. AFK→lobby), we don't
+      // want a permanent userChannels entry that locks the user out of future
+      // lobby joins until the bot restarts.
+      try {
+        await member.voice.setChannel(channel);
+      } catch (moveError) {
+        logger.error(
+          `Failed to move ${member.displayName} into newly created channel; cleaning up:`,
+          moveError,
+        );
+        try {
+          await channel.delete(
+            "Failed to move user into newly created channel",
+          );
+        } catch (deleteError) {
+          logger.error(
+            "Error deleting orphaned channel after setChannel failure:",
+            deleteError,
+          );
+        }
+        return;
+      }
+
       this.userChannels.set(member.id, channel);
-      await member.voice.setChannel(channel);
       logger.info(
         `Created voice channel ${channelName} for ${member.displayName}`,
       );
@@ -1612,10 +1639,7 @@ export class VoiceChannelManager {
           "Dynamic Voice Channels",
         ));
 
-      const lobbyChannelName =
-        (await configService.getString("voicechannels.lobby.name")) ||
-        (await configService.getString("voice_channel.lobby_channel_name")) ||
-        (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+      const lobbyChannelName = await this.getLobbyChannelName();
 
       const offlineLobbyName =
         (await configService.getString("voicechannels.lobby.offlinename")) ||
