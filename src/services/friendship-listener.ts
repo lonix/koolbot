@@ -1,5 +1,6 @@
 import { Client, Message } from "discord.js";
 import logger from "../utils/logger.js";
+import { bestTriggers, worstTriggers } from "../content/friendship-triggers.js";
 
 /**
  * Passive friendship listener.
@@ -33,21 +34,6 @@ export class FriendshipListener {
     if (!message.guild) return; // guild text only
 
     const content = message.content.toLowerCase();
-
-    const bestTriggers = [
-      "best ship",
-      "best eve ship",
-      "best eve online ship",
-      "what is the best ship",
-      "what's the best ship",
-    ];
-    const worstTriggers = [
-      "worst ship",
-      "worst eve ship",
-      "worst eve online ship",
-      "what is the worst ship",
-      "what's the worst ship",
-    ];
 
     const isBest = bestTriggers.some((t) => content.includes(t));
     const isWorst = worstTriggers.some((t) => content.includes(t));

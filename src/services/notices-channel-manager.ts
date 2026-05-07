@@ -1,29 +1,9 @@
-import { Client, TextChannel, EmbedBuilder, ColorResolvable } from "discord.js";
+import { Client, TextChannel, EmbedBuilder } from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import Notice, { INotice } from "../models/notice.js";
-
-// Category colors and emojis
-const CATEGORY_CONFIG = {
-  general: {
-    emoji: "📋",
-    color: 0x5865f2 as ColorResolvable,
-    label: "General",
-  },
-  rules: { emoji: "📜", color: 0xe74c3c as ColorResolvable, label: "Rules" },
-  info: {
-    emoji: "ℹ️",
-    color: 0x3498db as ColorResolvable,
-    label: "Information",
-  },
-  help: { emoji: "❓", color: 0x9b59b6 as ColorResolvable, label: "Help" },
-  "game-servers": {
-    emoji: "🎮",
-    color: 0x2ecc71 as ColorResolvable,
-    label: "Game Servers",
-  },
-} as const;
+import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 
 export class NoticesChannelManager {
   private static instance: NoticesChannelManager;
@@ -531,7 +511,7 @@ export class NoticesChannelManager {
       }
 
       const categoryInfo =
-        CATEGORY_CONFIG[notice.category as keyof typeof CATEGORY_CONFIG];
+        NOTICE_CATEGORIES[notice.category as keyof typeof NOTICE_CATEGORIES];
       const embed = new EmbedBuilder()
         .setColor(categoryInfo.color)
         .setTitle(`${categoryInfo.emoji} ${notice.title}`)

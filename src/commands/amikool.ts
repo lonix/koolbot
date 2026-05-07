@@ -5,34 +5,12 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
+import {
+  koolResponses,
+  notKoolResponses,
+} from "../content/amikool-responses.js";
 
 const configService = ConfigService.getInstance();
-
-const koolResponses = [
-  "Yes, you are kool! 😎",
-  "Absolutely kool! 🌟",
-  "You're the koolest! 🎸",
-  "Kool status: Confirmed! ✅",
-  "100% kool certified! 🏆",
-  "Kool as ice! ❄️",
-  "Much kool, Such wow! 👑",
-  "Kool vibes detected! 🎵",
-  "Maximum koolness achieved! 🚀",
-  "Kool level: Legendary! 🏅",
-];
-
-const notKoolResponses = [
-  "No, you are not kool... yet! 😢",
-  "Kool status: Pending... ⏳",
-  "Not quite kool enough... 🥺",
-  "Koolness level: Needs improvement 📈",
-  "Almost kool, but not quite! 🎯",
-  "Kool potential detected! 💫",
-  "Koolness in progress... 🔄",
-  "Future kool kid! 🌱",
-  "Kool training required! 🎓",
-  "Koolness upgrade available! 💎",
-];
 
 export const data = new SlashCommandBuilder()
   .setName("amikool")

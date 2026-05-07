@@ -12,45 +12,15 @@ import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import mongoose from "mongoose";
 import { quoteService } from "./quote-service.js";
+import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
+import {
+  ACHIEVEMENT_METADATA,
+  type AchievementType,
+} from "../content/achievements.js";
 
-// Badge type definitions
-export type AccoladeType =
-  | "first_hour"
-  | "voice_veteran_100"
-  | "voice_veteran_500"
-  | "voice_veteran_1000"
-  | "voice_legend_8765"
-  | "marathon_runner"
-  | "ultra_marathoner"
-  | "social_butterfly"
-  | "connector"
-  | "night_owl"
-  | "early_bird"
-  | "weekend_warrior"
-  | "weekday_warrior"
-  | "consistent_week"
-  | "consistent_fortnight"
-  | "consistent_month"
-  | "quotable"
-  | "quote_master"
-  | "quote_collector"
-  | "quote_legend"
-  | "widely_quoted"
-  | "quote_icon"
-  | "viral_quote";
+export type { AccoladeType, AchievementType };
 
-export type AchievementType =
-  | "weekly_champion"
-  | "weekly_night_owl"
-  | "weekly_marathon"
-  | "weekly_social_butterfly"
-  | "weekly_active"
-  | "weekly_consistent";
-
-interface BadgeDefinition {
-  emoji: string;
-  name: string;
-  description: string;
+interface BadgeLogic {
   checkFunction: (
     userId: string,
     userData: IVoiceChannelTracking | null,
@@ -59,6 +29,12 @@ interface BadgeDefinition {
     userId: string,
     userData: IVoiceChannelTracking | null,
   ) => Promise<{ value?: number; description?: string; unit?: string }>;
+}
+
+interface BadgeDefinition extends BadgeLogic {
+  emoji: string;
+  name: string;
+  description: string;
 }
 
 export class AchievementsService {
@@ -70,12 +46,10 @@ export class AchievementsService {
   // Minimum duration threshold for consecutive days (5 minutes in seconds)
   private static readonly MIN_DAILY_DURATION_SECONDS = 300;
 
-  // Accolade definitions (persistent badges)
-  private accoladeDefinitions: Record<AccoladeType, BadgeDefinition> = {
+  // Awarding logic per accolade (display metadata lives in
+  // src/content/accolades.ts). Keys must match ACCOLADE_METADATA exactly.
+  private accoladeLogic: Record<AccoladeType, BadgeLogic> = {
     first_hour: {
-      emoji: "🎉",
-      name: "First Steps",
-      description: "Spent your first hour in voice chat",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -98,9 +72,6 @@ export class AchievementsService {
       },
     },
     voice_veteran_100: {
-      emoji: "🎖️",
-      name: "Voice Veteran",
-      description: "Reached 100 hours in voice chat",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -123,9 +94,6 @@ export class AchievementsService {
       },
     },
     voice_veteran_500: {
-      emoji: "🏅",
-      name: "Voice Elite",
-      description: "Reached 500 hours in voice chat",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -148,9 +116,6 @@ export class AchievementsService {
       },
     },
     voice_veteran_1000: {
-      emoji: "🏆",
-      name: "Voice Master",
-      description: "Reached 1000 hours in voice chat",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -173,9 +138,6 @@ export class AchievementsService {
       },
     },
     voice_legend_8765: {
-      emoji: "👑",
-      name: "Voice Legend",
-      description: "Reached 8765 hours (1 year) in voice chat",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -198,9 +160,6 @@ export class AchievementsService {
       },
     },
     marathon_runner: {
-      emoji: "🏃",
-      name: "Marathon Runner",
-      description: "Completed a 4+ hour voice session",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -227,9 +186,6 @@ export class AchievementsService {
       },
     },
     ultra_marathoner: {
-      emoji: "🦸",
-      name: "Ultra Marathoner",
-      description: "Completed an 8+ hour voice session",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -256,9 +212,6 @@ export class AchievementsService {
       },
     },
     social_butterfly: {
-      emoji: "🦋",
-      name: "Social Butterfly",
-      description: "Voiced with 10+ unique users",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -288,9 +241,6 @@ export class AchievementsService {
       },
     },
     connector: {
-      emoji: "🤝",
-      name: "Connector",
-      description: "Voiced with 25+ unique users",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -320,9 +270,6 @@ export class AchievementsService {
       },
     },
     night_owl: {
-      emoji: "🦉",
-      name: "Night Owl",
-      description: "Accumulated 50+ hours during late night (10 PM - 6 AM)",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -366,9 +313,6 @@ export class AchievementsService {
       },
     },
     early_bird: {
-      emoji: "🐦",
-      name: "Early Bird",
-      description: "Accumulated 50+ hours during early morning (6 AM - 10 AM)",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -412,9 +356,6 @@ export class AchievementsService {
       },
     },
     weekend_warrior: {
-      emoji: "🎮",
-      name: "Weekend Warrior",
-      description: "Accumulated 100+ hours during weekends",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -458,9 +399,6 @@ export class AchievementsService {
       },
     },
     weekday_warrior: {
-      emoji: "💼",
-      name: "Weekday Warrior",
-      description: "Accumulated 100+ hours during weekdays",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -504,9 +442,6 @@ export class AchievementsService {
       },
     },
     consistent_week: {
-      emoji: "🔥",
-      name: "On a Roll",
-      description: "Connected for 7 consecutive days (5+ min/day)",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -545,9 +480,6 @@ export class AchievementsService {
       },
     },
     consistent_fortnight: {
-      emoji: "⚡",
-      name: "Dedicated AF",
-      description: "Connected for 14 consecutive days (5+ min/day)",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -586,9 +518,6 @@ export class AchievementsService {
       },
     },
     consistent_month: {
-      emoji: "💀",
-      name: "No-Lifer",
-      description: "Connected for 30 consecutive days (5+ min/day)",
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
@@ -627,17 +556,8 @@ export class AchievementsService {
       },
     },
     quotable: {
-      emoji: "🗣️",
-      name: "Quotable",
-      description: "Been quoted for the first time",
       checkFunction: async (userId: string) => {
-        const quoteStats = {
-          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
-          addedCount: await quoteService.getQuotesAddedByUser(userId),
-          mostLikedLikes:
-            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
-        };
-        return quoteStats.authoredCount >= 1;
+        return (await quoteService.getQuotesAuthoredByUser(userId)) >= 1;
       },
       metadataFunction: async (userId: string) => {
         const count = await quoteService.getQuotesAuthoredByUser(userId);
@@ -649,17 +569,8 @@ export class AchievementsService {
       },
     },
     quote_master: {
-      emoji: "📝",
-      name: "Quote Master",
-      description: "Added 10 quotes to the collection",
       checkFunction: async (userId: string) => {
-        const quoteStats = {
-          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
-          addedCount: await quoteService.getQuotesAddedByUser(userId),
-          mostLikedLikes:
-            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
-        };
-        return quoteStats.addedCount >= 10;
+        return (await quoteService.getQuotesAddedByUser(userId)) >= 10;
       },
       metadataFunction: async (userId: string) => {
         const count = await quoteService.getQuotesAddedByUser(userId);
@@ -671,17 +582,8 @@ export class AchievementsService {
       },
     },
     quote_collector: {
-      emoji: "📚",
-      name: "Quote Collector",
-      description: "Added 50 quotes to the collection",
       checkFunction: async (userId: string) => {
-        const quoteStats = {
-          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
-          addedCount: await quoteService.getQuotesAddedByUser(userId),
-          mostLikedLikes:
-            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
-        };
-        return quoteStats.addedCount >= 50;
+        return (await quoteService.getQuotesAddedByUser(userId)) >= 50;
       },
       metadataFunction: async (userId: string) => {
         const count = await quoteService.getQuotesAddedByUser(userId);
@@ -693,17 +595,8 @@ export class AchievementsService {
       },
     },
     quote_legend: {
-      emoji: "🏆",
-      name: "Quote Legend",
-      description: "Added 100 quotes to the collection",
       checkFunction: async (userId: string) => {
-        const quoteStats = {
-          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
-          addedCount: await quoteService.getQuotesAddedByUser(userId),
-          mostLikedLikes:
-            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
-        };
-        return quoteStats.addedCount >= 100;
+        return (await quoteService.getQuotesAddedByUser(userId)) >= 100;
       },
       metadataFunction: async (userId: string) => {
         const count = await quoteService.getQuotesAddedByUser(userId);
@@ -715,17 +608,8 @@ export class AchievementsService {
       },
     },
     widely_quoted: {
-      emoji: "⭐",
-      name: "Widely Quoted",
-      description: "Been quoted 25 times",
       checkFunction: async (userId: string) => {
-        const quoteStats = {
-          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
-          addedCount: await quoteService.getQuotesAddedByUser(userId),
-          mostLikedLikes:
-            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
-        };
-        return quoteStats.authoredCount >= 25;
+        return (await quoteService.getQuotesAuthoredByUser(userId)) >= 25;
       },
       metadataFunction: async (userId: string) => {
         const count = await quoteService.getQuotesAuthoredByUser(userId);
@@ -737,17 +621,8 @@ export class AchievementsService {
       },
     },
     quote_icon: {
-      emoji: "💫",
-      name: "Quote Icon",
-      description: "Been quoted 50 times",
       checkFunction: async (userId: string) => {
-        const quoteStats = {
-          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
-          addedCount: await quoteService.getQuotesAddedByUser(userId),
-          mostLikedLikes:
-            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
-        };
-        return quoteStats.authoredCount >= 50;
+        return (await quoteService.getQuotesAuthoredByUser(userId)) >= 50;
       },
       metadataFunction: async (userId: string) => {
         const count = await quoteService.getQuotesAuthoredByUser(userId);
@@ -759,17 +634,10 @@ export class AchievementsService {
       },
     },
     viral_quote: {
-      emoji: "🔥",
-      name: "Viral Quote",
-      description: "Have a quote with 10+ likes",
       checkFunction: async (userId: string) => {
-        const quoteStats = {
-          authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
-          addedCount: await quoteService.getQuotesAddedByUser(userId),
-          mostLikedLikes:
-            (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0,
-        };
-        return quoteStats.mostLikedLikes >= 10;
+        const mostLikedLikes =
+          (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0;
+        return mostLikedLikes >= 10;
       },
       metadataFunction: async (userId: string) => {
         const mostLikedLikes =
@@ -783,14 +651,11 @@ export class AchievementsService {
     },
   };
 
-  // Achievement definitions (time-based, not announced)
-  private achievementDefinitions: Partial<
-    Record<AchievementType, BadgeDefinition>
-  > = {
+  // Awarding logic per achievement (display metadata lives in
+  // src/content/achievements.ts). Only ids present in ACHIEVEMENT_METADATA
+  // need an entry here; reserved-but-unimplemented types stay absent.
+  private achievementLogic: Partial<Record<AchievementType, BadgeLogic>> = {
     weekly_active: {
-      emoji: "⚡",
-      name: "Active",
-      description: "Reached 10 hours in voice chat this week",
       checkFunction: async (userId: string) => {
         const weeklyTime = await this.getWeeklyTimeForUser(userId);
         return weeklyTime >= 36000; // 10 hours = 36000 seconds
@@ -1106,17 +971,16 @@ export class AchievementsService {
       const userTrackingData = await VoiceChannelTracking.findOne({ userId });
 
       // Check each accolade type
-      for (const [type, definition] of Object.entries(
-        this.accoladeDefinitions,
-      )) {
+      for (const type of Object.keys(ACCOLADE_METADATA) as AccoladeType[]) {
         if (existingAccoladeTypes.has(type)) {
           continue; // Already earned
         }
 
-        const earned = await definition.checkFunction(userId, userTrackingData);
+        const logic = this.accoladeLogic[type];
+        const earned = await logic.checkFunction(userId, userTrackingData);
         if (earned) {
-          const metadata = definition.metadataFunction
-            ? await definition.metadataFunction(userId, userTrackingData)
+          const metadata = logic.metadataFunction
+            ? await logic.metadataFunction(userId, userTrackingData)
             : {};
 
           const accolade: IAccolade = {
@@ -1130,7 +994,7 @@ export class AchievementsService {
           userAchievements.statistics.totalAccolades += 1;
 
           logger.info(
-            `User ${username} (${userId}) earned accolade: ${definition.name}`,
+            `User ${username} (${userId}) earned accolade: ${ACCOLADE_METADATA[type].name}`,
           );
         }
       }
@@ -1192,17 +1056,20 @@ export class AchievementsService {
       const newAchievements: IAchievement[] = [];
 
       // Check each achievement type
-      for (const [type, definition] of Object.entries(
-        this.achievementDefinitions,
-      )) {
-        if (!definition || existingAchievementTypes.includes(type)) {
+      for (const type of Object.keys(
+        ACHIEVEMENT_METADATA,
+      ) as AchievementType[]) {
+        if (existingAchievementTypes.includes(type)) {
           continue;
         }
 
-        const earned = await definition.checkFunction(userId, null);
+        const logic = this.achievementLogic[type];
+        if (!logic) continue;
+
+        const earned = await logic.checkFunction(userId, null);
         if (earned) {
-          const metadata = definition.metadataFunction
-            ? await definition.metadataFunction(userId, null)
+          const metadata = logic.metadataFunction
+            ? await logic.metadataFunction(userId, null)
             : undefined;
 
           const achievement: IAchievement = {
@@ -1217,7 +1084,7 @@ export class AchievementsService {
           userAchievements.statistics.totalAchievements += 1;
 
           logger.info(
-            `User ${username} (${userId}) earned achievement: ${definition.name} for ${currentPeriod}`,
+            `User ${username} (${userId}) earned achievement: ${ACHIEVEMENT_METADATA[type as keyof typeof ACHIEVEMENT_METADATA].name} for ${currentPeriod}`,
           );
         }
       }
@@ -1277,11 +1144,18 @@ export class AchievementsService {
    * Get badge definition for an accolade type
    */
   public getAccoladeDefinition(type: string): BadgeDefinition | undefined {
-    return this.accoladeDefinitions[type as AccoladeType];
+    const meta = ACCOLADE_METADATA[type as AccoladeType];
+    const logic = this.accoladeLogic[type as AccoladeType];
+    if (!meta || !logic) return undefined;
+    return { ...meta, ...logic };
   }
 
   public getAchievementDefinition(type: string): BadgeDefinition | undefined {
-    return this.achievementDefinitions[type as AchievementType];
+    const meta =
+      ACHIEVEMENT_METADATA[type as keyof typeof ACHIEVEMENT_METADATA];
+    const logic = this.achievementLogic[type as AchievementType];
+    if (!meta || !logic) return undefined;
+    return { ...meta, ...logic };
   }
 
   /**
