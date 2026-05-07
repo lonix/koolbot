@@ -47,6 +47,6 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run zizmor
-        uses: zizmorcore/zizmor-action@v0
+        uses: zizmorcore/zizmor-action@v0.5.3
         with:
           advanced-security: auto
