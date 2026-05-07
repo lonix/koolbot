@@ -601,6 +601,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleVCControlButton } =
           await import("./handlers/vc-control-button-handler.js");
         await handleVCControlButton(interaction);
+      } else if (interaction.customId.startsWith("vc_preset_")) {
+        const { handleVCPresetButton } =
+          await import("./handlers/vc-preset-handler.js");
+        await handleVCPresetButton(interaction);
       } else {
         // Handle wizard buttons
         const { handleWizardButton } =
@@ -621,6 +625,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleVCTransferSelect } =
           await import("./handlers/vc-transfer-select-handler.js");
         await handleVCTransferSelect(interaction);
+      } else if (interaction.customId.startsWith("vc_preset_")) {
+        const { handleVCPresetSelect } =
+          await import("./handlers/vc-preset-handler.js");
+        await handleVCPresetSelect(interaction);
       } else {
         // Handle wizard select menus
         const { handleWizardSelectMenu } =

@@ -1007,7 +1007,7 @@ export class VoiceChannelManager {
           .setEmoji("👑"),
       );
 
-      const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      const row2Buttons = [
         new ButtonBuilder()
           .setCustomId(`vc_control_live_${channel.id}_${ownerId}`)
           .setLabel(isLive ? "Go Offline" : "Go Live")
@@ -1018,6 +1018,24 @@ export class VoiceChannelManager {
           .setLabel(hasWaitingRoom ? "Remove Waiting Room" : "Waiting Room")
           .setStyle(hasWaitingRoom ? ButtonStyle.Danger : ButtonStyle.Secondary)
           .setEmoji(hasWaitingRoom ? "🗑️" : "⏳"),
+      ];
+
+      const presetsEnabled = await configService.getBoolean(
+        "voicechannels.presets.enabled",
+        false,
+      );
+      if (presetsEnabled) {
+        row2Buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`vc_preset_open_${channel.id}_${ownerId}`)
+            .setLabel("Presets")
+            .setStyle(ButtonStyle.Secondary)
+            .setEmoji("🎛️"),
+        );
+      }
+
+      const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...row2Buttons,
       );
 
       // In Discord, voice channels can have built-in text chat enabled
@@ -1283,6 +1301,28 @@ export class VoiceChannelManager {
 
       // Store ownership
       this.userChannels.set(userId, newChannel);
+
+      // Auto-apply the user's default preset (if presets are enabled)
+      const presetsEnabled = await configService.getBoolean(
+        "voicechannels.presets.enabled",
+        false,
+      );
+      if (presetsEnabled) {
+        try {
+          const { getDefaultPreset, applyPresetToChannel } = await import(
+            "../handlers/vc-preset-handler.js"
+          );
+          const defaultPreset = await getDefaultPreset(userId);
+          if (defaultPreset) {
+            await applyPresetToChannel(newChannel, defaultPreset);
+            logger.info(
+              `Auto-applied default preset "${defaultPreset.name}" for user ${userId} on channel ${newChannel.id}`,
+            );
+          }
+        } catch (error) {
+          logger.error("Error auto-applying default preset:", error);
+        }
+      }
 
       // Send control panel
       await this.sendControlPanel(newChannel, userId);
@@ -2076,7 +2116,7 @@ export class VoiceChannelManager {
         .setEmoji("👑"),
     );
 
-    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    const row2Buttons = [
       new ButtonBuilder()
         .setCustomId(`vc_control_live_${channel.id}_${ownerId}`)
         .setLabel(isLive ? "Go Offline" : "Go Live")
@@ -2087,6 +2127,24 @@ export class VoiceChannelManager {
         .setLabel(hasWaitingRoom ? "Remove Waiting Room" : "Waiting Room")
         .setStyle(hasWaitingRoom ? ButtonStyle.Danger : ButtonStyle.Secondary)
         .setEmoji(hasWaitingRoom ? "🗑️" : "⏳"),
+    ];
+
+    const presetsEnabled = await configService.getBoolean(
+      "voicechannels.presets.enabled",
+      false,
+    );
+    if (presetsEnabled) {
+      row2Buttons.push(
+        new ButtonBuilder()
+          .setCustomId(`vc_preset_open_${channel.id}_${ownerId}`)
+          .setLabel("Presets")
+          .setStyle(ButtonStyle.Secondary)
+          .setEmoji("🎛️"),
+      );
+    }
+
+    const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      ...row2Buttons,
     );
 
     await message.edit({
