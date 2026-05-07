@@ -2202,6 +2202,10 @@ export class VoiceChannelManager {
       clearInterval(this.healthCheckInterval);
       this.healthCheckInterval = null;
     }
+    for (const { timer } of this.ownershipTransferTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.ownershipTransferTimers.clear();
     this.userChannels.clear();
     this.customChannelNames.clear();
     this.ownershipQueue.clear();

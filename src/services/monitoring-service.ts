@@ -30,6 +30,7 @@ export class MonitoringService {
   private startTime: Date = new Date();
   private totalCommands: number = 0;
   private totalErrors: number = 0;
+  private periodicLoggingInterval: ReturnType<typeof setInterval> | null = null;
 
   private constructor() {
     // Start periodic memory usage logging
@@ -195,7 +196,7 @@ export class MonitoringService {
    */
   private startPeriodicLogging(): void {
     // Log performance metrics every hour
-    setInterval(
+    this.periodicLoggingInterval = setInterval(
       () => {
         const metrics = this.getPerformanceMetrics();
         const memoryMB = Math.round(metrics.memoryUsage.heapUsed / 1024 / 1024);
@@ -234,6 +235,16 @@ export class MonitoringService {
       return `${hours}h ${minutes}m`;
     } else {
       return `${minutes}m`;
+    }
+  }
+
+  /**
+   * Stop periodic logging and clear the interval handle.
+   */
+  public destroy(): void {
+    if (this.periodicLoggingInterval) {
+      clearInterval(this.periodicLoggingInterval);
+      this.periodicLoggingInterval = null;
     }
   }
 }
