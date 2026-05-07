@@ -1,0 +1,16 @@
+rules:
+  unpinned-uses:
+    config:
+      policies:
+        actions/*: ref-pin
+        github/*: ref-pin
+        docker/*: ref-pin
+        sigstore/*: ref-pin
+        aquasecurity/*: ref-pin
+        googleapis/*: ref-pin
+        DavidAnson/*: ref-pin
+        hadolint/*: ref-pin
+        reviewdog/*: ref-pin
+        zizmorcore/*: ref-pin
+        release-drafter/*: ref-pin
+        '*': hash-pin
