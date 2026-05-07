@@ -4,16 +4,26 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ButtonInteraction,
+  ModalSubmitInteraction,
+  StringSelectMenuInteraction,
+  Guild,
 } from "discord.js";
+import type { FeatureKey } from "../commands/setup-wizard-helpers.js";
 
 const wizardService = WizardService.getInstance();
+
+type WizardHandlerInteraction =
+  | ButtonInteraction
+  | ModalSubmitInteraction
+  | StringSelectMenuInteraction;
 
 /**
  * Move to the next feature in the wizard or show summary
  */
 export async function moveToNextFeature(
-  interaction: any,
-  guild: any,
+  interaction: WizardHandlerInteraction,
+  guild: Guild,
   userId: string,
   guildId: string,
 ): Promise<void> {
@@ -41,7 +51,7 @@ export async function moveToNextFeature(
       interaction,
       guild,
       userId,
-      nextFeature as any,
+      nextFeature as FeatureKey,
     );
   }
 }
@@ -50,8 +60,8 @@ export async function moveToNextFeature(
  * Show configuration summary and confirmation
  */
 async function showSummary(
-  interaction: any,
-  guild: any,
+  interaction: WizardHandlerInteraction,
+  guild: Guild,
   userId: string,
   guildId: string,
 ): Promise<void> {
@@ -70,7 +80,7 @@ async function showSummary(
 
   if (configEntries.length > 0) {
     // Group by category
-    const grouped: Record<string, Array<[string, any]>> = {};
+    const grouped: Record<string, Array<[string, unknown]>> = {};
     configEntries.forEach(([key, value]) => {
       const category = key.split(".")[0];
       if (!grouped[category]) {

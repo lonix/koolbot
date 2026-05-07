@@ -4,7 +4,10 @@ import {
   IAccolade,
   IAchievement,
 } from "../models/user-achievements.js";
-import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
+import {
+  VoiceChannelTracking,
+  type IVoiceChannelTracking,
+} from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import mongoose from "mongoose";
@@ -48,10 +51,13 @@ interface BadgeDefinition {
   emoji: string;
   name: string;
   description: string;
-  checkFunction: (userId: string, userData: any | null) => Promise<boolean>;
+  checkFunction: (
+    userId: string,
+    userData: IVoiceChannelTracking | null,
+  ) => Promise<boolean>;
   metadataFunction?: (
     userId: string,
-    userData: any | null,
+    userData: IVoiceChannelTracking | null,
   ) => Promise<{ value?: number; description?: string; unit?: string }>;
 }
 
@@ -70,12 +76,18 @@ export class AchievementsService {
       emoji: "🎉",
       name: "First Steps",
       description: "Spent your first hour in voice chat",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 3600 : false;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
@@ -89,12 +101,18 @@ export class AchievementsService {
       emoji: "🎖️",
       name: "Voice Veteran",
       description: "Reached 100 hours in voice chat",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 360000 : false;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
@@ -108,12 +126,18 @@ export class AchievementsService {
       emoji: "🏅",
       name: "Voice Elite",
       description: "Reached 500 hours in voice chat",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 1800000 : false;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
@@ -127,12 +151,18 @@ export class AchievementsService {
       emoji: "🏆",
       name: "Voice Master",
       description: "Reached 1000 hours in voice chat",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 3600000 : false;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
@@ -146,12 +176,18 @@ export class AchievementsService {
       emoji: "👑",
       name: "Voice Legend",
       description: "Reached 8765 hours (1 year) in voice chat",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return user ? user.totalTime >= 31554000 : false;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         return {
@@ -165,17 +201,23 @@ export class AchievementsService {
       emoji: "🏃",
       name: "Marathon Runner",
       description: "Completed a 4+ hour voice session",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
-        return user.sessions.some((s: any) => (s.duration || 0) >= 14400);
+        return user.sessions.some((s) => (s.duration || 0) >= 14400);
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const maxSession = Math.max(
-          ...(user?.sessions.map((s: any) => s.duration || 0) || [0]),
+          ...(user?.sessions.map((s) => s.duration || 0) || [0]),
         );
         return {
           value: Math.floor(maxSession / 3600),
@@ -188,17 +230,23 @@ export class AchievementsService {
       emoji: "🦸",
       name: "Ultra Marathoner",
       description: "Completed an 8+ hour voice session",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
-        return user.sessions.some((s: any) => (s.duration || 0) >= 28800);
+        return user.sessions.some((s) => (s.duration || 0) >= 28800);
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const maxSession = Math.max(
-          ...(user?.sessions.map((s: any) => s.duration || 0) || [0]),
+          ...(user?.sessions.map((s) => s.duration || 0) || [0]),
         );
         return {
           value: Math.floor(maxSession / 3600),
@@ -211,20 +259,26 @@ export class AchievementsService {
       emoji: "🦋",
       name: "Social Butterfly",
       description: "Voiced with 10+ unique users",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         const uniqueUsers = new Set(
-          user.sessions.flatMap((s: any) => s.otherUsers || []),
+          user.sessions.flatMap((s) => s.otherUsers || []),
         );
         return uniqueUsers.size >= 10;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const uniqueUsers = new Set(
-          user?.sessions.flatMap((s: any) => s.otherUsers || []) || [],
+          user?.sessions.flatMap((s) => s.otherUsers || []) || [],
         );
         return {
           value: uniqueUsers.size,
@@ -237,20 +291,26 @@ export class AchievementsService {
       emoji: "🤝",
       name: "Connector",
       description: "Voiced with 25+ unique users",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         const uniqueUsers = new Set(
-          user.sessions.flatMap((s: any) => s.otherUsers || []),
+          user.sessions.flatMap((s) => s.otherUsers || []),
         );
         return uniqueUsers.size >= 25;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         const uniqueUsers = new Set(
-          user?.sessions.flatMap((s: any) => s.otherUsers || []) || [],
+          user?.sessions.flatMap((s) => s.otherUsers || []) || [],
         );
         return {
           value: uniqueUsers.size,
@@ -263,7 +323,10 @@ export class AchievementsService {
       emoji: "🦉",
       name: "Night Owl",
       description: "Accumulated 50+ hours during late night (10 PM - 6 AM)",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
@@ -278,7 +341,10 @@ export class AchievementsService {
         }
         return lateNightSeconds >= 180000; // 50 hours
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         let lateNightSeconds = 0;
@@ -303,7 +369,10 @@ export class AchievementsService {
       emoji: "🐦",
       name: "Early Bird",
       description: "Accumulated 50+ hours during early morning (6 AM - 10 AM)",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
@@ -318,7 +387,10 @@ export class AchievementsService {
         }
         return earlyMorningSeconds >= 180000; // 50 hours
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         let earlyMorningSeconds = 0;
@@ -343,7 +415,10 @@ export class AchievementsService {
       emoji: "🎮",
       name: "Weekend Warrior",
       description: "Accumulated 100+ hours during weekends",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
@@ -358,7 +433,10 @@ export class AchievementsService {
         }
         return weekendSeconds >= 360000; // 100 hours
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         let weekendSeconds = 0;
@@ -383,7 +461,10 @@ export class AchievementsService {
       emoji: "💼",
       name: "Weekday Warrior",
       description: "Accumulated 100+ hours during weekdays",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
@@ -398,7 +479,10 @@ export class AchievementsService {
         }
         return weekdaySeconds >= 360000; // 100 hours
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         let weekdaySeconds = 0;
@@ -423,7 +507,10 @@ export class AchievementsService {
       emoji: "🔥",
       name: "On a Roll",
       description: "Connected for 7 consecutive days (5+ min/day)",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
@@ -433,7 +520,10 @@ export class AchievementsService {
         );
         return longestStreak >= 7;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) {
@@ -458,7 +548,10 @@ export class AchievementsService {
       emoji: "⚡",
       name: "Dedicated AF",
       description: "Connected for 14 consecutive days (5+ min/day)",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
@@ -468,7 +561,10 @@ export class AchievementsService {
         );
         return longestStreak >= 14;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) {
@@ -493,7 +589,10 @@ export class AchievementsService {
       emoji: "💀",
       name: "No-Lifer",
       description: "Connected for 30 consecutive days (5+ min/day)",
-      checkFunction: async (userId: string, userData: any | null) => {
+      checkFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
@@ -503,7 +602,10 @@ export class AchievementsService {
         );
         return longestStreak >= 30;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (
+        userId: string,
+        userData: IVoiceChannelTracking | null,
+      ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) {
@@ -528,8 +630,8 @@ export class AchievementsService {
       emoji: "🗣️",
       name: "Quotable",
       description: "Been quoted for the first time",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const quoteStats = userData?.quoteStats || {
+      checkFunction: async (userId: string) => {
+        const quoteStats = {
           authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
           addedCount: await quoteService.getQuotesAddedByUser(userId),
           mostLikedLikes:
@@ -537,10 +639,8 @@ export class AchievementsService {
         };
         return quoteStats.authoredCount >= 1;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
-        const count =
-          userData?.quoteStats?.authoredCount ||
-          (await quoteService.getQuotesAuthoredByUser(userId));
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
         return {
           value: count,
           description: "First quote",
@@ -552,8 +652,8 @@ export class AchievementsService {
       emoji: "📝",
       name: "Quote Master",
       description: "Added 10 quotes to the collection",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const quoteStats = userData?.quoteStats || {
+      checkFunction: async (userId: string) => {
+        const quoteStats = {
           authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
           addedCount: await quoteService.getQuotesAddedByUser(userId),
           mostLikedLikes:
@@ -561,10 +661,8 @@ export class AchievementsService {
         };
         return quoteStats.addedCount >= 10;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
-        const count =
-          userData?.quoteStats?.addedCount ||
-          (await quoteService.getQuotesAddedByUser(userId));
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
         return {
           value: count,
           description: "10+ quotes added",
@@ -576,8 +674,8 @@ export class AchievementsService {
       emoji: "📚",
       name: "Quote Collector",
       description: "Added 50 quotes to the collection",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const quoteStats = userData?.quoteStats || {
+      checkFunction: async (userId: string) => {
+        const quoteStats = {
           authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
           addedCount: await quoteService.getQuotesAddedByUser(userId),
           mostLikedLikes:
@@ -585,10 +683,8 @@ export class AchievementsService {
         };
         return quoteStats.addedCount >= 50;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
-        const count =
-          userData?.quoteStats?.addedCount ||
-          (await quoteService.getQuotesAddedByUser(userId));
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
         return {
           value: count,
           description: "50+ quotes added",
@@ -600,8 +696,8 @@ export class AchievementsService {
       emoji: "🏆",
       name: "Quote Legend",
       description: "Added 100 quotes to the collection",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const quoteStats = userData?.quoteStats || {
+      checkFunction: async (userId: string) => {
+        const quoteStats = {
           authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
           addedCount: await quoteService.getQuotesAddedByUser(userId),
           mostLikedLikes:
@@ -609,10 +705,8 @@ export class AchievementsService {
         };
         return quoteStats.addedCount >= 100;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
-        const count =
-          userData?.quoteStats?.addedCount ||
-          (await quoteService.getQuotesAddedByUser(userId));
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAddedByUser(userId);
         return {
           value: count,
           description: "100+ quotes added",
@@ -624,8 +718,8 @@ export class AchievementsService {
       emoji: "⭐",
       name: "Widely Quoted",
       description: "Been quoted 25 times",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const quoteStats = userData?.quoteStats || {
+      checkFunction: async (userId: string) => {
+        const quoteStats = {
           authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
           addedCount: await quoteService.getQuotesAddedByUser(userId),
           mostLikedLikes:
@@ -633,10 +727,8 @@ export class AchievementsService {
         };
         return quoteStats.authoredCount >= 25;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
-        const count =
-          userData?.quoteStats?.authoredCount ||
-          (await quoteService.getQuotesAuthoredByUser(userId));
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
         return {
           value: count,
           description: "25+ times quoted",
@@ -648,8 +740,8 @@ export class AchievementsService {
       emoji: "💫",
       name: "Quote Icon",
       description: "Been quoted 50 times",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const quoteStats = userData?.quoteStats || {
+      checkFunction: async (userId: string) => {
+        const quoteStats = {
           authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
           addedCount: await quoteService.getQuotesAddedByUser(userId),
           mostLikedLikes:
@@ -657,10 +749,8 @@ export class AchievementsService {
         };
         return quoteStats.authoredCount >= 50;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
-        const count =
-          userData?.quoteStats?.authoredCount ||
-          (await quoteService.getQuotesAuthoredByUser(userId));
+      metadataFunction: async (userId: string) => {
+        const count = await quoteService.getQuotesAuthoredByUser(userId);
         return {
           value: count,
           description: "50+ times quoted",
@@ -672,8 +762,8 @@ export class AchievementsService {
       emoji: "🔥",
       name: "Viral Quote",
       description: "Have a quote with 10+ likes",
-      checkFunction: async (userId: string, userData: any | null) => {
-        const quoteStats = userData?.quoteStats || {
+      checkFunction: async (userId: string) => {
+        const quoteStats = {
           authoredCount: await quoteService.getQuotesAuthoredByUser(userId),
           addedCount: await quoteService.getQuotesAddedByUser(userId),
           mostLikedLikes:
@@ -681,10 +771,9 @@ export class AchievementsService {
         };
         return quoteStats.mostLikedLikes >= 10;
       },
-      metadataFunction: async (userId: string, userData: any | null) => {
+      metadataFunction: async (userId: string) => {
         const mostLikedLikes =
-          userData?.quoteStats?.mostLikedLikes ??
-          ((await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0);
+          (await quoteService.getMostLikedQuoteByAuthor(userId))?.likes || 0;
         return {
           value: mostLikedLikes,
           description: "10+ likes on a quote",
