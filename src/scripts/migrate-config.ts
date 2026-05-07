@@ -1,6 +1,6 @@
+import mongoose from "mongoose";
 import { ConfigService } from "../services/config-service.js";
 import logger from "../utils/logger.js";
-import { connectToDatabase } from "../utils/database.js";
 
 interface ConfigMigration {
   oldKey: string;
@@ -165,8 +165,9 @@ async function migrateConfiguration(): Promise<void> {
   try {
     logger.info("Starting configuration migration...");
 
-    // Connect to database
-    await connectToDatabase();
+    await mongoose.connect(
+      process.env.MONGODB_URI || "mongodb://localhost:27017/koolbot",
+    );
 
     const configService = ConfigService.getInstance();
     await configService.initialize();

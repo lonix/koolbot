@@ -1,6 +1,6 @@
+import mongoose from "mongoose";
 import { ConfigService } from "../services/config-service.js";
 import logger from "../utils/logger.js";
-import { connectToDatabase } from "../utils/database.js";
 
 interface ConfigValidation {
   key: string;
@@ -88,8 +88,9 @@ async function validateConfiguration(): Promise<void> {
   try {
     logger.info("Starting configuration validation...");
 
-    // Connect to database
-    await connectToDatabase();
+    await mongoose.connect(
+      process.env.MONGODB_URI || "mongodb://localhost:27017/koolbot",
+    );
 
     const configService = ConfigService.getInstance();
     await configService.initialize();
