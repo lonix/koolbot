@@ -24,6 +24,10 @@ jobs:
     name: Lint Dockerfile
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # Required for uploading the hadolint SARIF report to the Security tab.
+      security-events: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
