@@ -6,9 +6,7 @@
  * and silently break logic that depends on them (e.g. rate-limit retry).
  */
 
-export function isErrorWithCode(
-  e: unknown,
-): e is { code: number; message?: string } {
+export function isErrorWithCode(e: unknown): e is { code: number } {
   return (
     typeof e === "object" &&
     e !== null &&
