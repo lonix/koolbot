@@ -1,6 +1,11 @@
 import { Client, ActivityType } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import {
+  lonelyStatuses,
+  singleUserStatuses,
+  multipleUsersStatuses,
+} from "../content/statuses.js";
 
 export class BotStatusService {
   private static instance: BotStatusService;
@@ -10,43 +15,6 @@ export class BotStatusService {
   private currentVcUserCount = 0;
   // Username tracking removed for simplified status logic (field deleted)
   private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
-
-  // Fun status messages for different scenarios
-  private readonly lonelyStatuses = [
-    "nobody, I hate it here",
-    "paint dry, I'm so bored",
-    "the void, I'm contemplating existence",
-    "pixels, I'm counting them",
-    "solitaire, I'm playing alone",
-    "nothing, I'm staring at the void",
-    "the meaning of life, I'm contemplating it",
-    "Rick Astley on repeat, I'm so lonely", // cspell:ignore Astley
-    "Lo-fi girl, kinda goes with the vibe",
-    "the whole universe was in a hot dense state",
-    "Some russian kid, screaming about fucking my mom",
-    "The matrix, blue or red pill, guys ?",
-  ];
-
-  // Simplified single-user statuses (no username personalization)
-  private readonly singleUserStatuses = [
-    "a lone wanderer",
-    "one solitary soul",
-    "a single user existing",
-    "one person contemplating life",
-    "a lone voice in the void",
-    "just one user vibing",
-  ];
-
-  private readonly multipleUsersStatuses = [
-    "{count} nerds",
-    "{count} souls",
-    "{count} humans",
-    "{count} chatters",
-    "{count} people",
-    "{count} gamers that suck",
-    "{count} conversing about nothing",
-    "{count} people that need to get a life",
-  ];
 
   private constructor(client: Client) {
     this.client = client;
@@ -59,18 +27,16 @@ export class BotStatusService {
   private getRandomStatusMessage(): string {
     // Simplified: only differentiate between 0, 1, and many users; no name interpolation
     if (this.currentVcUserCount <= 0) {
-      return this.lonelyStatuses[
-        Math.floor(Math.random() * this.lonelyStatuses.length)
-      ];
+      return lonelyStatuses[Math.floor(Math.random() * lonelyStatuses.length)];
     }
     if (this.currentVcUserCount === 1) {
-      return this.singleUserStatuses[
-        Math.floor(Math.random() * this.singleUserStatuses.length)
+      return singleUserStatuses[
+        Math.floor(Math.random() * singleUserStatuses.length)
       ];
     }
     const template =
-      this.multipleUsersStatuses[
-        Math.floor(Math.random() * this.multipleUsersStatuses.length)
+      multipleUsersStatuses[
+        Math.floor(Math.random() * multipleUsersStatuses.length)
       ];
     return template.replace("{count}", this.currentVcUserCount.toString());
   }
