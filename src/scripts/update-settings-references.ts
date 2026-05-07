@@ -1,6 +1,6 @@
+import mongoose from "mongoose";
 import { ConfigService } from "../services/config-service.js";
 import logger from "../utils/logger.js";
-import { connectToDatabase } from "../utils/database.js";
 
 interface SettingReference {
   oldKey: string;
@@ -101,8 +101,9 @@ async function updateSettingsReferences(): Promise<void> {
   try {
     logger.info("Starting settings reference update...");
 
-    // Connect to database
-    await connectToDatabase();
+    await mongoose.connect(
+      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
+    );
 
     const configService = ConfigService.getInstance();
     await configService.initialize();
@@ -133,7 +134,9 @@ async function updateSettingsReferences(): Promise<void> {
     logger.info("- src/index.ts");
   } catch (error) {
     logger.error("Error during settings reference update:", error);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    await mongoose.disconnect();
   }
 }
 

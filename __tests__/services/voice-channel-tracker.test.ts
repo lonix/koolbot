@@ -18,8 +18,6 @@ jest.mock('../../src/services/achievements-service.js', () => ({
   },
 }));
 
-jest.mock('../../src/utils/database.js');
-
 // Static imports — mocks are registered before these load (jest.mock is hoisted)
 import { VoiceChannelTracker } from '../../src/services/voice-channel-tracker.js';
 import { VoiceChannelTracking } from '../../src/models/voice-channel-tracking.js';
