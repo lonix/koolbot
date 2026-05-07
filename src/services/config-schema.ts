@@ -8,6 +8,8 @@ export interface ConfigSchema {
   "voicechannels.channel.suffix": string;
   "voicechannels.controlpanel.enabled": boolean;
   "voicechannels.ownership.grace_period_seconds": number;
+  "voicechannels.presets.enabled": boolean;
+  "voicechannels.presets.max_per_user": number;
 
   // Voice Activity Tracking
   "voicetracking.enabled": boolean;
@@ -104,6 +106,8 @@ export const defaultConfig: ConfigSchema = {
   "voicechannels.channel.suffix": "",
   "voicechannels.controlpanel.enabled": true,
   "voicechannels.ownership.grace_period_seconds": 30,
+  "voicechannels.presets.enabled": false,
+  "voicechannels.presets.max_per_user": 3,
 
   // Voice Activity Tracking
   "voicetracking.enabled": false,
