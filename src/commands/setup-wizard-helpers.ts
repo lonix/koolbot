@@ -2,11 +2,22 @@ import {
   Guild,
   ChatInputCommandInteraction,
   ButtonInteraction,
+  ModalSubmitInteraction,
+  StringSelectMenuInteraction,
   EmbedBuilder,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
+
+// Wizard helpers can be invoked from any of the interaction kinds that flow
+// through the wizard (slash command, button, modal, or select menu) — they all
+// support the followUp/reply/edit surface used here.
+type WizardInteraction =
+  | ChatInputCommandInteraction
+  | ButtonInteraction
+  | ModalSubmitInteraction
+  | StringSelectMenuInteraction;
 import { WizardService } from "../services/wizard-service.js";
 import logger from "../utils/logger.js";
 
@@ -85,7 +96,7 @@ export type { FeatureKey };
  * Start configuration for a specific feature
  */
 export async function startFeatureConfiguration(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   feature: FeatureKey,
@@ -158,7 +169,7 @@ export async function startFeatureConfiguration(
 }
 
 async function configureVoiceChannels(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -221,7 +232,7 @@ async function configureVoiceChannels(
 }
 
 async function configureVoiceTracking(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -263,7 +274,7 @@ async function configureVoiceTracking(
 }
 
 async function configureQuotes(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -307,7 +318,7 @@ async function configureQuotes(
 }
 
 async function configureAchievements(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -349,7 +360,7 @@ async function configureAchievements(
 }
 
 async function configureLogging(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -396,7 +407,7 @@ async function configureLogging(
 }
 
 async function configureAmikool(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -435,7 +446,7 @@ async function configureAmikool(
 }
 
 async function configureReactionRoles(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -479,7 +490,7 @@ async function configureReactionRoles(
 }
 
 async function configureAnnouncements(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -518,7 +529,7 @@ async function configureAnnouncements(
 }
 
 async function configureNotices(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
@@ -566,7 +577,7 @@ async function configureNotices(
 }
 
 async function configurePolls(
-  interaction: ChatInputCommandInteraction | ButtonInteraction,
+  interaction: WizardInteraction,
   guild: Guild,
   userId: string,
   guildId: string,
