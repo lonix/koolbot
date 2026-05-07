@@ -201,9 +201,7 @@ async function handleSavePresetModal(
     userLimit: channel.userLimit ?? 0,
     bitrate: Math.round((channel.bitrate ?? 64000) / 1000),
     isDefault:
-      existingIndex !== -1
-        ? !!prefs.presets[existingIndex].isDefault
-        : false,
+      existingIndex !== -1 ? !!prefs.presets[existingIndex].isDefault : false,
   };
 
   if (existingIndex !== -1) {

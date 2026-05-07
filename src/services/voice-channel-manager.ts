@@ -1309,9 +1309,8 @@ export class VoiceChannelManager {
       );
       if (presetsEnabled) {
         try {
-          const { getDefaultPreset, applyPresetToChannel } = await import(
-            "../handlers/vc-preset-handler.js"
-          );
+          const { getDefaultPreset, applyPresetToChannel } =
+            await import("../handlers/vc-preset-handler.js");
           const defaultPreset = await getDefaultPreset(userId);
           if (defaultPreset) {
             await applyPresetToChannel(newChannel, defaultPreset);
