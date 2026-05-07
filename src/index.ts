@@ -378,9 +378,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Scheduled announcements cleanup",
     );
 
-    // 6a. Stop remaining timer-owning services so their intervals/timeouts
-    //     don't fire against a half-closed Discord client or MongoDB
-    //     connection during the rest of the shutdown sequence.
+    // 7. Stop remaining timer-owning services so their intervals/timeouts
+    //    don't fire against a half-closed Discord client or MongoDB
+    //    connection during the rest of the shutdown sequence.
     await runWithTimeout(
       async () => {
         voiceChannelManager.destroy();
@@ -396,7 +396,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Service timer cleanup",
     );
 
-    // 7. Close database connections - 3 second timeout
+    // 8. Close database connections - 3 second timeout
     await runWithTimeout(
       async () => {
         const { default: mongoose } = await import("mongoose");
@@ -409,7 +409,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
       "Database connection closure",
     );
 
-    // 7. Destroy Discord client - 5 second timeout
+    // 9. Destroy Discord client - 5 second timeout
     await runWithTimeout(
       async () => {
         await client.destroy();

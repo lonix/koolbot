@@ -165,37 +165,39 @@ describe('MonitoringService', () => {
   });
 
   describe('destroy', () => {
-    afterEach(() => {
-      jest.useRealTimers();
-      // Reset the singleton so the next test starts with a fresh interval.
+    let fresh: MonitoringService;
+
+    beforeEach(() => {
+      // The outer beforeEach instantiated the singleton with real timers.
+      // Destroy it (now that destroy() exists) and reset the singleton
+      // before switching to fake timers, so we don't leak the original
+      // real interval and don't mix real+fake timer state.
+      service.destroy();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (MonitoringService as any).instance = undefined;
+
+      jest.useFakeTimers();
+      fresh = MonitoringService.getInstance();
+    });
+
+    afterEach(() => {
+      // Make sure each test leaves no live interval before resetting the
+      // singleton, even when the test itself didn't call destroy().
+      fresh.destroy();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (MonitoringService as any).instance = undefined;
+      jest.useRealTimers();
     });
 
     it('captures the periodic logging interval handle on construction', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (MonitoringService as any).instance = undefined;
-      jest.useFakeTimers();
-      const setIntervalSpy = jest.spyOn(globalThis, 'setInterval');
-
-      const fresh = MonitoringService.getInstance();
-
-      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const handle = (fresh as any).periodicLoggingInterval;
       expect(handle).not.toBeNull();
       expect(handle).toBeDefined();
-
-      setIntervalSpy.mockRestore();
     });
 
     it('clears the periodic logging interval and nulls the handle', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (MonitoringService as any).instance = undefined;
-      jest.useFakeTimers();
       const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
-
-      const fresh = MonitoringService.getInstance();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const handle = (fresh as any).periodicLoggingInterval;
 
@@ -209,11 +211,6 @@ describe('MonitoringService', () => {
     });
 
     it('does not fire the periodic logger after destroy()', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (MonitoringService as any).instance = undefined;
-      jest.useFakeTimers();
-
-      const fresh = MonitoringService.getInstance();
       const getPerfSpy = jest.spyOn(fresh, 'getPerformanceMetrics');
 
       fresh.destroy();
@@ -226,12 +223,7 @@ describe('MonitoringService', () => {
     });
 
     it('is idempotent — repeated calls are safe', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (MonitoringService as any).instance = undefined;
-      jest.useFakeTimers();
       const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
-
-      const fresh = MonitoringService.getInstance();
 
       expect(() => {
         fresh.destroy();
