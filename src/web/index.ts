@@ -10,32 +10,8 @@ import {
   createSessionMiddleware,
   writeSessionCookie,
 } from "./session.js";
-import {
-  renderBootstrap,
-  renderDashboard,
-  renderInvalidLink,
-  renderSignedOut,
-} from "./views.js";
-
-const SECRET_KEYS = new Set([
-  "DISCORD_TOKEN",
-  "MONGODB_URI",
-  "WEBUI_SESSION_SECRET",
-]);
-
-const BOOTSTRAP_KEYS = [
-  "DISCORD_TOKEN",
-  "CLIENT_ID",
-  "GUILD_ID",
-  "MONGODB_URI",
-  "NODE_ENV",
-  "DEBUG",
-  "WEBUI_ENABLED",
-  "WEBUI_BASE_URL",
-  "WEBUI_SESSION_SECRET",
-  "WEBUI_SESSION_TTL_MINUTES",
-  "WEBUI_INACTIVITY_TIMEOUT_MINUTES",
-];
+import { renderInvalidLink, renderSignedOut } from "./views.js";
+import { createReadOnlyRouter } from "./read-only-routes.js";
 
 /**
  * Build the WebUI router. Caller mounts this at /admin on the existing
@@ -88,52 +64,12 @@ export function createWebRouter(client: Client): Router {
     },
   );
 
-  router.get(
-    "/",
-    requireSession,
-    (req: AuthenticatedRequest, res: Response): void => {
-      const ctx = req.webSession;
-      if (!ctx) {
-        res.status(401).type("text/plain").send("Unauthorized");
-        return;
-      }
-      const csrfToken =
-        (req as Request & { csrfToken?: string }).csrfToken ?? "";
-      res.type("text/html").send(
-        renderDashboard({
-          discordUserId: ctx.discordUserId,
-          guildId: ctx.guildId,
-          csrfToken,
-        }),
-      );
-    },
-  );
-
-  router.get(
-    "/bootstrap",
-    requireSession,
-    (_req: AuthenticatedRequest, res: Response): void => {
-      const rows = BOOTSTRAP_KEYS.map((key) => {
-        const raw = process.env[key];
-        const present = typeof raw === "string" && raw.length > 0;
-        let display: string | undefined;
-        if (present && raw) {
-          if (SECRET_KEYS.has(key)) {
-            // Only reveal a 4-char tail when the secret is long enough
-            // that the tail isn't the whole value. For shorter values we
-            // omit the tail entirely so we never echo the full secret.
-            display = raw.length >= 8 ? `…${raw.slice(-4)}` : undefined;
-          } else if (raw.length > 32) {
-            display = `${raw.slice(0, 28)}…`;
-          } else {
-            display = raw;
-          }
-        }
-        return { key, present, display };
-      });
-      res.type("text/html").send(renderBootstrap({ rows }));
-    },
-  );
+  // Read-only admin pages (Dashboard, Bootstrap, Settings, Permissions,
+  // Announcements, Polls, Reaction Roles, Notices, Voice Channels, Database)
+  // are registered by the read-only router. It re-registers `requireSession`
+  // internally; safe to mount before the auth/finish endpoints below since
+  // they live at distinct paths.
+  router.use(createReadOnlyRouter(client, requireSession));
 
   router.post(
     "/finish",
