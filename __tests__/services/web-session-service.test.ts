@@ -1,0 +1,129 @@
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
+import { WebSessionService } from "../../src/services/web-session-service.js";
+import { WebSession } from "../../src/models/web-session.js";
+
+jest.mock("../../src/models/web-session.js");
+jest.mock("../../src/utils/logger.js");
+
+const ORIGINAL_ENV = { ...process.env };
+
+describe("WebSessionService", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env.WEBUI_SESSION_SECRET = "test-secret-of-sufficient-length";
+    process.env.WEBUI_BASE_URL = "https://example.test";
+    process.env.WEBUI_SESSION_TTL_MINUTES = "10";
+
+    // Reset singleton between tests
+    (WebSessionService as unknown as { instance: unknown }).instance = null;
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it("hashToken is deterministic for same secret and produces hex output", () => {
+    const svc = WebSessionService.getInstance();
+    const a = svc.hashToken("hello");
+    const b = svc.hashToken("hello");
+    expect(a).toBe(b);
+    expect(a).toMatch(/^[a-f0-9]+$/);
+  });
+
+  it("hashToken throws when secret missing", () => {
+    delete process.env.WEBUI_SESSION_SECRET;
+    const svc = WebSessionService.getInstance();
+    expect(() => svc.hashToken("x")).toThrow(/WEBUI_SESSION_SECRET/);
+  });
+
+  it("create revokes prior sessions and inserts a new row", async () => {
+    const updateMany = jest.fn().mockResolvedValue({ modifiedCount: 1 });
+    const create = jest.fn().mockResolvedValue({ _id: "abc" });
+    (WebSession as unknown as { updateMany: unknown }).updateMany = updateMany;
+    (WebSession as unknown as { create: unknown }).create = create;
+
+    const svc = WebSessionService.getInstance();
+    const result = await svc.create("user-1", "guild-1", ["scope:a"]);
+
+    expect(updateMany).toHaveBeenCalledWith(
+      { discord_user_id: "user-1", revoked_at: null },
+      { $set: expect.objectContaining({ revoked_at: expect.any(Date) }) },
+    );
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(result.url).toMatch(
+      /^https:\/\/example\.test\/admin\/s\/[A-Za-z0-9_-]+$/,
+    );
+    expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("redeem returns null when no matching unused session exists", async () => {
+    (WebSession as unknown as { updateMany: unknown }).updateMany = jest
+      .fn()
+      .mockResolvedValue({ modifiedCount: 0 });
+    (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
+      jest.fn().mockResolvedValue(null);
+
+    const svc = WebSessionService.getInstance();
+    const result = await svc.redeem("not-a-real-token");
+    expect(result).toBeNull();
+  });
+
+  it("redeem marks the session used and returns context on success", async () => {
+    const findOneAndUpdate = jest.fn().mockResolvedValue({
+      _id: { toString: () => "session-id" },
+      discord_user_id: "user-1",
+      guild_id: "guild-1",
+      scopes: ["scope:a"],
+    });
+    (
+      WebSession as unknown as { findOneAndUpdate: unknown }
+    ).findOneAndUpdate = findOneAndUpdate;
+
+    const svc = WebSessionService.getInstance();
+    const result = await svc.redeem("any-token");
+
+    expect(result).toEqual({
+      sessionId: "session-id",
+      discordUserId: "user-1",
+      guildId: "guild-1",
+      scopes: ["scope:a"],
+    });
+    const call = findOneAndUpdate.mock.calls[0];
+    expect(call[0]).toMatchObject({
+      used_at: null,
+      revoked_at: null,
+    });
+    expect(call[1]).toMatchObject({ $set: { used_at: expect.any(Date) } });
+  });
+
+  it("revokeSession returns true when modifiedCount > 0", async () => {
+    (WebSession as unknown as { updateOne: unknown }).updateOne = jest
+      .fn()
+      .mockResolvedValue({ modifiedCount: 1 });
+    const svc = WebSessionService.getInstance();
+    expect(await svc.revokeSession("abc")).toBe(true);
+  });
+
+  it("revokeSession returns false when nothing updated", async () => {
+    (WebSession as unknown as { updateOne: unknown }).updateOne = jest
+      .fn()
+      .mockResolvedValue({ modifiedCount: 0 });
+    const svc = WebSessionService.getInstance();
+    expect(await svc.revokeSession("abc")).toBe(false);
+  });
+
+  it("revokeSession returns false for empty id without hitting the model", async () => {
+    const updateOne = jest.fn();
+    (WebSession as unknown as { updateOne: unknown }).updateOne = updateOne;
+    const svc = WebSessionService.getInstance();
+    expect(await svc.revokeSession("")).toBe(false);
+    expect(updateOne).not.toHaveBeenCalled();
+  });
+});
