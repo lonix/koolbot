@@ -64,13 +64,6 @@ export function createWebRouter(client: Client): Router {
     },
   );
 
-  // Read-only admin pages (Dashboard, Bootstrap, Settings, Permissions,
-  // Announcements, Polls, Reaction Roles, Notices, Voice Channels, Database)
-  // are registered by the read-only router. It re-registers `requireSession`
-  // internally; safe to mount before the auth/finish endpoints below since
-  // they live at distinct paths.
-  router.use(createReadOnlyRouter(client, requireSession));
-
   router.post(
     "/finish",
     finishLimiter,
@@ -85,6 +78,14 @@ export function createWebRouter(client: Client): Router {
       res.status(200).type("text/html").send(renderSignedOut());
     },
   );
+
+  // Read-only admin pages (Dashboard, Bootstrap, Settings, Permissions,
+  // Announcements, Polls, Reaction Roles, Notices, Voice Channels, Database).
+  // Mounted *after* /finish so a POST to /finish hits requireCsrf first;
+  // otherwise this router's `requireSession` would refresh the session
+  // cookie and re-hit Mongo even on requests that the CSRF check would
+  // ultimately reject.
+  router.use(createReadOnlyRouter(client, requireSession));
 
   router.use(
     (err: unknown, _req: Request, res: Response, next: NextFunction): void => {

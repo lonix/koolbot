@@ -86,9 +86,13 @@ const STYLE = [
 const SCRIPT =
   "(function(){var el=document.getElementById('session-countdown');if(!el)return;" +
   "var deadline=Date.now()+parseInt(el.getAttribute('data-remaining-ms'),10);" +
+  "var fired=false;" +
   "function tick(){var r=Math.max(0,deadline-Date.now());var s=Math.floor(r/1000);" +
   "var m=Math.floor(s/60);var ss=s%60;el.textContent=m+':'+(ss<10?'0'+ss:ss);" +
-  "if(r<=0){window.location.href='/admin/finish-redirect'}}tick();setInterval(tick,1000)})();";
+  // When the countdown hits 0, navigate to /admin/. The session middleware
+  // will reject the now-expired cookie and render the scaffold's 401 page.
+  "if(r<=0&&!fired){fired=true;window.location.href='/admin/'}}" +
+  "tick();setInterval(tick,1000)})();";
 
 function renderNav(active: string): string {
   return NAV_ITEMS.map((item) => {
@@ -128,13 +132,22 @@ export function renderAdminPage(opts: AdminPageOptions): string {
 
 /**
  * Remaining session lifetime in milliseconds for the banner countdown.
- * Reads WEBUI_INACTIVITY_TIMEOUT_MINUTES — the cookie middleware refreshes
- * lastActivityAt on every request, so this is what would actually time the
- * user out without further interaction.
+ *
+ * Two ceilings apply, and the banner has to honour both:
+ *   - the inactivity sliding window (`WEBUI_INACTIVITY_TIMEOUT_MINUTES`),
+ *     which the cookie middleware just refreshed back to its full length.
+ *   - the server-side hard cap from `dbSession.expiresAt`
+ *     (`WEBUI_SESSION_TTL_MINUTES`), surfaced on `WebSessionContext`.
+ *
+ * We display whichever ends sooner. Without `session`, we conservatively
+ * fall back to inactivity-only (used by tests).
  */
-export function getDisplayedRemainingMs(): number {
+export function getDisplayedRemainingMs(session?: { expiresAt: Date }): number {
   const raw = process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
   const parsed = raw ? Number(raw) : NaN;
-  const minutes = Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
-  return minutes * 60 * 1000;
+  const inactivityMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+  const inactivityMs = inactivityMinutes * 60 * 1000;
+  if (!session) return inactivityMs;
+  const hardCapMs = Math.max(0, session.expiresAt.getTime() - Date.now());
+  return Math.min(inactivityMs, hardCapMs);
 }

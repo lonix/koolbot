@@ -46,6 +46,7 @@ import {
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
+  type ReactionRoleRow,
   type SettingRow,
 } from "./admin-views.js";
 
@@ -103,7 +104,7 @@ function commonFromReq(req: AuthenticatedRequest): {
   return {
     guildId: session.guildId,
     csrfToken: getCsrfToken(req),
-    remainingMs: getDisplayedRemainingMs(),
+    remainingMs: getDisplayedRemainingMs(session),
   };
 }
 
@@ -488,7 +489,7 @@ export function createReadOnlyRouter(
         messageId: string;
         isArchived: boolean;
         archivedAt?: Date | null;
-      }): ReturnType<typeof Object> => ({
+      }): ReactionRoleRow => ({
         emoji: rr.emoji,
         roleName: rr.roleName,
         roleId: rr.roleId,

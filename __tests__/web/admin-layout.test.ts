@@ -113,4 +113,23 @@ describe("getDisplayedRemainingMs", () => {
     process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "0";
     expect(getDisplayedRemainingMs()).toBe(30 * 60 * 1000);
   });
+
+  it("honours the TTL hard cap when it ends before the inactivity window", () => {
+    // Inactivity window = 30 min, but the session has only 5 min left.
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+    const remaining = getDisplayedRemainingMs({ expiresAt });
+    expect(remaining).toBeLessThanOrEqual(5 * 60 * 1000);
+    expect(remaining).toBeGreaterThan(4 * 60 * 1000);
+  });
+
+  it("uses the inactivity window when the TTL cap is further out", () => {
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "10";
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
+    expect(getDisplayedRemainingMs({ expiresAt })).toBe(10 * 60 * 1000);
+  });
+
+  it("returns 0 when the hard cap has already passed", () => {
+    const expiresAt = new Date(Date.now() - 1000);
+    expect(getDisplayedRemainingMs({ expiresAt })).toBe(0);
+  });
 });
