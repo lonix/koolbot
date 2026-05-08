@@ -4,7 +4,7 @@ module.exports = (request, options) => {
   try {
     return options.defaultResolver(request, options);
   } catch (error) {
-    if (request.startsWith('.') && request.endsWith('.js')) {
+    if ((request.startsWith('./') || request.startsWith('../')) && request.endsWith('.js')) {
       const tsRequest = `${request.slice(0, -3)}.ts`;
       const candidates = [tsRequest, path.resolve(options.basedir, tsRequest)];
       const normalizedRequest = request.replace(/\\/g, '/');
@@ -20,6 +20,7 @@ module.exports = (request, options) => {
         try {
           return options.defaultResolver(candidate, options);
         } catch {
+          // Try the next candidate path.
           continue;
         }
       }
