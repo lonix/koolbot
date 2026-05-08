@@ -7,16 +7,26 @@ import { Request, Response } from "express";
  * to keep the WebUI scaffold dependency-free.
  */
 
+// Reserved JS object keys an attacker could inject via the Cookie header
+// to pollute the prototype chain.
+const FORBIDDEN_COOKIE_NAMES = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
 export function parseCookies(req: Request): Record<string, string> {
+  // Prototype-free map so a malicious `Cookie: __proto__=…` header cannot
+  // pollute Object.prototype even if the name check below is bypassed.
+  const out: Record<string, string> = Object.create(null);
   const header = req.headers.cookie;
-  if (!header) return {};
-  const out: Record<string, string> = {};
+  if (!header) return out;
   for (const part of header.split(";")) {
     const idx = part.indexOf("=");
     if (idx === -1) continue;
     const name = part.slice(0, idx).trim();
     const value = part.slice(idx + 1).trim();
-    if (!name) continue;
+    if (!name || FORBIDDEN_COOKIE_NAMES.has(name)) continue;
     try {
       out[name] = decodeURIComponent(value);
     } catch {
