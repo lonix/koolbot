@@ -389,9 +389,9 @@ export class PollService {
       errors: [] as string[],
     };
 
-    let parsedUrl: URL;
+    let parsedUrl;
     try {
-      parsedUrl = new URL(url);
+      parsedUrl = new globalThis.URL(url);
     } catch {
       results.errors.push("Invalid URL format");
       return results;
