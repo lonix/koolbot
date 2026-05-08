@@ -4,6 +4,11 @@ describe('Logger Utility', () => {
   const originalDebug = process.env.DEBUG;
 
   afterEach(() => {
+    if (typeof originalDebug === 'undefined') {
+      delete process.env.DEBUG;
+      return;
+    }
+
     process.env.DEBUG = originalDebug;
   });
 

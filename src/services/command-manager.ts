@@ -65,6 +65,7 @@ export class CommandManager {
     try {
       const commands = [];
       const enabledCommands = [];
+      const debugModeEnabled = isDebugMode();
 
       // Define command configurations with their requirements
       const commandConfigs = [
@@ -129,10 +130,10 @@ export class CommandManager {
             commands.push(commandData.toJSON());
             enabledCommands.push(config.name);
 
-            if (isDebugMode()) {
+            if (debugModeEnabled) {
               logger.debug(`✓ /${config.name} command enabled`);
             }
-          } else if (isDebugMode()) {
+          } else if (debugModeEnabled) {
             logger.debug(`✗ /${config.name} command disabled`);
           }
         } catch (error) {
@@ -140,7 +141,7 @@ export class CommandManager {
         }
       }
 
-      if (isDebugMode()) {
+      if (debugModeEnabled) {
         logger.debug(`Enabled commands: ${enabledCommands.join(", ")}`);
       }
 
@@ -306,6 +307,7 @@ export class CommandManager {
       if (!this.client) {
         throw new Error("Client not set");
       }
+      const debugModeEnabled = isDebugMode();
 
       // Clear existing commands
       this.client.commands.clear();
@@ -391,10 +393,10 @@ export class CommandManager {
               autocomplete: autocompleteFunction,
             });
 
-            if (isDebugMode()) {
+            if (debugModeEnabled) {
               logger.debug(`✓ /${config.name} command loaded`);
             }
-          } else if (isDebugMode()) {
+          } else if (debugModeEnabled) {
             logger.debug(`✗ /${config.name} command disabled`);
           }
         } catch (error) {
