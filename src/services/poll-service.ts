@@ -65,6 +65,15 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
   const ipVersion = isIP(normalizedIp);
   if (ipVersion === 4) {
     const octets = normalizedIp.split(".").map(Number);
+    if (
+      octets.length !== 4 ||
+      octets.some(
+        (octet) => !Number.isInteger(octet) || octet < 0 || octet > 255,
+      )
+    ) {
+      return false;
+    }
+
     const [first, second] = octets;
 
     return (
@@ -83,6 +92,10 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
     }
 
     const firstHextet = Number.parseInt(normalizedIp.split(":")[0] || "0", 16);
+    if (!Number.isFinite(firstHextet)) {
+      return false;
+    }
+
     return (
       (firstHextet & 0xfe00) === 0xfc00 || (firstHextet & 0xffc0) === 0xfe80
     );

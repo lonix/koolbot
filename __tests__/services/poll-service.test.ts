@@ -101,6 +101,7 @@ describe("PollService", () => {
       "http://[fc00::1]/internal",
       "http://[fe80::1]/internal",
       "http://[::ffff:127.0.0.1]/internal",
+      "http://[::ffff:7f00:1]/internal",
     ];
 
     for (const blockedUrl of blockedUrls) {
