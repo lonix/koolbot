@@ -1,5 +1,6 @@
 import { Client, TextChannel } from "discord.js";
 import { CronJob, CronTime } from "cron";
+import { isIP } from "node:net";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { PollSchedule, IPollSchedule } from "../models/poll-schedule.js";
@@ -21,6 +22,53 @@ interface PollData {
 
 interface PollSource {
   polls: PollData[];
+}
+
+function isPrivateOrLocalHostname(hostname: string): boolean {
+  const normalizedHostname = hostname.toLowerCase();
+  if (
+    normalizedHostname === "localhost" ||
+    normalizedHostname.endsWith(".localhost")
+  ) {
+    return true;
+  }
+
+  const normalizedIp =
+    normalizedHostname.startsWith("[") && normalizedHostname.endsWith("]")
+      ? normalizedHostname.slice(1, -1)
+      : normalizedHostname;
+
+  if (normalizedIp.startsWith("::ffff:")) {
+    return isPrivateOrLocalHostname(normalizedIp.slice("::ffff:".length));
+  }
+
+  const ipVersion = isIP(normalizedIp);
+  if (ipVersion === 4) {
+    const octets = normalizedIp.split(".").map(Number);
+    const [first, second] = octets;
+
+    return (
+      first === 0 ||
+      first === 10 ||
+      first === 127 ||
+      (first === 169 && second === 254) ||
+      (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168)
+    );
+  }
+
+  if (ipVersion === 6) {
+    if (normalizedIp === "::" || normalizedIp === "::1") {
+      return true;
+    }
+
+    const firstHextet = Number.parseInt(normalizedIp.split(":")[0] || "0", 16);
+    return (
+      (firstHextet & 0xfe00) === 0xfc00 || (firstHextet & 0xffc0) === 0xfe80
+    );
+  }
+
+  return false;
 }
 
 export class PollService {
@@ -341,9 +389,27 @@ export class PollService {
       errors: [] as string[],
     };
 
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      results.errors.push("Invalid URL format");
+      return results;
+    }
+
+    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+      results.errors.push("URL must use the http or https protocol");
+      return results;
+    }
+
+    if (isPrivateOrLocalHostname(parsedUrl.hostname)) {
+      results.errors.push("URL must not point to a private or local address");
+      return results;
+    }
+
     try {
       // Fetch the content with timeout
-      const response = await axios.get(url, {
+      const response = await axios.get(parsedUrl.toString(), {
         timeout: 10000,
         maxContentLength: 1024 * 1024, // 1MB max
         headers: {
