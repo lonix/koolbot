@@ -112,21 +112,24 @@ export function createWebRouter(client: Client): Router {
   router.get(
     "/bootstrap",
     requireSession,
-    (req: AuthenticatedRequest, res: Response): void => {
-      const csrfToken =
-        (req as Request & { csrfToken?: string }).csrfToken ?? "";
+    (_req: AuthenticatedRequest, res: Response): void => {
       const rows = BOOTSTRAP_KEYS.map((key) => {
         const raw = process.env[key];
         const present = typeof raw === "string" && raw.length > 0;
-        let tail: string | undefined;
-        if (present && SECRET_KEYS.has(key) && raw) {
-          tail = raw.slice(-4);
-        } else if (present && raw && !SECRET_KEYS.has(key)) {
-          tail = raw.length > 32 ? `${raw.slice(0, 28)}…` : raw;
+        let display: string | undefined;
+        if (present && raw) {
+          if (SECRET_KEYS.has(key)) {
+            // Reveal only the last 4 characters of secrets.
+            display = `…${raw.slice(-4)}`;
+          } else if (raw.length > 32) {
+            display = `${raw.slice(0, 28)}…`;
+          } else {
+            display = raw;
+          }
         }
-        return { key, present, tail };
+        return { key, present, display };
       });
-      res.type("text/html").send(renderBootstrap({ rows, csrfToken }));
+      res.type("text/html").send(renderBootstrap({ rows }));
     },
   );
 

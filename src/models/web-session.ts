@@ -1,30 +1,30 @@
 import mongoose, { Document, Schema } from "mongoose";
 
 export interface IWebSession extends Document {
-  token_hash: string;
-  discord_user_id: string;
-  guild_id: string;
+  tokenHash: string;
+  discordUserId: string;
+  guildId: string;
   scopes: string[];
-  created_at: Date;
-  expires_at: Date;
-  used_at: Date | null;
-  revoked_at: Date | null;
+  createdAt: Date;
+  expiresAt: Date;
+  usedAt: Date | null;
+  revokedAt: Date | null;
 }
 
 const WebSessionSchema = new Schema<IWebSession>(
   {
-    token_hash: {
+    tokenHash: {
       type: String,
       required: true,
       unique: true,
       index: true,
     },
-    discord_user_id: {
+    discordUserId: {
       type: String,
       required: true,
       index: true,
     },
-    guild_id: {
+    guildId: {
       type: String,
       required: true,
     },
@@ -33,20 +33,20 @@ const WebSessionSchema = new Schema<IWebSession>(
       required: true,
       default: [],
     },
-    created_at: {
+    createdAt: {
       type: Date,
       required: true,
       default: Date.now,
     },
-    expires_at: {
+    expiresAt: {
       type: Date,
       required: true,
     },
-    used_at: {
+    usedAt: {
       type: Date,
       default: null,
     },
-    revoked_at: {
+    revokedAt: {
       type: Date,
       default: null,
     },

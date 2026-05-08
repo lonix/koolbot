@@ -54,23 +54,24 @@ export function renderDashboard(opts: {
 }
 
 export function renderBootstrap(opts: {
-  rows: Array<{ key: string; present: boolean; tail?: string }>;
-  csrfToken: string;
+  rows: Array<{ key: string; present: boolean; display?: string }>;
 }): string {
   const tableRows = opts.rows
     .map((row) => {
       const present = row.present
         ? `<span style="color:#15803d;">present</span>`
         : `<span style="color:#b91c1c;">missing</span>`;
-      const tail = row.tail ? `<code>…${escapeHtml(row.tail)}</code>` : "";
-      return `<tr><td>${escapeHtml(row.key)}</td><td>${present}</td><td>${tail}</td></tr>`;
+      const display = row.display
+        ? `<code>${escapeHtml(row.display)}</code>`
+        : "";
+      return `<tr><td>${escapeHtml(row.key)}</td><td>${present}</td><td>${display}</td></tr>`;
     })
     .join("");
   const body = [
     '<nav><a href="/admin/">Dashboard</a> <a href="/admin/bootstrap">Bootstrap</a></nav>',
     "<h1>Bootstrap (read-only)</h1>",
     "<p>Environment values are <strong>never</strong> writable from the WebUI. Only presence and the last 4 characters of secrets are shown.</p>",
-    "<table><thead><tr><th>Key</th><th>Status</th><th>Tail</th></tr></thead>",
+    "<table><thead><tr><th>Key</th><th>Status</th><th>Value</th></tr></thead>",
     `<tbody>${tableRows}</tbody></table>`,
   ].join("");
   return pageShell("Bootstrap", body);
@@ -81,7 +82,7 @@ export function renderSignedOut(): string {
     "Signed out",
     [
       "<h1>Signed out</h1>",
-      "<p>Your session has been revoked. Run <code>/config</code> in Discord to start a new one.</p>",
+      "<p>Your session has been revoked. Run <code>/config web</code> in Discord to start a new one.</p>",
     ].join(""),
   );
 }
@@ -91,7 +92,7 @@ export function renderInvalidLink(): string {
     "Invalid link",
     [
       "<h1>Link invalid or expired</h1>",
-      "<p>Magic-link tokens are single-use and expire quickly. Run <code>/config</code> in Discord again to receive a fresh link.</p>",
+      "<p>Magic-link tokens are single-use and expire quickly. Run <code>/config web</code> in Discord again to receive a fresh link.</p>",
     ].join(""),
   );
 }

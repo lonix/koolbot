@@ -76,14 +76,14 @@ export class WebSessionService {
     const expiresAt = new Date(now.getTime() + ttlMs);
 
     await WebSession.create({
-      token_hash: tokenHash,
-      discord_user_id: discordUserId,
-      guild_id: guildId,
+      tokenHash,
+      discordUserId,
+      guildId,
       scopes,
-      created_at: now,
-      expires_at: expiresAt,
-      used_at: null,
-      revoked_at: null,
+      createdAt: now,
+      expiresAt,
+      usedAt: null,
+      revokedAt: null,
     });
 
     const url = `${this.getBaseUrl()}/admin/s/${token}`;
@@ -107,12 +107,12 @@ export class WebSessionService {
     const now = new Date();
     const session = await WebSession.findOneAndUpdate(
       {
-        token_hash: tokenHash,
-        used_at: null,
-        revoked_at: null,
-        expires_at: { $gt: now },
+        tokenHash,
+        usedAt: null,
+        revokedAt: null,
+        expiresAt: { $gt: now },
       },
-      { $set: { used_at: now } },
+      { $set: { usedAt: now } },
       { new: true },
     );
 
@@ -120,8 +120,8 @@ export class WebSessionService {
 
     return {
       sessionId: String(session._id),
-      discordUserId: session.discord_user_id,
-      guildId: session.guild_id,
+      discordUserId: session.discordUserId,
+      guildId: session.guildId,
       scopes: session.scopes,
     };
   }
@@ -145,8 +145,8 @@ export class WebSessionService {
   public async revokeForUser(discordUserId: string): Promise<number> {
     const now = new Date();
     const result = await WebSession.updateMany(
-      { discord_user_id: discordUserId, revoked_at: null },
-      { $set: { revoked_at: now } },
+      { discordUserId, revokedAt: null },
+      { $set: { revokedAt: now } },
     );
     const modified = (result as { modifiedCount?: number }).modifiedCount ?? 0;
     if (modified > 0) {
@@ -165,8 +165,8 @@ export class WebSessionService {
     try {
       const now = new Date();
       const result = await WebSession.updateOne(
-        { _id: sessionId, revoked_at: null },
-        { $set: { revoked_at: now } },
+        { _id: sessionId, revokedAt: null },
+        { $set: { revokedAt: now } },
       );
       const modified =
         (result as { modifiedCount?: number }).modifiedCount ?? 0;

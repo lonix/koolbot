@@ -5,6 +5,7 @@ import { parseCookies, setCookie } from "./cookies.js";
 
 export const CSRF_COOKIE = "koolbot_csrf";
 export const CSRF_HEADER = "x-csrf-token";
+export const CSRF_COOKIE_PATH = "/admin";
 
 /**
  * Double-submit-cookie CSRF protection. The cookie is non-HttpOnly so the
@@ -24,7 +25,7 @@ export function ensureCsrfCookie(
       httpOnly: false,
       sameSite: "lax",
       secure: shouldUseSecureCookies(),
-      path: "/",
+      path: CSRF_COOKIE_PATH,
     });
     (req as Request & { csrfToken?: string }).csrfToken = token;
   } else {

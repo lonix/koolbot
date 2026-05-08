@@ -53,8 +53,8 @@ describe("WebSessionService", () => {
     const result = await svc.create("user-1", "guild-1", ["scope:a"]);
 
     expect(updateMany).toHaveBeenCalledWith(
-      { discord_user_id: "user-1", revoked_at: null },
-      { $set: expect.objectContaining({ revoked_at: expect.any(Date) }) },
+      { discordUserId: "user-1", revokedAt: null },
+      { $set: expect.objectContaining({ revokedAt: expect.any(Date) }) },
     );
     expect(create).toHaveBeenCalledTimes(1);
     expect(result.url).toMatch(
@@ -78,8 +78,8 @@ describe("WebSessionService", () => {
   it("redeem marks the session used and returns context on success", async () => {
     const findOneAndUpdate = jest.fn().mockResolvedValue({
       _id: { toString: () => "session-id" },
-      discord_user_id: "user-1",
-      guild_id: "guild-1",
+      discordUserId: "user-1",
+      guildId: "guild-1",
       scopes: ["scope:a"],
     });
     (
@@ -97,10 +97,10 @@ describe("WebSessionService", () => {
     });
     const call = findOneAndUpdate.mock.calls[0];
     expect(call[0]).toMatchObject({
-      used_at: null,
-      revoked_at: null,
+      usedAt: null,
+      revokedAt: null,
     });
-    expect(call[1]).toMatchObject({ $set: { used_at: expect.any(Date) } });
+    expect(call[1]).toMatchObject({ $set: { usedAt: expect.any(Date) } });
   });
 
   it("revokeSession returns true when modifiedCount > 0", async () => {

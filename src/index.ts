@@ -146,7 +146,23 @@ function startHealthServer(): void {
         `WEBUI_ENABLED=true but missing required env vars: ${missing.join(", ")}. WebUI will not be mounted.`,
       );
     } else {
-      healthApp.set("trust proxy", true);
+      // Default to NOT trusting any X-Forwarded-* headers so an attacker
+      // cannot spoof req.ip and bypass the rate limiter. Operators behind
+      // a reverse proxy can opt in by setting WEBUI_TRUST_PROXY to a hop
+      // count (e.g. "1") or to one of express' supported strings ("loopback",
+      // "linklocal", "uniquelocal", "true").
+      const trustProxyRaw = (process.env.WEBUI_TRUST_PROXY || "").trim();
+      if (trustProxyRaw) {
+        const asNumber = Number(trustProxyRaw);
+        if (Number.isFinite(asNumber) && asNumber >= 0) {
+          healthApp.set("trust proxy", asNumber);
+        } else if (trustProxyRaw.toLowerCase() === "true") {
+          healthApp.set("trust proxy", true);
+        } else {
+          healthApp.set("trust proxy", trustProxyRaw);
+        }
+        logger.info(`WebUI trust proxy set to: ${trustProxyRaw}`);
+      }
       healthApp.use("/admin", createWebRouter(client));
       logger.info("WebUI mounted at /admin");
     }

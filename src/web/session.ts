@@ -14,6 +14,7 @@ import {
 import { shouldUseSecureCookies } from "./csrf.js";
 
 export const SESSION_COOKIE = "koolbot_session";
+export const SESSION_COOKIE_PATH = "/admin";
 
 const DEFAULT_INACTIVITY_MINUTES = 30;
 
@@ -61,13 +62,13 @@ export function writeSessionCookie(
     httpOnly: true,
     sameSite: "lax",
     secure: shouldUseSecureCookies(),
-    path: "/",
+    path: SESSION_COOKIE_PATH,
     maxAge: getInactivityMinutes() * 60 * 1000,
   });
 }
 
 export function clearSessionCookie(res: Response): void {
-  clearCookie(res, SESSION_COOKIE, { path: "/" });
+  clearCookie(res, SESSION_COOKIE, { path: SESSION_COOKIE_PATH });
 }
 
 function readSessionCookie(req: Request): CookiePayload | null {
@@ -102,8 +103,10 @@ function readSessionCookie(req: Request): CookiePayload | null {
 
 /**
  * Session middleware: verifies the signed cookie, enforces the sliding
- * inactivity window, hard-caps the session to its server-side expires_at,
- * and re-checks Administrator on every request via PermissionsService.
+ * inactivity window, hard-caps the session to its server-side expiresAt,
+ * and re-checks the user's command permission on every request via
+ * PermissionsService (admins always pass; otherwise the configured roles
+ * for "config" must allow the user).
  */
 export function createSessionMiddleware(
   client: Client,
@@ -131,9 +134,10 @@ export function createSessionMiddleware(
     const dbSession = await sessionService.findById(payload.sid);
     if (
       !dbSession ||
-      dbSession.revoked_at ||
-      dbSession.expires_at.getTime() <= now ||
-      dbSession.discord_user_id !== payload.uid
+      dbSession.revokedAt ||
+      dbSession.expiresAt.getTime() <= now ||
+      dbSession.discordUserId !== payload.uid ||
+      dbSession.guildId !== payload.gid
     ) {
       clearSessionCookie(res);
       respondUnauthorized(res);
@@ -142,18 +146,15 @@ export function createSessionMiddleware(
 
     try {
       const permissions = PermissionsService.getInstance(client);
-      const guild = await client.guilds.fetch(payload.gid);
-      const member = await guild.members.fetch(payload.uid);
-      const isAdmin = member.permissions.has("Administrator");
-      if (!isAdmin) {
-        // Re-check admin on every request as required by the spec.
-        // Defer to the cached permissions service for any future per-route
-        // role gating.
-        await permissions.checkCommandPermission(
-          payload.uid,
-          payload.gid,
-          "config",
-        );
+      // checkCommandPermission already short-circuits to true for
+      // Administrators and to true when no role gating is configured for
+      // the command, so we can rely on its boolean directly.
+      const allowed = await permissions.checkCommandPermission(
+        payload.uid,
+        payload.gid,
+        "config",
+      );
+      if (!allowed) {
         clearSessionCookie(res);
         await sessionService.revokeSession(payload.sid);
         respondUnauthorized(res);
@@ -188,7 +189,7 @@ function respondUnauthorized(res: Response): void {
       `<!doctype html><html><head><meta charset="utf-8"><title>Sign in required</title></head>` +
         `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
         `<h1>Sign in required</h1>` +
-        `<p>Run <code>/config</code> in Discord to receive a fresh sign-in link.</p>` +
+        `<p>Run <code>/config web</code> in Discord to receive a fresh sign-in link.</p>` +
         `</body></html>`,
     );
 }
