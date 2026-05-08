@@ -21,7 +21,7 @@ import {
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
-import { defaultConfig } from "../services/config-schema.js";
+import { defaultConfig, settingsMetadata } from "../services/config-schema.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import { ScheduledAnnouncement } from "../models/scheduled-announcement.js";
@@ -295,16 +295,23 @@ export function createReadOnlyRouter(
       const stored = await config.getAll().catch(() => []);
       const storedByKey = new Map(stored.map((s) => [s.key, s]));
 
+      // Description and category come from the static settingsMetadata
+      // map (one entry per key in `defaultConfig`); when a DB row exists
+      // and overrides them, prefer the DB value. This way every key has a
+      // stable description on a fresh install — even before /config set
+      // ever runs — without losing operator-customised descriptions.
       const rows: SettingRow[] = Object.entries(defaultConfig).map(
         ([key, defaultValue]) => {
           const dbEntry = storedByKey.get(key);
+          const meta = settingsMetadata[key as keyof typeof settingsMetadata];
           return {
             key,
             current: dbEntry ? dbEntry.value : defaultValue,
             defaultValue,
             type: describeType(defaultValue),
-            description: dbEntry?.description ?? "(no description on disk yet)",
-            category: dbEntry?.category ?? deriveCategory(key),
+            description: dbEntry?.description ?? meta?.description ?? "",
+            category:
+              dbEntry?.category ?? meta?.category ?? deriveCategory(key),
           };
         },
       );

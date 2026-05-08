@@ -192,3 +192,341 @@ export const defaultConfig: ConfigSchema = {
   "polls.default_duration_hours": 24, // Default 24 hours
   "polls.cooldown_days": 7, // Minimum 7 days between reusing same poll
 };
+
+/**
+ * Per-key metadata used by the WebUI Settings page and by future
+ * `/config` description surfaces. Single source of truth so every key in
+ * `defaultConfig` has a stable description even when the DB row hasn't
+ * been written yet (e.g. on a fresh install).
+ *
+ * Categories match the existing values used by `migrateFromEnv()` and the
+ * `Config` mongoose model's `category` enum, so a Settings group rendered
+ * from this map looks identical to one rendered from a populated DB.
+ */
+export interface SettingMetadata {
+  description: string;
+  category: string;
+}
+
+export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
+  // Voice Channel Management
+  "voicechannels.enabled": {
+    description: "Enable voice channel management.",
+    category: "voicechannels",
+  },
+  "voicechannels.category.name": {
+    description:
+      "Name of the Discord category that contains managed voice channels.",
+    category: "voicechannels",
+  },
+  "voicechannels.lobby.name": {
+    description:
+      "Name of the lobby channel users join to spawn a personal channel.",
+    category: "voicechannels",
+  },
+  "voicechannels.lobby.offlinename": {
+    description:
+      "Name displayed on the lobby channel while the bot is offline.",
+    category: "voicechannels",
+  },
+  "voicechannels.channel.prefix": {
+    description: "Prefix prepended to dynamically created voice channel names.",
+    category: "voicechannels",
+  },
+  "voicechannels.channel.suffix": {
+    description: "Suffix appended to dynamically created voice channel names.",
+    category: "voicechannels",
+  },
+  "voicechannels.controlpanel.enabled": {
+    description:
+      "Show the in-channel control panel (rename / privacy / live / transfer).",
+    category: "voicechannels",
+  },
+  "voicechannels.ownership.grace_period_seconds": {
+    description:
+      "Seconds to wait before transferring ownership when the channel owner leaves.",
+    category: "voicechannels",
+  },
+  "voicechannels.presets.enabled": {
+    description:
+      "Enable per-user channel presets (saved channel name + privacy).",
+    category: "voicechannels",
+  },
+  "voicechannels.presets.max_per_user": {
+    description: "Maximum number of presets a user can save.",
+    category: "voicechannels",
+  },
+
+  // Voice Activity Tracking
+  "voicetracking.enabled": {
+    description: "Enable voice activity tracking and the /voicestats command.",
+    category: "voicetracking",
+  },
+  "voicetracking.stats.top.enabled": {
+    description: "Enable the /voicestats top leaderboard subcommand.",
+    category: "voicetracking",
+  },
+  "voicetracking.stats.user.enabled": {
+    description: "Enable the /voicestats user personal-stats subcommand.",
+    category: "voicetracking",
+  },
+  "voicetracking.seen.enabled": {
+    description: "Enable last-seen tracking and the /seen command.",
+    category: "voicetracking",
+  },
+  "voicetracking.excluded_channels": {
+    description:
+      "Comma-separated channel IDs to exclude from voice activity tracking.",
+    category: "voicetracking",
+  },
+  "voicetracking.announcements.enabled": {
+    description: "Enable scheduled voice-stats announcements.",
+    category: "voicetracking",
+  },
+  "voicetracking.announcements.schedule": {
+    description: "Cron schedule for the recurring voice-stats announcement.",
+    category: "voicetracking",
+  },
+  "voicetracking.announcements.channel": {
+    description: "Channel name where voice-stats announcements are posted.",
+    category: "voicetracking",
+  },
+  "voicetracking.admin_roles": {
+    description:
+      "Comma-separated role names allowed to run privileged voice tracking commands.",
+    category: "voicetracking",
+  },
+
+  // Voice Channel Cleanup (dbtrunk)
+  "voicetracking.cleanup.enabled": {
+    description: "Enable scheduled database cleanup of voice tracking data.",
+    category: "voicetracking",
+  },
+  "voicetracking.cleanup.schedule": {
+    description: "Cron schedule for the database cleanup job.",
+    category: "voicetracking",
+  },
+  "voicetracking.cleanup.retention.detailed_sessions_days": {
+    description:
+      "Days to keep detailed session rows before they are summarised away.",
+    category: "voicetracking",
+  },
+  "voicetracking.cleanup.retention.monthly_summaries_months": {
+    description: "Months to keep monthly summary rows.",
+    category: "voicetracking",
+  },
+  "voicetracking.cleanup.retention.yearly_summaries_years": {
+    description: "Years to keep yearly summary rows.",
+    category: "voicetracking",
+  },
+
+  // Individual Features
+  "ping.enabled": {
+    description: "Enable the /ping latency check command.",
+    category: "ping",
+  },
+  "help.enabled": {
+    description: "Enable the /help command.",
+    category: "help",
+  },
+  "amikool.enabled": {
+    description: "Enable the /amikool fun role check command.",
+    category: "amikool",
+  },
+  "amikool.role.name": {
+    description: 'Role name required to be considered "kool" by /amikool.',
+    category: "amikool",
+  },
+
+  // Quote System
+  "quotes.enabled": {
+    description: "Enable the quotes system and the /quote command.",
+    category: "quotes",
+  },
+  "quotes.channel_id": {
+    description: "Channel ID where quote messages are posted.",
+    category: "quotes",
+  },
+  "quotes.add_roles": {
+    description:
+      "Comma-separated role IDs allowed to add quotes. Empty means everyone can add.",
+    category: "quotes",
+  },
+  "quotes.delete_roles": {
+    description:
+      "Comma-separated role IDs allowed to delete quotes. Empty means only admins.",
+    category: "quotes",
+  },
+  "quotes.max_length": {
+    description: "Maximum length of a single quote in characters.",
+    category: "quotes",
+  },
+  "quotes.cooldown": {
+    description: "Cooldown in seconds between quote additions per user.",
+    category: "quotes",
+  },
+  "quotes.cleanup_interval": {
+    description:
+      "Interval in minutes between sweeps for unauthorised messages in the quote channel.",
+    category: "quotes",
+  },
+  "quotes.header_enabled": {
+    description:
+      "Post and maintain a pinned informational header in the quote channel.",
+    category: "quotes",
+  },
+  "quotes.header_message_id": {
+    description: "Auto-managed message ID of the quote channel header post.",
+    category: "quotes",
+  },
+  "quotes.header_pin_enabled": {
+    description: "Pin the header post in the quote channel.",
+    category: "quotes",
+  },
+
+  // Core Bot Logging (Discord)
+  "core.startup.enabled": {
+    description: "Send bot startup notifications to a Discord channel.",
+    category: "core",
+  },
+  "core.startup.channel_id": {
+    description: "Channel ID for startup notifications.",
+    category: "core",
+  },
+  "core.errors.enabled": {
+    description: "Send error notifications to a Discord channel.",
+    category: "core",
+  },
+  "core.errors.channel_id": {
+    description: "Channel ID for error notifications.",
+    category: "core",
+  },
+  "core.cleanup.enabled": {
+    description: "Send cleanup-job notifications to a Discord channel.",
+    category: "core",
+  },
+  "core.cleanup.channel_id": {
+    description: "Channel ID for cleanup-job notifications.",
+    category: "core",
+  },
+  "core.config.enabled": {
+    description:
+      "Send configuration-change notifications to a Discord channel.",
+    category: "core",
+  },
+  "core.config.channel_id": {
+    description: "Channel ID for configuration-change notifications.",
+    category: "core",
+  },
+  "core.cron.enabled": {
+    description: "Send cron-job notifications to a Discord channel.",
+    category: "core",
+  },
+  "core.cron.channel_id": {
+    description: "Channel ID for cron-job notifications.",
+    category: "core",
+  },
+
+  // Fun / Easter Eggs
+  "fun.friendship": {
+    description: "Enable the friendship easter-egg trigger phrases.",
+    category: "fun",
+  },
+
+  // Rate Limiting
+  "ratelimit.enabled": {
+    description: "Enable per-user command rate limiting.",
+    category: "ratelimit",
+  },
+  "ratelimit.max_commands": {
+    description: "Maximum number of commands a user can run per time window.",
+    category: "ratelimit",
+  },
+  "ratelimit.window_seconds": {
+    description: "Length of the rate-limit time window in seconds.",
+    category: "ratelimit",
+  },
+  "ratelimit.bypass_admin": {
+    description: "Allow administrators to bypass rate limiting.",
+    category: "ratelimit",
+  },
+
+  // Scheduled Announcements
+  "announcements.enabled": {
+    description: "Enable scheduled announcements and the /announce command.",
+    category: "announcements",
+  },
+
+  // Achievements
+  "achievements.enabled": {
+    description: "Enable the achievements / accolades system.",
+    category: "achievements",
+  },
+  "achievements.announcements.enabled": {
+    description: "Announce newly earned achievements in a Discord channel.",
+    category: "achievements",
+  },
+  "achievements.dm_notifications.enabled": {
+    description: "DM users when they earn a new achievement.",
+    category: "achievements",
+  },
+
+  // Reaction Roles
+  "reactionroles.enabled": {
+    description: "Enable the reaction-role system and the /reactrole command.",
+    category: "reactionroles",
+  },
+  "reactionroles.message_channel_id": {
+    description: "Channel ID where reaction-role messages are posted.",
+    category: "reactionroles",
+  },
+
+  // Setup Wizard
+  "wizard.enabled": {
+    description: "Enable the /setup wizard command.",
+    category: "wizard",
+  },
+
+  // Notices System
+  "notices.enabled": {
+    description: "Enable the notices system and the /notice command.",
+    category: "notices",
+  },
+  "notices.channel_id": {
+    description: "Channel ID where notice messages are posted.",
+    category: "notices",
+  },
+  "notices.cleanup_interval": {
+    description:
+      "Interval in minutes between sweeps for unauthorised messages in the notices channel.",
+    category: "notices",
+  },
+  "notices.header_enabled": {
+    description:
+      "Post and maintain a pinned informational header in the notices channel.",
+    category: "notices",
+  },
+  "notices.header_message_id": {
+    description: "Auto-managed message ID of the notices channel header post.",
+    category: "notices",
+  },
+  "notices.header_pin_enabled": {
+    description: "Pin the header post in the notices channel.",
+    category: "notices",
+  },
+
+  // Poll System
+  "polls.enabled": {
+    description: "Enable the poll system and the /poll command.",
+    category: "polls",
+  },
+  "polls.default_duration_hours": {
+    description: "Default poll duration in hours (1–768).",
+    category: "polls",
+  },
+  "polls.cooldown_days": {
+    description:
+      "Minimum days before a question from the library can be reused.",
+    category: "polls",
+  },
+};
