@@ -1,4 +1,5 @@
 const path = require('path');
+const SOURCE_DIR_SEGMENT = '/src/';
 
 module.exports = (request, options) => {
   try {
@@ -8,11 +9,10 @@ module.exports = (request, options) => {
       const tsRequest = `${request.slice(0, -3)}.ts`;
       const candidates = [tsRequest, path.resolve(options.basedir, tsRequest)];
       const normalizedRequest = request.replace(/\\/g, '/');
-      const srcPrefix = '/src/';
-      const srcIndex = normalizedRequest.indexOf(srcPrefix);
+      const srcIndex = normalizedRequest.indexOf(SOURCE_DIR_SEGMENT);
 
       if (srcIndex !== -1) {
-        const srcRelativePath = normalizedRequest.slice(srcIndex + srcPrefix.length, -3);
+        const srcRelativePath = normalizedRequest.slice(srcIndex + SOURCE_DIR_SEGMENT.length, -3);
         candidates.push(path.join(options.rootDir, 'src', `${srcRelativePath}.ts`));
       }
 
