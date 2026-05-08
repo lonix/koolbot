@@ -39,5 +39,14 @@ describe('Logger Utility', () => {
 
     process.env.DEBUG = 'false';
     expect(isDebugMode()).toBe(false);
+
+    process.env.DEBUG = '';
+    expect(isDebugMode()).toBe(false);
+
+    process.env.DEBUG = '1';
+    expect(isDebugMode()).toBe(false);
+
+    delete process.env.DEBUG;
+    expect(isDebugMode()).toBe(false);
   });
 });
