@@ -34,7 +34,7 @@ jest.mock('../../src/services/quote-service.js', () => ({
 // Static imports — mocks are registered before these load (jest.mock is hoisted)
 import { AchievementsService, GamificationService } from '../../src/services/achievements-service.js';
 import { UserAchievements } from '../../src/models/user-achievements.js';
-import { VoiceChannelTracking } from '../../src/models/voice-channel-tracking.js';
+import { VoiceChannelTracking, type IVoiceChannelTracking } from '../../src/models/voice-channel-tracking.js';
 
 // Helper to create an AchievementsService with injected config
 function createAchievementsService(mockClient: Partial<Client>) {
@@ -134,6 +134,37 @@ describe('AchievementsService', () => {
     it('should return undefined for invalid achievement type', () => {
       const { service } = createAchievementsService(mockClient);
       expect(service.getAchievementDefinition('non_existent')).toBeUndefined();
+    });
+  });
+
+  describe('accolade metadata', () => {
+    const emptyTrackingData = {
+      userId: 'user123',
+      username: 'TestUser',
+      totalTime: 0,
+      lastSeen: new Date(),
+      sessions: [],
+      excludedChannels: [],
+    } as unknown as IVoiceChannelTracking;
+
+    it('should return 0 marathon metadata value when sessions are empty', async () => {
+      const { service } = createAchievementsService(mockClient);
+      const metadataFunction = (service as never)['accoladeLogic'].marathon_runner
+        .metadataFunction as (userId: string, userData: unknown) => Promise<{ value?: number }>;
+
+      const metadata = await metadataFunction('user123', emptyTrackingData);
+
+      expect(metadata.value).toBe(0);
+    });
+
+    it('should return 0 ultra marathon metadata value when sessions are empty', async () => {
+      const { service } = createAchievementsService(mockClient);
+      const metadataFunction = (service as never)['accoladeLogic'].ultra_marathoner
+        .metadataFunction as (userId: string, userData: unknown) => Promise<{ value?: number }>;
+
+      const metadata = await metadataFunction('user123', emptyTrackingData);
+
+      expect(metadata.value).toBe(0);
     });
   });
 
