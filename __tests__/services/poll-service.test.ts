@@ -64,7 +64,7 @@ describe("PollService", () => {
     expect(result).toEqual({
       imported: 0,
       skipped: 0,
-      errors: ["Invalid URL format"],
+      errors: ["Invalid URL format. Please provide a valid HTTP or HTTPS URL."],
     });
     expect(mockAxiosGet).not.toHaveBeenCalled();
   });
@@ -89,17 +89,29 @@ describe("PollService", () => {
   it("rejects private and local destinations before fetching", async () => {
     const service = PollService.getInstance({} as never);
 
-    const result = await service.importFromUrl(
+    const blockedUrls = [
       "http://127.0.0.1/internal",
-      "guild-1",
-      "user-1",
-    );
+      "http://10.0.0.12/internal",
+      "http://172.20.0.5/internal",
+      "http://192.168.1.10/internal",
+      "http://169.254.169.254/latest/meta-data/",
+      "http://localhost/internal",
+      "http://foo.localhost/internal",
+      "http://[::1]/internal",
+      "http://[fc00::1]/internal",
+      "http://[fe80::1]/internal",
+      "http://[::ffff:127.0.0.1]/internal",
+    ];
 
-    expect(result).toEqual({
-      imported: 0,
-      skipped: 0,
-      errors: ["URL must not point to a private or local address"],
-    });
+    for (const blockedUrl of blockedUrls) {
+      const result = await service.importFromUrl(blockedUrl, "guild-1", "user-1");
+
+      expect(result).toEqual({
+        imported: 0,
+        skipped: 0,
+        errors: ["URL must not point to a private or local address"],
+      });
+    }
     expect(mockAxiosGet).not.toHaveBeenCalled();
   });
 

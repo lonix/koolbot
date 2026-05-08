@@ -24,6 +24,11 @@ interface PollSource {
   polls: PollData[];
 }
 
+/**
+ * Block obvious local/private destinations so poll imports cannot be used for
+ * direct SSRF probes against loopback, link-local, RFC1918, or unique-local
+ * network targets.
+ */
 function isPrivateOrLocalHostname(hostname: string): boolean {
   const normalizedHostname = hostname.toLowerCase();
   if (
@@ -39,7 +44,22 @@ function isPrivateOrLocalHostname(hostname: string): boolean {
       : normalizedHostname;
 
   if (normalizedIp.startsWith("::ffff:")) {
-    return isPrivateOrLocalHostname(normalizedIp.slice("::ffff:".length));
+    const mappedIp = normalizedIp.slice("::ffff:".length);
+    if (isIP(mappedIp) === 4) {
+      return isPrivateOrLocalHostname(mappedIp);
+    }
+
+    const mappedHextets = mappedIp.split(":");
+    if (mappedHextets.length === 2) {
+      const mappedOctets = mappedHextets.flatMap((hextet) => {
+        const value = Number.parseInt(hextet, 16);
+        return [value >> 8, value & 0xff];
+      });
+
+      if (mappedOctets.every((octet) => Number.isInteger(octet))) {
+        return isPrivateOrLocalHostname(mappedOctets.join("."));
+      }
+    }
   }
 
   const ipVersion = isIP(normalizedIp);
@@ -393,7 +413,9 @@ export class PollService {
     try {
       parsedUrl = new globalThis.URL(url);
     } catch {
-      results.errors.push("Invalid URL format");
+      results.errors.push(
+        "Invalid URL format. Please provide a valid HTTP or HTTPS URL.",
+      );
       return results;
     }
 
