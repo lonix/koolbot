@@ -1,5 +1,7 @@
 import { describe, it, expect } from "@jest/globals";
+import { Request } from "express";
 import {
+  parseCookies,
   signValue,
   verifySignedValue,
 } from "../../src/web/cookies.js";
@@ -29,5 +31,32 @@ describe("web cookies signing", () => {
     expect(verifySignedValue("nodot", secret)).toBeNull();
     expect(verifySignedValue(".justsig", secret)).toBeNull();
     expect(verifySignedValue("noval.", secret)).toBeNull();
+  });
+});
+
+describe("parseCookies", () => {
+  function fakeReq(header?: string): Request {
+    return { headers: { cookie: header } } as unknown as Request;
+  }
+
+  it("returns an empty Map when no cookie header is set", () => {
+    const out = parseCookies(fakeReq());
+    expect(out.size).toBe(0);
+  });
+
+  it("parses simple name=value pairs and decodes URI components", () => {
+    const out = parseCookies(fakeReq("a=1; b=hello%20world"));
+    expect(out.get("a")).toBe("1");
+    expect(out.get("b")).toBe("hello world");
+  });
+
+  it("does not mutate Object.prototype on a malicious cookie name", () => {
+    const before = (Object.prototype as unknown as { polluted?: string })
+      .polluted;
+    parseCookies(fakeReq("__proto__=polluted; constructor=evil"));
+    const after = (Object.prototype as unknown as { polluted?: string })
+      .polluted;
+    expect(after).toBe(before);
+    expect(({} as { polluted?: string }).polluted).toBeUndefined();
   });
 });

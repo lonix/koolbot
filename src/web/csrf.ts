@@ -17,7 +17,8 @@ export function ensureCsrfCookie(
   next: NextFunction,
 ): void {
   const cookies = parseCookies(req);
-  if (!cookies[CSRF_COOKIE]) {
+  const existing = cookies.get(CSRF_COOKIE);
+  if (!existing) {
     const token = crypto.randomBytes(32).toString("base64url");
     setCookie(res, CSRF_COOKIE, token, {
       httpOnly: false,
@@ -27,7 +28,7 @@ export function ensureCsrfCookie(
     });
     (req as Request & { csrfToken?: string }).csrfToken = token;
   } else {
-    (req as Request & { csrfToken?: string }).csrfToken = cookies[CSRF_COOKIE];
+    (req as Request & { csrfToken?: string }).csrfToken = existing;
   }
   next();
 }
@@ -46,7 +47,7 @@ export function requireCsrf(
     return;
   }
   const cookies = parseCookies(req);
-  const cookieToken = cookies[CSRF_COOKIE];
+  const cookieToken = cookies.get(CSRF_COOKIE);
   const headerToken = req.header(CSRF_HEADER) || (req.body && req.body._csrf);
   if (!cookieToken || !headerToken) {
     res.status(403).type("text/plain").send("CSRF token missing");

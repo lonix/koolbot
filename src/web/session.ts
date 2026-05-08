@@ -72,7 +72,7 @@ export function clearSessionCookie(res: Response): void {
 
 function readSessionCookie(req: Request): CookiePayload | null {
   const cookies = parseCookies(req);
-  const raw = cookies[SESSION_COOKIE];
+  const raw = cookies.get(SESSION_COOKIE);
   if (!raw) return null;
   let secret: string;
   try {

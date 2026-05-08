@@ -7,31 +7,28 @@ import { Request, Response } from "express";
  * to keep the WebUI scaffold dependency-free.
  */
 
-// Reserved JS object keys an attacker could inject via the Cookie header
-// to pollute the prototype chain.
-const FORBIDDEN_COOKIE_NAMES = new Set([
-  "__proto__",
-  "constructor",
-  "prototype",
-]);
-
-export function parseCookies(req: Request): Record<string, string> {
-  // Prototype-free map so a malicious `Cookie: __proto__=…` header cannot
-  // pollute Object.prototype even if the name check below is bypassed.
-  const out: Record<string, string> = Object.create(null);
+/**
+ * Parse the Cookie header into a Map. We use a Map (not a plain object)
+ * so user-controlled cookie names cannot mutate any object prototype, and
+ * so CodeQL's remote-property-injection query has nothing to flag.
+ */
+export function parseCookies(req: Request): Map<string, string> {
+  const out = new Map<string, string>();
   const header = req.headers.cookie;
   if (!header) return out;
   for (const part of header.split(";")) {
     const idx = part.indexOf("=");
     if (idx === -1) continue;
     const name = part.slice(0, idx).trim();
-    const value = part.slice(idx + 1).trim();
-    if (!name || FORBIDDEN_COOKIE_NAMES.has(name)) continue;
+    const rawValue = part.slice(idx + 1).trim();
+    if (!name) continue;
+    let value = rawValue;
     try {
-      out[name] = decodeURIComponent(value);
+      value = decodeURIComponent(rawValue);
     } catch {
-      out[name] = value;
+      // Keep the raw value on malformed encodings.
     }
+    out.set(name, value);
   }
   return out;
 }
