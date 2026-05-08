@@ -3,10 +3,10 @@ import { config as dotenvConfig } from "dotenv";
 
 dotenvConfig();
 
-const isDebug = process.env.DEBUG === "true";
+export const isDebugMode = (): boolean => process.env.DEBUG === "true";
 
 const logger = winston.createLogger({
-  level: isDebug ? "debug" : "info",
+  level: isDebugMode() ? "debug" : "info",
   format: winston.format.combine(
     winston.format.timestamp(),
     winston.format.errors({ stack: true }), // Properly serialize error objects

@@ -6,7 +6,7 @@ import {
   ButtonInteraction,
   User,
 } from "discord.js";
-import logger from "../utils/logger.js";
+import logger, { isDebugMode } from "../utils/logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
@@ -251,7 +251,7 @@ export class VoiceChannelTracker {
 
       // Check if channel is excluded
       if (await this.isChannelExcluded(channelId)) {
-        if (await this.configService.get("DEBUG")) {
+        if (isDebugMode()) {
           logger.info(
             `[DEBUG] Channel ${channelName} (${channelId}) is excluded from tracking`,
           );
@@ -284,7 +284,7 @@ export class VoiceChannelTracker {
       }
       this.encounteredUsers.set(member.id, encounteredSet);
 
-      if (await this.configService.get("DEBUG")) {
+      if (isDebugMode()) {
         logger.info(
           `[DEBUG] Started tracking user ${member.displayName} (${member.id}) in channel ${channelName}, initial users: ${encounteredSet.size}`,
         );
@@ -300,7 +300,7 @@ export class VoiceChannelTracker {
 
       const session = this.activeSessions.get(userId);
       if (!session) {
-        if (await this.configService.get("DEBUG")) {
+        if (isDebugMode()) {
           logger.info(
             `[DEBUG] No active session found for user ${userId} when attempting to end tracking`,
           );
@@ -313,7 +313,7 @@ export class VoiceChannelTracker {
         (endTime.getTime() - session.startTime.getTime()) / 1000,
       );
 
-      if (await this.configService.get("DEBUG")) {
+      if (isDebugMode()) {
         logger.info(
           `[DEBUG] Ending session for user ${userId} in channel ${session.channelName} (${session.channelId})`,
         );
@@ -359,7 +359,7 @@ export class VoiceChannelTracker {
       this.userChannels.delete(userId);
       this.encounteredUsers.delete(userId);
 
-      if (await this.configService.get("DEBUG")) {
+      if (isDebugMode()) {
         logger.info(
           `[DEBUG] Saved voice session for user ${user.username} (${userId}) - Duration: ${duration}s, Other users: ${otherUsers.length}`,
         );

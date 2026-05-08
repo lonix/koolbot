@@ -9,7 +9,7 @@ import {
   HTTPError,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
-import logger from "../utils/logger.js";
+import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
@@ -17,7 +17,6 @@ import { CooldownManager } from "./cooldown-manager.js";
 import { PermissionsService } from "./permissions-service.js";
 
 dotenvConfig();
-const isDebug = process.env.DEBUG === "true";
 
 interface CommandModule {
   data: SlashCommandBuilder;
@@ -130,10 +129,10 @@ export class CommandManager {
             commands.push(commandData.toJSON());
             enabledCommands.push(config.name);
 
-            if (isDebug) {
+            if (isDebugMode()) {
               logger.debug(`✓ /${config.name} command enabled`);
             }
-          } else if (isDebug) {
+          } else if (isDebugMode()) {
             logger.debug(`✗ /${config.name} command disabled`);
           }
         } catch (error) {
@@ -141,7 +140,7 @@ export class CommandManager {
         }
       }
 
-      if (isDebug) {
+      if (isDebugMode()) {
         logger.debug(`Enabled commands: ${enabledCommands.join(", ")}`);
       }
 
@@ -392,10 +391,10 @@ export class CommandManager {
               autocomplete: autocompleteFunction,
             });
 
-            if (isDebug) {
+            if (isDebugMode()) {
               logger.debug(`✓ /${config.name} command loaded`);
             }
-          } else if (isDebug) {
+          } else if (isDebugMode()) {
             logger.debug(`✗ /${config.name} command disabled`);
           }
         } catch (error) {
