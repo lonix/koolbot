@@ -812,28 +812,29 @@ async function handleReload(
 async function handleWeb(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  // Defer immediately so the DB revoke/create + DM round-trip can't blow
+  // Discord's 3-second interaction-ack deadline.
+  await interaction.deferReply({ ephemeral: true });
+
   if (!isWebUIEnabled()) {
-    await interaction.reply({
+    await interaction.editReply({
       content:
         "The web UI is disabled. Ask an operator to set `WEBUI_ENABLED=true` and restart the bot.",
-      ephemeral: true,
     });
     return;
   }
 
   const missing = getMissingWebUIEnvVars();
   if (missing.length > 0) {
-    await interaction.reply({
+    await interaction.editReply({
       content: `❌ Web UI is enabled but missing env vars: ${missing.join(", ")}`,
-      ephemeral: true,
     });
     return;
   }
 
   if (!interaction.guildId) {
-    await interaction.reply({
+    await interaction.editReply({
       content: "This command must be run inside a guild.",
-      ephemeral: true,
     });
     return;
   }
@@ -855,26 +856,23 @@ async function handleWeb(
 
     try {
       await interaction.user.send(dmBody);
-      await interaction.reply({
+      await interaction.editReply({
         content:
           "✅ I've DMed you a single-use sign-in link. Check your direct messages.",
-        ephemeral: true,
       });
     } catch (dmError) {
       logger.warn(
         `Could not DM web sign-in link to ${interaction.user.id}; falling back to ephemeral reply`,
         dmError,
       );
-      await interaction.reply({
+      await interaction.editReply({
         content: dmBody,
-        ephemeral: true,
       });
     }
   } catch (error) {
     logger.error("Error issuing web sign-in link:", error);
-    await interaction.reply({
+    await interaction.editReply({
       content: "An error occurred while issuing your sign-in link.",
-      ephemeral: true,
     });
   }
 }

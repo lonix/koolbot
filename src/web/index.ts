@@ -119,8 +119,10 @@ export function createWebRouter(client: Client): Router {
         let display: string | undefined;
         if (present && raw) {
           if (SECRET_KEYS.has(key)) {
-            // Reveal only the last 4 characters of secrets.
-            display = `…${raw.slice(-4)}`;
+            // Only reveal a 4-char tail when the secret is long enough
+            // that the tail isn't the whole value. For shorter values we
+            // omit the tail entirely so we never echo the full secret.
+            display = raw.length >= 8 ? `…${raw.slice(-4)}` : undefined;
           } else if (raw.length > 32) {
             display = `${raw.slice(0, 28)}…`;
           } else {
