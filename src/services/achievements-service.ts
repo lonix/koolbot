@@ -175,8 +175,9 @@ export class AchievementsService {
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
-        const maxSession = Math.max(
-          ...(user?.sessions.map((s) => s.duration || 0) || [0]),
+        const maxSession = (user?.sessions ?? []).reduce(
+          (max, session) => Math.max(max, session.duration || 0),
+          0,
         );
         return {
           value: Math.floor(maxSession / 3600),
@@ -201,8 +202,9 @@ export class AchievementsService {
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
-        const maxSession = Math.max(
-          ...(user?.sessions.map((s) => s.duration || 0) || [0]),
+        const maxSession = (user?.sessions ?? []).reduce(
+          (max, session) => Math.max(max, session.duration || 0),
+          0,
         );
         return {
           value: Math.floor(maxSession / 3600),
