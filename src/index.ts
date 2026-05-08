@@ -36,6 +36,11 @@ import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
+import {
+  createWebRouter,
+  getMissingWebUIEnvVars,
+  isWebUIEnabled,
+} from "./web/index.js";
 import mongoose from "mongoose";
 
 dotenvConfig();
@@ -130,6 +135,41 @@ function startHealthServer(): void {
       res.status(503).send("Service Unavailable");
     }
   });
+
+  // Mount the WebUI behind the feature flag. When disabled, no /admin/*
+  // route is registered, so the server responds 404 for those paths
+  // exactly as it did before this scaffold landed.
+  if (isWebUIEnabled()) {
+    const missing = getMissingWebUIEnvVars();
+    if (missing.length > 0) {
+      logger.error(
+        `WEBUI_ENABLED=true but missing required env vars: ${missing.join(", ")}. WebUI will not be mounted.`,
+      );
+    } else {
+      // Default to NOT trusting any X-Forwarded-* headers so an attacker
+      // cannot spoof req.ip and bypass the rate limiter. Operators behind
+      // a reverse proxy can opt in by setting WEBUI_TRUST_PROXY to a hop
+      // count (e.g. "1") or to one of express' supported strings ("loopback",
+      // "linklocal", "uniquelocal", "true").
+      const trustProxyRaw = (process.env.WEBUI_TRUST_PROXY || "").trim();
+      if (trustProxyRaw) {
+        const asNumber = Number(trustProxyRaw);
+        if (Number.isFinite(asNumber) && asNumber >= 0) {
+          healthApp.set("trust proxy", asNumber);
+        } else if (trustProxyRaw.toLowerCase() === "true") {
+          healthApp.set("trust proxy", true);
+        } else {
+          healthApp.set("trust proxy", trustProxyRaw);
+        }
+        logger.info(`WebUI trust proxy set to: ${trustProxyRaw}`);
+      }
+      healthApp.use("/admin", createWebRouter(client));
+      logger.info("WebUI mounted at /admin");
+    }
+  } else {
+    logger.debug("WEBUI_ENABLED is not true; /admin routes not mounted");
+  }
+
   healthApp.listen(3000, () => {
     logger.info("Healthcheck server running on port 3000");
   });
