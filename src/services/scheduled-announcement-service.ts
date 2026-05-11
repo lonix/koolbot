@@ -399,7 +399,7 @@ export class ScheduledAnnouncementService {
     }
     if (guildId && announcement.guildId !== guildId) {
       logger.warn(
-        `Attempted to toggle announcement ${announcement._id.toString()} from wrong guild. Expected: ${announcement.guildId}, Got: ${sanitizeForLog(guildId)}`,
+        `Attempted to toggle announcement ${sanitizeForLog(announcement._id.toString())} from wrong guild. Expected: ${announcement.guildId}, Got: ${sanitizeForLog(guildId)}`,
       );
       return null;
     }
@@ -425,7 +425,7 @@ export class ScheduledAnnouncementService {
     }
 
     logger.info(
-      `${enabled ? "Enabled" : "Disabled"} announcement: ${announcement._id.toString()}`,
+      `${enabled ? "Enabled" : "Disabled"} announcement: ${sanitizeForLog(announcement._id.toString())}`,
     );
     return announcement;
   }

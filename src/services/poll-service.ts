@@ -592,7 +592,7 @@ export class PollService {
     }
     if (guildId && schedule.guildId !== guildId) {
       logger.warn(
-        `Attempted to toggle schedule ${schedule._id.toString()} from wrong guild (got ${sanitizeForLog(guildId)})`,
+        `Attempted to toggle schedule ${sanitizeForLog(schedule._id.toString())} from wrong guild (got ${sanitizeForLog(guildId)})`,
       );
       return null;
     }
@@ -618,7 +618,7 @@ export class PollService {
     }
 
     logger.info(
-      `${enabled ? "Enabled" : "Disabled"} poll schedule: ${schedule._id.toString()}`,
+      `${enabled ? "Enabled" : "Disabled"} poll schedule: ${sanitizeForLog(schedule._id.toString())}`,
     );
     return schedule;
   }
@@ -638,7 +638,7 @@ export class PollService {
     }
     if (guildId && item.guildId !== guildId) {
       logger.warn(
-        `Attempted to toggle poll item ${item._id.toString()} from wrong guild (got ${sanitizeForLog(guildId)})`,
+        `Attempted to toggle poll item ${sanitizeForLog(item._id.toString())} from wrong guild (got ${sanitizeForLog(guildId)})`,
       );
       return null;
     }
@@ -650,7 +650,7 @@ export class PollService {
     item.enabled = enabled;
     await item.save();
     logger.info(
-      `${enabled ? "Enabled" : "Disabled"} poll item: ${item._id.toString()}`,
+      `${enabled ? "Enabled" : "Disabled"} poll item: ${sanitizeForLog(item._id.toString())}`,
     );
     return item;
   }
