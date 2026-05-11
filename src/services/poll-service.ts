@@ -5,6 +5,7 @@ import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { PollSchedule, IPollSchedule } from "../models/poll-schedule.js";
 import { PollItem, IPollItem } from "../models/poll-item.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 import axios from "axios";
 import yaml from "js-yaml";
 
@@ -591,7 +592,7 @@ export class PollService {
     }
     if (guildId && schedule.guildId !== guildId) {
       logger.warn(
-        `Attempted to toggle schedule ${scheduleId} from wrong guild`,
+        `Attempted to toggle schedule ${schedule._id.toString()} from wrong guild (got ${sanitizeForLog(guildId)})`,
       );
       return null;
     }
@@ -617,7 +618,7 @@ export class PollService {
     }
 
     logger.info(
-      `${enabled ? "Enabled" : "Disabled"} poll schedule: ${scheduleId}`,
+      `${enabled ? "Enabled" : "Disabled"} poll schedule: ${schedule._id.toString()}`,
     );
     return schedule;
   }
@@ -636,7 +637,9 @@ export class PollService {
       return null;
     }
     if (guildId && item.guildId !== guildId) {
-      logger.warn(`Attempted to toggle poll item ${itemId} from wrong guild`);
+      logger.warn(
+        `Attempted to toggle poll item ${item._id.toString()} from wrong guild (got ${sanitizeForLog(guildId)})`,
+      );
       return null;
     }
 
@@ -646,7 +649,9 @@ export class PollService {
 
     item.enabled = enabled;
     await item.save();
-    logger.info(`${enabled ? "Enabled" : "Disabled"} poll item: ${itemId}`);
+    logger.info(
+      `${enabled ? "Enabled" : "Disabled"} poll item: ${item._id.toString()}`,
+    );
     return item;
   }
 

@@ -6,6 +6,7 @@ import {
   ScheduledAnnouncement,
   IScheduledAnnouncement,
 } from "../models/scheduled-announcement.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 interface ScheduledJob {
   announcement: IScheduledAnnouncement;
@@ -398,7 +399,7 @@ export class ScheduledAnnouncementService {
     }
     if (guildId && announcement.guildId !== guildId) {
       logger.warn(
-        `Attempted to toggle announcement ${announcementId} from wrong guild. Expected: ${announcement.guildId}, Got: ${guildId}`,
+        `Attempted to toggle announcement ${announcement._id.toString()} from wrong guild. Expected: ${announcement.guildId}, Got: ${sanitizeForLog(guildId)}`,
       );
       return null;
     }
@@ -424,7 +425,7 @@ export class ScheduledAnnouncementService {
     }
 
     logger.info(
-      `${enabled ? "Enabled" : "Disabled"} announcement: ${announcementId}`,
+      `${enabled ? "Enabled" : "Disabled"} announcement: ${announcement._id.toString()}`,
     );
     return announcement;
   }
