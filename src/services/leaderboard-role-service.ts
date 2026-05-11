@@ -3,12 +3,13 @@ import {
   Guild,
   GuildMember,
   Role,
-  TextChannel,
   EmbedBuilder,
+  GuildTextBasedChannel,
 } from "discord.js";
 import { CronJob, CronTime } from "cron";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelTracker, TimePeriod } from "./voice-channel-tracker.js";
+import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import logger from "../utils/logger.js";
 
 interface ParsedTier {
@@ -29,12 +30,17 @@ export interface LeaderboardRoleRunSummary {
   }>;
 }
 
+function sanitizeCronExpression(expression: string): string {
+  return expression.trim().replace(/^["']|["']$/g, "");
+}
+
 export class LeaderboardRoleService {
   private static instance: LeaderboardRoleService;
   private client: Client;
   private configService: ConfigService;
   private job: CronJob | null = null;
   private isInitialized: boolean = false;
+  private isRunning: boolean = false;
 
   private constructor(client: Client) {
     this.client = client;
@@ -77,8 +83,7 @@ export class LeaderboardRoleService {
 
   private validateCronExpression(expression: string): boolean {
     try {
-      const cleanExpression = expression.replace(/^["']|["']$/g, "");
-      new CronTime(cleanExpression);
+      new CronTime(expression);
       return true;
     } catch (error) {
       logger.error(
@@ -183,9 +188,17 @@ export class LeaderboardRoleService {
   /**
    * Recalculate role assignments now. Safe to call manually (e.g. from a
    * future WebUI "Run now" button) — does not depend on the cron job state.
-   * Returns a per-tier summary of which users gained and lost each role.
+   * Concurrent invocations (cron + manual) are coalesced: the second call
+   * returns null immediately without doing work.
    */
   public async runNow(): Promise<LeaderboardRoleRunSummary | null> {
+    if (this.isRunning) {
+      logger.info(
+        "Leaderboard role reconciliation already in progress, skipping concurrent run.",
+      );
+      return null;
+    }
+    this.isRunning = true;
     try {
       await this.waitForClientReady();
 
@@ -236,10 +249,6 @@ export class LeaderboardRoleService {
       const topUsers = await tracker.getTopUsers(maxTopN, period);
       const rankedUserIds: string[] = topUsers.map((u) => u.userId);
 
-      // Ensure the member cache is populated so we can find current role holders.
-      // For very large guilds this is unavoidable; we accept the one-time fetch.
-      await guild.members.fetch();
-
       const summary: LeaderboardRoleRunSummary = {
         ranAt: new Date(),
         period,
@@ -266,6 +275,8 @@ export class LeaderboardRoleService {
     } catch (error) {
       logger.error("Error during leaderboard role reconciliation:", error);
       return null;
+    } finally {
+      this.isRunning = false;
     }
   }
 
@@ -290,32 +301,49 @@ export class LeaderboardRoleService {
     }
 
     const qualifyingIds = new Set(rankedUserIds.slice(0, tier.topN));
-    const currentHolders = new Set<string>(
-      Array.from(role.members.values()).map((m) => m.id),
-    );
+
+    // Source of truth for "who already has this role per our last run" is
+    // our own persisted state — we cannot rely on `role.members` because
+    // the bot does not request the privileged GuildMembers intent.
+    const previousAssignment = await LeaderboardRoleAssignment.findOne({
+      guildId: guild.id,
+      roleId: tier.roleId,
+    });
+    const previousHolders = new Set<string>(previousAssignment?.userIds ?? []);
 
     const added: string[] = [];
     const removed: string[] = [];
+    const finalHolders = new Set<string>();
 
     for (const userId of qualifyingIds) {
-      if (currentHolders.has(userId)) continue;
       const member = await this.safeFetchMember(guild, userId);
-      if (!member) continue;
-      try {
-        await member.roles.add(role, "Leaderboard role reward (auto-assign)");
-        added.push(userId);
-      } catch (error) {
-        logger.warn(
-          `Failed to add role ${role.name} to ${member.user.tag} (${userId}):`,
-          error,
-        );
+      if (!member) {
+        // Couldn't reach the member (left the guild, etc.); skip.
+        continue;
       }
+      if (!previousHolders.has(userId)) {
+        try {
+          await member.roles.add(role, "Leaderboard role reward (auto-assign)");
+          added.push(userId);
+        } catch (error) {
+          logger.warn(
+            `Failed to add role ${role.name} to ${member.user.tag} (${userId}):`,
+            error,
+          );
+          continue;
+        }
+      }
+      finalHolders.add(userId);
     }
 
-    for (const userId of currentHolders) {
+    for (const userId of previousHolders) {
       if (qualifyingIds.has(userId)) continue;
       const member = await this.safeFetchMember(guild, userId);
-      if (!member) continue;
+      if (!member) {
+        // User left the guild; nothing to revoke. Treat as removed.
+        removed.push(userId);
+        continue;
+      }
       try {
         await member.roles.remove(
           role,
@@ -327,8 +355,21 @@ export class LeaderboardRoleService {
           `Failed to remove role ${role.name} from ${member.user.tag} (${userId}):`,
           error,
         );
+        // If we couldn't remove, keep them in the set so we try again next run.
+        finalHolders.add(userId);
       }
     }
+
+    await LeaderboardRoleAssignment.findOneAndUpdate(
+      { guildId: guild.id, roleId: tier.roleId },
+      {
+        guildId: guild.id,
+        roleId: tier.roleId,
+        topN: tier.topN,
+        userIds: Array.from(finalHolders),
+      },
+      { upsert: true },
+    );
 
     return {
       topN: tier.topN,
@@ -368,9 +409,9 @@ export class LeaderboardRoleService {
 
     try {
       const channel = await guild.channels.fetch(channelId);
-      if (!channel || !(channel instanceof TextChannel)) {
+      if (!channel || !channel.isTextBased() || !("send" in channel)) {
         logger.warn(
-          `Leaderboard announcement channel ${channelId} not found or not a text channel`,
+          `Leaderboard announcement channel ${channelId} not found or not a sendable text channel`,
         );
         return;
       }
@@ -402,7 +443,7 @@ export class LeaderboardRoleService {
         });
       }
 
-      await channel.send({ embeds: [embed] });
+      await (channel as GuildTextBasedChannel).send({ embeds: [embed] });
     } catch (error) {
       logger.error("Failed to post leaderboard role announcement:", error);
     }
@@ -428,14 +469,15 @@ export class LeaderboardRoleService {
         return;
       }
 
-      const cronExpression = await this.configService.getString(
+      const rawCron = await this.configService.getString(
         "leaderboard_roles.update_cron",
         "0 0 * * 1",
       );
+      const cronExpression = sanitizeCronExpression(rawCron);
 
       if (!this.validateCronExpression(cronExpression)) {
         logger.error(
-          `Leaderboard role service not started: invalid cron "${cronExpression}"`,
+          `Leaderboard role service not started: invalid cron "${rawCron}"`,
         );
         this.isInitialized = true;
         return;

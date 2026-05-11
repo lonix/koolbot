@@ -17,6 +17,9 @@ const mockGuildRolesFetch = jest.fn();
 const mockGuildChannelsFetch = jest.fn();
 const mockClientGuildsFetch = jest.fn();
 
+const mockAssignmentFindOne = jest.fn();
+const mockAssignmentFindOneAndUpdate = jest.fn();
+
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
@@ -33,6 +36,16 @@ jest.unstable_mockModule("../../src/services/voice-channel-tracker.js", () => ({
   },
 }));
 
+jest.unstable_mockModule(
+  "../../src/models/leaderboard-role-assignment.js",
+  () => ({
+    LeaderboardRoleAssignment: {
+      findOne: mockAssignmentFindOne,
+      findOneAndUpdate: mockAssignmentFindOneAndUpdate,
+    },
+  }),
+);
+
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: jest.fn(),
@@ -42,9 +55,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { LeaderboardRoleService } = await import(
-  "../../src/services/leaderboard-role-service.js"
-);
+const { LeaderboardRoleService } =
+  await import("../../src/services/leaderboard-role-service.js");
 
 type ServiceInstance = InstanceType<typeof LeaderboardRoleService>;
 
@@ -65,20 +77,16 @@ interface MockGuild {
   members: { fetch: typeof mockGuildMembersFetch };
   roles: { fetch: typeof mockGuildRolesFetch };
   channels: { fetch: typeof mockGuildChannelsFetch };
-  role: { id: string; name: string; members: Map<string, { id: string }> };
+  role: { id: string; name: string };
 }
 
 function makeGuildWithRole(opts: {
   roleId: string;
   roleName: string;
-  currentHolders: string[];
 }): MockGuild {
   const role = {
     id: opts.roleId,
     name: opts.roleName,
-    members: new Map(
-      opts.currentHolders.map((id) => [id, { id }]),
-    ),
   };
 
   mockGuildRolesFetch.mockResolvedValue(role);
@@ -91,7 +99,6 @@ function makeGuildWithRole(opts: {
         roles: { add: mockRolesAdd, remove: mockRolesRemove },
       };
     }
-    // No-arg call: prime the cache; returns the full collection (unused here).
     return new Map();
   });
 
@@ -126,6 +133,8 @@ describe("LeaderboardRoleService", () => {
           return "";
       }
     });
+    mockAssignmentFindOne.mockResolvedValue(null);
+    mockAssignmentFindOneAndUpdate.mockResolvedValue({});
   });
 
   describe("singleton", () => {
@@ -144,18 +153,16 @@ describe("LeaderboardRoleService", () => {
   describe("runNow guards", () => {
     it("returns null when the feature is disabled", async () => {
       mockConfigGetBoolean.mockResolvedValue(false);
-      const svc: ServiceInstance = LeaderboardRoleService.getInstance(
-        makeClient(),
-      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
       expect(result).toBeNull();
       expect(mockGetTopUsers).not.toHaveBeenCalled();
     });
 
     it("returns null when no tiers are configured", async () => {
-      const svc: ServiceInstance = LeaderboardRoleService.getInstance(
-        makeClient(),
-      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
       expect(result).toBeNull();
       expect(mockGetTopUsers).not.toHaveBeenCalled();
@@ -167,11 +174,36 @@ describe("LeaderboardRoleService", () => {
         if (key === "leaderboard_roles.period") return "alltime";
         return "";
       });
-      const svc: ServiceInstance = LeaderboardRoleService.getInstance(
-        makeClient(),
-      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
       expect(result).toBeNull();
+    });
+
+    it("coalesces concurrent invocations", async () => {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.tiers") return "1:99999001";
+        if (k === "leaderboard_roles.period") return "alltime";
+        return "";
+      });
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 100 },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const [first, second] = await Promise.all([svc.runNow(), svc.runNow()]);
+
+      // One of them ran, the other was coalesced and returned null.
+      const succeeded = [first, second].filter((r) => r !== null);
+      const skipped = [first, second].filter((r) => r === null);
+      expect(succeeded).toHaveLength(1);
+      expect(skipped).toHaveLength(1);
     });
   });
 
@@ -198,13 +230,11 @@ describe("LeaderboardRoleService", () => {
       const guild = makeGuildWithRole({
         roleId: "111",
         roleName: "Top 1",
-        currentHolders: [],
       });
       mockClientGuildsFetch.mockResolvedValue(guild);
 
-      const svc: ServiceInstance = LeaderboardRoleService.getInstance(
-        makeClient(),
-      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
 
       expect(result).not.toBeNull();
@@ -216,7 +246,7 @@ describe("LeaderboardRoleService", () => {
   });
 
   describe("role reconciliation", () => {
-    it("adds the role to qualifying users who don't have it", async () => {
+    it("adds the role to qualifying users with no previous assignment", async () => {
       mockConfigGetString.mockImplementation(async (key: unknown) => {
         const k = key as string;
         if (k === "GUILD_ID") return "guild-1";
@@ -229,16 +259,13 @@ describe("LeaderboardRoleService", () => {
         { userId: "u2", username: "u2", totalTime: 90 },
         { userId: "u3", username: "u3", totalTime: 80 },
       ]);
-      const guild = makeGuildWithRole({
-        roleId: "99999003",
-        roleName: "Top 3",
-        currentHolders: [], // nobody has it yet
-      });
-      mockClientGuildsFetch.mockResolvedValue(guild);
-
-      const svc: ServiceInstance = LeaderboardRoleService.getInstance(
-        makeClient(),
+      mockAssignmentFindOne.mockResolvedValue(null); // first-ever run
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999003", roleName: "Top 3" }),
       );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
 
       expect(result).not.toBeNull();
@@ -248,6 +275,17 @@ describe("LeaderboardRoleService", () => {
       expect(result!.tiers[0].removed).toEqual([]);
       expect(mockRolesAdd).toHaveBeenCalledTimes(3);
       expect(mockRolesRemove).not.toHaveBeenCalled();
+      // Persists the new holder set
+      expect(mockAssignmentFindOneAndUpdate).toHaveBeenCalledWith(
+        { guildId: "guild-1", roleId: "99999003" },
+        expect.objectContaining({
+          guildId: "guild-1",
+          roleId: "99999003",
+          topN: 3,
+          userIds: expect.arrayContaining(["u1", "u2", "u3"]),
+        }),
+        { upsert: true },
+      );
     });
 
     it("removes the role from users who no longer qualify", async () => {
@@ -262,24 +300,78 @@ describe("LeaderboardRoleService", () => {
         { userId: "u1", username: "u1", totalTime: 100 },
         { userId: "u2", username: "u2", totalTime: 90 },
       ]);
-      const guild = makeGuildWithRole({
+      // Previous run: u1 + u-old had the role. u-old should now lose it.
+      mockAssignmentFindOne.mockResolvedValue({
+        guildId: "guild-1",
         roleId: "99999002",
-        roleName: "Top 2",
-        // u1 is still top, u2 is new top, u-old should lose the role
-        currentHolders: ["u1", "u-old"],
+        topN: 2,
+        userIds: ["u1", "u-old"],
       });
-      mockClientGuildsFetch.mockResolvedValue(guild);
-
-      const svc: ServiceInstance = LeaderboardRoleService.getInstance(
-        makeClient(),
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999002", roleName: "Top 2" }),
       );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
 
       expect(result).not.toBeNull();
-      expect(result!.tiers[0].added).toEqual(["u2"]);
+      expect(result!.tiers[0].added).toEqual(["u2"]); // u1 already had it
       expect(result!.tiers[0].removed).toEqual(["u-old"]);
       expect(mockRolesAdd).toHaveBeenCalledTimes(1);
       expect(mockRolesRemove).toHaveBeenCalledTimes(1);
+      // Final holder set should be u1 + u2
+      expect(mockAssignmentFindOneAndUpdate).toHaveBeenCalledWith(
+        { guildId: "guild-1", roleId: "99999002" },
+        expect.objectContaining({
+          userIds: expect.arrayContaining(["u1", "u2"]),
+        }),
+        { upsert: true },
+      );
+    });
+
+    it("counts a member who left the guild as removed without erroring", async () => {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.tiers") return "2:99999002";
+        if (k === "leaderboard_roles.period") return "alltime";
+        return "";
+      });
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 100 },
+        { userId: "u2", username: "u2", totalTime: 90 },
+      ]);
+      mockAssignmentFindOne.mockResolvedValue({
+        guildId: "guild-1",
+        roleId: "99999002",
+        topN: 2,
+        userIds: ["u-left"],
+      });
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999002", roleName: "Top 2" }),
+      );
+      // Override member fetch: "u-left" rejects (user is gone)
+      mockGuildMembersFetch.mockImplementation(async (...args: unknown[]) => {
+        const arg = args[0];
+        if (arg === "u-left") throw new Error("Unknown member");
+        if (typeof arg === "string") {
+          return {
+            id: arg,
+            user: { tag: `user-${arg}` },
+            roles: { add: mockRolesAdd, remove: mockRolesRemove },
+          };
+        }
+        return new Map();
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result).not.toBeNull();
+      expect(result!.tiers[0].removed).toEqual(["u-left"]);
+      expect(mockRolesRemove).not.toHaveBeenCalled();
     });
 
     it("marks a tier as skipped when the role is not found", async () => {
@@ -299,14 +391,14 @@ describe("LeaderboardRoleService", () => {
         channels: { fetch: mockGuildChannelsFetch },
       });
 
-      const svc: ServiceInstance = LeaderboardRoleService.getInstance(
-        makeClient(),
-      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
       const result = await svc.runNow();
 
       expect(result).not.toBeNull();
       expect(result!.tiers[0].skippedReason).toBe("role-not-found");
       expect(mockRolesAdd).not.toHaveBeenCalled();
+      expect(mockAssignmentFindOneAndUpdate).not.toHaveBeenCalled();
     });
   });
 });
