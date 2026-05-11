@@ -720,7 +720,9 @@ See [Commands Documentation](COMMANDS.md#reactrole) for detailed usage.
 
 ## 🏅 Leaderboard Role Rewards
 
-Auto-assign Discord roles based on each user's position on the voice-channel leaderboard. A cron job recalculates assignments on a schedule; users who fall out of a tier lose the role automatically.
+Auto-assign Discord roles based on each user's position on the voice-channel leaderboard.
+A cron job recalculates assignments on a schedule; users who fall out of a tier lose
+the role automatically.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -732,15 +734,20 @@ Auto-assign Discord roles based on each user's position on the voice-channel lea
 
 ### Tier Configuration
 
-Tiers are admin-defined — there is no built-in "top 1 / top 3 / top 10". You pick any positions you want to reward and which role each one grants. The format is a comma-separated list of `topN:roleId` pairs:
+Tiers are admin-defined — there is no built-in "top 1 / top 3 / top 10". You pick any
+positions you want to reward and which role each one grants. The format is a
+comma-separated list of `topN:roleId` pairs:
 
-```
+```text
 leaderboard_roles.tiers = "1:111111111111111111,3:222222222222222222,10:333333333333333333"
 ```
 
-In this example a user at rank #1 receives all three roles, a user at rank #2 or #3 receives the latter two, and a user at rank #4–#10 receives only the third. Each tier is independent.
+In this example a user at rank #1 receives all three roles, a user at rank #2 or #3
+receives the latter two, and a user at rank #4–#10 receives only the third. Each tier
+is independent.
 
-Invalid entries (non-numeric `topN`, non-snowflake role ID, malformed syntax) are logged and skipped — they don't stop the rest of the configuration from applying.
+Invalid entries (non-numeric `topN`, non-snowflake role ID, malformed syntax) are
+logged and skipped — they don't stop the rest of the configuration from applying.
 
 ### Example
 
@@ -1178,7 +1185,7 @@ The config system automatically converts values:
 
 - `leaderboard_roles.enabled` (bool, default: false)
 - `leaderboard_roles.period` (string, default: "alltime") — `week` / `month` / `alltime`
-- `leaderboard_roles.update_cron` (string, default: "0 0 * * 1")
+- `leaderboard_roles.update_cron` (string, default: `"0 0 * * 1"`)
 - `leaderboard_roles.tiers` (string, default: "") — comma-separated `topN:roleId`
 - `leaderboard_roles.announcement_channel_id` (string, default: "")
 
