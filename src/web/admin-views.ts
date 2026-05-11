@@ -169,19 +169,27 @@ export interface SettingsProps extends CommonProps {
   groups: Array<{ category: string; rows: SettingRow[] }>;
 }
 
+/**
+ * Coerce an unknown setting value to a primitive safe for embedding in HTML
+ * form attributes. Objects, null, and undefined are stringified or empty-string.
+ */
+function coerceToDisplayValue(value: unknown): string | number | boolean {
+  if (value === null || value === undefined) return "";
+  if (
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  return String(value);
+}
+
 function renderSettingInput(r: SettingRow, csrfToken: string): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
   const keyField = `<input type="hidden" name="key" value="${escapeHtml(r.key)}">`;
 
-  // Coerce current value to a primitive safe for HTML attribute embedding.
-  const primitiveValue =
-    r.current === null || r.current === undefined
-      ? ""
-      : typeof r.current === "boolean" ||
-          typeof r.current === "number" ||
-          typeof r.current === "string"
-        ? r.current
-        : String(r.current);
+  const primitiveValue = coerceToDisplayValue(r.current);
 
   let control: string;
   if (r.type === "boolean") {

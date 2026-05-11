@@ -275,13 +275,11 @@ export function createWriteRouter(
         const commandManager = CommandManager.getInstance(client);
         await commandManager.registerCommands();
         await commandManager.populateClientCommands();
-        botStatus.setOperationalStatus();
 
         await AuditLog.create({ action: "commands.reload", userId, guildId });
         logger.info(`WebUI: ${userId} triggered command reload`);
-      } catch (err) {
+      } finally {
         botStatus.setOperationalStatus();
-        throw err;
       }
 
       res.redirect(302, "/admin/settings");
