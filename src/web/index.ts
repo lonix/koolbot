@@ -12,6 +12,7 @@ import {
 } from "./session.js";
 import { renderInvalidLink, renderSignedOut } from "./views.js";
 import { createReadOnlyRouter } from "./read-only-routes.js";
+import { createWriteRouter } from "./write-routes.js";
 
 /**
  * Build the WebUI router. Caller mounts this at /admin on the existing
@@ -22,7 +23,9 @@ export function createWebRouter(client: Client): Router {
   const router = Router();
   const sessionService = WebSessionService.getInstance();
 
-  router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+  // 64kb covers a 2000-char message + 6000-char embed + CSRF/cron/etc.
+  // with comfortable headroom for the announcement and poll forms.
+  router.use(express.urlencoded({ extended: false, limit: "64kb" }));
   router.use(ensureCsrfCookie);
 
   const redeemLimiter = createRateLimiter({
@@ -78,6 +81,13 @@ export function createWebRouter(client: Client): Router {
       res.status(200).type("text/html").send(renderSignedOut());
     },
   );
+
+  // State-changing handlers (issue #383) for announcements + polls.
+  // Mounted before the read-only router so a POST to a write path doesn't
+  // first run the read-only middleware's session refresh; CSRF is checked
+  // inside the write router. Same-shape paths (POST vs. GET) avoid
+  // ordering ambiguity, but we keep the explicit precedence.
+  router.use(createWriteRouter(client, requireSession));
 
   // Read-only admin pages (Dashboard, Bootstrap, Settings, Permissions,
   // Announcements, Polls, Reaction Roles, Notices, Voice Channels, Database).

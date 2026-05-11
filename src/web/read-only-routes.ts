@@ -46,7 +46,10 @@ import {
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
+  type ChannelOption,
+  type FlashMessage,
   type ReactionRoleRow,
+  type RoleOption,
   type SettingRow,
 } from "./admin-views.js";
 
@@ -108,38 +111,82 @@ function commonFromReq(req: AuthenticatedRequest): {
   };
 }
 
-async function fetchChannelNames(
+interface ChannelData {
+  names: Map<string, string>;
+  textChannels: ChannelOption[];
+}
+
+interface RoleData {
+  names: Map<string, string>;
+  roles: RoleOption[];
+}
+
+/**
+ * Fetch the guild's channel cache once and derive both the id→name map
+ * used for table rendering and the text-channel options used to populate
+ * picker dropdowns. One Discord API roundtrip per request instead of
+ * two.
+ */
+async function fetchChannelData(
   client: Client,
   guildId: string,
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+): Promise<ChannelData> {
+  const names = new Map<string, string>();
+  const textChannels: ChannelOption[] = [];
   try {
     const guild = await client.guilds.fetch(guildId);
     await guild.channels.fetch();
     for (const ch of guild.channels.cache.values()) {
-      if (ch?.id) out.set(ch.id, ch.name ?? ch.id);
+      if (!ch?.id) continue;
+      const name = ch.name ?? ch.id;
+      names.set(ch.id, name);
+      if (
+        ch.type === ChannelType.GuildText ||
+        ch.type === ChannelType.GuildAnnouncement
+      ) {
+        textChannels.push({ id: ch.id, name });
+      }
     }
+    textChannels.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
-    logger.debug("fetchChannelNames failed", err);
+    logger.debug("fetchChannelData failed", err);
   }
-  return out;
+  return { names, textChannels };
 }
 
-async function fetchRoleNames(
+/**
+ * Fetch the guild's roles cache once and return both the id→name map
+ * and the picker option list (with @everyone filtered out).
+ */
+async function fetchRoleData(
   client: Client,
   guildId: string,
-): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+): Promise<RoleData> {
+  const names = new Map<string, string>();
+  const roles: RoleOption[] = [];
   try {
     const guild = await client.guilds.fetch(guildId);
     await guild.roles.fetch();
     for (const role of guild.roles.cache.values()) {
-      out.set(role.id, role.name);
+      names.set(role.id, role.name);
+      if (role.id === guild.id) continue; // skip @everyone in pickers
+      roles.push({ id: role.id, name: role.name });
     }
+    roles.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
-    logger.debug("fetchRoleNames failed", err);
+    logger.debug("fetchRoleData failed", err);
   }
-  return out;
+  return { names, roles };
+}
+
+function readFlash(req: Request): FlashMessage | null {
+  const type = String(req.query.flash ?? "");
+  const text = String(req.query.msg ?? "");
+  if (!text) return null;
+  if (type !== "ok" && type !== "warn" && type !== "err") return null;
+  // Cap the rendered message length so a hostile redirect cannot pump
+  // megabytes through the banner. Pages already escape on output.
+  return { type, text: text.slice(0, 500) };
 }
 
 /**
@@ -356,7 +403,7 @@ export function createReadOnlyRouter(
       const permissions = PermissionsService.getInstance(client);
       const all = await permissions.listAllPermissions(common.guildId);
       const commands = Array.from(client.commands.keys()).sort();
-      const roleNames = await fetchRoleNames(client, common.guildId);
+      const { names: roleNames } = await fetchRoleData(client, common.guildId);
 
       const perCommand = new Map<string, string[]>();
       const allRoleIds = new Set<string>();
@@ -387,15 +434,15 @@ export function createReadOnlyRouter(
       const common = commonFromReq(req);
       const service = ScheduledAnnouncementService.getInstance(client);
       const config = ConfigService.getInstance();
-      const [enabled, announcements, channelNames] = await Promise.all([
+      const [enabled, announcements, channelData] = await Promise.all([
         config.getBoolean("announcements.enabled", false),
         service.listAnnouncements(common.guildId),
-        fetchChannelNames(client, common.guildId),
+        fetchChannelData(client, common.guildId),
       ]);
 
       const rows = announcements.map((a) => ({
         id: String(a._id),
-        channelName: channelNames.get(a.channelId) ?? a.channelId,
+        channelName: channelData.names.get(a.channelId) ?? a.channelId,
         cron: a.cronSchedule,
         enabled: a.enabled,
         messagePreview:
@@ -405,9 +452,15 @@ export function createReadOnlyRouter(
         createdAt: new Date(a.createdAt).toISOString(),
       }));
 
-      res
-        .type("text/html")
-        .send(renderAnnouncementsPage({ ...common, enabled, rows }));
+      res.type("text/html").send(
+        renderAnnouncementsPage({
+          ...common,
+          enabled,
+          rows,
+          textChannels: channelData.textChannels,
+          flash: readFlash(req),
+        }),
+      );
     }),
   );
 
@@ -424,16 +477,16 @@ export function createReadOnlyRouter(
         items,
         defaultDurationHours,
         cooldownDays,
-        channelNames,
-        roleNames,
+        channelData,
+        roleData,
       ] = await Promise.all([
         config.getBoolean("polls.enabled", false),
         service.listSchedules(common.guildId),
         service.listPollItems(common.guildId),
         config.getNumber("polls.default_duration_hours", 24),
         config.getNumber("polls.cooldown_days", 7),
-        fetchChannelNames(client, common.guildId),
-        fetchRoleNames(client, common.guildId),
+        fetchChannelData(client, common.guildId),
+        fetchRoleData(client, common.guildId),
       ]);
 
       res.type("text/html").send(
@@ -442,18 +495,22 @@ export function createReadOnlyRouter(
           enabled,
           defaultDurationHours,
           cooldownDays,
+          textChannels: channelData.textChannels,
+          roles: roleData.roles,
+          flash: readFlash(req),
           schedules: schedules.map((s) => ({
             id: String(s._id),
-            channelName: channelNames.get(s.channelId) ?? s.channelId,
+            channelName: channelData.names.get(s.channelId) ?? s.channelId,
             cron: s.cronSchedule,
             durationHours: s.pollDuration,
             pingRoleName: s.roleIdToPing
-              ? (roleNames.get(s.roleIdToPing) ?? s.roleIdToPing)
+              ? (roleData.names.get(s.roleIdToPing) ?? s.roleIdToPing)
               : null,
             enabled: s.enabled,
             lastRun: s.lastRun ? new Date(s.lastRun).toISOString() : "—",
           })),
           items: items.map((it) => ({
+            id: String(it._id),
             question: it.question,
             answers: it.answers ?? [],
             tags: it.tags ?? [],
@@ -474,7 +531,7 @@ export function createReadOnlyRouter(
       const common = commonFromReq(req);
       const config = ConfigService.getInstance();
       const service = ReactionRoleService.getInstance(client);
-      const [enabled, configChannelId, all, archived, channelNames] =
+      const [enabled, configChannelId, all, archived, channelData] =
         await Promise.all([
           config.getBoolean("reactionroles.enabled", false),
           config.getString("reactionroles.message_channel_id", ""),
@@ -483,8 +540,9 @@ export function createReadOnlyRouter(
             .sort({ archivedAt: -1 })
             .limit(50)
             .lean(),
-          fetchChannelNames(client, common.guildId),
+          fetchChannelData(client, common.guildId),
         ]);
+      const channelNames = channelData.names;
 
       const active = all.filter((rr) => !rr.isArchived);
       const shape = (rr: {
@@ -532,14 +590,15 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const common = commonFromReq(req);
       const config = ConfigService.getInstance();
-      const [enabled, channelId, headerEnabled, notices, channelNames] =
+      const [enabled, channelId, headerEnabled, notices, channelData] =
         await Promise.all([
           config.getBoolean("notices.enabled", false),
           config.getString("notices.channel_id", ""),
           config.getBoolean("notices.header_enabled", true),
           Notice.find({}).sort({ category: 1, order: 1 }).lean(),
-          fetchChannelNames(client, common.guildId),
+          fetchChannelData(client, common.guildId),
         ]);
+      const channelNames = channelData.names;
 
       const grouped = new Map<string, typeof notices>();
       for (const n of notices) {
@@ -590,7 +649,7 @@ export function createReadOnlyRouter(
         detailedDays,
         monthlyMonths,
         yearlyYears,
-        channelNames,
+        channelData,
       ] = await Promise.all([
         truncation.isEnabled(),
         truncation.getSchedule(),
@@ -607,8 +666,9 @@ export function createReadOnlyRouter(
           "voicetracking.cleanup.retention.yearly_summaries_years",
           1,
         ),
-        fetchChannelNames(client, common.guildId),
+        fetchChannelData(client, common.guildId),
       ]);
+      const channelNames = channelData.names;
 
       const collections: Array<{ name: string; count: number }> = [];
       if (mongoose.connection.readyState === 1 && mongoose.connection.db) {

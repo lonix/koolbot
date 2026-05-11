@@ -6,6 +6,7 @@ import {
   ScheduledAnnouncement,
   IScheduledAnnouncement,
 } from "../models/scheduled-announcement.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 interface ScheduledJob {
   announcement: IScheduledAnnouncement;
@@ -378,6 +379,54 @@ export class ScheduledAnnouncementService {
     }
 
     logger.info(`Created new announcement: ${announcement._id}`);
+    return announcement;
+  }
+
+  /**
+   * Flip an announcement's `enabled` flag. Re-syncs the active cron job:
+   * enabling reschedules immediately, disabling stops the running job.
+   * Used by the WebUI write surface (#383). Returns the updated document
+   * or null if the announcement was not found or belongs to another guild.
+   */
+  public async setAnnouncementEnabled(
+    announcementId: string,
+    enabled: boolean,
+    guildId?: string,
+  ): Promise<IScheduledAnnouncement | null> {
+    const announcement = await ScheduledAnnouncement.findById(announcementId);
+    if (!announcement) {
+      return null;
+    }
+    if (guildId && announcement.guildId !== guildId) {
+      logger.warn(
+        `Attempted to toggle announcement ${sanitizeForLog(announcement._id.toString())} from wrong guild. Expected: ${announcement.guildId}, Got: ${sanitizeForLog(guildId)}`,
+      );
+      return null;
+    }
+
+    if (announcement.enabled === enabled) {
+      return announcement;
+    }
+
+    announcement.enabled = enabled;
+    await announcement.save();
+
+    const existing = this.jobs.get(announcementId);
+    if (existing) {
+      existing.job.stop();
+      this.jobs.delete(announcementId);
+    }
+
+    if (this.isInitialized && enabled) {
+      const job = this.scheduleAnnouncement(announcement);
+      if (job) {
+        this.jobs.set(announcement._id.toString(), { announcement, job });
+      }
+    }
+
+    logger.info(
+      `${enabled ? "Enabled" : "Disabled"} announcement: ${sanitizeForLog(announcement._id.toString())}`,
+    );
     return announcement;
   }
 

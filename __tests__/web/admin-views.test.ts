@@ -60,7 +60,11 @@ describe("renderBootstrapPage", () => {
               isSecret: true,
               display: "…abcd",
             },
-            { key: "WEBUI_SESSION_TTL_MINUTES", present: false, isSecret: false },
+            {
+              key: "WEBUI_SESSION_TTL_MINUTES",
+              present: false,
+              isSecret: false,
+            },
           ],
         },
       ],
@@ -130,6 +134,7 @@ describe("renderAnnouncementsPage", () => {
       ...COMMON,
       enabled: false,
       rows: [],
+      textChannels: [],
     });
     expect(html).toContain("No scheduled announcements");
     expect(html).toContain("disabled");
@@ -151,10 +156,35 @@ describe("renderAnnouncementsPage", () => {
           createdAt: "2026-05-08T00:00:00.000Z",
         },
       ],
+      textChannels: [{ id: "c1", name: "general" }],
     });
     expect(html).toContain("0 9 * * *");
     expect(html).toContain("&lt;b&gt;hi&lt;/b&gt;");
     expect(html).toContain("#general");
+  });
+
+  it("renders the create form and post-vc-stats button", () => {
+    const html = renderAnnouncementsPage({
+      ...COMMON,
+      enabled: true,
+      rows: [],
+      textChannels: [{ id: "c1", name: "general" }],
+    });
+    expect(html).toContain("/admin/announcements/create");
+    expect(html).toContain("/admin/announcements/post-vc-stats");
+    expect(html).toContain("Process placeholders");
+  });
+
+  it("renders a flash banner when provided", () => {
+    const html = renderAnnouncementsPage({
+      ...COMMON,
+      enabled: true,
+      rows: [],
+      textChannels: [],
+      flash: { type: "ok", text: "Created announcement abc." },
+    });
+    expect(html).toContain("Created announcement abc.");
+    expect(html).toContain('class="notice ok"');
   });
 });
 
@@ -167,6 +197,8 @@ describe("renderPollsPage", () => {
       cooldownDays: 7,
       schedules: [],
       items: [],
+      textChannels: [],
+      roles: [],
     });
     expect(html).toContain("No poll schedules");
     expect(html).toContain("No poll questions");
@@ -191,6 +223,7 @@ describe("renderPollsPage", () => {
       ],
       items: [
         {
+          id: "i1",
           question: "Pineapple on pizza?",
           answers: ["Yes", "No"],
           tags: ["food"],
@@ -200,10 +233,30 @@ describe("renderPollsPage", () => {
           source: "manual",
         },
       ],
+      textChannels: [{ id: "c1", name: "polls" }],
+      roles: [{ id: "r1", name: "Members" }],
     });
     expect(html).toContain("Pineapple on pizza?");
     expect(html).toContain("@Members");
     expect(html).toContain("Yes • No");
+    expect(html).toContain("/admin/polls/schedules/s1/test");
+    expect(html).toContain("/admin/polls/items/i1/delete");
+  });
+
+  it("renders write forms for schedules, items and bulk import", () => {
+    const html = renderPollsPage({
+      ...COMMON,
+      enabled: true,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      schedules: [],
+      items: [],
+      textChannels: [{ id: "c1", name: "polls" }],
+      roles: [{ id: "r1", name: "Members" }],
+    });
+    expect(html).toContain("/admin/polls/schedules/create");
+    expect(html).toContain("/admin/polls/items/create");
+    expect(html).toContain("/admin/polls/items/import");
   });
 });
 
