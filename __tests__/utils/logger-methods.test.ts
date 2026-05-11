@@ -1,6 +1,17 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect, afterEach } from '@jest/globals';
 
 describe('Logger Utility', () => {
+  const originalDebug = process.env.DEBUG;
+
+  afterEach(() => {
+    if (typeof originalDebug === 'undefined') {
+      delete process.env.DEBUG;
+      return;
+    }
+
+    process.env.DEBUG = originalDebug;
+  });
+
   it('should export logger object', async () => {
     const logger = await import('../../src/utils/logger.js');
     
@@ -23,5 +34,24 @@ describe('Logger Utility', () => {
     expect(() => logger.error('test')).not.toThrow();
     expect(() => logger.warn('test')).not.toThrow();
     expect(() => logger.debug('test')).not.toThrow();
+  });
+
+  it('should evaluate debug mode from process.env.DEBUG', async () => {
+    const { isDebugMode } = await import('../../src/utils/logger.js');
+
+    process.env.DEBUG = 'true';
+    expect(isDebugMode()).toBe(true);
+
+    process.env.DEBUG = 'false';
+    expect(isDebugMode()).toBe(false);
+
+    process.env.DEBUG = '';
+    expect(isDebugMode()).toBe(false);
+
+    process.env.DEBUG = '1';
+    expect(isDebugMode()).toBe(false);
+
+    delete process.env.DEBUG;
+    expect(isDebugMode()).toBe(false);
   });
 });

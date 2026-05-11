@@ -16,7 +16,7 @@ import {
   AuditLogEvent,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
-import logger from "./utils/logger.js";
+import logger, { isDebugMode } from "./utils/logger.js";
 import { ConfigService } from "./services/config-service.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelManager } from "./services/voice-channel-manager.js";
@@ -65,7 +65,7 @@ if (missingVars.length > 0) {
 }
 
 // Set debug mode
-if (process.env.DEBUG === "true") {
+if (isDebugMode()) {
   logger.info("Debug mode enabled");
 }
 
