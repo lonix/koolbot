@@ -173,18 +173,28 @@ function renderSettingInput(r: SettingRow, csrfToken: string): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
   const keyField = `<input type="hidden" name="key" value="${escapeHtml(r.key)}">`;
 
+  // Coerce current value to a primitive safe for HTML attribute embedding.
+  const primitiveValue =
+    r.current === null || r.current === undefined
+      ? ""
+      : typeof r.current === "boolean" ||
+          typeof r.current === "number" ||
+          typeof r.current === "string"
+        ? r.current
+        : String(r.current);
+
   let control: string;
   if (r.type === "boolean") {
-    const checked = r.current === true ? " checked" : "";
+    const checked = primitiveValue === true ? " checked" : "";
     control =
       `<label style="display:flex;gap:.4rem;align-items:center;cursor:pointer">` +
       `<input type="checkbox" name="value" value="true"${checked}> ` +
-      `<span class="mono">${r.current === true ? "true" : "false"}</span>` +
+      `<span class="mono">${primitiveValue === true ? "true" : "false"}</span>` +
       `</label>`;
   } else if (r.type === "number") {
-    control = `<input type="number" name="value" value="${escapeHtml(r.current)}" style="width:8rem">`;
+    control = `<input type="number" name="value" value="${escapeHtml(primitiveValue)}" style="width:8rem">`;
   } else {
-    control = `<input type="text" name="value" value="${escapeHtml(r.current)}">`;
+    control = `<input type="text" name="value" value="${escapeHtml(primitiveValue)}">`;
   }
 
   const setForm =

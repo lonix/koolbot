@@ -5,7 +5,7 @@
  * `src/services/` — no duplicate data access or validation logic.
  */
 
-import express, {
+import {
   Router,
   type NextFunction,
   type Request,
@@ -170,9 +170,9 @@ export function createWriteRouter(
 ): Router {
   const router = Router();
 
-  // Larger body limit for YAML import textarea — still behind session auth.
-  router.use(express.urlencoded({ extended: false, limit: "512kb" }));
-
+  // Body parsing is handled by the parent router (createWebRouter) which
+  // sets a 256 KB limit — large enough for YAML imports of any realistic
+  // configuration file.
   router.use(requireSession);
   router.use(requireCsrf);
 
@@ -645,7 +645,12 @@ export function createWriteRouter(
         const raw = req.body?.[k];
         const coerced = coerceValue(k, raw);
         if (coerced.ok) {
-          wizard.addConfiguration(userId, guildId, k, coerced.value as never);
+          wizard.addConfiguration(
+            userId,
+            guildId,
+            k,
+            coerced.value as string | number | boolean,
+          );
         }
       }
 
