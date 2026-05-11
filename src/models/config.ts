@@ -35,8 +35,10 @@ const ConfigSchema = new Schema<IConfig>(
         "fun",
         "gamification", // Kept for backward compatibility during migration
         "help",
+        "leaderboard_roles",
         "notices",
         "ping",
+        "polls",
         "quotes",
         "ratelimit",
         "reactionroles",

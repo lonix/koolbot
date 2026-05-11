@@ -20,6 +20,7 @@ Complete configuration reference for all KoolBot settings. All settings can be m
 - [Announcements](#-announcements) - Automated stats posting
 - [Achievements System](#-achievements-system) - Badges and achievements
 - [Reaction Roles](#-reaction-roles) - Self-assignable roles via reactions
+- [Leaderboard Role Rewards](#-leaderboard-role-rewards) - Auto-assign roles from voice leaderboard
 - [Discord Logging](#-discord-logging) - Event logging to channels
 - [Fun Features](#-fun-features) - Easter eggs and extras
 - [Rate Limiting](#-rate-limiting) - Command spam protection
@@ -717,6 +718,57 @@ See [Commands Documentation](COMMANDS.md#reactrole) for detailed usage.
 
 ---
 
+## 🏅 Leaderboard Role Rewards
+
+Auto-assign Discord roles based on each user's position on the voice-channel leaderboard.
+A cron job recalculates assignments on a schedule; users who fall out of a tier lose
+the role automatically.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `leaderboard_roles.enabled` | `false` | Enable/disable auto-assignment |
+| `leaderboard_roles.period` | `alltime` | Leaderboard period: `week`, `month`, or `alltime` |
+| `leaderboard_roles.update_cron` | `0 0 * * 1` | Cron schedule for recalculation (default: Mondays 00:00) |
+| `leaderboard_roles.tiers` | `""` | Comma-separated `topN:roleId` pairs (e.g. `1:111,3:222,10:333`) |
+| `leaderboard_roles.announcement_channel_id` | `""` | Optional channel ID for role-change announcements (empty disables) |
+
+### Tier Configuration
+
+Tiers are admin-defined — there is no built-in "top 1 / top 3 / top 10". You pick any
+positions you want to reward and which role each one grants. The format is a
+comma-separated list of `topN:roleId` pairs:
+
+```text
+leaderboard_roles.tiers = "1:111111111111111111,3:222222222222222222,10:333333333333333333"
+```
+
+In this example a user at rank #1 receives all three roles, a user at rank #2 or #3
+receives the latter two, and a user at rank #4–#10 receives only the third. Each tier
+is independent.
+
+Invalid entries (non-numeric `topN`, non-snowflake role ID, malformed syntax) are
+logged and skipped — they don't stop the rest of the configuration from applying.
+
+### Example
+
+```bash
+# Enable and configure
+/config set key:leaderboard_roles.enabled value:true
+/config set key:leaderboard_roles.period value:week
+/config set key:leaderboard_roles.update_cron value:"0 0 * * 1"
+/config set key:leaderboard_roles.tiers value:"1:111111111111111111,3:222222222222222222"
+/config set key:leaderboard_roles.announcement_channel_id value:"123456789012345678"
+/config reload
+```
+
+**Notes:**
+
+- The bot must have the **Manage Roles** permission and its highest role must sit above the reward roles in the role hierarchy, otherwise role add/remove will fail.
+- Role assignments are tracked in MongoDB so the bot can revoke a role from a user even after a restart, without requiring the privileged `GuildMembers` intent.
+- The announcement embed is only posted when there is at least one add/remove in a run.
+
+---
+
 ## 🧹 Voice Channel Cleanup
 
 Automatic cleanup of old tracking data with data aggregation.
@@ -1128,6 +1180,14 @@ The config system automatically converts values:
 
 - `reactionroles.enabled` (bool, default: false)
 - `reactionroles.message_channel_id` (string, default: "")
+
+#### Leaderboard Role Rewards
+
+- `leaderboard_roles.enabled` (bool, default: false)
+- `leaderboard_roles.period` (string, default: "alltime") — `week` / `month` / `alltime`
+- `leaderboard_roles.update_cron` (string, default: `"0 0 * * 1"`)
+- `leaderboard_roles.tiers` (string, default: "") — comma-separated `topN:roleId`
+- `leaderboard_roles.announcement_channel_id` (string, default: "")
 
 #### Quote System
 

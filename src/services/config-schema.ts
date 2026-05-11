@@ -94,6 +94,13 @@ export interface ConfigSchema {
   "polls.enabled": boolean;
   "polls.default_duration_hours": number; // Default poll duration in hours (1-768)
   "polls.cooldown_days": number; // Minimum days between reusing same poll
+
+  // Leaderboard Role Rewards
+  "leaderboard_roles.enabled": boolean;
+  "leaderboard_roles.period": string; // "week" | "month" | "alltime"
+  "leaderboard_roles.update_cron": string; // Cron schedule for recalculation
+  "leaderboard_roles.tiers": string; // Comma-separated "topN:roleId" pairs, e.g. "1:111,3:222,10:333"
+  "leaderboard_roles.announcement_channel_id": string; // Optional channel ID for role-change announcements
 }
 
 export const defaultConfig: ConfigSchema = {
@@ -191,6 +198,13 @@ export const defaultConfig: ConfigSchema = {
   "polls.enabled": false,
   "polls.default_duration_hours": 24, // Default 24 hours
   "polls.cooldown_days": 7, // Minimum 7 days between reusing same poll
+
+  // Leaderboard Role Rewards defaults
+  "leaderboard_roles.enabled": false,
+  "leaderboard_roles.period": "alltime",
+  "leaderboard_roles.update_cron": "0 0 * * 1", // Every Monday at 00:00
+  "leaderboard_roles.tiers": "",
+  "leaderboard_roles.announcement_channel_id": "",
 };
 
 /**
@@ -528,5 +542,32 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "Minimum days before a question from the library can be reused.",
     category: "polls",
+  },
+
+  // Leaderboard Role Rewards
+  "leaderboard_roles.enabled": {
+    description:
+      "Auto-assign Discord roles to users based on their voice-leaderboard position.",
+    category: "leaderboard_roles",
+  },
+  "leaderboard_roles.period": {
+    description:
+      'Leaderboard period to evaluate: "week", "month", or "alltime".',
+    category: "leaderboard_roles",
+  },
+  "leaderboard_roles.update_cron": {
+    description:
+      "Cron schedule for recalculating leaderboard role assignments.",
+    category: "leaderboard_roles",
+  },
+  "leaderboard_roles.tiers": {
+    description:
+      'Comma-separated "topN:roleId" pairs (e.g. "1:111,3:222,10:333"). Each tier independently assigns the role to users whose rank is ≤ N. Admins pick any positions; nothing is hardcoded.',
+    category: "leaderboard_roles",
+  },
+  "leaderboard_roles.announcement_channel_id": {
+    description:
+      "Optional channel ID where role-change announcements are posted. Leave empty to disable announcements.",
+    category: "leaderboard_roles",
   },
 };
