@@ -28,10 +28,18 @@ import { recordAudit } from "./audit.js";
 
 type Flash = { type: "ok" | "warn" | "err"; text: string };
 
+const FLASH_MAX = 500;
+
 function flashRedirect(res: Response, path: string, flash: Flash): void {
+  // Mirror the renderer's 500-char cap on the way out so the redirect
+  // URL itself can't balloon to header/URI limits on a noisy failure.
+  const truncated =
+    flash.text.length > FLASH_MAX
+      ? `${flash.text.slice(0, FLASH_MAX - 1)}…`
+      : flash.text;
   const qs = new globalThis.URLSearchParams({
     flash: flash.type,
-    msg: flash.text,
+    msg: truncated,
   }).toString();
   res.redirect(303, `${path}?${qs}`);
 }
@@ -47,9 +55,19 @@ function getCheckbox(req: AuthenticatedRequest, name: string): boolean {
   return typeof raw === "string" && raw.length > 0;
 }
 
+/**
+ * Normalize a cron expression: trim wrapping quotes so we validate and
+ * persist the same form. Otherwise `"0 9 * * *"` would pass validation
+ * (which strips quotes internally) but get stored verbatim, and later
+ * fail when the cron job is actually scheduled from the database row.
+ */
+function normalizeCron(expr: string): string {
+  return expr.replace(/^["']|["']$/g, "").trim();
+}
+
 function validCron(expr: string): boolean {
   try {
-    new CronTime(expr.replace(/^["']|["']$/g, ""));
+    new CronTime(expr);
     return true;
   } catch {
     return false;
@@ -101,7 +119,7 @@ export function createWriteRouter(
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const channelId = getString(req, "channelId");
-      const cron = getString(req, "cron");
+      const cron = normalizeCron(getString(req, "cron"));
       const message = getString(req, "message");
       const placeholders = getCheckbox(req, "placeholders");
       const embedTitle = getString(req, "embedTitle");
@@ -188,21 +206,34 @@ export function createWriteRouter(
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const service = ScheduledAnnouncementService.getInstance(client);
-      const ok = await service
-        .deleteAnnouncement(id, session.guildId)
-        .catch(() => false);
-      await recordAudit(session, {
-        action: "announcement.delete",
-        targetId: id,
-        result: ok ? "success" : "failure",
-        errorMessage: ok ? null : "not found or wrong guild",
-      });
-      flashRedirect(res, "/admin/announcements", {
-        type: ok ? "ok" : "err",
-        text: ok
-          ? `Deleted announcement ${id}.`
-          : `Announcement ${id} not found.`,
-      });
+      try {
+        const ok = await service.deleteAnnouncement(id, session.guildId);
+        await recordAudit(session, {
+          action: "announcement.delete",
+          targetId: id,
+          result: ok ? "success" : "failure",
+          errorMessage: ok ? null : "not found or wrong guild",
+        });
+        flashRedirect(res, "/admin/announcements", {
+          type: ok ? "ok" : "err",
+          text: ok
+            ? `Deleted announcement ${id}.`
+            : `Announcement ${id} not found.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Delete announcement failed", err);
+        await recordAudit(session, {
+          action: "announcement.delete",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/announcements", {
+          type: "err",
+          text: `Failed to delete announcement ${id}: ${text}`,
+        });
+      }
     }),
   );
 
@@ -287,7 +318,7 @@ export function createWriteRouter(
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const channelId = getString(req, "channelId");
-      const cron = getString(req, "cron");
+      const cron = normalizeCron(getString(req, "cron"));
       const durationRaw = getString(req, "durationHours");
       const pingRoleId = getString(req, "pingRoleId");
 
@@ -362,19 +393,34 @@ export function createWriteRouter(
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const service = PollService.getInstance(client);
-      const ok = await service
-        .deleteSchedule(id, session.guildId)
-        .catch(() => false);
-      await recordAudit(session, {
-        action: "poll-schedule.delete",
-        targetId: id,
-        result: ok ? "success" : "failure",
-        errorMessage: ok ? null : "not found or wrong guild",
-      });
-      flashRedirect(res, "/admin/polls", {
-        type: ok ? "ok" : "err",
-        text: ok ? `Deleted poll schedule ${id}.` : `Schedule ${id} not found.`,
-      });
+      try {
+        const ok = await service.deleteSchedule(id, session.guildId);
+        await recordAudit(session, {
+          action: "poll-schedule.delete",
+          targetId: id,
+          result: ok ? "success" : "failure",
+          errorMessage: ok ? null : "not found or wrong guild",
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: ok ? "ok" : "err",
+          text: ok
+            ? `Deleted poll schedule ${id}.`
+            : `Schedule ${id} not found.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Delete poll schedule failed", err);
+        await recordAudit(session, {
+          action: "poll-schedule.delete",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Failed to delete schedule ${id}: ${text}`,
+        });
+      }
     }),
   );
 
@@ -562,19 +608,34 @@ export function createWriteRouter(
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const service = PollService.getInstance(client);
-      const ok = await service
-        .deletePollItem(id, session.guildId)
-        .catch(() => false);
-      await recordAudit(session, {
-        action: "poll-item.delete",
-        targetId: id,
-        result: ok ? "success" : "failure",
-        errorMessage: ok ? null : "not found or wrong guild",
-      });
-      flashRedirect(res, "/admin/polls", {
-        type: ok ? "ok" : "err",
-        text: ok ? `Deleted poll question ${id}.` : `Question ${id} not found.`,
-      });
+      try {
+        const ok = await service.deletePollItem(id, session.guildId);
+        await recordAudit(session, {
+          action: "poll-item.delete",
+          targetId: id,
+          result: ok ? "success" : "failure",
+          errorMessage: ok ? null : "not found or wrong guild",
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: ok ? "ok" : "err",
+          text: ok
+            ? `Deleted poll question ${id}.`
+            : `Question ${id} not found.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Delete poll item failed", err);
+        await recordAudit(session, {
+          action: "poll-item.delete",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Failed to delete question ${id}: ${text}`,
+        });
+      }
     }),
   );
 
@@ -633,37 +694,53 @@ export function createWriteRouter(
         return;
       }
       const service = PollService.getInstance(client);
-      const results = await service.importFromUrl(
-        url,
-        session.guildId,
-        session.discordUserId,
-      );
-      const errCount = results.errors.length;
-      const type: Flash["type"] =
-        results.imported > 0 && errCount === 0
-          ? "ok"
-          : results.imported > 0
-            ? "warn"
-            : "err";
-      const summary = `Imported ${results.imported}, skipped ${results.skipped}, errors ${errCount}.`;
-      const firstError =
-        errCount > 0 ? ` First error: ${results.errors[0]}` : "";
-      await recordAudit(session, {
-        action: "poll-item.import",
-        details: {
+      try {
+        const results = await service.importFromUrl(
           url,
-          imported: results.imported,
-          skipped: results.skipped,
-          errors: errCount,
-        },
-        result: errCount > 0 && results.imported === 0 ? "failure" : "success",
-        errorMessage:
-          errCount > 0 ? results.errors.slice(0, 5).join("; ") : null,
-      });
-      flashRedirect(res, "/admin/polls", {
-        type,
-        text: `${summary}${firstError}`,
-      });
+          session.guildId,
+          session.discordUserId,
+        );
+        const errCount = results.errors.length;
+        const type: Flash["type"] =
+          results.imported > 0 && errCount === 0
+            ? "ok"
+            : results.imported > 0
+              ? "warn"
+              : "err";
+        const summary = `Imported ${results.imported}, skipped ${results.skipped}, errors ${errCount}.`;
+        const firstError =
+          errCount > 0 ? ` First error: ${results.errors[0]}` : "";
+        await recordAudit(session, {
+          action: "poll-item.import",
+          details: {
+            url,
+            imported: results.imported,
+            skipped: results.skipped,
+            errors: errCount,
+          },
+          result:
+            errCount > 0 && results.imported === 0 ? "failure" : "success",
+          errorMessage:
+            errCount > 0 ? results.errors.slice(0, 5).join("; ") : null,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type,
+          text: `${summary}${firstError}`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Poll import failed", err);
+        await recordAudit(session, {
+          action: "poll-item.import",
+          details: { url },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Import failed: ${text}`,
+        });
+      }
     }),
   );
 
