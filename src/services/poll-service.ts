@@ -576,6 +576,81 @@ export class PollService {
   }
 
   /**
+   * Flip a poll schedule's `enabled` flag. Restarts or stops the cron
+   * job in lockstep so the toggle reflects in scheduling, not just the
+   * database row. Used by the WebUI write surface (#383).
+   */
+  public async setScheduleEnabled(
+    scheduleId: string,
+    enabled: boolean,
+    guildId?: string,
+  ): Promise<IPollSchedule | null> {
+    const schedule = await PollSchedule.findById(scheduleId);
+    if (!schedule) {
+      return null;
+    }
+    if (guildId && schedule.guildId !== guildId) {
+      logger.warn(
+        `Attempted to toggle schedule ${scheduleId} from wrong guild`,
+      );
+      return null;
+    }
+
+    if (schedule.enabled === enabled) {
+      return schedule;
+    }
+
+    schedule.enabled = enabled;
+    await schedule.save();
+
+    const existing = this.jobs.get(scheduleId);
+    if (existing) {
+      existing.job.stop();
+      this.jobs.delete(scheduleId);
+    }
+
+    if (this.isInitialized && enabled) {
+      const job = this.schedulePoll(schedule);
+      if (job) {
+        this.jobs.set(schedule._id.toString(), { schedule, job });
+      }
+    }
+
+    logger.info(
+      `${enabled ? "Enabled" : "Disabled"} poll schedule: ${scheduleId}`,
+    );
+    return schedule;
+  }
+
+  /**
+   * Flip a poll item's `enabled` flag. Disabled items are skipped during
+   * scheduled selection. Used by the WebUI write surface (#383).
+   */
+  public async setPollItemEnabled(
+    itemId: string,
+    enabled: boolean,
+    guildId?: string,
+  ): Promise<IPollItem | null> {
+    const item = await PollItem.findById(itemId);
+    if (!item) {
+      return null;
+    }
+    if (guildId && item.guildId !== guildId) {
+      logger.warn(`Attempted to toggle poll item ${itemId} from wrong guild`);
+      return null;
+    }
+
+    if (item.enabled === enabled) {
+      return item;
+    }
+
+    item.enabled = enabled;
+    await item.save();
+    logger.info(`${enabled ? "Enabled" : "Disabled"} poll item: ${itemId}`);
+    return item;
+  }
+
+  /**
    * Delete a poll schedule
    */
   public async deleteSchedule(

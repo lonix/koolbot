@@ -299,12 +299,88 @@ export interface AnnouncementRow {
   createdAt: string;
 }
 
+export interface ChannelOption {
+  id: string;
+  name: string;
+}
+
+export interface RoleOption {
+  id: string;
+  name: string;
+}
+
+export interface FlashMessage {
+  type: "ok" | "warn" | "err";
+  text: string;
+}
+
 export interface AnnouncementsProps extends CommonProps {
   enabled: boolean;
   rows: AnnouncementRow[];
+  textChannels: ChannelOption[];
+  flash?: FlashMessage | null;
 }
 
+function renderFlash(flash?: FlashMessage | null): string {
+  if (!flash) return "";
+  const cls =
+    flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
+  return `<div class="notice ${cls}">${escapeHtml(flash.text)}</div>`;
+}
+
+function channelOptionsHtml(options: ChannelOption[]): string {
+  if (options.length === 0) {
+    return `<option value="">(no text channels available)</option>`;
+  }
+  return options
+    .map(
+      (c) =>
+        `<option value="${escapeHtml(c.id)}">#${escapeHtml(c.name)}</option>`,
+    )
+    .join("");
+}
+
+function roleOptionsHtml(options: RoleOption[]): string {
+  return [
+    `<option value="">(none)</option>`,
+    ...options.map(
+      (r) =>
+        `<option value="${escapeHtml(r.id)}">@${escapeHtml(r.name)}</option>`,
+    ),
+  ].join("");
+}
+
+const CRON_EXAMPLES_HTML = `
+<details class="helper">
+  <summary>Cron expression examples</summary>
+  <ul class="mono">
+    <li><code>0 9 * * *</code> — every day at 09:00</li>
+    <li><code>0 12 * * 1</code> — every Monday at 12:00</li>
+    <li><code>0 16 * * 5</code> — every Friday at 16:00 (weekly VC stats default)</li>
+    <li><code>0 0 1 * *</code> — first of every month at 00:00</li>
+    <li><code>*/30 * * * *</code> — every 30 minutes</li>
+  </ul>
+  <p class="muted">Format: <code>minute hour day-of-month month day-of-week</code>.</p>
+</details>`;
+
+const PLACEHOLDER_REFERENCE_HTML = `
+<details class="helper">
+  <summary>Available placeholders</summary>
+  <ul class="mono">
+    <li><code>{server_name}</code> — guild name</li>
+    <li><code>{member_count}</code> — total members</li>
+    <li><code>{date}</code> — current date</li>
+    <li><code>{time}</code> — current time</li>
+    <li><code>{day}</code> — current weekday</li>
+    <li><code>{month}</code> — current month</li>
+    <li><code>{year}</code> — current year</li>
+  </ul>
+  <p class="muted">Tick "Process placeholders" on the announcement to expand them at send time.</p>
+</details>`;
+
 export function renderAnnouncementsPage(props: AnnouncementsProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+
   const tableRows = props.rows
     .map(
       (a) => `<tr>
@@ -315,6 +391,10 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 <td>${escapeHtml(a.messagePreview)}${a.embedTitle ? `<div class="muted mono">embed: ${escapeHtml(a.embedTitle)}</div>` : ""}</td>
 <td>${a.placeholders ? '<span class="tag tag-info">yes</span>' : '<span class="muted">no</span>'}</td>
 <td class="muted">${escapeHtml(a.createdAt)}</td>
+<td class="actions">
+  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/toggle">${csrfInput}<button type="submit" class="btn">${a.enabled ? "Disable" : "Enable"}</button></form>
+  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/delete" onsubmit="return confirm('Delete announcement ${escapeHtml(a.id)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+</td>
 </tr>`,
     )
     .join("");
@@ -322,19 +402,61 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const tableHtml =
     props.rows.length === 0
       ? `<div class="empty">No scheduled announcements configured.</div>`
-      : `<table><thead><tr><th>ID</th><th>Channel</th><th>Cron</th><th>Status</th><th>Message</th><th>Placeholders</th><th>Created</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+      : `<table><thead><tr><th>ID</th><th>Channel</th><th>Cron</th><th>Status</th><th>Message</th><th>Placeholders</th><th>Created</th><th>Actions</th></tr></thead><tbody>${tableRows}</tbody></table>`;
 
   const body = `
 <h1>Announcements</h1>
-<p class="subtitle">Scheduled announcements posted on a cron. Read-only.</p>
+<p class="subtitle">Scheduled announcements posted on a cron. Replaces <code>/announce</code> and <code>/announce-vc-stats</code>; the slash commands still work in parallel during migration.</p>
+${renderFlash(props.flash)}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
     <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
     <dt>Total schedules</dt><dd>${props.rows.length}</dd>
   </dl>
+  <form method="POST" action="/admin/announcements/post-vc-stats" class="inline-form">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary">Post weekly VC stats now</button>
+    <span class="muted">Runs the same announcement as <code>/announce-vc-stats</code>.</span>
+  </form>
 </div>
-<div class="card"><h2>Schedules</h2>${tableHtml}</div>
+<div class="card">
+  <h2>Schedules</h2>${tableHtml}
+</div>
+<div class="card">
+  <h2>Create a new announcement</h2>
+  <form method="POST" action="/admin/announcements/create" class="stack">
+    ${csrfInput}
+    <label>Channel
+      <select name="channelId" required>${channelOptionsHtml(props.textChannels)}</select>
+    </label>
+    <label>Cron schedule
+      <input type="text" name="cron" placeholder="0 9 * * *" required pattern=".{3,}">
+    </label>
+    ${CRON_EXAMPLES_HTML}
+    <label>Message
+      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"></textarea>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="placeholders" value="1">
+      Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
+    </label>
+    ${PLACEHOLDER_REFERENCE_HTML}
+    <fieldset>
+      <legend>Optional embed</legend>
+      <label>Title
+        <input type="text" name="embedTitle" maxlength="256">
+      </label>
+      <label>Description
+        <textarea name="embedDescription" rows="3" maxlength="4000"></textarea>
+      </label>
+      <label>Colour (hex, e.g. <code>#5865F2</code>)
+        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2">
+      </label>
+    </fieldset>
+    <button type="submit" class="btn btn-primary">Create announcement</button>
+  </form>
+</div>
 `;
   return renderAdminPage({
     title: "Announcements",
@@ -358,6 +480,7 @@ export interface PollScheduleRow {
 }
 
 export interface PollItemRow {
+  id: string;
   question: string;
   answers: string[];
   tags: string[];
@@ -373,9 +496,14 @@ export interface PollsProps extends CommonProps {
   cooldownDays: number;
   schedules: PollScheduleRow[];
   items: PollItemRow[];
+  textChannels: ChannelOption[];
+  roles: RoleOption[];
+  flash?: FlashMessage | null;
 }
 
 export function renderPollsPage(props: PollsProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+
   const scheduleRows = props.schedules
     .map(
       (s) => `<tr>
@@ -386,6 +514,11 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${s.pingRoleName ? `@${escapeHtml(s.pingRoleName)}` : '<span class="muted">none</span>'}</td>
 <td>${tagOnOff(s.enabled)}</td>
 <td class="muted">${escapeHtml(s.lastRun)}</td>
+<td class="actions">
+  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/toggle">${csrfInput}<button type="submit" class="btn">${s.enabled ? "Disable" : "Enable"}</button></form>
+  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/test">${csrfInput}<button type="submit" class="btn">Test</button></form>
+  <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/delete" onsubmit="return confirm('Delete schedule ${escapeHtml(s.id)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+</td>
 </tr>`,
     )
     .join("");
@@ -399,13 +532,18 @@ export function renderPollsPage(props: PollsProps): string {
 <td class="muted">${escapeHtml(it.lastUsed)}</td>
 <td>${tagOnOff(it.enabled)}</td>
 <td class="muted">${escapeHtml(it.source)}</td>
+<td class="actions">
+  <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/toggle">${csrfInput}<button type="submit" class="btn">${it.enabled ? "Disable" : "Enable"}</button></form>
+  <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/delete" onsubmit="return confirm('Delete poll question?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+</td>
 </tr>`,
     )
     .join("");
 
   const body = `
 <h1>Polls</h1>
-<p class="subtitle">Poll schedules and question library. Read-only.</p>
+<p class="subtitle">Poll schedules and the question library. Replaces <code>/poll create|delete|test|add-item|delete-item|import-url|list|list-items</code>; the slash commands still work in parallel during migration.</p>
+${renderFlash(props.flash)}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -421,16 +559,67 @@ export function renderPollsPage(props: PollsProps): string {
   ${
     props.schedules.length === 0
       ? `<div class="empty">No poll schedules configured.</div>`
-      : `<table><thead><tr><th>ID</th><th>Channel</th><th>Cron</th><th>Duration</th><th>Ping role</th><th>Status</th><th>Last run</th></tr></thead><tbody>${scheduleRows}</tbody></table>`
+      : `<table><thead><tr><th>ID</th><th>Channel</th><th>Cron</th><th>Duration</th><th>Ping role</th><th>Status</th><th>Last run</th><th>Actions</th></tr></thead><tbody>${scheduleRows}</tbody></table>`
   }
+</div>
+<div class="card">
+  <h2>Create a new schedule</h2>
+  <form method="POST" action="/admin/polls/schedules/create" class="stack">
+    ${csrfInput}
+    <label>Channel
+      <select name="channelId" required>${channelOptionsHtml(props.textChannels)}</select>
+    </label>
+    <label>Cron schedule
+      <input type="text" name="cron" placeholder="0 12 * * *" required>
+    </label>
+    ${CRON_EXAMPLES_HTML}
+    <label>Duration (hours, 1–768)
+      <input type="number" name="durationHours" min="1" max="768" value="${props.defaultDurationHours}" required>
+    </label>
+    <label>Ping role
+      <select name="pingRoleId">${roleOptionsHtml(props.roles)}</select>
+    </label>
+    <button type="submit" class="btn btn-primary">Create schedule</button>
+  </form>
 </div>
 <div class="card">
   <h2>Question library</h2>
   ${
     props.items.length === 0
       ? `<div class="empty">No poll questions stored.</div>`
-      : `<table><thead><tr><th>Question</th><th>Tags</th><th>Used</th><th>Last used</th><th>Status</th><th>Source</th></tr></thead><tbody>${itemRows}</tbody></table>`
+      : `<table><thead><tr><th>Question</th><th>Tags</th><th>Used</th><th>Last used</th><th>Status</th><th>Source</th><th>Actions</th></tr></thead><tbody>${itemRows}</tbody></table>`
   }
+</div>
+<div class="card">
+  <h2>Add a poll question</h2>
+  <form method="POST" action="/admin/polls/items/create" class="stack">
+    ${csrfInput}
+    <label>Question
+      <input type="text" name="question" maxlength="300" required>
+    </label>
+    <label>Answers (comma-separated, 2–10 options)
+      <input type="text" name="answers" placeholder="Yes, No, Maybe" required>
+    </label>
+    <label>Tags (comma-separated, optional)
+      <input type="text" name="tags" placeholder="icebreaker, funny">
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="multiSelect" value="1">
+      Allow multiple answer selections
+    </label>
+    <button type="submit" class="btn btn-primary">Add question</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Bulk import from URL</h2>
+  <p class="muted">Fetches a YAML or JSON document shaped as <code>{ polls: [{ question, answers, multiselect?, tags? }] }</code>. Duplicate questions (same text) are skipped.</p>
+  <form method="POST" action="/admin/polls/items/import" class="stack">
+    ${csrfInput}
+    <label>URL
+      <input type="url" name="url" placeholder="https://example.com/polls.yaml" required>
+    </label>
+    <button type="submit" class="btn btn-primary">Import</button>
+  </form>
 </div>
 `;
   return renderAdminPage({
