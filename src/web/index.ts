@@ -12,6 +12,7 @@ import {
 } from "./session.js";
 import { renderInvalidLink, renderSignedOut } from "./views.js";
 import { createReadOnlyRouter } from "./read-only-routes.js";
+import { createWriteRouter } from "./write-routes.js";
 
 /**
  * Build the WebUI router. Caller mounts this at /admin on the existing
@@ -22,7 +23,7 @@ export function createWebRouter(client: Client): Router {
   const router = Router();
   const sessionService = WebSessionService.getInstance();
 
-  router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+  router.use(express.urlencoded({ extended: false, limit: "256kb" }));
   router.use(ensureCsrfCookie);
 
   const redeemLimiter = createRateLimiter({
@@ -85,6 +86,7 @@ export function createWebRouter(client: Client): Router {
   // otherwise this router's `requireSession` would refresh the session
   // cookie and re-hit Mongo even on requests that the CSRF check would
   // ultimately reject.
+  router.use(createWriteRouter(client, requireSession));
   router.use(createReadOnlyRouter(client, requireSession));
 
   router.use(

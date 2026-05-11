@@ -359,12 +359,18 @@ export function createReadOnlyRouter(
       const roleNames = await fetchRoleNames(client, common.guildId);
 
       const perCommand = new Map<string, string[]>();
-      const allRoleIds = new Set<string>();
+      const restrictedRoleIds = new Set<string>();
       for (const entry of all) {
         perCommand.set(entry.commandName, entry.roleIds);
-        for (const r of entry.roleIds) allRoleIds.add(r);
+        for (const r of entry.roleIds) restrictedRoleIds.add(r);
       }
-      const roleIds = Array.from(allRoleIds).sort((a, b) =>
+      const roleIds = Array.from(restrictedRoleIds).sort((a, b) =>
+        (roleNames.get(a) ?? a).localeCompare(roleNames.get(b) ?? b),
+      );
+      // All guild roles for the editable multi-select dropdowns.
+      const allRoleIds: string[] = Array.from(
+        roleNames.keys() as Iterable<string>,
+      ).sort((a, b) =>
         (roleNames.get(a) ?? a).localeCompare(roleNames.get(b) ?? b),
       );
 
@@ -373,6 +379,7 @@ export function createReadOnlyRouter(
           ...common,
           commands,
           roleIds,
+          allRoleIds,
           roleNames,
           perCommand,
         }),

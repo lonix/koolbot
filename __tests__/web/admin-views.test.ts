@@ -4,12 +4,15 @@ import {
   renderBootstrapPage,
   renderDashboardPage,
   renderDatabasePage,
+  renderImportDiffPage,
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
+  renderWizardPage,
+  renderWizardConfirmPage,
 } from "../../src/web/admin-views.js";
 
 const COMMON = { csrfToken: "csrf", remainingMs: 60_000 };
@@ -60,7 +63,11 @@ describe("renderBootstrapPage", () => {
               isSecret: true,
               display: "…abcd",
             },
-            { key: "WEBUI_SESSION_TTL_MINUTES", present: false, isSecret: false },
+            {
+              key: "WEBUI_SESSION_TTL_MINUTES",
+              present: false,
+              isSecret: false,
+            },
           ],
         },
       ],
@@ -99,28 +106,31 @@ describe("renderSettingsPage", () => {
 });
 
 describe("renderPermissionsPage", () => {
-  it("falls back to an empty state when no roles are configured", () => {
+  it("renders empty options when no roles are in the guild", () => {
     const html = renderPermissionsPage({
       ...COMMON,
       commands: ["ping"],
       roleIds: [],
+      allRoleIds: [],
       roleNames: new Map(),
       perCommand: new Map(),
     });
-    expect(html).toContain("No restricted commands");
     expect(html).toContain("/ping");
+    expect(html).toContain("No roles found in this guild");
   });
 
-  it("renders a matrix when roles exist", () => {
+  it("renders a multi-select with guild roles and marks current restrictions", () => {
     const html = renderPermissionsPage({
       ...COMMON,
       commands: ["dbtrunk"],
       roleIds: ["r1"],
+      allRoleIds: ["r1"],
       roleNames: new Map([["r1", "Admins"]]),
       perCommand: new Map([["dbtrunk", ["r1"]]]),
     });
     expect(html).toContain(">Admins<");
     expect(html).toContain('class="tag tag-warn">restricted');
+    expect(html).toContain("selected");
   });
 });
 
@@ -390,5 +400,132 @@ describe("renderVoiceChannelsPage", () => {
     expect(html).toContain('class="tag tag-warn">dynamic');
     expect(html).toContain('class="tag tag-warn">LIVE');
     expect(html).toContain("Friday night");
+  });
+});
+
+describe("renderSettingsPage (editable)", () => {
+  it("renders form controls for boolean, number, and string types", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicechannels",
+          rows: [
+            {
+              key: "voicechannels.enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "Enable VC mgmt",
+              category: "voicechannels",
+            },
+            {
+              key: "voicechannels.presets.max_per_user",
+              current: 3,
+              defaultValue: 3,
+              type: "number",
+              description: "Max presets",
+              category: "voicechannels",
+            },
+            {
+              key: "voicechannels.lobby.name",
+              current: "Lobby",
+              defaultValue: "Lobby",
+              type: "string",
+              description: "Lobby name",
+              category: "voicechannels",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain('action="/admin/settings/set"');
+    expect(html).toContain('action="/admin/settings/reset"');
+    expect(html).toContain('action="/admin/settings/reload"');
+    expect(html).toContain('href="/admin/settings/export"');
+    expect(html).toContain('action="/admin/settings/import"');
+    expect(html).toContain('type="checkbox"');
+    expect(html).toContain('type="number"');
+    expect(html).toContain('type="text"');
+    expect(html).toContain("Enable VC mgmt");
+  });
+});
+
+describe("renderImportDiffPage", () => {
+  it("shows pending and rejected rows", () => {
+    const html = renderImportDiffPage({
+      ...COMMON,
+      yamlText: "voicechannels.enabled: true",
+      rows: [
+        {
+          key: "voicechannels.enabled",
+          status: "pending",
+          before: false,
+          after: true,
+        },
+        { key: "DISCORD_TOKEN", status: "rejected", reason: "protected key" },
+      ],
+    });
+    expect(html).toContain("voicechannels.enabled");
+    expect(html).toContain("DISCORD_TOKEN");
+    expect(html).toContain("protected key");
+    expect(html).toContain('action="/admin/settings/import/apply"');
+    expect(html).toContain("Cancel");
+  });
+
+  it("disables the Apply button when there are no pending rows", () => {
+    const html = renderImportDiffPage({
+      ...COMMON,
+      yamlText: "DISCORD_TOKEN: secret",
+      rows: [
+        { key: "DISCORD_TOKEN", status: "rejected", reason: "protected key" },
+      ],
+    });
+    expect(html).toContain("disabled");
+  });
+});
+
+describe("renderWizardPage", () => {
+  it("renders feature checkboxes with current status pre-checked", () => {
+    const html = renderWizardPage({
+      ...COMMON,
+      featureOrder: ["voicechannels", "quotes"],
+      featureStatus: { voicechannels: true, quotes: false },
+    });
+    expect(html).toContain("Voice Channels");
+    expect(html).toContain("Quote System");
+    expect(html).toContain('action="/admin/wizard/start"');
+    // voicechannels enabled → should be checked
+    expect(html).toMatch(/value="voicechannels"[^>]* checked/);
+    // quotes disabled → should NOT be checked in this span
+    expect(html).toContain('value="quotes"');
+  });
+});
+
+describe("renderWizardConfirmPage", () => {
+  it("shows pending settings and an Apply button", () => {
+    const html = renderWizardConfirmPage({
+      ...COMMON,
+      pending: [["voicechannels.enabled", true]],
+      metadata: {
+        "voicechannels.enabled": {
+          description: "Enable voice channels",
+          category: "voicechannels",
+        },
+      },
+    });
+    expect(html).toContain("voicechannels.enabled");
+    expect(html).toContain("Enable voice channels");
+    expect(html).toContain('action="/admin/wizard/apply"');
+    expect(html).toContain('action="/admin/wizard/cancel"');
+  });
+
+  it("disables Apply when there are no pending settings", () => {
+    const html = renderWizardConfirmPage({
+      ...COMMON,
+      pending: [],
+      metadata: {},
+    });
+    expect(html).toContain("disabled");
   });
 });

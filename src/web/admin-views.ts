@@ -169,16 +169,65 @@ export interface SettingsProps extends CommonProps {
   groups: Array<{ category: string; rows: SettingRow[] }>;
 }
 
+function renderSettingInput(r: SettingRow, csrfToken: string): string {
+  const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
+  const keyField = `<input type="hidden" name="key" value="${escapeHtml(r.key)}">`;
+
+  let control: string;
+  if (r.type === "boolean") {
+    const checked = r.current === true ? " checked" : "";
+    control =
+      `<label style="display:flex;gap:.4rem;align-items:center;cursor:pointer">` +
+      `<input type="checkbox" name="value" value="true"${checked}> ` +
+      `<span class="mono">${r.current === true ? "true" : "false"}</span>` +
+      `</label>`;
+  } else if (r.type === "number") {
+    control = `<input type="number" name="value" value="${escapeHtml(r.current)}" style="width:8rem">`;
+  } else {
+    control = `<input type="text" name="value" value="${escapeHtml(r.current)}">`;
+  }
+
+  const setForm =
+    `<form method="POST" action="/admin/settings/set" class="inline-form">` +
+    csrf +
+    keyField +
+    control +
+    `<button type="submit" class="btn btn-primary btn-sm">Set</button>` +
+    `</form>`;
+
+  const resetForm =
+    `<form method="POST" action="/admin/settings/reset" class="inline-form" style="margin-top:.25rem">` +
+    csrf +
+    keyField +
+    `<button type="submit" class="btn btn-secondary btn-sm">Reset</button>` +
+    `</form>`;
+
+  return setForm + resetForm;
+}
+
 export function renderSettingsPage(props: SettingsProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+
+  const actionBar = `
+<div class="actions">
+  <form method="POST" action="/admin/settings/reload">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <button type="submit" class="btn btn-secondary">⟳ Reload Commands</button>
+  </form>
+  <a href="/admin/settings/export" class="btn btn-secondary">↓ Export YAML</a>
+  <a href="#import-section" class="btn btn-secondary">↑ Import YAML</a>
+  <a href="/admin/wizard" class="btn btn-secondary">🧙 Setup Wizard</a>
+</div>`;
+
   const sections = props.groups
     .map((g) => {
       const rows = g.rows
         .map(
           (r) => `<tr>
-<td class="mono">${escapeHtml(r.key)}</td>
-<td>${formatValue(r.current)}</td>
+<td class="mono" style="white-space:nowrap">${escapeHtml(r.key)}</td>
+<td>${renderSettingInput(r, props.csrfToken)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
-<td>${formatValue(r.defaultValue)}</td>
+<td style="white-space:nowrap">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
 </tr>`,
         )
@@ -187,20 +236,118 @@ export function renderSettingsPage(props: SettingsProps): string {
 <div class="card">
   <h2>${escapeHtml(g.category)}</h2>
   <table>
-    <thead><tr><th>Key</th><th>Value</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <thead><tr><th>Key</th><th>Edit</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </div>`;
     })
     .join("");
 
+  const importSection = `
+<div id="import-section" class="card">
+  <h2>Import YAML</h2>
+  <p class="muted" style="margin:0 0 .75rem">Paste a YAML key→value mapping. A diff preview will be shown before anything is written. Bootstrap and environment keys are always refused.</p>
+  <form method="POST" action="/admin/settings/import">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <textarea name="yaml" rows="12" placeholder="voicechannels.enabled: true&#10;quotes.max_length: 500"></textarea>
+    <div style="margin-top:.5rem">
+      <button type="submit" class="btn btn-primary">Preview Import</button>
+    </div>
+  </form>
+</div>`;
+
   const body = `
 <h1>Settings</h1>
-<p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>. Read-only.</p>
+<p class="subtitle">DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
+${actionBar}
 ${sections}
+${importSection}
 `;
   return renderAdminPage({
     title: "Settings",
+    active: "/admin/settings",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+// ---------- Import diff preview ----------
+
+export interface ImportDiffRow {
+  key: string;
+  status: "pending" | "rejected";
+  reason?: string;
+  before?: unknown;
+  after?: unknown;
+}
+
+export interface ImportDiffProps extends CommonProps {
+  rows: ImportDiffRow[];
+  yamlText: string;
+}
+
+export function renderImportDiffPage(props: ImportDiffProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+
+  const diffRows = props.rows
+    .map((r) => {
+      if (r.status === "rejected") {
+        return `<tr>
+<td class="mono">${escapeHtml(r.key)}</td>
+<td><span class="tag tag-diff-reject">rejected</span></td>
+<td class="muted">${escapeHtml(r.reason ?? "")}</td>
+<td></td>
+</tr>`;
+      }
+      const beforeStr =
+        r.before === undefined
+          ? `<span class="muted">—</span>`
+          : `<span class="mono">${escapeHtml(r.before)}</span>`;
+      const afterStr = `<span class="mono">${escapeHtml(r.after)}</span>`;
+      const tag =
+        r.before === r.after
+          ? `<span class="tag tag-info">no change</span>`
+          : `<span class="tag tag-diff-change">changed</span>`;
+      return `<tr>
+<td class="mono">${escapeHtml(r.key)}</td>
+<td>${tag}</td>
+<td>${beforeStr}</td>
+<td>${afterStr}</td>
+</tr>`;
+    })
+    .join("");
+
+  const pendingCount = props.rows.filter((r) => r.status === "pending").length;
+  const rejectedCount = props.rows.filter(
+    (r) => r.status === "rejected",
+  ).length;
+
+  const yamlEncoded = escapeHtml(props.yamlText);
+
+  const body = `
+<h1>Import Preview</h1>
+<p class="subtitle">Review the changes below before applying. Rejected rows will not be written.</p>
+<div class="notice info">${pendingCount} key(s) will be written; ${rejectedCount} rejected.</div>
+
+<div class="card">
+  <table>
+    <thead><tr><th>Key</th><th>Status</th><th>Current</th><th>New value</th></tr></thead>
+    <tbody>${diffRows}</tbody>
+  </table>
+</div>
+
+<div class="actions">
+  <form method="POST" action="/admin/settings/import/apply">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <input type="hidden" name="yaml" value="${yamlEncoded}">
+    <button type="submit" class="btn btn-primary" ${pendingCount === 0 ? "disabled" : ""}>Apply Import</button>
+  </form>
+  <a href="/admin/settings" class="btn btn-secondary">Cancel</a>
+</div>
+`;
+  return renderAdminPage({
+    title: "Import Preview",
     active: "/admin/settings",
     body,
     csrfToken: props.csrfToken,
@@ -212,74 +359,283 @@ ${sections}
 
 export interface PermissionsProps extends CommonProps {
   commands: string[];
+  /** Role IDs currently used in any restriction (for read-only matrix view). */
   roleIds: string[];
+  /** All guild role IDs — used to populate the editable multi-selects. */
+  allRoleIds: string[];
   roleNames: Map<string, string>;
   perCommand: Map<string, string[]>;
 }
 
 export function renderPermissionsPage(props: PermissionsProps): string {
-  const headerRoles = props.roleIds
-    .map(
-      (rid) =>
-        `<th title="${escapeHtml(rid)}">${escapeHtml(props.roleNames.get(rid) ?? rid)}</th>`,
-    )
-    .join("");
+  const csrf = escapeHtml(props.csrfToken);
 
-  const matrixRows = props.commands
+  // Editable per-command forms (use allRoleIds for the select options).
+  const editRows = props.commands
     .map((cmd) => {
-      const allowed = new Set(props.perCommand.get(cmd) ?? []);
-      const cells = props.roleIds
-        .map(
-          (rid) =>
-            `<td>${allowed.has(rid) ? '<span class="tag tag-on">✓</span>' : '<span class="muted">—</span>'}</td>`,
-        )
-        .join("");
+      const current = new Set(props.perCommand.get(cmd) ?? []);
       const status =
-        allowed.size === 0
+        current.size === 0
           ? `<span class="tag tag-info">open</span>`
           : `<span class="tag tag-warn">restricted</span>`;
-      return `<tr><td class="mono">/${escapeHtml(cmd)}</td><td>${status}</td>${cells}</tr>`;
-    })
-    .join("");
 
-  const matrixHtml =
-    props.roleIds.length === 0
-      ? `<div class="empty">No restricted commands. All registered commands are open by default.</div>`
-      : `<table><thead><tr><th>Command</th><th>Status</th>${headerRoles}</tr></thead><tbody>${matrixRows}</tbody></table>`;
+      const options =
+        props.allRoleIds.length === 0
+          ? `<option disabled>No roles found in this guild</option>`
+          : props.allRoleIds
+              .map((rid) => {
+                const name = props.roleNames.get(rid) ?? rid;
+                const sel = current.has(rid) ? " selected" : "";
+                return `<option value="${escapeHtml(rid)}"${sel}>${escapeHtml(name)}</option>`;
+              })
+              .join("");
 
-  const perCommandRows = props.commands
-    .map((cmd) => {
-      const allowed = props.perCommand.get(cmd) ?? [];
-      if (allowed.length === 0) {
-        return `<tr><td class="mono">/${escapeHtml(cmd)}</td><td><span class="tag tag-info">open</span></td><td class="muted">All members</td></tr>`;
-      }
-      const pills = allowed
-        .map(
-          (rid) =>
-            `<span class="tag tag-info" title="${escapeHtml(rid)}">${escapeHtml(props.roleNames.get(rid) ?? rid)}</span>`,
-        )
-        .join(" ");
-      return `<tr><td class="mono">/${escapeHtml(cmd)}</td><td><span class="tag tag-warn">restricted</span></td><td>${pills}</td></tr>`;
+      return `<tr>
+<td class="mono">/${escapeHtml(cmd)}</td>
+<td>${status}</td>
+<td>
+  <form method="POST" action="/admin/permissions/set" style="display:flex;gap:.4rem;align-items:flex-start">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <input type="hidden" name="command" value="${escapeHtml(cmd)}">
+    <select name="roleIds" multiple size="3" style="min-width:14rem">${options}</select>
+    <div style="display:flex;flex-direction:column;gap:.25rem">
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      <span class="muted" style="font-size:.7rem">Hold Ctrl/⌘ to<br>select multiple</span>
+    </div>
+  </form>
+</td>
+</tr>`;
     })
     .join("");
 
   const body = `
 <h1>Permissions</h1>
-<p class="subtitle">Discord command access derived from <code>permissions-service.ts</code>. Administrators always bypass these checks.</p>
-
-<div class="card"><h2>Matrix</h2>${matrixHtml}</div>
+<p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles to restrict a command; deselect all to make it open.</p>
 
 <div class="card">
   <h2>Per-command</h2>
   <table>
-    <thead><tr><th>Command</th><th>Status</th><th>Allowed roles</th></tr></thead>
-    <tbody>${perCommandRows}</tbody>
+    <thead><tr><th>Command</th><th>Status</th><th>Allowed roles (multi-select)</th></tr></thead>
+    <tbody>${editRows}</tbody>
   </table>
 </div>
 `;
   return renderAdminPage({
     title: "Permissions",
     active: "/admin/permissions",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+// ---------- Wizard pages ----------
+
+export interface WizardPageProps extends CommonProps {
+  featureOrder: string[];
+  featureStatus: Record<string, boolean>;
+}
+
+const FEATURE_LABELS: Record<string, { name: string; desc: string }> = {
+  voicechannels: {
+    name: "Voice Channels",
+    desc: "Dynamic voice channel management with lobby",
+  },
+  voicetracking: {
+    name: "Voice Tracking",
+    desc: "Track voice activity and generate statistics",
+  },
+  quotes: {
+    name: "Quote System",
+    desc: "Collect and share memorable quotes",
+  },
+  achievements: {
+    name: "Achievements",
+    desc: "Achievement system for voice activity",
+  },
+  logging: {
+    name: "Core Logging",
+    desc: "Bot event logging to Discord channels",
+  },
+  amikool: {
+    name: "Am I Kool",
+    desc: "Fun command to check kool status based on a role",
+  },
+  reactionroles: {
+    name: "Reaction Roles",
+    desc: "Let users self-assign roles via reactions",
+  },
+  announcements: {
+    name: "Announcements",
+    desc: "Schedule automated announcements",
+  },
+  notices: {
+    name: "Notices",
+    desc: "Protected channel for server notices",
+  },
+  polls: { name: "Polls", desc: "Periodic polls for icebreaker discussions" },
+};
+
+export function renderWizardPage(props: WizardPageProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+
+  const cards = props.featureOrder
+    .map((fk) => {
+      const info = FEATURE_LABELS[fk] ?? { name: fk, desc: "" };
+      const checked = props.featureStatus[fk] ? " checked" : "";
+      return `<div class="feature-card">
+  <input type="checkbox" name="features" value="${escapeHtml(fk)}" id="feat-${escapeHtml(fk)}"${checked}>
+  <div class="fc-info">
+    <label for="feat-${escapeHtml(fk)}" class="fc-name" style="cursor:pointer">${escapeHtml(info.name)}</label>
+    <div class="fc-desc">${escapeHtml(info.desc)}</div>
+  </div>
+</div>`;
+    })
+    .join("");
+
+  const body = `
+<h1>Setup Wizard</h1>
+<p class="subtitle">Select the features you want to configure and click <strong>Next</strong>. The wizard will guide you through each feature's key settings.</p>
+<div class="notice info">Changes are only applied at the final confirmation step. You can cancel at any time without affecting the current configuration.</div>
+<form method="POST" action="/admin/wizard/start">
+  <input type="hidden" name="_csrf" value="${csrf}">
+  <div class="card">
+    <h2>Select features to configure</h2>
+    <div class="wizard-features">${cards}</div>
+  </div>
+  <div class="actions">
+    <button type="submit" class="btn btn-primary">Next →</button>
+    <a href="/admin/" class="btn btn-secondary">Cancel</a>
+  </div>
+</form>
+`;
+  return renderAdminPage({
+    title: "Setup Wizard",
+    active: "/admin/wizard",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+export interface WizardStepPageProps extends CommonProps {
+  stepIndex: number;
+  totalSteps: number;
+  featureKey: string;
+  settingKeys: string[];
+  currentValues: Record<string, unknown>;
+  metadata: Record<string, { description: string; category: string }>;
+  defaultValues: Record<string, unknown>;
+}
+
+export function renderWizardStepPage(props: WizardStepPageProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+  const info = FEATURE_LABELS[props.featureKey] ?? {
+    name: props.featureKey,
+    desc: "",
+  };
+
+  const fields = props.settingKeys
+    .map((k) => {
+      const current = props.currentValues[k];
+      const meta = props.metadata[k];
+      const defaultVal = props.defaultValues[k];
+      const type =
+        typeof defaultVal === "boolean"
+          ? "boolean"
+          : typeof defaultVal === "number"
+            ? "number"
+            : "string";
+      const desc = meta?.description ?? "";
+
+      let control: string;
+      if (type === "boolean") {
+        const checked = current === true ? " checked" : "";
+        control = `<label style="display:flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" name="${escapeHtml(k)}" value="true"${checked}> Enable</label>`;
+      } else if (type === "number") {
+        control = `<input type="number" name="${escapeHtml(k)}" value="${escapeHtml(current)}">`;
+      } else {
+        control = `<input type="text" name="${escapeHtml(k)}" value="${escapeHtml(current)}">`;
+      }
+
+      return `<div class="field-row">
+  <label for="wiz-${escapeHtml(k)}">${escapeHtml(k)}</label>
+  ${control}
+  <div class="help">${escapeHtml(desc)}</div>
+</div>`;
+    })
+    .join("");
+
+  const stepLabel = `Step ${props.stepIndex + 1} of ${props.totalSteps}`;
+
+  const body = `
+<h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
+<p class="subtitle">${escapeHtml(info.desc)}</p>
+<form method="POST" action="/admin/wizard/step/${props.stepIndex}">
+  <input type="hidden" name="_csrf" value="${csrf}">
+  <div class="card">${fields}</div>
+  <div class="actions">
+    <button type="submit" class="btn btn-primary">
+      ${props.stepIndex + 1 < props.totalSteps ? "Next →" : "Review →"}
+    </button>
+    <a href="/admin/wizard" class="btn btn-secondary">← Back to features</a>
+  </div>
+</form>
+`;
+  return renderAdminPage({
+    title: `Wizard — ${info.name}`,
+    active: "/admin/wizard",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+export interface WizardConfirmPageProps extends CommonProps {
+  pending: Array<[string, unknown]>;
+  metadata: Record<string, { description: string; category: string }>;
+}
+
+export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+
+  const rows =
+    props.pending.length === 0
+      ? `<tr><td colspan="3" class="empty">No settings configured.</td></tr>`
+      : props.pending
+          .map(
+            ([k, v]) =>
+              `<tr>
+<td class="mono">${escapeHtml(k)}</td>
+<td class="mono">${escapeHtml(v)}</td>
+<td class="muted">${escapeHtml(props.metadata[k]?.description ?? "")}</td>
+</tr>`,
+          )
+          .join("");
+
+  const body = `
+<h1>Review Configuration</h1>
+<p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
+<div class="card">
+  <table>
+    <thead><tr><th>Key</th><th>New value</th><th>Description</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</div>
+<div class="actions">
+  <form method="POST" action="/admin/wizard/apply">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <button type="submit" class="btn btn-primary" ${props.pending.length === 0 ? "disabled" : ""}>✓ Apply</button>
+  </form>
+  <form method="POST" action="/admin/wizard/cancel">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <button type="submit" class="btn btn-danger">✕ Cancel</button>
+  </form>
+</div>
+`;
+  return renderAdminPage({
+    title: "Wizard — Review",
+    active: "/admin/wizard",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
