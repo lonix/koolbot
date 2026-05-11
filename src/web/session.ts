@@ -24,6 +24,12 @@ export interface WebSessionContext {
   guildId: string;
   scopes: string[];
   lastActivityAt: number;
+  /**
+   * Server-side hard cap for the session, mirrored from
+   * `WebSession.expiresAt`. Used by the banner countdown so the rendered
+   * remaining time respects the TTL ceiling, not just the inactivity window.
+   */
+  expiresAt: Date;
 }
 
 export type AuthenticatedRequest = Request & { webSession?: WebSessionContext };
@@ -176,6 +182,7 @@ export function createSessionMiddleware(
       guildId: payload.gid,
       scopes: dbSession.scopes,
       lastActivityAt: now,
+      expiresAt: dbSession.expiresAt,
     };
     next();
   };
