@@ -42,3 +42,4 @@ jobs:
             !dist
             !coverage
             !.github/prompts
+            !CHANGELOG.md
