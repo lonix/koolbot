@@ -8,6 +8,7 @@ import {
 } from "@jest/globals";
 import {
   ChannelType,
+  DiscordAPIError,
   type Client,
   type VoiceChannel,
   type GuildMember,
@@ -262,6 +263,82 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       // Assert: Channel.delete should only be called once, not twice
       // This verifies the channelsBeingDeleted Set prevents double deletion
       expect(mockChannel.delete).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("cleanupUserChannel resilience (issue #404)", () => {
+    function makeUnknownChannelError(): DiscordAPIError {
+      // DiscordAPIError's constructor signature has shifted between
+      // discord.js versions and `name` is a getter on its prototype, so we
+      // build the instance via Object.create + defineProperty rather than
+      // calling the constructor.
+      const error = Object.create(DiscordAPIError.prototype) as DiscordAPIError;
+      Object.defineProperties(error, {
+        rawError: {
+          value: { message: "Unknown Channel", code: 10003 },
+          writable: true,
+        },
+        code: { value: 10003, writable: true },
+        status: { value: 404, writable: true },
+        method: { value: "DELETE", writable: true },
+        url: {
+          value: "https://discord.com/api/v10/channels/channel-id",
+          writable: true,
+        },
+        message: { value: "Unknown Channel", writable: true },
+      });
+      return error;
+    }
+
+    it("removes the userChannels entry when channel.delete throws 10003 (Unknown Channel)", async () => {
+      // Setup: owner has a channel entry whose remote channel has already
+      // been deleted on Discord's side.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (manager as any).userChannels.set("owner-id", mockChannel);
+      mockMembers.clear();
+      Object.defineProperty(mockChannel, "members", {
+        value: mockMembers as Collection<string, GuildMember>,
+        writable: true,
+      });
+      (mockChannel.delete as jest.Mock).mockRejectedValue(
+        makeUnknownChannelError(),
+      );
+
+      // Drive cleanupUserChannel directly: handleVoiceStateUpdate also
+      // invokes cleanupEmptyChannel afterwards, which would muddy the
+      // assertion we care about here.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (manager as any).cleanupUserChannel("owner-id");
+
+      // The userChannels entry must be cleared so subsequent lobby joins
+      // aren't silently skipped with "already has a channel".
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userChannels: Map<string, VoiceChannel> = (manager as any)
+        .userChannels;
+      expect(userChannels.has("owner-id")).toBe(false);
+    });
+
+    it("keeps the userChannels entry when channel.delete throws a non-10003 error", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (manager as any).userChannels.set("owner-id", mockChannel);
+      mockMembers.clear();
+      Object.defineProperty(mockChannel, "members", {
+        value: mockMembers as Collection<string, GuildMember>,
+        writable: true,
+      });
+      (mockChannel.delete as jest.Mock).mockRejectedValue(
+        new Error("transient network failure"),
+      );
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (manager as any).cleanupUserChannel("owner-id");
+
+      // Non-10003 failures are transient: leave the entry so the periodic
+      // cleanup can retry, instead of dropping ownership tracking on the floor.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const userChannels: Map<string, VoiceChannel> = (manager as any)
+        .userChannels;
+      expect(userChannels.has("owner-id")).toBe(true);
     });
   });
 
