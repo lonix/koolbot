@@ -3,6 +3,7 @@ import {
   VoiceChannel,
   CategoryChannel,
   ChannelType,
+  DiscordAPIError,
   GuildMember,
   Guild,
   Client,
@@ -14,6 +15,19 @@ import {
   PermissionFlagsBits,
   Message,
 } from "discord.js";
+
+// Discord REST error code 10003 — the channel no longer exists. For our
+// cleanup paths this is a success condition: the remote resource is already
+// gone, so we should reconcile in-memory state instead of bailing out and
+// leaving stale entries behind (issue #404, follow-up to #339).
+const UNKNOWN_CHANNEL_ERROR_CODE = 10003;
+
+function isUnknownChannelError(error: unknown): boolean {
+  return (
+    error instanceof DiscordAPIError &&
+    error.code === UNKNOWN_CHANNEL_ERROR_CODE
+  );
+}
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
@@ -1096,24 +1110,43 @@ export class VoiceChannelManager {
   }
 
   private async cleanupUserChannel(userId: string): Promise<void> {
-    try {
-      const channel = this.userChannels.get(userId);
-      if (channel && channel.members.size === 0) {
-        // Clean up waiting room if one exists
-        await this.removeWaitingRoom(channel.id);
-        // Clean up live status
-        this.liveChannels.delete(channel.id);
-        await channel.delete();
-        this.userChannels.delete(userId);
-        // Clean up custom name tracking
-        this.customChannelNames.delete(channel.id);
-        // Clean up ownership queue
-        this.ownershipQueue.delete(channel.id);
-        logger.info(`Cleaned up voice channel ${channel.name}`);
-      }
-    } catch (error) {
-      logger.error("Error cleaning up user channel:", error);
+    const channel = this.userChannels.get(userId);
+    if (!channel || channel.members.size !== 0) {
+      return;
     }
+
+    const channelId = channel.id;
+    const channelName = channel.name;
+
+    try {
+      // Clean up waiting room if one exists
+      await this.removeWaitingRoom(channelId);
+      // Clean up live status
+      this.liveChannels.delete(channelId);
+      await channel.delete();
+      logger.info(`Cleaned up voice channel ${channelName}`);
+    } catch (error) {
+      if (isUnknownChannelError(error)) {
+        // Channel is already gone on Discord's side — treat as success and
+        // fall through to reconcile local state.
+        logger.warn(
+          `Voice channel ${channelName} (${channelId}) already deleted on Discord; reconciling local state.`,
+        );
+      } else {
+        // Unexpected failure (rate limit, permissions, etc.). Leave the
+        // userChannels entry intact so the periodic cleanup can retry later.
+        logger.error("Error cleaning up user channel:", error);
+        return;
+      }
+    }
+
+    // Always reconcile in-memory state when the channel is gone (either we
+    // just deleted it, or it was already gone). A stale userChannels entry
+    // would otherwise lock the user out of future lobby joins until the bot
+    // restarts (issue #404).
+    this.userChannels.delete(userId);
+    this.customChannelNames.delete(channelId);
+    this.ownershipQueue.delete(channelId);
   }
 
   /**
@@ -1152,8 +1185,19 @@ export class VoiceChannelManager {
       this.channelsBeingDeleted.add(channel.id);
 
       // Delete the channel
-      await channel.delete();
-      logger.info(`Cleaned up empty voice channel ${channel.name}`);
+      try {
+        await channel.delete();
+        logger.info(`Cleaned up empty voice channel ${channel.name}`);
+      } catch (error) {
+        if (isUnknownChannelError(error)) {
+          // Already gone on Discord's side — fall through and reconcile.
+          logger.warn(
+            `Empty voice channel ${channel.name} (${channel.id}) already deleted on Discord; reconciling local state.`,
+          );
+        } else {
+          throw error;
+        }
+      }
 
       // Clean up all tracking for this channel
       if (ownerId) {
