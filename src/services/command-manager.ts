@@ -11,6 +11,7 @@ import {
 import { config as dotenvConfig } from "dotenv";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
+import { sendDeprecationNotice } from "../utils/deprecation-notice.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { CooldownManager } from "./cooldown-manager.js";
@@ -552,13 +553,17 @@ export class CommandManager {
         }
       }
 
-      await executeFunction();
-      monitoringService.trackCommandEnd(
-        commandName,
-        trackingId,
-        startTime,
-        true,
-      );
+      try {
+        await executeFunction();
+        monitoringService.trackCommandEnd(
+          commandName,
+          trackingId,
+          startTime,
+          true,
+        );
+      } finally {
+        await sendDeprecationNotice(interaction);
+      }
     } catch (error) {
       monitoringService.trackCommandEnd(
         commandName,
