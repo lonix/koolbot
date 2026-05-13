@@ -2,8 +2,27 @@
 
 Complete reference for all KoolBot commands with examples and detailed explanations.
 
-> **Note:** All commands must be enabled through configuration before they appear in Discord.  
-> Use `/config set key:command.enabled value:true` and then `/config reload` to enable commands.
+> **Note:** All commands must be enabled through configuration before they appear in Discord.
+> The supported way to do this is the WebUI Settings page (run `/config` to get a
+> single-use sign-in link). The legacy slash equivalents — `/config set
+> key:command.enabled value:true` followed by `/config reload` — still work for the
+> current release but are deprecated; see the banner below.
+
+---
+
+> ⚠️ **Deprecation notice (v1.0 migration):** The following admin slash commands are
+> **deprecated** and will be removed in 1.0. They still work, but each invocation now
+> emits a deprecation embed pointing at the WebUI. Run `/config` to open the WebUI
+> launcher instead.
+>
+> - `/permissions`, `/setup`, `/announce`, `/announce-vc-stats`, `/poll`,
+>   `/reactrole`, `/notice`, `/dbtrunk`, `/vc`, `/botstats`
+> - Every `/config` subcommand except the launcher (i.e. `/config list`,
+>   `/config set`, `/config import`, `/config export`, `/config reset`,
+>   `/config reload`). The `/config web` launcher itself is **not** deprecated.
+>
+> User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`, `/achievements`,
+> `/amikool`, `/help`) are unaffected.
 
 ---
 
@@ -477,6 +496,9 @@ Each quote appears as an embed with:
 
 ### `/notice`
 
+> ⚠️ **Deprecated:** will be removed in 1.0. Manage notices from the WebUI
+> (run `/config` to get a sign-in link).
+
 **Description:** Manage server notices in a protected bot-controlled channel. Perfect for server rules, game server info, bot feature help, and important announcements.
 
 **Configuration:**
@@ -664,6 +686,11 @@ Commands that require Administrator permission in Discord.
 
 ### `/config`
 
+> ⚠️ **Deprecated:** every `/config` subcommand below — `list`, `set`, `import`,
+> `export`, `reset`, `reload` — is deprecated and will be removed in 1.0. The
+> `/config web` launcher (which DMs you a single-use WebUI sign-in link) is
+> **not** deprecated and remains the supported admin entry point.
+
 **Description:** Comprehensive configuration management for all bot settings.
 
 **Usage:**
@@ -808,6 +835,9 @@ Import configuration from a YAML file.
 ---
 
 ### `/permissions`
+
+> ⚠️ **Deprecated:** will be removed in 1.0. Manage permissions from the WebUI
+> (run `/config` to get a sign-in link).
 
 **Description:** Manage role-based command access control. This feature allows admins to restrict which commands can be used by
 specific Discord roles.
@@ -1082,6 +1112,9 @@ Can access 15 command(s):
 ---
 
 ### `/reactrole`
+
+> ⚠️ **Deprecated:** will be removed in 1.0. Manage reaction roles from the
+> WebUI (run `/config` to get a sign-in link).
 
 **Description:** Manage reaction-based roles. Allows users to self-assign roles by reacting to a message. Automatically creates
 Discord roles, categories, and channels with proper permissions.
@@ -1367,6 +1400,10 @@ Message ID: 444555666
 
 ### `/vc`
 
+> ⚠️ **Deprecated:** will be removed in 1.0. Manage voice channels from the
+> WebUI (run `/config` to get a sign-in link). The user-facing voice channel
+> control panel buttons inside Discord are **not** affected.
+
 **Description:** Voice channel management, cleanup tools, and user customization.
 
 **Configuration:**
@@ -1540,6 +1577,9 @@ you (the owner) will receive a notification in the channel with a **🚪 Let In*
 
 ### `/dbtrunk`
 
+> ⚠️ **Deprecated:** will be removed in 1.0. Run database cleanup from the
+> WebUI (run `/config` to get a sign-in link).
+
 **Description:** Database cleanup management for voice tracking data.
 
 **Configuration:**
@@ -1625,6 +1665,9 @@ Duration: 3.2 seconds
 
 ### `/announce-vc-stats`
 
+> ⚠️ **Deprecated:** will be removed in 1.0. Trigger the weekly VC stats post
+> from the WebUI (run `/config` to get a sign-in link).
+
 **Description:** Manually trigger the weekly voice channel statistics announcement.
 
 **Configuration:**
@@ -1681,6 +1724,9 @@ Active users: 47
 ---
 
 ### `/announce`
+
+> ⚠️ **Deprecated:** will be removed in 1.0. Manage scheduled announcements
+> from the WebUI (run `/config` to get a sign-in link).
 
 **Description:** Manage scheduled announcements to automatically send messages to channels on a schedule.
 
@@ -1794,6 +1840,9 @@ Message: Good morning, {server_name}!
 ---
 
 ### `/poll`
+
+> ⚠️ **Deprecated:** will be removed in 1.0. Manage poll schedules and the
+> poll-question library from the WebUI (run `/config` to get a sign-in link).
 
 **Description:** Manage periodic polls for icebreaker discussions and community engagement.
 Posts Discord native polls on a schedule with questions from URL sources or database storage.
@@ -2084,6 +2133,9 @@ The bot intelligently selects polls to avoid repetition:
 
 ### `/setup`
 
+> ⚠️ **Deprecated:** will be removed in 1.0. Run the setup wizard from the
+> WebUI (run `/config` to get a sign-in link).
+
 **Description:** Interactive setup wizard to guide you through configuring KoolBot features.
 This is the recommended way to set up your server for the first time or configure new features.
 
@@ -2206,6 +2258,9 @@ This will:
 ---
 
 ### `/botstats`
+
+> ⚠️ **Deprecated:** will be removed in 1.0. View bot stats on the WebUI
+> dashboard (run `/config` to get a sign-in link).
 
 **Description:** View bot performance and usage statistics.
 
