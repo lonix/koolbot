@@ -15,6 +15,11 @@ import {
   PermissionFlagsBits,
   Message,
 } from "discord.js";
+import logger from "../utils/logger.js";
+import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
+import { ConfigService } from "./config-service.js";
+
+const configService = ConfigService.getInstance();
 
 // Discord REST error code 10003 — the channel no longer exists. For our
 // cleanup paths this is a success condition: the remote resource is already
@@ -28,11 +33,6 @@ function isUnknownChannelError(error: unknown): boolean {
     error.code === UNKNOWN_CHANNEL_ERROR_CODE
   );
 }
-import logger from "../utils/logger.js";
-import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
-import { ConfigService } from "./config-service.js";
-
-const configService = ConfigService.getInstance();
 
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
