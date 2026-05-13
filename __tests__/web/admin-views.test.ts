@@ -273,7 +273,7 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain("No archived mappings");
   });
 
-  it("renders an active row with category/channel resolution", () => {
+  it("renders an active row with category/channel resolution and write controls", () => {
     const html = renderReactionRolesPage({
       ...COMMON,
       enabled: true,
@@ -296,8 +296,39 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain("Gamer");
     expect(html).toContain("#roles");
     expect(html).toContain('class="tag tag-on">active');
+    expect(html).toContain("/admin/reaction-roles/create");
+    expect(html).toContain("/admin/reaction-roles/archive");
+    expect(html).toContain("/admin/reaction-roles/delete");
+  });
+
+  it("renders unarchive control for archived rows", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: { name: "roles", id: "c1" },
+      active: [],
+      archived: [
+        {
+          emoji: "📦",
+          roleName: "Old",
+          roleId: "r2",
+          categoryName: "Roles",
+          channelName: "old",
+          messageId: "m2",
+          isArchived: true,
+          archivedAt: "2026-05-08T00:00:00.000Z",
+        },
+      ],
+    });
+    expect(html).toContain("/admin/reaction-roles/unarchive");
+    expect(html).toContain("/admin/reaction-roles/delete");
   });
 });
+
+const NOTICE_CATEGORY_OPTIONS = [
+  { value: "general", label: "📋 General" },
+  { value: "rules", label: "📜 Rules" },
+];
 
 describe("renderNoticesPage", () => {
   it("renders the empty state when no notices exist", () => {
@@ -308,11 +339,13 @@ describe("renderNoticesPage", () => {
       headerEnabled: false,
       total: 0,
       groups: [],
+      categoryOptions: NOTICE_CATEGORY_OPTIONS,
     });
     expect(html).toContain("No notices stored");
+    expect(html).toContain("Create a notice");
   });
 
-  it("groups by category and escapes content", () => {
+  it("groups by category, exposes per-row edit/delete, and escapes content", () => {
     const html = renderNoticesPage({
       ...COMMON,
       enabled: true,
@@ -324,19 +357,27 @@ describe("renderNoticesPage", () => {
           category: "rules",
           rows: [
             {
+              id: "n1",
               order: 1,
               title: "Be nice",
+              content: "<3 everyone",
               preview: "<3 everyone",
+              category: "rules",
               messageId: "m1",
               updatedAt: "2026-05-08T00:00:00.000Z",
             },
           ],
         },
       ],
+      categoryOptions: NOTICE_CATEGORY_OPTIONS,
     });
     expect(html).toContain("rules");
     expect(html).toContain("Be nice");
     expect(html).toContain("&lt;3 everyone");
+    expect(html).toContain("/admin/notices/n1/update");
+    expect(html).toContain("/admin/notices/n1/delete");
+    expect(html).toContain("/admin/notices/n1/order");
+    expect(html).toContain("/admin/notices/sync");
   });
 });
 
@@ -360,14 +401,20 @@ describe("renderDatabasePage", () => {
         monthlyMonths: 6,
         yearlyYears: 1,
       },
+      trunkHistory: [],
       collections: [],
     });
     expect(html).toContain("connected");
     expect(html).toContain("No collection statistics");
     expect(html).toContain("30 days");
+    expect(html).toContain("No prior cleanup runs recorded");
+    // Disabled feature → cleanup button is rendered but disabled.
+    expect(html).toMatch(
+      /<button[^>]*type="submit"[^>]*disabled[^>]*>Run cleanup now<\/button>/,
+    );
   });
 
-  it("lists collections with counts when present", () => {
+  it("lists collections with counts and history when present", () => {
     const html = renderDatabasePage({
       ...COMMON,
       connection: { state: "connected", name: "koolbot", host: "mongodb" },
@@ -382,11 +429,25 @@ describe("renderDatabasePage", () => {
         monthlyMonths: 6,
         yearlyYears: 1,
       },
+      trunkHistory: [
+        {
+          ranAt: "2026-05-08T00:00:00.000Z",
+          sessionsRemoved: 17,
+          dataAggregated: 4,
+          executionMs: 1234,
+          errors: 0,
+          result: "success",
+          errorMessage: null,
+        },
+      ],
       collections: [{ name: "configs", count: 42 }],
     });
     expect(html).toContain("configs");
     expect(html).toContain("42");
     expect(html).toContain("0 0 * * *");
+    expect(html).toContain("/admin/database/run-cleanup");
+    expect(html).toContain("17");
+    expect(html).toContain("1234ms");
   });
 });
 
@@ -408,7 +469,7 @@ describe("renderVoiceChannelsPage", () => {
     expect(html).toContain("Voice channel category not found");
   });
 
-  it("renders managed channels with lobby/dynamic/live tags", () => {
+  it("renders managed channels with lobby/dynamic/live tags and cleanup actions", () => {
     const html = renderVoiceChannelsPage({
       ...COMMON,
       enabled: true,
@@ -443,5 +504,29 @@ describe("renderVoiceChannelsPage", () => {
     expect(html).toContain('class="tag tag-warn">dynamic');
     expect(html).toContain('class="tag tag-warn">LIVE');
     expect(html).toContain("Friday night");
+    expect(html).toContain("/admin/voice-channels/reload");
+    expect(html).toContain("/admin/voice-channels/force-reload");
+  });
+
+  it("disables cleanup actions when the feature is off or the category is missing", () => {
+    const html = renderVoiceChannelsPage({
+      ...COMMON,
+      enabled: false,
+      controlPanelEnabled: true,
+      categoryName: "Voice",
+      lobbyName: "Lobby",
+      offlineLobbyName: "Offline Lobby",
+      prefix: "🎮",
+      totalManaged: 0,
+      totalEmpty: 0,
+      channels: [],
+      categoryFound: false,
+    });
+    expect(html).toMatch(
+      /<button[^>]*type="submit"[^>]*disabled[^>]*>Clean up empty channels<\/button>/,
+    );
+    expect(html).toMatch(
+      /<button[^>]*type="submit"[^>]*disabled[^>]*>Force cleanup/,
+    );
   });
 });

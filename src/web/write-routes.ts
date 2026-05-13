@@ -1,10 +1,9 @@
 /**
- * State-changing route handlers for the WebUI (issue #383). Mounted onto
- * the WebUI router behind `requireSession` and `requireCsrf`. Every
- * handler is a thin wrapper around `ScheduledAnnouncementService`,
- * `PollService`, or `VoiceChannelAnnouncer` — there is no business
- * logic here. Each write records exactly one audit entry via
- * `recordAudit()`.
+ * State-changing route handlers for the WebUI (issues #383 and #384).
+ * Mounted onto the WebUI router behind `requireSession` and
+ * `requireCsrf`. Every handler is a thin wrapper around an existing
+ * service — there is no business logic here. Each write records exactly
+ * one audit entry via `recordAudit()`.
  */
 
 import {
@@ -19,9 +18,16 @@ import logger from "../utils/logger.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import { PollService } from "../services/poll-service.js";
 import { VoiceChannelAnnouncer } from "../services/voice-channel-announcer.js";
+import { ReactionRoleService } from "../services/reaction-role-service.js";
+import { NoticesChannelManager } from "../services/notices-channel-manager.js";
+import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
+import { VoiceChannelManager } from "../services/voice-channel-manager.js";
+import { ConfigService } from "../services/config-service.js";
 import type { IScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import type { IPollSchedule } from "../models/poll-schedule.js";
 import type { IPollItem } from "../models/poll-item.js";
+import Notice from "../models/notice.js";
+import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { requireCsrf } from "./csrf.js";
 import type { AuthenticatedRequest } from "./session.js";
 import { recordAudit } from "./audit.js";
@@ -53,6 +59,12 @@ function getString(req: AuthenticatedRequest, name: string): string {
 function getCheckbox(req: AuthenticatedRequest, name: string): boolean {
   const raw = (req.body as Record<string, unknown> | undefined)?.[name];
   return typeof raw === "string" && raw.length > 0;
+}
+
+function parseIntInRange(raw: string, min: number, max: number): number | null {
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return n;
 }
 
 /**
@@ -739,6 +751,685 @@ export function createWriteRouter(
         flashRedirect(res, "/admin/polls", {
           type: "err",
           text: `Import failed: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // ============================================================
+  // Reaction Roles (issue #384)
+  // ============================================================
+
+  router.post(
+    "/reaction-roles/create",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const name = getString(req, "name");
+      const emoji = getString(req, "emoji");
+
+      if (!name || !emoji) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Role name and emoji are both required.",
+        });
+        return;
+      }
+
+      const service = ReactionRoleService.getInstance(client);
+      try {
+        const result = await service.createReactionRole(
+          session.guildId,
+          name,
+          emoji,
+        );
+        await recordAudit(session, {
+          action: "reactionrole.create",
+          targetId: result.roleId ?? null,
+          details: {
+            roleName: name,
+            emoji,
+            categoryId: result.categoryId,
+            channelId: result.channelId,
+            messageId: result.messageId,
+          },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success ? null : result.message,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: result.success ? "ok" : "err",
+          text: result.message,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Create reaction role failed", err);
+        await recordAudit(session, {
+          action: "reactionrole.create",
+          details: { roleName: name, emoji },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: `Failed to create reaction role: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/reaction-roles/archive",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const roleName = getString(req, "roleName");
+      if (!roleName) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Role name is required.",
+        });
+        return;
+      }
+      const service = ReactionRoleService.getInstance(client);
+      try {
+        const result = await service.archiveReactionRole(
+          session.guildId,
+          roleName,
+        );
+        await recordAudit(session, {
+          action: "reactionrole.archive",
+          targetId: roleName,
+          details: { roleName },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success ? null : result.message,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: result.success ? "ok" : "err",
+          text: result.message,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Archive reaction role failed", err);
+        await recordAudit(session, {
+          action: "reactionrole.archive",
+          targetId: roleName,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: `Failed to archive ${roleName}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/reaction-roles/unarchive",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const roleName = getString(req, "roleName");
+      if (!roleName) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Role name is required.",
+        });
+        return;
+      }
+      const service = ReactionRoleService.getInstance(client);
+      try {
+        const result = await service.unarchiveReactionRole(
+          session.guildId,
+          roleName,
+        );
+        await recordAudit(session, {
+          action: "reactionrole.unarchive",
+          targetId: roleName,
+          details: { roleName },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success ? null : result.message,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: result.success ? "ok" : "err",
+          text: result.message,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Unarchive reaction role failed", err);
+        await recordAudit(session, {
+          action: "reactionrole.unarchive",
+          targetId: roleName,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: `Failed to unarchive ${roleName}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/reaction-roles/delete",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const roleName = getString(req, "roleName");
+      if (!roleName) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Role name is required.",
+        });
+        return;
+      }
+      const service = ReactionRoleService.getInstance(client);
+      try {
+        const result = await service.deleteReactionRole(
+          session.guildId,
+          roleName,
+        );
+        await recordAudit(session, {
+          action: "reactionrole.delete",
+          targetId: roleName,
+          details: { roleName },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success ? null : result.message,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: result.success ? "ok" : "err",
+          text: result.message,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Delete reaction role failed", err);
+        await recordAudit(session, {
+          action: "reactionrole.delete",
+          targetId: roleName,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: `Failed to delete ${roleName}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // ============================================================
+  // Notices (issue #384)
+  // ============================================================
+
+  const NOTICE_CATEGORY_KEYS = new Set(Object.keys(NOTICE_CATEGORIES));
+
+  router.post(
+    "/notices/create",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const title = getString(req, "title");
+      const content = getString(req, "content");
+      const category = getString(req, "category");
+      const orderRaw = getString(req, "order");
+
+      if (!title || !content || !category) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: "Title, content, and category are all required.",
+        });
+        return;
+      }
+      if (title.length > 256) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: "Title must be 256 characters or fewer.",
+        });
+        return;
+      }
+      if (content.length > 4000) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: "Content must be 4000 characters or fewer.",
+        });
+        return;
+      }
+      if (!NOTICE_CATEGORY_KEYS.has(category)) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: `Unknown category: ${category}.`,
+        });
+        return;
+      }
+      const order = parseIntInRange(orderRaw || "0", -1000, 10000);
+      if (order === null) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: "Order must be an integer between -1000 and 10000.",
+        });
+        return;
+      }
+
+      try {
+        const enabled = await ConfigService.getInstance().getBoolean(
+          "notices.enabled",
+          false,
+        );
+        const notice = await new Notice({
+          title,
+          content,
+          category,
+          order,
+          createdBy: session.discordUserId,
+        }).save();
+
+        let postedMessageId: string | null = null;
+        if (enabled) {
+          const manager = NoticesChannelManager.getInstance(client);
+          postedMessageId = await manager.postNotice(notice);
+          if (postedMessageId) {
+            notice.messageId = postedMessageId;
+            await notice.save();
+          }
+        }
+
+        await recordAudit(session, {
+          action: "notice.create",
+          targetId: String(notice._id),
+          details: {
+            title,
+            category,
+            order,
+            posted: postedMessageId !== null,
+            featureEnabled: enabled,
+          },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "ok",
+          text: enabled
+            ? `Created notice ${notice._id} and posted to channel.`
+            : `Created notice ${notice._id}. Enable notices.enabled to post it to a channel.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Create notice failed", err);
+        await recordAudit(session, {
+          action: "notice.create",
+          details: { title, category, order },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: `Failed to create notice: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/notices/:id/update",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const title = getString(req, "title");
+      const content = getString(req, "content");
+      const category = getString(req, "category");
+      const orderRaw = getString(req, "order");
+
+      if (!title || !content || !category) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: "Title, content, and category are all required.",
+        });
+        return;
+      }
+      if (!NOTICE_CATEGORY_KEYS.has(category)) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: `Unknown category: ${category}.`,
+        });
+        return;
+      }
+      const order = parseIntInRange(orderRaw, -1000, 10000);
+      if (order === null) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: "Order must be an integer between -1000 and 10000.",
+        });
+        return;
+      }
+
+      try {
+        const notice = await Notice.findById(id);
+        if (!notice) {
+          await recordAudit(session, {
+            action: "notice.update",
+            targetId: id,
+            result: "failure",
+            errorMessage: "not found",
+          });
+          flashRedirect(res, "/admin/notices", {
+            type: "err",
+            text: `Notice ${id} not found.`,
+          });
+          return;
+        }
+
+        notice.title = title;
+        notice.content = content;
+        notice.category = category;
+        notice.order = order;
+        await notice.save();
+
+        const enabled = await ConfigService.getInstance().getBoolean(
+          "notices.enabled",
+          false,
+        );
+        if (enabled) {
+          const manager = NoticesChannelManager.getInstance(client);
+          if (notice.messageId) {
+            await manager.deleteNoticeMessage(notice.messageId);
+          }
+          const newMessageId = await manager.postNotice(notice);
+          if (newMessageId) {
+            notice.messageId = newMessageId;
+            await notice.save();
+          }
+        }
+
+        await recordAudit(session, {
+          action: "notice.update",
+          targetId: id,
+          details: { title, category, order, reposted: enabled },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "ok",
+          text: `Updated notice ${id}.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Update notice failed", err);
+        await recordAudit(session, {
+          action: "notice.update",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: `Failed to update notice ${id}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/notices/:id/order",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const orderRaw = getString(req, "order");
+      const order = parseIntInRange(orderRaw, -1000, 10000);
+      if (order === null) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: "Order must be an integer between -1000 and 10000.",
+        });
+        return;
+      }
+      try {
+        const notice = await Notice.findById(id);
+        if (!notice) {
+          await recordAudit(session, {
+            action: "notice.reorder",
+            targetId: id,
+            result: "failure",
+            errorMessage: "not found",
+          });
+          flashRedirect(res, "/admin/notices", {
+            type: "err",
+            text: `Notice ${id} not found.`,
+          });
+          return;
+        }
+        const previous = notice.order;
+        notice.order = order;
+        await notice.save();
+        await recordAudit(session, {
+          action: "notice.reorder",
+          targetId: id,
+          details: { from: previous, to: order, category: notice.category },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "ok",
+          text: `Reordered notice ${id}: ${previous} → ${order}. Resync to refresh channel order.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Reorder notice failed", err);
+        await recordAudit(session, {
+          action: "notice.reorder",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: `Failed to reorder notice ${id}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/notices/:id/delete",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      try {
+        const notice = await Notice.findById(id);
+        if (!notice) {
+          await recordAudit(session, {
+            action: "notice.delete",
+            targetId: id,
+            result: "failure",
+            errorMessage: "not found",
+          });
+          flashRedirect(res, "/admin/notices", {
+            type: "err",
+            text: `Notice ${id} not found.`,
+          });
+          return;
+        }
+        const manager = NoticesChannelManager.getInstance(client);
+        if (notice.messageId) {
+          await manager.deleteNoticeMessage(notice.messageId);
+        }
+        await Notice.findByIdAndDelete(id);
+        await recordAudit(session, {
+          action: "notice.delete",
+          targetId: id,
+          details: { title: notice.title, category: notice.category },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "ok",
+          text: `Deleted notice ${id}.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Delete notice failed", err);
+        await recordAudit(session, {
+          action: "notice.delete",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: `Failed to delete notice ${id}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/notices/sync",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      try {
+        const manager = NoticesChannelManager.getInstance(client);
+        await manager.syncNotices();
+        const count = await Notice.countDocuments();
+        await recordAudit(session, {
+          action: "notice.sync",
+          details: { count },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "ok",
+          text: `Synced ${count} notices to channel.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Notice sync failed", err);
+        await recordAudit(session, {
+          action: "notice.sync",
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: `Failed to sync notices: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // ============================================================
+  // Database — dbtrunk (issue #384)
+  // ============================================================
+
+  router.post(
+    "/database/run-cleanup",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const service = VoiceChannelTruncationService.getInstance(client);
+      try {
+        const stats = await service.runCleanup();
+        const skipped =
+          stats.errors.length === 1 &&
+          stats.errors[0] === "Cleanup skipped: minimum interval not met";
+        const hasErrors = stats.errors.length > 0 && !skipped;
+        await recordAudit(session, {
+          action: "dbtrunk.run",
+          details: {
+            sessionsRemoved: stats.sessionsRemoved,
+            dataAggregated: stats.dataAggregated,
+            executionTime: stats.executionTime,
+            errors: hasErrors ? stats.errors.length : 0,
+            skipped,
+          },
+          result: hasErrors ? "failure" : "success",
+          errorMessage: hasErrors ? stats.errors.slice(0, 3).join("; ") : null,
+        });
+        if (skipped) {
+          flashRedirect(res, "/admin/database", {
+            type: "warn",
+            text: "Cleanup skipped: 24-hour minimum interval not met since the last run.",
+          });
+          return;
+        }
+        if (hasErrors) {
+          flashRedirect(res, "/admin/database", {
+            type: "err",
+            text: `Cleanup finished with errors: ${stats.errors.slice(0, 3).join("; ")}`,
+          });
+          return;
+        }
+        flashRedirect(res, "/admin/database", {
+          type: "ok",
+          text: `Cleanup complete. Removed ${stats.sessionsRemoved} sessions across ${stats.dataAggregated} users in ${stats.executionTime}ms.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("dbtrunk run failed", err);
+        await recordAudit(session, {
+          action: "dbtrunk.run",
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/database", {
+          type: "err",
+          text: `Cleanup failed: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // ============================================================
+  // Voice Channels (issue #384)
+  // ============================================================
+
+  router.post(
+    "/voice-channels/reload",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const manager = VoiceChannelManager.getInstance(client);
+      try {
+        await manager.cleanupEmptyChannels();
+        await recordAudit(session, {
+          action: "voicechannels.reload",
+          result: "success",
+        });
+        flashRedirect(res, "/admin/voice-channels", {
+          type: "ok",
+          text: "Cleaned up empty voice channels.",
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("VC reload failed", err);
+        await recordAudit(session, {
+          action: "voicechannels.reload",
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/voice-channels", {
+          type: "err",
+          text: `Cleanup failed: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/voice-channels/force-reload",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const manager = VoiceChannelManager.getInstance(client);
+      try {
+        await manager.cleanupEmptyChannels();
+        const guild = await client.guilds.fetch(session.guildId);
+        await manager.ensureLobbyChannels(guild);
+        await recordAudit(session, {
+          action: "voicechannels.force-reload",
+          result: "success",
+        });
+        flashRedirect(res, "/admin/voice-channels", {
+          type: "ok",
+          text: "Force cleanup complete. Unmanaged channels removed and lobby channels ensured.",
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("VC force-reload failed", err);
+        await recordAudit(session, {
+          action: "voicechannels.force-reload",
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/voice-channels", {
+          type: "err",
+          text: `Force cleanup failed: ${text}`,
         });
       }
     }),

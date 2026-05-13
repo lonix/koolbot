@@ -103,6 +103,11 @@ const STYLE = [
   ".helper{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.4rem .6rem;font-size:.85rem}",
   ".helper summary{cursor:pointer;color:#cbd5e1;font-weight:600}",
   ".helper ul{margin:.4rem 0;padding-left:1.2rem}",
+  "form.inline-order{display:flex;gap:.25rem;align-items:center;margin:0}",
+  "form.inline-order input[type=number]{width:5rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px;padding:.25rem .4rem;font:inherit;font-size:.85rem}",
+  ".edit-details{flex:0 0 100%;margin-bottom:.35rem}",
+  ".edit-details form.stack{margin-top:.5rem}",
+  "button[disabled]{opacity:.5;cursor:not-allowed}",
 ].join("");
 
 const SCRIPT =
