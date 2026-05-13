@@ -2,8 +2,11 @@
 
 Complete reference for all KoolBot commands with examples and detailed explanations.
 
-> **Note:** All commands must be enabled through configuration before they appear in Discord.  
-> Use `/config set key:command.enabled value:true` and then `/config reload` to enable commands.
+> **Note:** All commands must be enabled through configuration before they appear in Discord.
+> The supported way to do this is the WebUI Settings page (run `/config` to get a
+> single-use sign-in link). The legacy slash equivalents — `/config set
+> key:command.enabled value:true` followed by `/config reload` — still work for the
+> current release but are deprecated; see the banner below.
 
 ---
 

@@ -70,20 +70,19 @@ export async function sendDeprecationNotice(
     return;
   }
 
-  const embed = buildEmbed();
+  // Only emit as a follow-up so we never consume the initial reply slot.
+  // If the command threw before replying/deferring, the global error
+  // handler in src/index.ts will produce the user-facing reply; sending a
+  // deprecation embed there would just be overwritten by editReply.
+  if (!interaction.replied && !interaction.deferred) {
+    return;
+  }
 
   try {
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
-    } else {
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    await interaction.followUp({
+      embeds: [buildEmbed()],
+      flags: MessageFlags.Ephemeral,
+    });
   } catch (error) {
     logger.warn(
       `Failed to send deprecation notice for /${interaction.commandName}:`,

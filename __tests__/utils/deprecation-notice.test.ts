@@ -163,10 +163,10 @@ describe("sendDeprecationNotice", () => {
     expect(interaction.reply).not.toHaveBeenCalled();
   });
 
-  it("falls back to reply when the interaction has not been replied/deferred", async () => {
+  it("skips silently when the interaction has not been replied/deferred (so error replies are not overwritten)", async () => {
     const interaction = buildInteraction({ commandName: "botstats" });
     await sendDeprecationNotice(interaction);
-    expect(interaction.reply).toHaveBeenCalledTimes(1);
+    expect(interaction.reply).not.toHaveBeenCalled();
     expect(interaction.followUp).not.toHaveBeenCalled();
   });
 
@@ -189,6 +189,20 @@ describe("sendDeprecationNotice", () => {
     await sendDeprecationNotice(interaction);
     expect(interaction.followUp).not.toHaveBeenCalled();
     expect(interaction.reply).not.toHaveBeenCalled();
+  });
+
+  it("points the operator at the /config launcher in the deprecation copy", async () => {
+    const interaction = buildInteraction({
+      commandName: "vc",
+      replied: true,
+    });
+    await sendDeprecationNotice(interaction);
+    expect(interaction.followUp).toHaveBeenCalledTimes(1);
+    const call = (interaction.followUp as jest.Mock).mock.calls[0][0] as {
+      embeds: Array<{ data: { description?: string } }>;
+    };
+    expect(call.embeds[0].data.description).toContain("/config");
+    expect(call.embeds[0].data.description).toContain("removed in 1.0");
   });
 
   it("swallows errors from the Discord client", async () => {
