@@ -15,6 +15,31 @@ export function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Escape a value for safe interpolation into a single-quoted JavaScript
+ * string inside an HTML attribute (e.g. `onsubmit="return confirm('...')"`).
+ *
+ * `escapeHtml` is not enough: HTML entities are decoded back to characters
+ * before the JS engine sees them, so a `'` in the input would terminate the
+ * JS string and let surrounding markup leak into the script context. Strip
+ * the dangerous characters here, then HTML-escape the result so the
+ * attribute itself is also safe.
+ */
+export function escapeJsInAttr(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const jsSafe = String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")
+    // Break any </script> sequence so the string can't escape its tag context.
+    .replace(/<\/(script)/gi, "<\\/$1");
+  return escapeHtml(jsSafe);
+}
+
 interface NavItem {
   href: string;
   label: string;

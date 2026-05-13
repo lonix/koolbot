@@ -774,6 +774,26 @@ export function createWriteRouter(
         });
         return;
       }
+      // Discord caps role names at 100 chars. Validate here so we surface a
+      // clean flash instead of letting the Discord API reject the create
+      // mid-rollback.
+      if (name.length > 100) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Role name must be 100 characters or fewer.",
+        });
+        return;
+      }
+      // Emoji input is either a single Unicode codepoint cluster or a custom
+      // emoji markup like `<:name:id>` / `<a:name:id>`. 100 chars is well past
+      // any legitimate input and matches the form's `maxlength`.
+      if (emoji.length > 100) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Emoji input must be 100 characters or fewer.",
+        });
+        return;
+      }
 
       const service = ReactionRoleService.getInstance(client);
       try {
@@ -1041,11 +1061,19 @@ export function createWriteRouter(
           },
           result: "success",
         });
+        let flashType: Flash["type"] = "ok";
+        let flashText: string;
+        if (!enabled) {
+          flashText = `Created notice ${notice._id}. Enable notices.enabled to post it to a channel.`;
+        } else if (postedMessageId !== null) {
+          flashText = `Created notice ${notice._id} and posted to channel.`;
+        } else {
+          flashType = "warn";
+          flashText = `Created notice ${notice._id} but the channel post failed. Check the bot's logs and use Resync to retry.`;
+        }
         flashRedirect(res, "/admin/notices", {
-          type: "ok",
-          text: enabled
-            ? `Created notice ${notice._id} and posted to channel.`
-            : `Created notice ${notice._id}. Enable notices.enabled to post it to a channel.`,
+          type: flashType,
+          text: flashText,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
@@ -1123,7 +1151,12 @@ export function createWriteRouter(
           "notices.enabled",
           false,
         );
+        // `postNotice()` catches its own errors and returns null on failure.
+        // Track the actual outcome so the audit/flash don't lie about a repost.
+        let repostAttempted = false;
+        let repostSucceeded = false;
         if (enabled) {
+          repostAttempted = true;
           const manager = NoticesChannelManager.getInstance(client);
           if (notice.messageId) {
             await manager.deleteNoticeMessage(notice.messageId);
@@ -1131,16 +1164,35 @@ export function createWriteRouter(
           const newMessageId = await manager.postNotice(notice);
           if (newMessageId) {
             notice.messageId = newMessageId;
-            await notice.save();
+            repostSucceeded = true;
+          } else {
+            // We deleted (or tried to delete) the old message but couldn't
+            // post a replacement. Clear the now-stale messageId so the next
+            // sync doesn't try to delete a message that no longer exists.
+            notice.messageId = undefined;
           }
+          await notice.save();
         }
 
         await recordAudit(session, {
           action: "notice.update",
           targetId: id,
-          details: { title, category, order, reposted: enabled },
+          details: {
+            title,
+            category,
+            order,
+            repostAttempted,
+            repostSucceeded,
+          },
           result: "success",
         });
+        if (repostAttempted && !repostSucceeded) {
+          flashRedirect(res, "/admin/notices", {
+            type: "warn",
+            text: `Updated notice ${id} but the channel post failed. Use Resync to retry.`,
+          });
+          return;
+        }
         flashRedirect(res, "/admin/notices", {
           type: "ok",
           text: `Updated notice ${id}.`,
@@ -1317,9 +1369,7 @@ export function createWriteRouter(
       const service = VoiceChannelTruncationService.getInstance(client);
       try {
         const stats = await service.runCleanup();
-        const skipped =
-          stats.errors.length === 1 &&
-          stats.errors[0] === "Cleanup skipped: minimum interval not met";
+        const skipped = stats.skipped === true;
         const hasErrors = stats.errors.length > 0 && !skipped;
         await recordAudit(session, {
           action: "dbtrunk.run",

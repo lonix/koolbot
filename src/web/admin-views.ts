@@ -4,7 +4,7 @@
  * without a Discord client or MongoDB.
  */
 
-import { escapeHtml, renderAdminPage } from "./admin-layout.js";
+import { escapeHtml, escapeJsInAttr, renderAdminPage } from "./admin-layout.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -654,11 +654,12 @@ export interface ReactionRolesProps extends CommonProps {
 
 function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
   const escapedName = escapeHtml(rr.roleName);
+  const jsName = escapeJsInAttr(rr.roleName);
   const actions = rr.isArchived
     ? `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Unarchive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${escapedName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`
-    : `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${escapedName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Archive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${escapedName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`
+    : `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Archive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
 
   return `<tr>
 <td class="mono">${escapeHtml(rr.emoji)}</td>
@@ -802,7 +803,7 @@ export function renderNoticesPage(props: NoticesProps): string {
       <button type="submit" class="btn btn-primary">Save changes</button>
     </form>
   </details>
-  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" onsubmit="return confirm('Delete notice &quot;${escapeHtml(n.title)}&quot;?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" onsubmit="return confirm('Delete notice \\'${escapeJsInAttr(n.title)}\\'?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
 </tr>`,
               )

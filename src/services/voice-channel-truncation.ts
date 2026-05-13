@@ -12,6 +12,12 @@ export interface ICleanupStats {
   executionTime: number;
   errors: string[];
   timestamp: Date;
+  /**
+   * `true` when the run returned early because the 24h minimum interval
+   * hadn't elapsed since the previous cleanup. Lets callers distinguish a
+   * deliberate no-op from a genuine failure without parsing `errors[0]`.
+   */
+  skipped?: boolean;
 }
 
 export interface IRetentionConfig {
@@ -292,6 +298,7 @@ export class VoiceChannelTruncationService {
             executionTime: Date.now() - startTime,
             errors: ["Cleanup skipped: minimum interval not met"],
             timestamp: new Date(),
+            skipped: true,
           };
         }
       }
