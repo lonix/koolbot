@@ -31,8 +31,10 @@ import { PollItem } from "../models/poll-item.js";
 import { ReactionRoleService } from "../services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import Notice from "../models/notice.js";
+import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
+import { WebAuditLog } from "../models/web-audit-log.js";
 import type { AuthenticatedRequest } from "./session.js";
 import { getDisplayedRemainingMs } from "./admin-layout.js";
 import {
@@ -47,7 +49,9 @@ import {
   renderSettingsPage,
   renderVoiceChannelsPage,
   type ChannelOption,
+  type DbTrunkHistoryRow,
   type FlashMessage,
+  type NoticeCategoryOption,
   type ReactionRoleRow,
   type RoleOption,
   type SettingRow,
@@ -579,6 +583,7 @@ export function createReadOnlyRouter(
             : null,
           active: active.map(shape),
           archived: archived.map(shape),
+          flash: readFlash(req),
         }),
       );
     }),
@@ -609,13 +614,23 @@ export function createReadOnlyRouter(
       const groups = Array.from(grouped.entries()).map(([category, list]) => ({
         category,
         rows: list.map((n) => ({
+          id: String(n._id),
           order: n.order,
           title: n.title,
+          content: n.content,
           preview:
             n.content.length > 120 ? `${n.content.slice(0, 120)}…` : n.content,
+          category: n.category,
           messageId: n.messageId ?? "",
           updatedAt: new Date(n.updatedAt).toISOString(),
         })),
+      }));
+
+      const categoryOptions: NoticeCategoryOption[] = Object.entries(
+        NOTICE_CATEGORIES,
+      ).map(([value, info]) => ({
+        value,
+        label: `${info.emoji} ${info.label}`,
       }));
 
       res.type("text/html").send(
@@ -628,6 +643,8 @@ export function createReadOnlyRouter(
           headerEnabled,
           total: notices.length,
           groups,
+          categoryOptions,
+          flash: readFlash(req),
         }),
       );
     }),
@@ -695,6 +712,36 @@ export function createReadOnlyRouter(
           mongoose.connection.readyState
         ] ?? "unknown";
 
+      const historyDocs = await WebAuditLog.find({
+        guildId: common.guildId,
+        action: "dbtrunk.run",
+      })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .lean()
+        .catch(() => [] as Array<Record<string, unknown>>);
+
+      const trunkHistory: DbTrunkHistoryRow[] = historyDocs.map((h) => {
+        const details = (h.details ?? {}) as {
+          sessionsRemoved?: number;
+          dataAggregated?: number;
+          executionTime?: number;
+          errors?: number;
+        };
+        return {
+          ranAt:
+            h.createdAt instanceof Date
+              ? h.createdAt.toISOString()
+              : String(h.createdAt ?? ""),
+          sessionsRemoved: details.sessionsRemoved ?? 0,
+          dataAggregated: details.dataAggregated ?? 0,
+          executionMs: details.executionTime ?? 0,
+          errors: details.errors ?? 0,
+          result: (h.result as "success" | "failure") ?? "success",
+          errorMessage: (h.errorMessage as string | null) ?? null,
+        };
+      });
+
       res.type("text/html").send(
         renderDatabasePage({
           ...common,
@@ -723,7 +770,9 @@ export function createReadOnlyRouter(
             monthlyMonths,
             yearlyYears,
           },
+          trunkHistory,
           collections,
+          flash: readFlash(req),
         }),
       );
     }),
@@ -811,6 +860,7 @@ export function createReadOnlyRouter(
           totalEmpty,
           channels,
           categoryFound,
+          flash: readFlash(req),
         }),
       );
     }),

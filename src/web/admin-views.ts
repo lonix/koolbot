@@ -4,7 +4,7 @@
  * without a Discord client or MongoDB.
  */
 
-import { escapeHtml, renderAdminPage } from "./admin-layout.js";
+import { escapeHtml, escapeJsInAttr, renderAdminPage } from "./admin-layout.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -649,30 +649,46 @@ export interface ReactionRolesProps extends CommonProps {
   configChannel: { name: string; id: string } | null;
   active: ReactionRoleRow[];
   archived: ReactionRoleRow[];
+  flash?: FlashMessage | null;
 }
 
-function reactionRoleRow(rr: ReactionRoleRow): string {
+function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
+  const escapedName = escapeHtml(rr.roleName);
+  const jsName = escapeJsInAttr(rr.roleName);
+  const actions = rr.isArchived
+    ? `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Unarchive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`
+    : `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Archive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+
   return `<tr>
 <td class="mono">${escapeHtml(rr.emoji)}</td>
-<td>${escapeHtml(rr.roleName)} <span class="muted mono">${escapeHtml(rr.roleId)}</span></td>
+<td>${escapedName} <span class="muted mono">${escapeHtml(rr.roleId)}</span></td>
 <td>${escapeHtml(rr.categoryName)}</td>
 <td>#${escapeHtml(rr.channelName)}</td>
 <td class="mono">${escapeHtml(rr.messageId)}</td>
 <td><span class="tag ${rr.isArchived ? "tag-off" : "tag-on"}">${rr.isArchived ? "archived" : "active"}</span></td>
 <td class="muted">${escapeHtml(rr.archivedAt ?? "")}</td>
+<td class="actions">${actions}</td>
 </tr>`;
 }
 
 export function renderReactionRolesPage(props: ReactionRolesProps): string {
-  const activeRows = props.active.map(reactionRoleRow).join("");
-  const archivedRows = props.archived.map(reactionRoleRow).join("");
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const activeRows = props.active
+    .map((rr) => reactionRoleRow(rr, csrfInput))
+    .join("");
+  const archivedRows = props.archived
+    .map((rr) => reactionRoleRow(rr, csrfInput))
+    .join("");
   const channelLine = props.configChannel
     ? `<dt>Message channel</dt><dd>#${escapeHtml(props.configChannel.name)} <span class="muted mono">${escapeHtml(props.configChannel.id)}</span></dd>`
-    : `<dt>Message channel</dt><dd class="muted">unset</dd>`;
+    : `<dt>Message channel</dt><dd class="muted">unset — set <code>reactionroles.message_channel_id</code> before creating reaction roles.</dd>`;
 
   const body = `
 <h1>Reaction Roles</h1>
-<p class="subtitle">Per-message reaction-role mappings stored in <code>reaction_role_configs</code>. Read-only.</p>
+<p class="subtitle">Per-message reaction-role mappings. Replaces <code>/reactrole create|archive|unarchive|delete|list|status</code>; the slash commands still work in parallel during migration.</p>
+${renderFlash(props.flash)}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -687,15 +703,29 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
   ${
     props.active.length === 0
       ? `<div class="empty">No active reaction-role mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th></tr></thead><tbody>${activeRows}</tbody></table>`
+      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
   }
+</div>
+<div class="card">
+  <h2>Create a reaction role</h2>
+  <p class="muted">Creates a Discord role + category + text channel, posts a reaction-role message to the configured channel, and adds the reaction. The new channel preview is <code>${escapeHtml(props.configChannel?.name ?? "(unset)")}</code>.</p>
+  <form method="POST" action="/admin/reaction-roles/create" class="stack">
+    ${csrfInput}
+    <label>Role name
+      <input type="text" name="name" required maxlength="100" placeholder="Gamer">
+    </label>
+    <label>Emoji (Unicode or <code>&lt;:name:id&gt;</code>)
+      <input type="text" name="emoji" required maxlength="100" placeholder="🎮">
+    </label>
+    <button type="submit" class="btn btn-primary">Create reaction role</button>
+  </form>
 </div>
 <div class="card">
   <h2>Archived (last 50)</h2>
   ${
     props.archived.length === 0
       ? `<div class="empty">No archived mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th></tr></thead><tbody>${archivedRows}</tbody></table>`
+      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
   }
 </div>
 `;
@@ -711,11 +741,19 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
 // ---------- Notices ----------
 
 export interface NoticeRow {
+  id: string;
   order: number;
   title: string;
+  content: string;
   preview: string;
+  category: string;
   messageId: string;
   updatedAt: string;
+}
+
+export interface NoticeCategoryOption {
+  value: string;
+  label: string;
 }
 
 export interface NoticesProps extends CommonProps {
@@ -724,9 +762,24 @@ export interface NoticesProps extends CommonProps {
   headerEnabled: boolean;
   total: number;
   groups: Array<{ category: string; rows: NoticeRow[] }>;
+  categoryOptions: NoticeCategoryOption[];
+  flash?: FlashMessage | null;
+}
+
+function noticeCategoryOptionsHtml(
+  options: NoticeCategoryOption[],
+  selected?: string,
+): string {
+  return options
+    .map(
+      (o) =>
+        `<option value="${escapeHtml(o.value)}"${o.value === selected ? " selected" : ""}>${escapeHtml(o.label)}</option>`,
+    )
+    .join("");
 }
 
 export function renderNoticesPage(props: NoticesProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const groupSections =
     props.groups.length === 0
       ? `<div class="empty">No notices stored.</div>`
@@ -735,24 +788,37 @@ export function renderNoticesPage(props: NoticesProps): string {
             const rows = g.rows
               .map(
                 (n) => `<tr>
-<td>${n.order}</td>
-<td>${escapeHtml(n.title)}</td>
+<td><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" value="${n.order}" min="-1000" max="10000" required><button type="submit" class="btn">Save</button></form></td>
+<td>${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></td>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
 <td class="muted">${escapeHtml(n.updatedAt)}</td>
+<td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/update" class="stack">${csrfInput}
+      <label>Title<input type="text" name="title" maxlength="256" value="${escapeHtml(n.title)}" required></label>
+      <label>Content<textarea name="content" rows="6" maxlength="4000" required>${escapeHtml(n.content)}</textarea></label>
+      <label>Category<select name="category">${noticeCategoryOptionsHtml(props.categoryOptions, n.category)}</select></label>
+      <label>Order<input type="number" name="order" min="-1000" max="10000" value="${n.order}" required></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
+  <form method="POST" action="/admin/notices/${escapeHtml(n.id)}/delete" onsubmit="return confirm('Delete notice \\'${escapeJsInAttr(n.title)}\\'?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
+</td>
 </tr>`,
               )
               .join("");
             return `<div class="card">
   <h2>${escapeHtml(g.category)} <span class="muted">(${g.rows.length})</span></h2>
-  <table><thead><tr><th>#</th><th>Title</th><th>Content</th><th>Message ID</th><th>Updated</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th>Order</th><th>Title</th><th>Content</th><th>Message ID</th><th>Updated</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
 </div>`;
           })
           .join("");
 
   const body = `
 <h1>Notices</h1>
-<p class="subtitle">Notice posts grouped by category. Read-only.</p>
+<p class="subtitle">Notice posts grouped by category. Replaces <code>/notice add|edit|delete|sync</code>; the slash commands still work in parallel during migration. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
+${renderFlash(props.flash)}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -761,6 +827,22 @@ export function renderNoticesPage(props: NoticesProps): string {
     <dt>Header post</dt><dd>${tagOnOff(props.headerEnabled, "enabled", "disabled")}</dd>
     <dt>Total notices</dt><dd>${props.total}</dd>
   </dl>
+  <form method="POST" action="/admin/notices/sync" class="inline-form" onsubmit="return confirm('Resync all notices? This deletes and reposts every notice message.');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary">Resync notices to channel</button>
+    <span class="muted">Same effect as <code>/notice sync</code>.</span>
+  </form>
+</div>
+<div class="card">
+  <h2>Create a notice</h2>
+  <form method="POST" action="/admin/notices/create" class="stack">
+    ${csrfInput}
+    <label>Title<input type="text" name="title" maxlength="256" required></label>
+    <label>Content<textarea name="content" rows="5" maxlength="4000" required></textarea></label>
+    <label>Category<select name="category" required>${noticeCategoryOptionsHtml(props.categoryOptions)}</select></label>
+    <label>Order (lower posts first)<input type="number" name="order" min="-1000" max="10000" value="0" required></label>
+    <button type="submit" class="btn btn-primary">Create notice</button>
+  </form>
 </div>
 ${groupSections}
 `;
@@ -774,6 +856,16 @@ ${groupSections}
 }
 
 // ---------- Database ----------
+
+export interface DbTrunkHistoryRow {
+  ranAt: string;
+  sessionsRemoved: number;
+  dataAggregated: number;
+  executionMs: number;
+  errors: number;
+  result: "success" | "failure";
+  errorMessage: string | null;
+}
 
 export interface DatabaseProps extends CommonProps {
   connection: {
@@ -792,18 +884,45 @@ export interface DatabaseProps extends CommonProps {
     monthlyMonths: number;
     yearlyYears: number;
   };
+  trunkHistory: DbTrunkHistoryRow[];
   collections: Array<{ name: string; count: number }>;
+  flash?: FlashMessage | null;
 }
 
 export function renderDatabasePage(props: DatabaseProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const collectionsHtml =
     props.collections.length === 0
       ? `<div class="empty">No collection statistics available.</div>`
       : `<table><thead><tr><th>Collection</th><th>Documents (est.)</th></tr></thead><tbody>${props.collections.map((c) => `<tr><td class="mono">${escapeHtml(c.name)}</td><td>${c.count}</td></tr>`).join("")}</tbody></table>`;
 
+  const historyHtml =
+    props.trunkHistory.length === 0
+      ? `<div class="empty">No prior cleanup runs recorded.</div>`
+      : `<table><thead><tr><th>When</th><th>Result</th><th>Sessions removed</th><th>Users processed</th><th>Time</th><th>Errors</th></tr></thead><tbody>${props.trunkHistory
+          .map(
+            (h) => `<tr>
+<td class="muted">${escapeHtml(h.ranAt)}</td>
+<td>${h.result === "success" ? '<span class="tag tag-on">ok</span>' : '<span class="tag tag-off">failed</span>'}</td>
+<td>${h.sessionsRemoved}</td>
+<td>${h.dataAggregated}</td>
+<td class="muted">${h.executionMs}ms</td>
+<td class="muted">${h.errors === 0 ? "—" : `${h.errors}${h.errorMessage ? `: ${escapeHtml(h.errorMessage.slice(0, 80))}` : ""}`}</td>
+</tr>`,
+          )
+          .join("")}</tbody></table>`;
+
+  const runDisabled = props.trunk.isRunning || !props.trunk.enabled;
+  const runHint = !props.trunk.enabled
+    ? "Enable <code>voicetracking.cleanup.enabled</code> first."
+    : props.trunk.isRunning
+      ? "A cleanup is already running."
+      : "Same effect as <code>/dbtrunk run</code>. Subject to the 24-hour minimum interval.";
+
   const body = `
 <h1>Database</h1>
-<p class="subtitle">MongoDB connection state and the voice-channel <code>dbtrunk</code> cleanup status. Read-only.</p>
+<p class="subtitle">MongoDB connection state and the voice-channel <code>dbtrunk</code> cleanup. Replaces <code>/dbtrunk status|run</code>; the slash commands still work in parallel during migration.</p>
+${renderFlash(props.flash)}
 <div class="card">
   <h2>Connection</h2>
   <dl class="kv">
@@ -825,6 +944,15 @@ export function renderDatabasePage(props: DatabaseProps): string {
     <dt>Monthly summaries retention</dt><dd>${props.trunk.monthlyMonths} months</dd>
     <dt>Yearly summaries retention</dt><dd>${props.trunk.yearlyYears} years</dd>
   </dl>
+  <form method="POST" action="/admin/database/run-cleanup" class="inline-form" onsubmit="return confirm('Run voice-channel data cleanup now?');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run cleanup now</button>
+    <span class="muted">${runHint}</span>
+  </form>
+</div>
+<div class="card">
+  <h2>Last 10 cleanup runs</h2>
+  ${historyHtml}
 </div>
 <div class="card"><h2>Collections</h2>${collectionsHtml}</div>
 `;
@@ -859,9 +987,11 @@ export interface VoiceChannelsProps extends CommonProps {
   totalEmpty: number;
   channels: VoiceChannelRow[];
   categoryFound: boolean;
+  flash?: FlashMessage | null;
 }
 
 export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const rows = props.channels
     .map((ch) => {
       const tag = ch.isLobby
@@ -884,9 +1014,17 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
       ? `<div class="empty">Category exists but contains no voice channels.</div>`
       : `<table><thead><tr><th>Name</th><th>Type</th><th>Users</th><th>Custom name</th><th>Channel ID</th></tr></thead><tbody>${rows}</tbody></table>`;
 
+  const reloadDisabled = !props.enabled || !props.categoryFound;
+  const reloadHint = !props.enabled
+    ? "Enable <code>voicechannels.enabled</code> first."
+    : !props.categoryFound
+      ? "Category not found in this guild."
+      : "";
+
   const body = `
 <h1>Voice Channels</h1>
-<p class="subtitle">Voice-channel category contents and live state. Read-only.</p>
+<p class="subtitle">Voice-channel category contents and live state. Replaces <code>/vc reload|force-reload</code>; the slash commands still work in parallel during migration.</p>
+${renderFlash(props.flash)}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -899,6 +1037,20 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
     <dt>Total in category</dt><dd>${props.totalManaged}</dd>
     <dt>Empty channels</dt><dd>${props.totalEmpty}</dd>
   </dl>
+</div>
+<div class="card">
+  <h2>Cleanup actions</h2>
+  <form method="POST" action="/admin/voice-channels/reload" class="inline-form" onsubmit="return confirm('Clean up empty dynamic voice channels now?');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary"${reloadDisabled ? " disabled" : ""}>Clean up empty channels</button>
+    <span class="muted">Same effect as <code>/vc reload</code>.</span>
+  </form>
+  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of ALL unmanaged channels in the category and re-create lobby channels?');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force cleanup &amp; ensure lobby</button>
+    <span class="muted">Same effect as <code>/vc force-reload</code>.</span>
+  </form>
+  ${reloadHint ? `<p class="muted">${reloadHint}</p>` : ""}
 </div>
 <div class="card"><h2>Channels</h2>${channelsHtml}</div>
 `;

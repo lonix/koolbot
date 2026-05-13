@@ -15,6 +15,31 @@ export function escapeHtml(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Escape a value for safe interpolation into a single-quoted JavaScript
+ * string inside an HTML attribute (e.g. `onsubmit="return confirm('...')"`).
+ *
+ * `escapeHtml` is not enough: HTML entities are decoded back to characters
+ * before the JS engine sees them, so a `'` in the input would terminate the
+ * JS string and let surrounding markup leak into the script context. Strip
+ * the dangerous characters here, then HTML-escape the result so the
+ * attribute itself is also safe.
+ */
+export function escapeJsInAttr(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  const jsSafe = String(value)
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n")
+    .replace(/\r/g, "\\r")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")
+    // Break any </script> sequence so the string can't escape its tag context.
+    .replace(/<\/(script)/gi, "<\\/$1");
+  return escapeHtml(jsSafe);
+}
+
 interface NavItem {
   href: string;
   label: string;
@@ -103,6 +128,11 @@ const STYLE = [
   ".helper{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.4rem .6rem;font-size:.85rem}",
   ".helper summary{cursor:pointer;color:#cbd5e1;font-weight:600}",
   ".helper ul{margin:.4rem 0;padding-left:1.2rem}",
+  "form.inline-order{display:flex;gap:.25rem;align-items:center;margin:0}",
+  "form.inline-order input[type=number]{width:5rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px;padding:.25rem .4rem;font:inherit;font-size:.85rem}",
+  ".edit-details{flex:0 0 100%;margin-bottom:.35rem}",
+  ".edit-details form.stack{margin-top:.5rem}",
+  "button[disabled]{opacity:.5;cursor:not-allowed}",
 ].join("");
 
 const SCRIPT =
