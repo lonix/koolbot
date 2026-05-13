@@ -5,6 +5,8 @@ Complete reference for all KoolBot commands with examples and detailed explanati
 > **Note:** All commands must be enabled through configuration before they appear in Discord.  
 > Use `/config set key:command.enabled value:true` and then `/config reload` to enable commands.
 
+---
+
 > ⚠️ **Deprecation notice (v1.0 migration):** The following admin slash commands are
 > **deprecated** and will be removed in 1.0. They still work, but each invocation now
 > emits a deprecation embed pointing at the WebUI. Run `/config` to open the WebUI
