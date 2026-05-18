@@ -11,7 +11,6 @@ import {
 import { config as dotenvConfig } from "dotenv";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
-import { sendDeprecationNotice } from "../utils/deprecation-notice.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { CooldownManager } from "./cooldown-manager.js";
@@ -80,34 +79,12 @@ export class CommandManager {
         },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
         {
-          name: "announce-vc-stats",
-          configKey: "voicetracking.announcements.enabled",
-          file: "announce-vc-stats",
-        },
-        {
           name: "achievements",
           configKey: "achievements.enabled",
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
-        { name: "notice", configKey: "notices.enabled", file: "notice" },
-        {
-          name: "announce",
-          configKey: "announcements.enabled",
-          file: "announce",
-        },
-        { name: "dbtrunk", configKey: null, file: "dbtrunk" }, // Always enabled for admins
-        { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
-        { name: "config", configKey: null, file: "config/index" }, // Always enabled
-        { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
-        { name: "permissions", configKey: null, file: "permissions" }, // Always enabled for admins
-        {
-          name: "reactrole",
-          configKey: "reactionroles.enabled",
-          file: "reactrole",
-        },
-        { name: "poll", configKey: "polls.enabled", file: "poll" },
-        { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
+        { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher
       ];
 
       // Process each command
@@ -325,34 +302,12 @@ export class CommandManager {
         },
         { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
         {
-          name: "announce-vc-stats",
-          configKey: "voicetracking.announcements.enabled",
-          file: "announce-vc-stats",
-        },
-        {
           name: "achievements",
           configKey: "achievements.enabled",
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
-        { name: "notice", configKey: "notices.enabled", file: "notice" },
-        {
-          name: "announce",
-          configKey: "announcements.enabled",
-          file: "announce",
-        },
-        { name: "dbtrunk", configKey: null, file: "dbtrunk" }, // Always enabled for admins
-        { name: "vc", configKey: "voicechannels.enabled", file: "vc" },
-        { name: "config", configKey: null, file: "config/index" }, // Always enabled
-        { name: "botstats", configKey: null, file: "botstats" }, // Always enabled
-        { name: "permissions", configKey: null, file: "permissions" }, // Always enabled for admins
-        {
-          name: "reactrole",
-          configKey: "reactionroles.enabled",
-          file: "reactrole",
-        },
-        { name: "poll", configKey: "polls.enabled", file: "poll" },
-        { name: "setup", configKey: null, file: "setup-wizard" }, // Always enabled - core feature
+        { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher
       ];
 
       // Process each command
@@ -553,17 +508,13 @@ export class CommandManager {
         }
       }
 
-      try {
-        await executeFunction();
-        monitoringService.trackCommandEnd(
-          commandName,
-          trackingId,
-          startTime,
-          true,
-        );
-      } finally {
-        await sendDeprecationNotice(interaction);
-      }
+      await executeFunction();
+      monitoringService.trackCommandEnd(
+        commandName,
+        trackingId,
+        startTime,
+        true,
+      );
     } catch (error) {
       monitoringService.trackCommandEnd(
         commandName,

@@ -35,7 +35,6 @@ import FriendshipListener from "./services/friendship-listener.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
 import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
-import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
   createWebRouter,
@@ -430,7 +429,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
         await noticesChannelManager.stop();
         pollService.destroy();
         leaderboardRoleService.destroy();
-        WizardService.getInstance().shutdown();
         MonitoringService.getInstance().destroy();
         await botStatusService.shutdown();
       },
@@ -663,7 +661,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle button interactions
   if (interaction.isButton()) {
     try {
-      // Check if it's a VC control button
       if (interaction.customId.startsWith("vc_control_")) {
         const { handleVCControlButton } =
           await import("./handlers/vc-control-button-handler.js");
@@ -673,10 +670,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await import("./handlers/vc-preset-handler.js");
         await handleVCPresetButton(interaction);
       } else {
-        // Handle wizard buttons
-        const { handleWizardButton } =
-          await import("./handlers/wizard-button-handler.js");
-        await handleWizardButton(interaction);
+        logger.debug(
+          `Ignoring button interaction with unrecognized customId: ${interaction.customId}`,
+        );
       }
     } catch (error) {
       logger.error("Error handling button interaction:", error);
@@ -687,7 +683,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle select menu interactions
   if (interaction.isStringSelectMenu()) {
     try {
-      // Check if it's a VC transfer select
       if (interaction.customId.startsWith("vc_transfer_select_")) {
         const { handleVCTransferSelect } =
           await import("./handlers/vc-transfer-select-handler.js");
@@ -697,10 +692,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
           await import("./handlers/vc-preset-handler.js");
         await handleVCPresetSelect(interaction);
       } else {
-        // Handle wizard select menus
-        const { handleWizardSelectMenu } =
-          await import("./handlers/wizard-select-handler.js");
-        await handleWizardSelectMenu(interaction);
+        logger.debug(
+          `Ignoring select menu interaction with unrecognized customId: ${interaction.customId}`,
+        );
       }
     } catch (error) {
       logger.error("Error handling select menu interaction:", error);
@@ -711,16 +705,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // Handle modal submit interactions
   if (interaction.isModalSubmit()) {
     try {
-      // Check if it's a VC modal
       if (interaction.customId.startsWith("vc_modal_")) {
         const { handleVCModal } =
           await import("./handlers/vc-modal-handler.js");
         await handleVCModal(interaction);
       } else {
-        // Handle wizard modals
-        const { handleWizardModal } =
-          await import("./handlers/wizard-modal-handler.js");
-        await handleWizardModal(interaction);
+        logger.debug(
+          `Ignoring modal interaction with unrecognized customId: ${interaction.customId}`,
+        );
       }
     } catch (error) {
       logger.error("Error handling modal interaction:", error);

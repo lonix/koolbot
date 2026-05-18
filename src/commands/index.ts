@@ -4,11 +4,10 @@ import { execute as ping } from "./ping.js";
 import { execute as amikool } from "./amikool.js";
 import { execute as voicestats } from "./voicestats.js";
 import { execute as seen } from "./seen.js";
-import { execute as announceVcStats } from "./announce-vc-stats.js";
-import { execute as configCommand } from "./config/index.js";
+import { execute as configCommand } from "./config.js";
 import { execute as quoteCommand } from "./quote.js";
-import { execute as dbtrunkCommand } from "./dbtrunk.js";
-import { execute as vcCommand } from "./vc.js";
+import { execute as achievementsCommand } from "./achievements.js";
+import { execute as helpCommand } from "./help.js";
 import { ConfigService } from "../services/config-service.js";
 
 const configService = ConfigService.getInstance();
@@ -40,28 +39,18 @@ const commands: Record<
   config: async (interaction) => {
     await configCommand(interaction);
   },
-  "announce-vc-stats": async (interaction) => {
-    if (
-      await configService.getBoolean(
-        "voicetracking.announcements.enabled",
-        false,
-      )
-    ) {
-      await announceVcStats(interaction);
-    }
-  },
   quote: async (interaction) => {
     if (await configService.getBoolean("quotes.enabled", false)) {
       await quoteCommand(interaction);
     }
   },
-  dbtrunk: async (interaction) => {
-    await dbtrunkCommand(interaction);
-  },
-  vc: async (interaction) => {
-    if (await configService.getBoolean("voicechannels.enabled", false)) {
-      await vcCommand(interaction);
+  achievements: async (interaction) => {
+    if (await configService.getBoolean("achievements.enabled", false)) {
+      await achievementsCommand(interaction);
     }
+  },
+  help: async (interaction) => {
+    await helpCommand(interaction);
   },
 };
 
