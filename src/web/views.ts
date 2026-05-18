@@ -82,7 +82,7 @@ export function renderSignedOut(): string {
     "Signed out",
     [
       "<h1>Signed out</h1>",
-      "<p>Your session has been revoked. Run <code>/config web</code> in Discord to start a new one.</p>",
+      "<p>Your session has been revoked. Run <code>/config</code> in Discord to start a new one.</p>",
     ].join(""),
   );
 }
@@ -92,7 +92,7 @@ export function renderInvalidLink(): string {
     "Invalid link",
     [
       "<h1>Link invalid or expired</h1>",
-      "<p>Magic-link tokens are single-use and expire quickly. Run <code>/config web</code> in Discord again to receive a fresh link.</p>",
+      "<p>Magic-link tokens are single-use and expire quickly. Run <code>/config</code> in Discord again to receive a fresh link.</p>",
     ].join(""),
   );
 }
