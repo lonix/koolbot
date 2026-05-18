@@ -1,8 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import { data as voiceStatsData } from '../../src/commands/voicestats.js';
-import { data as announceVcStatsData } from '../../src/commands/announce-vc-stats.js';
 import { data as seenData } from '../../src/commands/seen.js';
-import { data as dbtrunkData } from '../../src/commands/dbtrunk.js';
 
 describe('Command Options Validation', () => {
   describe('VoiceStats Command Options', () => {
@@ -76,18 +74,6 @@ describe('Command Options Validation', () => {
     });
   });
 
-  describe('Announce VC Stats Command Options', () => {
-    const json = announceVcStatsData.toJSON();
-
-    it('should have no options or empty options array', () => {
-      expect(json.options === undefined || json.options?.length === 0).toBe(true);
-    });
-
-    it('should have administrator permission requirement', () => {
-      expect(json.default_member_permissions).toBe('8');
-    });
-  });
-
   describe('Seen Command Options', () => {
     const json = seenData.toJSON();
 
@@ -102,34 +88,6 @@ describe('Command Options Validation', () => {
 
     it('should have exactly 1 option', () => {
       expect(json.options?.length).toBe(1);
-    });
-  });
-
-  describe('DBTrunk Command Options', () => {
-    const json = dbtrunkData.toJSON();
-
-    it('should have subcommands', () => {
-      expect(json.options).toBeDefined();
-      expect(json.options?.length).toBe(2);
-    });
-
-    it('should have run subcommand with correct type', () => {
-      const runSubcommand = json.options?.find((opt: any) => opt.name === 'run');
-      expect(runSubcommand).toBeDefined();
-      expect(runSubcommand?.type).toBe(1); // Subcommand type
-      expect(runSubcommand?.description).toBe('Run cleanup immediately');
-    });
-
-    it('should have status subcommand with correct type', () => {
-      const statusSubcommand = json.options?.find((opt: any) => opt.name === 'status');
-      expect(statusSubcommand).toBeDefined();
-      expect(statusSubcommand?.type).toBe(1); // Subcommand type
-      expect(statusSubcommand?.description).toBe('Show cleanup service status');
-    });
-
-    it('should have administrator permission requirement', () => {
-      expect(json.default_member_permissions).toBeDefined();
-      // Administrator = 8 in string format
     });
   });
 });

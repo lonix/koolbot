@@ -47,33 +47,26 @@ describe("CommandManager Methods", () => {
       // Both arrays should have the same commands
       expect(loadCommandNames).toEqual(populateCommandNames);
 
-      // Specifically check for critical commands that must be in sync
-      expect(loadCommandNames).toContain("setup");
-      expect(populateCommandNames).toContain("setup");
+      // /config is the sole admin slash command after the v1.0 cut
+      expect(loadCommandNames).toContain("config");
+      expect(populateCommandNames).toContain("config");
     }
   });
 
-  it("should have setup command without wizard.enabled gate", () => {
+  it("should register /config as the collapsed WebUI launcher", () => {
     const filePath = path.join(
       __dirname,
       "../../src/services/command-manager.ts",
     );
     const fileContent = fs.readFileSync(filePath, "utf-8");
 
-    // Check that setup command has configKey: null (always enabled)
-    const setupCommandPatterns = [
-      /{\s*name:\s*"setup",\s*configKey:\s*null,\s*file:\s*"setup-wizard"\s*}/g,
-    ];
-
-    let foundSetupWithNull = false;
-    for (const pattern of setupCommandPatterns) {
-      if (pattern.test(fileContent)) {
-        foundSetupWithNull = true;
-        break;
-      }
-    }
-
-    expect(foundSetupWithNull).toBe(true);
+    // /config maps to src/commands/config.ts and is always enabled
+    const configCommandPattern =
+      /{\s*name:\s*"config",\s*configKey:\s*null,\s*file:\s*"config"\s*}/g;
+    const matches = fileContent.match(configCommandPattern);
+    expect(matches).not.toBeNull();
+    // Once in loadCommandsDynamically and once in populateClientCommands
+    expect(matches?.length).toBe(2);
   });
 
   it("should have help command without help.enabled gate", () => {
@@ -97,6 +90,32 @@ describe("CommandManager Methods", () => {
     }
 
     expect(foundHelpWithNull).toBe(true);
+  });
+
+  it("should not register any of the deprecated admin slash commands", () => {
+    const filePath = path.join(
+      __dirname,
+      "../../src/services/command-manager.ts",
+    );
+    const fileContent = fs.readFileSync(filePath, "utf-8");
+
+    const removedCommands = [
+      "permissions",
+      "setup",
+      "announce",
+      "announce-vc-stats",
+      "poll",
+      "reactrole",
+      "notice",
+      "dbtrunk",
+      "vc",
+      "botstats",
+    ];
+
+    for (const name of removedCommands) {
+      const pattern = new RegExp(`name:\\s*"${name}"`);
+      expect(fileContent).not.toMatch(pattern);
+    }
   });
 
   it("should use getBoolean() for config checks in both loadCommandsDynamically and populateClientCommands", () => {

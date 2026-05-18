@@ -40,14 +40,9 @@ const commandDetails: Record<
     usage: "/amikool",
     configKey: "amikool.enabled",
   },
-  vctop: {
-    description: "View voice channel activity leaderboards.",
-    usage: "/vctop [limit:10] [period:week|month|alltime]",
-    configKey: "voicetracking.enabled",
-  },
-  vcstats: {
-    description: "View your voice channel statistics.",
-    usage: "/vcstats [period:week|month|alltime]",
+  voicestats: {
+    description: "View voice channel statistics (top users or per-user).",
+    usage: "/voicestats <top|user> [options]",
     configKey: "voicetracking.enabled",
   },
   seen: {
@@ -55,32 +50,14 @@ const commandDetails: Record<
     usage: "/seen <user>",
     configKey: "voicetracking.seen.enabled",
   },
-  "announce-vc-stats": {
-    description: "Manually trigger voice channel statistics announcement.",
-    usage: "/announce-vc-stats",
-    configKey: "voicetracking.announcements.enabled",
-  },
-  vc: {
-    description: "Voice channel management commands.",
-    usage: "/vc <subcommand> [options]",
-    configKey: "voicechannels.enabled",
+  achievements: {
+    description: "View earned badges and achievements.",
+    usage: "/achievements [user]",
+    configKey: "achievements.enabled",
   },
   config: {
-    description: "Manage bot configuration (Admin only).",
-    usage: "/config <subcommand> [options]",
-  },
-  botstats: {
-    description: "View bot statistics and health information.",
-    usage: "/botstats",
-  },
-  dbtrunk: {
-    description: "Database truncation commands (Admin only).",
-    usage: "/dbtrunk <subcommand>",
-  },
-  "exclude-channel": {
-    description: "Manage voice channel tracking exclusions (Admin only).",
-    usage: "/exclude-channel <subcommand> [channel]",
-    configKey: "voicetracking.enabled",
+    description: "Open the admin web UI (Admin only).",
+    usage: "/config",
   },
 };
 

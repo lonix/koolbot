@@ -1,237 +1,217 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { data, autocomplete } from '../../src/commands/config/index.js';
-import { AutocompleteInteraction } from 'discord.js';
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
+import type { ChatInputCommandInteraction } from "discord.js";
 
-describe('Config Command', () => {
-  describe('command metadata', () => {
-    it('should have correct command name', () => {
-      expect(data.name).toBe('config');
+const mockCreateSession = jest.fn();
+const mockGetInstance = jest.fn(() => ({
+  create: mockCreateSession,
+}));
+const mockIsWebUIEnabled = jest.fn();
+const mockGetMissingWebUIEnvVars = jest.fn();
+
+jest.unstable_mockModule("../../src/services/web-session-service.js", () => ({
+  WebSessionService: { getInstance: mockGetInstance },
+}));
+
+jest.unstable_mockModule("../../src/web/index.js", () => ({
+  isWebUIEnabled: mockIsWebUIEnabled,
+  getMissingWebUIEnvVars: mockGetMissingWebUIEnvVars,
+}));
+
+jest.unstable_mockModule("../../src/utils/logger.js", () => ({
+  default: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  },
+}));
+
+const { data, execute } = await import("../../src/commands/config.js");
+
+const ORIGINAL_ENV = { ...process.env };
+
+describe("Config Command — metadata", () => {
+  it("has correct command name", () => {
+    expect(data.name).toBe("config");
+  });
+
+  it("has a description", () => {
+    expect(data.description).toBeDefined();
+    expect(typeof data.description).toBe("string");
+  });
+
+  it("is a valid slash command", () => {
+    const json = data.toJSON();
+    expect(json).toHaveProperty("name", "config");
+    expect(json).toHaveProperty("description");
+  });
+
+  it("requires administrator permissions", () => {
+    const json = data.toJSON();
+    expect(json.default_member_permissions).toBeDefined();
+  });
+
+  it("exposes no subcommands (bare /config launches the WebUI)", () => {
+    const json = data.toJSON();
+    const subcommands = (json.options ?? []).filter(
+      (opt: { type?: number }) => opt.type === 1,
+    );
+    expect(subcommands.length).toBe(0);
+  });
+
+  it("does not register any legacy subcommands", () => {
+    const json = data.toJSON();
+    const removed = [
+      "list",
+      "set",
+      "import",
+      "export",
+      "reset",
+      "reload",
+      "web",
+    ];
+    const names = (json.options ?? []).map((opt: { name: string }) => opt.name);
+    for (const name of removed) {
+      expect(names).not.toContain(name);
+    }
+  });
+});
+
+describe("Config Command — execute", () => {
+  let deferReply: jest.Mock;
+  let editReply: jest.Mock;
+  let userSend: jest.Mock;
+
+  function buildInteraction(
+    overrides: { guildId?: string | null; userId?: string } = {},
+  ): ChatInputCommandInteraction {
+    deferReply = jest.fn().mockResolvedValue(undefined as never);
+    editReply = jest.fn().mockResolvedValue(undefined as never);
+    userSend = jest.fn().mockResolvedValue(undefined as never);
+
+    return {
+      deferReply,
+      editReply,
+      guildId: overrides.guildId === undefined ? "g1" : overrides.guildId,
+      user: {
+        id: overrides.userId ?? "u1",
+        send: userSend,
+      },
+    } as unknown as ChatInputCommandInteraction;
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    process.env = { ...ORIGINAL_ENV };
+    mockGetInstance.mockReturnValue({ create: mockCreateSession });
+    mockIsWebUIEnabled.mockReturnValue(true);
+    mockGetMissingWebUIEnvVars.mockReturnValue([]);
+  });
+
+  afterEach(() => {
+    process.env = { ...ORIGINAL_ENV };
+  });
+
+  it("defers the reply before doing any work", async () => {
+    mockCreateSession.mockResolvedValue({
+      url: "https://example.test/admin/s/tok",
+      expiresAt: new Date(Date.now() + 10 * 60_000),
     });
+    const interaction = buildInteraction();
 
-    it('should have a description', () => {
-      expect(data.description).toBeDefined();
-      expect(typeof data.description).toBe('string');
+    await execute(interaction);
+
+    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+  });
+
+  it("rejects when the WebUI is disabled", async () => {
+    mockIsWebUIEnabled.mockReturnValue(false);
+    const interaction = buildInteraction();
+
+    await execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("web UI is disabled"),
     });
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
 
-    it('should be a valid slash command', () => {
-      const json = data.toJSON();
-      expect(json).toHaveProperty('name', 'config');
-      expect(json).toHaveProperty('description');
+  it("rejects when required env vars are missing", async () => {
+    mockGetMissingWebUIEnvVars.mockReturnValue([
+      "WEBUI_BASE_URL",
+      "WEBUI_SESSION_SECRET",
+    ]);
+    const interaction = buildInteraction();
+
+    await execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("WEBUI_BASE_URL"),
     });
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
 
-    it('should require administrator permissions', () => {
-      const json = data.toJSON();
-      expect(json.default_member_permissions).toBeDefined();
+  it("rejects when invoked outside a guild", async () => {
+    const interaction = buildInteraction({ guildId: null });
+
+    await execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("must be run inside a guild"),
     });
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
 
-    it('should have subcommands', () => {
-      const json = data.toJSON();
-      expect(json.options).toBeDefined();
-      expect(Array.isArray(json.options)).toBe(true);
-      expect(json.options?.length).toBeGreaterThan(0);
+  it("DMs the sign-in link when WebUI is enabled and DM succeeds", async () => {
+    mockCreateSession.mockResolvedValue({
+      url: "https://example.test/admin/s/tok",
+      expiresAt: new Date(Date.now() + 10 * 60_000),
     });
+    const interaction = buildInteraction();
 
-    it('should have list subcommand', () => {
-      const json = data.toJSON();
-      const listSubcommand = json.options?.find((opt: any) => opt.name === 'list');
-      expect(listSubcommand).toBeDefined();
-    });
+    await execute(interaction);
 
-    it('should have set subcommand', () => {
-      const json = data.toJSON();
-      const setSubcommand = json.options?.find((opt: any) => opt.name === 'set');
-      expect(setSubcommand).toBeDefined();
-    });
-
-    it('should have export subcommand', () => {
-      const json = data.toJSON();
-      const exportSubcommand = json.options?.find((opt: any) => opt.name === 'export');
-      expect(exportSubcommand).toBeDefined();
-    });
-
-    it('should have import subcommand', () => {
-      const json = data.toJSON();
-      const importSubcommand = json.options?.find((opt: any) => opt.name === 'import');
-      expect(importSubcommand).toBeDefined();
-    });
-
-    it('should have reload subcommand', () => {
-      const json = data.toJSON();
-      const reloadSubcommand = json.options?.find((opt: any) => opt.name === 'reload');
-      expect(reloadSubcommand).toBeDefined();
-    });
-
-    it('should have autocomplete enabled on set subcommand key option', () => {
-      const json = data.toJSON();
-      const setSubcommand = json.options?.find((opt: any) => opt.name === 'set');
-      const keyOption = setSubcommand?.options?.find((opt: any) => opt.name === 'key');
-      expect(keyOption).toBeDefined();
-      expect(keyOption?.autocomplete).toBe(true);
-    });
-
-    it('should have autocomplete enabled on reset subcommand key option', () => {
-      const json = data.toJSON();
-      const resetSubcommand = json.options?.find((opt: any) => opt.name === 'reset');
-      const keyOption = resetSubcommand?.options?.find((opt: any) => opt.name === 'key');
-      expect(keyOption).toBeDefined();
-      expect(keyOption?.autocomplete).toBe(true);
+    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1");
+    expect(userSend).toHaveBeenCalledWith(
+      expect.stringContaining("https://example.test/admin/s/tok"),
+    );
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("DMed you"),
     });
   });
 
-  describe('autocomplete function', () => {
-    let mockInteraction: any;
-    let mockRespond: jest.Mock;
-
-    beforeEach(() => {
-      mockRespond = jest.fn();
-      mockInteraction = {
-        options: {
-          getFocused: jest.fn(),
-        },
-        respond: mockRespond,
-      } as unknown as AutocompleteInteraction;
+  it("falls back to ephemeral reply when DM fails", async () => {
+    mockCreateSession.mockResolvedValue({
+      url: "https://example.test/admin/s/tok",
+      expiresAt: new Date(Date.now() + 10 * 60_000),
     });
+    const interaction = buildInteraction();
+    userSend.mockRejectedValueOnce(new Error("DMs blocked") as never);
 
-    it('should respond with config keys when focused option is "key"', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'key',
-        value: 'voice',
-      });
+    await execute(interaction);
 
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      const response = mockRespond.mock.calls[0][0];
-      expect(Array.isArray(response)).toBe(true);
-      expect(response.length).toBeGreaterThan(0);
-      // Should include voice-related keys
-      expect(response.some((choice: any) => choice.value.includes('voice'))).toBe(true);
+    expect(userSend).toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("https://example.test/admin/s/tok"),
     });
+  });
 
-    it('should respond with empty array when focused option is not "key"', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'value',
-        value: 'test',
-      });
+  it("reports an error when session creation throws", async () => {
+    mockCreateSession.mockRejectedValue(new Error("mongo down") as never);
+    const interaction = buildInteraction();
 
-      await autocomplete(mockInteraction);
+    await execute(interaction);
 
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      expect(mockRespond).toHaveBeenCalledWith([]);
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("An error occurred"),
     });
-
-    it('should limit results to 25 choices', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'key',
-        value: '', // Empty search should return all keys
-      });
-
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      const response = mockRespond.mock.calls[0][0];
-      expect(response.length).toBeLessThanOrEqual(25);
-    });
-
-    it('should filter keys case-insensitively', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'key',
-        value: 'VOICE',
-      });
-
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      const response = mockRespond.mock.calls[0][0];
-      expect(response.length).toBeGreaterThan(0);
-      expect(response.some((choice: any) => choice.value.includes('voice'))).toBe(true);
-    });
-
-    it('should respond with empty array on error', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockImplementation(() => {
-        throw new Error('Test error');
-      });
-
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      expect(mockRespond).toHaveBeenCalledWith([]);
-    });
-
-    it('should include description in choice names', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'key',
-        value: 'ping.enabled',
-      });
-
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      const response = mockRespond.mock.calls[0][0];
-      expect(response.length).toBeGreaterThan(0);
-      const pingChoice = response.find((choice: any) => choice.value === 'ping.enabled');
-      expect(pingChoice).toBeDefined();
-      expect(pingChoice.name).toContain('ping.enabled');
-      expect(pingChoice.name).toContain(' - '); // Description separator with spaces
-    });
-
-    it('should ensure all choice names are within Discord 100 character limit', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'key',
-        value: '', // Empty search to get all keys
-      });
-
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      const response = mockRespond.mock.calls[0][0];
-      
-      // Verify all choice names are within Discord's 100 character limit
-      response.forEach((choice: any) => {
-        expect(choice.name.length).toBeGreaterThan(0);
-        expect(choice.name.length).toBeLessThanOrEqual(100);
-      });
-    });
-
-    it('should truncate descriptions for long keys to fit 100 char limit', async () => {
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'key',
-        value: 'voicetracking.cleanup.retention', // Long key prefix
-      });
-
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      const response = mockRespond.mock.calls[0][0];
-      
-      // Should have results for long keys
-      expect(response.length).toBeGreaterThan(0);
-      
-      // All names should still be within limit
-      response.forEach((choice: any) => {
-        expect(choice.name.length).toBeLessThanOrEqual(100);
-      });
-    });
-
-    it('should handle all current config keys properly', async () => {
-      // Verify that all existing config keys (even the longest ones) are handled correctly
-      // The longest current key is ~57 chars, well within safe range
-      (mockInteraction.options.getFocused as jest.Mock).mockReturnValue({
-        name: 'key',
-        value: 'voicetracking', // Get all voicetracking keys (some are long)
-      });
-
-      await autocomplete(mockInteraction);
-
-      expect(mockRespond).toHaveBeenCalledTimes(1);
-      const response = mockRespond.mock.calls[0][0];
-      
-      // All keys should be handled properly
-      response.forEach((choice: any) => {
-        expect(choice.name.length).toBeGreaterThan(0);
-        expect(choice.name.length).toBeLessThanOrEqual(100);
-        expect(choice.value).toBeTruthy();
-      });
-    });
+    expect(userSend).not.toHaveBeenCalled();
   });
 });

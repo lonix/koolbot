@@ -107,7 +107,7 @@ describe('Help Command', () => {
     });
 
     it('should include usage information in specific command help', async () => {
-      (mockInteraction.options!.getString as jest.Mock).mockReturnValue('vctop');
+      (mockInteraction.options!.getString as jest.Mock).mockReturnValue('voicestats');
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
@@ -128,14 +128,14 @@ describe('Help Command', () => {
     });
 
     it('should handle multiple known commands', async () => {
-      const commands = ['ping', 'help', 'quote', 'botstats'];
-      
+      const commands = ['ping', 'help', 'quote', 'achievements'];
+
       for (const cmd of commands) {
         mockInteraction.reply = jest.fn().mockResolvedValue(undefined);
         (mockInteraction.options!.getString as jest.Mock).mockReturnValue(cmd);
-        
+
         await execute(mockInteraction as ChatInputCommandInteraction);
-        
+
         expect(mockInteraction.reply).toHaveBeenCalled();
       }
     });

@@ -196,7 +196,7 @@ function respondUnauthorized(res: Response): void {
       `<!doctype html><html><head><meta charset="utf-8"><title>Sign in required</title></head>` +
         `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
         `<h1>Sign in required</h1>` +
-        `<p>Run <code>/config web</code> in Discord to receive a fresh sign-in link.</p>` +
+        `<p>Run <code>/config</code> in Discord to receive a fresh sign-in link.</p>` +
         `</body></html>`,
     );
 }

@@ -4,7 +4,7 @@ import mongoose, { Document, Schema } from "mongoose";
  * Audit-log entry for write actions performed through the WebUI (issue #383
  * onwards). One row per state-changing request, keyed by the WebUI session
  * that produced it so an operator can trace every change back to a specific
- * `/config web` redemption.
+ * `/config` redemption.
  */
 export interface IWebAuditLog extends Document {
   guildId: string;
