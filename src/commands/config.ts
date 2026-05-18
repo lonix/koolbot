@@ -9,17 +9,10 @@ import { getMissingWebUIEnvVars, isWebUIEnabled } from "../web/index.js";
 
 export const data = new SlashCommandBuilder()
   .setName("config")
-  .setDescription("Open the admin web UI")
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .addSubcommand((subcommand) =>
-    subcommand
-      .setName("web")
-      .setDescription(
-        "Open the admin web UI (sends you a single-use sign-in link)",
-      ),
-  );
+  .setDescription("Open the admin web UI (sends you a single-use sign-in link)")
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
-async function handleWeb(
+export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   // Defer immediately so the DB revoke/create + DM round-trip can't blow
@@ -62,7 +55,7 @@ async function handleWeb(
       `🔗 **Koolbot admin sign-in link**\n` +
       `${session.url}\n` +
       `This link is single-use and expires in about ${ttlMinutes} minute(s). ` +
-      `If you did not run \`/config web\`, ignore this message.`;
+      `If you did not run \`/config\`, ignore this message.`;
 
     try {
       await interaction.user.send(dmBody);
@@ -85,20 +78,4 @@ async function handleWeb(
       content: "An error occurred while issuing your sign-in link.",
     });
   }
-}
-
-export async function execute(
-  interaction: ChatInputCommandInteraction,
-): Promise<void> {
-  const subcommand = interaction.options.getSubcommand();
-
-  if (subcommand === "web") {
-    await handleWeb(interaction);
-    return;
-  }
-
-  await interaction.reply({
-    content: "Unknown subcommand.",
-    ephemeral: true,
-  });
 }

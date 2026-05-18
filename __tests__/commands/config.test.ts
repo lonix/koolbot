@@ -22,18 +22,25 @@ describe("Config Command (WebUI launcher)", () => {
     expect(json.default_member_permissions).toBeDefined();
   });
 
-  it("should expose only the web subcommand", () => {
+  it("should expose no subcommands (bare /config launches the WebUI)", () => {
     const json = data.toJSON();
-    expect(json.options).toBeDefined();
-    expect(json.options?.length).toBe(1);
-    const sub = json.options?.[0];
-    expect(sub?.name).toBe("web");
-    expect((sub as { type?: number })?.type).toBe(1);
+    const subcommands = (json.options ?? []).filter(
+      (opt: { type?: number }) => opt.type === 1,
+    );
+    expect(subcommands.length).toBe(0);
   });
 
-  it("should not have any legacy subcommands (list/set/import/export/reset/reload)", () => {
+  it("should not register any legacy subcommands", () => {
     const json = data.toJSON();
-    const removed = ["list", "set", "import", "export", "reset", "reload"];
+    const removed = [
+      "list",
+      "set",
+      "import",
+      "export",
+      "reset",
+      "reload",
+      "web",
+    ];
     const names = (json.options ?? []).map((opt: { name: string }) => opt.name);
     for (const name of removed) {
       expect(names).not.toContain(name);

@@ -57,7 +57,7 @@ const commandDetails: Record<
   },
   config: {
     description: "Open the admin web UI (Admin only).",
-    usage: "/config web",
+    usage: "/config",
   },
 };
 

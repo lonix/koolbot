@@ -35,6 +35,7 @@ import FriendshipListener from "./services/friendship-listener.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
 import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
+import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
   createWebRouter,
@@ -429,6 +430,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         await noticesChannelManager.stop();
         pollService.destroy();
         leaderboardRoleService.destroy();
+        WizardService.getInstance().shutdown();
         MonitoringService.getInstance().destroy();
         await botStatusService.shutdown();
       },
