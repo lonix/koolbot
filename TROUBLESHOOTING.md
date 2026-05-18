@@ -280,11 +280,18 @@ docker compose up -d --force-recreate
 
 ### `/config` says "missing env vars: WEBUI_BASE_URL, WEBUI_SESSION_SECRET"
 
-Both must be set in `.env` when `WEBUI_ENABLED=true`:
+Both must be set in `.env` when `WEBUI_ENABLED=true`. Generate the
+secret on your host first (dotenv does not run shell substitutions):
+
+```bash
+openssl rand -base64 32
+```
+
+Then paste the output into `.env`:
 
 ```env
 WEBUI_BASE_URL=https://bot.example.com   # or http://localhost:3000 for local
-WEBUI_SESSION_SECRET=$(openssl rand -base64 32)
+WEBUI_SESSION_SECRET=<paste-the-output-here>
 ```
 
 Restart the bot.
@@ -318,16 +325,33 @@ One of:
 
 ### "Sign in required" on every page
 
-Your cookie is stale or your IP changed. Run `/config` again to mint a
-fresh link.
+Possible causes:
+
+- Cookie expired (idle past `WEBUI_INACTIVITY_TIMEOUT_MINUTES`).
+- DB session row passed its hard TTL.
+- You ran `/config` again, which server-side-revoked this session.
+- Permission re-check failed (Web UI Permissions → `config` was
+  configured and your roles no longer match).
+- The bot restarted with a new `WEBUI_SESSION_SECRET`.
+
+The cookie is **not** bound to your client IP — switching networks
+does not by itself end a session.
+
+Run `/config` again to mint a fresh link.
 
 ### Web UI URL loads but won't accept my cookie
 
-Browsers refuse `Secure`-flagged cookies over plain HTTP. Either:
+Browsers refuse `Secure`-flagged cookies over plain HTTP. The Web UI
+flags its session cookie `Secure` whenever `NODE_ENV=production`
+(`shouldUseSecureCookies()` in `src/web/csrf.ts`). Pick one:
 
-- Run behind HTTPS (recommended) — see [WEBUI.md → Reverse-proxy guidance](WEBUI.md#reverse-proxy-guidance).
-- Set `WEBUI_BASE_URL=http://...` so the bot doesn't mark the cookie as
-  `Secure`. **Local testing only.**
+- Run behind HTTPS via a reverse proxy (recommended) — see
+  [WEBUI.md → Reverse-proxy guidance](WEBUI.md#reverse-proxy-guidance).
+- Set `NODE_ENV=development` in `.env` and restart. The cookie loses
+  the `Secure` flag and plain HTTP works again. **Local testing only.**
+
+Changing `WEBUI_BASE_URL` to `http://...` alone does **not** fix this —
+the URL scheme is not what flips the `Secure` flag.
 
 ### Behind a reverse proxy, rate limits trigger on the proxy's IP
 
@@ -410,8 +434,13 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 
 **Solutions:**
 
-1. **Verify you have Administrator permission** in Discord (or a role
-   that the Web UI's Permissions page allows for `config`).
+1. **Verify you have Administrator permission** in Discord. `/config`
+   is registered with `setDefaultMemberPermissions(Administrator)`, so
+   Discord blocks non-admins from even invoking it. If you need to
+   allow a non-admin role, an operator must override the command in
+   Discord under **Server Settings → Integrations → KoolBot → /config**.
+   The Web UI's Permissions page can only narrow access further, it
+   cannot grant Discord-level access on its own.
 2. **Verify `WEBUI_ENABLED=true`** in `.env` and that you've restarted
    the bot since the change.
 3. **Check bot logs for the mount confirmation:**

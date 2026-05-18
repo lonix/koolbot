@@ -6,7 +6,7 @@ Complete guide for developers extending or maintaining KoolBot.
 
 - [Architecture Overview](#architecture-overview)
 - [The `src/web/` Web UI](#the-srcweb-web-ui)
-- [The "no business logic outside services" rule](#the-no-business-logic-outside-services-rule)
+- [The "thin HTTP layer over services" goal](#the-thin-http-layer-over-services-goal)
 - [Common Patterns](#common-patterns)
   - [Bot-Controlled Channel Header Posts](#bot-controlled-channel-header-posts)
   - [Service Singleton Pattern](#service-singleton-pattern)
@@ -95,8 +95,15 @@ is never created and `/admin/*` returns 404.
    - Enforces the sliding inactivity window
    - Re-fetches the `WebSession` row to enforce server-side revocation
    - Hard-caps the session at `expiresAt`
-   - **Re-checks `PermissionsService.checkCommandPermission(uid, gid, "config")`**
-     so demoting an admin in Discord kicks them out immediately
+   - **Re-checks `PermissionsService.checkCommandPermission(uid, gid, "config")`.**
+     This returns `false` (and the middleware logs the user out) only
+     when explicit role gating is configured for `config` on the Web UI's
+     Permissions page and the user's roles no longer match. With no
+     explicit gating, the check returns `true` and a demoted admin keeps
+     their existing session — the magic-link gate at `/admin/s/<token>`
+     is the primary defense, not this revalidation. If you want demotions
+     to log existing sessions out, configure Permissions → `config` to
+     an admin-only role.
 4. `POST /admin/finish` revokes the session in MongoDB, clears the cookie.
 
 The cookie value carries `sid`, `uid`, `gid`, `iat`, `act` — all
@@ -131,38 +138,40 @@ remaining time.
 
 ---
 
-## The "no business logic outside services" rule
+## The "thin HTTP layer over services" goal
 
-This is the single hardest rule for `src/web/`:
+The goal — not yet fully reached in the existing code — is to keep
+`src/web/` as a thin HTTP layer over `src/services/`:
 
-> **Routes in `src/web/` are thin wrappers over `src/services/`. No
-> business logic, validation, or data shape lives in the web layer.**
+> **Push validation, side effects, and data writes into services.
+> Routes should mostly read form fields, call a service method, and
+> render the result.**
 
-Concretely:
+Current state of the code:
 
-- ✅ A route reads form fields, calls a service method, renders the result.
-- ✅ A route translates a service error into an HTTP status code.
-- ❌ A route doing schema validation that the service doesn't already do.
-- ❌ A route reaching into Mongoose models directly.
-- ❌ A route making Discord API calls that aren't going through a service.
+- `src/web/write-routes.ts` still owns some input coercion
+  (`coerceConfigValue`, `normalizeCron`, `validCron`) and reads/writes
+  to Mongoose models directly. Same for `read-only-routes.ts`, which
+  imports several models for page data.
+- These are *not* prohibited today, but new write paths should prefer
+  pushing logic into a service so the slash-command surface and the
+  Web UI surface share one validation path. If you're tempted to add a
+  `if (input.length > 200)` check inside a write-route handler, add it
+  to the service instead.
 
-The reason: the slash-command surface (`src/commands/`) and the Web UI
-surface (`src/web/`) **must share one validation path**, one permission
-check, and one source of truth. If a setting is valid in one place but
-rejected in the other, that's a bug — and it's a bug we structurally
-prevent by keeping the logic in services and giving both surfaces the
-same client view.
-
-If you find yourself wanting to add a `if (input.length > 200)` check
-inside a write-route handler, stop. Add it to the service. The web
-layer should just call the service and react to its return value.
+The reason: when both surfaces share one validation path, a setting
+accepted in one place can never be silently rejected in the other.
 
 ### Adding a write route
+
+`createWebRouter` mounts the router at `/admin`, so routes declared
+inside `write-routes.ts` use **relative** paths — Express composes the
+final `/admin/<your-path>` URL for you.
 
 ```typescript
 // src/web/write-routes.ts (example)
 router.post(
-  "/admin/myfeature/save",
+  "/myfeature/save",            // becomes /admin/myfeature/save
   requireCsrf,
   requireSession,
   async (req: AuthenticatedRequest, res: Response) => {
@@ -542,21 +551,37 @@ await myService.initialize();
 
 Configuration uses a two-tier system:
 
-| Tier                | Stored in | Who edits it           | Reload          |
-| ------------------- | --------- | ---------------------- | --------------- |
-| Bootstrap / secrets | `.env`    | Operator (host shell)  | Restart process |
-| Feature settings    | MongoDB   | Admin via Web UI       | Live            |
+| Tier                | Stored in | Who edits it          | Picked up                                                  |
+| ------------------- | --------- | --------------------- | ---------------------------------------------------------- |
+| Bootstrap / secrets | `.env`    | Operator (host shell) | Process restart                                            |
+| Feature settings    | MongoDB   | Admin via Web UI      | Saved immediately to the `ConfigService` cache (see below) |
+
+Some services (cron-driven schedules, channel managers) cache derived
+state that does not refresh automatically when their config changes —
+those have a per-page reload button on the Web UI. Plain feature
+toggles take effect on the next read.
 
 **Rule:** if a value is read at startup (Discord token, Mongo URI,
 `WEBUI_*` secrets), it goes in `.env`. Anything else lives in MongoDB
-and is edited through the Web UI's Settings page. `src/services/config-service.ts`
-is the only thing that reads MongoDB-backed settings; only
-`src/index.ts`, `src/web/`, and `src/services/web-session-service.ts`
-read `process.env`.
+and is edited through the Web UI's Settings page.
+
+`process.env` is read at boot by a known set of modules — `src/index.ts`,
+`src/web/index.ts`, `src/web/session.ts`, `src/web/csrf.ts`,
+`src/web/admin-layout.ts`, `src/web/read-only-routes.ts` (bootstrap
+page), `src/services/config-service.ts` (for the env→bootstrap-key
+mappings), `src/services/web-session-service.ts`,
+`src/services/discord-logger.ts`, `src/services/startup-migrator.ts`,
+and `src/utils/logger.ts`. New service code should prefer reading
+through `ConfigService` so the same lookup path serves both surfaces;
+add new direct `process.env` reads only when the value is genuinely a
+startup-only secret.
 
 The protected-keys list lives at the top of `src/web/write-routes.ts`
-(`PROTECTED_KEYS`). It is hand-maintained — when you add a new env var,
-add it there too so YAML import can't overwrite it.
+(`PROTECTED_KEYS`). It is hand-maintained — when you add a new
+**bootstrap** env var (something whose value should never round-trip
+through YAML import/export), add it to that set so imports can't
+overwrite it. Operational tuning vars like `WEBUI_TRUST_PROXY` don't
+need to be there since they aren't represented as DB-backed keys.
 
 #### Adding New Config Keys
 
@@ -592,9 +617,12 @@ discovers settings from `defaultConfig` automatically.
 - Use dot notation: `feature.subsetting`
 - Group by domain: `voicechannels.*`, `quotes.*`, etc.
 - Always provide defaults
-- **Never access `process.env` directly outside `src/index.ts`,
-  `src/web/`, and `src/services/web-session-service.ts`.** Every other
-  caller goes through `ConfigService`.
+- **Prefer `ConfigService` for runtime feature settings.** Direct
+  `process.env` reads are expected at boot in `src/index.ts`,
+  `src/web/`, and a small allowlist of services (see the
+  "Configuration Management" section above for the current list). New
+  runtime feature code should go through `ConfigService` so the slash
+  command and Web UI surfaces see the same value.
 - Use appropriate type methods: `getBoolean()`, `getString()`, `getNumber()`
 
 ---

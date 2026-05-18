@@ -37,7 +37,15 @@ STEP 2: Configure
 │ Enable the admin Web UI (recommended):                                  │
 │   WEBUI_ENABLED=true                                                    │
 │   WEBUI_BASE_URL=http://localhost:3000                                  │
-│   WEBUI_SESSION_SECRET=$(openssl rand -base64 32)                       │
+│   WEBUI_SESSION_SECRET=<paste output of: openssl rand -base64 32>       │
+│                                                                         │
+│ Note: dotenv does not run shell substitutions — run                     │
+│   openssl rand -base64 32                                               │
+│ separately on your host, then paste the output into the value.          │
+│                                                                         │
+│ For plain-HTTP localhost testing, also set NODE_ENV=development         │
+│ (the Web UI cookie is Secure-flagged whenever NODE_ENV=production,      │
+│ and browsers refuse Secure cookies over http://...).                    │
 └─────────────────────────────────────────────────────────────────────────┘
 
 Where to get credentials:

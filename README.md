@@ -53,14 +53,19 @@ MONGODB_URI=mongodb://mongodb:27017/koolbot
 # Web UI — the admin surface. Recommended.
 WEBUI_ENABLED=true
 WEBUI_BASE_URL=http://localhost:3000
-WEBUI_SESSION_SECRET=replace-with-openssl-rand-base64-32
+WEBUI_SESSION_SECRET=replace-with-output-from-openssl-rand-base64-32
 
 # Optional
 DEBUG=false
-NODE_ENV=production
+# For local testing over plain HTTP, use NODE_ENV=development. The Web UI
+# session cookie is flagged `Secure` whenever NODE_ENV=production, which
+# browsers refuse over a `http://localhost` URL.
+NODE_ENV=development
 ```
 
-Generate a strong `WEBUI_SESSION_SECRET`:
+Generate a strong `WEBUI_SESSION_SECRET` by running this on your host
+**before** editing the file (paste the output in as the value above —
+dotenv files do not execute shell substitutions):
 
 ```bash
 openssl rand -base64 32
@@ -94,8 +99,11 @@ container will:
 
 - ✅ Automatically install dependencies
 - ✅ Set up MongoDB database
-- ✅ Register `/config` and the user-facing slash commands with Discord
+- ✅ Register `/config` and `/help` with Discord (other user commands
+  register only after you enable them on the Web UI's Settings page and
+  click **Reload commands to Discord**)
 - ✅ Mount the Web UI at `/admin` (only when `WEBUI_ENABLED=true`)
+- ✅ Publish port 3000 to the host so the sign-in link is reachable
 - ✅ Start the bot and keep it running
 
 Check the logs:
@@ -134,15 +142,21 @@ Look for `WebUI mounted at /admin` to confirm the Web UI is live.
 KoolBot ships **two** kinds of commands: user-facing chat commands, and one
 admin launcher.
 
-**User commands** (always in Discord):
+**User commands** (registered on demand — each one is gated by a
+`*.enabled` setting in the Web UI; `/help` and `/config` are the only
+commands always registered):
 
-- `/ping` — Check bot responsiveness
-- `/help` — Discover commands
-- `/voicestats top` / `/voicestats user` — Leaderboards and personal stats
-- `/seen` — Last-seen lookup
-- `/achievements` — View earned accolades
-- `/quote add` / `/quote edit` — Manage memorable quotes
-- `/amikool` — Role verification
+- `/ping` — Check bot responsiveness (`ping.enabled`)
+- `/help` — Discover commands (always on)
+- `/voicestats top` / `/voicestats user` — Leaderboards and personal stats (`voicetracking.enabled` + per-subcommand flag)
+- `/seen` — Last-seen lookup (`voicetracking.seen.enabled`)
+- `/achievements` — View earned accolades (`achievements.enabled`)
+- `/quote add` / `/quote edit` — Manage memorable quotes (`quotes.enabled`)
+- `/amikool` — Role verification (`amikool.enabled`)
+
+A fresh install only sees `/help` and `/config` in Discord until you
+enable the others on the Settings page and click **Reload commands to
+Discord**.
 
 **Admin launcher** (Discord → Web UI):
 
@@ -161,10 +175,14 @@ admin launcher.
 
 KoolBot has a **two-tier** configuration model:
 
-| Tier                | Stored in | Edited via                                 | Reload      |
-| ------------------- | --------- | ------------------------------------------ | ----------- |
-| Bootstrap / secrets | `.env`    | Edit the file on the host                  | Restart bot |
-| Feature settings    | MongoDB   | Web UI **Settings**, **Permissions**, etc. | Live        |
+| Tier                | Stored in | Edited via                                 | Picked up                  |
+| ------------------- | --------- | ------------------------------------------ | -------------------------- |
+| Bootstrap / secrets | `.env`    | Edit the file on the host                  | Bot restart                |
+| Feature settings    | MongoDB   | Web UI **Settings**, **Permissions**, etc. | Saved immediately (note ↓) |
+
+> ↓ Plain feature toggles take effect on the next read. A few
+> services (cron schedules, channel managers) cache derived state and
+> need a manual reload via their per-page button to fully apply.
 
 All features ship **disabled by default** for safety. Turn them on from the
 Web UI's Settings page once the bot is running.
@@ -214,9 +232,15 @@ Web UI's Settings page once the bot is running.
 
 The Web UI's Settings page has **Export** and **Import** buttons. Exports
 are YAML files covering DB-backed settings only — bootstrap env vars are
-never included. Imports are previewed as a diff before you apply them,
-and any payload that tries to set a protected key (`DISCORD_TOKEN`,
-`WEBUI_SESSION_SECRET`, etc.) is rejected outright.
+never included.
+
+Imports are previewed as a diff before you apply them. Apply is
+**per-key**: rows that target protected bootstrap keys
+(`DISCORD_TOKEN`, `WEBUI_SESSION_SECRET`, etc.) are skipped with a
+`rejected: protected key` status, and the remaining valid rows still
+apply. The result page reports per-key `applied` / `rejected` outcomes
+and a top-level `ok` / `partial` / `failed` summary, so a mixed YAML
+file produces a partial import rather than an all-or-nothing failure.
 
 ---
 
@@ -612,7 +636,7 @@ src/
 │   ├── voice-channel-tracker.ts
 │   ├── web-session-service.ts
 │   └── ...
-├── web/                  # Web UI router (thin wrappers over services)
+├── web/                  # Web UI router (HTTP layer over services)
 │   ├── index.ts          # Express router mounted at /admin
 │   ├── session.ts        # Cookie session middleware
 │   ├── read-only-routes.ts
@@ -625,10 +649,14 @@ src/
 └── index.ts              # Application entry point
 ```
 
-The hard rule for `src/web/`: **no business logic lives outside
-`src/services/`.** The Web UI is a new client on top of existing
-services, not a fork of the data model. See
-[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for details.
+The target for `src/web/` is to be a thin HTTP layer over the
+services — the routes today do still hold some input coercion
+(`coerceConfigValue`, `normalizeCron`) and direct model reads for page
+data, but new write paths should prefer pushing that into a service
+method. The goal is one validation path shared between the slash-command
+surface and the Web UI surface, not two. See
+[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) for the current state and
+conventions.
 
 ### Contributing
 

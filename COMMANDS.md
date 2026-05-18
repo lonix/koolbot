@@ -409,8 +409,14 @@ sign-in link via DM. Every administrative action — settings, permissions,
 the setup wizard, announcements, polls, reaction roles, notices, voice
 channel management, database cleanup, bot stats — happens in the Web UI.
 
-**Permission:** Discord **Administrator** by default (overridable via the
-`/permissions` UI inside the Web UI itself).
+**Permission:** Discord **Administrator** by default. `/config` is
+registered with `setDefaultMemberPermissions(Administrator)`, so
+Discord itself blocks non-administrators from invoking it before the
+bot ever sees the interaction. To grant `/config` to non-admin roles,
+override the command's permissions in Discord
+(**Server Settings → Integrations → KoolBot → /config**); the Web UI's
+Permissions page can only further restrict who is allowed once Discord
+has admitted the interaction.
 
 **Prerequisites:** Operator must have set `WEBUI_ENABLED=true`,
 `WEBUI_BASE_URL`, and `WEBUI_SESSION_SECRET` in `.env` and restarted the
@@ -426,8 +432,10 @@ No subcommands, no parameters.
 
 **Behavior:**
 
-1. Bot verifies you have the Administrator permission (or a role that
-   `permissions-service` permits to run `config`).
+1. Discord routes the interaction to the bot (it only does this for
+   members the command's Discord-level permissions allow — Administrator
+   by default; non-admin roles allowed only when an operator has added
+   them via Server Settings → Integrations).
 2. Bot revokes any prior unrevoked sessions you have.
 3. Bot generates a single-use token bound to your Discord user ID
    (default TTL: 10 minutes; configurable via
@@ -439,9 +447,17 @@ No subcommands, no parameters.
 6. You configure the bot in the Web UI. The session sliding window
    defaults to 30 minutes of inactivity and is hard-capped at the
    server-side TTL.
-7. You click **Finish** (or close the tab; or the inactivity timer
-   fires; or you re-run `/config`, which revokes the current session).
-   The cookie clears and `/admin/*` returns 401.
+7. You end the session one of four ways:
+   - Click **Finish** — server-side revoke + cookie cleared, immediate.
+   - Re-run `/config` — server-side revoke of the prior session +
+     fresh link minted.
+   - Idle past the inactivity window or hard TTL — the next request
+     rejects the cookie (the server-side row stays in MongoDB until
+     it's TTL-expired or explicitly revoked).
+   - Close the tab — the cookie sticks around in your browser and the
+     session row stays valid in MongoDB until idle/TTL, so closing the
+     tab is **not** equivalent to signing out. Click Finish if you want
+     a hard end.
 
 **Example responses:**
 
@@ -513,7 +529,10 @@ chat. Only you (the channel owner) can use it.
 
 **Features:**
 
-- Only visible to the channel owner
+- Posted into the voice channel's text chat — visible to everyone with
+  access to that channel; only the channel owner can interact with the
+  buttons (non-owners get an ephemeral "Only the channel owner can use
+  these controls" reply if they click)
 - Updates dynamically as privacy / live / waiting-room state changes
 - Persists until the channel is deleted
 - Posted automatically every time a new channel is created
@@ -536,7 +555,7 @@ Privacy: 🌐 Public
 [✏️ Rename] [🔒 Make Private] [👥 Invite] [👑 Transfer]
 [⬜ Go Offline] [🗑️ Remove Waiting Room]
 
-Only you can see and use these controls
+Only the channel owner can use these controls
 ```
 
 ### Rename channel
@@ -551,8 +570,12 @@ Make Public** opens it back up.
 
 ### Invite users
 
-While the channel is private, click **👥 Invite** and pick a user from
-the menu. They get a DM notification with permission to join.
+While the channel is private, click **👥 Invite**. The bot replies with
+an ephemeral message explaining how to grant a user access:
+right-click their name in Discord and **Edit Channel Permissions** for
+this channel. (The button is intentionally an instructions handoff, not
+an interactive user picker — Discord's per-user channel permission
+panel covers the actual grant.)
 
 ### Transfer ownership
 

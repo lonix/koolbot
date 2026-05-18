@@ -76,13 +76,15 @@ port to learn. It is dark unless `WEBUI_ENABLED=true`.
                             │ checked each req │
                             └──────────────────┘
                                  │
-                                 │ click "Finish" (or idle out)
-                                 ▼
-                            ┌──────────────────┐
-                            │ session revoked  │
-                            │ cookie cleared   │
-                            │ /admin/* → 401   │
-                            └──────────────────┘
+                                 ├─ click "Finish" or re-run /config
+                                 │  → session revoked server-side,
+                                 │    cookie cleared, /admin/* → 401
+                                 │
+                                 └─ idle past the inactivity window,
+                                    or reach the hard expiresAt
+                                    → cookie rejected on the next request;
+                                      the DB row stays until TTL or
+                                      explicit revoke
 ```
 
 Key properties:
@@ -99,8 +101,12 @@ Key properties:
   sessions are untouched.
 - **Permissions re-checked every request.** The cookie-session middleware
   re-runs `PermissionsService.checkCommandPermission(uid, gid, "config")`
-  on every hit. Demote an admin in Discord and their next click logs
-  them out.
+  on every hit. That check returns `false` (and the middleware logs the
+  user out) when the user has lost Administrator **and** the bot's
+  Permissions page has explicit role gating configured for `config` that
+  no longer matches the user's roles. With no explicit gating configured,
+  a re-check after demotion still passes — the magic-link gate at
+  `/admin/s/<token>` is the primary defense, not this revalidation.
 - **No persistent OAuth.** The bot is the trust anchor. If you can run
   `/config` in Discord, you can configure the bot — no separate login.
 
@@ -111,20 +117,30 @@ Key properties:
 KoolBot has a hard rule: **bootstrap settings live in `.env`, everything
 else lives in MongoDB and is edited via the Web UI.**
 
-| Setting tier         | Where it lives | How it's edited                                  | Reload           |
-| -------------------- | -------------- | ------------------------------------------------ | ---------------- |
-| Bootstrap / secrets  | `.env`         | Edit the file on the host                        | Restart bot      |
-| Feature config       | MongoDB        | Web UI **Settings**, **Permissions**, etc.       | Live             |
-| Discord command list | MongoDB        | Web UI Settings → **Reload commands to Discord** | Click the button |
+| Setting tier         | Where it lives | How it's edited                                  | Picked up                  |
+| -------------------- | -------------- | ------------------------------------------------ | -------------------------- |
+| Bootstrap / secrets  | `.env`         | Edit the file on the host                        | Bot restart                |
+| Feature config       | MongoDB        | Web UI **Settings**, **Permissions**, etc.       | Saved immediately (note ↓) |
+| Discord command list | MongoDB        | Web UI Settings → **Reload commands to Discord** | Click the button           |
 
-The Web UI's **Bootstrap** page surfaces every `.env` value the bot reads,
+> ↓ Plain feature toggles take effect on the next read. Cron-scheduled
+> services (announcements, polls, cleanup) and channel managers cache
+> derived state and need a manual reload via their per-page button to
+> fully apply.
+
+The Web UI's **Bootstrap** page surfaces every `.env` value the bot
+reads (see `BOOTSTRAP_VARS` in `src/web/read-only-routes.ts`),
 read-only, with secrets masked (last 4 characters only). You can verify
 what the process saw at startup, but you cannot change it from the
 browser.
 
-YAML import/export covers the MongoDB tier only. The protected-keys list
-(`src/web/write-routes.ts`) refuses any import that tries to set a
-bootstrap key, even if you handcraft the YAML. Defense in depth.
+YAML import/export covers the MongoDB tier only. Imports apply
+**per-key**: the protected-keys list (`PROTECTED_KEYS` in
+`src/web/write-routes.ts`) flags any row that targets a bootstrap key
+as `rejected: protected key`, but other valid rows in the same file
+still apply. The result page shows per-key outcomes plus a top-level
+`ok` / `partial` / `failed` status — a mixed YAML produces a partial
+import, not an atomic failure.
 
 ---
 
@@ -259,8 +275,12 @@ services:
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
-    ports:
-      - "27017:27017"
+    # Intentionally no `ports:` — the bot reaches MongoDB over the
+    # internal Docker network. The default mongo image has NO auth, so
+    # do not publish 27017 to a public interface. If you need host
+    # access for mongosh, bind explicitly to loopback:
+    #   ports:
+    #     - "127.0.0.1:27017:27017"
     stop_grace_period: 30s
     stop_signal: SIGTERM
 
@@ -270,9 +290,25 @@ volumes:
 
 With this, `WEBUI_BASE_URL=http://your-host:3000`.
 
-⚠️ **No HTTPS.** The session cookie is `Secure`-flagged automatically
-when `WEBUI_BASE_URL` is HTTPS; over plain HTTP, anyone on the network
-path can lift it. Don't do this on the public internet.
+⚠️ **No HTTPS — read this before using this recipe in production.**
+
+The Web UI sets the session cookie's `Secure` flag whenever
+`NODE_ENV=production` (see `shouldUseSecureCookies()` in
+`src/web/csrf.ts`). Browsers refuse to send `Secure` cookies over plain
+HTTP, so a production-mode bot reached at `http://your-host:3000`
+**will not maintain a session** — every page click logs you back out.
+
+Pick one:
+
+- Set `NODE_ENV=development` while you accept plain HTTP (the cookie
+  drops the `Secure` flag), **or**
+- Put a reverse proxy in front of the bot and terminate TLS there
+  (recommended — see [Caddy reverse proxy](#caddy-reverse-proxy-recommended)
+  below).
+
+Either way, plain HTTP exposes the magic-link bearer token in transit
+and the session cookie in subsequent requests. Don't run plain HTTP on
+the public internet.
 
 ### Bind to localhost only
 
@@ -369,8 +405,16 @@ WEBUI_TRUST_PROXY=1
 Caddy provisions the TLS certificate automatically via Let's Encrypt and
 forwards `X-Forwarded-For` to the bot. `WEBUI_TRUST_PROXY=1` tells the
 bot's rate limiter to trust exactly one hop (Caddy) when reading client
-IPs — without it, an attacker who can reach `/admin/s/...` directly
-could spoof their IP and bypass rate limits.
+IPs.
+
+⚠️ **Trust-proxy is a footgun if the bot is *also* directly reachable.**
+By default the bot ignores `X-Forwarded-*` headers, so a direct client
+cannot spoof its IP. Setting `WEBUI_TRUST_PROXY=1` flips that: any
+request reaching the bot — including a direct one that bypasses Caddy
+— can now set `X-Forwarded-For` to anything it wants. **Block direct
+access to `bot:3000` from outside the Docker network** (the recipe
+above does this by not declaring a `ports:` on the bot service) before
+trusting forwarded headers.
 
 > **We do not bundle Caddy.** The recipe above is the easy path; your
 > existing nginx, Traefik, or HAProxy works equally well as long as it
@@ -389,15 +433,21 @@ reachable from the tunnel sidecar's network namespace.
 The Web UI is a plain HTTP server. Any reverse proxy works. The
 requirements are:
 
-1. **Forward `Host`** so URL generation inside the app matches
+1. **Terminate TLS at the proxy.** The bot itself does not speak HTTPS.
+2. **Forward `Host`** so URL generation inside the app matches
    `WEBUI_BASE_URL`. Most proxies do this by default.
-2. **Forward `X-Forwarded-Proto`** so the bot knows whether the original
-   request was HTTPS. The `Secure` cookie flag depends on this.
-3. **Set `WEBUI_TRUST_PROXY`** to the hop count of trusted proxies in
+3. **Run the bot with `NODE_ENV=production`.** That's what flips the
+   session cookie's `Secure` flag on (`shouldUseSecureCookies()` in
+   `src/web/csrf.ts`). The bot does not look at `X-Forwarded-Proto` —
+   the decision is `NODE_ENV`-only. You can still forward
+   `X-Forwarded-Proto` for your own logging, it just doesn't affect
+   cookie flagging.
+4. **Set `WEBUI_TRUST_PROXY`** to the hop count of trusted proxies in
    front of the bot. `1` for "one Caddy/nginx", larger for chained
-   setups. Without this, the bot ignores `X-Forwarded-*` headers and
-   treats every request as coming from the proxy's IP.
-4. **Terminate TLS at the proxy.** The bot itself does not speak HTTPS.
+   setups. Without this, the bot ignores `X-Forwarded-*` headers
+   entirely; with this, **make sure the bot is not also directly
+   reachable** so attackers can't bypass the proxy and spoof
+   `X-Forwarded-For` against the rate limiter.
 
 The Caddy config above is intentionally minimal. nginx equivalent:
 
@@ -486,16 +536,24 @@ Could not DM web sign-in link to <user-id>; falling back to ephemeral reply
 
 ## Session lifecycle and revocation
 
-| Trigger                            | Effect                                                   |
-| ---------------------------------- | -------------------------------------------------------- |
-| Run `/config`                      | Revokes all your prior unrevoked sessions; mints new     |
-| Click DM link                      | Marks token `usedAt`; sets signed session cookie         |
-| Idle longer than inactivity window | Cookie expires; next click → 401                         |
-| Reach session's hard `expiresAt`   | Session revoked server-side; next click → 401            |
-| Click **Finish** in the UI         | Session revoked server-side; cookie cleared              |
-| Admin role removed in Discord      | Next request re-checks permissions → 401, cookie cleared |
-| Bot restart                        | Sessions survive (stored in MongoDB)                     |
-| `WEBUI_SESSION_SECRET` rotated     | All existing sessions and outstanding tokens invalid     |
+| Trigger                            | Effect                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------- |
+| Run `/config`                      | Revokes all your prior unrevoked sessions server-side; mints new                        |
+| Click DM link                      | Marks token `usedAt`; sets signed session cookie                                        |
+| Idle longer than inactivity window | Cookie is rejected on the next request; the DB row remains until TTL or explicit revoke |
+| Reach session's hard `expiresAt`   | Cookie is rejected on the next request; the DB row is past its TTL                      |
+| Click **Finish** in the UI         | Session revoked server-side; cookie cleared                                             |
+| Admin role removed in Discord      | Next request re-runs the permission check — caveat ↓                                    |
+| Bot restart                        | Sessions survive (stored in MongoDB)                                                    |
+| `WEBUI_SESSION_SECRET` rotated     | All existing sessions and outstanding tokens invalid                                    |
+
+> **Caveat on the "admin role removed" row.** The permission re-check
+> only returns `false` when there's explicit role gating configured for
+> `config` on the Web UI's Permissions page that no longer matches the
+> user's roles. With no explicit gating, the check returns `true` and
+> the session continues. If you want demotions to log existing sessions
+> out, configure Permissions → `config` to an admin-only role, then
+> the role removal will kick the session on the next request.
 
 Two admins can be in the Web UI at the same time. Re-running `/config`
 only invalidates **your own** sessions.
@@ -565,16 +623,34 @@ One of:
 
 ### "Sign in required" on every page
 
-Your cookie is stale or your IP changed in a way that broke session
-binding. Run `/config` again to mint a fresh link.
+Possible causes (in roughly decreasing likelihood):
+
+- Your cookie expired (idle past `WEBUI_INACTIVITY_TIMEOUT_MINUTES`).
+- The DB session row passed its hard TTL (`WEBUI_SESSION_TTL_MINUTES`
+  from issuance).
+- You ran `/config` again and revoked this session server-side.
+- Permission re-check failed: someone configured Web UI Permissions →
+  `config` to restrict the command, and your roles no longer match.
+- The bot was restarted with a new `WEBUI_SESSION_SECRET`, invalidating
+  the cookie signature.
+
+Run `/config` again to mint a fresh link.
+
+The cookie is **not** bound to your client IP — switching networks does
+not by itself end a session.
 
 ### The Web UI URL loads but won't accept my cookie
 
-Browsers refuse `Secure`-flagged cookies over plain HTTP. Either:
+Browsers refuse `Secure`-flagged cookies over plain HTTP. The Web UI
+flags its session cookie `Secure` whenever `NODE_ENV=production`
+(see `shouldUseSecureCookies()` in `src/web/csrf.ts`). Pick one:
 
-- Run behind HTTPS (recommended), **or**
-- Set `WEBUI_BASE_URL=http://...` so the bot doesn't set the `Secure`
-  flag in the first place. Only do this for local testing.
+- Run behind HTTPS via a reverse proxy (recommended), **or**
+- Set `NODE_ENV=development` in `.env` and restart, so the cookie is
+  not flagged `Secure`. Only do this for local testing.
+
+Changing only `WEBUI_BASE_URL` to `http://...` is **not** enough — the
+URL scheme does not influence cookie flagging.
 
 ### Behind a proxy, rate limits trigger on the proxy's IP
 

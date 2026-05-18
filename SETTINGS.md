@@ -130,7 +130,10 @@ shell into the container.
 ## 🎮 Command Enablement
 
 Enable or disable individual commands from the Web UI's **Settings**
-page. **All commands are disabled by default.**
+page. **Every command listed below is disabled by default.** `/help`
+and `/config` are the exceptions — both are always registered (no
+`*.enabled` flag) so a fresh install always has access to the Web UI
+launcher and help discovery.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -684,8 +687,13 @@ These commands are **admin-only** by default:
 
 - `/config` — opens the Web UI
 
-The Web UI itself also requires that the user can run `config` (admin
-by default, overridable via the Permissions page).
+`/config` is registered with Discord's `setDefaultMemberPermissions(Administrator)`,
+so Discord enforces the admin gate before the bot's `PermissionsService`
+ever runs. To grant `/config` to non-admin roles, an operator must
+override the command in Discord (**Server Settings → Integrations →
+KoolBot → /config**). The Web UI's Permissions page only **narrows**
+who is allowed once Discord has admitted the interaction; it does not
+widen Discord's default member-permission gate.
 
 All other commands default to accessible by everyone unless you add
 permissions.
@@ -697,19 +705,26 @@ permissions.
 ### Editing settings
 
 All DB-backed settings are edited on the Web UI's **Settings** page.
-The Settings page groups settings by feature, validates input per
-schema, and shows inline help. After changing any `*.enabled` value,
-click **Reload commands to Discord** so Discord re-syncs the
-registration.
+The Settings page groups settings by feature, coerces inputs to the
+declared primitive type (boolean / number / string), and shows inline
+help. It does **not** enforce schema-level constraints like numeric
+ranges or enum allow-lists — invalid-but-well-typed values are
+accepted, so double-check inputs against the docs for keys with valid
+ranges (cron expressions, retention days, etc.). After changing any
+`*.enabled` value, click **Reload commands to Discord** so Discord
+re-syncs the registration.
 
 ### YAML export / import
 
 - **Export** — Settings page → click **Export** → download YAML. Covers
   DB-backed settings only; bootstrap env vars are excluded.
 - **Import** — Settings page → click **Import** → upload YAML → review
-  the diff → apply. Imports that try to set a protected key
-  (`DISCORD_TOKEN`, `WEBUI_SESSION_SECRET`, any other `.env` value) are
-  rejected outright.
+  the diff → apply. Imports are **per-key**: any row targeting a
+  protected key (`DISCORD_TOKEN`, `WEBUI_SESSION_SECRET`, any other
+  `.env` value) is flagged `rejected: protected key`, and the remaining
+  rows still apply. The result page surfaces per-key outcomes plus a
+  top-level `ok` / `partial` / `failed` summary, so a mixed YAML
+  produces a partial import rather than an all-or-nothing failure.
 
 ### Reset to default
 
@@ -720,7 +735,9 @@ For any setting, click **Reset to default** on the Settings page.
 The Web UI form controls map to the underlying schema types:
 
 - **Booleans** — checkbox
-- **Numbers** — number input with min/max validation
+- **Numbers** — number input; the form coerces strings to numbers but
+  does not enforce per-setting min/max (see [Editing settings](#editing-settings)
+  above)
 - **Strings** — text input
 - **Comma-separated lists** — text input; you handle the commas
 
@@ -735,7 +752,15 @@ The Web UI form controls map to the underlying schema types:
 
 ## 📖 Quick Settings Reference
 
-### All available settings (DB-backed)
+### Commonly used settings (DB-backed)
+
+This is a selected subset — the authoritative list of every key (with
+defaults and metadata) lives in `src/services/config-schema.ts`. Notable
+keys that may be missing from this summary include the `help.*` toggle,
+`voicechannels.presets.*`, `quotes.cleanup_interval`, the
+`*.header_message_id` storage slots managed by the bot, and the
+`leaderboard_roles.*` family (covered in [its own section](#-leaderboard-role-rewards)
+above).
 
 #### Commands
 

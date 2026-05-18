@@ -110,7 +110,10 @@ This file provides an overview of the complete documentation structure.
 
 - All admin configuration is browser-based, magic-link gated
 - Slash command surface stays focused on member-facing actions
-- One source of truth (`src/services/`) — the Web UI is a thin client
+- Goal: `src/services/` holds the business logic; `src/web/` is a thin
+  HTTP layer over it. The current code is on that path but not all the
+  way there (some input coercion and direct model reads still live in
+  the web layer) — new code should push toward the goal
 
 ### Bootstrap-vs-DB boundary
 
