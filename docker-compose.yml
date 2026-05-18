@@ -8,7 +8,24 @@ services:
       - mongodb
     stop_grace_period: 30s
     stop_signal: SIGTERM
-
+    # The bot listens on port 3000 inside the container for /health and the
+    # admin Web UI (/admin/*, only when WEBUI_ENABLED=true in .env).
+    #
+    # Pick one of the options below to make the Web UI reachable from your
+    # browser. See WEBUI.md for HTTPS / reverse-proxy setups.
+    #
+    # Option A — Publish directly (LAN/VPN-only, no HTTPS):
+    # ports:
+    #   - "3000:3000"
+    #
+    # Option B — Bind to localhost only (use an SSH tunnel to reach it):
+    # ports:
+    #   - "127.0.0.1:3000:3000"
+    #
+    # Option C — Caddy / nginx / Traefik reverse proxy (recommended for any
+    # internet-facing deployment). Leave `ports:` unset on this service and
+    # let the proxy service forward to bot:3000 over the internal Docker
+    # network. See WEBUI.md → "Docker Compose recipes" for a full example.
 
   mongodb:
     image: mongo:latest

@@ -1,62 +1,53 @@
 # KoolBot Commands Reference
 
-Complete reference for all KoolBot commands with examples and detailed explanations.
+Complete reference for every slash command KoolBot registers with Discord.
 
-> **Note:** All commands must be enabled through configuration before they appear in Discord.
-> The supported way to do this is the WebUI Settings page (run `/config` to get a
-> single-use sign-in link). The legacy slash equivalents — `/config set
-> key:command.enabled value:true` followed by `/config reload` — still work for the
-> current release but are deprecated; see the banner below.
+KoolBot's slash-command surface is intentionally small. All
+**day-to-day chat interaction** stays in Discord (`/ping`, `/voicestats`,
+`/seen`, `/quote`, `/achievements`, `/amikool`, `/help`). All
+**administration and configuration** lives in the Web UI, reached via the
+single `/config` launcher.
 
----
-
-> ⚠️ **Deprecation notice (v1.0 migration):** The following admin slash commands are
-> **deprecated** and will be removed in 1.0. They still work, but each invocation now
-> emits a deprecation embed pointing at the WebUI. Run `/config` to open the WebUI
-> launcher instead.
->
-> - `/permissions`, `/setup`, `/announce`, `/announce-vc-stats`, `/poll`,
->   `/reactrole`, `/notice`, `/dbtrunk`, `/vc`, `/botstats`
-> - Every `/config` subcommand except the launcher (i.e. `/config list`,
->   `/config set`, `/config import`, `/config export`, `/config reset`,
->   `/config reload`). The `/config web` launcher itself is **not** deprecated.
->
-> User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`, `/achievements`,
-> `/amikool`, `/help`) are unaffected.
+> **Note:** Most commands must be enabled before they appear in Discord.
+> Toggle them from the Web UI's **Settings** page (run `/config` to get a
+> single-use sign-in link), then click **Reload commands to Discord** to
+> push the registration change.
 
 ---
 
 ## 📋 Table of Contents
 
-- [User Commands](#-user-commands) - Available to all server members
-- [Admin Commands](#-admin-commands) - Require Administrator permission
-  - [/setup](#setup) - Interactive setup wizard (recommended for first-time setup)
-  - [/config](#config) - Configuration management
-  - [/permissions](#permissions) - Role-based access control
-  - [/vc](#vc) - Voice channel management
-- [Configuration Management](#config) - Detailed `/config` command guide
-- [Quick Command Reference](#-quick-command-reference) - Summary table
+- [User Commands](#-user-commands)
+  - [/ping](#ping)
+  - [/help](#help)
+  - [/voicestats](#voicestats)
+  - [/seen](#seen)
+  - [/achievements](#achievements)
+  - [/quote](#quote)
+  - [/amikool](#amikool)
+- [Admin: Web UI launcher](#-admin-web-ui-launcher)
+  - [/config](#config)
+- [Voice Channel Control Panel](#voice-channel-control-panel)
+- [Permission Requirements](#-permission-requirements)
+- [Quick Command Reference](#-quick-command-reference)
 
 ---
 
 ## 👥 User Commands
 
-Commands available to all server members.
+Commands available to all server members. Per-command role gating can be
+applied from the Web UI's **Permissions** page; without gating, the
+command is open to everyone.
 
 ### `/ping`
 
 **Description:** Check if the bot is responding and measure latency.
 
-**Configuration:**
-
-```bash
-/config set key:ping.enabled value:true
-/config reload
-```
+**Enable:** Web UI → Settings → set `ping.enabled = true` → Reload commands.
 
 **Usage:**
 
-```bash
+```text
 /ping
 ```
 
@@ -68,32 +59,33 @@ Bot Latency: 45ms
 API Latency: 123ms
 ```
 
-**Use Cases:**
+**Use cases:**
 
 - Verify bot is online and responsive
 - Check connection quality
-- Troubleshoot lag issues
+- Troubleshoot lag
 
 ---
 
 ### `/help`
 
-**Description:** Get help with KoolBot commands. Lists all available commands or shows detailed information about a specific command.
+**Description:** Get help with KoolBot commands. Lists all available commands
+or shows detailed information about a specific command.
 
-**Note:** This is a core command that is **always enabled** and does not require configuration.
+**Note:** Core command, **always enabled**, no configuration needed.
 
 **Usage:**
 
-```bash
-/help                    # List all commands
-/help command:ping       # Get detailed help for a specific command
+```text
+/help                    # List all enabled commands
+/help command:ping       # Detailed help for one command
 ```
 
 **Parameters:**
 
-- `command` (optional) - Name of the command to get detailed help for
+- `command` (optional) — Name of the command to get detailed help for
 
-**Example Responses:**
+**Example responses:**
 
 ```text
 # List all commands
@@ -110,39 +102,28 @@ Usage: /ping
 Status: ✅ Enabled
 ```
 
-**Use Cases:**
-
-- Discover available commands
-- Learn command syntax
-- Check if a command is enabled
-- New user onboarding
-
 ---
 
 ### `/voicestats`
 
-**Description:** Voice channel statistics and leaderboards. This unified command combines leaderboard (`top`) and personal stats (`user`) functionality.
+**Description:** Voice channel statistics and leaderboards. Combines
+leaderboard (`top`) and personal stats (`user`) functionality.
 
-**Configuration:**
+**Enable:** Web UI → Settings:
 
-```bash
-# Requires voice tracking to be enabled
-/config set key:voicetracking.enabled value:true
-/config reload
+- `voicetracking.enabled = true`
+- `voicetracking.stats.top.enabled = true` (for `top` subcommand)
+- `voicetracking.stats.user.enabled = true` (for `user` subcommand)
 
-# Optional: Enable individual subcommands
-/config set key:voicetracking.stats.top.enabled value:true
-/config set key:voicetracking.stats.user.enabled value:true
-/config reload
-```
+Then click **Reload commands to Discord**.
 
 #### Subcommand: `top`
 
-**Description:** View voice channel activity leaderboards showing top users by time spent.
+View voice channel activity leaderboards.
 
 **Usage:**
 
-```bash
+```text
 /voicestats top
 /voicestats top limit:20
 /voicestats top period:month
@@ -151,12 +132,12 @@ Status: ✅ Enabled
 
 **Parameters:**
 
-- `limit` (optional) - Number of users to display (1-50, default: 10)
-- `period` (optional) - Time period: `week`, `month`, `alltime` (default: week)
+- `limit` (optional) — Number of users to display (1-50, default: 10)
+- `period` (optional) — `week` / `month` / `alltime` (default: `week`)
 
-**Example Response:**
+**Example response:**
 
-```json
+```text
 Top Voice Channel Users (week):
 🥇 Alice: 24h 15m
 🥈 Bob: 18h 32m
@@ -165,19 +146,13 @@ Top Voice Channel Users (week):
 5. Emma: 6h 10m
 ```
 
-**Use Cases:**
-
-- See who's most active in voice channels
-- Create friendly competition
-- Recognize community engagement
-
 #### Subcommand: `user`
 
-**Description:** View personal voice channel statistics and activity history for yourself or another user.
+View personal voice channel statistics for yourself or another user.
 
 **Usage:**
 
-```bash
+```text
 /voicestats user
 /voicestats user user:@Alice
 /voicestats user period:month
@@ -186,12 +161,12 @@ Top Voice Channel Users (week):
 
 **Parameters:**
 
-- `user` (optional) - The user to show statistics for (defaults to yourself)
-- `period` (optional) - Time period: `week`, `month`, `alltime` (default: week)
+- `user` (optional) — Defaults to yourself
+- `period` (optional) — `week` / `month` / `alltime` (default: `week`)
 
-**Example Response:**
+**Example response:**
 
-```json
+```text
 Voice Channel Statistics for Alice (week):
 Total Time: 24h 15m
 Last Seen: 2026-01-29 12:00:00
@@ -202,78 +177,58 @@ Recent Sessions:
 • Music Lounge: 1h 30m
 ```
 
-**Use Cases:**
-
-- Track your own voice channel usage
-- View another user's activity
-- See activity trends
-- Check recent session history
-
 ---
 
 ### `/seen`
 
 **Description:** Check when a user was last active in voice channels.
 
-**Configuration:**
+**Enable:** Web UI → Settings:
 
-```bash
-/config set key:voicetracking.enabled value:true
-/config set key:voicetracking.seen.enabled value:true
-/config reload
-```
+- `voicetracking.enabled = true`
+- `voicetracking.seen.enabled = true`
+
+Then reload commands.
 
 **Usage:**
 
-```bash
+```text
 /seen user:@Username
 ```
 
 **Parameters:**
 
-- `user` (required) - The user to look up
+- `user` (required) — The user to look up
 
-**Example Response:**
+**Example response:**
 
-```json
+```text
 👤 Alice was last seen:
 🕐 2 hours ago
 📍 In: Gaming Room
 ⏱️ Duration: 3h 45m
 ```
 
-**Use Cases:**
-
-- Check if someone has been online recently
-- See what channel they were in
-- Track member activity patterns
-
 ---
 
 ### `/achievements`
 
-**Description:** View earned badges and achievements from voice channel activity. Displays persistent accolades earned through milestones and participation.
+**Description:** View earned accolades and badges from voice channel activity.
 
-**Configuration:**
-
-```bash
-# Enable achievements system
-/config set key:achievements.enabled value:true
-/config reload
-```
+**Enable:** Web UI → Settings → `achievements.enabled = true` → Reload commands.
 
 **Usage:**
 
-```bash
-/achievements                    # View your own achievements
-/achievements user:@Username     # View another user's achievements
+```text
+/achievements                    # View your own accolades
+/achievements user:@Username     # View another user's accolades
 ```
 
 **Parameters:**
 
-- `user` (optional) - The user to view achievements for (defaults to yourself)
+- `user` (optional) — Defaults to yourself
 
-**Example Response:**
+**Example response:**
 
 ```text
 🏆 Alice's Achievements
@@ -301,88 +256,75 @@ Total Accolades: 4
 Total Achievements: 0
 ```
 
-**Available Accolades:**
+**Available accolades:**
 
-- 🎉 **First Steps** - Spent your first hour in voice chat
-- 🎖️ **Voice Veteran** - Reached 100 hours
-- 🏅 **Voice Elite** - Reached 500 hours
-- 🏆 **Voice Master** - Reached 1000 hours
-- 👑 **Voice Legend** - Reached 8765 hours (1 year!)
-- 🏃 **Marathon Runner** - Completed a 4+ hour session
-- 🦸 **Ultra Marathoner** - Completed an 8+ hour session
-- 🦋 **Social Butterfly** - Voiced with 10+ unique users
-- 🤝 **Connector** - Voiced with 25+ unique users
-- 🦉 **Night Owl** - 50+ hours late night (10 PM - 6 AM UTC)
-- 🐦 **Early Bird** - 50+ hours early morning (6 AM - 10 AM UTC)
-- 🎮 **Weekend Warrior** - 100+ hours on weekends
-- 💼 **Weekday Warrior** - 100+ hours on weekdays
-- 🔥 **On a Roll** - Connected for 7 consecutive days (5+ min/day)
-- ⚡ **Dedicated AF** - Connected for 14 consecutive days (5+ min/day)
-- 💀 **No-Lifer** - Connected for 30 consecutive days (5+ min/day)
-- 🗣️ **Quotable** - Been quoted for the first time
-- 📝 **Quote Master** - Added 10 quotes to the collection
-- 📚 **Quote Collector** - Added 50 quotes to the collection
-- 🏆 **Quote Legend** - Added 100 quotes to the collection
-- ⭐ **Widely Quoted** - Been quoted 25 times
-- 💫 **Quote Icon** - Been quoted 50 times
-- 🔥 **Viral Quote** - Have a quote with 10+ likes
+- 🎉 **First Steps** — First hour in voice chat
+- 🎖️ **Voice Veteran** — 100 hours
+- 🏅 **Voice Elite** — 500 hours
+- 🏆 **Voice Master** — 1000 hours
+- 👑 **Voice Legend** — 8765 hours (1 year!)
+- 🏃 **Marathon Runner** — 4+ hour session
+- 🦸 **Ultra Marathoner** — 8+ hour session
+- 🦋 **Social Butterfly** — 10+ unique users
+- 🤝 **Connector** — 25+ unique users
+- 🦉 **Night Owl** — 50+ late-night hours (10 PM - 6 AM UTC)
+- 🐦 **Early Bird** — 50+ early-morning hours (6 AM - 10 AM UTC)
+- 🎮 **Weekend Warrior** — 100+ weekend hours
+- 💼 **Weekday Warrior** — 100+ weekday hours
+- 🔥 **On a Roll** — 7 consecutive days (5+ min/day)
+- ⚡ **Dedicated AF** — 14 consecutive days (5+ min/day)
+- 💀 **No-Lifer** — 30 consecutive days (5+ min/day)
+- 🗣️ **Quotable** — Been quoted for the first time
+- 📝 **Quote Master** — Added 10 quotes
+- 📚 **Quote Collector** — Added 50 quotes
+- 🏆 **Quote Legend** — Added 100 quotes
+- ⭐ **Widely Quoted** — Been quoted 25 times
+- 💫 **Quote Icon** — Been quoted 50 times
+- 🔥 **Viral Quote** — Have a quote with 10+ likes
 
-**Note on Time-Based Accolades:**
+**Notes on time-based accolades:**
 
-- **Night Owl** and **Early Bird** times are calculated in **UTC timezone** (the bot's server time)
-- These times may differ from your local timezone depending on your location
-- **Weekend Warrior** and **Weekday Warrior** use UTC for determining day of week
-- Calculate your local time offset from UTC to know when these periods occur in your timezone
+- Night Owl / Early Bird use **UTC**, not your local timezone
+- Weekend Warrior / Weekday Warrior use UTC day-of-week
 
-**Notification System:**
+**Notifications:**
 
-When you earn a new accolade, you'll receive:
-
-- A DM from the bot with details about your achievement
-- Announcement in the weekly voice stats channel
-
-**Use Cases:**
-
-- Track your voice activity milestones
-- View your collection of earned badges
-- Compare achievements with friends
-- Get motivated to participate more
+When you earn a new accolade you receive a DM (if DMs are open) and an
+announcement in the configured weekly voice stats channel.
 
 ---
 
 ### `/quote`
 
-**Description:** Add and manage memorable quotes in a dedicated bot-managed channel. All quotes are posted in a channel where users can react with 👍/👎.
+**Description:** Add and manage memorable quotes in a dedicated bot-managed
+channel. All quotes are posted in a channel where users can react with
+👍/👎.
 
-**Configuration:**
+**Enable:** Web UI → Settings:
 
-```bash
-# Enable quotes and set channel
-/config set key:quotes.enabled value:true
-/config set key:quotes.channel_id value:"YOUR_CHANNEL_ID"
-/config set key:quotes.cooldown value:60
-/config set key:quotes.max_length value:1000
-/config reload
-```
+- `quotes.enabled = true`
+- `quotes.channel_id = <channel-id>`
+- (Optional) `quotes.cooldown`, `quotes.max_length`, `quotes.add_roles`,
+  `quotes.delete_roles`
 
-**Subcommands:**
+Then reload commands.
 
 #### `/quote add`
 
-Add a new quote to the quote channel.
+Add a new quote.
 
 **Usage:**
 
-```bash
+```text
 /quote add text:"Great quote!" author:@Alice
 ```
 
 **Parameters:**
 
-- `text` (required): The quote text to add
-- `author` (required): The user who said the quote (mention/select the user)
+- `text` (required) — The quote text
+- `author` (required) — Who said it
 
-**Example Response:**
+**Example response:**
 
 ```text
 ✅ Quote added successfully and posted to the quote channel!
@@ -394,7 +336,7 @@ Edit an existing quote that you added.
 
 **Usage:**
 
-```bash
+```text
 /quote edit id:"697bdfe2808f7d245289392c" text:"Updated quote!"
 /quote edit id:"697bdfe2808f7d245289392c" author:@Bob
 /quote edit id:"697bdfe2808f7d245289392c" text:"New text" author:@Bob
@@ -402,267 +344,50 @@ Edit an existing quote that you added.
 
 **Parameters:**
 
-- `id` (required): The quote ID (found in the quote footer in the channel)
-- `text` (optional): The new quote text
-- `author` (optional): The new author (mention/select the user)
+- `id` (required) — Quote ID (in the quote footer)
+- `text` (optional) — New quote text
+- `author` (optional) — New author
 
 **Notes:**
 
 - You can only edit quotes that you added
-- At least one field (text or author) must be provided
-- The quote message in the channel will be updated automatically
+- At least one of `text` or `author` must be provided
 
-**Example Response:**
+**How it works:**
 
-```text
-✅ Quote updated successfully!
-```
+1. User submits a quote via `/quote add`
+2. Bot posts it as an embed in the configured quote channel
+3. Bot adds 👍 / 👎 reactions
+4. Users browse by scrolling the channel and vote with reactions
+5. Bot cleans up unauthorized messages every few minutes
 
-**How It Works:**
+**Security:**
 
-1. User submits a quote using `/quote add` command
-2. Bot posts the quote as an embed in the configured quote channel
-3. Bot automatically adds 👍 and 👎 reactions to the message
-4. Users browse quotes by scrolling through the channel
-5. Users react with 👍 or 👎 to vote on quotes
-6. Users can edit their own quotes using `/quote edit` with the quote ID
-7. Bot automatically cleans up any unauthorized messages (every 5 minutes)
-8. An informational header post explains the channel usage (auto-recreated if deleted)
-
-**Security Features:**
-
-- **Strict Permissions**: Channel is automatically configured so only the bot can post messages
-- **Auto-Cleanup**: Removes any non-bot messages every 5 minutes (configurable)
-- **User Access**: Users can view, read history, and add reactions only
-- **Informational Header**: Pinned post explains how the quote channel works
-
-**Example Response:**
-
-```text
-✅ Quote added successfully and posted to the quote channel!
-```
-
-**Quote Display in Channel:**
-
-Each quote appears as an embed with:
-
-- The quote text
-- Author (mentioned user)
-- Who added it
-- Quote ID (in footer)
-- 👍 and 👎 reactions for voting
-
-**Advanced Configuration:**
-
-```bash
-# Restrict who can add quotes (role IDs)
-/config set key:quotes.add_roles value:"123456789,987654321"
-
-# Set maximum quote length
-/config set key:quotes.max_length value:500
-
-# Set cooldown between adding quotes (seconds)
-/config set key:quotes.cooldown value:120
-
-# Set cleanup interval (minutes, default: 5)
-/config set key:quotes.cleanup_interval value:10
-
-# Disable header post (default: enabled)
-/config set key:quotes.header_enabled value:false
-
-# Disable header pinning (default: enabled)
-/config set key:quotes.header_pin_enabled value:false
-```
-
-**Use Cases:**
-
-- Preserve memorable server moments
-- Create a community quote wall
-- Natural browsing via channel scroll
-- Engage through Discord reactions
-- Simple, streamlined quote management
-- Protected channel prevents spam/abuse
-
-**Setup Steps:**
-
-1. Create a dedicated text channel for quotes (e.g., #quotes)
-2. Get the channel ID (right-click channel → Copy ID)
-3. Configure: `/config set key:quotes.channel_id value:"CHANNEL_ID"`
-4. Enable: `/config set key:quotes.enabled value:true`
-5. Reload: `/config reload`
-6. Bot will automatically set strict permissions on the channel
-
----
-
-### `/notice`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Manage notices from the WebUI
-> (run `/config` to get a sign-in link).
-
-**Description:** Manage server notices in a protected bot-controlled channel. Perfect for server rules, game server info, bot feature help, and important announcements.
-
-**Configuration:**
-
-```bash
-# Enable notices and set channel
-/config set key:notices.enabled value:true
-/config set key:notices.channel_id value:"YOUR_CHANNEL_ID"
-/config reload
-```
-
-**Subcommands:**
-
-#### `/notice add`
-
-Add a new notice to the channel.
-
-**Parameters:**
-
-- `title` (required) - Notice title (max 256 characters)
-- `content` (required) - Notice content (max 4000 characters)
-- `category` (required) - Category: General, Rules, Information, Help, or Game Servers
-- `order` (optional) - Display order (lower numbers appear first, default: 0)
-
-**Usage:**
-
-```bash
-/notice add title:"Server Rules" content:"1. Be respectful\n2. No spam..." category:"Rules" order:1
-/notice add title:"Minecraft Server" content:"IP: mc.example.com\nPort: 25565" category:"Game Servers" order:10
-/notice add title:"Bot Commands Help" content:"Use /help to see available commands" category:"Help" order:20
-```
-
-#### `/notice edit`
-
-Edit an existing notice.
-
-**Parameters:**
-
-- `id` (required) - Notice ID (visible in notice channel footer)
-- `title` (optional) - New title
-- `content` (optional) - New content
-- `category` (optional) - New category
-- `order` (optional) - New display order
-
-**Usage:**
-
-```bash
-/notice edit id:"abc123" title:"Updated Rules" content:"New rules text..."
-/notice edit id:"abc123" order:5
-```
-
-#### `/notice delete`
-
-Delete a notice.
-
-**Parameters:**
-
-- `id` (required) - Notice ID (visible in notice channel footer)
-
-**Usage:**
-
-```bash
-/notice delete id:"abc123"
-```
-
-**Note:** You can find notice IDs by viewing the notices in the channel - each notice shows its ID in the footer.
-
-#### `/notice sync`
-
-Recreate all notices in the channel (useful after cleanup or channel issues).
-
-**Usage:**
-
-```bash
-/notice sync
-```
-
-**How It Works:**
-
-1. Admin creates notices using `/notice add` with title, content, and category
-2. Bot posts each notice as a rich embed in the configured notices channel
-3. Bot automatically creates a "Bot Features" notice listing enabled features
-4. Notices are displayed in order by category, then by custom order number
-5. Channel is read-only for regular users (only bot can post)
-6. Bot automatically removes any unauthorized messages every 5 minutes
-7. An informational header post explains the channel purpose (auto-recreated if deleted)
-8. Notices persist in database and survive bot restarts
-9. Notice IDs are visible in each notice's footer for editing/deletion
-
-**Security Features:**
-
-- **Strict Permissions**: Channel is automatically configured so only the bot can post messages
-- **Auto-Cleanup**: Removes any non-bot messages every 5 minutes (configurable)
-- **User Access**: Users can view, read history, and add reactions only
-- **Persistent**: Notices stored in MongoDB, auto-repost on bot restart
-- **Informational Header**: Pinned post explains the channel's purpose
-
-**Notice Categories:**
-
-- **📋 General** - General server information
-- **📜 Rules** - Server rules and guidelines
-- **ℹ️ Information** - Important server info
-- **❓ Help** - Bot feature help and guides
-- **🎮 Game Servers** - Game server connection information
-
-**Advanced Configuration:**
-
-```bash
-# Set cleanup interval (minutes, default: 5)
-/config set key:notices.cleanup_interval value:10
-
-# Disable header post (default: enabled)
-/config set key:notices.header_enabled value:false
-
-# Disable header pinning (default: enabled)
-/config set key:notices.header_pin_enabled value:false
-```
-
-**Use Cases:**
-
-- Post server rules that can't be deleted/modified by users
-- Share game server connection info that stays up-to-date
-- Provide bot feature help and usage guides
-- Important announcements that need to stay visible
-- Protected information channel that prevents spam
-
-**Setup Steps:**
-
-1. Create a dedicated text channel for notices (e.g., #notices or #info)
-2. Get the channel ID (right-click channel → Copy ID)
-3. Configure: `/config set key:notices.channel_id value:"CHANNEL_ID"`
-4. Enable: `/config set key:notices.enabled value:true`
-5. Reload: `/config reload`
-6. Bot will automatically set strict permissions on the channel
-7. Add your first notice: `/notice add title:"Welcome" content:"Welcome to our server!" category:"General"`
-
-**Permissions:**
-
-- Everyone can view quotes in the channel
-- Everyone can add reactions to quotes
-- Only bot can post messages (auto-configured)
-- Adding quotes via command respects `quotes.add_roles` configuration (empty = everyone can add)
+The bot configures the quote channel so that only the bot can post.
+Users can read and react only. Unauthorized messages are removed by a
+periodic cleanup job. A pinned header explains the channel's purpose
+and is auto-recreated if deleted.
 
 ---
 
 ### `/amikool`
 
-**Description:** Check if you have a specific role (for role verification).
+**Description:** Check if you have a specific role (fun role verification).
 
-**Configuration:**
+**Enable:** Web UI → Settings:
 
-```bash
-/config set key:amikool.enabled value:true
-/config set key:amikool.role.name value:"Kool Members"
-/config reload
-```
+- `amikool.enabled = true`
+- `amikool.role.name = "Kool Members"` (or whatever role you check for)
+
+Then reload commands.
 
 **Usage:**
 
-```bash
+```text
 /amikool
 ```
 
-**Example Responses:**
+**Example responses:**
 
 ```text
 ✅ Yes, you are kool! You have the "Kool Members" role.
@@ -670,849 +395,135 @@ Recreate all notices in the channel (useful after cleanup or channel issues).
 ❌ Sorry, you don't have the "Kool Members" role.
 ```
 
-**Use Cases:**
-
-- Fun role verification
-- Check membership status
-- Confirm permissions
-
 ---
 
-## 🔧 Admin Commands
+## 🔧 Admin: Web UI launcher
 
-Commands that require Administrator permission in Discord.
-
----
+KoolBot has exactly one admin slash command. It does one thing: mint a
+single-use sign-in link for the admin Web UI and DM it to you.
 
 ### `/config`
 
-> ⚠️ **Deprecated:** every `/config` subcommand below — `list`, `set`, `import`,
-> `export`, `reset`, `reload` — is deprecated and will be removed in 1.0. The
-> `/config web` launcher (which DMs you a single-use WebUI sign-in link) is
-> **not** deprecated and remains the supported admin entry point.
+**Description:** Open the admin web UI. Sends you a single-use, time-limited
+sign-in link via DM. Every administrative action — settings, permissions,
+the setup wizard, announcements, polls, reaction roles, notices, voice
+channel management, database cleanup, bot stats — happens in the Web UI.
 
-**Description:** Comprehensive configuration management for all bot settings.
+**Permission:** Discord **Administrator** by default (overridable via the
+`/permissions` UI inside the Web UI itself).
+
+**Prerequisites:** Operator must have set `WEBUI_ENABLED=true`,
+`WEBUI_BASE_URL`, and `WEBUI_SESSION_SECRET` in `.env` and restarted the
+bot. See [WEBUI.md](WEBUI.md).
 
 **Usage:**
-
-```bash
-/config list                              # List all settings
-/config get key:ping.enabled              # Get specific setting
-/config set key:ping.enabled value:true   # Set a value
-/config reset key:ping.enabled            # Reset to default
-/config reload                            # Reload commands to Discord
-/config export                            # Export config to YAML
-/config import                            # Import config from YAML (attach file)
-```
-
-**Subcommands:**
-
-#### `/config list`
-
-Displays all configuration settings organized by category.
-
-**Example Response:**
 
 ```text
-📋 Configuration Settings
-
-Commands:
-  ping.enabled: true
-  quotes.enabled: false
-  amikool.enabled: true
-
-Voice Channels:
-  voicechannels.enabled: true
-  voicechannels.category.name: "Voice Channels"
-  ...
+/config
 ```
 
-#### `/config get`
+No subcommands, no parameters.
 
-Get the value of a specific setting.
+**Behavior:**
 
-**Parameters:**
+1. Bot verifies you have the Administrator permission (or a role that
+   `permissions-service` permits to run `config`).
+2. Bot revokes any prior unrevoked sessions you have.
+3. Bot generates a single-use token bound to your Discord user ID
+   (default TTL: 10 minutes; configurable via
+   `WEBUI_SESSION_TTL_MINUTES`).
+4. Bot DMs you a unique URL of the form
+   `https://your-bot.example.com/admin/s/<token>`.
+5. You open the link. The bot exchanges the token for a signed session
+   cookie scoped to your user ID and redirects to `/admin/`.
+6. You configure the bot in the Web UI. The session sliding window
+   defaults to 30 minutes of inactivity and is hard-capped at the
+   server-side TTL.
+7. You click **Finish** (or close the tab; or the inactivity timer
+   fires; or you re-run `/config`, which revokes the current session).
+   The cookie clears and `/admin/*` returns 401.
 
-- `key` (required) - The setting key (e.g., `ping.enabled`)
+**Example responses:**
 
-**Example:**
+DM is delivered:
 
-```bash
-/config get key:voicetracking.enabled
-→ voicetracking.enabled: true
+```text
+✅ I've DMed you a single-use sign-in link. Check your direct messages.
 ```
 
-#### `/config set`
+DM is blocked (fallback to ephemeral reply, visible only to you):
 
-Update a configuration value.
-
-**Parameters:**
-
-- `key` (required) - The setting key
-- `value` (required) - The new value
-
-**Examples:**
-
-```bash
-# Enable a feature
-/config set key:ping.enabled value:true
-
-# Set a string value
-/config set key:voicechannels.lobby.name value:"🟢 Join Here"
-
-# Set a number
-/config set key:quotes.cooldown value:120
-
-# Set comma-separated list
-/config set key:voicetracking.excluded_channels value:"123,456,789"
+```text
+🔗 Koolbot admin sign-in link
+https://bot.example.com/admin/s/9f4b...
+This link is single-use and expires in about 10 minute(s).
+If you did not run /config, ignore this message.
 ```
 
-#### `/config reset`
+Web UI disabled:
 
-Reset a setting to its default value.
-
-**Parameters:**
-
-- `key` (required) - The setting key to reset
-
-**Example:**
-
-```bash
-/config reset key:ping.enabled
-→ ✅ Reset ping.enabled to default value: false
+```text
+The web UI is disabled. Ask an operator to set WEBUI_ENABLED=true and restart the bot.
 ```
 
-#### `/config reload`
+Missing required env vars:
 
-Reload all commands to Discord API. **Required after enabling/disabling commands.**
-
-**Example:**
-
-```bash
-/config reload
-→ ✅ Commands reloaded successfully!
+```text
+❌ Web UI is enabled but missing env vars: WEBUI_BASE_URL, WEBUI_SESSION_SECRET
 ```
 
-**When to use:**
+**Why a launcher and not subcommands?**
 
-- After enabling/disabling any command
-- After changing command-related settings
-- If commands don't appear in Discord
+The slash command surface is genuinely bad at editing long lists,
+permission matrices, YAML, and structured configuration. The Web UI is
+the right home for that. Keeping a single launcher means:
 
-#### `/config export`
+- No persistent OAuth setup for casual operators.
+- The admin endpoint is dark unless an admin is actively configuring.
+- A leaked link is useless after one redemption or after the TTL.
+- Fat-fingering a setting has zero remediation cost — just close the tab.
 
-Export current configuration to a YAML file.
-
-**Example:**
-
-```bash
-/config export
-→ 📄 config-2026-01-15.yaml (attached file)
-```
-
-**Use Cases:**
-
-- Backup configuration
-- Transfer settings between instances
-- Version control settings
-
-#### `/config import`
-
-Import configuration from a YAML file.
-
-**Usage:**
-
-```bash
-/config import (attach YAML file)
-```
-
-**Use Cases:**
-
-- Restore from backup
-- Clone settings to new instance
-- Bulk configuration updates
+📖 **[Web UI Guide →](WEBUI.md)**
 
 ---
 
-### `/permissions`
+## Voice Channel Control Panel
 
-> ⚠️ **Deprecated:** will be removed in 1.0. Manage permissions from the WebUI
-> (run `/config` to get a sign-in link).
+**Note:** This is not a slash command. It is the inline component-based
+panel posted in a dynamically created voice channel's text chat.
 
-**Description:** Manage role-based command access control. This feature allows admins to restrict which commands can be used by
-specific Discord roles.
+**Description:** When you create a voice channel (by joining the lobby),
+an interactive control panel is automatically sent to the channel's text
+chat. Only you (the channel owner) can use it.
 
-**Command Name Format:** Command names are used directly (e.g., `quote`, `voicestats`)
+**Enable:** Web UI → Settings → `voicechannels.controlpanel.enabled = true`
+(default: `true`).
 
-**Key Features:**
+**Buttons (row 1):**
 
-- **Multi-role support** - Assign multiple roles to a single command
-- **OR logic** - Users need ANY of the assigned roles to execute the command
-- **Admin bypass** - Administrators always have access to all commands
-- **Default open** - Commands without permissions are accessible to everyone
+- **✏️ Rename** — Rename your channel (modal)
+- **🔒 Make Private / 🌐 Make Public** — Toggle privacy mode
+- **👥 Invite** — Invite a user to your private channel
+- **👑 Transfer** — Transfer ownership to another user in the channel
 
-**Subcommands:**
+**Buttons (row 2):**
 
-#### `/permissions set`
-
-Set command permissions (replaces any existing permissions).
-
-> **Note:** In Discord's slash command UI, `command` and `role` are option names. Select `quote` for the **command** option
-> and `@Moderator`, `@VIP`, etc. for the **role** options. The `command:value` notation in examples below represents the
-> option structure, not literal text you type.
-
-**Usage:**
-
-```bash
-/permissions set command:quote role:@Moderator
-/permissions set command:quote role:@Moderator role:@VIP role:@Admin
-/permissions set command:voicestats role:@Member
-```
-
-**Parameters:**
-
-- `command` (required) - Command name (autocomplete available)
-- `role1` (required) - First role that can use this command
-- `role2-5` (optional) - Additional roles (up to 5 total)
-
-**Example Response:**
-
-```text
-✅ Set permissions for `/quote` to: @Moderator, @VIP, @Admin
-```
-
-**Use Cases:**
-
-- Restrict powerful commands to trusted roles
-- Limit access to resource-intensive commands
-- Create role-specific command sets
-
-#### `/permissions add`
-
-Add roles to existing command permissions without removing current ones.
-
-**Usage:**
-
-```bash
-/permissions add command:quote role:@Contributor
-/permissions add command:quote role:@VIP role:@Premium
-```
-
-**Parameters:**
-
-- `command` (required) - Command name
-- `role1` (required) - First role to add
-- `role2-5` (optional) - Additional roles to add
-
-**Example Response:**
-
-```text
-✅ Added roles to `/quote`: @Contributor
-```
-
-**Use Cases:**
-
-- Incrementally expand access
-- Grant access to new roles without reconfiguring
-
-#### `/permissions remove`
-
-Remove specific roles from command permissions.
-
-**Usage:**
-
-```bash
-/permissions remove command:quote role:@VIP
-/permissions remove command:quote role:@Moderator role:@VIP
-```
-
-**Parameters:**
-
-- `command` (required) - Command name
-- `role1` (required) - First role to remove
-- `role2-5` (optional) - Additional roles to remove
-
-**Example Response:**
-
-```text
-✅ Removed roles from `/quote`: @VIP
-```
-
-**Note:** If all roles are removed, the permission entry is deleted automatically (command becomes accessible to everyone).
-
-**Use Cases:**
-
-- Revoke access from specific roles
-- Clean up outdated permissions
-
-#### `/permissions clear`
-
-Remove all permissions for a command, or remove all commands from a role/user.
-
-**Usage:**
-
-```bash
-# Clear permissions for a specific command
-/permissions clear command:quote
-
-# Clear all commands that have a specific role
-/permissions clear role:@Moderator
-
-# Clear all commands accessible via a user's roles
-/permissions clear user:@username
-```
-
-**Parameters:**
-
-- `command` (optional) - Command name to clear permissions for
-- `role` (optional) - Remove this role from all commands
-- `user` (optional) - Remove all of this user's roles from all commands
-
-**Note:** You must specify at least one parameter (command, role, or user).
-
-**Example Responses:**
-
-```text
-# Clearing a command
-✅ Cleared all permissions for `/quote`. It is now accessible to everyone.
-
-# Clearing a role from all commands
-✅ Removed @Moderator from 3 command(s).
-
-# Clearing a user's roles from all commands
-✅ Removed @username's roles from 5 command(s).
-```
-
-**Use Cases:**
-
-- Reset command to default open access
-- Remove all restrictions for a command
-- Remove a role from all commands when role is being deleted
-- Clean up permissions when removing a user's access
-
-#### `/permissions list`
-
-View the permission matrix showing all commands with role restrictions, or filter by a specific command.
-
-**Usage:**
-
-```bash
-# List all command permissions
-/permissions list
-
-# View permissions for a specific command
-/permissions list command:quote
-```
-
-**Parameters:**
-
-- `command` (optional) - Filter by specific command name
-
-**Example Responses:**
-
-```text
-# Listing all permissions
-Command Permissions
-
-Commands with role restrictions:
-
-/quote
-@Moderator, @VIP
-
-/voicestats
-@Member
-
-Commands not listed are accessible to everyone.
-Admins bypass all restrictions.
-
-# Listing a specific command
-Permissions for /quote
-
-Roles that can use this command:
-@Moderator, @VIP
-
-Admins bypass all restrictions.
-
-# When command has no permissions
-ℹ️ No permissions configured for `/quote`. It is accessible to everyone.
-```
-
-**Use Cases:**
-
-- Audit current permissions
-- Review access control setup
-- Documentation and planning
-- Check permissions for a specific command
-
-#### `/permissions view`
-
-Check what commands a specific user or role can access.
-
-**Usage:**
-
-```bash
-/permissions view user:@username
-/permissions view role:@Moderator
-```
-
-**Parameters:**
-
-- `user` (optional) - User to check
-- `role` (optional) - Role to check
-
-**Note:** Must specify either user OR role, not both.
-
-**Example Responses:**
-
-```text
-# View user permissions
-Permissions for username#1234
-Can access 12 command(s):
-`/ping`, `/help`, `/quote`, `/voicestats`, ...
-
-# View role permissions
-Permissions for Moderator
-Can access 15 command(s):
-`/ping`, `/help`, `/quote`, `/voicestats`, `/config`, ...
-```
-
-**Use Cases:**
-
-- Troubleshoot access issues
-- Verify role permissions
-- User support
-
-**Important Notes:**
-
-- **Always enabled** - Permissions are a core feature, no configuration needed
-- **Admin commands** - Commands like `/config`, `/vc`, `/dbtrunk` automatically require Administrator permission
-- **Permission inheritance** - Users inherit permissions from all their roles (OR logic)
-- **Default behavior** - When no permissions are set, everyone has access (except admin-only commands)
-- **Cache** - Permissions are cached for performance; changes take effect immediately
-
-**Examples:**
-
-```bash
-# Restrict quote command to moderators and VIPs
-/permissions set command:quote role:@Moderator role:@VIP
-
-# Add contributors to the allowed list
-/permissions add command:quote role:@Contributor
-
-# Check what @user123 can access
-/permissions view user:@user123
-
-# See all permission rules
-/permissions list
-
-# Make quote accessible to everyone again
-/permissions clear command:quote
-```
-
----
-
-### `/reactrole`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Manage reaction roles from the
-> WebUI (run `/config` to get a sign-in link).
-
-**Description:** Manage reaction-based roles. Allows users to self-assign roles by reacting to a message. Automatically creates
-Discord roles, categories, and channels with proper permissions.
-
-**Configuration:**
-
-```bash
-# Enable reaction roles feature
-/config set key:reactionroles.enabled value:true
-
-# Set channel for reaction role messages
-/config set key:reactionroles.message_channel_id value:"CHANNEL_ID"
-
-# Reload commands
-/config reload
-```
-
-**Permissions:** Requires Administrator permission
-
-**Subcommands:**
-
-#### `/reactrole create`
-
-Create a new reaction role with associated Discord role, category, and channel.
-
-**Usage:**
-
-```bash
-/reactrole create name:"Gaming" emoji:🎮
-/reactrole create name:"Movie Night" emoji:🎬
-/reactrole create name:"Music Lovers" emoji:🎵
-```
-
-**Parameters:**
-
-- `name` (required) - Name for the role, category, and channel
-- `emoji` (required) - Emoji users will react with to get the role
-
-**What it creates:**
-
-1. A Discord role with the specified name
-2. A category channel (visible only to role members)
-3. A text channel inside the category
-4. A reaction message in the configured message channel
-
-**Example Response:**
-
-```text
-✅ Reaction Role Created
-Successfully created reaction role Gaming!
-Role: @Gaming
-Category: #Gaming
-Channel: #gaming
-Users can now react to get this role!
-```
-
-**Use Cases:**
-
-- Create opt-in interest groups (gaming, movies, music)
-- Organize by game/activity with private channels
-- Event-based roles (tournament participants)
-- Community segmentation
-
-#### `/reactrole archive`
-
-Archive a reaction role. Disables reactions but keeps the role, category, and channels.
-
-**Usage:**
-
-```bash
-/reactrole archive name:"Gaming"
-```
-
-**Parameters:**
-
-- `name` (required) - Name of the reaction role to archive
-
-**What it does:**
-
-- Marks the role as archived
-- Removes the reaction message
-- Keeps the Discord role intact
-- Preserves the category and channels
-- Users can no longer get the role via reactions
-- Existing role members keep their access
-
-**Example Response:**
-
-```text
-📦 Reaction Role Archived
-Successfully archived reaction role Gaming. Role and channels are preserved but reactions are disabled.
-The reaction message has been removed
-```
-
-**Use Cases:**
-
-- Temporarily disable new sign-ups
-- Preserve channels for existing members
-- Archive inactive communities without deletion
-
-#### `/reactrole unarchive`
-
-Unarchive a reaction role to re-enable reactions.
-
-**Usage:**
-
-```bash
-/reactrole unarchive name:"Gaming"
-```
-
-**Parameters:**
-
-- `name` (required) - Name of the reaction role to unarchive
-
-**What it does:**
-
-- Marks the role as active again
-- Creates a new reaction message in the configured channel
-- Users can now react to get the role again
-- All existing channels and permissions remain unchanged
-
-**Example Response:**
-
-```text
-📤 Reaction Role Unarchived
-Successfully unarchived reaction role Gaming. Users can now react to get this role again!
-```
-
-**Use Cases:**
-
-- Re-enable sign-ups after a temporary pause
-- Reactivate seasonal communities
-- Resume role assignment after maintenance
-
-#### `/reactrole delete`
-
-Completely delete a reaction role and all associated resources.
-
-**Usage:**
-
-```bash
-/reactrole delete name:"Gaming"
-```
-
-**Parameters:**
-
-- `name` (required) - Name of the reaction role to delete
-
-**What it deletes:**
-
-- The Discord role
-- The category and all channels inside it
-- The reaction message
-- The database configuration
-
-**Example Response:**
-
-```text
-🗑️ Reaction Role Deleted
-Successfully deleted reaction role Gaming and all associated resources.
-All resources have been permanently removed
-```
-
-**Warning:** This action is permanent and cannot be undone!
-
-**Use Cases:**
-
-- Remove obsolete reaction roles
-- Clean up old communities
-- Free up Discord server space
-
-#### `/reactrole list`
-
-List all configured reaction roles.
-
-**Usage:**
-
-```bash
-/reactrole list
-```
-
-**Example Response:**
-
-```text
-📋 Reaction Roles
-Found 3 reaction role(s)
-
-🎮 Gaming
-Status: ✅ Active
-Role: @Gaming
-Category: #Gaming
-Channel: #gaming
-Created: 1/15/2026
-
-🎬 Movie Night
-Status: 📦 Archived
-Role: @Movie Night
-Category: #Movie Night
-Channel: #movie-night
-Created: 1/10/2026
-```
-
-**Use Cases:**
-
-- View all reaction roles at a glance
-- Check which roles are active vs archived
-- Audit reaction role configuration
-
-#### `/reactrole status`
-
-Check detailed status of a specific reaction role.
-
-**Usage:**
-
-```bash
-/reactrole status name:"Gaming"
-```
-
-**Parameters:**
-
-- `name` (required) - Name of the reaction role to check
-
-**Example Response:**
-
-```text
-🎮 Gaming
-Status: ✅ Active
-Role ID: 123456789
-Category ID: 987654321
-Channel ID: 111222333
-Created: 1/15/2026, 3:30:00 PM
-Last Updated: 1/15/2026, 3:30:00 PM
-Message ID: 444555666
-```
-
-**Use Cases:**
-
-- Get IDs for advanced configuration
-- Debug permission issues
-- Verify role configuration
-
----
-
-**Setup Guide:**
-
-1. Create a dedicated channel for reaction role messages (e.g., #get-roles)
-1. Get the channel ID (right-click channel → Copy ID)
-1. Configure the bot:
-
-```bash
-/config set key:reactionroles.enabled value:true
-/config set key:reactionroles.message_channel_id value:"YOUR_CHANNEL_ID"
-/config reload
-```
-
-1. Create your first reaction role:
-
-```bash
-/reactrole create name:"Gaming" emoji:🎮
-```
-
-1. Users can now react in the configured channel to get roles!
-
-**How it works:**
-
-- Users react to the message with the specified emoji
-- Bot automatically assigns the role
-- Users gain access to the private category and channels
-- Removing the reaction removes the role and access
-- Category permissions are automatically maintained
-
-**Best Practices:**
-
-- Use clear, descriptive names for roles
-- Choose easily recognizable emojis
-- Pin the reaction message in the channel
-- Organize reaction messages with category separators
-- Archive roles instead of deleting to preserve data and allow reactivation
-- Use unarchive to re-enable roles after maintenance or seasonal breaks
-- Use archived roles for seasonal/temporary communities
-
----
-
-### `/vc`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Manage voice channels from the
-> WebUI (run `/config` to get a sign-in link). The user-facing voice channel
-> control panel buttons inside Discord are **not** affected.
-
-**Description:** Voice channel management, cleanup tools, and user customization.
-
-**Configuration:**
-
-```bash
-/config set key:voicechannels.enabled value:true
-/config reload
-```
-
-**Subcommands:**
-
-#### `/vc reload`
-
-Clean up empty dynamically created voice channels.
-
-**Usage:**
-
-```bash
-/vc reload
-```
-
-**What it does:**
-
-- Removes empty user-created channels
-- Keeps channels with active users
-- Preserves the lobby channel
-
-**Example Response:**
-
-```text
-🧹 Cleaned up 3 empty voice channels
-```
-
-**Use Cases:**
-
-- Manual cleanup of abandoned channels
-- Server organization
-- Free up channel slots
-
-#### `/vc force-reload`
-
-Force cleanup of ALL unmanaged channels in the voice category.
-
-**Usage:**
-
-```bash
-/vc force-reload
-```
-
-**Warning:** This is destructive! It removes ALL channels except the lobby, even if they have users.
-
-**What it does:**
-
-- Removes ALL unmanaged channels in category
-- Keeps only the lobby channel
-- Does not remove manually created channels outside the category
-
-**Example Response:**
-
-```text
-⚠️ Force cleanup completed
-Removed 8 channels from Voice Channels category
-```
-
-**Use Cases:**
-
-- Reset voice channel setup
-- Fix corrupted channel states
-- Emergency cleanup
-
----
-
-### Voice Channel Control Panel
-
-**Description:** When you create a voice channel, an interactive control panel is automatically sent to the channel's text chat (if
-available). This provides quick access to customization options.
-
-**Configuration:**
-
-```bash
-/config set key:voicechannels.controlpanel.enabled value:true  # Default: true
-/config reload
-```
-
-**Control Panel Buttons (Row 1):**
-
-- **✏️ Rename** - Opens a modal to rename your channel
-- **🔒 Make Private / 🌐 Make Public** - Toggle privacy mode
-- **👥 Invite** - Invite users to your private channel
-- **👑 Transfer** - Shows how to transfer ownership
-
-**Control Panel Buttons (Row 2):**
-
-- **🔴 Go Live / ⬜ Go Offline** - Mark your channel as live (streaming disclaimer)
-- **⏳ Waiting Room / 🗑️ Remove Waiting Room** - Toggle a companion waiting room channel
+- **🔴 Go Live / ⬜ Go Offline** — Mark the channel as live with a streaming disclaimer
+- **⏳ Waiting Room / 🗑️ Remove Waiting Room** — Toggle a companion waiting room
 
 **Features:**
 
-- Only visible to channel owner
-- Updates dynamically when privacy mode, live status, or waiting room changes
-- Persists until channel is deleted
-- Posted every time a new channel is created
+- Only visible to the channel owner
+- Updates dynamically as privacy / live / waiting-room state changes
+- Persists until the channel is deleted
+- Posted automatically every time a new channel is created
 
 **Requirements:**
 
-- Server must have text channels associated with voice channels (community servers)
+- Discord server must support text channels associated with voice channels
 - `voicechannels.controlpanel.enabled` must be `true`
 
-**Example Control Panel:**
+**Example panel:**
 
 ```text
 🎮 Voice Channel Controls
@@ -1528,1012 +539,190 @@ Privacy: 🌐 Public
 Only you can see and use these controls
 ```
 
-**Available Actions:**
+### Rename channel
 
-#### Rename Channel
+Click **✏️ Rename** to open a modal where you can enter a new name. No
+placeholder requirements — use any name.
 
-Click the **✏️ Rename** button to open a modal where you can enter a new name for your channel. No placeholder requirements - use any name you want!
+### Toggle privacy
 
-#### Toggle Privacy
+**🔒 Make Private** restricts the channel to you and invited users. **🌐
+Make Public** opens it back up.
 
-Click the **🔒 Make Private** button to make your channel invite-only. Only you and invited users will be able to join. Click **🌐
-Make Public** to allow anyone to join again.
+### Invite users
 
-#### Invite Users
+While the channel is private, click **👥 Invite** and pick a user from
+the menu. They get a DM notification with permission to join.
 
-When your channel is private, click the **👥 Invite** button to see instructions on inviting users. Select a user to grant them
-permission to join your channel. They'll receive a DM notification.
+### Transfer ownership
 
-#### Transfer Ownership
+**👑 Transfer** opens a dropdown of users currently in the channel.
+Pick one to hand over ownership instantly.
 
-Click the **👑 Transfer** button to select a user from a dropdown menu. Only users currently in the channel will appear. Transfer ownership instantly.
+### Go Live
 
-#### Go Live
+**🔴 Go Live** adds a `🔴` prefix to your channel name, posts a Terms-of-
+Service disclaimer in the channel text chat, and notifies anyone joining
+that the channel is live. **⬜ Go Offline** removes the prefix and
+indicator.
 
-Click **🔴 Go Live** to mark your channel as live. This will:
+### Waiting Room
 
-- Add a `🔴` prefix to your channel name (auto-removed when you go offline)
-- Post a disclaimer in the channel text chat about platform Terms of Service
-- Notify anyone who joins the channel that it is live
-
-Click **⬜ Go Offline** to remove the live indicator.
-
-#### Waiting Room
-
-Click **⏳ Waiting Room** to create a companion waiting room channel for your voice channel. Users can join the waiting room and
-you (the owner) will receive a notification in the channel with a **🚪 Let In** button to move them into your channel.
-
-- Waiting room users cannot speak (mic muted)
-- When deleted or when you remove it, remaining users are automatically moved into your channel
-- Click **🗑️ Remove Waiting Room** to delete it
-
----
-
-- Return to default settings
-- Fix misconfigured preferences
-- Start fresh with new preferences
-
----
-
-### `/dbtrunk`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Run database cleanup from the
-> WebUI (run `/config` to get a sign-in link).
-
-**Description:** Database cleanup management for voice tracking data.
-
-**Configuration:**
-
-```bash
-/config set key:voicetracking.cleanup.enabled value:true
-/config reload
-```
-
-**Subcommands:**
-
-#### `/dbtrunk status`
-
-Show cleanup service status and statistics.
-
-**Usage:**
-
-```bash
-/dbtrunk status
-```
-
-**Example Response:**
-
-```text
-📊 Cleanup Service Status
-
-Status: ✅ Running
-Database: ✅ Connected
-Schedule: Daily at 00:00
-
-Last Cleanup: 2026-01-14 00:00:15
-Sessions Removed: 1,247
-Data Aggregated: 89 records
-
-Retention Policy:
-  Detailed Sessions: 30 days
-  Monthly Summaries: 6 months
-  Yearly Summaries: 1 year
-```
-
-**Use Cases:**
-
-- Check cleanup status
-- Verify database health
-- Monitor data retention
-
-#### `/dbtrunk run`
-
-Manually trigger database cleanup now.
-
-**Usage:**
-
-```bash
-/dbtrunk run
-```
-
-**What it does:**
-
-- Removes old detailed sessions (older than retention period)
-- Removes old monthly summaries
-- Removes old yearly summaries
-- Preserves aggregated statistics
-
-**Example Response:**
-
-```text
-🧹 Cleanup completed successfully!
-
-Detailed sessions removed: 1,247
-Monthly summaries removed: 12
-Yearly summaries removed: 1
-Total space freed: 15.4 MB
-Duration: 3.2 seconds
-```
-
-**Use Cases:**
-
-- Manual cleanup between scheduled runs
-- Free up database space immediately
-- Test cleanup configuration
-
----
-
-### `/announce-vc-stats`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Trigger the weekly VC stats post
-> from the WebUI (run `/config` to get a sign-in link).
-
-**Description:** Manually trigger the weekly voice channel statistics announcement.
-
-**Configuration:**
-
-```bash
-/config set key:voicetracking.enabled value:true
-/config set key:voicetracking.announcements.enabled value:true
-/config set key:voicetracking.announcements.channel value:"voice-stats"
-/config reload
-```
-
-**Usage:**
-
-```bash
-/announce-vc-stats
-```
-
-**What it does:**
-
-- Posts top voice channel users to configured channel
-- Shows weekly statistics
-- Includes medals for top 3 users
-
-**Example Response (in configured channel):**
-
-```text
-📊 Weekly Voice Channel Stats
-
-🥇 Alice: 45h 30m
-🥈 Bob: 38h 15m
-🥉 Charlie: 32h 20m
-4. David: 28h 10m
-5. Emma: 24h 45m
-...
-
-Total server voice time: 324h 15m
-Active users: 47
-```
-
-**Use Cases:**
-
-- Post stats on-demand
-- Test announcement format
-- Share stats outside regular schedule
-
-**Automatic Announcements:**
-
-```bash
-# Configure automatic weekly announcements
-/config set key:voicetracking.announcements.schedule value:"0 16 * * 5"
-# Every Friday at 4 PM
-```
-
----
-
-### `/announce`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Manage scheduled announcements
-> from the WebUI (run `/config` to get a sign-in link).
-
-**Description:** Manage scheduled announcements to automatically send messages to channels on a schedule.
-
-**Configuration:**
-
-```bash
-/config set key:announcements.enabled value:true
-/config reload
-```
-
-**Subcommands:**
-
-#### Create a scheduled announcement
-
-```bash
-/announce create cron:"0 9 * * *" channel:#general message:"Good morning!" placeholders:true
-```
-
-**Parameters:**
-
-- `cron` (required) - Cron schedule expression
-  - `0 9 * * *` - Daily at 9 AM
-  - `0 12 * * 1` - Every Monday at noon
-  - `0 0 * * 0` - Every Sunday at midnight
-  - `*/30 * * * *` - Every 30 minutes
-- `channel` (required) - Channel to send announcements to
-- `message` (required) - Message content
-- `placeholders` (optional) - Enable dynamic placeholders (default: false)
-- `embed_title` (optional) - Add an embed with title
-- `embed_description` (optional) - Embed description
-- `embed_color` (optional) - Embed color (hex code, e.g., #FF0000)
-
-**Supported Placeholders:**
-
-When `placeholders` is enabled, you can use:
-
-- `{server_name}` - Server name
-- `{member_count}` - Current member count
-- `{date}` - Current date
-- `{time}` - Current time
-- `{day}` - Day of week (e.g., Monday)
-- `{month}` - Month name (e.g., January)
-- `{year}` - Current year
-
-**Examples:**
-
-```bash
-# Daily morning announcement
-/announce create cron:"0 9 * * *" channel:#general \
-  message:"Good morning, {server_name}! We have {member_count} members!" \
-  placeholders:true
-
-# Weekly event reminder with embed
-/announce create cron:"0 18 * * 5" channel:#events \
-  message:"Weekly game night starting soon!" \
-  embed_title:"🎮 Game Night" \
-  embed_description:"Join us for games this Friday evening!" \
-  embed_color:#5865F2
-
-# Monthly server stats
-/announce create cron:"0 0 1 * *" channel:#announcements \
-  message:"Monthly server update for {month} {year}" \
-  placeholders:true
-```
-
-#### List scheduled announcements
-
-```bash
-/announce list
-```
-
-Shows all scheduled announcements with their:
-
-- ID
-- Status (enabled/disabled)
-- Channel
-- Cron schedule
-- Message preview
-
-#### Delete an announcement
-
-```bash
-/announce delete id:123abc456def
-```
-
-**Parameters:**
-
-- `id` (required) - Announcement ID from `/announce list`
-
-**Example Response:**
-
-```text
-✅ Announcement Created
-
-Announcement ID: `65f4a3b2c1d9e8f7a6b5c4d3`
-Channel: #general
-Schedule: `0 9 * * *`
-Placeholders: Enabled
-Message: Good morning, {server_name}!
-```
-
-**Use Cases:**
-
-- Daily/weekly automated announcements
-- Event reminders
-- Server updates
-- Community engagement messages
-- Rule reminders
-- Automated status updates
-
----
-
-### `/poll`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Manage poll schedules and the
-> poll-question library from the WebUI (run `/config` to get a sign-in link).
-
-**Description:** Manage periodic polls for icebreaker discussions and community engagement.
-Posts Discord native polls on a schedule with questions from URL sources or database storage.
-
-**Configuration:**
-
-```bash
-/config set key:polls.enabled value:true
-/config set key:polls.default_duration_hours value:24    # Default poll duration
-/config set key:polls.cooldown_days value:7              # Days before reusing poll
-/config reload
-```
-
-**Features:**
-
-- 🗳️ **Native Discord Polls** - Uses Discord's built-in poll feature
-- 📅 **Scheduled Posting** - Automatic polls via cron schedules  
-- 📥 **URL Import** - Fetch poll questions from YAML/JSON files
-- 🔄 **Smart Rotation** - Avoid repeating polls within cooldown period
-- 💾 **Database Storage** - Store and manage poll questions locally
-- 🔔 **Role Pinging** - Optional role mentions when posting
-- 🎲 **Multi-Select** - Support for multiple answer selections
-
-**Subcommands:**
-
-#### Create a poll schedule
-
-```bash
-/poll create channel:#daily-questions schedule:"0 12 * * *" duration:24 ping_role:@Everyone
-```
-
-**Parameters:**
-
-- `channel` (required) - Channel to post polls in
-- `schedule` (required) - Cron schedule expression
-  - `0 12 * * *` - Daily at noon
-  - `0 9 * * 1` - Every Monday at 9 AM
-  - `0 18 * * 5` - Every Friday at 6 PM
-- `duration` (optional) - Poll duration in hours (1-768, default: 24)
-- `ping_role` (optional) - Role to mention when posting polls
-
-**Example:**
-
-```bash
-/poll create channel:#icebreakers schedule:"0 14 * * *" duration:48 ping_role:@Community
-```
-
-#### Import poll questions from URL
-
-```bash
-/poll import-url url:https://example.com/polls.yaml
-```
-
-Imports poll questions from a remote YAML or JSON file and saves them to the database.
-
-**Supported URL Formats:**
-
-**YAML:**
-
-```yaml
-polls:
-  - question: "What's your favorite programming language?"
-    answers:
-      - "JavaScript"
-      - "Python"
-      - "Go"
-      - "Rust"
-    multiselect: false
-    tags: ["tech", "icebreaker"]
-  
-  - question: "Would you rather fight 100 duck-sized horses or 1 horse-sized duck?"
-    answers:
-      - "100 duck-sized horses"
-      - "1 horse-sized duck"
-      - "Neither, I'm out!"
-    multiselect: false
-    tags: ["funny", "absurd"]
-```
-
-**JSON:**
-
-```json
-{
-  "polls": [
-    {
-      "question": "What's your favorite season?",
-      "answers": ["Spring", "Summer", "Fall", "Winter"],
-      "multiselect": false,
-      "tags": ["general"]
-    }
-  ]
-}
-```
-
-**Import Result:**
-
-```text
-📥 Import Results
-
-Imported: 15
-Skipped: 3
-Errors: 0
-```
-
-#### Add a poll question manually
-
-```bash
-/poll add-item question:"What's your favorite food?" \
-  answers:"Pizza, Tacos, Sushi, Burgers" \
-  multiselect:false \
-  tags:"food,icebreaker"
-```
-
-**Parameters:**
-
-- `question` (required) - Poll question (max 300 characters)
-- `answers` (required) - Comma-separated list of 2-10 answers
-- `multiselect` (optional) - Allow multiple selections (default: false)
-- `tags` (optional) - Comma-separated tags for categorization
-
-#### List poll schedules
-
-```bash
-/poll list
-```
-
-Shows all configured poll schedules with:
-
-- Schedule ID
-- Status (enabled/disabled)
-- Target channel
-- Cron schedule
-- Poll duration
-- Ping role
-- Last run time
-
-**Example Response:**
-
-```text
-📊 Poll Schedules
-Total: 2 schedule(s)
-
-✅ 65f8a9b3c2d1e4f6a7b8c5d4
-Channel: #daily-questions
-Schedule: `0 12 * * *`
-Duration: 24h
-Ping Role: @Everyone
-Last Run: 2/14/2026, 12:00:00 PM
-
-✅ 65f8b2c4d3e5f7a8b9c6d5e4
-Channel: #friday-fun
-Schedule: `0 18 * * 5`
-Duration: 48h
-Ping Role: None
-Last Run: Never
-```
-
-#### List poll questions
-
-```bash
-/poll list-items
-```
-
-Shows all stored poll questions with:
-
-- Poll ID
-- Status (enabled/disabled)
-- Question text (truncated)
-- Number of answers
-- Usage count
-- Last used date
-
-**Example Response:**
-
-```text
-📊 Poll Questions
-Total: 25 question(s)
-
-✅ 65f8c3d4e5f6a7b8c9d6e5f6
-Q: What's your favorite programming language?
-Answers: 4
-Used: 3 times
-Last: 2/10/2026, 2:00:00 PM
-
-✅ 65f8d4e5f6a7b8c9d6e5f7a8
-Q: Would you rather fight 100 duck-sized horses...
-Answers: 3
-Used: 1 times
-Last: 1/28/2026, 12:00:00 PM
-```
-
-#### Delete a poll schedule
-
-```bash
-/poll delete id:65f8a9b3c2d1e4f6a7b8c5d4
-```
-
-**Parameters:**
-
-- `id` (required) - Schedule ID from `/poll list`
-
-#### Delete a poll question
-
-```bash
-/poll delete-item id:65f8c3d4e5f6a7b8c9d6e5f6
-```
-
-**Parameters:**
-
-- `id` (required) - Poll item ID from `/poll list-items`
-
-#### Test a poll schedule
-
-```bash
-/poll test schedule_id:65f8a9b3c2d1e4f6a7b8c5d4
-```
-
-Posts a poll immediately from the specified schedule for testing purposes.
-
-**Parameters:**
-
-- `schedule_id` (required) - Schedule ID to test
-
-**Poll Selection Logic:**
-
-The bot intelligently selects polls to avoid repetition:
-
-1. **Cooldown Period** - Polls used within the cooldown period (default 7 days) are skipped
-2. **Usage Count** - Prioritizes less-used polls
-3. **Randomization** - Randomly selects from the top 20% least-used eligible polls
-4. **Fallback** - If all polls are within cooldown, uses the oldest-used poll
-
-**Example Workflow:**
-
-```bash
-# 1. Enable the feature
-/config set key:polls.enabled value:true
-/config reload
-
-# 2. Import poll questions from a URL
-/poll import-url url:https://mysite.com/icebreaker-polls.yaml
-→ Imported: 20 polls
-
-# 3. Or add polls manually
-/poll add-item question:"Cats or dogs?" answers:"Cats, Dogs, Both!, Neither" multiselect:false
-
-# 4. Create a schedule
-/poll create channel:#daily-questions schedule:"0 12 * * *" duration:24 ping_role:@Community
-
-# 5. Test it immediately
-/poll test schedule_id:65f8a9b3c2d1e4f6a7b8c5d4
-→ ✅ Test poll posted successfully
-
-# 6. View schedules
-/poll list
-
-# 7. View all poll questions
-/poll list-items
-```
-
-**Use Cases:**
-
-- Daily icebreaker questions to spark conversations
-- Weekly "Would You Rather" discussions
-- Team building and getting-to-know-you activities
-- Community engagement and feedback polls
-- Fun hypothetical scenarios
-- Topic voting for events or discussions
-
-**Tips:**
-
-- **Start Small** - Import 10-15 polls initially to test the rotation
-- **Diversify** - Mix serious and funny questions for variety
-- **Tag Wisely** - Use tags to organize polls by theme
-- **Monitor Usage** - Check `/poll list-items` to see which polls are popular
-- **Update Regularly** - Add new polls monthly to keep content fresh
-- **Cooldown Balance** - Adjust cooldown period based on pool size (more polls = longer cooldown works better)
-
----
-**Notes:**
-
-- Announcements persist across bot restarts
-- All times use the server's timezone
-- Invalid cron expressions are rejected
-- Only administrators can manage announcements
-
----
-
-### `/setup`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. Run the setup wizard from the
-> WebUI (run `/config` to get a sign-in link).
-
-**Description:** Interactive setup wizard to guide you through configuring KoolBot features.
-This is the recommended way to set up your server for the first time or configure new features.
-
-**Note:** This command is always available to administrators as a core feature.
-
-**Usage:**
-
-```bash
-/setup wizard                       # Start full setup wizard
-/setup wizard feature:voicechannels # Configure specific feature
-```
-
-**Subcommands:**
-
-#### `/setup wizard [feature]`
-
-Start the interactive configuration wizard. Optionally specify a feature to configure directly.
-
-**Parameters:**
-
-- `feature` (optional) - Choose a specific feature to configure:
-  - `voicechannels` - Dynamic voice channel management
-  - `voicetracking` - Voice activity tracking
-  - `quotes` - Quote system
-  - `gamification` - Achievement badges
-  - `logging` - Core event logging
-
-**What it does:**
-
-The wizard provides a guided, step-by-step setup experience:
-
-1. **Auto-detects existing resources** - Finds existing categories, channels, and suggests using them
-2. **Feature selection** - Choose which features to enable (full wizard) or configure a specific feature
-3. **Interactive configuration** - Uses buttons, select menus, and modals to collect settings
-4. **Validates input** - Ensures channels exist and settings are valid
-5. **Applies configuration** - Automatically sets all related config keys
-6. **Shows summary** - Displays what was configured
-
-**Example Flow (Full Wizard):**
-
-```text
-Step 1: Feature Selection
-┌────────────────────────────────┐
-│ Select features to configure:  │
-│ ☑ Voice Channels              │
-│ ☑ Voice Tracking              │
-│ ☐ Quote System                │
-│ ☐ Achievements                │
-│ ☐ Core Logging                │
-│                                │
-│ [Continue] [Cancel]            │
-└────────────────────────────────┘
-
-Step 2: Voice Channels Setup
-┌────────────────────────────────┐
-│ Voice Channels Configuration   │
-│                                │
-│ Category: Voice Channels       │
-│ Lobby Name: 🟢 Lobby          │
-│                                │
-│ [Next] [Back] [Cancel]         │
-└────────────────────────────────┘
-
-Step 3: Confirmation
-✅ Configuration Complete!
-Voice Channels: Enabled
-Voice Tracking: Enabled
-Quote System: Disabled
-Achievements: Disabled
-Core Logging: Disabled
-
-Run /config reload to apply changes.
-```
-
-#### Example: Specific Feature Setup
-
-```bash
-/setup wizard feature:voicetracking
-```
-
-This will:
-
-- Skip feature selection
-- Go directly to voice tracking configuration
-- Configure tracking settings, excluded channels, and admin roles
-- Enable the feature upon completion
-
-#### Benefits over manual configuration
-
-- **Beginner-friendly** - No need to know exact config keys
-- **Auto-detection** - Suggests existing channels and categories
-- **Guided workflow** - Step-by-step with explanations
-- **Error prevention** - Validates all inputs before applying
-- **Bulk configuration** - Sets multiple related settings at once
-- **Interactive** - Uses Discord's UI components for better UX
-
-**When to use:**
-
-- **First-time setup** - Easiest way to get started
-- **New features** - Enable and configure additional features
-- **Troubleshooting** - Reconfigure features that aren't working
-- **Channel changes** - Update channel references after reorganization
-
-**Use Cases:**
-
-- Initial server setup
-- Onboarding new administrators
-- Enabling new features
-- Reconfiguring after channel reorganization
-- Troubleshooting misconfigured features
-
-**Notes:**
-
-- Sessions expire after 15 minutes of inactivity
-- All interactions are ephemeral (only visible to you)
-- Requires Administrator permission
-- Changes take effect after `/config reload`
-- Wizard validates that channels exist before applying
-
----
-
-### `/botstats`
-
-> ⚠️ **Deprecated:** will be removed in 1.0. View bot stats on the WebUI
-> dashboard (run `/config` to get a sign-in link).
-
-**Description:** View bot performance and usage statistics.
-
-**Usage:**
-
-```bash
-/botstats
-```
-
-**Example Response:**
-
-```text
-🤖 KoolBot Statistics
-
-Uptime: 7 days, 14 hours, 23 minutes
-Version: 1.0.0
-
-Performance:
-  Memory Usage: 245 MB
-  CPU Usage: 3.2%
-  Database: Connected
-  Latency: 45ms
-
-Activity:
-  Guilds: 1
-  Users Tracked: 347
-  Voice Sessions Today: 89
-  Commands Executed: 2,451
-
-Most Used Commands:
-  1. /voicestats - 1,526 times
-  2. /ping - 421 times
-  3. /quote - 315 times
-```
-
-**Use Cases:**
-
-- Monitor bot health
-- Check resource usage
-- View usage statistics
-- Troubleshoot performance issues
+**⏳ Waiting Room** creates a companion waiting-room channel. Joiners
+land there muted; you (the owner) get a notification with a **🚪 Let In**
+button to admit them. **🗑️ Remove Waiting Room** deletes it.
 
 ---
 
 ## 🔒 Permission Requirements
 
-### User Command Permissions
+### User command permissions
 
-| Command         | Permission Level | Additional Requirements                   |
-| --------------- | ---------------- | ----------------------------------------- |
-| `/ping`         | Everyone         | Command must be enabled                   |
-| `/voicestats`   | Everyone         | Voice tracking enabled                    |
-| `/achievements` | Everyone         | Achievements enabled                      |
-| `/seen`         | Everyone         | Voice tracking + seen enabled             |
-| `/quote`        | Everyone\*       | Quotes enabled (\*may be role-restricted) |
-| `/amikool`      | Everyone         | Command enabled + role configured         |
+| Command         | Permission Level | Additional Requirements                    |
+| --------------- | ---------------- | ------------------------------------------ |
+| `/ping`         | Everyone\*       | Command must be enabled                    |
+| `/voicestats`   | Everyone\*       | Voice tracking enabled                     |
+| `/achievements` | Everyone\*       | Achievements enabled                       |
+| `/seen`         | Everyone\*       | Voice tracking + seen enabled              |
+| `/quote`        | Everyone\*       | Quotes enabled                             |
+| `/amikool`      | Everyone\*       | Command enabled + role configured          |
 
-### Admin Command Permissions
+\* Per-command role gating can be added in the Web UI's **Permissions** page.
 
-All admin commands require **Administrator** permission in Discord.
+### Admin command permissions
 
-| Command              | Additional Requirements                          |
-| -------------------- | ------------------------------------------------ |
-| `/setup`             | Administrator permission                         |
-| `/config`            | Administrator permission                         |
-| `/permissions`       | Administrator permission                         |
-| `/vc`                | Administrator + voice channels enabled           |
-| `/dbtrunk`           | Administrator + cleanup enabled                  |
-| `/announce-vc-stats` | Administrator + tracking & announcements enabled |
-| `/botstats`          | Administrator permission                         |
+| Command   | Permission                                                       |
+| --------- | ---------------------------------------------------------------- |
+| `/config` | Administrator (overridable in the Web UI's Permissions page)     |
 
-### Bot Permissions Required
+### Bot permissions required
 
-The bot needs these Discord permissions to function:
+The bot needs these Discord permissions:
 
 **Essential:**
 
-- Read Messages/View Channels
+- Read Messages / View Channels
 - Send Messages
 - Use Slash Commands
+- Embed Links
+- Attach Files
 
-**For Voice Features:**
+**For voice features:**
 
 - Manage Channels (create/delete voice channels)
 - Move Members (move users to created channels)
 - View Channel (see voice channels)
 - Connect (for voice state updates)
 
-**For Configuration:**
+**For reaction roles:**
 
-- Embed Links (for rich responses)
-- Attach Files (for config export/import)
+- Manage Roles (the bot's highest role must sit above any role it grants)
+
+**For leaderboard role rewards:**
+
+- Manage Roles (same hierarchy rule as above)
 
 ---
 
 ## 📚 Quick Command Reference
 
-### User Commands Summary
+### User commands
 
-```bash
+```text
 /ping                               # Check bot status
 /help [command]                     # Get help on commands
-/voicestats top [period] [limit]   # Voice leaderboards
-/voicestats user [user] [period]   # Voice channel stats
-/achievements [user]               # View earned badges
-/seen user:@User                   # Last seen info
-/quote text:"..." author:"@User"   # Add quote to channel
-/amikool                           # Role verification
+/voicestats top [period] [limit]    # Voice leaderboards
+/voicestats user [user] [period]    # Personal voice stats
+/achievements [user]                # View earned accolades
+/seen user:@User                    # Last-seen lookup
+/quote add text:"..." author:@User  # Add a quote
+/quote edit id:"..." [text:"..."] [author:@User]
+/amikool                            # Role verification
 ```
 
-### Admin Commands Summary
+### Admin command
 
-```bash
-# Initial Setup (Recommended)
-/setup wizard                      # Interactive setup wizard
-/setup wizard feature:...          # Configure specific feature
-
-# Configuration
-/config list                       # List all settings
-/config get key:...                # Get setting value
-/config set key:... value:...      # Set setting value
-/config reset key:...              # Reset to default
-/config reload                     # Reload commands
-/config export                     # Export config
-/config import                     # Import config
-
-# Permissions
-/permissions set command:... role:...   # Set command permissions
-/permissions add command:... role:...   # Add role to command
-/permissions remove command:... role:...# Remove role from command
-/permissions list                       # View all permissions
-/permissions list command:...           # View permissions for a command
-/permissions view user:...              # Check user access
-/permissions view role:...              # Check role access
-/permissions clear command:...          # Clear command restrictions
-/permissions clear role:...             # Remove role from all commands
-/permissions clear user:...             # Remove user's roles from all commands
-
-# Voice Management
-/vc reload                         # Clean empty channels
-/vc force-reload                   # Force cleanup all
-
-# Database Management
-/dbtrunk status                    # Cleanup status
-/dbtrunk run                       # Run cleanup now
-
-# Other Admin
-/announce-vc-stats                 # Post stats now
-/announce create                   # Schedule announcement
-/announce list                     # View announcements
-/announce delete                   # Remove announcement
-/reactrole create                  # Create reaction role
-/reactrole list                    # View reaction roles
-/reactrole archive                 # Archive reaction role
-/reactrole unarchive               # Unarchive reaction role
-/reactrole delete                  # Delete reaction role
-/reactrole status                  # Check role status
-/botstats                          # Bot statistics
+```text
+/config                             # Open the admin Web UI (DMs a sign-in link)
 ```
+
+Once in the Web UI:
+
+| Page              | Replaces (legacy slash command)                                |
+| ----------------- | ------------------------------------------------------------- |
+| Dashboard         | `/botstats`                                                   |
+| Settings          | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
+| Permissions       | `/permissions set/add/remove/clear/list/view`                 |
+| Setup Wizard      | `/setup wizard`                                               |
+| Announcements     | `/announce create/list/delete`, `/announce-vc-stats`          |
+| Polls             | `/poll create/list/add-item/import-url/delete/delete-item/test/list-items` |
+| Reaction Roles    | `/reactrole create/archive/unarchive/delete/list/status`      |
+| Notices           | `/notice add/edit/delete/sync`                                |
+| Voice Channels    | `/vc reload`, `/vc force-reload`                              |
+| Database          | `/dbtrunk status`, `/dbtrunk run`                             |
+| Bootstrap         | (new — read-only `.env` diagnostics)                          |
 
 ---
 
 ## 🎯 Common Workflows
 
-### Initial Bot Setup
+### Initial bot setup
 
-#### Option 1: Using Setup Wizard (Recommended for beginners)
+1. Run `/config` in Discord.
+2. Open the DM'd link.
+3. Click **Setup Wizard** in the navigation.
+4. Pick the features you want (voice channels, voice tracking, quotes,
+   achievements, logging, etc.). The wizard auto-detects existing
+   channels and applies the related settings for you.
+5. On the **Settings** page, hit **Reload commands to Discord** if the
+   wizard enabled any commands that should now appear in Discord.
 
-```bash
-# Use the interactive setup wizard for guided configuration
-/setup wizard
+### Enable a single command
 
-# Or configure specific features
-/setup wizard feature:voicechannels
-/setup wizard feature:voicetracking
-```
+1. `/config` → open the Web UI.
+2. **Settings** → find `<command>.enabled`, set to `true`, save.
+3. Click **Reload commands to Discord**.
+4. Wait a minute or two for Discord to sync.
 
-The wizard will:
+### Manage permissions
 
-- Auto-detect existing channels
-- Guide you through each feature
-- Validate all settings
-- Apply configuration automatically
+1. `/config` → open the Web UI.
+2. **Permissions** → pick a command, pick the roles allowed to use it.
+3. Save. Changes take effect immediately.
 
-#### Option 2: Manual Configuration (Advanced users)
+### Schedule an announcement
 
-```bash
-# 1. Enable basic commands
-/config set key:ping.enabled value:true
-/config reload
+1. `/config` → open the Web UI.
+2. **Announcements** → New announcement.
+3. Pick a channel, a cron schedule (`0 9 * * *` = daily 9 AM), the
+   message, and optional embed fields.
+4. Save. The announcement persists across bot restarts.
 
-# 2. Setup voice channels (use wizard)
-/setup wizard feature:voicechannels
-/config reload
+### Trigger weekly voice stats now
 
-# 3. Enable tracking
-/config set key:voicetracking.enabled value:true
-/config set key:voicetracking.seen.enabled value:true
-/config reload
+1. `/config` → open the Web UI.
+2. **Announcements** → click **Post weekly stats now**.
 
-# 4. Enable weekly announcements
-/config set key:voicetracking.announcements.enabled value:true
-/config set key:voicetracking.announcements.channel value:"voice-stats"
-/config reload
+### Manual database cleanup
 
-# 5. Enable achievements system
-/config set key:achievements.enabled value:true
-/config reload
+1. `/config` → open the Web UI.
+2. **Database** → click **Run cleanup now**.
 
-# 6. Setup data cleanup
-/config set key:voicetracking.cleanup.enabled value:true
-/config reload
+### Backup and restore configuration
 
-# 7. Setup quote channel (optional)
-/config set key:quotes.enabled value:true
-/config set key:quotes.channel_id value:"YOUR_QUOTE_CHANNEL_ID"
-/config reload
-```
+- **Settings** page → **Export** to download a YAML file.
+- **Settings** page → **Import** to upload YAML; preview the diff before
+  apply. Bootstrap env vars are excluded from both directions.
 
-### Enable Quote Channel
+### Reset a single setting
 
-```bash
-# 1. Create a dedicated text channel in Discord (e.g., #quotes)
-# 2. Right-click the channel → Copy ID
-# 3. Configure the bot:
-/config set key:quotes.enabled value:true
-/config set key:quotes.channel_id value:"YOUR_CHANNEL_ID"
-/config reload
+- **Settings** page → find the key → click **Reset to default**.
 
-# 4. Test it
-/quote text:"Hello World!" author:"@YourName"
-```
+### Troubleshooting commands not appearing
 
-### Enable Logging
-
-```bash
-# Create channels in Discord first, then:
-/config set key:core.startup.enabled value:true
-/config set key:core.startup.channel_id value:YOUR_CHANNEL_ID
-
-/config set key:core.errors.enabled value:true
-/config set key:core.errors.channel_id value:YOUR_CHANNEL_ID
-
-/config set key:core.cleanup.enabled value:true
-/config set key:core.cleanup.channel_id value:YOUR_CHANNEL_ID
-```
-
-### Troubleshooting Commands Not Appearing
-
-```bash
-# 1. Check if command is enabled
-/config get key:ping.enabled
-
-# 2. Enable if needed
-/config set key:ping.enabled value:true
-
-# 3. MUST reload commands
-/config reload
-
-# 4. Wait a few minutes for Discord to sync
-```
-
-### Backup and Restore Configuration
-
-```bash
-# Backup
-/config export
-# Save the file somewhere safe
-
-# Restore
-/config import
-# Attach the saved YAML file
-```
+1. Web UI → **Settings** → verify `<command>.enabled = true`.
+2. Click **Reload commands to Discord**.
+3. Wait 2-5 minutes for Discord to sync.
 
 ---
 
@@ -2541,59 +730,62 @@ The wizard will:
 
 ### "Command not found" or command doesn't appear
 
-**Solutions:**
-
-1. Check if enabled: `/config get key:commandname.enabled`
-2. Enable it: `/config set key:commandname.enabled value:true`
-3. **Reload commands: `/config reload`** (Required!)
-4. Wait 2-5 minutes for Discord to sync
+1. Web UI → **Settings** → check `<command>.enabled`.
+2. Set it to `true` if needed, save.
+3. **Reload commands to Discord** (required).
+4. Wait 2-5 minutes.
 
 ### "Permission denied" errors
 
-**Check:**
-
-- Do you have Administrator permission?
-- Is the bot role high enough in the hierarchy?
-- Is the feature enabled in configuration?
+- Do you have Administrator permission (for `/config`)?
+- Is the bot's role high enough in the Discord role hierarchy?
+- Is the feature enabled in the Web UI's Settings page?
+- For `/config`: is `WEBUI_ENABLED=true` and are the other `WEBUI_*`
+  env vars set? Check the bot logs for `WebUI mounted at /admin`.
 
 ### Voice commands not working
 
-**Verify:**
+Web UI → **Settings** → verify both:
 
-```bash
-/config get key:voicechannels.enabled
-/config get key:voicetracking.enabled
-```
+- `voicechannels.enabled = true`
+- `voicetracking.enabled = true`
 
-Both should be `true`. If not:
-
-```bash
-/config set key:voicechannels.enabled value:true
-/config set key:voicetracking.enabled value:true
-/config reload
-```
+Then click **Reload commands to Discord**.
 
 ### Stats showing as empty
 
-**Possible causes:**
+- Tracking might have been enabled recently (give it time).
+- Channels you care about might be in `voicetracking.excluded_channels`.
+- Users have to actually have been in voice channels since tracking
+  started.
 
-- Tracking recently enabled (give it time)
-- Channels are excluded
-- Users not in voice channels yet
+Verify excluded channels on the Settings page.
 
-**Check excluded channels:**
+### Magic link doesn't arrive
 
-```bash
-/config get key:voicetracking.excluded_channels
-```
+- DMs from server members might be disabled. The bot falls back to an
+  ephemeral reply in the channel where you ran `/config` — check there.
+- The bot might not have permission to DM you for other reasons. Run
+  `/config` again and look at the channel reply.
+
+### Magic link 404s when clicked
+
+- Already used (single-use).
+- Expired (default 10 minutes).
+- Superseded by a newer `/config` invocation.
+
+Run `/config` again.
+
+See [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting) for more.
 
 ---
 
-## 📖 Related Documentation
+## 📖 Related documentation
 
-- **[README.md](README.md)** - Bot overview and quick start
-- **[SETTINGS.md](SETTINGS.md)** - Complete configuration reference
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Detailed troubleshooting guide
+- **[README.md](README.md)** — Bot overview and quick start
+- **[WEBUI.md](WEBUI.md)** — Web UI setup, magic-link flow, reverse-proxy guidance
+- **[SETTINGS.md](SETTINGS.md)** — Complete configuration reference
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** — General troubleshooting
 
 ---
 

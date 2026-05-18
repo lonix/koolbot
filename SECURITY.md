@@ -90,11 +90,10 @@ Please include the following information in your report to help us better unders
 
 ### Rate Limiting
 
-KoolBot includes built-in rate limiting to prevent command spam. Ensure rate limiting is enabled in production:
-
-```bash
-/config set key:ratelimit.enabled value:true
-```
+KoolBot includes built-in rate limiting to prevent command spam. Ensure
+rate limiting is enabled in production: in the Web UI's Settings page,
+set `ratelimit.enabled = true` (run `/config` in Discord to receive a
+sign-in link to the Web UI).
 
 ### Input Validation
 
