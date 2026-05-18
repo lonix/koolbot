@@ -575,6 +575,7 @@ export interface WizardStepPageProps extends CommonProps {
   currentValues: Record<string, unknown>;
   metadata: Record<string, { description: string; category: string }>;
   defaultValues: Record<string, unknown>;
+  flash?: FlashMessage | null;
 }
 
 export function renderWizardStepPage(props: WizardStepPageProps): string {
@@ -629,6 +630,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   const body = `
 <h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
 <p class="subtitle">${escapeHtml(info.desc)}</p>
+${renderFlash(props.flash)}
 <form method="POST" action="/admin/wizard/step/${props.stepIndex}">
   <input type="hidden" name="_csrf" value="${csrf}">
   <div class="card">${fields}</div>

@@ -629,10 +629,22 @@ export function createWriteRouter(
         }
       }
 
+      // Tri-state outcome so an audit query for `result: "success"` doesn't
+      // exclude partial imports (e.g. 99 keys applied with 1 type-mismatch).
+      // `result` mirrors what the user-facing flash shows: `failure` only
+      // when nothing landed; otherwise `success` with a `partial` flag in
+      // the details for reporting.
+      const outcome: "ok" | "partial" | "failed" =
+        failed.length === 0 ? "ok" : applied > 0 ? "partial" : "failed";
       await recordAudit(session, {
         action: "settings.import",
-        details: { applied, failed: failed.length, failedKeys: failed },
-        result: failed.length > 0 ? "failure" : "success",
+        details: {
+          applied,
+          failed: failed.length,
+          failedKeys: failed,
+          outcome,
+        },
+        result: outcome === "failed" ? "failure" : "success",
         errorMessage:
           failed.length > 0
             ? failed
@@ -748,6 +760,16 @@ export function createWriteRouter(
         session.guildId,
       );
 
+      // POST /wizard/step/:n redirects here with `?flash=warn&msg=…` when
+      // coercion drops fields. Surface it via the renderer.
+      const flashType = String(req.query.flash ?? "");
+      const flashMsg = String(req.query.msg ?? "");
+      const flash =
+        flashMsg &&
+        (flashType === "ok" || flashType === "warn" || flashType === "err")
+          ? { type: flashType as "ok" | "warn" | "err", text: flashMsg }
+          : null;
+
       if (existing && Number(req.query.reset) !== 1) {
         const features = existing.selectedFeatures;
         const stepParam = req.query.step;
@@ -803,6 +825,7 @@ export function createWriteRouter(
                 string,
                 unknown
               >,
+              flash,
             }),
           );
           return;
@@ -852,10 +875,18 @@ export function createWriteRouter(
       }
 
       const wizard = WizardService.getInstance();
+      // `createSession` silently replaces any pre-existing session for the
+      // same user/guild. Snapshot the prior state first so the audit row
+      // records what was discarded — an operator restarting their own
+      // wizard is fine, but an admin clobbering someone else's progress
+      // needs to be traceable.
+      const prior = wizard.getSession(session.discordUserId, session.guildId);
+      const replacedExisting = prior !== null;
+      const discardedKeys = prior ? Object.keys(prior.configuration) : [];
       wizard.createSession(session.discordUserId, session.guildId, features);
       await recordAudit(session, {
         action: "wizard.start",
-        details: { features },
+        details: { features, replacedExisting, discardedKeys },
         result: "success",
       });
       res.redirect(303, "/admin/wizard?step=0");
@@ -892,6 +923,7 @@ export function createWriteRouter(
       const featureKey = state.selectedFeatures[stepIndex];
       const settingKeys = WIZARD_FEATURE_SETTINGS[featureKey] ?? [];
       const saved: Record<string, unknown> = {};
+      const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
         const raw = (req.body as Record<string, unknown> | undefined)?.[k];
         const coerced = coerceConfigValue(k, raw);
@@ -903,14 +935,42 @@ export function createWriteRouter(
             coerced.value,
           );
           saved[k] = coerced.value;
+        } else {
+          // Mirror the YAML-import principle: a coercion failure must not
+          // be silent. The operator gets a flash on the *next* page and the
+          // audit row records the dropped keys so misconfigured form input
+          // is traceable.
+          dropped.push({ key: k, reason: coerced.reason });
         }
       }
 
       await recordAudit(session, {
         action: "wizard.step",
-        details: { stepIndex, featureKey, saved },
-        result: "success",
+        details: { stepIndex, featureKey, saved, dropped },
+        result: dropped.length > 0 ? "failure" : "success",
+        errorMessage:
+          dropped.length > 0
+            ? dropped.map((d) => `${d.key}: ${d.reason}`).join("; ")
+            : null,
       });
+
+      // On any coercion failure, keep the operator on the same step so they
+      // can correct the input. Otherwise advance to the next step (or the
+      // confirm page if this was the last one).
+      if (dropped.length > 0) {
+        const msg = `${dropped.length} field${dropped.length === 1 ? "" : "s"} ignored (invalid input): ${dropped
+          .map((d) => `${d.key} (${d.reason})`)
+          .join(", ")}.`;
+        const truncated =
+          msg.length > FLASH_MAX ? `${msg.slice(0, FLASH_MAX - 1)}…` : msg;
+        const qs = new globalThis.URLSearchParams({
+          step: String(stepIndex),
+          flash: "warn",
+          msg: truncated,
+        }).toString();
+        res.redirect(303, `/admin/wizard?${qs}`);
+        return;
+      }
 
       const nextStep = stepIndex + 1;
       if (nextStep >= state.selectedFeatures.length) {

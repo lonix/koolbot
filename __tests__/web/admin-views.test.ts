@@ -680,7 +680,12 @@ describe("renderImportDiffPage", () => {
       ...COMMON,
       yamlText: "voicechannels.enabled: true",
       rows: [
-        { key: "voicechannels.enabled", status: "pending", before: false, after: true },
+        {
+          key: "voicechannels.enabled",
+          status: "pending",
+          before: false,
+          after: true,
+        },
         { key: "DISCORD_TOKEN", status: "rejected", reason: "protected key" },
         { key: "bogus.key", status: "rejected", reason: "unknown key" },
       ],
@@ -715,7 +720,7 @@ describe("renderImportDiffPage", () => {
   it("escapes the YAML payload inside the round-trip hidden field", () => {
     const html = renderImportDiffPage({
       ...COMMON,
-      yamlText: '<script>alert(1)</script>',
+      yamlText: "<script>alert(1)</script>",
       rows: [],
     });
     expect(html).toContain("&lt;script&gt;");
@@ -732,7 +737,9 @@ describe("renderWizardPage", () => {
     });
     expect(html).toContain("Voice Channels");
     expect(html).toContain("Polls");
-    expect(html).toMatch(/value="voicechannels" id="feat-voicechannels" checked/);
+    expect(html).toMatch(
+      /value="voicechannels" id="feat-voicechannels" checked/,
+    );
     expect(html).not.toMatch(/value="polls" id="feat-polls" checked/);
     expect(html).toContain('action="/admin/wizard/start"');
   });
@@ -767,10 +774,33 @@ describe("renderWizardStepPage", () => {
     expect(html).toContain("Step 1 of 2");
     expect(html).toContain('action="/admin/wizard/step/0"');
     expect(html).toContain("Voice Channels");
-    expect(html).toMatch(/type="checkbox"[^>]*name="voicechannels.enabled"[^>]*value="true" checked/);
-    expect(html).toMatch(/type="number"[^>]*name="quotes.max_length"[^>]*value="500"/);
+    expect(html).toMatch(
+      /type="checkbox"[^>]*name="voicechannels.enabled"[^>]*value="true" checked/,
+    );
+    expect(html).toMatch(
+      /type="number"[^>]*name="quotes.max_length"[^>]*value="500"/,
+    );
     expect(html).toContain('value="Lobby"');
     expect(html).toContain("Enable VC");
+  });
+
+  it("renders a flash banner when coercion drops fields", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      stepIndex: 0,
+      totalSteps: 1,
+      featureKey: "quotes",
+      settingKeys: [],
+      currentValues: {},
+      defaultValues: {},
+      metadata: {},
+      flash: {
+        type: "warn",
+        text: "1 field ignored (invalid input): quotes.max_length (invalid number).",
+      },
+    });
+    expect(html).toContain("quotes.max_length (invalid number)");
+    expect(html).toContain('class="notice warn"');
   });
 
   it("changes the submit label on the final step", () => {
@@ -805,7 +835,9 @@ describe("renderWizardConfirmPage", () => {
     expect(html).toContain("quotes.max_length");
     expect(html).toContain('action="/admin/wizard/apply"');
     expect(html).toContain('action="/admin/wizard/cancel"');
-    expect(html).toMatch(/<button[^>]*type="submit"[^>]*class="btn btn-primary"[^>]*>Apply<\/button>/);
+    expect(html).toMatch(
+      /<button[^>]*type="submit"[^>]*class="btn btn-primary"[^>]*>Apply<\/button>/,
+    );
   });
 
   it("disables Apply when there are no pending settings", () => {
@@ -818,4 +850,3 @@ describe("renderWizardConfirmPage", () => {
     expect(html).toContain("No settings configured");
   });
 });
-
