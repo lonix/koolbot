@@ -167,18 +167,84 @@ export interface SettingRow {
 
 export interface SettingsProps extends CommonProps {
   groups: Array<{ category: string; rows: SettingRow[] }>;
+  flash?: FlashMessage | null;
+}
+
+/**
+ * Reduce an arbitrary stored value to a primitive that's safe to drop into
+ * an HTML form attribute. Mongo can hand us complex shapes from older rows
+ * (arrays, objects); they're rare for typed config keys but we coerce
+ * defensively so the form never crashes on a stray value.
+ */
+function coerceToDisplayValue(value: unknown): string | number | boolean {
+  if (value === null || value === undefined) return "";
+  if (
+    typeof value === "boolean" ||
+    typeof value === "number" ||
+    typeof value === "string"
+  ) {
+    return value;
+  }
+  return String(value);
+}
+
+function renderSettingInput(r: SettingRow, csrfToken: string): string {
+  const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
+  const keyField = `<input type="hidden" name="key" value="${escapeHtml(r.key)}">`;
+  const primitive = coerceToDisplayValue(r.current);
+
+  let control: string;
+  if (r.type === "boolean") {
+    const checked = primitive === true ? " checked" : "";
+    control =
+      `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
+      `<input type="checkbox" name="value" value="true"${checked}> ` +
+      `<span class="mono">${primitive === true ? "true" : "false"}</span>` +
+      `</label>`;
+  } else if (r.type === "number") {
+    control = `<input type="number" name="value" value="${escapeHtml(primitive)}" style="width:8rem">`;
+  } else {
+    control = `<input type="text" name="value" value="${escapeHtml(primitive)}">`;
+  }
+
+  return (
+    `<form method="POST" action="/admin/settings/set" class="inline-form">` +
+    csrf +
+    keyField +
+    control +
+    `<button type="submit" class="btn btn-primary btn-sm">Set</button>` +
+    `</form>` +
+    `<form method="POST" action="/admin/settings/reset" class="inline-form" style="margin-top:.25rem">` +
+    csrf +
+    keyField +
+    `<button type="submit" class="btn btn-sm">Reset</button>` +
+    `</form>`
+  );
 }
 
 export function renderSettingsPage(props: SettingsProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+
+  const actionBar = `
+<div class="actions">
+  <form method="POST" action="/admin/settings/reload" onsubmit="return confirm('Reload bot slash commands now? This briefly puts the bot into a config-reload status.');">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <button type="submit" class="btn">Reload commands</button>
+  </form>
+  <a href="/admin/settings/export" class="btn">Export YAML</a>
+  <a href="#import-section" class="btn">Import YAML</a>
+  <a href="/admin/wizard" class="btn">Setup wizard</a>
+</div>`;
+
   const sections = props.groups
     .map((g) => {
       const rows = g.rows
         .map(
           (r) => `<tr>
-<td class="mono">${escapeHtml(r.key)}</td>
-<td>${formatValue(r.current)}</td>
+<td class="mono" style="white-space:nowrap">${escapeHtml(r.key)}</td>
+<td>${renderSettingInput(r, props.csrfToken)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
-<td>${formatValue(r.defaultValue)}</td>
+<td style="white-space:nowrap">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
 </tr>`,
         )
@@ -187,20 +253,119 @@ export function renderSettingsPage(props: SettingsProps): string {
 <div class="card">
   <h2>${escapeHtml(g.category)}</h2>
   <table>
-    <thead><tr><th>Key</th><th>Value</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <thead><tr><th>Key</th><th>Edit</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </div>`;
     })
     .join("");
 
+  const importSection = `
+<div id="import-section" class="card">
+  <h2>Import YAML</h2>
+  <p class="muted" style="margin:0 0 .75rem">Paste a YAML key→value mapping. A diff preview is shown before anything is written. Bootstrap and environment keys are always refused.</p>
+  <form method="POST" action="/admin/settings/import" class="stack">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <textarea name="yaml" rows="12" placeholder="voicechannels.enabled: true&#10;quotes.max_length: 500"></textarea>
+    <div>
+      <button type="submit" class="btn btn-primary">Preview import</button>
+    </div>
+  </form>
+</div>`;
+
   const body = `
 <h1>Settings</h1>
-<p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>. Read-only.</p>
+<p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
+${renderFlash(props.flash)}
+${actionBar}
 ${sections}
+${importSection}
 `;
   return renderAdminPage({
     title: "Settings",
+    active: "/admin/settings",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+// ---------- Import diff preview ----------
+
+export interface ImportDiffRow {
+  key: string;
+  status: "pending" | "rejected";
+  reason?: string;
+  before?: unknown;
+  after?: unknown;
+}
+
+export interface ImportDiffProps extends CommonProps {
+  rows: ImportDiffRow[];
+  yamlText: string;
+}
+
+export function renderImportDiffPage(props: ImportDiffProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+
+  const diffRows = props.rows
+    .map((r) => {
+      if (r.status === "rejected") {
+        return `<tr>
+<td class="mono">${escapeHtml(r.key)}</td>
+<td><span class="tag tag-diff-reject">rejected</span></td>
+<td class="muted">${escapeHtml(r.reason ?? "")}</td>
+<td></td>
+</tr>`;
+      }
+      const beforeStr =
+        r.before === undefined
+          ? `<span class="muted">—</span>`
+          : `<span class="mono">${escapeHtml(r.before)}</span>`;
+      const afterStr = `<span class="mono">${escapeHtml(r.after)}</span>`;
+      // String-coerce both sides so YAML `5` (number) and DB `"5"` (string)
+      // are treated as equal when they round-trip through the form.
+      const same = String(r.before ?? "") === String(r.after ?? "");
+      const tag = same
+        ? `<span class="tag tag-info">no change</span>`
+        : `<span class="tag tag-diff-change">changed</span>`;
+      return `<tr>
+<td class="mono">${escapeHtml(r.key)}</td>
+<td>${tag}</td>
+<td>${beforeStr}</td>
+<td>${afterStr}</td>
+</tr>`;
+    })
+    .join("");
+
+  const pendingCount = props.rows.filter((r) => r.status === "pending").length;
+  const rejectedCount = props.rows.filter(
+    (r) => r.status === "rejected",
+  ).length;
+
+  const yamlEncoded = escapeHtml(props.yamlText);
+
+  const body = `
+<h1>Import preview</h1>
+<p class="subtitle">Review the changes below before applying. Rejected rows will not be written.</p>
+<div class="notice info">${pendingCount} key(s) will be written; ${rejectedCount} rejected.</div>
+<div class="card">
+  <table>
+    <thead><tr><th>Key</th><th>Status</th><th>Current</th><th>New value</th></tr></thead>
+    <tbody>${diffRows}</tbody>
+  </table>
+</div>
+<div class="actions">
+  <form method="POST" action="/admin/settings/import/apply">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <input type="hidden" name="yaml" value="${yamlEncoded}">
+    <button type="submit" class="btn btn-primary"${pendingCount === 0 ? " disabled" : ""}>Apply import</button>
+  </form>
+  <a href="/admin/settings" class="btn">Cancel</a>
+</div>
+`;
+  return renderAdminPage({
+    title: "Import preview",
     active: "/admin/settings",
     body,
     csrfToken: props.csrfToken,
@@ -212,12 +377,18 @@ ${sections}
 
 export interface PermissionsProps extends CommonProps {
   commands: string[];
+  /** Role IDs currently used in any restriction (read-only matrix). */
   roleIds: string[];
+  /** All guild role IDs in display order — populates the multi-select dropdowns. */
+  allRoleIds: string[];
   roleNames: Map<string, string>;
   perCommand: Map<string, string[]>;
+  flash?: FlashMessage | null;
 }
 
 export function renderPermissionsPage(props: PermissionsProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+
   const headerRoles = props.roleIds
     .map(
       (rid) =>
@@ -247,39 +418,281 @@ export function renderPermissionsPage(props: PermissionsProps): string {
       ? `<div class="empty">No restricted commands. All registered commands are open by default.</div>`
       : `<table><thead><tr><th>Command</th><th>Status</th>${headerRoles}</tr></thead><tbody>${matrixRows}</tbody></table>`;
 
-  const perCommandRows = props.commands
+  const editRows = props.commands
     .map((cmd) => {
-      const allowed = props.perCommand.get(cmd) ?? [];
-      if (allowed.length === 0) {
-        return `<tr><td class="mono">/${escapeHtml(cmd)}</td><td><span class="tag tag-info">open</span></td><td class="muted">All members</td></tr>`;
-      }
-      const pills = allowed
-        .map(
-          (rid) =>
-            `<span class="tag tag-info" title="${escapeHtml(rid)}">${escapeHtml(props.roleNames.get(rid) ?? rid)}</span>`,
-        )
-        .join(" ");
-      return `<tr><td class="mono">/${escapeHtml(cmd)}</td><td><span class="tag tag-warn">restricted</span></td><td>${pills}</td></tr>`;
+      const current = new Set(props.perCommand.get(cmd) ?? []);
+      const status =
+        current.size === 0
+          ? `<span class="tag tag-info">open</span>`
+          : `<span class="tag tag-warn">restricted</span>`;
+      const options =
+        props.allRoleIds.length === 0
+          ? `<option disabled>No roles available in this guild</option>`
+          : props.allRoleIds
+              .map((rid) => {
+                const name = props.roleNames.get(rid) ?? rid;
+                const sel = current.has(rid) ? " selected" : "";
+                return `<option value="${escapeHtml(rid)}"${sel}>${escapeHtml(name)}</option>`;
+              })
+              .join("");
+      return `<tr>
+<td class="mono">/${escapeHtml(cmd)}</td>
+<td>${status}</td>
+<td>
+  <form method="POST" action="/admin/permissions/set" class="inline-form" style="align-items:flex-start">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <input type="hidden" name="command" value="${escapeHtml(cmd)}">
+    <select name="roleIds" multiple size="3" style="min-width:14rem">${options}</select>
+    <div style="display:flex;flex-direction:column;gap:.25rem">
+      <button type="submit" class="btn btn-primary btn-sm">Save</button>
+      <span class="muted" style="font-size:.7rem">Hold Ctrl/⌘<br>for multiple</span>
+    </div>
+  </form>
+</td>
+</tr>`;
     })
     .join("");
 
   const body = `
 <h1>Permissions</h1>
-<p class="subtitle">Discord command access derived from <code>permissions-service.ts</code>. Administrators always bypass these checks.</p>
-
-<div class="card"><h2>Matrix</h2>${matrixHtml}</div>
-
+<p class="subtitle">Discord command access. Administrators always bypass these checks. Select roles to restrict a command; deselect all and save to make it open.</p>
+${renderFlash(props.flash)}
 <div class="card">
-  <h2>Per-command</h2>
+  <h2>Edit</h2>
   <table>
-    <thead><tr><th>Command</th><th>Status</th><th>Allowed roles</th></tr></thead>
-    <tbody>${perCommandRows}</tbody>
+    <thead><tr><th>Command</th><th>Status</th><th>Allowed roles (multi-select)</th></tr></thead>
+    <tbody>${editRows}</tbody>
   </table>
 </div>
+<div class="card"><h2>Matrix</h2>${matrixHtml}</div>
 `;
   return renderAdminPage({
     title: "Permissions",
     active: "/admin/permissions",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+// ---------- Setup Wizard ----------
+
+export interface WizardPageProps extends CommonProps {
+  featureOrder: string[];
+  featureStatus: Record<string, boolean>;
+}
+
+const WIZARD_FEATURE_LABELS: Record<string, { name: string; desc: string }> = {
+  voicechannels: {
+    name: "Voice Channels",
+    desc: "Dynamic voice channel management with lobby.",
+  },
+  voicetracking: {
+    name: "Voice Tracking",
+    desc: "Track voice activity and generate statistics.",
+  },
+  quotes: {
+    name: "Quote System",
+    desc: "Collect and share memorable quotes.",
+  },
+  achievements: {
+    name: "Achievements",
+    desc: "Achievement system for voice activity.",
+  },
+  logging: {
+    name: "Core Logging",
+    desc: "Bot event logging to Discord channels.",
+  },
+  amikool: {
+    name: "Am I Kool",
+    desc: "Fun command to check kool status based on a role.",
+  },
+  reactionroles: {
+    name: "Reaction Roles",
+    desc: "Let users self-assign roles via reactions.",
+  },
+  announcements: {
+    name: "Announcements",
+    desc: "Schedule automated announcements.",
+  },
+  notices: {
+    name: "Notices",
+    desc: "Curated channel for server notices.",
+  },
+  polls: {
+    name: "Polls",
+    desc: "Periodic polls for icebreaker discussions.",
+  },
+};
+
+export function renderWizardPage(props: WizardPageProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+  const cards = props.featureOrder
+    .map((fk) => {
+      const info = WIZARD_FEATURE_LABELS[fk] ?? { name: fk, desc: "" };
+      const checked = props.featureStatus[fk] ? " checked" : "";
+      const id = `feat-${fk}`;
+      return `<div class="feature-card">
+  <input type="checkbox" name="features" value="${escapeHtml(fk)}" id="${escapeHtml(id)}"${checked}>
+  <div class="fc-info">
+    <label for="${escapeHtml(id)}" class="fc-name">${escapeHtml(info.name)}</label>
+    <div class="fc-desc">${escapeHtml(info.desc)}</div>
+  </div>
+</div>`;
+    })
+    .join("");
+
+  const body = `
+<h1>Setup Wizard</h1>
+<p class="subtitle">Pick the features you want to configure and click <strong>Next</strong>. The wizard walks you through each feature's key settings.</p>
+<div class="notice info">Changes are only applied at the final confirmation step. Cancel any time without affecting the current configuration.</div>
+<form method="POST" action="/admin/wizard/start">
+  <input type="hidden" name="_csrf" value="${csrf}">
+  <div class="card">
+    <h2>Select features to configure</h2>
+    <div class="wizard-features">${cards}</div>
+  </div>
+  <div class="actions">
+    <button type="submit" class="btn btn-primary">Next →</button>
+    <a href="/admin/" class="btn">Cancel</a>
+  </div>
+</form>
+`;
+  return renderAdminPage({
+    title: "Setup Wizard",
+    active: "/admin/wizard",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+export interface WizardStepPageProps extends CommonProps {
+  stepIndex: number;
+  totalSteps: number;
+  featureKey: string;
+  settingKeys: string[];
+  currentValues: Record<string, unknown>;
+  metadata: Record<string, { description: string; category: string }>;
+  defaultValues: Record<string, unknown>;
+}
+
+export function renderWizardStepPage(props: WizardStepPageProps): string {
+  const csrf = escapeHtml(props.csrfToken);
+  const info = WIZARD_FEATURE_LABELS[props.featureKey] ?? {
+    name: props.featureKey,
+    desc: "",
+  };
+
+  const fields = props.settingKeys
+    .map((k) => {
+      const current = props.currentValues[k];
+      const meta = props.metadata[k];
+      const defaultVal = props.defaultValues[k];
+      const type =
+        typeof defaultVal === "boolean"
+          ? "boolean"
+          : typeof defaultVal === "number"
+            ? "number"
+            : "string";
+      const desc = meta?.description ?? "";
+      const inputId = `wiz-${k}`;
+      const display =
+        typeof current === "boolean" ||
+        typeof current === "number" ||
+        typeof current === "string"
+          ? current
+          : "";
+
+      let control: string;
+      if (type === "boolean") {
+        const checked = current === true ? " checked" : "";
+        control = `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="true"${checked}> Enable</label>`;
+      } else if (type === "number") {
+        control = `<input type="number" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="${escapeHtml(display)}">`;
+      } else {
+        control = `<input type="text" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="${escapeHtml(display)}">`;
+      }
+
+      return `<div class="field-row">
+  <label for="${escapeHtml(inputId)}">${escapeHtml(k)}</label>
+  ${control}
+  <div class="help">${escapeHtml(desc)}</div>
+</div>`;
+    })
+    .join("");
+
+  const stepLabel = `Step ${props.stepIndex + 1} of ${props.totalSteps}`;
+  const nextLabel =
+    props.stepIndex + 1 < props.totalSteps ? "Next →" : "Review →";
+
+  const body = `
+<h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
+<p class="subtitle">${escapeHtml(info.desc)}</p>
+<form method="POST" action="/admin/wizard/step/${props.stepIndex}">
+  <input type="hidden" name="_csrf" value="${csrf}">
+  <div class="card">${fields}</div>
+  <div class="actions">
+    <button type="submit" class="btn btn-primary">${nextLabel}</button>
+    <a href="/admin/wizard" class="btn">← Back to features</a>
+  </div>
+</form>
+`;
+  return renderAdminPage({
+    title: `Wizard — ${info.name}`,
+    active: "/admin/wizard",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+  });
+}
+
+export interface WizardConfirmPageProps extends CommonProps {
+  pending: Array<[string, unknown]>;
+  metadata: Record<string, { description: string; category: string }>;
+}
+
+export function renderWizardConfirmPage(
+  props: WizardConfirmPageProps,
+): string {
+  const csrf = escapeHtml(props.csrfToken);
+  const rows =
+    props.pending.length === 0
+      ? `<tr><td colspan="3" class="empty">No settings configured.</td></tr>`
+      : props.pending
+          .map(
+            ([k, v]) =>
+              `<tr>
+<td class="mono">${escapeHtml(k)}</td>
+<td class="mono">${escapeHtml(v)}</td>
+<td class="muted">${escapeHtml(props.metadata[k]?.description ?? "")}</td>
+</tr>`,
+          )
+          .join("");
+
+  const body = `
+<h1>Review configuration</h1>
+<p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
+<div class="card">
+  <table>
+    <thead><tr><th>Key</th><th>New value</th><th>Description</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+</div>
+<div class="actions">
+  <form method="POST" action="/admin/wizard/apply">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <button type="submit" class="btn btn-primary"${props.pending.length === 0 ? " disabled" : ""}>Apply</button>
+  </form>
+  <form method="POST" action="/admin/wizard/cancel">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <button type="submit" class="btn btn-danger">Cancel</button>
+  </form>
+</div>
+`;
+  return renderAdminPage({
+    title: "Wizard — Review",
+    active: "/admin/wizard",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
