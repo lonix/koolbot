@@ -407,25 +407,31 @@ export function createReadOnlyRouter(
       const permissions = PermissionsService.getInstance(client);
       const all = await permissions.listAllPermissions(common.guildId);
       const commands = Array.from(client.commands.keys()).sort();
-      const { names: roleNames } = await fetchRoleData(client, common.guildId);
+      const { names: roleNames, roles: guildRoles } = await fetchRoleData(
+        client,
+        common.guildId,
+      );
 
       const perCommand = new Map<string, string[]>();
-      const allRoleIds = new Set<string>();
+      const restrictedRoleIds = new Set<string>();
       for (const entry of all) {
         perCommand.set(entry.commandName, entry.roleIds);
-        for (const r of entry.roleIds) allRoleIds.add(r);
+        for (const r of entry.roleIds) restrictedRoleIds.add(r);
       }
-      const roleIds = Array.from(allRoleIds).sort((a, b) =>
+      const roleIds = Array.from(restrictedRoleIds).sort((a, b) =>
         (roleNames.get(a) ?? a).localeCompare(roleNames.get(b) ?? b),
       );
+      const allRoleIds = guildRoles.map((r) => r.id);
 
       res.type("text/html").send(
         renderPermissionsPage({
           ...common,
           commands,
           roleIds,
+          allRoleIds,
           roleNames,
           perCommand,
+          flash: readFlash(req),
         }),
       );
     }),

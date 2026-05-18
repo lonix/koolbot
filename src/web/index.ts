@@ -23,9 +23,11 @@ export function createWebRouter(client: Client): Router {
   const router = Router();
   const sessionService = WebSessionService.getInstance();
 
-  // 64kb covers a 2000-char message + 6000-char embed + CSRF/cron/etc.
-  // with comfortable headroom for the announcement and poll forms.
-  router.use(express.urlencoded({ extended: false, limit: "64kb" }));
+  // 256kb covers a 2000-char message + 6000-char embed + CSRF/cron/etc.
+  // with comfortable headroom, plus YAML import payloads from the settings
+  // page (a full config dump is well under 64kb but power-users may paste
+  // larger files with comments and surrounding context).
+  router.use(express.urlencoded({ extended: false, limit: "256kb" }));
   router.use(ensureCsrfCookie);
 
   const redeemLimiter = createRateLimiter({

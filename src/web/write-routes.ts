@@ -9,11 +9,13 @@
 import {
   Router,
   type NextFunction,
+  type Request,
   type RequestHandler,
   type Response,
 } from "express";
 import { Client } from "discord.js";
 import { CronTime } from "cron";
+import * as yaml from "js-yaml";
 import logger from "../utils/logger.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import { PollService } from "../services/poll-service.js";
@@ -23,6 +25,11 @@ import { NoticesChannelManager } from "../services/notices-channel-manager.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
+import { PermissionsService } from "../services/permissions-service.js";
+import { WizardService } from "../services/wizard-service.js";
+import { BotStatusService } from "../services/bot-status-service.js";
+import { CommandManager } from "../services/command-manager.js";
+import { defaultConfig, settingsMetadata } from "../services/config-schema.js";
 import type { IScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import type { IPollSchedule } from "../models/poll-schedule.js";
 import type { IPollItem } from "../models/poll-item.js";
@@ -31,6 +38,14 @@ import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { requireCsrf } from "./csrf.js";
 import type { AuthenticatedRequest } from "./session.js";
 import { recordAudit } from "./audit.js";
+import { getDisplayedRemainingMs } from "./admin-layout.js";
+import {
+  renderImportDiffPage,
+  renderWizardPage,
+  renderWizardStepPage,
+  renderWizardConfirmPage,
+  type ImportDiffRow,
+} from "./admin-views.js";
 
 type Flash = { type: "ok" | "warn" | "err"; text: string };
 
@@ -114,6 +129,128 @@ function asyncHandler(
   };
 }
 
+/**
+ * Environment / bootstrap keys that must never appear in YAML import payloads
+ * or YAML export output. Defense in depth — they're never put into the export
+ * dictionary in the first place, and import/apply refuses them again.
+ *
+ * Hand-maintained: keep in lock-step with the `WEBUI_*` and bootstrap env
+ * vars consumed in src/index.ts and src/web/index.ts. Adding a new env var
+ * without updating this list will silently let admins overwrite it via YAML.
+ */
+export const PROTECTED_KEYS: ReadonlySet<string> = new Set([
+  "DISCORD_TOKEN",
+  "CLIENT_ID",
+  "GUILD_ID",
+  "MONGODB_URI",
+  "NODE_ENV",
+  "DEBUG",
+  "WEBUI_ENABLED",
+  "WEBUI_BASE_URL",
+  "WEBUI_SESSION_SECRET",
+  "WEBUI_SESSION_TTL_MINUTES",
+  "WEBUI_INACTIVITY_TIMEOUT_MINUTES",
+]);
+
+/**
+ * Settings shown per wizard feature. Key order determines form order.
+ * Each list must reference real keys in `defaultConfig` — unknown keys
+ * are silently dropped at apply.
+ */
+const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
+  voicechannels: [
+    "voicechannels.enabled",
+    "voicechannels.category.name",
+    "voicechannels.lobby.name",
+    "voicechannels.lobby.offlinename",
+    "voicechannels.channel.prefix",
+    "voicechannels.channel.suffix",
+    "voicechannels.controlpanel.enabled",
+  ],
+  voicetracking: [
+    "voicetracking.enabled",
+    "voicetracking.stats.top.enabled",
+    "voicetracking.stats.user.enabled",
+    "voicetracking.seen.enabled",
+    "voicetracking.announcements.enabled",
+    "voicetracking.announcements.channel",
+  ],
+  quotes: [
+    "quotes.enabled",
+    "quotes.channel_id",
+    "quotes.max_length",
+    "quotes.cooldown",
+    "quotes.header_enabled",
+  ],
+  achievements: [
+    "achievements.enabled",
+    "achievements.announcements.enabled",
+    "achievements.dm_notifications.enabled",
+  ],
+  logging: [
+    "core.startup.enabled",
+    "core.startup.channel_id",
+    "core.errors.enabled",
+    "core.errors.channel_id",
+    "core.config.enabled",
+    "core.config.channel_id",
+  ],
+  amikool: ["amikool.enabled", "amikool.role.name"],
+  reactionroles: ["reactionroles.enabled", "reactionroles.message_channel_id"],
+  announcements: ["announcements.enabled"],
+  notices: ["notices.enabled", "notices.channel_id", "notices.header_enabled"],
+  polls: [
+    "polls.enabled",
+    "polls.default_duration_hours",
+    "polls.cooldown_days",
+  ],
+};
+
+const WIZARD_FEATURE_ORDER = [
+  "voicechannels",
+  "voicetracking",
+  "quotes",
+  "achievements",
+  "logging",
+  "amikool",
+  "reactionroles",
+  "announcements",
+  "notices",
+  "polls",
+];
+
+/**
+ * Coerce a raw form value to match the expected type of `key` in
+ * `defaultConfig`. Returns the coerced value on success, or a typed
+ * failure describing why coercion was refused.
+ */
+export function coerceConfigValue(
+  key: string,
+  raw: unknown,
+):
+  | { ok: true; value: string | number | boolean }
+  | { ok: false; reason: string } {
+  if (!(key in defaultConfig)) {
+    return { ok: false, reason: "unknown key" };
+  }
+  const expected = typeof defaultConfig[key as keyof typeof defaultConfig];
+  if (expected === "boolean") {
+    // HTML checkboxes post "true" when checked, the field is absent when
+    // unchecked. YAML may post a real boolean; honour both.
+    return { ok: true, value: raw === "true" || raw === true };
+  }
+  if (expected === "number") {
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (!Number.isFinite(n)) return { ok: false, reason: "invalid number" };
+    return { ok: true, value: n };
+  }
+  return { ok: true, value: String(raw ?? "") };
+}
+
+function getCsrfFromReq(req: AuthenticatedRequest): string {
+  return (req as Request & { csrfToken?: string }).csrfToken ?? "";
+}
+
 export function createWriteRouter(
   client: Client,
   requireSession: RequestHandler,
@@ -121,6 +258,799 @@ export function createWriteRouter(
   const router = Router();
   router.use(requireSession);
   router.use(requireCsrf);
+
+  // ============================================================
+  // Settings — single-key set/reset + reload (issue #383)
+  // ============================================================
+
+  router.post(
+    "/settings/set",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const key = getString(req, "key");
+      const raw = (req.body as Record<string, unknown> | undefined)?.value;
+
+      const coerced = coerceConfigValue(key, raw);
+      if (!coerced.ok) {
+        await recordAudit(session, {
+          action: "setting.set",
+          targetId: key || null,
+          details: { reason: coerced.reason },
+          result: "failure",
+          errorMessage: coerced.reason,
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Cannot set ${key || "(empty key)"}: ${coerced.reason}.`,
+        });
+        return;
+      }
+
+      const config = ConfigService.getInstance();
+      let before: unknown;
+      try {
+        before = await config.get(key);
+      } catch {
+        before = defaultConfig[key as keyof typeof defaultConfig];
+      }
+      const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+      try {
+        await config.set(
+          key,
+          coerced.value,
+          meta?.description ?? "",
+          meta?.category ?? key.split(".")[0],
+        );
+        await recordAudit(session, {
+          action: "setting.set",
+          targetId: key,
+          details: { before, after: coerced.value },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "ok",
+          text: `Set ${key} = ${String(coerced.value)}.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Set setting failed", err);
+        await recordAudit(session, {
+          action: "setting.set",
+          targetId: key,
+          details: { before, attempted: coerced.value },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Failed to set ${key}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/settings/reset",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const key = getString(req, "key");
+      if (!(key in defaultConfig)) {
+        await recordAudit(session, {
+          action: "setting.reset",
+          targetId: key || null,
+          result: "failure",
+          errorMessage: "unknown key",
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Unknown setting: ${key || "(empty)"}.`,
+        });
+        return;
+      }
+
+      const config = ConfigService.getInstance();
+      let before: unknown;
+      try {
+        before = await config.get(key);
+      } catch {
+        before = undefined;
+      }
+      try {
+        await config.delete(key);
+        await recordAudit(session, {
+          action: "setting.reset",
+          targetId: key,
+          details: {
+            before,
+            after: defaultConfig[key as keyof typeof defaultConfig],
+          },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "ok",
+          text: `Reset ${key} to default.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Reset setting failed", err);
+        await recordAudit(session, {
+          action: "setting.reset",
+          targetId: key,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Failed to reset ${key}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/settings/reload",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const botStatus = BotStatusService.getInstance(client);
+      botStatus.setConfigReloadStatus();
+      try {
+        const commandManager = CommandManager.getInstance(client);
+        await commandManager.registerCommands();
+        await commandManager.populateClientCommands();
+        await recordAudit(session, {
+          action: "commands.reload",
+          result: "success",
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "ok",
+          text: "Reloaded slash commands.",
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Command reload failed", err);
+        await recordAudit(session, {
+          action: "commands.reload",
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Reload failed: ${text}`,
+        });
+      } finally {
+        // Always restore the operational status even if the reload threw —
+        // otherwise the bot would be stuck in "config reloading" forever.
+        botStatus.setOperationalStatus();
+      }
+    }),
+  );
+
+  // ============================================================
+  // Settings — YAML export / import (issue #383)
+  // ============================================================
+
+  // GET is exempt from CSRF; mounted on this router so requireSession runs.
+  router.get(
+    "/settings/export",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      try {
+        const config = ConfigService.getInstance();
+        const all = await config.getAll();
+        const exportObj: Record<string, unknown> = {};
+        // Start from defaults so every public key has a value.
+        for (const [k, v] of Object.entries(defaultConfig)) {
+          if (!PROTECTED_KEYS.has(k)) exportObj[k] = v;
+        }
+        // Overlay with DB values.
+        for (const entry of all) {
+          if (!PROTECTED_KEYS.has(entry.key))
+            exportObj[entry.key] = entry.value;
+        }
+        const yamlContent = yaml.dump(exportObj, { sortKeys: true });
+        const filename = `koolbot-config-${new Date()
+          .toISOString()
+          .slice(0, 10)}.yaml`;
+        await recordAudit(session, {
+          action: "settings.export",
+          details: { keys: Object.keys(exportObj).length },
+          result: "success",
+        });
+        res.setHeader(
+          "Content-Disposition",
+          `attachment; filename="${filename}"`,
+        );
+        res.type("application/x-yaml").send(yamlContent);
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Settings export failed", err);
+        await recordAudit(session, {
+          action: "settings.export",
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Export failed: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/settings/import",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const yamlText = getString(req, "yaml");
+      if (!yamlText) {
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: "Paste YAML before previewing.",
+        });
+        return;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = yaml.load(yamlText);
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "parse error";
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Invalid YAML: ${text}`,
+        });
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: "YAML must be a key→value mapping, not a list or scalar.",
+        });
+        return;
+      }
+
+      const config = ConfigService.getInstance();
+      const all = await config.getAll();
+      const currentByKey = new Map(all.map((e) => [e.key, e.value]));
+
+      const rows: ImportDiffRow[] = [];
+      for (const [key, value] of Object.entries(
+        parsed as Record<string, unknown>,
+      )) {
+        if (PROTECTED_KEYS.has(key)) {
+          rows.push({ key, status: "rejected", reason: "protected key" });
+          continue;
+        }
+        if (!(key in defaultConfig)) {
+          rows.push({ key, status: "rejected", reason: "unknown key" });
+          continue;
+        }
+        // Surface type-mismatch in the preview so a silent drop at apply
+        // isn't the first sign the user sees.
+        const coerced = coerceConfigValue(key, value);
+        if (!coerced.ok) {
+          rows.push({
+            key,
+            status: "rejected",
+            reason: `type mismatch (${coerced.reason})`,
+          });
+          continue;
+        }
+        const before = currentByKey.has(key)
+          ? currentByKey.get(key)
+          : defaultConfig[key as keyof typeof defaultConfig];
+        rows.push({
+          key,
+          status: "pending",
+          before,
+          after: coerced.value,
+        });
+      }
+
+      res.type("text/html").send(
+        renderImportDiffPage({
+          csrfToken: getCsrfFromReq(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          rows,
+          yamlText,
+        }),
+      );
+    }),
+  );
+
+  router.post(
+    "/settings/import/apply",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const yamlText = getString(req, "yaml");
+
+      let parsed: unknown;
+      try {
+        parsed = yaml.load(yamlText);
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "parse error";
+        await recordAudit(session, {
+          action: "settings.import",
+          result: "failure",
+          errorMessage: `parse: ${text}`,
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Invalid YAML: ${text}`,
+        });
+        return;
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        await recordAudit(session, {
+          action: "settings.import",
+          result: "failure",
+          errorMessage: "not a mapping",
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: "YAML must be a mapping.",
+        });
+        return;
+      }
+
+      const config = ConfigService.getInstance();
+      let applied = 0;
+      const failed: Array<{ key: string; reason: string }> = [];
+
+      for (const [key, value] of Object.entries(
+        parsed as Record<string, unknown>,
+      )) {
+        if (PROTECTED_KEYS.has(key)) {
+          failed.push({ key, reason: "protected" });
+          continue;
+        }
+        if (!(key in defaultConfig)) {
+          failed.push({ key, reason: "unknown" });
+          continue;
+        }
+        const coerced = coerceConfigValue(key, value);
+        if (!coerced.ok) {
+          failed.push({ key, reason: coerced.reason });
+          continue;
+        }
+        const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+        try {
+          await config.set(
+            key,
+            coerced.value,
+            meta?.description ?? "",
+            meta?.category ?? key.split(".")[0],
+          );
+          applied++;
+        } catch (err) {
+          const text = err instanceof Error ? err.message : "set failed";
+          logger.error(`Import: failed to set ${key}`, err);
+          failed.push({ key, reason: text });
+        }
+      }
+
+      // Tri-state outcome so an audit query for `result: "success"` doesn't
+      // exclude partial imports (e.g. 99 keys applied with 1 type-mismatch).
+      // `result` mirrors what the user-facing flash shows: `failure` only
+      // when nothing landed; otherwise `success` with a `partial` flag in
+      // the details for reporting.
+      const outcome: "ok" | "partial" | "failed" =
+        failed.length === 0 ? "ok" : applied > 0 ? "partial" : "failed";
+      await recordAudit(session, {
+        action: "settings.import",
+        details: {
+          applied,
+          failed: failed.length,
+          failedKeys: failed,
+          outcome,
+        },
+        result: outcome === "failed" ? "failure" : "success",
+        errorMessage:
+          failed.length > 0
+            ? failed
+                .slice(0, 5)
+                .map((f) => `${f.key}: ${f.reason}`)
+                .join("; ")
+            : null,
+      });
+
+      const summary =
+        failed.length === 0
+          ? `Imported ${applied} setting${applied === 1 ? "" : "s"}.`
+          : `Imported ${applied}, skipped ${failed.length} (first: ${failed[0].key} — ${failed[0].reason}).`;
+      flashRedirect(res, "/admin/settings", {
+        type: failed.length === 0 ? "ok" : applied > 0 ? "warn" : "err",
+        text: summary,
+      });
+    }),
+  );
+
+  // ============================================================
+  // Permissions — replace allowed-role list per command (issue #383)
+  // ============================================================
+
+  router.post(
+    "/permissions/set",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const command = getString(req, "command");
+      if (!command) {
+        flashRedirect(res, "/admin/permissions", {
+          type: "err",
+          text: "Missing command name.",
+        });
+        return;
+      }
+
+      // <select multiple> posts an array; a single value posts a string;
+      // nothing selected posts no field at all.
+      const rawRoleIds = (req.body as Record<string, unknown> | undefined)
+        ?.roleIds;
+      let roleIds: string[];
+      if (Array.isArray(rawRoleIds)) {
+        roleIds = rawRoleIds.map(String).filter(Boolean);
+      } else if (typeof rawRoleIds === "string" && rawRoleIds) {
+        roleIds = rawRoleIds
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      } else {
+        roleIds = [];
+      }
+
+      const permissions = PermissionsService.getInstance(client);
+      const before = await permissions
+        .getCommandPermissions(session.guildId, command)
+        .catch(() => null);
+
+      try {
+        if (roleIds.length === 0) {
+          await permissions.clearCommandPermissions(session.guildId, command);
+        } else {
+          await permissions.setCommandPermissions(
+            session.guildId,
+            command,
+            roleIds,
+          );
+        }
+        await recordAudit(session, {
+          action: "permissions.set",
+          targetId: command,
+          details: { before, after: roleIds },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/permissions", {
+          type: "ok",
+          text:
+            roleIds.length === 0
+              ? `Cleared restriction on /${command} (now open).`
+              : `Set /${command} → ${roleIds.length} role(s).`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Set permissions failed", err);
+        await recordAudit(session, {
+          action: "permissions.set",
+          targetId: command,
+          details: { before, attempted: roleIds },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/permissions", {
+          type: "err",
+          text: `Failed to update /${command}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // ============================================================
+  // Setup Wizard (issue #383)
+  // ============================================================
+
+  router.get(
+    "/wizard",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const csrfToken = getCsrfFromReq(req);
+      const remainingMs = getDisplayedRemainingMs(session);
+      const wizard = WizardService.getInstance();
+      const existing = wizard.getSession(
+        session.discordUserId,
+        session.guildId,
+      );
+
+      // POST /wizard/step/:n redirects here with `?flash=warn&msg=…` when
+      // coercion drops fields. Surface it via the renderer.
+      const flashType = String(req.query.flash ?? "");
+      const flashMsg = String(req.query.msg ?? "");
+      const flash =
+        flashMsg &&
+        (flashType === "ok" || flashType === "warn" || flashType === "err")
+          ? { type: flashType as "ok" | "warn" | "err", text: flashMsg }
+          : null;
+
+      if (existing && Number(req.query.reset) !== 1) {
+        const features = existing.selectedFeatures;
+        const stepParam = req.query.step;
+
+        if (typeof stepParam === "string" && stepParam === "confirm") {
+          const pending = Object.entries(existing.configuration);
+          res.type("text/html").send(
+            renderWizardConfirmPage({
+              csrfToken,
+              remainingMs,
+              pending,
+              metadata: settingsMetadata,
+            }),
+          );
+          return;
+        }
+
+        const step =
+          stepParam !== undefined ? parseInt(String(stepParam), 10) : -1;
+        if (Number.isFinite(step) && step >= 0 && step < features.length) {
+          const featureKey = features[step];
+          const settingKeys = WIZARD_FEATURE_SETTINGS[featureKey] ?? [];
+          const config = ConfigService.getInstance();
+          const currentValues: Record<string, unknown> = {};
+          for (const k of settingKeys) {
+            const fromWizard = wizard.getConfiguration(
+              session.discordUserId,
+              session.guildId,
+              k,
+            );
+            if (fromWizard !== undefined) {
+              currentValues[k] = fromWizard;
+            } else {
+              try {
+                currentValues[k] = await config.get(k);
+              } catch {
+                currentValues[k] =
+                  defaultConfig[k as keyof typeof defaultConfig];
+              }
+            }
+          }
+          res.type("text/html").send(
+            renderWizardStepPage({
+              csrfToken,
+              remainingMs,
+              stepIndex: step,
+              totalSteps: features.length,
+              featureKey,
+              settingKeys,
+              currentValues,
+              metadata: settingsMetadata,
+              defaultValues: defaultConfig as unknown as Record<
+                string,
+                unknown
+              >,
+              flash,
+            }),
+          );
+          return;
+        }
+      }
+
+      // Step 0: feature selection. Show the current feature.enabled state
+      // alongside each card so the operator knows what's already on.
+      const config = ConfigService.getInstance();
+      const featureStatus: Record<string, boolean> = {};
+      for (const fk of WIZARD_FEATURE_ORDER) {
+        const keys = WIZARD_FEATURE_SETTINGS[fk] ?? [];
+        const enabledKey = keys.find((k) => k.endsWith(".enabled"));
+        featureStatus[fk] = enabledKey
+          ? await config.getBoolean(enabledKey, false)
+          : false;
+      }
+      res.type("text/html").send(
+        renderWizardPage({
+          csrfToken,
+          remainingMs,
+          featureOrder: WIZARD_FEATURE_ORDER,
+          featureStatus,
+        }),
+      );
+    }),
+  );
+
+  router.post(
+    "/wizard/start",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const rawFeatures = (req.body as Record<string, unknown> | undefined)
+        ?.features;
+      const features: string[] = (
+        Array.isArray(rawFeatures) ? rawFeatures : [rawFeatures]
+      )
+        .map(String)
+        .filter((f) => WIZARD_FEATURE_ORDER.includes(f));
+
+      if (features.length === 0) {
+        flashRedirect(res, "/admin/wizard", {
+          type: "err",
+          text: "Pick at least one feature to configure.",
+        });
+        return;
+      }
+
+      const wizard = WizardService.getInstance();
+      // `createSession` silently replaces any pre-existing session for the
+      // same user/guild. Snapshot the prior state first so the audit row
+      // records what was discarded — an operator restarting their own
+      // wizard is fine, but an admin clobbering someone else's progress
+      // needs to be traceable.
+      const prior = wizard.getSession(session.discordUserId, session.guildId);
+      const replacedExisting = prior !== null;
+      const discardedKeys = prior ? Object.keys(prior.configuration) : [];
+      wizard.createSession(session.discordUserId, session.guildId, features);
+      await recordAudit(session, {
+        action: "wizard.start",
+        details: { features, replacedExisting, discardedKeys },
+        result: "success",
+      });
+      res.redirect(303, "/admin/wizard?step=0");
+    }),
+  );
+
+  router.post(
+    "/wizard/step/:n",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const wizard = WizardService.getInstance();
+      const state = wizard.getSession(session.discordUserId, session.guildId);
+      if (!state) {
+        flashRedirect(res, "/admin/wizard", {
+          type: "warn",
+          text: "Wizard session expired. Please start again.",
+        });
+        return;
+      }
+
+      const stepIndex = parseInt(String(req.params.n), 10);
+      if (
+        !Number.isFinite(stepIndex) ||
+        stepIndex < 0 ||
+        stepIndex >= state.selectedFeatures.length
+      ) {
+        flashRedirect(res, "/admin/wizard", {
+          type: "err",
+          text: "Invalid wizard step.",
+        });
+        return;
+      }
+
+      const featureKey = state.selectedFeatures[stepIndex];
+      const settingKeys = WIZARD_FEATURE_SETTINGS[featureKey] ?? [];
+      const saved: Record<string, unknown> = {};
+      const dropped: Array<{ key: string; reason: string }> = [];
+      for (const k of settingKeys) {
+        const raw = (req.body as Record<string, unknown> | undefined)?.[k];
+        const coerced = coerceConfigValue(k, raw);
+        if (coerced.ok) {
+          wizard.addConfiguration(
+            session.discordUserId,
+            session.guildId,
+            k,
+            coerced.value,
+          );
+          saved[k] = coerced.value;
+        } else {
+          // Mirror the YAML-import principle: a coercion failure must not
+          // be silent. The operator gets a flash on the *next* page and the
+          // audit row records the dropped keys so misconfigured form input
+          // is traceable.
+          dropped.push({ key: k, reason: coerced.reason });
+        }
+      }
+
+      await recordAudit(session, {
+        action: "wizard.step",
+        details: { stepIndex, featureKey, saved, dropped },
+        result: dropped.length > 0 ? "failure" : "success",
+        errorMessage:
+          dropped.length > 0
+            ? dropped.map((d) => `${d.key}: ${d.reason}`).join("; ")
+            : null,
+      });
+
+      // On any coercion failure, keep the operator on the same step so they
+      // can correct the input. Otherwise advance to the next step (or the
+      // confirm page if this was the last one).
+      if (dropped.length > 0) {
+        const msg = `${dropped.length} field${dropped.length === 1 ? "" : "s"} ignored (invalid input): ${dropped
+          .map((d) => `${d.key} (${d.reason})`)
+          .join(", ")}.`;
+        const truncated =
+          msg.length > FLASH_MAX ? `${msg.slice(0, FLASH_MAX - 1)}…` : msg;
+        const qs = new globalThis.URLSearchParams({
+          step: String(stepIndex),
+          flash: "warn",
+          msg: truncated,
+        }).toString();
+        res.redirect(303, `/admin/wizard?${qs}`);
+        return;
+      }
+
+      const nextStep = stepIndex + 1;
+      if (nextStep >= state.selectedFeatures.length) {
+        res.redirect(303, "/admin/wizard?step=confirm");
+      } else {
+        res.redirect(303, `/admin/wizard?step=${nextStep}`);
+      }
+    }),
+  );
+
+  router.post(
+    "/wizard/apply",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const wizard = WizardService.getInstance();
+      const state = wizard.getSession(session.discordUserId, session.guildId);
+      if (!state) {
+        flashRedirect(res, "/admin/wizard", {
+          type: "warn",
+          text: "Wizard session expired. Please start again.",
+        });
+        return;
+      }
+
+      const pendingKeys = Object.keys(state.configuration);
+      try {
+        const applied = await wizard.applyConfiguration(
+          session.discordUserId,
+          session.guildId,
+        );
+        await recordAudit(session, {
+          action: "wizard.apply",
+          details: { keys: pendingKeys, count: pendingKeys.length },
+          result: applied ? "success" : "failure",
+          errorMessage: applied ? null : "applyConfiguration returned false",
+        });
+        wizard.endSession(session.discordUserId, session.guildId);
+        flashRedirect(res, "/admin/settings", {
+          type: applied ? "ok" : "err",
+          text: applied
+            ? `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}.`
+            : "Wizard failed to apply some settings. Check the bot logs.",
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Wizard apply failed", err);
+        await recordAudit(session, {
+          action: "wizard.apply",
+          details: { keys: pendingKeys },
+          result: "failure",
+          errorMessage: text,
+        });
+        wizard.endSession(session.discordUserId, session.guildId);
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Wizard failed: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/wizard/cancel",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const wizard = WizardService.getInstance();
+      const state = wizard.getSession(session.discordUserId, session.guildId);
+      const discardedKeys = state ? Object.keys(state.configuration) : [];
+      wizard.endSession(session.discordUserId, session.guildId);
+      await recordAudit(session, {
+        action: "wizard.cancel",
+        details: { discardedKeys, hadSession: state !== null },
+        result: "success",
+      });
+      flashRedirect(res, "/admin/", {
+        type: "ok",
+        text: "Wizard cancelled. No changes were applied.",
+      });
+    }),
+  );
 
   // ============================================================
   // Announcements
