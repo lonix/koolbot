@@ -29,10 +29,7 @@ import { PermissionsService } from "../services/permissions-service.js";
 import { WizardService } from "../services/wizard-service.js";
 import { BotStatusService } from "../services/bot-status-service.js";
 import { CommandManager } from "../services/command-manager.js";
-import {
-  defaultConfig,
-  settingsMetadata,
-} from "../services/config-schema.js";
+import { defaultConfig, settingsMetadata } from "../services/config-schema.js";
 import type { IScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import type { IPollSchedule } from "../models/poll-schedule.js";
 import type { IPollItem } from "../models/poll-item.js";
@@ -230,7 +227,9 @@ const WIZARD_FEATURE_ORDER = [
 export function coerceConfigValue(
   key: string,
   raw: unknown,
-): { ok: true; value: string | number | boolean } | { ok: false; reason: string } {
+):
+  | { ok: true; value: string | number | boolean }
+  | { ok: false; reason: string } {
   if (!(key in defaultConfig)) {
     return { ok: false, reason: "unknown key" };
   }
@@ -445,7 +444,8 @@ export function createWriteRouter(
         }
         // Overlay with DB values.
         for (const entry of all) {
-          if (!PROTECTED_KEYS.has(entry.key)) exportObj[entry.key] = entry.value;
+          if (!PROTECTED_KEYS.has(entry.key))
+            exportObj[entry.key] = entry.value;
         }
         const yamlContent = yaml.dump(exportObj, { sortKeys: true });
         const filename = `koolbot-config-${new Date()
@@ -647,8 +647,7 @@ export function createWriteRouter(
           ? `Imported ${applied} setting${applied === 1 ? "" : "s"}.`
           : `Imported ${applied}, skipped ${failed.length} (first: ${failed[0].key} — ${failed[0].reason}).`;
       flashRedirect(res, "/admin/settings", {
-        type:
-          failed.length === 0 ? "ok" : applied > 0 ? "warn" : "err",
+        type: failed.length === 0 ? "ok" : applied > 0 ? "warn" : "err",
         text: summary,
       });
     }),

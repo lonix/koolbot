@@ -652,9 +652,7 @@ export interface WizardConfirmPageProps extends CommonProps {
   metadata: Record<string, { description: string; category: string }>;
 }
 
-export function renderWizardConfirmPage(
-  props: WizardConfirmPageProps,
-): string {
+export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
   const csrf = escapeHtml(props.csrfToken);
   const rows =
     props.pending.length === 0
