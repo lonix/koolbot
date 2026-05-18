@@ -15,7 +15,7 @@ Complete configuration reference for all KoolBot settings.
 > Legacy `/config set` / `/permissions add` / `/setup wizard` etc. slash
 > commands have been removed — the Web UI is the only admin surface.
 > See [WEBUI.md](WEBUI.md).
-
+>
 > **Important:** Most features are **disabled by default** for safety.
 > Turn them on from the Web UI's Settings page once the bot is running.
 

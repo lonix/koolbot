@@ -126,16 +126,16 @@ This file provides an overview of the complete documentation structure.
 
 ## 📊 Documentation Map (where to go for what)
 
-| You want to…                       | Read                       |
-| ---------------------------------- | -------------------------- |
-| Stand up the bot in 5 minutes      | README.md                  |
-| Understand the magic-link flow     | WEBUI.md                   |
-| Put the Web UI behind HTTPS        | WEBUI.md → Reverse-proxy   |
-| Run `/config` and find a setting   | SETTINGS.md                |
-| Look up a slash command            | COMMANDS.md                |
-| Contribute code                    | DEVELOPER_GUIDE.md, CONTRIBUTING.md |
-| Debug a problem                    | TROUBLESHOOTING.md         |
-| See the visual diagram             | QUICK_START_VISUAL.md      |
+| You want to…                     | Read                                |
+| -------------------------------- | ----------------------------------- |
+| Stand up the bot in 5 minutes    | README.md                           |
+| Understand the magic-link flow   | WEBUI.md                            |
+| Put the Web UI behind HTTPS      | WEBUI.md → Reverse-proxy            |
+| Run `/config` and find a setting | SETTINGS.md                         |
+| Look up a slash command          | COMMANDS.md                         |
+| Contribute code                  | DEVELOPER_GUIDE.md, CONTRIBUTING.md |
+| Debug a problem                  | TROUBLESHOOTING.md                  |
+| See the visual diagram           | QUICK_START_VISUAL.md               |
 
 ## 🔗 Cross-References
 

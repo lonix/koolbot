@@ -161,10 +161,10 @@ admin launcher.
 
 KoolBot has a **two-tier** configuration model:
 
-| Tier                | Stored in | Edited via                                | Reload          |
-| ------------------- | --------- | ----------------------------------------- | --------------- |
-| Bootstrap / secrets | `.env`    | Edit the file on the host                 | Restart bot     |
-| Feature settings    | MongoDB   | Web UI **Settings**, **Permissions**, etc. | Live            |
+| Tier                | Stored in | Edited via                                 | Reload      |
+| ------------------- | --------- | ------------------------------------------ | ----------- |
+| Bootstrap / secrets | `.env`    | Edit the file on the host                  | Restart bot |
+| Feature settings    | MongoDB   | Web UI **Settings**, **Permissions**, etc. | Live        |
 
 All features ship **disabled by default** for safety. Turn them on from the
 Web UI's Settings page once the bot is running.

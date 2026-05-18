@@ -111,11 +111,11 @@ Key properties:
 KoolBot has a hard rule: **bootstrap settings live in `.env`, everything
 else lives in MongoDB and is edited via the Web UI.**
 
-| Setting tier         | Where it lives | How it's edited                                    | Reload          |
-| -------------------- | -------------- | -------------------------------------------------- | --------------- |
-| Bootstrap / secrets  | `.env`         | Edit the file on the host                          | Restart bot     |
-| Feature config       | MongoDB        | Web UI **Settings**, **Permissions**, etc.         | Live            |
-| Discord command list | MongoDB        | Web UI Settings → **Reload commands to Discord**   | Click the button |
+| Setting tier         | Where it lives | How it's edited                                  | Reload           |
+| -------------------- | -------------- | ------------------------------------------------ | ---------------- |
+| Bootstrap / secrets  | `.env`         | Edit the file on the host                        | Restart bot      |
+| Feature config       | MongoDB        | Web UI **Settings**, **Permissions**, etc.       | Live             |
+| Discord command list | MongoDB        | Web UI Settings → **Reload commands to Discord** | Click the button |
 
 The Web UI's **Bootstrap** page surfaces every `.env` value the bot reads,
 read-only, with secrets masked (last 4 characters only). You can verify
@@ -486,16 +486,16 @@ Could not DM web sign-in link to <user-id>; falling back to ephemeral reply
 
 ## Session lifecycle and revocation
 
-| Trigger                                | Effect                                                 |
-| -------------------------------------- | ------------------------------------------------------ |
-| Run `/config`                          | Revokes all your prior unrevoked sessions; mints new   |
-| Click DM link                          | Marks token `usedAt`; sets signed session cookie       |
-| Idle longer than inactivity window     | Cookie expires; next click → 401                       |
-| Reach session's hard `expiresAt`       | Session revoked server-side; next click → 401          |
-| Click **Finish** in the UI             | Session revoked server-side; cookie cleared            |
-| Admin role removed in Discord          | Next request re-checks permissions → 401, cookie cleared |
-| Bot restart                            | Sessions survive (stored in MongoDB)                   |
-| `WEBUI_SESSION_SECRET` rotated         | All existing sessions and outstanding tokens invalid   |
+| Trigger                            | Effect                                                   |
+| ---------------------------------- | -------------------------------------------------------- |
+| Run `/config`                      | Revokes all your prior unrevoked sessions; mints new     |
+| Click DM link                      | Marks token `usedAt`; sets signed session cookie         |
+| Idle longer than inactivity window | Cookie expires; next click → 401                         |
+| Reach session's hard `expiresAt`   | Session revoked server-side; next click → 401            |
+| Click **Finish** in the UI         | Session revoked server-side; cookie cleared              |
+| Admin role removed in Discord      | Next request re-checks permissions → 401, cookie cleared |
+| Bot restart                        | Sessions survive (stored in MongoDB)                     |
+| `WEBUI_SESSION_SECRET` rotated     | All existing sessions and outstanding tokens invalid     |
 
 Two admins can be in the Web UI at the same time. Re-running `/config`
 only invalidates **your own** sessions.
@@ -520,19 +520,19 @@ side effect, since the HMAC key changes.
 
 ## What the Web UI lets you do
 
-| Page              | Replaces                                                |
-| ----------------- | ------------------------------------------------------- |
-| **Dashboard**     | `/botstats`                                             |
-| **Settings**      | `/config list`, `/config get`, `/config set`, `/config reset`, `/config import`, `/config export`, `/config reload` |
-| **Permissions**   | `/permissions set`, `add`, `remove`, `clear`, `list`, `view` |
-| **Setup Wizard**  | `/setup wizard`                                         |
-| **Announcements** | `/announce create`, `list`, `delete`                    |
-| **Polls**         | `/poll create`, `list`, `add-item`, `import-url`, `delete`, `delete-item`, `test`, `list-items` |
-| **Reaction Roles**| `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status` |
-| **Notices**       | `/notice add`, `edit`, `delete`, `sync`                 |
-| **Voice Channels**| `/vc reload`, `/vc force-reload`                        |
-| **Database**      | `/dbtrunk status`, `/dbtrunk run`                       |
-| **Bootstrap**     | (new — read-only env diagnostics)                       |
+| Page               | Replaces                                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| **Dashboard**      | `/botstats`                                                                                         |
+| **Settings**       | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload`                                 |
+| **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
+| **Setup Wizard**   | `/setup wizard`                                                                                     |
+| **Announcements**  | `/announce create`, `list`, `delete`                                                                |
+| **Polls**          | `/poll create`, `list`, `add-item`, `import-url`, `delete`, `delete-item`, `test`, `list-items`     |
+| **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
+| **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
+| **Voice Channels** | `/vc reload`, `/vc force-reload`                                                                    |
+| **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
+| **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/amikool`, `/help`) are **not** affected and stay in

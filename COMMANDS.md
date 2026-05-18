@@ -648,19 +648,19 @@ The bot needs these Discord permissions:
 
 Once in the Web UI:
 
-| Page              | Replaces (legacy slash command)                                |
-| ----------------- | ------------------------------------------------------------- |
-| Dashboard         | `/botstats`                                                   |
-| Settings          | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
-| Permissions       | `/permissions set/add/remove/clear/list/view`                 |
-| Setup Wizard      | `/setup wizard`                                               |
-| Announcements     | `/announce create/list/delete`, `/announce-vc-stats`          |
-| Polls             | `/poll create/list/add-item/import-url/delete/delete-item/test/list-items` |
-| Reaction Roles    | `/reactrole create/archive/unarchive/delete/list/status`      |
-| Notices           | `/notice add/edit/delete/sync`                                |
-| Voice Channels    | `/vc reload`, `/vc force-reload`                              |
-| Database          | `/dbtrunk status`, `/dbtrunk run`                             |
-| Bootstrap         | (new — read-only `.env` diagnostics)                          |
+| Page           | Replaces (legacy slash command)                                            |
+| -------------- | -------------------------------------------------------------------------- |
+| Dashboard      | `/botstats`                                                                |
+| Settings       | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload`        |
+| Permissions    | `/permissions set/add/remove/clear/list/view`                              |
+| Setup Wizard   | `/setup wizard`                                                            |
+| Announcements  | `/announce create/list/delete`, `/announce-vc-stats`                       |
+| Polls          | `/poll create/list/add-item/import-url/delete/delete-item/test/list-items` |
+| Reaction Roles | `/reactrole create/archive/unarchive/delete/list/status`                   |
+| Notices        | `/notice add/edit/delete/sync`                                             |
+| Voice Channels | `/vc reload`, `/vc force-reload`                                           |
+| Database       | `/dbtrunk status`, `/dbtrunk run`                                          |
+| Bootstrap      | (new — read-only `.env` diagnostics)                                       |
 
 ---
 
