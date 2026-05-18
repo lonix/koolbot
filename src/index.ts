@@ -673,6 +673,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         logger.debug(
           `Ignoring button interaction with unrecognized customId: ${interaction.customId}`,
         );
+        await interaction.reply({
+          content:
+            "This button is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
+          ephemeral: true,
+        });
       }
     } catch (error) {
       logger.error("Error handling button interaction:", error);
@@ -695,6 +700,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         logger.debug(
           `Ignoring select menu interaction with unrecognized customId: ${interaction.customId}`,
         );
+        await interaction.reply({
+          content:
+            "This menu is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
+          ephemeral: true,
+        });
       }
     } catch (error) {
       logger.error("Error handling select menu interaction:", error);
@@ -713,6 +723,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         logger.debug(
           `Ignoring modal interaction with unrecognized customId: ${interaction.customId}`,
         );
+        await interaction.reply({
+          content:
+            "This form is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
+          ephemeral: true,
+        });
       }
     } catch (error) {
       logger.error("Error handling modal interaction:", error);
