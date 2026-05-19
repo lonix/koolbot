@@ -124,4 +124,20 @@ describe("coerceConfigValue", () => {
       coerceConfigValue("voicetracking.excluded_channels", []),
     ).toEqual({ ok: true, value: "" });
   });
+
+  it("rejects an array payload for a non-list string key", () => {
+    // A misconfigured YAML import or crafted form post mustn't silently
+    // CSV-join an accidental list into a string-typed key. Only the two
+    // *_list types accept array input.
+    const r = coerceConfigValue("voicechannels.lobby.name", ["a", "b"]);
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.reason).toMatch(/array/i);
+    }
+  });
+
+  it("rejects an array payload for a number key", () => {
+    const r = coerceConfigValue("quotes.max_length", [500]);
+    expect(r.ok).toBe(false);
+  });
 });

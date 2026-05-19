@@ -308,6 +308,10 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "Name of the Discord category that contains managed voice channels.",
     category: "voicechannels",
+    // `string` (not "category") until #447 renames this to
+    // `voicechannels.category_id` and switches storage from name to ID.
+    // The renderer infrastructure for "category" already exists; flipping
+    // the type is a one-line change once #447 lands.
     type: "string",
   },
   "voicechannels.lobby.name": {

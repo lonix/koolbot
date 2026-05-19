@@ -414,6 +414,73 @@ describe("renderSettingsPage", () => {
     expect(html).toContain('<option value="r2" selected>@Mod</option>');
   });
 
+  it("surfaces stored IDs that aren't in the live options as `(missing) <id>` and keeps them selected", () => {
+    // The configured channel was deleted from Discord (or the bot's
+    // cache is stale). The dropdown must still preserve the stored value
+    // so saving the form doesn't silently clear the setting.
+    const singleSelect = renderSettingsPage({
+      ...COMMON,
+      textChannels: [{ id: "111", name: "general" }],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.announcements.channel_id",
+              label: "Announcement channel",
+              current: "999-deleted",
+              defaultValue: "",
+              type: "channel",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+      ],
+    });
+    expect(singleSelect).toContain(
+      '<option value="999-deleted" selected>(missing) 999-deleted</option>',
+    );
+    // And the "(none)" placeholder should NOT be the selected one in this
+    // case — the missing-ID option carries the selection.
+    expect(singleSelect).toMatch(/<option value=""[^>]*>\(none\)<\/option>/);
+    expect(singleSelect).not.toMatch(
+      /<option value="" selected>\(none\)<\/option>/,
+    );
+
+    // Multi-select case: one known + one missing.
+    const multiSelect = renderSettingsPage({
+      ...COMMON,
+      textChannels: [{ id: "111", name: "general" }],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.excluded_channels",
+              label: "Excluded channels",
+              current: "111,999-deleted",
+              defaultValue: "",
+              type: "channel_list",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+      ],
+    });
+    expect(multiSelect).toContain(
+      '<option value="111" selected>#general</option>',
+    );
+    expect(multiSelect).toContain(
+      '<option value="999-deleted" selected>(missing) 999-deleted</option>',
+    );
+  });
+
   it("falls back to a text input for cron-type settings (placeholder until #444)", () => {
     const html = renderSettingsPage({
       ...COMMON,

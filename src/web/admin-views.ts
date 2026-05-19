@@ -198,6 +198,13 @@ function coerceToDisplayValue(value: unknown): string | number | boolean {
  * (Set) carries the `selected` attribute. Single-select callers pass a
  * Set with at most one entry; multi-select callers pass however many they
  * have.
+ *
+ * Stored IDs that aren't in the live options list (channel was deleted,
+ * role was renamed and the cache is stale, …) are surfaced as
+ * `(missing) <id>` options that stay `selected` on render. Without this
+ * the browser would default the single-select to the first option
+ * (typically the "(none)" row) and an operator could silently clear the
+ * setting by saving the form without touching the control.
  */
 function buildOptionsHtml(
   options: ChannelOption[] | RoleOption[],
@@ -207,14 +214,20 @@ function buildOptionsHtml(
 ): string {
   const parts: string[] = [];
   if (includeNoneRow) {
-    parts.push(
-      `<option value="" ${selected.size === 0 ? "selected" : ""}>(none)</option>`,
-    );
+    const noneSel = selected.size === 0 ? " selected" : "";
+    parts.push(`<option value=""${noneSel}>(none)</option>`);
   }
+  const knownIds = new Set(options.map((o) => o.id));
   for (const opt of options) {
     const sel = selected.has(opt.id) ? " selected" : "";
     parts.push(
       `<option value="${escapeHtml(opt.id)}"${sel}>${prefix}${escapeHtml(opt.name)}</option>`,
+    );
+  }
+  for (const id of selected) {
+    if (id === "" || knownIds.has(id)) continue;
+    parts.push(
+      `<option value="${escapeHtml(id)}" selected>(missing) ${escapeHtml(id)}</option>`,
     );
   }
   return parts.join("");
