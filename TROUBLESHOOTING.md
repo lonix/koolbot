@@ -136,7 +136,8 @@ docker compose logs -f bot
    # The host port only affects connections from your host machine;
    # containers still talk to MongoDB on its internal port 27017.
    # Exposing 27017 to 0.0.0.0 with the default mongo image (no auth)
-   # makes the database world-readable — don't do it.
+   # makes the database publicly accessible for both reads and writes
+   # — don't do it.
    ```
 
 ### "docker compose: command not found"

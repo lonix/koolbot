@@ -426,14 +426,16 @@ If you need host-side access for `mongosh`, Compass, or backups from
 the host, bind to localhost only — never `0.0.0.0`:
 
 ```yaml
-mongodb:
-  # ...
-  ports:
-    - "127.0.0.1:27017:27017"
+services:
+  mongodb:
+    # ...
+    ports:
+      - "127.0.0.1:27017:27017"
 ```
 
 For backups and exec'd-in tools, you don't need to publish at all —
-`docker compose exec mongodb mongodump …` runs inside the container.
+`docker compose exec mongodb mongodump <args>` runs inside the
+container.
 
 `docker-compose.dev.yml` does publish 27017 (bound to 127.0.0.1) for
 developer convenience. Do not use the dev compose file in production.
