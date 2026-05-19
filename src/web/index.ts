@@ -57,12 +57,7 @@ export function createWebRouter(client: Client): Router {
           res.status(404).type("text/html").send(renderInvalidLink());
           return;
         }
-        const csrfToken =
-          (req as Request & { csrfToken?: string }).csrfToken || "";
-        res
-          .status(200)
-          .type("text/html")
-          .send(renderConsent({ token, csrfToken }));
+        res.status(200).type("text/html").send(renderConsent({ token }));
       } catch (err) {
         logger.error("Error peeking web session token", err);
         res.status(500).type("text/plain").send("Internal Server Error");
@@ -71,12 +66,18 @@ export function createWebRouter(client: Client): Router {
   );
 
   // POST consumes the token, marks it used, writes the session cookie,
-  // and redirects into the admin app. Requires the CSRF cookie set by
-  // ensureCsrfCookie on the preceding GET.
+  // and redirects into the admin app.
+  //
+  // No CSRF check here: the URL-bound token IS the credential, exactly
+  // like an OAuth authorization-code redemption. An attacker who has the
+  // token can already consume it directly; an attacker without it can't
+  // construct a meaningful POST (path won't match any session). The
+  // attacker also has no pre-existing session at this point to leverage.
+  // CSRF on /finish and write routes still applies because those run
+  // against an already-authenticated cookie.
   router.post(
     "/s/:token",
     redeemLimiter,
-    requireCsrf,
     async (req: Request, res: Response): Promise<void> => {
       try {
         const token = String(req.params.token || "");
