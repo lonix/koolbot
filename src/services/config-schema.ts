@@ -19,7 +19,7 @@ export interface ConfigSchema {
   "voicetracking.excluded_channels": string; // Comma-separated channel IDs
   "voicetracking.announcements.enabled": boolean;
   "voicetracking.announcements.schedule": string; // Cron schedule
-  "voicetracking.announcements.channel": string;
+  "voicetracking.announcements.channel_id": string; // Channel ID for voice-stats announcements
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": boolean;
@@ -108,7 +108,7 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.excluded_channels": "",
   "voicetracking.announcements.enabled": false,
   "voicetracking.announcements.schedule": "0 16 * * 5", // Every Friday at 16:00
-  "voicetracking.announcements.channel": "voice-stats",
+  "voicetracking.announcements.channel_id": "",
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": false,
@@ -269,8 +269,9 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Cron schedule for the recurring voice-stats announcement.",
     category: "voicetracking",
   },
-  "voicetracking.announcements.channel": {
-    description: "Channel name where voice-stats announcements are posted.",
+  "voicetracking.announcements.channel_id": {
+    description:
+      "Discord channel ID where voice-stats announcements are posted.",
     category: "voicetracking",
   },
 

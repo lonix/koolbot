@@ -314,8 +314,8 @@ export class WizardService {
         "Enable/disable weekly voice channel announcements",
       "voicetracking.announcements.schedule":
         "Cron expression for weekly announcements",
-      "voicetracking.announcements.channel":
-        "Channel name for voice channel announcements",
+      "voicetracking.announcements.channel_id":
+        "Discord channel ID for voice channel announcements",
       "quotes.enabled": "Enable/disable quote system",
       "quotes.channel_id": "Channel ID for quote messages",
       "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",

@@ -91,13 +91,7 @@ const configMigrations: ConfigMigration[] = [
     description: "Cron expression for weekly announcements",
     defaultValue: "0 16 * * 5",
   },
-  {
-    oldKey: "VC_ANNOUNCEMENT_CHANNEL",
-    newKey: "voicetracking.announcements.channel",
-    category: "voicetracking",
-    description: "Channel name for voice channel announcements",
-    defaultValue: "announcement",
-  },
+
   // Individual Features
   {
     oldKey: "ENABLE_PING",
@@ -256,7 +250,6 @@ export class StartupMigrator {
       "voicetracking.excluded_channels": "",
       "voicetracking.announcements.enabled": true,
       "voicetracking.announcements.schedule": "0 16 * * 5",
-      "voicetracking.announcements.channel": "announcement",
       "ping.enabled": true,
       "quotes.enabled": true,
       "quotes.delete_roles": "None",

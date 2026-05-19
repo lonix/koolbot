@@ -18,6 +18,7 @@ import {
 import { config as dotenvConfig } from "dotenv";
 import logger, { isDebugMode } from "./utils/logger.js";
 import { ConfigService } from "./services/config-service.js";
+import { runNameToIdMigrations } from "./services/name-id-migrator.js";
 import { CommandManager } from "./services/command-manager.js";
 import { VoiceChannelManager } from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
@@ -563,6 +564,11 @@ async function initializeServices(): Promise<void> {
     if (!guildId) {
       throw new Error("GUILD_ID not configured");
     }
+
+    // Translate any legacy name-stored Discord references (e.g. role names
+    // or channel names) into IDs before services that consume them start
+    // up. One-shot, idempotent, no-op on already-migrated deployments.
+    await runNameToIdMigrations(client, guildId, configService);
 
     // Initialize voice channel services
     await voiceChannelManager.initialize(guildId);

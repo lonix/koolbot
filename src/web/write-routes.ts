@@ -173,7 +173,7 @@ const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "voicetracking.stats.user.enabled",
     "voicetracking.seen.enabled",
     "voicetracking.announcements.enabled",
-    "voicetracking.announcements.channel",
+    "voicetracking.announcements.channel_id",
   ],
   quotes: [
     "quotes.enabled",
