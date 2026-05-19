@@ -155,21 +155,25 @@ export class VoiceChannelAnnouncer {
         return;
       }
 
-      const channelName = await this.configService.getString(
-        "voicetracking.announcements.channel",
-        "voice-stats",
+      const channelId = await this.configService.getString(
+        "voicetracking.announcements.channel_id",
+        "",
       );
+
+      if (!channelId) {
+        logger.error(
+          "voicetracking.announcements.channel_id is not configured",
+        );
+        return;
+      }
 
       // Ensure guild channels are cached
       await guild.channels.fetch();
 
-      const channel = guild.channels.cache.find(
-        (ch) => ch instanceof TextChannel && ch.name === channelName,
-      ) as TextChannel;
-
-      if (!channel) {
+      const channel = guild.channels.cache.get(channelId);
+      if (!channel || !(channel instanceof TextChannel)) {
         logger.error(
-          `Announcement channel ${channelName} not found in guild ${guild.name}`,
+          `Announcement channel ID ${channelId} not found (or not a text channel) in guild ${guild.name}`,
         );
         return;
       }
