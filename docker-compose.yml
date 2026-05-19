@@ -25,14 +25,16 @@ services:
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
-    # ⚠️ The default mongo image has NO authentication. This publish makes
-    # MongoDB reachable on the host's port 27017. If your host is on the
-    # public internet, restrict the bind to localhost only:
-    #   - "127.0.0.1:27017:27017"
-    # or remove the publish entirely (the bot reaches it over the internal
-    # Docker network at mongodb:27017 either way).
-    ports:
-      - "27017:27017"
+    # MongoDB is NOT published to the host. The bot reaches it over the
+    # internal Docker network at mongodb:27017. The default mongo image
+    # ships with NO authentication, so exposing 27017 to the host (and
+    # potentially the public internet) would mean an unauthenticated
+    # database open to anyone who can reach the host.
+    #
+    # If you need host-side access for debugging, add a localhost-only
+    # publish — never bind 0.0.0.0:
+    #   ports:
+    #     - "127.0.0.1:27017:27017"
     stop_grace_period: 30s
     stop_signal: SIGTERM
 

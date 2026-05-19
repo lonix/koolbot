@@ -413,6 +413,33 @@ else:
 
 After changing the compose file, run `docker compose up -d --force-recreate`.
 
+### MongoDB exposure
+
+The production `docker-compose.yml` deliberately does **not** publish
+MongoDB's port 27017 to the host — the bot reaches MongoDB over the
+internal Docker network at `mongodb:27017`. The default `mongo` image
+ships with no authentication, so publishing 27017 would mean any
+process on the host (and, on hosts with no firewall, anyone on the
+public internet) could read and write the bot's entire database.
+
+If you need host-side access for `mongosh`, Compass, or backups from
+the host, bind to localhost only — never `0.0.0.0`:
+
+```yaml
+services:
+  mongodb:
+    # ...
+    ports:
+      - "127.0.0.1:27017:27017"
+```
+
+For backups and exec'd-in tools, you don't need to publish at all —
+`docker compose exec mongodb mongodump <args>` runs inside the
+container.
+
+`docker-compose.dev.yml` does publish 27017 (bound to 127.0.0.1) for
+developer convenience. Do not use the dev compose file in production.
+
 ### Development mode
 
 For local development with hot reloading:
