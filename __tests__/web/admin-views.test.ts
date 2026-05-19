@@ -81,6 +81,65 @@ describe("renderBootstrapPage", () => {
 });
 
 describe("renderSettingsPage", () => {
+  it("renders the human label as primary text and the dotted key as a muted reference", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicechannels",
+          rows: [
+            {
+              key: "voicechannels.enabled",
+              label: "Voice Channel Management enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "Enable VC mgmt",
+              category: "voicechannels",
+            },
+          ],
+        },
+      ],
+    });
+    // Human label appears as bold primary text.
+    expect(html).toContain(
+      "<strong>Voice Channel Management enabled</strong>",
+    );
+    // Raw dotted key still rendered, but de-emphasised as a small code ref.
+    expect(html).toMatch(
+      /<code class="mono muted"[^>]*>voicechannels\.enabled<\/code>/,
+    );
+  });
+
+  it("renders the category title and description from categoryMetadata", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicechannels",
+          rows: [
+            {
+              key: "voicechannels.enabled",
+              label: "Voice Channel Management enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "Enable VC mgmt",
+              category: "voicechannels",
+            },
+          ],
+        },
+      ],
+    });
+    // Human title, not the slug.
+    expect(html).toContain("<h2>Voice Channels</h2>");
+    expect(html).not.toContain("<h2>voicechannels</h2>");
+    // Category description rendered as muted helper text under the title.
+    expect(html).toMatch(
+      /<p class="muted"[^>]*>Dynamic voice channel management/,
+    );
+  });
+
   it("renders one section per category and one row per setting", () => {
     const html = renderSettingsPage({
       ...COMMON,

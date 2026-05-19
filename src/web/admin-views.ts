@@ -5,6 +5,7 @@
  */
 
 import { escapeHtml, escapeJsInAttr, renderAdminPage } from "./admin-layout.js";
+import { categoryMetadata } from "../services/config-schema.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -158,6 +159,7 @@ ${sections}
 
 export interface SettingRow {
   key: string;
+  label: string;
   current: unknown;
   defaultValue: unknown;
   type: string;
@@ -238,10 +240,17 @@ export function renderSettingsPage(props: SettingsProps): string {
 
   const sections = props.groups
     .map((g) => {
+      const meta = categoryMetadata[g.category] ?? {
+        title: g.category,
+        description: "",
+      };
       const rows = g.rows
         .map(
           (r) => `<tr>
-<td class="mono" style="white-space:nowrap">${escapeHtml(r.key)}</td>
+<td>
+  <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
+  <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
+</td>
 <td>${renderSettingInput(r, props.csrfToken)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td style="white-space:nowrap">${formatValue(r.defaultValue)}</td>
@@ -249,11 +258,15 @@ export function renderSettingsPage(props: SettingsProps): string {
 </tr>`,
         )
         .join("");
+      const descHtml = meta.description
+        ? `<p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(meta.description)}</p>`
+        : "";
       return `
 <div class="card">
-  <h2>${escapeHtml(g.category)}</h2>
+  <h2>${escapeHtml(meta.title)}</h2>
+  ${descHtml}
   <table>
-    <thead><tr><th>Key</th><th>Edit</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+    <thead><tr><th>Setting</th><th>Edit</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </div>`;

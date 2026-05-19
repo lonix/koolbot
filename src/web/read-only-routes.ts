@@ -357,6 +357,7 @@ export function createReadOnlyRouter(
           const meta = settingsMetadata[key as keyof typeof settingsMetadata];
           return {
             key,
+            label: meta?.label ?? key,
             current: dbEntry ? dbEntry.value : defaultValue,
             defaultValue,
             type: describeType(defaultValue),
@@ -370,6 +371,7 @@ export function createReadOnlyRouter(
         if (!(entry.key in defaultConfig)) {
           rows.push({
             key: entry.key,
+            label: entry.key,
             current: entry.value,
             defaultValue: undefined,
             type: describeType(entry.value),
