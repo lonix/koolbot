@@ -92,14 +92,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Channel name for voice channel announcements",
     defaultValue: "voice-stats",
   },
-  {
-    oldKey: "VC_TRACKING_ADMIN_ROLES",
-    newKey: "voicetracking.admin_roles",
-    category: "voicetracking",
-    description: "Comma-separated role names that can manage tracking",
-    defaultValue: "",
-  },
-
   // Individual Features
   {
     oldKey: "ENABLE_PING",
@@ -130,13 +122,6 @@ const configMigrations: ConfigMigration[] = [
     category: "quotes",
     description: "Enable/disable quote system",
     defaultValue: "true",
-  },
-  {
-    oldKey: "QUOTE_ADD_ROLES",
-    newKey: "quotes.add_roles",
-    category: "quotes",
-    description: "Comma-separated role IDs that can add quotes",
-    defaultValue: "",
   },
   {
     oldKey: "QUOTE_DELETE_ROLES",

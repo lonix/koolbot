@@ -73,12 +73,6 @@ const settingReferences: SettingReference[] = [
     newKey: "voicetracking.announcements.channel",
     description: "Channel name for voice channel announcements",
   },
-  {
-    oldKey: "VC_TRACKING_ADMIN_ROLES",
-    newKey: "voicetracking.admin_roles",
-    description: "Comma-separated role names that can manage tracking",
-  },
-
   // Individual Features
   {
     oldKey: "ENABLE_PING",

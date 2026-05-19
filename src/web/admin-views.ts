@@ -499,10 +499,6 @@ const WIZARD_FEATURE_LABELS: Record<string, { name: string; desc: string }> = {
     name: "Achievements",
     desc: "Achievement system for voice activity.",
   },
-  logging: {
-    name: "Core Logging",
-    desc: "Bot event logging to Discord channels.",
-  },
   amikool: {
     name: "Am I Kool",
     desc: "Fun command to check kool status based on a role.",
