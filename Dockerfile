@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install all dependencies (including dev) for building
-RUN npm install
+RUN npm ci
 
 # Copy source code
 COPY . .
@@ -15,19 +15,24 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
+# Production dependencies stage
+FROM node:22-alpine AS prod-deps
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm ci --omit=dev
+
 # Production stage
 FROM node:22-alpine
 
 WORKDIR /app
 
-# Copy only necessary files from builder
+# Copy only runtime artifacts
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-
-# Copy migration scripts for production use
-COPY --from=builder /app/src/scripts ./src/scripts
-COPY --from=builder /app/src/loader.js ./src/loader.js
+COPY --from=prod-deps /app/node_modules ./node_modules
 
 # Set environment variables
 ENV NODE_ENV=production
