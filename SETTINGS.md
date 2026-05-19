@@ -37,7 +37,6 @@ Complete configuration reference for all KoolBot settings.
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
 - [Discord Logging](#-discord-logging)
-- [Fun Features](#-fun-features)
 - [Rate Limiting](#-rate-limiting)
 - [Permissions & Access Control](#-permissions--access-control)
 - [Configuration Management](#-configuration-management) — Using the Web UI
