@@ -174,6 +174,10 @@ export class ConfigService {
         "voice_channel.suffix",
         "tracking.enabled",
         "tracking.weekly_announcement_channel",
+        // Pre-rename keys preserved until the Discord-ready name→ID
+        // migrator runs (see name-id-migrator.ts).
+        "voicetracking.announcements.channel",
+        "amikool.role.name",
       ];
       knownOldKeys.forEach((key) => validKeys.add(key));
 

@@ -126,37 +126,29 @@ export class ChannelInitializer {
       const voiceChannelManager = VoiceChannelManager.getInstance(this.client);
       await voiceChannelManager.ensureLobbyChannelExists(guild);
 
-      // Find or create the announcement channel
-      const announcementChannelName =
-        (await this.configService.getString(
-          "voicetracking.announcements.channel",
-        )) ||
-        (await this.configService.getString(
-          "tracking.weekly_announcement_channel",
-        )) ||
-        (await this.configService.getString(
-          "VC_ANNOUNCEMENT_CHANNEL",
-          "voice-stats",
-        ));
-      let announcementChannel = guild.channels.cache.find(
-        (channel) =>
-          channel instanceof TextChannel &&
-          channel.name === announcementChannelName,
-      ) as TextChannel;
-
-      if (!announcementChannel) {
-        logger.info(
-          `Creating announcement channel: ${announcementChannelName}`,
+      // Verify the configured announcement channel exists. We no longer
+      // auto-create one: operators pick an existing channel via the
+      // admin panel (now stored as a Discord channel ID, not a name).
+      const announcementChannelId = await this.configService.getString(
+        "voicetracking.announcements.channel_id",
+        "",
+      );
+      if (announcementChannelId) {
+        const announcementChannel = guild.channels.cache.get(
+          announcementChannelId,
         );
-        announcementChannel = await guild.channels.create({
-          name: announcementChannelName,
-          type: ChannelType.GuildText,
-          parent: category,
-        });
-        logger.info(`Created announcement channel: ${announcementChannelName}`);
+        if (announcementChannel && announcementChannel instanceof TextChannel) {
+          logger.info(
+            `Found announcement channel: #${announcementChannel.name} (${announcementChannel.id})`,
+          );
+        } else {
+          logger.warn(
+            `voicetracking.announcements.channel_id=${announcementChannelId} does not resolve to a text channel in guild ${guild.name}`,
+          );
+        }
       } else {
-        logger.info(
-          `Found existing announcement channel: ${announcementChannelName}`,
+        logger.debug(
+          "voicetracking.announcements.channel_id is not set; skipping announcement channel verification",
         );
       }
 

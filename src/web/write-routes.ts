@@ -173,7 +173,7 @@ const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "voicetracking.stats.user.enabled",
     "voicetracking.seen.enabled",
     "voicetracking.announcements.enabled",
-    "voicetracking.announcements.channel",
+    "voicetracking.announcements.channel_id",
   ],
   quotes: [
     "quotes.enabled",
@@ -187,7 +187,7 @@ const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "achievements.announcements.enabled",
     "achievements.dm_notifications.enabled",
   ],
-  amikool: ["amikool.enabled", "amikool.role.name"],
+  amikool: ["amikool.enabled", "amikool.role_id"],
   reactionroles: ["reactionroles.enabled", "reactionroles.message_channel_id"],
   announcements: ["announcements.enabled"],
   notices: ["notices.enabled", "notices.channel_id", "notices.header_enabled"],

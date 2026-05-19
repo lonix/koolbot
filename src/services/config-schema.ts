@@ -19,7 +19,7 @@ export interface ConfigSchema {
   "voicetracking.excluded_channels": string; // Comma-separated channel IDs
   "voicetracking.announcements.enabled": boolean;
   "voicetracking.announcements.schedule": string; // Cron schedule
-  "voicetracking.announcements.channel": string;
+  "voicetracking.announcements.channel_id": string; // Channel ID for voice-stats announcements
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": boolean;
@@ -31,7 +31,7 @@ export interface ConfigSchema {
   // Individual Features
   "ping.enabled": boolean;
   "amikool.enabled": boolean;
-  "amikool.role.name": string; // Role name required for amikool
+  "amikool.role_id": string; // Role ID required to be considered "kool" by /amikool
 
   // Quote System Settings
   "quotes.enabled": boolean;
@@ -113,7 +113,7 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.excluded_channels": "",
   "voicetracking.announcements.enabled": false,
   "voicetracking.announcements.schedule": "0 16 * * 5", // Every Friday at 16:00
-  "voicetracking.announcements.channel": "voice-stats",
+  "voicetracking.announcements.channel_id": "",
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": false,
@@ -125,7 +125,7 @@ export const defaultConfig: ConfigSchema = {
   // Individual Features
   "ping.enabled": false,
   "amikool.enabled": false,
-  "amikool.role.name": "",
+  "amikool.role_id": "",
 
   // Quote System Defaults
   "quotes.enabled": false,
@@ -279,8 +279,9 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Cron schedule for the recurring voice-stats announcement.",
     category: "voicetracking",
   },
-  "voicetracking.announcements.channel": {
-    description: "Channel name where voice-stats announcements are posted.",
+  "voicetracking.announcements.channel_id": {
+    description:
+      "Discord channel ID where voice-stats announcements are posted.",
     category: "voicetracking",
   },
 
@@ -316,8 +317,9 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Enable the /amikool fun role check command.",
     category: "amikool",
   },
-  "amikool.role.name": {
-    description: 'Role name required to be considered "kool" by /amikool.',
+  "amikool.role_id": {
+    description:
+      'Discord role ID required to be considered "kool" by /amikool.',
     category: "amikool",
   },
 

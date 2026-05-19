@@ -21,13 +21,10 @@ export async function execute(interaction: CommandInteraction): Promise<void> {
     logger.info(`Executing amikool command for user ${interaction.user.tag}`);
 
     const member = interaction.member as GuildMember;
-    const coolRoleName = await configService.getString(
-      "COOL_ROLE_NAME",
-      "Kool",
-    );
-    const hasCoolRole = member?.roles.cache.some(
-      (role) => role.name === coolRoleName,
-    );
+    const coolRoleId = await configService.getString("amikool.role_id", "");
+    const hasCoolRole = coolRoleId
+      ? Boolean(member?.roles.cache.has(coolRoleId))
+      : false;
 
     const response = hasCoolRole
       ? koolResponses[Math.floor(Math.random() * koolResponses.length)]
