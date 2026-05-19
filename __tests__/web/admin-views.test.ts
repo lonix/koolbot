@@ -729,7 +729,7 @@ describe("renderImportDiffPage", () => {
 });
 
 describe("renderWizardPage", () => {
-  it("renders feature cards and reflects current enabled status", () => {
+  it("renders every feature checkbox unchecked regardless of current status", () => {
     const html = renderWizardPage({
       ...COMMON,
       featureOrder: ["voicechannels", "polls"],
@@ -737,11 +737,29 @@ describe("renderWizardPage", () => {
     });
     expect(html).toContain("Voice Channels");
     expect(html).toContain("Polls");
-    expect(html).toMatch(
+    // Neither checkbox should be pre-ticked, even though voicechannels is
+    // currently enabled. The wizard treats each run as a fresh declaration.
+    expect(html).not.toMatch(
       /value="voicechannels" id="feat-voicechannels" checked/,
     );
     expect(html).not.toMatch(/value="polls" id="feat-polls" checked/);
     expect(html).toContain('action="/admin/wizard/start"');
+  });
+
+  it('shows "currently ON/OFF" indicator next to each feature label', () => {
+    const html = renderWizardPage({
+      ...COMMON,
+      featureOrder: ["voicechannels", "polls"],
+      featureStatus: { voicechannels: true, polls: false },
+    });
+    // voicechannels is currently enabled → tag-on.
+    expect(html).toMatch(
+      /Voice Channels\s*<span class="fc-current">currently <span class="tag tag-on">ON<\/span><\/span>/,
+    );
+    // polls is currently disabled → tag-off.
+    expect(html).toMatch(
+      /Polls\s*<span class="fc-current">currently <span class="tag tag-off">OFF<\/span><\/span>/,
+    );
   });
 });
 

@@ -986,6 +986,27 @@ export function createWriteRouter(
         return;
       }
 
+      // The wizard treats each run as a complete declaration of which
+      // features should be enabled. Anything the admin didn't tick on the
+      // landing page gets its `.enabled` flag explicitly set to false here,
+      // so re-running the wizard is the supported way to turn things off.
+      // Without this, unchecked features would silently retain their
+      // pre-existing enabled state.
+      const selectedSet = new Set(state.selectedFeatures);
+      for (const fk of WIZARD_FEATURE_ORDER) {
+        if (selectedSet.has(fk)) continue;
+        const enabledKey = (WIZARD_FEATURE_SETTINGS[fk] ?? []).find((k) =>
+          k.endsWith(".enabled"),
+        );
+        if (!enabledKey) continue;
+        wizard.addConfiguration(
+          session.discordUserId,
+          session.guildId,
+          enabledKey,
+          false,
+        );
+      }
+
       const pendingKeys = Object.keys(state.configuration);
       try {
         const applied = await wizard.applyConfiguration(
