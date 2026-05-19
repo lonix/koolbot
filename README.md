@@ -152,7 +152,6 @@ commands always registered):
 - `/seen` — Last-seen lookup (`voicetracking.seen.enabled`)
 - `/achievements` — View earned accolades (`achievements.enabled`)
 - `/quote add` / `/quote edit` — Manage memorable quotes (`quotes.enabled`)
-- `/amikool` — Role verification (`amikool.enabled`)
 
 A fresh install only sees `/help` and `/config` in Discord until you
 enable the others on the Settings page and click **Reload commands to

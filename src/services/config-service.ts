@@ -155,8 +155,6 @@ export class ConfigService {
         "VC_ANNOUNCEMENT_CHANNEL",
         "VC_TRACKING_ADMIN_ROLES",
         "ENABLE_PING",
-        "ENABLE_AMIKOOL",
-        "COOL_ROLE_NAME",
         "ENABLE_QUOTES",
         "QUOTE_ADD_ROLES",
         "QUOTE_DELETE_ROLES",
@@ -177,7 +175,6 @@ export class ConfigService {
         // Pre-rename keys preserved until the Discord-ready name→ID
         // migrator runs (see name-id-migrator.ts).
         "voicetracking.announcements.channel",
-        "amikool.role.name",
       ];
       knownOldKeys.forEach((key) => validKeys.add(key));
 
@@ -193,10 +190,8 @@ export class ConfigService {
       // Valid categories from the enum
       const validCategories = new Set([
         "achievements",
-        "amikool",
         "announcements",
         "core",
-        "fun",
         "help",
         "ping",
         "quotes",

@@ -8,11 +8,10 @@ import { ConfigService } from "./config-service.js";
  * name-keyed row.
  *
  * Several config keys historically stored Discord entity references as
- * **names** (e.g. `voicetracking.announcements.channel = "voice-stats"`,
- * `amikool.role.name = "HR"`). Names aren't unique and aren't selector-
- * friendly: the v1.0 WebUI work renders these fields as `<select>` dropdowns
- * populated from the guild cache, which fundamentally requires the stored
- * value to be an ID.
+ * **names** (e.g. `voicetracking.announcements.channel = "voice-stats"`).
+ * Names aren't unique and aren't selector-friendly: the v1.0 WebUI work
+ * renders these fields as `<select>` dropdowns populated from the guild
+ * cache, which fundamentally requires the stored value to be an ID.
  *
  * This module is the one-shot translator. It runs once per bot start, after
  * Discord is ready (so the guild cache is hydrated) and before services
@@ -50,15 +49,6 @@ const RENAMES: RenameSpec[] = [
           ch.name === name,
       );
       return channel ? channel.id : null;
-    },
-  },
-  {
-    oldKey: "amikool.role.name",
-    newKey: "amikool.role_id",
-    description: "/amikool role",
-    resolve: (guild, name) => {
-      const role = guild.roles.cache.find((r) => r.name === name);
-      return role ? role.id : null;
     },
   },
 ];

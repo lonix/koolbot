@@ -35,11 +35,6 @@ const commandDetails: Record<
     usage: "/quote text:<text> author:<author>",
     configKey: "quotes.enabled",
   },
-  amikool: {
-    description: "Check if you have the kool role.",
-    usage: "/amikool",
-    configKey: "amikool.enabled",
-  },
   voicestats: {
     description: "View voice channel statistics (top users or per-user).",
     usage: "/voicestats <top|user> [options]",

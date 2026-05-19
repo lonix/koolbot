@@ -29,10 +29,10 @@ const ConfigSchema = new Schema<IConfig>(
       required: true,
       enum: [
         "achievements",
-        "amikool",
+        "amikool", // Kept for backward compatibility; key removed but legacy rows may exist
         "announcements",
         "core",
-        "fun",
+        "fun", // Kept for backward compatibility; key removed but legacy rows may exist
         "gamification", // Kept for backward compatibility during migration
         "help",
         "leaderboard_roles",

@@ -7,7 +7,6 @@ describe('Config Schema', () => {
       expect(defaultConfig['voicechannels.enabled']).toBe(false);
       expect(defaultConfig['voicetracking.enabled']).toBe(false);
       expect(defaultConfig['ping.enabled']).toBe(false);
-      expect(defaultConfig['amikool.enabled']).toBe(false);
       expect(defaultConfig['quotes.enabled']).toBe(false);
     });
 
@@ -37,10 +36,6 @@ describe('Config Schema', () => {
       // Default schedules should be strings (even if empty)
       expect(typeof defaultConfig['voicetracking.announcements.schedule']).toBe('string');
       expect(typeof defaultConfig['voicetracking.cleanup.schedule']).toBe('string');
-    });
-
-    it('should have fun features as boolean values', () => {
-      expect(typeof defaultConfig['fun.friendship']).toBe('boolean');
     });
 
     it('should have channel_id fields as strings', () => {

@@ -26,7 +26,6 @@ src/
 ├── index.ts              # Entry point, service initialization, Express bootstrap
 ├── commands/             # Discord slash commands (small surface from v1.0)
 │   ├── achievements.ts
-│   ├── amikool.ts
 │   ├── config.ts         # Web UI launcher (the only admin command)
 │   ├── help.ts
 │   ├── ping.ts

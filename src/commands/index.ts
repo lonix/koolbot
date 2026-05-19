@@ -1,7 +1,6 @@
 import { ChatInputCommandInteraction } from "discord.js";
 import logger from "../utils/logger.js";
 import { execute as ping } from "./ping.js";
-import { execute as amikool } from "./amikool.js";
 import { execute as voicestats } from "./voicestats.js";
 import { execute as seen } from "./seen.js";
 import { execute as configCommand } from "./config.js";
@@ -19,11 +18,6 @@ const commands: Record<
   ping: async (interaction) => {
     if (await configService.getBoolean("ping.enabled", false)) {
       await ping(interaction);
-    }
-  },
-  amikool: async (interaction) => {
-    if (await configService.getBoolean("amikool.enabled", false)) {
-      await amikool(interaction);
     }
   },
   voicestats: async (interaction) => {

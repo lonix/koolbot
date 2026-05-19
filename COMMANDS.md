@@ -4,7 +4,7 @@ Complete reference for every slash command KoolBot registers with Discord.
 
 KoolBot's slash-command surface is intentionally small. All
 **day-to-day chat interaction** stays in Discord (`/ping`, `/voicestats`,
-`/seen`, `/quote`, `/achievements`, `/amikool`, `/help`). All
+`/seen`, `/quote`, `/achievements`, `/help`). All
 **administration and configuration** lives in the Web UI, reached via the
 single `/config` launcher.
 
@@ -24,7 +24,6 @@ single `/config` launcher.
   - [/seen](#seen)
   - [/achievements](#achievements)
   - [/quote](#quote)
-  - [/amikool](#amikool)
 - [Admin: Web UI launcher](#-admin-web-ui-launcher)
   - [/config](#config)
 - [Voice Channel Control Panel](#voice-channel-control-panel)
@@ -370,33 +369,6 @@ and is auto-recreated if deleted.
 
 ---
 
-### `/amikool`
-
-**Description:** Check if you have a specific role (fun role verification).
-
-**Enable:** Web UI → Settings:
-
-- `amikool.enabled = true`
-- `amikool.role.name = "Kool Members"` (or whatever role you check for)
-
-Then reload commands.
-
-**Usage:**
-
-```text
-/amikool
-```
-
-**Example responses:**
-
-```text
-✅ Yes, you are kool! You have the "Kool Members" role.
-
-❌ Sorry, you don't have the "Kool Members" role.
-```
-
----
-
 ## 🔧 Admin: Web UI launcher
 
 KoolBot has exactly one admin slash command. It does one thing: mint a
@@ -608,7 +580,6 @@ button to admit them. **🗑️ Remove Waiting Room** deletes it.
 | `/achievements` | Everyone\*       | Achievements enabled                       |
 | `/seen`         | Everyone\*       | Voice tracking + seen enabled              |
 | `/quote`        | Everyone\*       | Quotes enabled                             |
-| `/amikool`      | Everyone\*       | Command enabled + role configured          |
 
 \* Per-command role gating can be added in the Web UI's **Permissions** page.
 
@@ -665,7 +636,6 @@ The bot needs these Discord permissions:
 /seen user:@User                    # Last-seen lookup
 /quote add text:"..." author:@User  # Add a quote
 /quote edit id:"..." [text:"..."] [author:@User]
-/amikool                            # Role verification
 ```
 
 ### Admin command

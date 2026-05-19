@@ -100,13 +100,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Enable/disable ping command",
     defaultValue: true,
   },
-  {
-    oldKey: "ENABLE_AMIKOOL",
-    newKey: "amikool.enabled",
-    category: "amikool",
-    description: "Enable/disable amikool command",
-    defaultValue: true,
-  },
 
   // Quote System
   {
@@ -137,7 +130,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Cooldown in seconds between quote additions",
     defaultValue: "60",
   },
-  // Fun / Easter eggs
 ];
 
 export class StartupMigrator {
@@ -259,12 +251,10 @@ export class StartupMigrator {
       "voicetracking.announcements.enabled": true,
       "voicetracking.announcements.schedule": "0 16 * * 5",
       "ping.enabled": true,
-      "amikool.enabled": true,
       "quotes.enabled": true,
       "quotes.delete_roles": "None",
       "quotes.max_length": 1000,
       "quotes.cooldown": 60,
-      "fun.friendship": false,
     };
 
     return defaultValues[key] === value;
