@@ -17,9 +17,7 @@ export async function execute(
 ): Promise<void> {
   const userId = interaction.user.id;
   const guildId = interaction.guildId;
-  logger.info(
-    `/config invoked by user=${userId} guild=${guildId ?? "<none>"}`,
-  );
+  logger.info(`/config invoked by user=${userId} guild=${guildId ?? "<none>"}`);
 
   // Defer immediately so the DB revoke/create + DM round-trip can't blow
   // Discord's 3-second interaction-ack deadline.
@@ -89,10 +87,7 @@ export async function execute(
       });
     }
   } catch (error) {
-    logger.error(
-      `Error issuing web sign-in link for user=${userId}:`,
-      error,
-    );
+    logger.error(`Error issuing web sign-in link for user=${userId}:`, error);
     await interaction.editReply({
       content: "An error occurred while issuing your sign-in link.",
     });
