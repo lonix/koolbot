@@ -27,8 +27,14 @@ services:
     restart: unless-stopped
     volumes:
       - mongodb_data_dev:/data/db
+    # ⚠️ DEV ONLY — publishes MongoDB to the host so you can connect with
+    # Compass / mongosh from your workstation. The default mongo image has
+    # NO authentication, so this is effectively an open database for
+    # anyone who can reach this host. Do NOT use docker-compose.dev.yml in
+    # production. The production docker-compose.yml deliberately does not
+    # publish 27017.
     ports:
-      - "27017:27017"
+      - "127.0.0.1:27017:27017"
     networks:
       - koolbot-network
     stop_grace_period: 30s

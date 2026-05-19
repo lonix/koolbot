@@ -117,15 +117,26 @@ docker compose logs -f bot
 
 3. **Port conflicts:**
 
+   The production `docker-compose.yml` does not publish MongoDB's port
+   27017 to the host (the bot reaches it on the internal Docker
+   network), so port-27017 conflicts only apply if you've added a
+   publish yourself or you're using `docker-compose.dev.yml`.
+
    ```bash
-   # Check if port 27017 is in use
+   # Check if port 27017 is in use on the host
    netstat -an | grep 27017
 
-   # Or use a different port on the host
-   # In docker-compose.yml: "27018:27017"
-   # In .env (for bot container): MONGODB_URI=mongodb://mongodb:27017/koolbot
-   # Note: The host port (27018) only affects connections from your host machine.
-   #       Containers still connect to MongoDB on its internal port 27017.
+   # If you've added a host publish for debugging, bind it to localhost
+   # only and pick a free host port — never bind 0.0.0.0:
+   # In docker-compose.yml (or the dev file):
+   #   ports:
+   #     - "127.0.0.1:27018:27017"
+   # In .env (the bot container always connects internally):
+   #   MONGODB_URI=mongodb://mongodb:27017/koolbot
+   # The host port only affects connections from your host machine;
+   # containers still talk to MongoDB on its internal port 27017.
+   # Exposing 27017 to 0.0.0.0 with the default mongo image (no auth)
+   # makes the database world-readable — don't do it.
    ```
 
 ### "docker compose: command not found"
