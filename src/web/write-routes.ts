@@ -222,6 +222,29 @@ export function coerceConfigValue(
   if (!(key in defaultConfig)) {
     return { ok: false, reason: "unknown key" };
   }
+
+  // Array payloads only make sense for the multi-select Discord-entity
+  // types (channel_list / role_list). For every other key shape, an
+  // array means something is wrong upstream — a misconfigured YAML
+  // import, a crafted form post, or JS coercion silently flattening a
+  // one-element array into a scalar (e.g. `Number([42]) === 42`).
+  // Reject loudly here so the failure surfaces in the import preview /
+  // audit log instead of being silently swallowed.
+  if (Array.isArray(raw)) {
+    const metaType =
+      settingsMetadata[key as keyof typeof settingsMetadata]?.type;
+    if (metaType !== "channel_list" && metaType !== "role_list") {
+      return {
+        ok: false,
+        reason: "invalid shape (array provided for non-list key)",
+      };
+    }
+    const csv = raw
+      .filter((v): v is string => typeof v === "string" && v !== "")
+      .join(",");
+    return { ok: true, value: csv };
+  }
+
   const expected = typeof defaultConfig[key as keyof typeof defaultConfig];
   if (expected === "boolean") {
     // HTML checkboxes post "true" when checked, the field is absent when
