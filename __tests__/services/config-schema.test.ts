@@ -1,5 +1,9 @@
 import { describe, it, expect } from '@jest/globals';
-import { defaultConfig } from '../../src/services/config-schema.js';
+import {
+  defaultConfig,
+  settingsMetadata,
+  categoryMetadata,
+} from '../../src/services/config-schema.js';
 
 describe('Config Schema', () => {
   describe('defaultConfig', () => {
@@ -61,6 +65,54 @@ describe('Config Schema', () => {
       expect(defaultConfig['ratelimit.max_commands']).toBeGreaterThan(0);
       expect(defaultConfig['ratelimit.window_seconds']).toBeGreaterThan(0);
       expect(typeof defaultConfig['ratelimit.bypass_admin']).toBe('boolean');
+    });
+  });
+
+  describe('settingsMetadata', () => {
+    it('has a non-empty label, description, and category for every key in defaultConfig', () => {
+      const missingLabel: string[] = [];
+      const missingDescription: string[] = [];
+      const missingCategory: string[] = [];
+      for (const key of Object.keys(defaultConfig)) {
+        const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+        if (!meta) {
+          missingLabel.push(key);
+          missingDescription.push(key);
+          missingCategory.push(key);
+          continue;
+        }
+        if (!meta.label || meta.label.trim() === '') missingLabel.push(key);
+        if (!meta.description || meta.description.trim() === '')
+          missingDescription.push(key);
+        if (!meta.category || meta.category.trim() === '')
+          missingCategory.push(key);
+      }
+      expect(missingLabel).toEqual([]);
+      expect(missingDescription).toEqual([]);
+      expect(missingCategory).toEqual([]);
+    });
+
+    it('does not have stale entries for keys that no longer exist in defaultConfig', () => {
+      const orphans = Object.keys(settingsMetadata).filter(
+        (k) => !(k in defaultConfig),
+      );
+      expect(orphans).toEqual([]);
+    });
+  });
+
+  describe('categoryMetadata', () => {
+    it('covers every category referenced by settingsMetadata', () => {
+      const usedCategories = new Set(
+        Object.values(settingsMetadata).map((m) => m.category),
+      );
+      const missing: string[] = [];
+      for (const cat of usedCategories) {
+        const meta = categoryMetadata[cat];
+        if (!meta || !meta.title.trim() || !meta.description.trim()) {
+          missing.push(cat);
+        }
+      }
+      expect(missing).toEqual([]);
     });
   });
 });

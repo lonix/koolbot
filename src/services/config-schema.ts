@@ -178,98 +178,201 @@ export const defaultConfig: ConfigSchema = {
 /**
  * Per-key metadata used by the WebUI Settings page and by future
  * `/config` description surfaces. Single source of truth so every key in
- * `defaultConfig` has a stable description even when the DB row hasn't
+ * `defaultConfig` has a stable label/description even when the DB row hasn't
  * been written yet (e.g. on a fresh install).
  *
  * Categories match the existing values used by `migrateFromEnv()` and the
  * `Config` mongoose model's `category` enum, so a Settings group rendered
  * from this map looks identical to one rendered from a populated DB.
+ *
+ * `label` is the human-readable name displayed as the primary text for the
+ * setting (e.g. "Voice Tracking enabled"). The raw dotted key is shown
+ * de-emphasised next to it for technical reference.
  */
 export interface SettingMetadata {
+  label: string;
   description: string;
   category: string;
 }
 
+/**
+ * Per-category metadata for the WebUI Settings page section headers and
+ * future `/config` surfaces. Keyed by the `category` slug used in
+ * `SettingMetadata`.
+ */
+export interface CategoryMetadata {
+  title: string;
+  description: string;
+}
+
+export const categoryMetadata: Record<string, CategoryMetadata> = {
+  voicechannels: {
+    title: "Voice Channels",
+    description:
+      "Dynamic voice channel management: lobby, per-user channels, presets, control panel.",
+  },
+  voicetracking: {
+    title: "Voice Tracking",
+    description:
+      "Time-in-voice tracking, leaderboards, last-seen, scheduled announcements, and DB cleanup.",
+  },
+  ping: {
+    title: "Ping",
+    description: "The /ping latency check command.",
+  },
+  quotes: {
+    title: "Quotes",
+    description: "Collect and curate memorable quotes in a dedicated channel.",
+  },
+  core: {
+    title: "Core Logging",
+    description:
+      "Discord-channel notifications for selected bot events. Most of this namespace was retired in #440 / #443; only the cleanup-job notification channel remains.",
+  },
+  ratelimit: {
+    title: "Rate Limiting",
+    description:
+      "Per-user slash-command rate limiting to stop accidental flooding.",
+  },
+  announcements: {
+    title: "Scheduled Announcements",
+    description:
+      "Schedule arbitrary messages to a Discord channel via cron expressions.",
+  },
+  achievements: {
+    title: "Achievements",
+    description:
+      "Award badges based on voice activity, optionally with channel and DM notifications.",
+  },
+  reactionroles: {
+    title: "Reaction Roles",
+    description:
+      "Let users self-assign roles by reacting to a configured message.",
+  },
+  wizard: {
+    title: "Setup Wizard",
+    description:
+      "The /setup slash command that walks new admins through feature configuration.",
+  },
+  notices: {
+    title: "Notices",
+    description:
+      "Curated channel where the bot maintains a pinned informational header and prunes unauthorised messages.",
+  },
+  polls: {
+    title: "Polls",
+    description:
+      "Periodic icebreaker polls drawn from a configurable question library.",
+  },
+  leaderboard_roles: {
+    title: "Leaderboard Role Rewards",
+    description:
+      "Auto-assign Discord roles based on a user's position in the voice-activity leaderboard.",
+  },
+  other: {
+    title: "Other",
+    description: "Keys present in the database without metadata in the schema.",
+  },
+};
+
 export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   // Voice Channel Management
   "voicechannels.enabled": {
+    label: "Voice Channel Management enabled",
     description: "Enable voice channel management.",
     category: "voicechannels",
   },
   "voicechannels.category.name": {
+    label: "Managed category name",
     description:
       "Name of the Discord category that contains managed voice channels.",
     category: "voicechannels",
   },
   "voicechannels.lobby.name": {
+    label: "Lobby channel display name",
     description:
-      "Name of the lobby channel users join to spawn a personal channel.",
+      "Display name of the lobby channel users join to spawn a personal channel. Cosmetic; the bot sets this on the managed channel rather than looking it up by name.",
     category: "voicechannels",
   },
   "voicechannels.lobby.offlinename": {
+    label: "Lobby display name (bot offline)",
     description:
-      "Name displayed on the lobby channel while the bot is offline.",
+      "Display name shown on the lobby channel while the bot is offline. Cosmetic.",
     category: "voicechannels",
   },
   "voicechannels.channel.prefix": {
+    label: "Per-user channel name prefix",
     description: "Prefix prepended to dynamically created voice channel names.",
     category: "voicechannels",
   },
   "voicechannels.channel.suffix": {
+    label: "Per-user channel name suffix",
     description: "Suffix appended to dynamically created voice channel names.",
     category: "voicechannels",
   },
   "voicechannels.controlpanel.enabled": {
+    label: "In-channel control panel enabled",
     description:
       "Show the in-channel control panel (rename / privacy / live / transfer).",
     category: "voicechannels",
   },
   "voicechannels.ownership.grace_period_seconds": {
+    label: "Ownership transfer grace period (seconds)",
     description:
       "Seconds to wait before transferring ownership when the channel owner leaves.",
     category: "voicechannels",
   },
   "voicechannels.presets.enabled": {
+    label: "Per-user channel presets enabled",
     description:
       "Enable per-user channel presets (saved channel name + privacy).",
     category: "voicechannels",
   },
   "voicechannels.presets.max_per_user": {
+    label: "Max presets per user",
     description: "Maximum number of presets a user can save.",
     category: "voicechannels",
   },
 
   // Voice Activity Tracking
   "voicetracking.enabled": {
+    label: "Voice Tracking enabled",
     description: "Enable voice activity tracking and the /voicestats command.",
     category: "voicetracking",
   },
   "voicetracking.stats.top.enabled": {
+    label: "/voicestats top subcommand enabled",
     description: "Enable the /voicestats top leaderboard subcommand.",
     category: "voicetracking",
   },
   "voicetracking.stats.user.enabled": {
+    label: "/voicestats user subcommand enabled",
     description: "Enable the /voicestats user personal-stats subcommand.",
     category: "voicetracking",
   },
   "voicetracking.seen.enabled": {
+    label: "/seen command enabled",
     description: "Enable last-seen tracking and the /seen command.",
     category: "voicetracking",
   },
   "voicetracking.excluded_channels": {
+    label: "Excluded channel IDs",
     description:
       "Comma-separated channel IDs to exclude from voice activity tracking.",
     category: "voicetracking",
   },
   "voicetracking.announcements.enabled": {
+    label: "Scheduled voice-stats announcements enabled",
     description: "Enable scheduled voice-stats announcements.",
     category: "voicetracking",
   },
   "voicetracking.announcements.schedule": {
+    label: "Announcement schedule (cron)",
     description: "Cron schedule for the recurring voice-stats announcement.",
     category: "voicetracking",
   },
   "voicetracking.announcements.channel_id": {
+    label: "Announcement channel",
     description:
       "Discord channel ID where voice-stats announcements are posted.",
     category: "voicetracking",
@@ -277,172 +380,208 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
 
   // Voice Channel Cleanup (dbtrunk)
   "voicetracking.cleanup.enabled": {
+    label: "Scheduled DB cleanup enabled",
     description: "Enable scheduled database cleanup of voice tracking data.",
     category: "voicetracking",
   },
   "voicetracking.cleanup.schedule": {
+    label: "Cleanup schedule (cron)",
     description: "Cron schedule for the database cleanup job.",
     category: "voicetracking",
   },
   "voicetracking.cleanup.retention.detailed_sessions_days": {
+    label: "Detailed-session retention (days)",
     description:
       "Days to keep detailed session rows before they are summarised away.",
     category: "voicetracking",
   },
   "voicetracking.cleanup.retention.monthly_summaries_months": {
+    label: "Monthly-summary retention (months)",
     description: "Months to keep monthly summary rows.",
     category: "voicetracking",
   },
   "voicetracking.cleanup.retention.yearly_summaries_years": {
+    label: "Yearly-summary retention (years)",
     description: "Years to keep yearly summary rows.",
     category: "voicetracking",
   },
 
   // Individual Features
   "ping.enabled": {
+    label: "/ping command enabled",
     description: "Enable the /ping latency check command.",
     category: "ping",
   },
 
   // Quote System
   "quotes.enabled": {
+    label: "Quote system enabled",
     description: "Enable the quotes system and the /quote command.",
     category: "quotes",
   },
   "quotes.channel_id": {
+    label: "Quote channel",
     description: "Channel ID where quote messages are posted.",
     category: "quotes",
   },
   "quotes.delete_roles": {
+    label: "Roles allowed to delete quotes",
     description:
       "Comma-separated role IDs allowed to delete quotes. Empty means only admins.",
     category: "quotes",
   },
   "quotes.max_length": {
+    label: "Maximum quote length (characters)",
     description: "Maximum length of a single quote in characters.",
     category: "quotes",
   },
   "quotes.cooldown": {
+    label: "Cooldown between quotes (seconds)",
     description: "Cooldown in seconds between quote additions per user.",
     category: "quotes",
   },
   "quotes.cleanup_interval": {
+    label: "Channel cleanup interval (minutes)",
     description:
       "Interval in minutes between sweeps for unauthorised messages in the quote channel.",
     category: "quotes",
   },
   "quotes.header_enabled": {
+    label: "Pinned header post enabled",
     description:
       "Post and maintain a pinned informational header in the quote channel.",
     category: "quotes",
   },
   "quotes.header_message_id": {
+    label: "Header message ID (auto-managed)",
     description: "Auto-managed message ID of the quote channel header post.",
     category: "quotes",
   },
   "quotes.header_pin_enabled": {
+    label: "Pin header post",
     description: "Pin the header post in the quote channel.",
     category: "quotes",
   },
 
   // Core Bot Logging (Discord)
   "core.cleanup.channel_id": {
+    label: "Cleanup-job notifications channel",
     description: "Channel ID for cleanup-job notifications.",
     category: "core",
   },
 
   // Rate Limiting
   "ratelimit.enabled": {
+    label: "Rate limiting enabled",
     description: "Enable per-user command rate limiting.",
     category: "ratelimit",
   },
   "ratelimit.max_commands": {
+    label: "Max commands per window",
     description: "Maximum number of commands a user can run per time window.",
     category: "ratelimit",
   },
   "ratelimit.window_seconds": {
+    label: "Rate-limit window (seconds)",
     description: "Length of the rate-limit time window in seconds.",
     category: "ratelimit",
   },
   "ratelimit.bypass_admin": {
+    label: "Admins bypass rate limit",
     description: "Allow administrators to bypass rate limiting.",
     category: "ratelimit",
   },
 
   // Scheduled Announcements
   "announcements.enabled": {
+    label: "Scheduled announcements enabled",
     description: "Enable scheduled announcements and the /announce command.",
     category: "announcements",
   },
 
   // Achievements
   "achievements.enabled": {
+    label: "Achievements enabled",
     description: "Enable the achievements / accolades system.",
     category: "achievements",
   },
   "achievements.announcements.enabled": {
+    label: "Channel announcements for earned achievements",
     description: "Announce newly earned achievements in a Discord channel.",
     category: "achievements",
   },
   "achievements.dm_notifications.enabled": {
+    label: "DM notifications for earned achievements",
     description: "DM users when they earn a new achievement.",
     category: "achievements",
   },
 
   // Reaction Roles
   "reactionroles.enabled": {
+    label: "Reaction roles enabled",
     description: "Enable the reaction-role system and the /reactrole command.",
     category: "reactionroles",
   },
   "reactionroles.message_channel_id": {
+    label: "Reaction-role message channel",
     description: "Channel ID where reaction-role messages are posted.",
     category: "reactionroles",
   },
 
   // Setup Wizard
   "wizard.enabled": {
+    label: "/setup wizard command enabled",
     description: "Enable the /setup wizard command.",
     category: "wizard",
   },
 
   // Notices System
   "notices.enabled": {
+    label: "Notices system enabled",
     description: "Enable the notices system and the /notice command.",
     category: "notices",
   },
   "notices.channel_id": {
+    label: "Notices channel",
     description: "Channel ID where notice messages are posted.",
     category: "notices",
   },
   "notices.cleanup_interval": {
+    label: "Channel cleanup interval (minutes)",
     description:
       "Interval in minutes between sweeps for unauthorised messages in the notices channel.",
     category: "notices",
   },
   "notices.header_enabled": {
+    label: "Pinned header post enabled",
     description:
       "Post and maintain a pinned informational header in the notices channel.",
     category: "notices",
   },
   "notices.header_message_id": {
+    label: "Header message ID (auto-managed)",
     description: "Auto-managed message ID of the notices channel header post.",
     category: "notices",
   },
   "notices.header_pin_enabled": {
+    label: "Pin header post",
     description: "Pin the header post in the notices channel.",
     category: "notices",
   },
 
   // Poll System
   "polls.enabled": {
+    label: "Polls system enabled",
     description: "Enable the poll system and the /poll command.",
     category: "polls",
   },
   "polls.default_duration_hours": {
+    label: "Default poll duration (hours)",
     description: "Default poll duration in hours (1–768).",
     category: "polls",
   },
   "polls.cooldown_days": {
+    label: "Reuse cooldown (days)",
     description:
       "Minimum days before a question from the library can be reused.",
     category: "polls",
@@ -450,26 +589,31 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
 
   // Leaderboard Role Rewards
   "leaderboard_roles.enabled": {
+    label: "Leaderboard role rewards enabled",
     description:
       "Auto-assign Discord roles to users based on their voice-leaderboard position.",
     category: "leaderboard_roles",
   },
   "leaderboard_roles.period": {
+    label: "Leaderboard period",
     description:
       'Leaderboard period to evaluate: "week", "month", or "alltime".',
     category: "leaderboard_roles",
   },
   "leaderboard_roles.update_cron": {
+    label: "Recalculation schedule (cron)",
     description:
       "Cron schedule for recalculating leaderboard role assignments.",
     category: "leaderboard_roles",
   },
   "leaderboard_roles.tiers": {
+    label: "Tier definitions",
     description:
       'Comma-separated "topN:roleId" pairs (e.g. "1:111,3:222,10:333"). Each tier independently assigns the role to users whose rank is ≤ N. Admins pick any positions; nothing is hardcoded.',
     category: "leaderboard_roles",
   },
   "leaderboard_roles.announcement_channel_id": {
+    label: "Role-change announcements channel",
     description:
       "Optional channel ID where role-change announcements are posted. Leave empty to disable announcements.",
     category: "leaderboard_roles",
