@@ -375,11 +375,14 @@ docker compose logs -f mongodb
 
 ### Exposing the Web UI
 
-The default `docker-compose.yml` does **not** publish the bot's port —
-operators should make a deliberate choice about how to expose `/admin`.
-Pick one:
+The default `docker-compose.yml` **publishes port 3000 to the host**
+already — that's what makes the quick-start magic link reachable at
+`http://your-host:3000` out of the box. There is no HTTPS. The compose
+file's `bot.ports` block is the spot to change if you want something
+else:
 
-- **Direct port publish** (simplest, no HTTPS — fine for LAN/VPN-only):
+- **Direct port publish (shipped default)** — fine for LAN-only or
+  VPN-only deployments:
 
   ```yaml
   services:
@@ -389,7 +392,8 @@ Pick one:
         - "3000:3000"     # /health and /admin
   ```
 
-- **Bind to localhost only** (then SSH-tunnel or VPN in):
+- **Bind to localhost only** (then SSH-tunnel or VPN in) — replace the
+  publish above with:
 
   ```yaml
   services:
@@ -400,7 +404,9 @@ Pick one:
   ```
 
 - **Reverse proxy with Caddy** (recommended for any internet-facing
-  deployment — gets you HTTPS for free):
+  deployment — gets you HTTPS for free). Remove the `ports:` block on
+  the bot service entirely and let the proxy forward to `bot:3000` on
+  the internal Docker network:
 
   See [WEBUI.md → Docker Compose recipes](WEBUI.md#docker-compose-recipes)
   for a complete `docker-compose.yml` + `Caddyfile` you can copy.

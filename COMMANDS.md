@@ -614,9 +614,14 @@ button to admit them. **🗑️ Remove Waiting Room** deletes it.
 
 ### Admin command permissions
 
-| Command   | Permission                                                       |
-| --------- | ---------------------------------------------------------------- |
-| `/config` | Administrator (overridable in the Web UI's Permissions page)     |
+| Command   | Permission                                                                                                     |
+| --------- | -------------------------------------------------------------------------------------------------------------- |
+| `/config` | Administrator (Discord-level default; to widen to non-admin roles, override in Server Settings → Integrations) |
+
+The Web UI's Permissions page can only **further restrict** who is
+allowed to use `/config` once Discord has admitted the interaction. It
+cannot widen access past Discord's `setDefaultMemberPermissions(Administrator)`
+gate.
 
 ### Bot permissions required
 

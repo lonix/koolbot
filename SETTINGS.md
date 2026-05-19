@@ -131,9 +131,12 @@ shell into the container.
 
 Enable or disable individual commands from the Web UI's **Settings**
 page. **Every command listed below is disabled by default.** `/help`
-and `/config` are the exceptions — both are always registered (no
-`*.enabled` flag) so a fresh install always has access to the Web UI
-launcher and help discovery.
+and `/config` are the exceptions — both are always registered by
+`CommandManager` regardless of any config flag, so a fresh install
+always has access to the Web UI launcher and help discovery. (The
+schema does contain a `help.enabled` flag with `default: true`, but it
+is **not** consulted when registering `/help` — toggling it has no
+effect on whether the command appears in Discord.)
 
 | Setting | Default | Description |
 | --- | --- | --- |

@@ -141,10 +141,11 @@ DOCKER COMMANDS
 EXPOSING THE WEB UI
 ════════════════════════════════════════════════════════════════════════════
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ The default docker-compose.yml does NOT publish port 3000.              │
-│ Pick one of:                                                            │
+│ The default docker-compose.yml publishes port 3000 to the host         │
+│ already (LAN/VPN-only, no HTTPS). To change that, edit the bot         │
+│ service's ports: block:                                                │
 │                                                                         │
-│  Direct port publish (LAN/VPN-only, no HTTPS):                          │
+│  Direct port publish (shipped default):                                 │
 │    ports:                                                               │
 │      - "3000:3000"                                                      │
 │                                                                         │
@@ -152,11 +153,12 @@ EXPOSING THE WEB UI
 │    ports:                                                               │
 │      - "127.0.0.1:3000:3000"                                            │
 │                                                                         │
-│  Caddy reverse proxy (recommended, gets HTTPS for free):                │
-│    See WEBUI.md → Docker Compose recipes                                │
+│  Caddy reverse proxy (recommended for internet-facing, HTTPS free):    │
+│    Remove the ports: block; let Caddy forward to bot:3000.             │
+│    See WEBUI.md → Docker Compose recipes for a full example.           │
 │                                                                         │
 │  Tailscale / Cloudflare Tunnel:                                         │
-│    Don't publish 3000. Point WEBUI_BASE_URL at your tunnel URL.         │
+│    Remove the ports: block. Point WEBUI_BASE_URL at your tunnel URL.   │
 └─────────────────────────────────────────────────────────────────────────┘
 
 TROUBLESHOOTING

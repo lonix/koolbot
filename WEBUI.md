@@ -210,8 +210,10 @@ WEBUI_SESSION_SECRET=replace-with-openssl-rand-base64-32-output
 
 Pick **one** of:
 
-- **Publish the port directly** (simplest, but no HTTPS). See the
-  [Direct port publish](#direct-port-publish) recipe below.
+- **Publish the port directly** (simplest, but no HTTPS — this is what
+  the shipped compose does). See the
+  [Direct port publish (the shipped default)](#direct-port-publish-the-shipped-default)
+  recipe below.
 - **Reverse-proxy it** (recommended for any deployment users will visit
   from a real browser). See [Reverse-proxy guidance](#reverse-proxy-guidance).
 - **Tunnel it** (Tailscale, WireGuard, Cloudflare Tunnel, etc.). Same
@@ -246,14 +248,18 @@ Open the DM, click the link, and you're in.
 
 ## Docker Compose recipes
 
-The production `docker-compose.yml` shipped in the repo does **not**
-publish port `3000` by default — operators should make a deliberate
-choice about how to expose the Web UI. The recipes below are starting
-points; pick one and drop it into your own `docker-compose.yml`.
+The production `docker-compose.yml` shipped in the repo **publishes
+port 3000 by default** so the quick-start magic link is reachable on
+`http://your-host:3000` out of the box. That's the right default for a
+local or LAN install but it has no HTTPS — for anything reachable from
+the public internet, swap the direct publish for a reverse proxy. The
+recipes below are starting points; pick one and drop it into your own
+`docker-compose.yml`.
 
-### Direct port publish
+### Direct port publish (the shipped default)
 
-Simplest setup. The bot listens on port `3000`; you map it to the host.
+The simplest setup, and what the repo's `docker-compose.yml` does
+already. The bot listens on port `3000`; you map it to the host.
 
 ```yaml
 services:
