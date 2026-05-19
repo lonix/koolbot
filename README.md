@@ -559,10 +559,9 @@ docker compose restart mongodb
 - **[COMMANDS.md](COMMANDS.md)** — Complete command reference with examples
 - **[SETTINGS.md](SETTINGS.md)** — All configuration options explained
 - **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** — Architecture and contribution patterns
-- **[QUICK_START_VISUAL.md](QUICK_START_VISUAL.md)** — Visual quick start
 - **[TESTING.md](TESTING.md)** — Testing guide and best practices
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** — Common issues and solutions
-- **[RELEASE_NOTES.md](RELEASE_NOTES.md)** — Version history and changelog
+- **[CHANGELOG.md](CHANGELOG.md)** — Version history (managed by release-please)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines for developers
 - **[SECURITY.md](SECURITY.md)** — Security policy and vulnerability reporting
 

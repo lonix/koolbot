@@ -664,7 +664,6 @@ discovers settings from `defaultConfig` automatically.
    - [ ] Update `WEBUI.md` if you added a new page or env var
    - [ ] Update `.env.example` if you added a bootstrap env var
    - [ ] Add to `DEVELOPER_GUIDE.md` if you established a reusable pattern
-   - [ ] Update `DOCS_SUMMARY.md`
 
 ---
 
