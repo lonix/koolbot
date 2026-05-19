@@ -79,16 +79,6 @@ const settingReferences: SettingReference[] = [
     newKey: "ping.enabled",
     description: "Enable/disable ping command",
   },
-  {
-    oldKey: "ENABLE_AMIKOOL",
-    newKey: "amikool.enabled",
-    description: "Enable/disable amikool command",
-  },
-  {
-    oldKey: "COOL_ROLE_NAME",
-    newKey: "amikool.role.name",
-    description: "Role name required to use amikool command",
-  },
 ];
 
 async function updateSettingsReferences(): Promise<void> {

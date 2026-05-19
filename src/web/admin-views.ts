@@ -499,10 +499,6 @@ const WIZARD_FEATURE_LABELS: Record<string, { name: string; desc: string }> = {
     name: "Achievements",
     desc: "Achievement system for voice activity.",
   },
-  amikool: {
-    name: "Am I Kool",
-    desc: "Fun command to check kool status based on a role.",
-  },
   reactionroles: {
     name: "Reaction Roles",
     desc: "Let users self-assign roles via reactions.",

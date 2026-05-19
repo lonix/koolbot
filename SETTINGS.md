@@ -141,8 +141,6 @@ effect on whether the command appears in Discord.)
 | Setting | Default | Description |
 | --- | --- | --- |
 | `ping.enabled` | `false` | Enable/disable the `/ping` command |
-| `amikool.enabled` | `false` | Enable/disable the `/amikool` command |
-| `amikool.role.name` | `""` | Role name to check for `/amikool` verification |
 | `quotes.enabled` | `false` | Enable/disable the quote system |
 
 After changing any `*.enabled` value, click **Reload commands to
@@ -634,16 +632,6 @@ or split them across `#bot-status`, `#admin-alerts`, `#bot-logs`, etc.
 
 ---
 
-## 🎭 Fun Features
-
-Easter eggs and passive listeners.
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `fun.friendship` | `false` | Respond to "best ship" and "worst ship" mentions |
-
----
-
 ## 🔒 Rate Limiting
 
 Protect your bot from command spam with global rate limiting.
@@ -768,8 +756,6 @@ above).
 #### Commands
 
 - `ping.enabled` (bool, default: false)
-- `amikool.enabled` (bool, default: false)
-- `amikool.role.name` (string, default: "")
 - `quotes.enabled` (bool, default: false)
 
 #### Setup Wizard
@@ -867,10 +853,6 @@ above).
 - `core.config.channel_id` (string, default: "")
 - `core.cron.enabled` (bool, default: false)
 - `core.cron.channel_id` (string, default: "")
-
-#### Fun Features
-
-- `fun.friendship` (bool, default: false)
 
 #### Rate Limiting
 

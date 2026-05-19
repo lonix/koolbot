@@ -100,20 +100,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Enable/disable ping command",
     defaultValue: "true",
   },
-  {
-    oldKey: "ENABLE_AMIKOOL",
-    newKey: "amikool.enabled",
-    category: "amikool",
-    description: "Enable/disable amikool command",
-    defaultValue: "true",
-  },
-  {
-    oldKey: "COOL_ROLE_NAME",
-    newKey: "amikool.role.name",
-    category: "amikool",
-    description: "Role name required to use amikool command",
-    defaultValue: "",
-  },
 
   // Quote System (if they exist in old format)
   {

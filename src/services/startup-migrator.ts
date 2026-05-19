@@ -106,20 +106,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Enable/disable ping command",
     defaultValue: true,
   },
-  {
-    oldKey: "ENABLE_AMIKOOL",
-    newKey: "amikool.enabled",
-    category: "amikool",
-    description: "Enable/disable amikool command",
-    defaultValue: true,
-  },
-  {
-    oldKey: "COOL_ROLE_NAME",
-    newKey: "amikool.role.name", // Fixed: match expected dot notation
-    category: "amikool",
-    description: "Name of the cool role for amikool command",
-    defaultValue: "HR",
-  },
 
   // Quote System
   {
@@ -150,7 +136,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Cooldown in seconds between quote additions",
     defaultValue: "60",
   },
-  // Fun / Easter eggs
 ];
 
 export class StartupMigrator {
@@ -273,13 +258,10 @@ export class StartupMigrator {
       "voicetracking.announcements.schedule": "0 16 * * 5",
       "voicetracking.announcements.channel": "announcement",
       "ping.enabled": true,
-      "amikool.enabled": true,
-      "amikool.role.name": "HR",
       "quotes.enabled": true,
       "quotes.delete_roles": "None",
       "quotes.max_length": 1000,
       "quotes.cooldown": 60,
-      "fun.friendship": false,
     };
 
     return defaultValues[key] === value;

@@ -30,8 +30,6 @@ export interface ConfigSchema {
 
   // Individual Features
   "ping.enabled": boolean;
-  "amikool.enabled": boolean;
-  "amikool.role.name": string; // Role name required for amikool
 
   // Quote System Settings
   "quotes.enabled": boolean;
@@ -47,9 +45,6 @@ export interface ConfigSchema {
   // Core Bot Logging (Discord) - only cleanup is wired up; other core.* keys
   // were declared but never read and have been removed. See issues #440/#443.
   "core.cleanup.channel_id": string;
-
-  // Fun / Easter Eggs
-  "fun.friendship": boolean;
 
   // Rate Limiting
   "ratelimit.enabled": boolean;
@@ -124,8 +119,6 @@ export const defaultConfig: ConfigSchema = {
 
   // Individual Features
   "ping.enabled": false,
-  "amikool.enabled": false,
-  "amikool.role.name": "",
 
   // Quote System Defaults
   "quotes.enabled": false,
@@ -140,9 +133,6 @@ export const defaultConfig: ConfigSchema = {
 
   // Core Bot Logging (Discord) - only cleanup is wired up.
   "core.cleanup.channel_id": "",
-
-  // Fun defaults
-  "fun.friendship": false,
 
   // Rate Limiting defaults
   "ratelimit.enabled": false,
@@ -312,14 +302,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Enable the /ping latency check command.",
     category: "ping",
   },
-  "amikool.enabled": {
-    description: "Enable the /amikool fun role check command.",
-    category: "amikool",
-  },
-  "amikool.role.name": {
-    description: 'Role name required to be considered "kool" by /amikool.',
-    category: "amikool",
-  },
 
   // Quote System
   "quotes.enabled": {
@@ -366,12 +348,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.cleanup.channel_id": {
     description: "Channel ID for cleanup-job notifications.",
     category: "core",
-  },
-
-  // Fun / Easter Eggs
-  "fun.friendship": {
-    description: "Enable the friendship easter-egg trigger phrases.",
-    category: "fun",
   },
 
   // Rate Limiting

@@ -155,8 +155,6 @@ export class ConfigService {
         "VC_ANNOUNCEMENT_CHANNEL",
         "VC_TRACKING_ADMIN_ROLES",
         "ENABLE_PING",
-        "ENABLE_AMIKOOL",
-        "COOL_ROLE_NAME",
         "ENABLE_QUOTES",
         "QUOTE_ADD_ROLES",
         "QUOTE_DELETE_ROLES",
@@ -189,10 +187,8 @@ export class ConfigService {
       // Valid categories from the enum
       const validCategories = new Set([
         "achievements",
-        "amikool",
         "announcements",
         "core",
-        "fun",
         "help",
         "ping",
         "quotes",

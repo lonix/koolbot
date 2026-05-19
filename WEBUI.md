@@ -599,7 +599,7 @@ side effect, since the HMAC key changes.
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
-`/achievements`, `/amikool`, `/help`) are **not** affected and stay in
+`/achievements`, `/help`) are **not** affected and stay in
 Discord exactly as before. The per-voice-channel control panel (rename,
 privacy, invite, transfer, live, waiting room) also stays in Discord —
 it's a member-facing feature, not an admin tool.

@@ -29,10 +29,8 @@ const ConfigSchema = new Schema<IConfig>(
       required: true,
       enum: [
         "achievements",
-        "amikool",
         "announcements",
         "core",
-        "fun",
         "gamification", // Kept for backward compatibility during migration
         "help",
         "leaderboard_roles",

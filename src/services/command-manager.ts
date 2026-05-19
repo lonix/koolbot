@@ -71,7 +71,6 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "help", configKey: null, file: "help" }, // Always enabled - core feature
-        { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
         {
           name: "voicestats",
           configKey: "voicetracking.enabled",
@@ -294,7 +293,6 @@ export class CommandManager {
       const commandConfigs = [
         { name: "ping", configKey: "ping.enabled", file: "ping" },
         { name: "help", configKey: null, file: "help" }, // Always enabled - core feature
-        { name: "amikool", configKey: "amikool.enabled", file: "amikool" },
         {
           name: "voicestats",
           configKey: "voicetracking.enabled",

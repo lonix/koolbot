@@ -243,7 +243,6 @@ export function createReadOnlyRouter(
         { key: "polls.enabled", label: "Polls" },
         { key: "reactionroles.enabled", label: "Reaction Roles" },
         { key: "notices.enabled", label: "Notices" },
-        { key: "fun.friendship", label: "Friendship" },
       ];
       const features = await Promise.all(
         featureKeys.map(async (f) => ({
