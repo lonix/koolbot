@@ -21,7 +21,6 @@ export default {
     '!src/**/*.d.ts',
     '!src/index.ts',
     '!src/loader.js',
-    '!src/loader.mjs',
     '!src/unregister-guild-commands.ts',
     '!src/scripts/**',
   ],
