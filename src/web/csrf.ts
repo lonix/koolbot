@@ -63,6 +63,22 @@ export function requireCsrf(
   next();
 }
 
+/**
+ * Decide whether to set the `Secure` cookie attribute. We key off the
+ * configured access scheme (`WEBUI_BASE_URL`) rather than NODE_ENV
+ * because operators routinely run NODE_ENV=production while exposing
+ * the WebUI over plain HTTP (Docker on a LAN, behind a reverse proxy
+ * that terminates TLS without propagating X-Forwarded-Proto, etc.).
+ * Setting Secure on an HTTP request causes browsers to silently drop
+ * the cookie, which breaks the entire sign-in flow.
+ *
+ * If WEBUI_BASE_URL is missing or malformed we fall back to the
+ * NODE_ENV check so we don't silently disable Secure on a real HTTPS
+ * deployment that just forgot to set the variable.
+ */
 export function shouldUseSecureCookies(): boolean {
+  const baseUrl = process.env.WEBUI_BASE_URL ?? "";
+  if (baseUrl.startsWith("https://")) return true;
+  if (baseUrl.startsWith("http://")) return false;
   return process.env.NODE_ENV === "production";
 }
