@@ -20,7 +20,6 @@ export interface ConfigSchema {
   "voicetracking.announcements.enabled": boolean;
   "voicetracking.announcements.schedule": string; // Cron schedule
   "voicetracking.announcements.channel": string;
-  "voicetracking.admin_roles": string; // Comma-separated role names
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": boolean;
@@ -31,14 +30,12 @@ export interface ConfigSchema {
 
   // Individual Features
   "ping.enabled": boolean;
-  "help.enabled": boolean;
   "amikool.enabled": boolean;
   "amikool.role.name": string; // Role name required for amikool
 
   // Quote System Settings
   "quotes.enabled": boolean;
   "quotes.channel_id": string; // Channel ID for quote messages
-  "quotes.add_roles": string; // Comma-separated role IDs
   "quotes.delete_roles": string; // Comma-separated role IDs
   "quotes.max_length": number; // Maximum quote length
   "quotes.cooldown": number; // Cooldown in seconds between quote additions
@@ -47,17 +44,9 @@ export interface ConfigSchema {
   "quotes.header_message_id": string; // Message ID of the header post
   "quotes.header_pin_enabled": boolean; // Pin the header post
 
-  // Core Bot Logging (Discord) - Defaults to disabled
-  "core.startup.enabled": boolean;
-  "core.startup.channel_id": string;
-  "core.errors.enabled": boolean;
-  "core.errors.channel_id": string;
-  "core.cleanup.enabled": boolean;
+  // Core Bot Logging (Discord) - only cleanup is wired up; other core.* keys
+  // were declared but never read and have been removed. See issues #440/#443.
   "core.cleanup.channel_id": string;
-  "core.config.enabled": boolean;
-  "core.config.channel_id": string;
-  "core.cron.enabled": boolean;
-  "core.cron.channel_id": string;
 
   // Fun / Easter Eggs
   "fun.friendship": boolean;
@@ -125,7 +114,6 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.announcements.enabled": false,
   "voicetracking.announcements.schedule": "0 16 * * 5", // Every Friday at 16:00
   "voicetracking.announcements.channel": "voice-stats",
-  "voicetracking.admin_roles": "",
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": false,
@@ -136,14 +124,12 @@ export const defaultConfig: ConfigSchema = {
 
   // Individual Features
   "ping.enabled": false,
-  "help.enabled": true,
   "amikool.enabled": false,
   "amikool.role.name": "",
 
   // Quote System Defaults
   "quotes.enabled": false,
   "quotes.channel_id": "",
-  "quotes.add_roles": "", // Empty means all users can add
   "quotes.delete_roles": "", // Empty means only admins can delete
   "quotes.max_length": 1000,
   "quotes.cooldown": 60,
@@ -152,17 +138,9 @@ export const defaultConfig: ConfigSchema = {
   "quotes.header_message_id": "", // Stores header message ID
   "quotes.header_pin_enabled": true, // Pin header for easy access
 
-  // Core Bot Logging (Discord) - Defaults to disabled
-  "core.startup.enabled": false,
-  "core.startup.channel_id": "",
-  "core.errors.enabled": false,
-  "core.errors.channel_id": "",
-  "core.cleanup.enabled": false,
+  // Core Bot Logging (Discord) - only cleanup is wired up.
   "core.cleanup.channel_id": "",
-  "core.config.enabled": false,
-  "core.config.channel_id": "",
-  "core.cron.enabled": false,
-  "core.cron.channel_id": "",
+
   // Fun defaults
   "fun.friendship": false,
 
@@ -305,11 +283,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel name where voice-stats announcements are posted.",
     category: "voicetracking",
   },
-  "voicetracking.admin_roles": {
-    description:
-      "Comma-separated role names allowed to run privileged voice tracking commands.",
-    category: "voicetracking",
-  },
 
   // Voice Channel Cleanup (dbtrunk)
   "voicetracking.cleanup.enabled": {
@@ -339,10 +312,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Enable the /ping latency check command.",
     category: "ping",
   },
-  "help.enabled": {
-    description: "Enable the /help command.",
-    category: "help",
-  },
   "amikool.enabled": {
     description: "Enable the /amikool fun role check command.",
     category: "amikool",
@@ -359,11 +328,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
   "quotes.channel_id": {
     description: "Channel ID where quote messages are posted.",
-    category: "quotes",
-  },
-  "quotes.add_roles": {
-    description:
-      "Comma-separated role IDs allowed to add quotes. Empty means everyone can add.",
     category: "quotes",
   },
   "quotes.delete_roles": {
@@ -399,45 +363,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
 
   // Core Bot Logging (Discord)
-  "core.startup.enabled": {
-    description: "Send bot startup notifications to a Discord channel.",
-    category: "core",
-  },
-  "core.startup.channel_id": {
-    description: "Channel ID for startup notifications.",
-    category: "core",
-  },
-  "core.errors.enabled": {
-    description: "Send error notifications to a Discord channel.",
-    category: "core",
-  },
-  "core.errors.channel_id": {
-    description: "Channel ID for error notifications.",
-    category: "core",
-  },
-  "core.cleanup.enabled": {
-    description: "Send cleanup-job notifications to a Discord channel.",
-    category: "core",
-  },
   "core.cleanup.channel_id": {
     description: "Channel ID for cleanup-job notifications.",
-    category: "core",
-  },
-  "core.config.enabled": {
-    description:
-      "Send configuration-change notifications to a Discord channel.",
-    category: "core",
-  },
-  "core.config.channel_id": {
-    description: "Channel ID for configuration-change notifications.",
-    category: "core",
-  },
-  "core.cron.enabled": {
-    description: "Send cron-job notifications to a Discord channel.",
-    category: "core",
-  },
-  "core.cron.channel_id": {
-    description: "Channel ID for cron-job notifications.",
     category: "core",
   },
 

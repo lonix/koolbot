@@ -98,14 +98,6 @@ const configMigrations: ConfigMigration[] = [
     description: "Channel name for voice channel announcements",
     defaultValue: "announcement",
   },
-  {
-    oldKey: "VC_TRACKING_ADMIN_ROLES",
-    newKey: "voicetracking.admin_roles",
-    category: "voicetracking",
-    description: "Comma-separated role names that can manage tracking",
-    defaultValue: "Admin,Moderator",
-  },
-
   // Individual Features
   {
     oldKey: "ENABLE_PING",
@@ -136,13 +128,6 @@ const configMigrations: ConfigMigration[] = [
     category: "quotes",
     description: "Enable/disable quote system",
     defaultValue: true,
-  },
-  {
-    oldKey: "QUOTE_ADD_ROLES",
-    newKey: "quotes.add_roles",
-    category: "quotes",
-    description: "Comma-separated role IDs that can add quotes",
-    defaultValue: "",
   },
   {
     oldKey: "QUOTE_DELETE_ROLES",
@@ -287,12 +272,10 @@ export class StartupMigrator {
       "voicetracking.announcements.enabled": true,
       "voicetracking.announcements.schedule": "0 16 * * 5",
       "voicetracking.announcements.channel": "announcement",
-      "voicetracking.admin_roles": "Admin,Moderator",
       "ping.enabled": true,
       "amikool.enabled": true,
       "amikool.role.name": "HR",
       "quotes.enabled": true,
-      "quotes.add_roles": "@HR",
       "quotes.delete_roles": "None",
       "quotes.max_length": 1000,
       "quotes.cooldown": 60,

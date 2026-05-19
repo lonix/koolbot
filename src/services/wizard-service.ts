@@ -316,23 +316,10 @@ export class WizardService {
         "Cron expression for weekly announcements",
       "voicetracking.announcements.channel":
         "Channel name for voice channel announcements",
-      "voicetracking.admin_roles":
-        "Comma-separated role names that can manage tracking",
       "quotes.enabled": "Enable/disable quote system",
       "quotes.channel_id": "Channel ID for quote messages",
-      "quotes.add_roles": "Comma-separated role IDs that can add quotes",
       "quotes.delete_roles": "Comma-separated role IDs that can delete quotes",
       "achievements.enabled": "Enable/disable achievements system",
-      "core.startup.enabled":
-        "Enable/disable Discord logging for bot startup/shutdown events",
-      "core.startup.channel_id":
-        "Discord channel ID for startup/shutdown logging",
-      "core.errors.enabled":
-        "Enable/disable Discord logging for critical errors",
-      "core.errors.channel_id": "Discord channel ID for error logging",
-      "core.config.enabled":
-        "Enable/disable Discord logging for configuration changes",
-      "core.config.channel_id": "Discord channel ID for config change logging",
     };
 
     return descriptions[key] || "Configuration setting";
