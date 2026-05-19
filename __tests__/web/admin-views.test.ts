@@ -260,6 +260,187 @@ describe("renderSettingsPage", () => {
       /type="checkbox" name="value" value="true" checked/,
     );
   });
+
+  it("renders a channel-type setting as a single-select dropdown populated from textChannels", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [
+        { id: "111", name: "general" },
+        { id: "222", name: "voice-stats" },
+      ],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.announcements.channel_id",
+              label: "Announcement channel",
+              current: "222",
+              defaultValue: "",
+              type: "channel",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain('<select name="value">');
+    expect(html).toContain('<option value="111">#general</option>');
+    expect(html).toContain('<option value="222" selected>#voice-stats</option>');
+  });
+
+  it("renders a category-type setting from categoryChannels", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [],
+      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      roles: [],
+      groups: [
+        {
+          category: "voicechannels",
+          rows: [
+            {
+              key: "voicechannels.category.name",
+              label: "Managed category",
+              current: "cat-1",
+              defaultValue: "",
+              type: "category",
+              description: "",
+              category: "voicechannels",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain(
+      '<option value="cat-1" selected>#Voice Channels</option>',
+    );
+  });
+
+  it("renders a role-type setting from roles with the @ prefix", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [],
+      categoryChannels: [],
+      roles: [
+        { id: "r1", name: "Admin" },
+        { id: "r2", name: "Member" },
+      ],
+      groups: [
+        {
+          category: "amikool",
+          rows: [
+            {
+              key: "amikool.role_id",
+              label: "Kool role",
+              current: "r1",
+              defaultValue: "",
+              type: "role",
+              description: "",
+              category: "amikool",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain('<option value="r1" selected>@Admin</option>');
+    expect(html).toContain('<option value="r2">@Member</option>');
+  });
+
+  it("renders a channel_list-type setting as a multi-select with CSV pre-selection", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [
+        { id: "111", name: "general" },
+        { id: "222", name: "afk" },
+        { id: "333", name: "other" },
+      ],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.excluded_channels",
+              label: "Excluded channels",
+              current: "111,333",
+              defaultValue: "",
+              type: "channel_list",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toMatch(/<select name="value" multiple/);
+    expect(html).toContain('<option value="111" selected>#general</option>');
+    expect(html).toContain('<option value="222">#afk</option>');
+    expect(html).toContain('<option value="333" selected>#other</option>');
+  });
+
+  it("renders a role_list-type setting as a multi-select with CSV pre-selection", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [],
+      categoryChannels: [],
+      roles: [
+        { id: "r1", name: "Admin" },
+        { id: "r2", name: "Mod" },
+      ],
+      groups: [
+        {
+          category: "quotes",
+          rows: [
+            {
+              key: "quotes.delete_roles",
+              label: "Roles allowed to delete quotes",
+              current: "r2",
+              defaultValue: "",
+              type: "role_list",
+              description: "",
+              category: "quotes",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toMatch(/<select name="value" multiple/);
+    expect(html).toContain('<option value="r1">@Admin</option>');
+    expect(html).toContain('<option value="r2" selected>@Mod</option>');
+  });
+
+  it("falls back to a text input for cron-type settings (placeholder until #444)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.announcements.schedule",
+              label: "Schedule",
+              current: "0 16 * * 5",
+              defaultValue: "0 16 * * 5",
+              type: "cron",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toMatch(
+      /<input type="text" name="value" value="0 16 \* \* 5"/,
+    );
+  });
 });
 
 describe("renderPermissionsPage", () => {

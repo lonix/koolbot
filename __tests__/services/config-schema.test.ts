@@ -69,16 +69,18 @@ describe('Config Schema', () => {
   });
 
   describe('settingsMetadata', () => {
-    it('has a non-empty label, description, and category for every key in defaultConfig', () => {
+    it('has a non-empty label, description, category, and type for every key in defaultConfig', () => {
       const missingLabel: string[] = [];
       const missingDescription: string[] = [];
       const missingCategory: string[] = [];
+      const missingType: string[] = [];
       for (const key of Object.keys(defaultConfig)) {
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
         if (!meta) {
           missingLabel.push(key);
           missingDescription.push(key);
           missingCategory.push(key);
+          missingType.push(key);
           continue;
         }
         if (!meta.label || meta.label.trim() === '') missingLabel.push(key);
@@ -86,10 +88,37 @@ describe('Config Schema', () => {
           missingDescription.push(key);
         if (!meta.category || meta.category.trim() === '')
           missingCategory.push(key);
+        if (!meta.type || (meta.type as string).trim() === '')
+          missingType.push(key);
       }
       expect(missingLabel).toEqual([]);
       expect(missingDescription).toEqual([]);
       expect(missingCategory).toEqual([]);
+      expect(missingType).toEqual([]);
+    });
+
+    it('declares a `type` consistent with the runtime defaultConfig value shape', () => {
+      // The schema-declared type must not contradict the runtime shape:
+      // a `boolean`-typed key has a boolean default, a `number`-typed key
+      // has a numeric default, and every other kind ("string", "cron",
+      // "channel"/"category"/"role" and their list variants) stores a
+      // string. Catches accidental drift between the declared metadata and
+      // the underlying default value.
+      const mismatches: string[] = [];
+      for (const [key, defaultValue] of Object.entries(defaultConfig)) {
+        const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+        if (!meta) continue;
+        const dv = typeof defaultValue;
+        if (meta.type === 'boolean' && dv !== 'boolean') mismatches.push(key);
+        else if (meta.type === 'number' && dv !== 'number') mismatches.push(key);
+        else if (
+          meta.type !== 'boolean' &&
+          meta.type !== 'number' &&
+          dv !== 'string'
+        )
+          mismatches.push(key);
+      }
+      expect(mismatches).toEqual([]);
     });
 
     it('does not have stale entries for keys that no longer exist in defaultConfig', () => {

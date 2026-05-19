@@ -97,4 +97,31 @@ describe("coerceConfigValue", () => {
       coerceConfigValue("voicechannels.lobby.name", null),
     ).toEqual({ ok: true, value: "" });
   });
+
+  it("joins array input into a comma-separated string for *_list keys", () => {
+    // The Settings page renders channel_list / role_list as <select
+    // multiple>, which posts repeated `value=…` params and lands here as
+    // an array. Backend storage is CSV so we collapse on the way in.
+    expect(
+      coerceConfigValue("voicetracking.excluded_channels", ["111", "222"]),
+    ).toEqual({ ok: true, value: "111,222" });
+    expect(
+      coerceConfigValue("quotes.delete_roles", ["roleA", "roleB", "roleC"]),
+    ).toEqual({ ok: true, value: "roleA,roleB,roleC" });
+  });
+
+  it("drops empty strings from array input for *_list keys", () => {
+    // Browsers sometimes send a stray empty option in select-multiple
+    // payloads; ignore them rather than producing a CSV with a leading
+    // or interior empty token.
+    expect(
+      coerceConfigValue("voicetracking.excluded_channels", ["", "111", ""]),
+    ).toEqual({ ok: true, value: "111" });
+  });
+
+  it("yields an empty string when nothing is selected in a multi-select", () => {
+    expect(
+      coerceConfigValue("voicetracking.excluded_channels", []),
+    ).toEqual({ ok: true, value: "" });
+  });
 });

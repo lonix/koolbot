@@ -119,6 +119,7 @@ function commonFromReq(req: AuthenticatedRequest): {
 interface ChannelData {
   names: Map<string, string>;
   textChannels: ChannelOption[];
+  categoryChannels: ChannelOption[];
 }
 
 interface RoleData {
@@ -127,10 +128,10 @@ interface RoleData {
 }
 
 /**
- * Fetch the guild's channel cache once and derive both the id→name map
- * used for table rendering and the text-channel options used to populate
- * picker dropdowns. One Discord API roundtrip per request instead of
- * two.
+ * Fetch the guild's channel cache once and derive the id→name map plus
+ * the option lists used to populate picker dropdowns (text channels for
+ * normal channel pickers, category channels for the voicechannels
+ * managed-category picker). One Discord API roundtrip per request.
  */
 async function fetchChannelData(
   client: Client,
@@ -138,6 +139,7 @@ async function fetchChannelData(
 ): Promise<ChannelData> {
   const names = new Map<string, string>();
   const textChannels: ChannelOption[] = [];
+  const categoryChannels: ChannelOption[] = [];
   try {
     const guild = await client.guilds.fetch(guildId);
     await guild.channels.fetch();
@@ -150,13 +152,16 @@ async function fetchChannelData(
         ch.type === ChannelType.GuildAnnouncement
       ) {
         textChannels.push({ id: ch.id, name });
+      } else if (ch.type === ChannelType.GuildCategory) {
+        categoryChannels.push({ id: ch.id, name });
       }
     }
     textChannels.sort((a, b) => a.name.localeCompare(b.name));
+    categoryChannels.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
     logger.debug("fetchChannelData failed", err);
   }
-  return { names, textChannels };
+  return { names, textChannels, categoryChannels };
 }
 
 /**
@@ -351,6 +356,9 @@ export function createReadOnlyRouter(
       // and overrides them, prefer the DB value. This way every key has a
       // stable description on a fresh install — even before /config set
       // ever runs — without losing operator-customised descriptions.
+      // `type` comes from settingsMetadata when present (the typed config
+      // schema is authoritative) and falls back to runtime-inferred type
+      // for orphan DB rows that the schema doesn't know about.
       const rows: SettingRow[] = Object.entries(defaultConfig).map(
         ([key, defaultValue]) => {
           const dbEntry = storedByKey.get(key);
@@ -360,7 +368,7 @@ export function createReadOnlyRouter(
             label: meta?.label ?? key,
             current: dbEntry ? dbEntry.value : defaultValue,
             defaultValue,
-            type: describeType(defaultValue),
+            type: meta?.type ?? describeType(defaultValue),
             description: dbEntry?.description ?? meta?.description ?? "",
             category:
               dbEntry?.category ?? meta?.category ?? deriveCategory(key),
@@ -397,7 +405,25 @@ export function createReadOnlyRouter(
         rows: rs,
       }));
 
-      res.type("text/html").send(renderSettingsPage({ ...common, groups }));
+      // Guild cache for the new dropdown selectors. One fetch, three lists.
+      const { textChannels, categoryChannels, roles } = await Promise.all([
+        fetchChannelData(client, common.guildId),
+        fetchRoleData(client, common.guildId),
+      ]).then(([chData, roleData]) => ({
+        textChannels: chData.textChannels,
+        categoryChannels: chData.categoryChannels,
+        roles: roleData.roles,
+      }));
+
+      res.type("text/html").send(
+        renderSettingsPage({
+          ...common,
+          groups,
+          textChannels,
+          categoryChannels,
+          roles,
+        }),
+      );
     }),
   );
 

@@ -169,6 +169,9 @@ export interface SettingRow {
 
 export interface SettingsProps extends CommonProps {
   groups: Array<{ category: string; rows: SettingRow[] }>;
+  textChannels: ChannelOption[];
+  categoryChannels: ChannelOption[];
+  roles: RoleOption[];
   flash?: FlashMessage | null;
 }
 
@@ -190,10 +193,46 @@ function coerceToDisplayValue(value: unknown): string | number | boolean {
   return String(value);
 }
 
-function renderSettingInput(r: SettingRow, csrfToken: string): string {
+/**
+ * Build `<option>` elements where any option whose id is in `selected`
+ * (Set) carries the `selected` attribute. Single-select callers pass a
+ * Set with at most one entry; multi-select callers pass however many they
+ * have.
+ */
+function buildOptionsHtml(
+  options: ChannelOption[] | RoleOption[],
+  selected: Set<string>,
+  prefix: string,
+  includeNoneRow: boolean,
+): string {
+  const parts: string[] = [];
+  if (includeNoneRow) {
+    parts.push(
+      `<option value="" ${selected.size === 0 ? "selected" : ""}>(none)</option>`,
+    );
+  }
+  for (const opt of options) {
+    const sel = selected.has(opt.id) ? " selected" : "";
+    parts.push(
+      `<option value="${escapeHtml(opt.id)}"${sel}>${prefix}${escapeHtml(opt.name)}</option>`,
+    );
+  }
+  return parts.join("");
+}
+
+function renderSettingInput(
+  r: SettingRow,
+  csrfToken: string,
+  pickers: {
+    textChannels: ChannelOption[];
+    categoryChannels: ChannelOption[];
+    roles: RoleOption[];
+  },
+): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
   const keyField = `<input type="hidden" name="key" value="${escapeHtml(r.key)}">`;
   const primitive = coerceToDisplayValue(r.current);
+  const currentStr = typeof primitive === "string" ? primitive : "";
 
   let control: string;
   if (r.type === "boolean") {
@@ -205,7 +244,40 @@ function renderSettingInput(r: SettingRow, csrfToken: string): string {
       `</label>`;
   } else if (r.type === "number") {
     control = `<input type="number" name="value" value="${escapeHtml(primitive)}" style="width:8rem">`;
+  } else if (
+    r.type === "channel" ||
+    r.type === "category" ||
+    r.type === "role"
+  ) {
+    const options =
+      r.type === "channel"
+        ? pickers.textChannels
+        : r.type === "category"
+          ? pickers.categoryChannels
+          : pickers.roles;
+    const prefix = r.type === "role" ? "@" : "#";
+    const selected = currentStr ? new Set([currentStr]) : new Set<string>();
+    control =
+      `<select name="value">` +
+      buildOptionsHtml(options, selected, prefix, true) +
+      `</select>`;
+  } else if (r.type === "channel_list" || r.type === "role_list") {
+    const options =
+      r.type === "channel_list" ? pickers.textChannels : pickers.roles;
+    const prefix = r.type === "role_list" ? "@" : "#";
+    const selected = new Set(
+      currentStr
+        .split(",")
+        .map((v) => v.trim())
+        .filter((v) => v !== ""),
+    );
+    control =
+      `<select name="value" multiple size="${Math.min(8, Math.max(3, options.length))}">` +
+      buildOptionsHtml(options, selected, prefix, false) +
+      `</select>`;
   } else {
+    // string, cron, or any unknown type → plain text. Issue #444 will
+    // replace cron with a friendly picker.
     control = `<input type="text" name="value" value="${escapeHtml(primitive)}">`;
   }
 
@@ -238,6 +310,11 @@ export function renderSettingsPage(props: SettingsProps): string {
   <a href="/admin/wizard" class="btn">Setup wizard</a>
 </div>`;
 
+  const pickers = {
+    textChannels: props.textChannels,
+    categoryChannels: props.categoryChannels,
+    roles: props.roles,
+  };
   const sections = props.groups
     .map((g) => {
       const meta = categoryMetadata[g.category] ?? {
@@ -251,7 +328,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
 </td>
-<td>${renderSettingInput(r, props.csrfToken)}</td>
+<td>${renderSettingInput(r, props.csrfToken, pickers)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td style="white-space:nowrap">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>

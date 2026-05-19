@@ -188,11 +188,31 @@ export const defaultConfig: ConfigSchema = {
  * `label` is the human-readable name displayed as the primary text for the
  * setting (e.g. "Voice Tracking enabled"). The raw dotted key is shown
  * de-emphasised next to it for technical reference.
+ *
+ * `type` drives input rendering on the Settings page. `boolean` / `number`
+ * / `string` cover the bulk of keys with the obvious HTML controls. The
+ * Discord-specific kinds (`channel`, `category`, `role`, `channel_list`,
+ * `role_list`) render as `<select>` dropdowns populated from the live guild
+ * cache so operators pick from real entities instead of typing IDs by
+ * hand. `cron` currently renders as a text input — issue #444 will replace
+ * it with a friendly schedule picker.
  */
+export type SettingType =
+  | "boolean"
+  | "number"
+  | "string"
+  | "cron"
+  | "channel"
+  | "category"
+  | "role"
+  | "channel_list"
+  | "role_list";
+
 export interface SettingMetadata {
   label: string;
   description: string;
   category: string;
+  type: SettingType;
 }
 
 /**
@@ -281,57 +301,67 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Voice Channel Management enabled",
     description: "Enable voice channel management.",
     category: "voicechannels",
+    type: "boolean",
   },
   "voicechannels.category.name": {
     label: "Managed category name",
     description:
       "Name of the Discord category that contains managed voice channels.",
     category: "voicechannels",
+    type: "string",
   },
   "voicechannels.lobby.name": {
     label: "Lobby channel display name",
     description:
       "Display name of the lobby channel users join to spawn a personal channel. Cosmetic; the bot sets this on the managed channel rather than looking it up by name.",
     category: "voicechannels",
+    type: "string",
   },
   "voicechannels.lobby.offlinename": {
     label: "Lobby display name (bot offline)",
     description:
       "Display name shown on the lobby channel while the bot is offline. Cosmetic.",
     category: "voicechannels",
+    type: "string",
   },
   "voicechannels.channel.prefix": {
     label: "Per-user channel name prefix",
     description: "Prefix prepended to dynamically created voice channel names.",
     category: "voicechannels",
+    type: "string",
   },
   "voicechannels.channel.suffix": {
     label: "Per-user channel name suffix",
     description: "Suffix appended to dynamically created voice channel names.",
     category: "voicechannels",
+    type: "string",
   },
   "voicechannels.controlpanel.enabled": {
     label: "In-channel control panel enabled",
     description:
       "Show the in-channel control panel (rename / privacy / live / transfer).",
     category: "voicechannels",
+    type: "boolean",
   },
   "voicechannels.ownership.grace_period_seconds": {
     label: "Ownership transfer grace period (seconds)",
     description:
       "Seconds to wait before transferring ownership when the channel owner leaves.",
     category: "voicechannels",
+    type: "number",
   },
   "voicechannels.presets.enabled": {
     label: "Per-user channel presets enabled",
     description:
       "Enable per-user channel presets (saved channel name + privacy).",
     category: "voicechannels",
+    type: "boolean",
   },
   "voicechannels.presets.max_per_user": {
     label: "Max presets per user",
     description: "Maximum number of presets a user can save.",
     category: "voicechannels",
+    type: "number",
   },
 
   // Voice Activity Tracking
@@ -339,43 +369,51 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Voice Tracking enabled",
     description: "Enable voice activity tracking and the /voicestats command.",
     category: "voicetracking",
+    type: "boolean",
   },
   "voicetracking.stats.top.enabled": {
     label: "/voicestats top subcommand enabled",
     description: "Enable the /voicestats top leaderboard subcommand.",
     category: "voicetracking",
+    type: "boolean",
   },
   "voicetracking.stats.user.enabled": {
     label: "/voicestats user subcommand enabled",
     description: "Enable the /voicestats user personal-stats subcommand.",
     category: "voicetracking",
+    type: "boolean",
   },
   "voicetracking.seen.enabled": {
     label: "/seen command enabled",
     description: "Enable last-seen tracking and the /seen command.",
     category: "voicetracking",
+    type: "boolean",
   },
   "voicetracking.excluded_channels": {
     label: "Excluded channel IDs",
     description:
       "Comma-separated channel IDs to exclude from voice activity tracking.",
     category: "voicetracking",
+    type: "channel_list",
   },
   "voicetracking.announcements.enabled": {
     label: "Scheduled voice-stats announcements enabled",
     description: "Enable scheduled voice-stats announcements.",
     category: "voicetracking",
+    type: "boolean",
   },
   "voicetracking.announcements.schedule": {
     label: "Announcement schedule (cron)",
     description: "Cron schedule for the recurring voice-stats announcement.",
     category: "voicetracking",
+    type: "cron",
   },
   "voicetracking.announcements.channel_id": {
     label: "Announcement channel",
     description:
       "Discord channel ID where voice-stats announcements are posted.",
     category: "voicetracking",
+    type: "channel",
   },
 
   // Voice Channel Cleanup (dbtrunk)
@@ -383,27 +421,32 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Scheduled DB cleanup enabled",
     description: "Enable scheduled database cleanup of voice tracking data.",
     category: "voicetracking",
+    type: "boolean",
   },
   "voicetracking.cleanup.schedule": {
     label: "Cleanup schedule (cron)",
     description: "Cron schedule for the database cleanup job.",
     category: "voicetracking",
+    type: "cron",
   },
   "voicetracking.cleanup.retention.detailed_sessions_days": {
     label: "Detailed-session retention (days)",
     description:
       "Days to keep detailed session rows before they are summarised away.",
     category: "voicetracking",
+    type: "number",
   },
   "voicetracking.cleanup.retention.monthly_summaries_months": {
     label: "Monthly-summary retention (months)",
     description: "Months to keep monthly summary rows.",
     category: "voicetracking",
+    type: "number",
   },
   "voicetracking.cleanup.retention.yearly_summaries_years": {
     label: "Yearly-summary retention (years)",
     description: "Years to keep yearly summary rows.",
     category: "voicetracking",
+    type: "number",
   },
 
   // Individual Features
@@ -411,6 +454,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "/ping command enabled",
     description: "Enable the /ping latency check command.",
     category: "ping",
+    type: "boolean",
   },
 
   // Quote System
@@ -418,49 +462,58 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Quote system enabled",
     description: "Enable the quotes system and the /quote command.",
     category: "quotes",
+    type: "boolean",
   },
   "quotes.channel_id": {
     label: "Quote channel",
     description: "Channel ID where quote messages are posted.",
     category: "quotes",
+    type: "channel",
   },
   "quotes.delete_roles": {
     label: "Roles allowed to delete quotes",
     description:
       "Comma-separated role IDs allowed to delete quotes. Empty means only admins.",
     category: "quotes",
+    type: "role_list",
   },
   "quotes.max_length": {
     label: "Maximum quote length (characters)",
     description: "Maximum length of a single quote in characters.",
     category: "quotes",
+    type: "number",
   },
   "quotes.cooldown": {
     label: "Cooldown between quotes (seconds)",
     description: "Cooldown in seconds between quote additions per user.",
     category: "quotes",
+    type: "number",
   },
   "quotes.cleanup_interval": {
     label: "Channel cleanup interval (minutes)",
     description:
       "Interval in minutes between sweeps for unauthorised messages in the quote channel.",
     category: "quotes",
+    type: "number",
   },
   "quotes.header_enabled": {
     label: "Pinned header post enabled",
     description:
       "Post and maintain a pinned informational header in the quote channel.",
     category: "quotes",
+    type: "boolean",
   },
   "quotes.header_message_id": {
     label: "Header message ID (auto-managed)",
     description: "Auto-managed message ID of the quote channel header post.",
     category: "quotes",
+    type: "string",
   },
   "quotes.header_pin_enabled": {
     label: "Pin header post",
     description: "Pin the header post in the quote channel.",
     category: "quotes",
+    type: "boolean",
   },
 
   // Core Bot Logging (Discord)
@@ -468,6 +521,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Cleanup-job notifications channel",
     description: "Channel ID for cleanup-job notifications.",
     category: "core",
+    type: "channel",
   },
 
   // Rate Limiting
@@ -475,21 +529,25 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Rate limiting enabled",
     description: "Enable per-user command rate limiting.",
     category: "ratelimit",
+    type: "boolean",
   },
   "ratelimit.max_commands": {
     label: "Max commands per window",
     description: "Maximum number of commands a user can run per time window.",
     category: "ratelimit",
+    type: "number",
   },
   "ratelimit.window_seconds": {
     label: "Rate-limit window (seconds)",
     description: "Length of the rate-limit time window in seconds.",
     category: "ratelimit",
+    type: "number",
   },
   "ratelimit.bypass_admin": {
     label: "Admins bypass rate limit",
     description: "Allow administrators to bypass rate limiting.",
     category: "ratelimit",
+    type: "boolean",
   },
 
   // Scheduled Announcements
@@ -497,6 +555,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Scheduled announcements enabled",
     description: "Enable scheduled announcements and the /announce command.",
     category: "announcements",
+    type: "boolean",
   },
 
   // Achievements
@@ -504,16 +563,19 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Achievements enabled",
     description: "Enable the achievements / accolades system.",
     category: "achievements",
+    type: "boolean",
   },
   "achievements.announcements.enabled": {
     label: "Channel announcements for earned achievements",
     description: "Announce newly earned achievements in a Discord channel.",
     category: "achievements",
+    type: "boolean",
   },
   "achievements.dm_notifications.enabled": {
     label: "DM notifications for earned achievements",
     description: "DM users when they earn a new achievement.",
     category: "achievements",
+    type: "boolean",
   },
 
   // Reaction Roles
@@ -521,11 +583,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Reaction roles enabled",
     description: "Enable the reaction-role system and the /reactrole command.",
     category: "reactionroles",
+    type: "boolean",
   },
   "reactionroles.message_channel_id": {
     label: "Reaction-role message channel",
     description: "Channel ID where reaction-role messages are posted.",
     category: "reactionroles",
+    type: "channel",
   },
 
   // Setup Wizard
@@ -533,6 +597,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "/setup wizard command enabled",
     description: "Enable the /setup wizard command.",
     category: "wizard",
+    type: "boolean",
   },
 
   // Notices System
@@ -540,33 +605,39 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Notices system enabled",
     description: "Enable the notices system and the /notice command.",
     category: "notices",
+    type: "boolean",
   },
   "notices.channel_id": {
     label: "Notices channel",
     description: "Channel ID where notice messages are posted.",
     category: "notices",
+    type: "channel",
   },
   "notices.cleanup_interval": {
     label: "Channel cleanup interval (minutes)",
     description:
       "Interval in minutes between sweeps for unauthorised messages in the notices channel.",
     category: "notices",
+    type: "number",
   },
   "notices.header_enabled": {
     label: "Pinned header post enabled",
     description:
       "Post and maintain a pinned informational header in the notices channel.",
     category: "notices",
+    type: "boolean",
   },
   "notices.header_message_id": {
     label: "Header message ID (auto-managed)",
     description: "Auto-managed message ID of the notices channel header post.",
     category: "notices",
+    type: "string",
   },
   "notices.header_pin_enabled": {
     label: "Pin header post",
     description: "Pin the header post in the notices channel.",
     category: "notices",
+    type: "boolean",
   },
 
   // Poll System
@@ -574,17 +645,20 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Polls system enabled",
     description: "Enable the poll system and the /poll command.",
     category: "polls",
+    type: "boolean",
   },
   "polls.default_duration_hours": {
     label: "Default poll duration (hours)",
     description: "Default poll duration in hours (1–768).",
     category: "polls",
+    type: "number",
   },
   "polls.cooldown_days": {
     label: "Reuse cooldown (days)",
     description:
       "Minimum days before a question from the library can be reused.",
     category: "polls",
+    type: "number",
   },
 
   // Leaderboard Role Rewards
@@ -593,29 +667,34 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "Auto-assign Discord roles to users based on their voice-leaderboard position.",
     category: "leaderboard_roles",
+    type: "boolean",
   },
   "leaderboard_roles.period": {
     label: "Leaderboard period",
     description:
       'Leaderboard period to evaluate: "week", "month", or "alltime".',
     category: "leaderboard_roles",
+    type: "string",
   },
   "leaderboard_roles.update_cron": {
     label: "Recalculation schedule (cron)",
     description:
       "Cron schedule for recalculating leaderboard role assignments.",
     category: "leaderboard_roles",
+    type: "cron",
   },
   "leaderboard_roles.tiers": {
     label: "Tier definitions",
     description:
       'Comma-separated "topN:roleId" pairs (e.g. "1:111,3:222,10:333"). Each tier independently assigns the role to users whose rank is ≤ N. Admins pick any positions; nothing is hardcoded.',
     category: "leaderboard_roles",
+    type: "string",
   },
   "leaderboard_roles.announcement_channel_id": {
     label: "Role-change announcements channel",
     description:
       "Optional channel ID where role-change announcements are posted. Leave empty to disable announcements.",
     category: "leaderboard_roles",
+    type: "channel",
   },
 };

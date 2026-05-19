@@ -233,6 +233,16 @@ export function coerceConfigValue(
     if (!Number.isFinite(n)) return { ok: false, reason: "invalid number" };
     return { ok: true, value: n };
   }
+  // Multi-select dropdowns (channel_list / role_list types) post the
+  // `value` field as an array of selected IDs. Collapse to the
+  // comma-separated string format the backend stores. Single-string keys
+  // never see arrays here so this branch is safe for both shapes.
+  if (Array.isArray(raw)) {
+    const csv = raw
+      .filter((v): v is string => typeof v === "string" && v !== "")
+      .join(",");
+    return { ok: true, value: csv };
+  }
   return { ok: true, value: String(raw ?? "") };
 }
 
