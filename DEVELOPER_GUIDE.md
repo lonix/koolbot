@@ -5,6 +5,8 @@ Complete guide for developers extending or maintaining KoolBot.
 ## Table of Contents
 
 - [Architecture Overview](#architecture-overview)
+- [The `src/web/` Web UI](#the-srcweb-web-ui)
+- [The "thin HTTP layer over services" goal](#the-thin-http-layer-over-services-goal)
 - [Common Patterns](#common-patterns)
   - [Bot-Controlled Channel Header Posts](#bot-controlled-channel-header-posts)
   - [Service Singleton Pattern](#service-singleton-pattern)
@@ -21,9 +23,28 @@ KoolBot follows a service-oriented architecture where each service owns a specif
 
 ```text
 src/
-├── index.ts              # Entry point, service initialization
-├── commands/             # Discord slash commands
-├── services/             # Business logic services
+├── index.ts              # Entry point, service initialization, Express bootstrap
+├── commands/             # Discord slash commands (small surface from v1.0)
+│   ├── achievements.ts
+│   ├── amikool.ts
+│   ├── config.ts         # Web UI launcher (the only admin command)
+│   ├── help.ts
+│   ├── ping.ts
+│   ├── quote.ts
+│   ├── seen.ts
+│   └── voicestats.ts
+├── services/             # Business logic services (single source of truth)
+├── web/                  # Web UI router — mounted at /admin when WEBUI_ENABLED=true
+│   ├── index.ts          # createWebRouter(client) — composes the router
+│   ├── session.ts        # Cookie session middleware + permission revalidation
+│   ├── csrf.ts           # CSRF (double-submit cookie)
+│   ├── cookies.ts        # Signed cookie helpers
+│   ├── rate-limit.ts     # In-memory rate limiter
+│   ├── read-only-routes.ts  # Dashboard, Bootstrap, Settings, etc. (GET)
+│   ├── write-routes.ts   # POST handlers (settings, permissions, wizard, etc.)
+│   ├── admin-layout.ts   # Shared layout + escapeHtml/escapeJsInAttr helpers
+│   ├── admin-views.ts    # Page renderers for the admin pages
+│   └── views.ts          # Sign-in / sign-out / invalid-link views
 ├── models/               # MongoDB schemas
 ├── handlers/             # Event handlers
 └── utils/                # Shared utilities
@@ -38,6 +59,8 @@ Services follow the **Singleton Pattern** and are initialized in `src/index.ts`:
 ConfigService
 CommandManager
 VoiceChannelManager
+WebSessionService          // magic-link tokens, used by /config and /admin/s/<token>
+PermissionsService         // re-checked on every /admin/* request
 ```
 
 - **ConfigService**: Configuration management with MongoDB persistence
@@ -45,6 +68,135 @@ VoiceChannelManager
 - **VoiceChannelManager**: Dynamic voice channel lifecycle
 - **QuoteChannelManager**: Quote channel management and permissions
 - **DiscordLogger**: Logging to Discord channels
+- **WebSessionService**: Magic-link issuance, redemption, revocation
+- **PermissionsService**: Per-command role gating (admins always bypass)
+
+---
+
+## The `src/web/` Web UI
+
+The Web UI is the only admin surface from v1.0 onward. It mounts on the
+**same Express server** that already exposes `/health` (port 3000 inside
+the container). When `WEBUI_ENABLED=true` and the required `WEBUI_*` env
+vars are set, `src/index.ts` calls `createWebRouter(client)` and
+`app.use("/admin", router)`. When `WEBUI_ENABLED` is false, the router
+is never created and `/admin/*` returns 404.
+
+### Auth flow
+
+1. `/config` Discord slash command → `WebSessionService.create(uid, gid)`
+   inserts a `WebSession` row (token hashed with HMAC-SHA256 over
+   `WEBUI_SESSION_SECRET`) and DMs the URL.
+2. Browser hits `GET /admin/s/<token>` → `WebSessionService.redeem()`
+   atomically `findOneAndUpdate({usedAt: null, ...}, {usedAt: now})`,
+   the route sets a signed session cookie and redirects to `/admin/`.
+3. Every subsequent request runs `createSessionMiddleware(client)` which:
+   - Verifies the HMAC-signed cookie
+   - Enforces the sliding inactivity window
+   - Re-fetches the `WebSession` row to enforce server-side revocation
+   - Hard-caps the session at `expiresAt`
+   - **Re-checks `PermissionsService.checkCommandPermission(uid, gid, "config")`.**
+     This returns `false` (and the middleware logs the user out) only
+     when explicit role gating is configured for `config` on the Web UI's
+     Permissions page and the user's roles no longer match. With no
+     explicit gating, the check returns `true` and a demoted admin keeps
+     their existing session — the magic-link gate at `/admin/s/<token>`
+     is the primary defense, not this revalidation. If you want demotions
+     to log existing sessions out, configure Permissions → `config` to
+     an admin-only role.
+4. `POST /admin/finish` revokes the session in MongoDB, clears the cookie.
+
+The cookie value carries `sid`, `uid`, `gid`, `iat`, `act` — all
+validated against the DB row on every request. Holding only the cookie
+isn't enough; the DB row has to also be unrevoked, unexpired, and match.
+
+### CSRF
+
+All state-changing routes (POSTs in `write-routes.ts`) use the
+double-submit cookie pattern via `csrf.ts`. The `ensureCsrfCookie`
+middleware sets a `koolbot_csrf` cookie on every request; `requireCsrf`
+checks that the form's hidden `_csrf` field matches.
+
+### Rate limiting
+
+`createRateLimiter({ windowMs, max, keyName })` is keyed by `req.ip`.
+The `/admin/s/<token>` redemption endpoint is rate-limited to 10
+attempts per minute per IP; `/admin/finish` to 30. To make this work
+behind a reverse proxy, operators set `WEBUI_TRUST_PROXY` to the hop
+count.
+
+### Views
+
+Pages are server-rendered HTML strings composed in `admin-views.ts` and
+wrapped by `renderAdminPage` from `admin-layout.ts`. There is no SPA, no
+JS bundle, no CDN. All values are escaped through `escapeHtml` /
+`escapeJsInAttr` at the boundary.
+
+The always-visible **session expires in X · [Finish]** banner is part of
+the shared layout and reads `WebSessionContext.expiresAt` to render the
+remaining time.
+
+---
+
+## The "thin HTTP layer over services" goal
+
+The goal — not yet fully reached in the existing code — is to keep
+`src/web/` as a thin HTTP layer over `src/services/`:
+
+> **Push validation, side effects, and data writes into services.
+> Routes should mostly read form fields, call a service method, and
+> render the result.**
+
+Current state of the code:
+
+- `src/web/write-routes.ts` still owns some input coercion
+  (`coerceConfigValue`, `normalizeCron`, `validCron`) and reads/writes
+  to Mongoose models directly. Same for `read-only-routes.ts`, which
+  imports several models for page data.
+- These are *not* prohibited today, but new write paths should prefer
+  pushing logic into a service so the slash-command surface and the
+  Web UI surface share one validation path. If you're tempted to add a
+  `if (input.length > 200)` check inside a write-route handler, add it
+  to the service instead.
+
+The reason: when both surfaces share one validation path, a setting
+accepted in one place can never be silently rejected in the other.
+
+### Adding a write route
+
+`createWebRouter` mounts the router at `/admin`, so routes declared
+inside `write-routes.ts` use **relative** paths — Express composes the
+final `/admin/<your-path>` URL for you.
+
+```typescript
+// src/web/write-routes.ts (example)
+router.post(
+  "/myfeature/save",            // becomes /admin/myfeature/save
+  requireCsrf,
+  requireSession,
+  async (req: AuthenticatedRequest, res: Response) => {
+    const { name, value } = req.body;
+    try {
+      await MyFeatureService.getInstance().updateThing(name, value);
+      res.redirect(303, "/admin/myfeature");
+    } catch (err) {
+      // Translate service errors → HTTP. Do not validate here.
+      if (err instanceof ValidationError) {
+        res.status(400).type("text/html").send(renderError(err.message));
+        return;
+      }
+      throw err;
+    }
+  },
+);
+```
+
+Service methods own:
+
+- Input validation (throw a typed error on bad input)
+- Authorization decisions beyond the basic "has a valid session"
+- Persistence (MongoDB writes)
+- Side effects (Discord API calls, cron job changes, log emission)
 
 ---
 
@@ -313,18 +465,14 @@ const embed = new EmbedBuilder()
 
 #### Configuration Examples
 
-Users can manage headers via Discord commands:
+Users can manage headers from the Web UI's Settings page:
 
-```bash
-# Disable header
-/config set key:feature.header_enabled value:false
-/config reload
+- `feature.header_enabled` → `false` to disable the header entirely.
+- `feature.header_enabled` → `true` and `feature.header_pin_enabled` →
+  `false` to keep the header but stop pinning it.
 
-# Enable without pinning
-/config set key:feature.header_enabled value:true
-/config set key:feature.header_pin_enabled value:false
-/config reload
-```
+(No command reload required — these are pure config flags read by the
+service on its next pass.)
 
 #### Testing
 
@@ -401,7 +549,39 @@ await myService.initialize();
 
 ### Configuration Management
 
-Configuration uses a two-tier system: environment variables for secrets, MongoDB for runtime config.
+Configuration uses a two-tier system:
+
+| Tier                | Stored in | Who edits it          | Picked up                                                  |
+| ------------------- | --------- | --------------------- | ---------------------------------------------------------- |
+| Bootstrap / secrets | `.env`    | Operator (host shell) | Process restart                                            |
+| Feature settings    | MongoDB   | Admin via Web UI      | Saved immediately to the `ConfigService` cache (see below) |
+
+Some services (cron-driven schedules, channel managers) cache derived
+state that does not refresh automatically when their config changes —
+those have a per-page reload button on the Web UI. Plain feature
+toggles take effect on the next read.
+
+**Rule:** if a value is read at startup (Discord token, Mongo URI,
+`WEBUI_*` secrets), it goes in `.env`. Anything else lives in MongoDB
+and is edited through the Web UI's Settings page.
+
+`process.env` is read at boot by a known set of modules — `src/index.ts`,
+`src/web/index.ts`, `src/web/session.ts`, `src/web/csrf.ts`,
+`src/web/admin-layout.ts`, `src/web/read-only-routes.ts` (bootstrap
+page), `src/services/config-service.ts` (for the env→bootstrap-key
+mappings), `src/services/web-session-service.ts`,
+`src/services/discord-logger.ts`, `src/services/startup-migrator.ts`,
+and `src/utils/logger.ts`. New service code should prefer reading
+through `ConfigService` so the same lookup path serves both surfaces;
+add new direct `process.env` reads only when the value is genuinely a
+startup-only secret.
+
+The protected-keys list lives at the top of `src/web/write-routes.ts`
+(`PROTECTED_KEYS`). It is hand-maintained — when you add a new
+**bootstrap** env var (something whose value should never round-trip
+through YAML import/export), add it to that set so imports can't
+overwrite it. Operational tuning vars like `WEBUI_TRUST_PROXY` don't
+need to be there since they aren't represented as DB-backed keys.
 
 #### Adding New Config Keys
 
@@ -419,7 +599,7 @@ export const defaultConfig: ConfigSchema = {
 };
 ```
 
-**Step 2**: Access in code:
+**Step 2**: Access in code (only inside a service):
 
 ```typescript
 const enabled = await configService.getBoolean("myfeature.enabled", false);
@@ -428,12 +608,21 @@ const setting = await configService.getString("myfeature.setting", "default");
 
 **Step 3**: Document in `SETTINGS.md`.
 
+**Step 4**: If the setting needs to appear on the Setup Wizard, add it to
+`WIZARD_FEATURE_SETTINGS` in `src/web/write-routes.ts`. The Settings page
+discovers settings from `defaultConfig` automatically.
+
 #### Configuration Best Practices
 
 - Use dot notation: `feature.subsetting`
 - Group by domain: `voicechannels.*`, `quotes.*`, etc.
 - Always provide defaults
-- Never access `process.env` directly (except in config service)
+- **Prefer `ConfigService` for runtime feature settings.** Direct
+  `process.env` reads are expected at boot in `src/index.ts`,
+  `src/web/`, and a small allowlist of services (see the
+  "Configuration Management" section above for the current list). New
+  runtime feature code should go through `ConfigService` so the slash
+  command and Web UI surfaces see the same value.
 - Use appropriate type methods: `getBoolean()`, `getString()`, `getNumber()`
 
 ---
@@ -463,10 +652,18 @@ const setting = await configService.getString("myfeature.setting", "default");
    - [ ] Test manually in Discord
    - [ ] Verify edge cases
 
-5. **Documentation**
-   - [ ] Update `COMMANDS.md`
-   - [ ] Update `SETTINGS.md`
-   - [ ] Add to `DEVELOPER_GUIDE.md`
+5. **Web UI surface** (if applicable)
+   - [ ] Add a read-only view in `src/web/read-only-routes.ts` / `admin-views.ts`
+   - [ ] Add write handlers in `src/web/write-routes.ts` (CSRF + session required)
+   - [ ] Link the page from `NAV_ITEMS` in `admin-layout.ts`
+   - [ ] Routes stay thin — no business logic outside services
+
+6. **Documentation**
+   - [ ] Update `COMMANDS.md` (only if there's a user-facing slash command — admin commands now live in the Web UI)
+   - [ ] Update `SETTINGS.md` with new DB-backed keys
+   - [ ] Update `WEBUI.md` if you added a new page or env var
+   - [ ] Update `.env.example` if you added a bootstrap env var
+   - [ ] Add to `DEVELOPER_GUIDE.md` if you established a reusable pattern
    - [ ] Update `DOCS_SUMMARY.md`
 
 ---
@@ -582,10 +779,11 @@ try {
 
 ## Additional Resources
 
-- [CONTRIBUTING.md](./CONTRIBUTING.md) - Contribution guidelines
-- [SETTINGS.md](./SETTINGS.md) - Configuration reference
-- [COMMANDS.md](./COMMANDS.md) - Command documentation
-- [TESTING.md](./TESTING.md) - Testing documentation
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — Contribution guidelines
+- [WEBUI.md](./WEBUI.md) — Web UI setup, magic-link flow, reverse-proxy guidance
+- [SETTINGS.md](./SETTINGS.md) — Configuration reference
+- [COMMANDS.md](./COMMANDS.md) — Command documentation
+- [TESTING.md](./TESTING.md) — Testing documentation
 
 ---
 

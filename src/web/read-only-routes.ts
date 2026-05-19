@@ -79,6 +79,7 @@ const BOOTSTRAP_VARS: BootstrapEnvVar[] = [
     category: "WebUI",
     isSecret: false,
   },
+  { key: "WEBUI_TRUST_PROXY", category: "WebUI", isSecret: false },
 ];
 
 function deriveCategory(key: string): string {

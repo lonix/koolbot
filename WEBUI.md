@@ -1,0 +1,697 @@
+# KoolBot Web UI
+
+The Web UI is the **only** admin surface for KoolBot from v1.0 onward.
+Everything that used to live behind `/config set`, `/permissions`, `/setup`,
+`/announce`, `/poll`, `/reactrole`, `/notice`, `/dbtrunk`, `/vc`, and
+`/botstats` is now reached by running a single Discord slash command,
+`/config`, which DMs you a one-time sign-in link.
+
+This document explains how to enable it, expose it, and operate it.
+
+---
+
+## 📋 Table of Contents
+
+- [TL;DR](#tldr)
+- [How the magic-link flow works](#how-the-magic-link-flow-works)
+- [Configuration boundary: env vs. database](#configuration-boundary-env-vs-database)
+- [Bootstrap environment variables](#bootstrap-environment-variables)
+- [Enabling the Web UI](#enabling-the-web-ui)
+- [Docker Compose recipes](#docker-compose-recipes)
+- [Reverse-proxy guidance](#reverse-proxy-guidance)
+- [Public-internet exposure](#public-internet-exposure)
+- [DM-closed fallback](#dm-closed-fallback)
+- [Session lifecycle and revocation](#session-lifecycle-and-revocation)
+- [What the Web UI lets you do](#what-the-web-ui-lets-you-do)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## TL;DR
+
+1. Set `WEBUI_ENABLED=true` plus the four other `WEBUI_*` bootstrap env vars
+   in `.env` (see [Bootstrap environment variables](#bootstrap-environment-variables)).
+2. Publish or reverse-proxy port `3000` so the URL in `WEBUI_BASE_URL`
+   actually reaches the container.
+3. Restart the bot.
+4. In Discord, run `/config`. The bot DMs you a single-use link.
+5. Click the link, configure the bot, click **Finish** when you're done.
+
+The Web UI mounts on the **same Express server** that already serves
+`/health` (port `3000` inside the container) — no new container, no new
+port to learn. It is dark unless `WEBUI_ENABLED=true`.
+
+---
+
+## How the magic-link flow works
+
+```text
+┌──────────┐                ┌──────────┐               ┌──────────┐
+│  Admin   │ /config        │  KoolBot │ create        │ MongoDB  │
+│ (Discord)│ ─────────────► │ (bot)    │ ────────────► │ (session)│
+└──────────┘                └──────────┘               └──────────┘
+                                 │
+                                 │ DM single-use URL
+                                 ▼
+                            ┌──────────┐
+                            │   Admin  │
+                            │ (DM)     │
+                            └──────────┘
+                                 │
+                                 │ open link in browser
+                                 ▼
+                            ┌──────────────────┐
+                            │ GET /admin/s/    │
+                            │ - validate token │
+                            │ - mark used      │
+                            │ - issue cookie   │
+                            │ - 302 → /admin/  │
+                            └──────────────────┘
+                                 │
+                                 │ authenticated by signed cookie
+                                 ▼
+                            ┌──────────────────┐
+                            │ /admin/* pages   │
+                            │ permissions re-  │
+                            │ checked each req │
+                            └──────────────────┘
+                                 │
+                                 ├─ click "Finish" or re-run /config
+                                 │  → session revoked server-side,
+                                 │    cookie cleared, /admin/* → 401
+                                 │
+                                 └─ idle past the inactivity window,
+                                    or reach the hard expiresAt
+                                    → cookie rejected on the next request;
+                                      the DB row stays until TTL or
+                                      explicit revoke
+```
+
+Key properties:
+
+- **Single-use.** Each link is bound to one Discord user ID and one token
+  hash. Redeeming it marks `usedAt` server-side. A second click 404s.
+- **Short TTL.** Default `WEBUI_SESSION_TTL_MINUTES=10`. Tokens expire
+  whether or not they're used.
+- **Sliding inactivity.** Once redeemed, the cookie has a sliding
+  inactivity window (default `WEBUI_INACTIVITY_TIMEOUT_MINUTES=30`)
+  hard-capped at the session's server-side `expiresAt`.
+- **Re-issuing kills the prior session.** Running `/config` again revokes
+  all of *your* unrevoked sessions and mints a new one. Other admins'
+  sessions are untouched.
+- **Permissions re-checked every request.** The cookie-session middleware
+  re-runs `PermissionsService.checkCommandPermission(uid, gid, "config")`
+  on every hit. That check returns `false` (and the middleware logs the
+  user out) when the user has lost Administrator **and** the bot's
+  Permissions page has explicit role gating configured for `config` that
+  no longer matches the user's roles. With no explicit gating configured,
+  a re-check after demotion still passes — the magic-link gate at
+  `/admin/s/<token>` is the primary defense, not this revalidation.
+- **No persistent OAuth.** The bot is the trust anchor. If you can run
+  `/config` in Discord, you can configure the bot — no separate login.
+
+---
+
+## Configuration boundary: env vs. database
+
+KoolBot has a hard rule: **bootstrap settings live in `.env`, everything
+else lives in MongoDB and is edited via the Web UI.**
+
+| Setting tier         | Where it lives | How it's edited                                  | Picked up                  |
+| -------------------- | -------------- | ------------------------------------------------ | -------------------------- |
+| Bootstrap / secrets  | `.env`         | Edit the file on the host                        | Bot restart                |
+| Feature config       | MongoDB        | Web UI **Settings**, **Permissions**, etc.       | Saved immediately (note ↓) |
+| Discord command list | MongoDB        | Web UI Settings → **Reload commands to Discord** | Click the button           |
+
+> ↓ Plain feature toggles take effect on the next read. Cron-scheduled
+> services (announcements, polls, cleanup) and channel managers cache
+> derived state and need a manual reload via their per-page button to
+> fully apply.
+
+The Web UI's **Bootstrap** page surfaces every `.env` value the bot
+reads (see `BOOTSTRAP_VARS` in `src/web/read-only-routes.ts`),
+read-only, with secrets masked (last 4 characters only). You can verify
+what the process saw at startup, but you cannot change it from the
+browser.
+
+YAML import/export covers the MongoDB tier only. Imports apply
+**per-key**: the protected-keys list (`PROTECTED_KEYS` in
+`src/web/write-routes.ts`) flags any row that targets a bootstrap key
+as `rejected: protected key`, but other valid rows in the same file
+still apply. The result page shows per-key outcomes plus a top-level
+`ok` / `partial` / `failed` status — a mixed YAML produces a partial
+import, not an atomic failure.
+
+---
+
+## Bootstrap environment variables
+
+These are read at startup and never edited from the Web UI. Change them
+by editing `.env` and restarting the container.
+
+### Required for the bot itself
+
+| Variable        | Required | Example                                  |
+| --------------- | -------- | ---------------------------------------- |
+| `DISCORD_TOKEN` | yes      | `MTIzNDU2Nzg5MDEy...`                    |
+| `CLIENT_ID`     | yes      | `1234567890123456789`                    |
+| `GUILD_ID`      | yes      | `9876543210987654321`                    |
+| `MONGODB_URI`   | yes      | `mongodb://mongodb:27017/koolbot`        |
+| `NODE_ENV`      | no       | `production` (default) / `development`   |
+| `DEBUG`         | no       | `false` (default) / `true`               |
+
+### Required when the Web UI is enabled
+
+| Variable                            | Required          | Default | Notes                                                                                            |
+| ----------------------------------- | ----------------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `WEBUI_ENABLED`                     | yes (to turn on)  | `false` | `true` mounts `/admin/*`; anything else leaves it 404.                                           |
+| `WEBUI_BASE_URL`                    | yes when enabled  | —       | Public URL the DM'd link points at, e.g. `https://bot.example.com`. No trailing slash needed.    |
+| `WEBUI_SESSION_SECRET`              | yes when enabled  | —       | HMAC key for token hashes and signed cookies. Use 32+ random bytes (`openssl rand -base64 32`).  |
+| `WEBUI_SESSION_TTL_MINUTES`         | no                | `10`    | TTL of the DM'd link from issuance.                                                              |
+| `WEBUI_INACTIVITY_TIMEOUT_MINUTES`  | no                | `30`    | Sliding cookie window after redemption.                                                          |
+| `WEBUI_TRUST_PROXY`                 | no                | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.     |
+
+> ⚠️ **Treat `WEBUI_SESSION_SECRET` like `DISCORD_TOKEN`.** Anyone who
+> can read it can forge sign-in cookies. Rotating it invalidates every
+> existing session and outstanding magic link.
+
+Generate a strong secret:
+
+```bash
+openssl rand -base64 32
+```
+
+---
+
+## Enabling the Web UI
+
+### 1. Set the env vars
+
+Append to `.env`:
+
+```env
+WEBUI_ENABLED=true
+WEBUI_BASE_URL=https://bot.example.com
+WEBUI_SESSION_SECRET=replace-with-openssl-rand-base64-32-output
+# Optional tuning
+WEBUI_SESSION_TTL_MINUTES=10
+WEBUI_INACTIVITY_TIMEOUT_MINUTES=30
+```
+
+If you don't have a real domain yet and just want to try it locally:
+
+```env
+WEBUI_ENABLED=true
+WEBUI_BASE_URL=http://localhost:3000
+WEBUI_SESSION_SECRET=replace-with-openssl-rand-base64-32-output
+```
+
+### 2. Make port 3000 reachable
+
+Pick **one** of:
+
+- **Publish the port directly** (simplest, but no HTTPS — this is what
+  the shipped compose does). See the
+  [Direct port publish (the shipped default)](#direct-port-publish-the-shipped-default)
+  recipe below.
+- **Reverse-proxy it** (recommended for any deployment users will visit
+  from a real browser). See [Reverse-proxy guidance](#reverse-proxy-guidance).
+- **Tunnel it** (Tailscale, WireGuard, Cloudflare Tunnel, etc.). Same
+  config as the reverse-proxy case — set `WEBUI_BASE_URL` to the URL
+  your tunnel exposes.
+
+### 3. Restart and verify
+
+```bash
+docker compose up -d --force-recreate
+docker compose logs -f bot | grep -i webui
+```
+
+Look for:
+
+```text
+WebUI mounted at /admin
+```
+
+If you see `WEBUI_ENABLED=true but missing required env vars: ...`, the
+bot started without the Web UI mounted — fix the env vars and restart.
+
+### 4. Run `/config`
+
+Run `/config` in Discord. The bot replies ephemerally:
+
+> ✅ I've DMed you a single-use sign-in link. Check your direct messages.
+
+Open the DM, click the link, and you're in.
+
+---
+
+## Docker Compose recipes
+
+The production `docker-compose.yml` shipped in the repo **publishes
+port 3000 by default** so the quick-start magic link is reachable on
+`http://your-host:3000` out of the box. That's the right default for a
+local or LAN install but it has no HTTPS — for anything reachable from
+the public internet, swap the direct publish for a reverse proxy. The
+recipes below are starting points; pick one and drop it into your own
+`docker-compose.yml`.
+
+### Direct port publish (the shipped default)
+
+The simplest setup, and what the repo's `docker-compose.yml` does
+already. The bot listens on port `3000`; you map it to the host.
+
+```yaml
+services:
+  bot:
+    image: ghcr.io/lonix/koolbot:latest
+    container_name: koolbot
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - mongodb
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    ports:
+      - "3000:3000"   # /health and /admin (when WEBUI_ENABLED=true)
+
+  mongodb:
+    image: mongo:latest
+    container_name: koolbot-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    # Intentionally no `ports:` — the bot reaches MongoDB over the
+    # internal Docker network. The default mongo image has NO auth, so
+    # do not publish 27017 to a public interface. If you need host
+    # access for mongosh, bind explicitly to loopback:
+    #   ports:
+    #     - "127.0.0.1:27017:27017"
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+
+volumes:
+  mongodb_data:
+```
+
+With this, `WEBUI_BASE_URL=http://your-host:3000`.
+
+⚠️ **No HTTPS — read this before using this recipe in production.**
+
+The Web UI sets the session cookie's `Secure` flag whenever
+`NODE_ENV=production` (see `shouldUseSecureCookies()` in
+`src/web/csrf.ts`). Browsers refuse to send `Secure` cookies over plain
+HTTP, so a production-mode bot reached at `http://your-host:3000`
+**will not maintain a session** — every page click logs you back out.
+
+Pick one:
+
+- Set `NODE_ENV=development` while you accept plain HTTP (the cookie
+  drops the `Secure` flag), **or**
+- Put a reverse proxy in front of the bot and terminate TLS there
+  (recommended — see [Caddy reverse proxy](#caddy-reverse-proxy-recommended)
+  below).
+
+Either way, plain HTTP exposes the magic-link bearer token in transit
+and the session cookie in subsequent requests. Don't run plain HTTP on
+the public internet.
+
+### Bind to localhost only
+
+If you only want to reach the Web UI from the host machine (and SSH-tunnel
+or VPN in), bind to the loopback:
+
+```yaml
+services:
+  bot:
+    # ...other fields...
+    ports:
+      - "127.0.0.1:3000:3000"
+```
+
+`WEBUI_BASE_URL=http://localhost:3000`, then open it locally or via
+`ssh -L 3000:localhost:3000 host`.
+
+### Caddy reverse proxy (recommended)
+
+Caddy gives you HTTPS with a one-line config and a public-domain DNS
+record. The bot stays on a private Docker network and is not directly
+exposed.
+
+```yaml
+services:
+  bot:
+    image: ghcr.io/lonix/koolbot:latest
+    container_name: koolbot
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      - mongodb
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    networks:
+      - koolbot-net
+    # No `ports:` — Caddy is the only public surface.
+
+  mongodb:
+    image: mongo:latest
+    container_name: koolbot-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongodb_data:/data/db
+    stop_grace_period: 30s
+    stop_signal: SIGTERM
+    networks:
+      - koolbot-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: koolbot-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - koolbot-net
+    depends_on:
+      - bot
+
+volumes:
+  mongodb_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  koolbot-net:
+    driver: bridge
+```
+
+`Caddyfile`:
+
+```text
+bot.example.com {
+    encode zstd gzip
+    reverse_proxy bot:3000
+}
+```
+
+In `.env`:
+
+```env
+WEBUI_ENABLED=true
+WEBUI_BASE_URL=https://bot.example.com
+WEBUI_SESSION_SECRET=...
+WEBUI_TRUST_PROXY=1
+```
+
+Caddy provisions the TLS certificate automatically via Let's Encrypt and
+forwards `X-Forwarded-For` to the bot. `WEBUI_TRUST_PROXY=1` tells the
+bot's rate limiter to trust exactly one hop (Caddy) when reading client
+IPs.
+
+⚠️ **Trust-proxy is a footgun if the bot is *also* directly reachable.**
+By default the bot ignores `X-Forwarded-*` headers, so a direct client
+cannot spoof its IP. Setting `WEBUI_TRUST_PROXY=1` flips that: any
+request reaching the bot — including a direct one that bypasses Caddy
+— can now set `X-Forwarded-For` to anything it wants. **Block direct
+access to `bot:3000` from outside the Docker network** (the recipe
+above does this by not declaring a `ports:` on the bot service) before
+trusting forwarded headers.
+
+> **We do not bundle Caddy.** The recipe above is the easy path; your
+> existing nginx, Traefik, or HAProxy works equally well as long as it
+> terminates TLS and forwards `Host` and `X-Forwarded-*` faithfully.
+
+### Tailscale / Cloudflare Tunnel
+
+Set `WEBUI_BASE_URL` to whatever URL your tunnel hands out and *don't*
+publish port `3000` to the public internet. The bot only needs to be
+reachable from the tunnel sidecar's network namespace.
+
+---
+
+## Reverse-proxy guidance
+
+The Web UI is a plain HTTP server. Any reverse proxy works. The
+requirements are:
+
+1. **Terminate TLS at the proxy.** The bot itself does not speak HTTPS.
+2. **Forward `Host`** so URL generation inside the app matches
+   `WEBUI_BASE_URL`. Most proxies do this by default.
+3. **Run the bot with `NODE_ENV=production`.** That's what flips the
+   session cookie's `Secure` flag on (`shouldUseSecureCookies()` in
+   `src/web/csrf.ts`). The bot does not look at `X-Forwarded-Proto` —
+   the decision is `NODE_ENV`-only. You can still forward
+   `X-Forwarded-Proto` for your own logging, it just doesn't affect
+   cookie flagging.
+4. **Set `WEBUI_TRUST_PROXY`** to the hop count of trusted proxies in
+   front of the bot. `1` for "one Caddy/nginx", larger for chained
+   setups. Without this, the bot ignores `X-Forwarded-*` headers
+   entirely; with this, **make sure the bot is not also directly
+   reachable** so attackers can't bypass the proxy and spoof
+   `X-Forwarded-For` against the rate limiter.
+
+The Caddy config above is intentionally minimal. nginx equivalent:
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name bot.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/bot.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/bot.example.com/privkey.pem;
+
+    location / {
+        proxy_pass         http://bot:3000;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Traefik (compose labels):
+
+```yaml
+labels:
+  - "traefik.enable=true"
+  - "traefik.http.routers.koolbot.rule=Host(`bot.example.com`)"
+  - "traefik.http.routers.koolbot.entrypoints=websecure"
+  - "traefik.http.routers.koolbot.tls.certresolver=letsencrypt"
+  - "traefik.http.services.koolbot.loadbalancer.server.port=3000"
+```
+
+---
+
+## Public-internet exposure
+
+Because every `/admin/*` route returns 401 (or 404 for the redemption
+endpoint) without a valid token or cookie, **putting the Web UI on the
+open internet is acceptable** — there is no login form to brute-force.
+
+That said:
+
+- **Always run behind HTTPS.** The session cookie is HMAC-signed but
+  cleartext, and the magic link itself is a bearer token. TLS is
+  non-negotiable on the public internet.
+- **The healthcheck endpoint (`/health`) is unauthenticated.** It is
+  intentionally minimal (returns `OK` or `Service Unavailable`) but it
+  *does* report whether MongoDB and Discord are reachable. Restrict it
+  to your monitoring system if you'd rather not advertise that.
+- **Mind the magic-link TTL.** A leaked link is useless after redemption
+  or expiry, but if the admin who ran `/config` shares the URL before
+  redeeming it, anyone with the URL becomes that admin until the TTL
+  fires. The default 10-minute window is short enough that this rarely
+  bites in practice.
+- **`/admin/s/<token>` is rate-limited** to 10 attempts per minute per
+  IP. Set `WEBUI_TRUST_PROXY` correctly so this rate-limiting actually
+  applies per real client and not per proxy.
+- **No analytics, no third-party assets.** Every page is rendered
+  server-side from `src/web/` with inline CSS. There is no JS bundle to
+  pin or CDN to allowlist.
+
+---
+
+## DM-closed fallback
+
+If you've disabled DMs from server members, the bot can't deliver the
+link via direct message. The current behavior:
+
+1. `/config` first tries to DM you.
+2. On failure, the bot falls back to **posting the link as the ephemeral
+   reply to the slash command itself** — visible only to you, not to
+   other users in the channel.
+3. The reply text is identical to the DM body.
+
+This means an admin with DMs closed can still configure the bot — they
+just see the link inline in Discord instead of in their DM tab. Re-enable
+DMs at any time to switch back to the cleaner experience.
+
+You'll see this warning in the logs whenever the fallback fires:
+
+```text
+Could not DM web sign-in link to <user-id>; falling back to ephemeral reply
+```
+
+---
+
+## Session lifecycle and revocation
+
+| Trigger                            | Effect                                                                                  |
+| ---------------------------------- | --------------------------------------------------------------------------------------- |
+| Run `/config`                      | Revokes all your prior unrevoked sessions server-side; mints new                        |
+| Click DM link                      | Marks token `usedAt`; sets signed session cookie                                        |
+| Idle longer than inactivity window | Cookie is rejected on the next request; the DB row remains until TTL or explicit revoke |
+| Reach session's hard `expiresAt`   | Cookie is rejected on the next request; the DB row is past its TTL                      |
+| Click **Finish** in the UI         | Session revoked server-side; cookie cleared                                             |
+| Admin role removed in Discord      | Next request re-runs the permission check — caveat ↓                                    |
+| Bot restart                        | Sessions survive (stored in MongoDB)                                                    |
+| `WEBUI_SESSION_SECRET` rotated     | All existing sessions and outstanding tokens invalid                                    |
+
+> **Caveat on the "admin role removed" row.** The permission re-check
+> only returns `false` when there's explicit role gating configured for
+> `config` on the Web UI's Permissions page that no longer matches the
+> user's roles. With no explicit gating, the check returns `true` and
+> the session continues. If you want demotions to log existing sessions
+> out, configure Permissions → `config` to an admin-only role, then
+> the role removal will kick the session on the next request.
+
+Two admins can be in the Web UI at the same time. Re-running `/config`
+only invalidates **your own** sessions.
+
+To hard-revoke every session right now without restarting:
+
+```bash
+# Drop just the active sessions; existing rows have revokedAt set.
+docker compose exec mongodb mongosh koolbot --eval '
+  db.websessions.updateMany(
+    { revokedAt: null },
+    { $set: { revokedAt: new Date() } }
+  )
+'
+```
+
+Or rotate `WEBUI_SESSION_SECRET` in `.env` and restart — that
+invalidates every signed cookie and every outstanding magic link as a
+side effect, since the HMAC key changes.
+
+---
+
+## What the Web UI lets you do
+
+| Page               | Replaces                                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------------------- |
+| **Dashboard**      | `/botstats`                                                                                         |
+| **Settings**       | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload`                                 |
+| **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
+| **Setup Wizard**   | `/setup wizard`                                                                                     |
+| **Announcements**  | `/announce create`, `list`, `delete`                                                                |
+| **Polls**          | `/poll create`, `list`, `add-item`, `import-url`, `delete`, `delete-item`, `test`, `list-items`     |
+| **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
+| **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
+| **Voice Channels** | `/vc reload`, `/vc force-reload`                                                                    |
+| **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
+| **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
+
+User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
+`/achievements`, `/amikool`, `/help`) are **not** affected and stay in
+Discord exactly as before. The per-voice-channel control panel (rename,
+privacy, invite, transfer, live, waiting room) also stays in Discord —
+it's a member-facing feature, not an admin tool.
+
+---
+
+## Troubleshooting
+
+### `/config` says "The web UI is disabled"
+
+`WEBUI_ENABLED` is not `true` (case-insensitive). Update `.env` and
+restart the bot.
+
+### `/config` says "missing env vars: WEBUI_BASE_URL, WEBUI_SESSION_SECRET"
+
+Exactly what it says. Set both in `.env` and restart.
+
+### The DM link 404s when I click it
+
+One of:
+
+- It was already redeemed (single-use). Run `/config` again.
+- It expired (default 10 minutes). Run `/config` again.
+- You ran `/config` a second time and got a *newer* link, which revoked
+  this one. Use the most recent DM.
+- `WEBUI_SESSION_SECRET` changed between issuance and redemption.
+
+### "Sign in required" on every page
+
+Possible causes (in roughly decreasing likelihood):
+
+- Your cookie expired (idle past `WEBUI_INACTIVITY_TIMEOUT_MINUTES`).
+- The DB session row passed its hard TTL (`WEBUI_SESSION_TTL_MINUTES`
+  from issuance).
+- You ran `/config` again and revoked this session server-side.
+- Permission re-check failed: someone configured Web UI Permissions →
+  `config` to restrict the command, and your roles no longer match.
+- The bot was restarted with a new `WEBUI_SESSION_SECRET`, invalidating
+  the cookie signature.
+
+Run `/config` again to mint a fresh link.
+
+The cookie is **not** bound to your client IP — switching networks does
+not by itself end a session.
+
+### The Web UI URL loads but won't accept my cookie
+
+Browsers refuse `Secure`-flagged cookies over plain HTTP. The Web UI
+flags its session cookie `Secure` whenever `NODE_ENV=production`
+(see `shouldUseSecureCookies()` in `src/web/csrf.ts`). Pick one:
+
+- Run behind HTTPS via a reverse proxy (recommended), **or**
+- Set `NODE_ENV=development` in `.env` and restart, so the cookie is
+  not flagged `Secure`. Only do this for local testing.
+
+Changing only `WEBUI_BASE_URL` to `http://...` is **not** enough — the
+URL scheme does not influence cookie flagging.
+
+### Behind a proxy, rate limits trigger on the proxy's IP
+
+Set `WEBUI_TRUST_PROXY` to your hop count (usually `1`) and restart.
+Without it, every request appears to come from the proxy and they all
+share one rate-limit bucket.
+
+### I want to disable the Web UI entirely
+
+Set `WEBUI_ENABLED=false` (or remove the line) and restart. All
+`/admin/*` paths 404 again. The `/health` endpoint is unaffected.
+
+### I locked myself out
+
+Edit `.env` on the host: set a fresh `WEBUI_SESSION_SECRET` and restart.
+Then run `/config` in Discord with an account that has the
+Administrator permission. The bootstrap path is "if you can run
+`/config` in Discord, you can configure the bot" — there is no
+forgotten-password flow because there is no password.
+
+---
+
+## 📚 Related documentation
+
+- [README.md](README.md) — Quick start
+- [SETTINGS.md](SETTINGS.md) — DB-backed setting catalog (what each
+  Web UI form field actually does)
+- [COMMANDS.md](COMMANDS.md) — User-facing slash commands
+- [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) — `src/web/` architecture
+- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — General troubleshooting
+
+---
+
+<div align="center">
+
+**Questions?** [Open an issue](https://github.com/lonix/koolbot/issues)
+
+</div>

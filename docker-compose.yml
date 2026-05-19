@@ -8,7 +8,16 @@ services:
       - mongodb
     stop_grace_period: 30s
     stop_signal: SIGTERM
-
+    # Publish the bot's port 3000 so /health and (when WEBUI_ENABLED=true)
+    # the admin Web UI at /admin/* are reachable from the host. This is the
+    # simplest setup; it is NOT secured for the public internet.
+    #
+    # For internet-facing deployments use a reverse proxy (Caddy, nginx,
+    # Traefik) and remove this publish — let the proxy forward to bot:3000
+    # over the internal Docker network. See WEBUI.md → "Docker Compose
+    # recipes" for a complete Caddy example.
+    ports:
+      - "3000:3000"
 
   mongodb:
     image: mongo:latest
@@ -16,6 +25,12 @@ services:
     restart: unless-stopped
     volumes:
       - mongodb_data:/data/db
+    # ⚠️ The default mongo image has NO authentication. This publish makes
+    # MongoDB reachable on the host's port 27017. If your host is on the
+    # public internet, restrict the bind to localhost only:
+    #   - "127.0.0.1:27017:27017"
+    # or remove the publish entirely (the bot reaches it over the internal
+    # Docker network at mongodb:27017 either way).
     ports:
       - "27017:27017"
     stop_grace_period: 30s

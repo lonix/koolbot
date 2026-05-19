@@ -6,54 +6,75 @@ This file provides an overview of the complete documentation structure.
 
 ### Core Documentation
 
-1. **README.md** (605 lines)
-   - Quick start guide (3 steps: clone, configure .env, docker-compose up)
-   - Feature overview with examples
-   - Voice channel management examples
-   - Discord logging setup
-   - Docker management commands
-   - Developer section
+1. **README.md**
+   - Quick start guide (3 steps: download files, edit `.env` with Web UI vars, `docker compose up -d`)
+   - Feature overview
+   - Web UI launcher walkthrough
+   - Docker management (incl. direct port publish, localhost-only, Caddy reverse proxy)
+   - Backup & restore (Settings page Export/Import + `mongodump`)
+   - Troubleshooting
 
-2. **DEVELOPER_GUIDE.md** (NEW)
-   - Architecture overview and patterns
+2. **WEBUI.md** (NEW)
+   - Magic-link flow diagram and lifecycle
+   - Env-vs-DB configuration boundary
+   - Bootstrap env vars (`WEBUI_*` + secrets)
+   - Enabling the Web UI
+   - Docker Compose recipes (direct publish, localhost-only, Caddy)
+   - Reverse-proxy guidance (Caddy / nginx / Traefik / tunnels)
+   - Public-internet exposure caveats
+   - DM-closed fallback
+   - Session lifecycle and revocation
+   - Web UI page → legacy slash command mapping
+   - Troubleshooting
+
+3. **DEVELOPER_GUIDE.md**
+   - Architecture overview including `src/web/`
+   - The "no business logic outside services" rule
+   - Magic-link auth flow
+   - CSRF and rate-limiting patterns
    - Bot-controlled channel header posts (reusable pattern)
    - Service singleton pattern
-   - Configuration management
+   - Configuration management (two-tier model)
    - Feature development checklist
    - Testing guidelines
    - Code style standards
 
-3. **COMMANDS.md** (934 lines)
-   - Complete command reference
-   - User commands with examples
-   - Admin commands with detailed subcommands
+4. **COMMANDS.md**
+   - User-facing slash commands (`/ping`, `/help`, `/voicestats`, `/seen`, `/achievements`, `/quote`, `/amikool`)
+   - Admin launcher (`/config`) — the only admin slash command, opens the Web UI
+   - Voice channel control panel
    - Permission requirements
-   - Common workflows
-   - Troubleshooting command issues
+   - Quick reference
+   - Page → legacy slash command mapping
 
-4. **SETTINGS.md** (481 lines)
-   - Environment variables guide
-   - All configuration options
-   - Category-organized settings
-   - Practical examples for each feature
+5. **SETTINGS.md**
+   - Environment variables (bootstrap, read-only in Web UI)
+   - WebUI env vars (`WEBUI_*`)
+   - All DB-backed configuration options (edited in the Web UI)
    - Quick reference table
-   - Configuration management guide
 
-5. **TROUBLESHOOTING.md** (668 lines)
+6. **QUICK_START_VISUAL.md**
+   - Visual / ASCII flow of the 3-step quick start
+   - Magic-link flow diagram
+   - Docker exposure options
+   - Updated architecture diagram (includes Web UI)
+
+7. **TROUBLESHOOTING.md**
    - Initial setup issues
    - Docker problems
    - Discord connection issues
    - Command troubleshooting
+   - Web UI / magic-link troubleshooting (see also WEBUI.md)
    - Voice channel issues
    - Database problems
    - Configuration issues
    - Performance optimization
    - Emergency procedures
 
-6. **RELEASE_NOTES.md** (existing, 150 lines)
+8. **RELEASE_NOTES.md**
    - Version history
    - Feature changes
-   - Migration notes
+   - Migration notes (v1.0 admin commands → Web UI)
 
 ### Configuration Files
 
@@ -61,12 +82,16 @@ This file provides an overview of the complete documentation structure.
    - Clear, commented template
    - Discord credentials instructions
    - Docker-optimized MongoDB URI
+   - Web UI bootstrap env vars (`WEBUI_ENABLED`, `WEBUI_BASE_URL`,
+     `WEBUI_SESSION_SECRET`, optional `WEBUI_SESSION_TTL_MINUTES`,
+     `WEBUI_INACTIVITY_TIMEOUT_MINUTES`, `WEBUI_TRUST_PROXY`)
    - Debug mode options
 
 2. **docker-compose.yml**
    - Production deployment
    - MongoDB with persistent volume
-   - Proper networking
+   - Operators choose how to expose port 3000 (see README + WEBUI.md
+     for direct-publish, localhost-only, and Caddy recipes)
 
 3. **docker-compose.dev.yml**
    - Development setup
@@ -78,137 +103,120 @@ This file provides an overview of the complete documentation structure.
 ### User-First Deployment
 
 - **Only 2 files needed:** `.env` and `docker-compose.yml`
-- **3-step quick start:** clone, configure, deploy
+- **3-step quick start:** download, configure, deploy
 - **No manual builds** required for users
 
-### Comprehensive Examples
+### Web UI as the only admin surface
 
-- Every feature has real configuration examples
-- Copy-paste ready commands
+- All admin configuration is browser-based, magic-link gated
+- Slash command surface stays focused on member-facing actions
+- Goal: `src/services/` holds the business logic; `src/web/` is a thin
+  HTTP layer over it. The current code is on that path but not all the
+  way there (some input coercion and direct model reads still live in
+  the web layer) — new code should push toward the goal
+
+### Bootstrap-vs-DB boundary
+
+- `.env` holds secrets and startup config only
+- MongoDB holds feature settings, edited via the Web UI
+- YAML import/export covers the MongoDB tier only
+
+### Comprehensive examples
+
+- Every feature has Web UI navigation breadcrumbs
+- Real docker-compose snippets including Caddy
 - Expected outputs shown
 
-### Troubleshooting Focus
+## 📊 Documentation Map (where to go for what)
 
-- Common issues identified
-- Step-by-step solutions
-- Emergency procedures included
-
-### Progressive Disclosure
-
-- Quick start → Features → Deep dive
-- Beginners can start immediately
-- Advanced users have detailed references
-
-## 📊 Documentation Statistics
-
-Total Lines: 2,688 (main documentation)
-
-- README.md: 605 lines
-- COMMANDS.md: 934 lines  
-- SETTINGS.md: 481 lines
-- TROUBLESHOOTING.md: 668 lines
-
-## ✅ Documentation Completeness
-
-### ✓ Covered Topics
-
-- [x] Quick start with Docker Compose
-- [x] Getting Discord credentials
-- [x] Environment variable configuration
-- [x] All command documentation
-- [x] All settings documentation
-- [x] Voice channel features
-- [x] Activity tracking
-- [x] Automated announcements
-- [x] Data cleanup
-- [x] Discord logging
-- [x] Quote system
-- [x] Permission requirements
-- [x] Troubleshooting guides
-- [x] Docker management
-- [x] Configuration backup/restore
-- [x] Emergency procedures
-
-### Example Coverage
-
-- [x] .env file setup
-- [x] Docker commands
-- [x] Voice channel configuration
-- [x] Tracking setup
-- [x] Announcement scheduling
-- [x] Data cleanup configuration
-- [x] Logging setup
-- [x] Quote system setup
-- [x] All admin commands
-- [x] All user commands
+| You want to…                     | Read                                |
+| -------------------------------- | ----------------------------------- |
+| Stand up the bot in 5 minutes    | README.md                           |
+| Understand the magic-link flow   | WEBUI.md                            |
+| Put the Web UI behind HTTPS      | WEBUI.md → Reverse-proxy            |
+| Run `/config` and find a setting | SETTINGS.md                         |
+| Look up a slash command          | COMMANDS.md                         |
+| Contribute code                  | DEVELOPER_GUIDE.md, CONTRIBUTING.md |
+| Debug a problem                  | TROUBLESHOOTING.md                  |
+| See the visual diagram           | QUICK_START_VISUAL.md               |
 
 ## 🔗 Cross-References
 
 All documentation files cross-reference each other:
 
-- README → COMMANDS, SETTINGS, TROUBLESHOOTING
-- COMMANDS → README, SETTINGS, TROUBLESHOOTING
-- SETTINGS → README, COMMANDS, TROUBLESHOOTING
-- TROUBLESHOOTING → README, COMMANDS, SETTINGS
+- README → WEBUI, COMMANDS, SETTINGS, TROUBLESHOOTING, DEVELOPER_GUIDE
+- WEBUI → README, COMMANDS, SETTINGS, DEVELOPER_GUIDE, TROUBLESHOOTING
+- COMMANDS → README, WEBUI, SETTINGS, TROUBLESHOOTING
+- SETTINGS → README, WEBUI, COMMANDS, TROUBLESHOOTING
+- DEVELOPER_GUIDE → CONTRIBUTING, SETTINGS, COMMANDS, TESTING
+- TROUBLESHOOTING → README, WEBUI, COMMANDS, SETTINGS
 
 ## 🎨 Formatting Standards
 
 - **Headers:** Emoji + title for easy scanning
-- **Code blocks:** Syntax highlighting with bash/env/yaml
+- **Code blocks:** Syntax highlighting with `bash`, `env`, `yaml`, `text`
 - **Examples:** Real, copy-paste ready
 - **Warnings:** Clearly marked with ⚠️
 - **Navigation:** Table of contents in long docs
-- **Visual aids:** Tables for settings and commands
+- **Visual aids:** Tables for settings and command-to-page mappings
 
 ## 🚀 User Journey
 
-### First-Time User
+### First-time user
 
 1. Read README Quick Start
-2. Copy .env.example → .env
-3. Run docker-compose up -d
-4. Configure features via Discord commands
-5. Reference COMMANDS.md as needed
+2. Copy `.env.example` → `.env`, fill in Discord credentials and WebUI vars
+3. `docker compose up -d`
+4. Run `/config` in Discord → click DM link → configure in browser
+5. Reference WEBUI.md if they need HTTPS / a real domain
 
-### Troubleshooting User
+### Troubleshooting user
 
 1. Check TROUBLESHOOTING.md index
-2. Find issue category
+2. For Web UI / magic-link issues → WEBUI.md → Troubleshooting
 3. Follow step-by-step solutions
-4. Reference SETTINGS.md for configuration
+4. Reference SETTINGS.md for what each key does
 5. Check logs as directed
 
-### Advanced User
+### Advanced user / operator
 
 1. Review SETTINGS.md for all options
-2. Use COMMANDS.md for admin features
-3. Set up logging, cleanup, tracking
-4. Export/import configurations
-5. Optimize performance
+2. Read WEBUI.md for reverse-proxy / threat-model details
+3. Use the Web UI Bootstrap page to verify env values
+4. Export / import YAML for migrations and backups
+
+### Contributor
+
+1. Read DEVELOPER_GUIDE.md for architecture and `src/web/` layout
+2. Note the "no business logic outside services" rule before adding routes
+3. Run `npm run check:all` before opening a PR
+4. Update the relevant docs for any user-visible change
 
 ## 📝 Notes for Maintainers
 
 ### When Adding Features
 
 - [ ] Update README.md (features section)
-- [ ] Add command to COMMANDS.md (if user-facing)
+- [ ] Add command to COMMANDS.md (only if user-facing slash command — admin features go in the Web UI)
 - [ ] Add settings to SETTINGS.md
-- [ ] Add to DEVELOPER_GUIDE.md (if reusable pattern)
+- [ ] Add Web UI page/section to WEBUI.md if applicable
+- [ ] Add to DEVELOPER_GUIDE.md if you established a reusable pattern
 - [ ] Add troubleshooting to TROUBLESHOOTING.md
 - [ ] Update examples
-- [ ] Update RELEASE_NOTES.md
+- [ ] Add a Conventional Commits footer that release-please understands
 
 ### When Changing Configuration
 
 - [ ] Update SETTINGS.md
-- [ ] Update .env.example if env var
+- [ ] Update `.env.example` if it's an env var
+- [ ] Update `PROTECTED_KEYS` in `src/web/write-routes.ts` if it's a new env var
 - [ ] Update examples in README.md
 - [ ] Add migration notes if breaking
 
 ### Documentation Review Checklist
 
 - [ ] All links work
-- [ ] Examples are current
+- [ ] Examples are current (no references to removed slash commands)
 - [ ] Code blocks have syntax highlighting
 - [ ] Cross-references are accurate
 - [ ] No outdated information
