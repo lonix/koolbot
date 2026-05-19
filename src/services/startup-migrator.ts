@@ -91,13 +91,7 @@ const configMigrations: ConfigMigration[] = [
     description: "Cron expression for weekly announcements",
     defaultValue: "0 16 * * 5",
   },
-  {
-    oldKey: "VC_ANNOUNCEMENT_CHANNEL",
-    newKey: "voicetracking.announcements.channel",
-    category: "voicetracking",
-    description: "Channel name for voice channel announcements",
-    defaultValue: "announcement",
-  },
+
   // Individual Features
   {
     oldKey: "ENABLE_PING",
@@ -112,13 +106,6 @@ const configMigrations: ConfigMigration[] = [
     category: "amikool",
     description: "Enable/disable amikool command",
     defaultValue: true,
-  },
-  {
-    oldKey: "COOL_ROLE_NAME",
-    newKey: "amikool.role.name", // Fixed: match expected dot notation
-    category: "amikool",
-    description: "Name of the cool role for amikool command",
-    defaultValue: "HR",
   },
 
   // Quote System

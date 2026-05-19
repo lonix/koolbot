@@ -38,8 +38,16 @@ const RENAMES: RenameSpec[] = [
     newKey: "voicetracking.announcements.channel_id",
     description: "voice-stats announcement channel",
     resolve: (guild, name) => {
+      // Match the downstream reader (VoiceChannelAnnouncer uses
+      // `instanceof TextChannel`): in discord.js v14, NewsChannel
+      // (GuildAnnouncement) extends TextChannel, so operators legitimately
+      // configure announcement-type channels here. Accepting both types
+      // keeps the migrator's tolerance aligned with runtime use.
       const channel = guild.channels.cache.find(
-        (ch) => ch.type === ChannelType.GuildText && ch.name === name,
+        (ch) =>
+          (ch.type === ChannelType.GuildText ||
+            ch.type === ChannelType.GuildAnnouncement) &&
+          ch.name === name,
       );
       return channel ? channel.id : null;
     },
