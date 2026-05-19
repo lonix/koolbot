@@ -87,6 +87,22 @@ export function renderSignedOut(): string {
   );
 }
 
+export function renderConsent(opts: {
+  token: string;
+  csrfToken: string;
+}): string {
+  const action = `/admin/s/${encodeURIComponent(opts.token)}`;
+  const body = [
+    "<h1>Sign in to Koolbot Admin</h1>",
+    "<p>Click <strong>Continue</strong> to start your admin session in this browser. Your single-use sign-in link will be consumed when you do.</p>",
+    `<form method="POST" action="${escapeHtml(action)}">`,
+    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
+    '<button type="submit">Continue</button>',
+    "</form>",
+  ].join("");
+  return pageShell("Sign in", body);
+}
+
 export function renderInvalidLink(): string {
   return pageShell(
     "Invalid link",

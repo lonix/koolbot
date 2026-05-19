@@ -142,6 +142,60 @@ export class WebSessionService {
   }
 
   /**
+   * Validate a magic-link token *without* consuming it. Returns the same
+   * shape as redeem() on success. Used by the consent screen so that
+   * server-side link previewers (Discordbot, Slackbot, etc.) doing a GET
+   * on the magic link don't burn the single-use token before the admin
+   * has a chance to click "Continue".
+   */
+  public async peek(token: string): Promise<RedeemedSession | null> {
+    if (!token) {
+      logger.info("Web session peek rejected: empty token");
+      return null;
+    }
+    let tokenHash: string;
+    try {
+      tokenHash = this.hashToken(token);
+    } catch (err) {
+      logger.error("Failed to hash token for peek", err);
+      return null;
+    }
+
+    const now = new Date();
+    let existing: IWebSession | null;
+    try {
+      existing = await WebSession.findOne({ tokenHash });
+    } catch (err) {
+      logger.error("Failed to look up session for peek", err);
+      return null;
+    }
+
+    if (!existing) {
+      logger.info("Web session peek rejected: not_found");
+      return null;
+    }
+    if (existing.revokedAt) {
+      logger.info("Web session peek rejected: revoked");
+      return null;
+    }
+    if (existing.usedAt) {
+      logger.info("Web session peek rejected: already_used");
+      return null;
+    }
+    if (existing.expiresAt <= now) {
+      logger.info("Web session peek rejected: expired");
+      return null;
+    }
+
+    return {
+      sessionId: String(existing._id),
+      discordUserId: existing.discordUserId,
+      guildId: existing.guildId,
+      scopes: existing.scopes,
+    };
+  }
+
+  /**
    * Diagnose why a redeem() lookup missed: token not found, already used,
    * expired, revoked, or a more obscure state. Best-effort — any error
    * collapses to "unknown" so a logging path never breaks the request.

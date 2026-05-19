@@ -10,7 +10,7 @@ import {
   createSessionMiddleware,
   writeSessionCookie,
 } from "./session.js";
-import { renderInvalidLink, renderSignedOut } from "./views.js";
+import { renderConsent, renderInvalidLink, renderSignedOut } from "./views.js";
 import { createReadOnlyRouter } from "./read-only-routes.js";
 import { createWriteRouter } from "./write-routes.js";
 
@@ -43,9 +43,40 @@ export function createWebRouter(client: Client): Router {
 
   const requireSession = createSessionMiddleware(client);
 
+  // GET only validates the token (peek) so server-side link previewers
+  // like Discordbot/Slackbot can't burn the single-use token before the
+  // admin clicks. The actual consume happens on POST below.
   router.get(
     "/s/:token",
     redeemLimiter,
+    async (req: Request, res: Response): Promise<void> => {
+      try {
+        const token = String(req.params.token || "");
+        const peeked = await sessionService.peek(token);
+        if (!peeked) {
+          res.status(404).type("text/html").send(renderInvalidLink());
+          return;
+        }
+        const csrfToken =
+          (req as Request & { csrfToken?: string }).csrfToken || "";
+        res
+          .status(200)
+          .type("text/html")
+          .send(renderConsent({ token, csrfToken }));
+      } catch (err) {
+        logger.error("Error peeking web session token", err);
+        res.status(500).type("text/plain").send("Internal Server Error");
+      }
+    },
+  );
+
+  // POST consumes the token, marks it used, writes the session cookie,
+  // and redirects into the admin app. Requires the CSRF cookie set by
+  // ensureCsrfCookie on the preceding GET.
+  router.post(
+    "/s/:token",
+    redeemLimiter,
+    requireCsrf,
     async (req: Request, res: Response): Promise<void> => {
       try {
         const token = String(req.params.token || "");

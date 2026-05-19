@@ -227,4 +227,113 @@ describe("WebSessionService", () => {
       );
     });
   });
+
+  describe("peek (validate without consuming)", () => {
+    let infoMock: jest.Mock;
+
+    beforeEach(() => {
+      infoMock = jest.fn();
+      (logger as unknown as { info: unknown }).info = infoMock;
+    });
+
+    function mockFindOne(existing: unknown): jest.Mock {
+      const fn = jest.fn().mockResolvedValue(existing);
+      (WebSession as unknown as { findOne: unknown }).findOne = fn;
+      // No findOneAndUpdate stub — peek must not call it.
+      (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
+        jest.fn(() => {
+          throw new Error("peek() must not consume the token");
+        });
+      return fn;
+    }
+
+    it("returns session context without marking the token used", async () => {
+      const findOne = mockFindOne({
+        _id: { toString: () => "session-id" },
+        discordUserId: "user-1",
+        guildId: "guild-1",
+        scopes: ["scope:a"],
+        usedAt: null,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      const svc = WebSessionService.getInstance();
+      const result = await svc.peek("any-token");
+      expect(result).toEqual({
+        sessionId: "session-id",
+        discordUserId: "user-1",
+        guildId: "guild-1",
+        scopes: ["scope:a"],
+      });
+      expect(findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns null and logs 'empty token' for an empty token", async () => {
+      const svc = WebSessionService.getInstance();
+      expect(await svc.peek("")).toBeNull();
+      expect(infoMock).toHaveBeenCalledWith(
+        expect.stringContaining("empty token"),
+      );
+    });
+
+    it("returns null and logs 'not_found' when no row matches", async () => {
+      mockFindOne(null);
+      const svc = WebSessionService.getInstance();
+      expect(await svc.peek("anything")).toBeNull();
+      expect(infoMock).toHaveBeenCalledWith(
+        expect.stringContaining("not_found"),
+      );
+    });
+
+    it("returns null and logs 'revoked' when revokedAt is set", async () => {
+      mockFindOne({
+        _id: { toString: () => "x" },
+        discordUserId: "u",
+        guildId: "g",
+        scopes: [],
+        usedAt: null,
+        revokedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      const svc = WebSessionService.getInstance();
+      expect(await svc.peek("anything")).toBeNull();
+      expect(infoMock).toHaveBeenCalledWith(
+        expect.stringContaining("revoked"),
+      );
+    });
+
+    it("returns null and logs 'already_used' when usedAt is set", async () => {
+      mockFindOne({
+        _id: { toString: () => "x" },
+        discordUserId: "u",
+        guildId: "g",
+        scopes: [],
+        usedAt: new Date(),
+        revokedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      const svc = WebSessionService.getInstance();
+      expect(await svc.peek("anything")).toBeNull();
+      expect(infoMock).toHaveBeenCalledWith(
+        expect.stringContaining("already_used"),
+      );
+    });
+
+    it("returns null and logs 'expired' when expiresAt is in the past", async () => {
+      mockFindOne({
+        _id: { toString: () => "x" },
+        discordUserId: "u",
+        guildId: "g",
+        scopes: [],
+        usedAt: null,
+        revokedAt: null,
+        expiresAt: new Date(Date.now() - 1000),
+      });
+      const svc = WebSessionService.getInstance();
+      expect(await svc.peek("anything")).toBeNull();
+      expect(infoMock).toHaveBeenCalledWith(
+        expect.stringContaining("expired"),
+      );
+    });
+  });
 });
