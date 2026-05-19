@@ -8,6 +8,7 @@ import {
 } from "@jest/globals";
 import { WebSessionService } from "../../src/services/web-session-service.js";
 import { WebSession } from "../../src/models/web-session.js";
+import logger from "../../src/utils/logger.js";
 
 jest.mock("../../src/models/web-session.js");
 jest.mock("../../src/utils/logger.js");
@@ -125,5 +126,105 @@ describe("WebSessionService", () => {
     const svc = WebSessionService.getInstance();
     expect(await svc.revokeSession("")).toBe(false);
     expect(updateOne).not.toHaveBeenCalled();
+  });
+
+  describe("redeem failure classification", () => {
+    let infoMock: jest.Mock;
+
+    beforeEach(() => {
+      // ts-jest's ESM auto-mock for the logger module produces a default
+      // export whose method shape isn't a jest.fn() we can introspect, so
+      // patch `info` directly with a known mock for these assertions.
+      infoMock = jest.fn();
+      (logger as unknown as { info: unknown }).info = infoMock;
+    });
+
+    function mockClassifierState(existing: unknown): void {
+      (
+        WebSession as unknown as { findOneAndUpdate: unknown }
+      ).findOneAndUpdate = jest.fn().mockResolvedValue(null);
+      (WebSession as unknown as { findOne: unknown }).findOne = jest
+        .fn()
+        .mockResolvedValue(existing);
+    }
+
+    function reasonsLogged(): string[] {
+      return infoMock.mock.calls.map((c) => String(c[0]));
+    }
+
+    it("logs 'not_found' when no row matches the tokenHash", async () => {
+      mockClassifierState(null);
+      const svc = WebSessionService.getInstance();
+      expect(await svc.redeem("anything")).toBeNull();
+      expect(reasonsLogged()).toEqual(
+        expect.arrayContaining([expect.stringContaining("not_found")]),
+      );
+    });
+
+    it("logs 'revoked' when revokedAt is set (takes precedence over used/expired)", async () => {
+      mockClassifierState({
+        revokedAt: new Date(),
+        usedAt: new Date(),
+        expiresAt: new Date(Date.now() - 1000),
+      });
+      const svc = WebSessionService.getInstance();
+      expect(await svc.redeem("anything")).toBeNull();
+      expect(reasonsLogged()).toEqual(
+        expect.arrayContaining([expect.stringContaining("revoked")]),
+      );
+    });
+
+    it("logs 'already_used' when usedAt is set and not revoked", async () => {
+      mockClassifierState({
+        revokedAt: null,
+        usedAt: new Date(),
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      const svc = WebSessionService.getInstance();
+      expect(await svc.redeem("anything")).toBeNull();
+      expect(reasonsLogged()).toEqual(
+        expect.arrayContaining([expect.stringContaining("already_used")]),
+      );
+    });
+
+    it("logs 'expired' when expiresAt is in the past, not used or revoked", async () => {
+      mockClassifierState({
+        revokedAt: null,
+        usedAt: null,
+        expiresAt: new Date(Date.now() - 1000),
+      });
+      const svc = WebSessionService.getInstance();
+      expect(await svc.redeem("anything")).toBeNull();
+      expect(reasonsLogged()).toEqual(
+        expect.arrayContaining([expect.stringContaining("expired")]),
+      );
+    });
+
+    it("logs 'unknown' when the row is otherwise live (lookup raced with state change)", async () => {
+      mockClassifierState({
+        revokedAt: null,
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60_000),
+      });
+      const svc = WebSessionService.getInstance();
+      expect(await svc.redeem("anything")).toBeNull();
+      expect(reasonsLogged()).toEqual(
+        expect.arrayContaining([expect.stringContaining("unknown")]),
+      );
+    });
+
+    it("collapses to 'unknown' if the diagnostic findOne throws", async () => {
+      (
+        WebSession as unknown as { findOneAndUpdate: unknown }
+      ).findOneAndUpdate = jest.fn().mockResolvedValue(null);
+      (WebSession as unknown as { findOne: unknown }).findOne = jest
+        .fn()
+        .mockRejectedValue(new Error("mongo down"));
+      const svc = WebSessionService.getInstance();
+      expect(await svc.redeem("anything")).toBeNull();
+      expect(reasonsLogged()).toEqual(
+        expect.arrayContaining([expect.stringContaining("unknown")]),
+      );
+    });
   });
 });

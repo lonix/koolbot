@@ -86,6 +86,10 @@ export class WebSessionService {
       revokedAt: null,
     });
 
+    logger.info(
+      `Web session created for user=${discordUserId} guild=${guildId} expires=${expiresAt.toISOString()}`,
+    );
+
     const url = `${this.getBaseUrl()}/admin/s/${token}`;
     return { token, url, expiresAt };
   }
@@ -95,7 +99,10 @@ export class WebSessionService {
    * already used, expired, or revoked. Marks the session used on success.
    */
   public async redeem(token: string): Promise<RedeemedSession | null> {
-    if (!token) return null;
+    if (!token) {
+      logger.info("Web session redeem rejected: empty token");
+      return null;
+    }
     let tokenHash: string;
     try {
       tokenHash = this.hashToken(token);
@@ -116,7 +123,15 @@ export class WebSessionService {
       { new: true },
     );
 
-    if (!session) return null;
+    if (!session) {
+      const reason = await this.classifyRedeemFailure(tokenHash, now);
+      logger.info(`Web session redeem rejected: ${reason}`);
+      return null;
+    }
+
+    logger.info(
+      `Web session redeemed for user=${session.discordUserId} guild=${session.guildId} session=${String(session._id)}`,
+    );
 
     return {
       sessionId: String(session._id),
@@ -124,6 +139,27 @@ export class WebSessionService {
       guildId: session.guildId,
       scopes: session.scopes,
     };
+  }
+
+  /**
+   * Diagnose why a redeem() lookup missed: token not found, already used,
+   * expired, revoked, or a more obscure state. Best-effort — any error
+   * collapses to "unknown" so a logging path never breaks the request.
+   */
+  private async classifyRedeemFailure(
+    tokenHash: string,
+    now: Date,
+  ): Promise<string> {
+    try {
+      const existing = await WebSession.findOne({ tokenHash });
+      if (!existing) return "not_found";
+      if (existing.revokedAt) return "revoked";
+      if (existing.usedAt) return "already_used";
+      if (existing.expiresAt <= now) return "expired";
+      return "unknown";
+    } catch {
+      return "unknown";
+    }
   }
 
   /**
