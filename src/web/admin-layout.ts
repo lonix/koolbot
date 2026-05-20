@@ -43,6 +43,14 @@ export function escapeJsInAttr(value: unknown): string {
 interface NavItem {
   href: string;
   label: string;
+  /**
+   * Config key (a `<feature>.enabled` boolean) that gates this page. When
+   * set and the feature resolves to `false`, the item is hidden from the
+   * sidebar. Items without a `featureKey` — Dashboard, Settings, etc. —
+   * are always shown. The page URL itself stays reachable by direct
+   * navigation; only the nav advertisement is suppressed.
+   */
+  featureKey?: string;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -50,14 +58,48 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/admin/settings", label: "Settings" },
   { href: "/admin/permissions", label: "Permissions" },
   { href: "/admin/wizard", label: "Setup Wizard" },
-  { href: "/admin/announcements", label: "Announcements" },
-  { href: "/admin/polls", label: "Polls" },
-  { href: "/admin/reaction-roles", label: "Reaction Roles" },
-  { href: "/admin/notices", label: "Notices" },
-  { href: "/admin/voice-channels", label: "Voice Channels" },
+  {
+    href: "/admin/announcements",
+    label: "Announcements",
+    featureKey: "announcements.enabled",
+  },
+  { href: "/admin/polls", label: "Polls", featureKey: "polls.enabled" },
+  {
+    href: "/admin/reaction-roles",
+    label: "Reaction Roles",
+    featureKey: "reactionroles.enabled",
+  },
+  {
+    href: "/admin/notices",
+    label: "Notices",
+    featureKey: "notices.enabled",
+  },
+  {
+    href: "/admin/voice-channels",
+    label: "Voice Channels",
+    featureKey: "voicechannels.enabled",
+  },
   { href: "/admin/database", label: "Database" },
   { href: "/admin/bootstrap", label: "Bootstrap" },
 ];
+
+/**
+ * Resolve the enabled-state of every feature-gated nav item. Takes an
+ * async boolean reader (in practice `ConfigService.getBoolean`) so this
+ * module stays free of a direct ConfigService dependency and remains
+ * unit-testable. The returned map is keyed by `featureKey`.
+ */
+export async function resolveNavFeatureStatus(
+  isEnabled: (key: string) => Promise<boolean>,
+): Promise<Record<string, boolean>> {
+  const status: Record<string, boolean> = {};
+  for (const item of NAV_ITEMS) {
+    if (item.featureKey) {
+      status[item.featureKey] = await isEnabled(item.featureKey);
+    }
+  }
+  return status;
+}
 
 export interface AdminPageOptions {
   title: string;
@@ -65,6 +107,12 @@ export interface AdminPageOptions {
   body: string;
   csrfToken: string;
   remainingMs: number;
+  /**
+   * Enabled-state of feature-gated nav items, keyed by `featureKey`. When
+   * omitted, every nav item is shown (keeps direct callers and tests that
+   * don't care about nav filtering working unchanged).
+   */
+  navFeatureStatus?: Record<string, boolean>;
 }
 
 const STYLE = [
@@ -166,13 +214,25 @@ const SCRIPT =
   "if(r<=0&&!fired){fired=true;window.location.href='/admin/'}}" +
   "tick();setInterval(tick,1000)})();";
 
-function renderNav(active: string): string {
-  return NAV_ITEMS.map((item) => {
-    const isActive =
-      item.href === active || (item.href === "/admin/" && active === "/admin");
-    const cls = isActive ? ' class="active"' : "";
-    return `<li><a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a></li>`;
-  }).join("");
+function renderNav(
+  active: string,
+  navFeatureStatus?: Record<string, boolean>,
+): string {
+  return NAV_ITEMS.filter((item) => {
+    // No status map → show everything. Otherwise hide items whose gating
+    // feature resolves to false. An unknown featureKey (missing from the
+    // map) is treated as enabled so a wiring gap never blanks the nav.
+    if (!navFeatureStatus || !item.featureKey) return true;
+    return navFeatureStatus[item.featureKey] !== false;
+  })
+    .map((item) => {
+      const isActive =
+        item.href === active ||
+        (item.href === "/admin/" && active === "/admin");
+      const cls = isActive ? ' class="active"' : "";
+      return `<li><a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a></li>`;
+    })
+    .join("");
 }
 
 export function renderAdminPage(opts: AdminPageOptions): string {
@@ -195,7 +255,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<button type="submit">Finish</button>',
     "</form></div></div>",
     '<div class="shell">',
-    `<nav class="side"><ul>${renderNav(opts.active)}</ul></nav>`,
+    `<nav class="side"><ul>${renderNav(opts.active, opts.navFeatureStatus)}</ul></nav>`,
     `<main>${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     "</body></html>",
