@@ -271,7 +271,7 @@ function getCsrfFromReq(req: AuthenticatedRequest): string {
  * write router (wizard steps, import preview). Keeps their sidebar
  * consistent with the read-only pages.
  */
-async function navStatusForPage(): Promise<Record<string, boolean>> {
+function navStatusForPage(): ReturnType<typeof resolveNavFeatureStatus> {
   const config = ConfigService.getInstance();
   return resolveNavFeatureStatus((key) => config.getBoolean(key, false));
 }

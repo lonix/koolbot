@@ -39,6 +39,7 @@ import type { AuthenticatedRequest } from "./session.js";
 import {
   getDisplayedRemainingMs,
   resolveNavFeatureStatus,
+  type NavFeatureStatus,
 } from "./admin-layout.js";
 import {
   renderAnnouncementsPage,
@@ -105,7 +106,7 @@ async function commonFromReq(req: AuthenticatedRequest): Promise<{
   guildId: string;
   csrfToken: string;
   remainingMs: number;
-  navFeatureStatus: Record<string, boolean>;
+  navFeatureStatus: NavFeatureStatus;
 }> {
   const session = req.webSession;
   if (!session) {

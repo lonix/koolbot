@@ -5,6 +5,15 @@
  * expires in X · [Finish]" banner mandated by #367.
  */
 
+import type { ConfigSchema } from "../services/config-schema.js";
+
+/**
+ * Enabled-state of feature-gated nav items, keyed by config-schema key.
+ * `Partial` because callers legitimately omit keys — an absent key is
+ * treated as enabled (fail-open) by `renderNav`.
+ */
+export type NavFeatureStatus = Partial<Record<keyof ConfigSchema, boolean>>;
+
 export function escapeHtml(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value)
@@ -49,8 +58,11 @@ interface NavItem {
    * sidebar. Items without a `featureKey` — Dashboard, Settings, etc. —
    * are always shown. The page URL itself stays reachable by direct
    * navigation; only the nav advertisement is suppressed.
+   *
+   * Typed as `keyof ConfigSchema` so a typo in `NAV_ITEMS` fails at
+   * compile time rather than silently never matching at runtime.
    */
-  featureKey?: string;
+  featureKey?: keyof ConfigSchema;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -88,16 +100,23 @@ export const NAV_ITEMS: NavItem[] = [
  * async boolean reader (in practice `ConfigService.getBoolean`) so this
  * module stays free of a direct ConfigService dependency and remains
  * unit-testable. The returned map is keyed by `featureKey`.
+ *
+ * Distinct feature keys are resolved in parallel (and de-duplicated, so
+ * two nav items sharing a key would only trigger one read).
  */
 export async function resolveNavFeatureStatus(
-  isEnabled: (key: string) => Promise<boolean>,
-): Promise<Record<string, boolean>> {
-  const status: Record<string, boolean> = {};
-  for (const item of NAV_ITEMS) {
-    if (item.featureKey) {
-      status[item.featureKey] = await isEnabled(item.featureKey);
-    }
-  }
+  isEnabled: (key: keyof ConfigSchema) => Promise<boolean>,
+): Promise<NavFeatureStatus> {
+  const keys = [
+    ...new Set(
+      NAV_ITEMS.flatMap((item) => (item.featureKey ? [item.featureKey] : [])),
+    ),
+  ];
+  const results = await Promise.all(keys.map((key) => isEnabled(key)));
+  const status: NavFeatureStatus = {};
+  keys.forEach((key, i) => {
+    status[key] = results[i];
+  });
   return status;
 }
 
@@ -108,11 +127,11 @@ export interface AdminPageOptions {
   csrfToken: string;
   remainingMs: number;
   /**
-   * Enabled-state of feature-gated nav items, keyed by `featureKey`. When
-   * omitted, every nav item is shown (keeps direct callers and tests that
-   * don't care about nav filtering working unchanged).
+   * Enabled-state of feature-gated nav items. When omitted, every nav
+   * item is shown (keeps direct callers and tests that don't care about
+   * nav filtering working unchanged).
    */
-  navFeatureStatus?: Record<string, boolean>;
+  navFeatureStatus?: NavFeatureStatus;
 }
 
 const STYLE = [
@@ -216,7 +235,7 @@ const SCRIPT =
 
 function renderNav(
   active: string,
-  navFeatureStatus?: Record<string, boolean>,
+  navFeatureStatus?: NavFeatureStatus,
 ): string {
   return NAV_ITEMS.filter((item) => {
     // No status map → show everything. Otherwise hide items whose gating

@@ -4,19 +4,23 @@
  * without a Discord client or MongoDB.
  */
 
-import { escapeHtml, escapeJsInAttr, renderAdminPage } from "./admin-layout.js";
+import {
+  escapeHtml,
+  escapeJsInAttr,
+  renderAdminPage,
+  type NavFeatureStatus,
+} from "./admin-layout.js";
 import { categoryMetadata } from "../services/config-schema.js";
 
 interface CommonProps {
   csrfToken: string;
   remainingMs: number;
   /**
-   * Enabled-state of feature-gated nav items, keyed by `featureKey`.
-   * Threaded straight through to `renderAdminPage` so the sidebar can
-   * hide pages for disabled features. Optional: when absent the nav
-   * shows every item.
+   * Enabled-state of feature-gated nav items. Threaded straight through
+   * to `renderAdminPage` so the sidebar can hide pages for disabled
+   * features. Optional: when absent the nav shows every item.
    */
-  navFeatureStatus?: Record<string, boolean>;
+  navFeatureStatus?: NavFeatureStatus;
 }
 
 function tagOnOff(on: boolean, onLabel = "ON", offLabel = "OFF"): string {
