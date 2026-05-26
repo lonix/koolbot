@@ -178,7 +178,6 @@ Configure the quote management system.
 | `quotes.enabled` | `false` | Enable/disable the quote system |
 | `quotes.channel_id` | `""` | Channel ID for quote messages (empty = use command channel) |
 | `quotes.cooldown` | `60` | Seconds between quote additions (per user) |
-| `quotes.cleanup_interval` | `5` | Minutes between cleanup of unauthorized quote messages |
 | `quotes.max_length` | `1000` | Maximum character length for quotes |
 | `quotes.add_roles` | `""` | Role IDs allowed to add quotes (comma-separated, empty = all) |
 | `quotes.delete_roles` | `""` | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
@@ -190,8 +189,6 @@ Configure the quote management system.
 
 - `quotes.channel_id` — If set, all quotes are posted to this channel.
   If empty, quotes post in the channel where the command was used.
-- `quotes.cleanup_interval` — Controls how often unauthorized messages
-  in the quote channel are removed.
 - `quotes.header_enabled` — Displays a pinned informational header.
   Auto-recreated if deleted.
 - `quotes.header_pin_enabled` — Controls whether the header is pinned.
@@ -210,7 +207,6 @@ the channel itself.
 | --- | --- | --- |
 | `notices.enabled` | `false` | Enable/disable the notices system |
 | `notices.channel_id` | `""` | Channel ID for notice messages |
-| `notices.cleanup_interval` | `5` | Minutes between cleanup of unauthorized messages |
 | `notices.header_enabled` | `true` | Show informational header post in notices channel |
 | `notices.header_pin_enabled` | `true` | Pin the header post for easy access |
 | `notices.header_message_id` | `""` | Stores header message ID (managed automatically) |
@@ -312,19 +308,6 @@ Dynamic voice channel creation and management.
 | `voicechannels.channel.prefix` | `"🎮"` | Prefix for user-created channels |
 | `voicechannels.channel.suffix` | `""` | Suffix for user-created channels |
 | `voicechannels.controlpanel.enabled` | `true` | Show interactive control panel in channel text chat |
-| `voicechannels.ownership.grace_period_seconds` | `30` | Grace period before transferring ownership when owner disconnects |
-
-### Ownership grace period
-
-When a channel owner disconnects (e.g., network issue, client restart),
-the bot waits for the grace period before transferring ownership. If
-the owner rejoins within this time, they retain ownership.
-
-**Recommended values:**
-
-- `30` (default) — Good balance for most servers
-- `60` — Servers with frequent connection issues
-- `10` — For faster ownership transfers
 
 ### Manual cleanup
 
@@ -747,7 +730,7 @@ The Web UI form controls map to the underlying schema types:
 This is a selected subset — the authoritative list of every key (with
 defaults and metadata) lives in `src/services/config-schema.ts`. Notable
 keys that may be missing from this summary include the `help.*` toggle,
-`voicechannels.presets.*`, `quotes.cleanup_interval`, the
+`voicechannels.presets.*`, the
 `*.header_message_id` storage slots managed by the bot, and the
 `leaderboard_roles.*` family (covered in [its own section](#-leaderboard-role-rewards)
 above).
@@ -778,7 +761,6 @@ above).
 
 - `quotes.channel_id` (string, default: "")
 - `quotes.cooldown` (number, default: 60)
-- `quotes.cleanup_interval` (number, default: 5)
 - `quotes.max_length` (number, default: 1000)
 - `quotes.add_roles` (string, default: "")
 - `quotes.delete_roles` (string, default: "")
@@ -789,7 +771,6 @@ above).
 
 - `notices.enabled` (bool, default: false)
 - `notices.channel_id` (string, default: "")
-- `notices.cleanup_interval` (number, default: 5)
 - `notices.header_enabled` (bool, default: true)
 - `notices.header_pin_enabled` (bool, default: true)
 
@@ -808,7 +789,6 @@ above).
 - `voicechannels.channel.prefix` (string, default: "🎮")
 - `voicechannels.channel.suffix` (string, default: "")
 - `voicechannels.controlpanel.enabled` (bool, default: true)
-- `voicechannels.ownership.grace_period_seconds` (number, default: 30)
 
 #### Voice Tracking
 
