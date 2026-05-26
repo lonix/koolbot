@@ -87,21 +87,6 @@ export class VoiceChannelTruncationService {
   }
 
   /**
-   * Get the notification channel ID
-   */
-  public async getNotificationChannel(): Promise<string | null> {
-    try {
-      return await this.configService.getString("core.cleanup.channel_id", "");
-    } catch (error) {
-      logger.debug(
-        "Failed to get notification channel, defaulting to null:",
-        error,
-      );
-      return null;
-    }
-  }
-
-  /**
    * Get the cleanup schedule
    */
   public async getSchedule(): Promise<string | null> {

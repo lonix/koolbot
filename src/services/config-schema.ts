@@ -40,10 +40,6 @@ export interface ConfigSchema {
   "quotes.header_message_id": string; // Message ID of the header post
   "quotes.header_pin_enabled": boolean; // Pin the header post
 
-  // Core Bot Logging (Discord) - only cleanup is wired up; other core.* keys
-  // were declared but never read and have been removed. See issues #440/#443.
-  "core.cleanup.channel_id": string;
-
   // Rate Limiting
   "ratelimit.enabled": boolean;
   "ratelimit.max_commands": number; // Maximum commands per time window
@@ -125,9 +121,6 @@ export const defaultConfig: ConfigSchema = {
   "quotes.header_enabled": true, // Enable informational header post
   "quotes.header_message_id": "", // Stores header message ID
   "quotes.header_pin_enabled": true, // Pin header for easy access
-
-  // Core Bot Logging (Discord) - only cleanup is wired up.
-  "core.cleanup.channel_id": "",
 
   // Rate Limiting defaults
   "ratelimit.enabled": false,
@@ -237,11 +230,6 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   quotes: {
     title: "Quotes",
     description: "Collect and curate memorable quotes in a dedicated channel.",
-  },
-  core: {
-    title: "Core Logging",
-    description:
-      "Discord-channel notifications for selected bot events. Most of this namespace was retired in #440 / #443; only the cleanup-job notification channel remains.",
   },
   ratelimit: {
     title: "Rate Limiting",
@@ -498,14 +486,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Pin the header post in the quote channel.",
     category: "quotes",
     type: "boolean",
-  },
-
-  // Core Bot Logging (Discord)
-  "core.cleanup.channel_id": {
-    label: "Cleanup-job notifications channel",
-    description: "Channel ID for cleanup-job notifications.",
-    category: "core",
-    type: "channel",
   },
 
   // Rate Limiting

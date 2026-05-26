@@ -1416,7 +1416,6 @@ export interface DatabaseProps extends CommonProps {
     isScheduled: boolean;
     isRunning: boolean;
     lastRun: string;
-    notificationChannel: { name: string; id: string } | null;
     detailedDays: number;
     monthlyMonths: number;
     yearlyYears: number;
@@ -1476,7 +1475,6 @@ ${renderFlash(props.flash)}
     <dt>Scheduled</dt><dd>${props.trunk.isScheduled ? '<span class="tag tag-on">yes</span>' : '<span class="tag tag-off">no</span>'}</dd>
     <dt>Currently running</dt><dd>${props.trunk.isRunning ? '<span class="tag tag-warn">yes</span>' : '<span class="tag tag-on">idle</span>'}</dd>
     <dt>Last run</dt><dd class="muted">${escapeHtml(props.trunk.lastRun)}</dd>
-    <dt>Notification channel</dt><dd>${props.trunk.notificationChannel ? `#${escapeHtml(props.trunk.notificationChannel.name)} <span class="muted mono">${escapeHtml(props.trunk.notificationChannel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
     <dt>Detailed sessions retention</dt><dd>${props.trunk.detailedDays} days</dd>
     <dt>Monthly summaries retention</dt><dd>${props.trunk.monthlyMonths} months</dd>
     <dt>Yearly summaries retention</dt><dd>${props.trunk.yearlyYears} years</dd>

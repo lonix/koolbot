@@ -36,7 +36,6 @@ Complete configuration reference for all KoolBot settings.
 - [Achievements System](#-achievements-system)
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
-- [Discord Logging](#-discord-logging)
 - [Rate Limiting](#-rate-limiting)
 - [Permissions & Access Control](#-permissions--access-control)
 - [Configuration Management](#-configuration-management) — Using the Web UI
@@ -570,50 +569,6 @@ calculations:
 
 ---
 
-## 📝 Discord Logging
-
-Send bot events and logs to Discord channels.
-
-### Startup / shutdown logging
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.startup.enabled` | `false` | Enable startup/shutdown event logging |
-| `core.startup.channel_id` | `""` | Channel ID for startup/shutdown logs |
-
-### Error logging
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.errors.enabled` | `false` | Enable error logging |
-| `core.errors.channel_id` | `""` | Channel ID for error logs |
-
-### Cleanup logging
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.cleanup.enabled` | `false` | Enable cleanup operation logging |
-| `core.cleanup.channel_id` | `""` | Channel ID for cleanup logs |
-
-### Configuration logging
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.config.enabled` | `false` | Enable configuration change logging |
-| `core.config.channel_id` | `""` | Channel ID for config logs |
-
-### Cron job logging
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `core.cron.enabled` | `false` | Enable scheduled task logging |
-| `core.cron.channel_id` | `""` | Channel ID for cron logs |
-
-You can point every category at the same channel for a consolidated log,
-or split them across `#bot-status`, `#admin-alerts`, `#bot-logs`, etc.
-
----
-
 ## 🔒 Rate Limiting
 
 Protect your bot from command spam with global rate limiting.
@@ -819,19 +774,6 @@ above).
 - `voicetracking.cleanup.retention.detailed_sessions_days` (number, default: 30)
 - `voicetracking.cleanup.retention.monthly_summaries_months` (number, default: 6)
 - `voicetracking.cleanup.retention.yearly_summaries_years` (number, default: 1)
-
-#### Discord Logging
-
-- `core.startup.enabled` (bool, default: false)
-- `core.startup.channel_id` (string, default: "")
-- `core.errors.enabled` (bool, default: false)
-- `core.errors.channel_id` (string, default: "")
-- `core.cleanup.enabled` (bool, default: false)
-- `core.cleanup.channel_id` (string, default: "")
-- `core.config.enabled` (bool, default: false)
-- `core.config.channel_id` (string, default: "")
-- `core.cron.enabled` (bool, default: false)
-- `core.cron.channel_id` (string, default: "")
 
 #### Rate Limiting
 

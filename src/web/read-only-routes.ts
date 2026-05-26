@@ -703,33 +703,23 @@ export function createReadOnlyRouter(
       const config = ConfigService.getInstance();
       const status = truncation.getStatus();
 
-      const [
-        enabled,
-        schedule,
-        notificationChannelId,
-        detailedDays,
-        monthlyMonths,
-        yearlyYears,
-        channelData,
-      ] = await Promise.all([
-        truncation.isEnabled(),
-        truncation.getSchedule(),
-        truncation.getNotificationChannel(),
-        config.getNumber(
-          "voicetracking.cleanup.retention.detailed_sessions_days",
-          30,
-        ),
-        config.getNumber(
-          "voicetracking.cleanup.retention.monthly_summaries_months",
-          6,
-        ),
-        config.getNumber(
-          "voicetracking.cleanup.retention.yearly_summaries_years",
-          1,
-        ),
-        fetchChannelData(client, common.guildId),
-      ]);
-      const channelNames = channelData.names;
+      const [enabled, schedule, detailedDays, monthlyMonths, yearlyYears] =
+        await Promise.all([
+          truncation.isEnabled(),
+          truncation.getSchedule(),
+          config.getNumber(
+            "voicetracking.cleanup.retention.detailed_sessions_days",
+            30,
+          ),
+          config.getNumber(
+            "voicetracking.cleanup.retention.monthly_summaries_months",
+            6,
+          ),
+          config.getNumber(
+            "voicetracking.cleanup.retention.yearly_summaries_years",
+            1,
+          ),
+        ]);
 
       const collections: Array<{ name: string; count: number }> = [];
       if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
@@ -802,14 +792,6 @@ export function createReadOnlyRouter(
             lastRun: status.lastCleanupDate
               ? status.lastCleanupDate.toISOString()
               : "—",
-            notificationChannel: notificationChannelId
-              ? {
-                  name:
-                    channelNames.get(notificationChannelId) ??
-                    notificationChannelId,
-                  id: notificationChannelId,
-                }
-              : null,
             detailedDays,
             monthlyMonths,
             yearlyYears,
