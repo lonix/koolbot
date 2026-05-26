@@ -4,12 +4,23 @@
  * without a Discord client or MongoDB.
  */
 
-import { escapeHtml, escapeJsInAttr, renderAdminPage } from "./admin-layout.js";
+import {
+  escapeHtml,
+  escapeJsInAttr,
+  renderAdminPage,
+  type NavFeatureStatus,
+} from "./admin-layout.js";
 import { categoryMetadata } from "../services/config-schema.js";
 
 interface CommonProps {
   csrfToken: string;
   remainingMs: number;
+  /**
+   * Enabled-state of feature-gated nav items. Threaded straight through
+   * to `renderAdminPage` so the sidebar can hide pages for disabled
+   * features. Optional: when absent the nav shows every item.
+   */
+  navFeatureStatus?: NavFeatureStatus;
 }
 
 function tagOnOff(on: boolean, onLabel = "ON", offLabel = "OFF"): string {
@@ -99,6 +110,7 @@ export function renderDashboardPage(props: DashboardProps): string {
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -152,6 +164,7 @@ ${sections}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -390,6 +403,7 @@ ${importSection}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -473,6 +487,7 @@ export function renderImportDiffPage(props: ImportDiffProps): string {
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -575,6 +590,7 @@ ${renderFlash(props.flash)}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -665,6 +681,7 @@ export function renderWizardPage(props: WizardPageProps): string {
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -747,6 +764,7 @@ ${renderFlash(props.flash)}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -797,6 +815,7 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -978,6 +997,7 @@ ${renderFlash(props.flash)}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -1142,6 +1162,7 @@ ${renderFlash(props.flash)}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -1249,6 +1270,7 @@ ${renderFlash(props.flash)}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -1366,6 +1388,7 @@ ${groupSections}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -1476,6 +1499,7 @@ ${renderFlash(props.flash)}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }
 
@@ -1574,5 +1598,6 @@ ${renderFlash(props.flash)}
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
   });
 }

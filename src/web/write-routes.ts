@@ -38,7 +38,10 @@ import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { requireCsrf } from "./csrf.js";
 import type { AuthenticatedRequest } from "./session.js";
 import { recordAudit } from "./audit.js";
-import { getDisplayedRemainingMs } from "./admin-layout.js";
+import {
+  getDisplayedRemainingMs,
+  resolveNavFeatureStatus,
+} from "./admin-layout.js";
 import {
   renderImportDiffPage,
   renderWizardPage,
@@ -261,6 +264,16 @@ export function coerceConfigValue(
 
 function getCsrfFromReq(req: AuthenticatedRequest): string {
   return (req as Request & { csrfToken?: string }).csrfToken ?? "";
+}
+
+/**
+ * Enabled-state of feature-gated nav items for the pages rendered by the
+ * write router (wizard steps, import preview). Keeps their sidebar
+ * consistent with the read-only pages.
+ */
+function navStatusForPage(): ReturnType<typeof resolveNavFeatureStatus> {
+  const config = ConfigService.getInstance();
+  return resolveNavFeatureStatus((key) => config.getBoolean(key, false));
 }
 
 export function createWriteRouter(
@@ -563,6 +576,7 @@ export function createWriteRouter(
         renderImportDiffPage({
           csrfToken: getCsrfFromReq(req),
           remainingMs: getDisplayedRemainingMs(session),
+          navFeatureStatus: await navStatusForPage(),
           rows,
           yamlText,
         }),
@@ -766,6 +780,7 @@ export function createWriteRouter(
       const session = requireSessionContext(req);
       const csrfToken = getCsrfFromReq(req);
       const remainingMs = getDisplayedRemainingMs(session);
+      const navFeatureStatus = await navStatusForPage();
       const wizard = WizardService.getInstance();
       const existing = wizard.getSession(
         session.discordUserId,
@@ -792,6 +807,7 @@ export function createWriteRouter(
             renderWizardConfirmPage({
               csrfToken,
               remainingMs,
+              navFeatureStatus,
               pending,
               metadata: settingsMetadata,
             }),
@@ -827,6 +843,7 @@ export function createWriteRouter(
             renderWizardStepPage({
               csrfToken,
               remainingMs,
+              navFeatureStatus,
               stepIndex: step,
               totalSteps: features.length,
               featureKey,
@@ -859,6 +876,7 @@ export function createWriteRouter(
         renderWizardPage({
           csrfToken,
           remainingMs,
+          navFeatureStatus,
           featureOrder: WIZARD_FEATURE_ORDER,
           featureStatus,
         }),

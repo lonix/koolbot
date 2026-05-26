@@ -5,6 +5,15 @@
  * expires in X · [Finish]" banner mandated by #367.
  */
 
+import type { ConfigSchema } from "../services/config-schema.js";
+
+/**
+ * Enabled-state of feature-gated nav items, keyed by config-schema key.
+ * `Partial` because callers legitimately omit keys — an absent key is
+ * treated as enabled (fail-open) by `renderNav`.
+ */
+export type NavFeatureStatus = Partial<Record<keyof ConfigSchema, boolean>>;
+
 export function escapeHtml(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value)
@@ -43,6 +52,17 @@ export function escapeJsInAttr(value: unknown): string {
 interface NavItem {
   href: string;
   label: string;
+  /**
+   * Config key (a `<feature>.enabled` boolean) that gates this page. When
+   * set and the feature resolves to `false`, the item is hidden from the
+   * sidebar. Items without a `featureKey` — Dashboard, Settings, etc. —
+   * are always shown. The page URL itself stays reachable by direct
+   * navigation; only the nav advertisement is suppressed.
+   *
+   * Typed as `keyof ConfigSchema` so a typo in `NAV_ITEMS` fails at
+   * compile time rather than silently never matching at runtime.
+   */
+  featureKey?: keyof ConfigSchema;
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -50,14 +70,55 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/admin/settings", label: "Settings" },
   { href: "/admin/permissions", label: "Permissions" },
   { href: "/admin/wizard", label: "Setup Wizard" },
-  { href: "/admin/announcements", label: "Announcements" },
-  { href: "/admin/polls", label: "Polls" },
-  { href: "/admin/reaction-roles", label: "Reaction Roles" },
-  { href: "/admin/notices", label: "Notices" },
-  { href: "/admin/voice-channels", label: "Voice Channels" },
+  {
+    href: "/admin/announcements",
+    label: "Announcements",
+    featureKey: "announcements.enabled",
+  },
+  { href: "/admin/polls", label: "Polls", featureKey: "polls.enabled" },
+  {
+    href: "/admin/reaction-roles",
+    label: "Reaction Roles",
+    featureKey: "reactionroles.enabled",
+  },
+  {
+    href: "/admin/notices",
+    label: "Notices",
+    featureKey: "notices.enabled",
+  },
+  {
+    href: "/admin/voice-channels",
+    label: "Voice Channels",
+    featureKey: "voicechannels.enabled",
+  },
   { href: "/admin/database", label: "Database" },
   { href: "/admin/bootstrap", label: "Bootstrap" },
 ];
+
+/**
+ * Resolve the enabled-state of every feature-gated nav item. Takes an
+ * async boolean reader (in practice `ConfigService.getBoolean`) so this
+ * module stays free of a direct ConfigService dependency and remains
+ * unit-testable. The returned map is keyed by `featureKey`.
+ *
+ * Distinct feature keys are resolved in parallel (and de-duplicated, so
+ * two nav items sharing a key would only trigger one read).
+ */
+export async function resolveNavFeatureStatus(
+  isEnabled: (key: keyof ConfigSchema) => Promise<boolean>,
+): Promise<NavFeatureStatus> {
+  const keys = [
+    ...new Set(
+      NAV_ITEMS.flatMap((item) => (item.featureKey ? [item.featureKey] : [])),
+    ),
+  ];
+  const results = await Promise.all(keys.map((key) => isEnabled(key)));
+  const status: NavFeatureStatus = {};
+  keys.forEach((key, i) => {
+    status[key] = results[i];
+  });
+  return status;
+}
 
 export interface AdminPageOptions {
   title: string;
@@ -65,6 +126,12 @@ export interface AdminPageOptions {
   body: string;
   csrfToken: string;
   remainingMs: number;
+  /**
+   * Enabled-state of feature-gated nav items. When omitted, every nav
+   * item is shown (keeps direct callers and tests that don't care about
+   * nav filtering working unchanged).
+   */
+  navFeatureStatus?: NavFeatureStatus;
 }
 
 const STYLE = [
@@ -166,13 +233,25 @@ const SCRIPT =
   "if(r<=0&&!fired){fired=true;window.location.href='/admin/'}}" +
   "tick();setInterval(tick,1000)})();";
 
-function renderNav(active: string): string {
-  return NAV_ITEMS.map((item) => {
-    const isActive =
-      item.href === active || (item.href === "/admin/" && active === "/admin");
-    const cls = isActive ? ' class="active"' : "";
-    return `<li><a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a></li>`;
-  }).join("");
+function renderNav(
+  active: string,
+  navFeatureStatus?: NavFeatureStatus,
+): string {
+  return NAV_ITEMS.filter((item) => {
+    // No status map → show everything. Otherwise hide items whose gating
+    // feature resolves to false. An unknown featureKey (missing from the
+    // map) is treated as enabled so a wiring gap never blanks the nav.
+    if (!navFeatureStatus || !item.featureKey) return true;
+    return navFeatureStatus[item.featureKey] !== false;
+  })
+    .map((item) => {
+      const isActive =
+        item.href === active ||
+        (item.href === "/admin/" && active === "/admin");
+      const cls = isActive ? ' class="active"' : "";
+      return `<li><a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a></li>`;
+    })
+    .join("");
 }
 
 export function renderAdminPage(opts: AdminPageOptions): string {
@@ -195,7 +274,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<button type="submit">Finish</button>',
     "</form></div></div>",
     '<div class="shell">',
-    `<nav class="side"><ul>${renderNav(opts.active)}</ul></nav>`,
+    `<nav class="side"><ul>${renderNav(opts.active, opts.navFeatureStatus)}</ul></nav>`,
     `<main>${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     "</body></html>",

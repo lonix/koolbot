@@ -4,6 +4,7 @@ import {
   getDisplayedRemainingMs,
   NAV_ITEMS,
   renderAdminPage,
+  resolveNavFeatureStatus,
 } from "../../src/web/admin-layout.js";
 
 describe("admin-layout escapeHtml", () => {
@@ -81,6 +82,78 @@ describe("renderAdminPage", () => {
       remainingMs: 0,
     });
     expect(html).toContain('href="/admin/settings" class="active"');
+  });
+
+  it("shows every nav item when navFeatureStatus is omitted", () => {
+    const html = renderAdminPage({
+      title: "Dashboard",
+      active: "/admin/",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    for (const item of NAV_ITEMS) {
+      expect(html).toContain(`href="${item.href}"`);
+    }
+  });
+
+  it("hides feature-gated nav items whose feature is disabled", () => {
+    const html = renderAdminPage({
+      title: "Dashboard",
+      active: "/admin/",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+      navFeatureStatus: {
+        "announcements.enabled": false,
+        "polls.enabled": true,
+        "reactionroles.enabled": false,
+        "notices.enabled": false,
+        "voicechannels.enabled": true,
+      },
+    });
+    // Disabled features are gone.
+    expect(html).not.toContain('href="/admin/announcements"');
+    expect(html).not.toContain('href="/admin/reaction-roles"');
+    expect(html).not.toContain('href="/admin/notices"');
+    // Enabled features stay.
+    expect(html).toContain('href="/admin/polls"');
+    expect(html).toContain('href="/admin/voice-channels"');
+    // Ungated items are always present.
+    expect(html).toContain('href="/admin/settings"');
+    expect(html).toContain('href="/admin/database"');
+    expect(html).toContain('href="/admin/bootstrap"');
+  });
+
+  it("keeps an item visible when its featureKey is missing from the status map", () => {
+    // A wiring gap (featureKey absent from the map) must not blank the
+    // item — fail open, not closed.
+    const html = renderAdminPage({
+      title: "Dashboard",
+      active: "/admin/",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+      navFeatureStatus: {},
+    });
+    expect(html).toContain('href="/admin/notices"');
+  });
+});
+
+describe("resolveNavFeatureStatus", () => {
+  it("resolves the enabled-state of every feature-gated nav item", async () => {
+    const gatedKeys = NAV_ITEMS.flatMap((n) =>
+      n.featureKey ? [n.featureKey] : [],
+    );
+    const seen: string[] = [];
+    const status = await resolveNavFeatureStatus(async (key) => {
+      seen.push(key);
+      return key === "polls.enabled";
+    });
+    // Every gated key was queried, and only gated keys were queried.
+    expect(seen.sort()).toEqual([...gatedKeys].sort());
+    expect(status["polls.enabled"]).toBe(true);
+    expect(status["notices.enabled"]).toBe(false);
   });
 });
 

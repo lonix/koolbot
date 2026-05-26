@@ -36,7 +36,11 @@ import { VoiceChannelTruncationService } from "../services/voice-channel-truncat
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
 import type { AuthenticatedRequest } from "./session.js";
-import { getDisplayedRemainingMs } from "./admin-layout.js";
+import {
+  getDisplayedRemainingMs,
+  resolveNavFeatureStatus,
+  type NavFeatureStatus,
+} from "./admin-layout.js";
 import {
   renderAnnouncementsPage,
   renderBootstrapPage,
@@ -98,21 +102,27 @@ function getCsrfToken(req: Request): string {
   return (req as Request & { csrfToken?: string }).csrfToken ?? "";
 }
 
-function commonFromReq(req: AuthenticatedRequest): {
+async function commonFromReq(req: AuthenticatedRequest): Promise<{
   guildId: string;
   csrfToken: string;
   remainingMs: number;
-} {
+  navFeatureStatus: NavFeatureStatus;
+}> {
   const session = req.webSession;
   if (!session) {
     // The middleware should always populate this; throw to satisfy the type
     // narrower without falling through to a partially-initialised page.
     throw new Error("requireSession middleware must run first");
   }
+  const config = ConfigService.getInstance();
+  const navFeatureStatus = await resolveNavFeatureStatus((key) =>
+    config.getBoolean(key, false),
+  );
   return {
     guildId: session.guildId,
     csrfToken: getCsrfToken(req),
     remainingMs: getDisplayedRemainingMs(session),
+    navFeatureStatus,
   };
 }
 
@@ -222,7 +232,7 @@ export function createReadOnlyRouter(
   router.get(
     "/",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
 
       let guildName: string | null = null;
@@ -305,7 +315,7 @@ export function createReadOnlyRouter(
   router.get(
     "/bootstrap",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const grouped = new Map<
         string,
         Array<{
@@ -346,7 +356,7 @@ export function createReadOnlyRouter(
   router.get(
     "/settings",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
       const stored = await config.getAll().catch(() => []);
       const storedByKey = new Map(stored.map((s) => [s.key, s]));
@@ -431,7 +441,7 @@ export function createReadOnlyRouter(
   router.get(
     "/permissions",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const permissions = PermissionsService.getInstance(client);
       const all = await permissions.listAllPermissions(common.guildId);
       const commands = Array.from(client.commands.keys()).sort();
@@ -469,7 +479,7 @@ export function createReadOnlyRouter(
   router.get(
     "/announcements",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const service = ScheduledAnnouncementService.getInstance(client);
       const config = ConfigService.getInstance();
       const [enabled, announcements, channelData] = await Promise.all([
@@ -506,7 +516,7 @@ export function createReadOnlyRouter(
   router.get(
     "/polls",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const service = PollService.getInstance(client);
       const config = ConfigService.getInstance();
       const [
@@ -566,7 +576,7 @@ export function createReadOnlyRouter(
   router.get(
     "/reaction-roles",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
       const service = ReactionRoleService.getInstance(client);
       const [enabled, configChannelId, all, archived, channelData] =
@@ -627,7 +637,7 @@ export function createReadOnlyRouter(
   router.get(
     "/notices",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
       const [enabled, channelId, headerEnabled, notices, channelData] =
         await Promise.all([
@@ -688,7 +698,7 @@ export function createReadOnlyRouter(
   router.get(
     "/database",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const truncation = VoiceChannelTruncationService.getInstance(client);
       const config = ConfigService.getInstance();
       const status = truncation.getStatus();
@@ -816,7 +826,7 @@ export function createReadOnlyRouter(
   router.get(
     "/voice-channels",
     asyncHandler(async (req, res) => {
-      const common = commonFromReq(req);
+      const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
       const manager = VoiceChannelManager.getInstance(client);
 
