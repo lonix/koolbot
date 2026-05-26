@@ -27,6 +27,12 @@ const configService = ConfigService.getInstance();
 // leaving stale entries behind (issue #404, follow-up to #339).
 const UNKNOWN_CHANNEL_ERROR_CODE = 10003;
 
+// Seconds to wait before transferring ownership when the channel owner
+// leaves. Demoted from `voicechannels.ownership.grace_period_seconds`
+// config key in #442 — operators never tuned it; it's an internal pacing
+// constant for the ownership-handoff state machine.
+const OWNERSHIP_TRANSFER_GRACE_SECONDS = 30;
+
 function isUnknownChannelError(error: unknown): boolean {
   return (
     error instanceof DiscordAPIError &&
@@ -432,12 +438,6 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Get grace period from config
-      const gracePeriodSeconds = await this.configService.getNumber(
-        "voicechannels.ownership.grace_period_seconds",
-        30,
-      );
-
       // Check if there's already a pending ownership transfer for this channel
       if (this.ownershipTransferTimers.has(channel.id)) {
         logger.info(
@@ -447,7 +447,7 @@ export class VoiceChannelManager {
       }
 
       logger.info(
-        `Owner ${currentOwnerId} left channel ${channel.name}. Scheduling ownership transfer in ${gracePeriodSeconds} seconds...`,
+        `Owner ${currentOwnerId} left channel ${channel.name}. Scheduling ownership transfer in ${OWNERSHIP_TRANSFER_GRACE_SECONDS} seconds...`,
       );
 
       // Schedule ownership transfer after grace period
@@ -516,7 +516,7 @@ export class VoiceChannelManager {
           logger.error("Error during scheduled ownership transfer:", error);
           this.ownershipTransferTimers.delete(channel.id);
         }
-      }, gracePeriodSeconds * 1000);
+      }, OWNERSHIP_TRANSFER_GRACE_SECONDS * 1000);
 
       // Store the timer and original owner info
       this.ownershipTransferTimers.set(channel.id, {

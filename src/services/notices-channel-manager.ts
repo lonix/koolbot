@@ -5,6 +5,12 @@ import logger from "../utils/logger.js";
 import Notice, { INotice } from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 
+// Internal sweep interval for purging unauthorised messages from the
+// notices channel. Demoted from `notices.cleanup_interval` config key in
+// #442 — operators never tuned it; the cadence is an implementation
+// detail of the channel-cleanup loop.
+const CLEANUP_INTERVAL_MINUTES = 5;
+
 export class NoticesChannelManager {
   private static instance: NoticesChannelManager;
   private client: Client;
@@ -394,14 +400,8 @@ export class NoticesChannelManager {
   }
 
   private async startCleanupJob(): Promise<void> {
-    // Get cleanup interval from config (in minutes)
-    const intervalMinutes = await this.configService.getNumber(
-      "notices.cleanup_interval",
-      5,
-    );
-
     // Convert to cron expression (*/N * * * * means every N minutes)
-    const cronExpression = `*/${intervalMinutes} * * * *`;
+    const cronExpression = `*/${CLEANUP_INTERVAL_MINUTES} * * * *`;
 
     this.cleanupJob = new CronJob(
       cronExpression,
@@ -414,7 +414,7 @@ export class NoticesChannelManager {
     );
 
     logger.info(
-      `Started notices channel cleanup job (every ${intervalMinutes} minutes)`,
+      `Started notices channel cleanup job (every ${CLEANUP_INTERVAL_MINUTES} minutes)`,
     );
   }
 
