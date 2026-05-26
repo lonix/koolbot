@@ -12,6 +12,12 @@ import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { quoteService } from "./quote-service.js";
 
+// Internal sweep interval for purging unauthorised messages from the
+// quote channel. Demoted from `quotes.cleanup_interval` config key in
+// #442 — operators never tuned it; the cadence is an implementation
+// detail of the channel-cleanup loop.
+const CLEANUP_INTERVAL_MINUTES = 5;
+
 /**
  * Normalize a Discord user ID from various formats to a clean numeric ID
  * Handles: <@123>, <@!123>, @username, or plain 123
@@ -375,14 +381,8 @@ export class QuoteChannelManager {
       logger.debug("Stopped existing cleanup job before starting new one");
     }
 
-    // Get cleanup interval from config (in minutes)
-    const intervalMinutes = await this.configService.getNumber(
-      "quotes.cleanup_interval",
-      5,
-    );
-
     // Convert to cron expression (*/N * * * * means every N minutes)
-    const cronExpression = `*/${intervalMinutes} * * * *`;
+    const cronExpression = `*/${CLEANUP_INTERVAL_MINUTES} * * * *`;
 
     this.cleanupJob = new CronJob(
       cronExpression,
@@ -395,7 +395,7 @@ export class QuoteChannelManager {
     );
 
     logger.info(
-      `Started quote channel cleanup job (every ${intervalMinutes} minutes)`,
+      `Started quote channel cleanup job (every ${CLEANUP_INTERVAL_MINUTES} minutes)`,
     );
   }
 

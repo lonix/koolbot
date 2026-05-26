@@ -7,7 +7,6 @@ export interface ConfigSchema {
   "voicechannels.channel.prefix": string;
   "voicechannels.channel.suffix": string;
   "voicechannels.controlpanel.enabled": boolean;
-  "voicechannels.ownership.grace_period_seconds": number;
   "voicechannels.presets.enabled": boolean;
   "voicechannels.presets.max_per_user": number;
 
@@ -37,7 +36,6 @@ export interface ConfigSchema {
   "quotes.delete_roles": string; // Comma-separated role IDs
   "quotes.max_length": number; // Maximum quote length
   "quotes.cooldown": number; // Cooldown in seconds between quote additions
-  "quotes.cleanup_interval": number; // Cleanup interval in minutes (default: 5)
   "quotes.header_enabled": boolean; // Enable header post in quote channel
   "quotes.header_message_id": string; // Message ID of the header post
   "quotes.header_pin_enabled": boolean; // Pin the header post
@@ -69,7 +67,6 @@ export interface ConfigSchema {
   // Notices System
   "notices.enabled": boolean;
   "notices.channel_id": string; // Channel ID for notice messages
-  "notices.cleanup_interval": number; // Cleanup interval in minutes
   "notices.header_enabled": boolean; // Enable header post in notices channel
   "notices.header_message_id": string; // Message ID of the header post
   "notices.header_pin_enabled": boolean; // Pin the header post
@@ -96,7 +93,6 @@ export const defaultConfig: ConfigSchema = {
   "voicechannels.channel.prefix": "🎮",
   "voicechannels.channel.suffix": "",
   "voicechannels.controlpanel.enabled": true,
-  "voicechannels.ownership.grace_period_seconds": 30,
   "voicechannels.presets.enabled": false,
   "voicechannels.presets.max_per_user": 3,
 
@@ -126,7 +122,6 @@ export const defaultConfig: ConfigSchema = {
   "quotes.delete_roles": "", // Empty means only admins can delete
   "quotes.max_length": 1000,
   "quotes.cooldown": 60,
-  "quotes.cleanup_interval": 5, // Clean up unauthorized messages every 5 minutes
   "quotes.header_enabled": true, // Enable informational header post
   "quotes.header_message_id": "", // Stores header message ID
   "quotes.header_pin_enabled": true, // Pin header for easy access
@@ -157,7 +152,6 @@ export const defaultConfig: ConfigSchema = {
   // Notices System defaults
   "notices.enabled": false,
   "notices.channel_id": "",
-  "notices.cleanup_interval": 5, // Clean up unauthorized messages every 5 minutes
   "notices.header_enabled": true, // Enable informational header post
   "notices.header_message_id": "", // Stores header message ID
   "notices.header_pin_enabled": true, // Pin header for easy access
@@ -347,13 +341,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicechannels",
     type: "boolean",
   },
-  "voicechannels.ownership.grace_period_seconds": {
-    label: "Ownership transfer grace period (seconds)",
-    description:
-      "Seconds to wait before transferring ownership when the channel owner leaves.",
-    category: "voicechannels",
-    type: "number",
-  },
   "voicechannels.presets.enabled": {
     label: "Per-user channel presets enabled",
     description:
@@ -493,13 +480,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "quotes",
     type: "number",
   },
-  "quotes.cleanup_interval": {
-    label: "Channel cleanup interval (minutes)",
-    description:
-      "Interval in minutes between sweeps for unauthorised messages in the quote channel.",
-    category: "quotes",
-    type: "number",
-  },
   "quotes.header_enabled": {
     label: "Pinned header post enabled",
     description:
@@ -616,13 +596,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where notice messages are posted.",
     category: "notices",
     type: "channel",
-  },
-  "notices.cleanup_interval": {
-    label: "Channel cleanup interval (minutes)",
-    description:
-      "Interval in minutes between sweeps for unauthorised messages in the notices channel.",
-    category: "notices",
-    type: "number",
   },
   "notices.header_enabled": {
     label: "Pinned header post enabled",
