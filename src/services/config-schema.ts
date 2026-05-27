@@ -53,6 +53,14 @@ export interface ConfigSchema {
   "achievements.enabled": boolean;
   "achievements.announcements.enabled": boolean;
   "achievements.dm_notifications.enabled": boolean;
+
+  // Weekly Personal Voice-Activity Digest (#483)
+  "digest.enabled": boolean;
+  "digest.cron": string; // Cron schedule, default Monday 09:00
+  "digest.min_active_minutes": number; // Min weekly minutes to qualify
+  "digest.streak_min_minutes": number; // Per-week minutes that count toward a streak
+  "digest.include_achievements": boolean;
+
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
@@ -166,6 +174,16 @@ export const defaultConfig: ConfigSchema = {
   "achievements.enabled": false,
   "achievements.announcements.enabled": true,
   "achievements.dm_notifications.enabled": true,
+
+  // Weekly digest defaults (#483). Master gate off, follows rule 1. The
+  // achievements sub-toggle defaults on so an operator who flips the
+  // master switch gets the richer embed without an extra step (parent
+  // gate keeps it inert until they do).
+  "digest.enabled": false,
+  "digest.cron": "0 9 * * 1", // Mondays at 09:00 in the host timezone
+  "digest.min_active_minutes": 30,
+  "digest.streak_min_minutes": 30,
+  "digest.include_achievements": true,
   // Reaction Roles defaults
   "reactionroles.enabled": false,
   "reactionroles.message_channel_id": "",
@@ -279,6 +297,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Achievements",
     description:
       "Award badges based on voice activity, optionally with channel and DM notifications.",
+  },
+  digest: {
+    title: "Weekly Digest",
+    description:
+      "Personalised weekly DM summarising each user's voice activity, rank, streak, and new achievements. Opt-out lives on the user's /me/notifications page.",
   },
   reactionroles: {
     title: "Reaction Roles",
@@ -569,6 +592,43 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "DM notifications for earned achievements",
     description: "DM users when they earn a new achievement.",
     category: "achievements",
+    type: "boolean",
+  },
+
+  // Weekly Personal Voice-Activity Digest (#483)
+  "digest.enabled": {
+    label: "Weekly voice-activity digest enabled",
+    description:
+      "Send a personalised weekly DM summarising each eligible user's voice activity, rank, streak, and new achievements.",
+    category: "digest",
+    type: "boolean",
+  },
+  "digest.cron": {
+    label: "Digest schedule (cron)",
+    description:
+      "Cron expression for when the weekly digest job runs (defaults to Mondays 09:00 in the host timezone).",
+    category: "digest",
+    type: "cron",
+  },
+  "digest.min_active_minutes": {
+    label: "Minimum active minutes to qualify",
+    description:
+      "Users with less than this many minutes of voice activity in the past 7 days are skipped.",
+    category: "digest",
+    type: "number",
+  },
+  "digest.streak_min_minutes": {
+    label: "Streak threshold (minutes per week)",
+    description:
+      "Minutes of voice activity that count a week toward the consecutive-weeks streak.",
+    category: "digest",
+    type: "number",
+  },
+  "digest.include_achievements": {
+    label: "Include weekly achievements in digest",
+    description:
+      "Embed the achievements earned during the past week alongside the activity summary.",
+    category: "digest",
     type: "boolean",
   },
 

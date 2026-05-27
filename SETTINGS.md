@@ -34,6 +34,7 @@ Complete configuration reference for all KoolBot settings.
 - [Voice Channel Cleanup](#-voice-channel-cleanup)
 - [Announcements](#-announcements)
 - [Achievements System](#-achievements-system)
+- [Weekly Digest](#-weekly-digest)
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
 - [Rate Limiting](#-rate-limiting)
@@ -419,6 +420,36 @@ accolade list and usage.
 
 ---
 
+## 📬 Weekly Digest
+
+Per-user weekly DM that summarises voice activity, leaderboard rank,
+streak, and achievements earned in the last 7 days. Opt-out lives on
+the user's **/me/notifications** page (no slash command).
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `digest.enabled` | `false` | Master switch — enables the cron job and DM delivery |
+| `digest.cron` | `"0 9 * * 1"` | Cron schedule (default: Mondays at 09:00 host timezone) |
+| `digest.min_active_minutes` | `30` | Minimum weekly voice minutes a user needs to receive a digest |
+| `digest.streak_min_minutes` | `30` | Minutes of weekly activity that count toward the consecutive-weeks streak |
+| `digest.include_achievements` | `true` | Include accolades and achievements earned in the past week |
+
+**Notes:**
+
+- Requires `voicetracking.enabled = true` so the underlying weekly stats
+  exist.
+- Per-user opt-out is honoured before each send via the
+  `prefs.digest` field set on `/me/notifications`.
+- Users with DMs closed are silently skipped (same pattern the
+  `AchievementsService` already uses).
+- A summary row (qualifying / sent / opted-out / DMs closed / failed)
+  is posted to the configured `core.cron.channel_id` log channel after
+  every run.
+- Delta + streak math uses a per-user `DigestState` row that is updated
+  after each successful delivery.
+
+---
+
 ### Cron schedule format
 
 ```text
@@ -752,6 +783,14 @@ above).
 - `achievements.enabled` (bool, default: false)
 - `achievements.announcements.enabled` (bool, default: true)
 - `achievements.dm_notifications.enabled` (bool, default: true)
+
+#### Weekly Digest
+
+- `digest.enabled` (bool, default: false)
+- `digest.cron` (string, default: `"0 9 * * 1"`)
+- `digest.min_active_minutes` (number, default: 30)
+- `digest.streak_min_minutes` (number, default: 30)
+- `digest.include_achievements` (bool, default: true)
 
 #### Cleanup
 

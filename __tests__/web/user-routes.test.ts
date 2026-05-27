@@ -408,9 +408,9 @@ describe("/me/notifications", () => {
     );
   });
 
-  it("renders 'coming soon' hint for digest and rewind rows", async () => {
+  it("renders 'coming soon' hint for the rewind row only (digest shipped in #483)", async () => {
     const out = await dispatch({ method: "GET" });
-    expect(out.body).toContain("#483");
+    expect(out.body).not.toContain("#483");
     expect(out.body).toContain("#484");
   });
 

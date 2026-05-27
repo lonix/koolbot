@@ -108,7 +108,6 @@ const NOTIFICATION_ROW_DEFS: readonly NotificationRowDef[] = [
     label: "Weekly digest",
     description:
       "Once-a-week DM summarising your activity and the server's highlights.",
-    comingSoon: "Toggle works today; the matching DM lands in #483.",
   },
   {
     key: "rewind",
