@@ -33,6 +33,7 @@ import {
   resolveManagedCategory,
 } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
+import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
 import {
   createSessionPingHandler,
@@ -46,6 +47,7 @@ import {
 import {
   renderAnnouncementsPage,
   renderBootstrapPage,
+  renderCommandAuditPage,
   renderDashboardPage,
   renderDatabasePage,
   renderNoticesPage,
@@ -55,6 +57,7 @@ import {
   renderSettingsPage,
   renderVoiceChannelsPage,
   type ChannelOption,
+  type CommandAuditRow,
   type DbTrunkHistoryRow,
   type FlashMessage,
   type NoticeCategoryOption,
@@ -871,6 +874,138 @@ export function createReadOnlyRouter(
           channels,
           categoryFound,
           flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Command Audit Log (#459) ----------
+  router.get(
+    "/audit/commands",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+
+      const pageSize = 50;
+      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+      const commandFilter = String(req.query.command ?? "").trim();
+      const userFilter = String(req.query.user ?? "").trim();
+      const resultFilterRaw = String(req.query.result ?? "").trim();
+      const resultFilter =
+        resultFilterRaw === "success" ||
+        resultFilterRaw === "error" ||
+        resultFilterRaw === "denied"
+          ? resultFilterRaw
+          : "";
+      const fromFilter = String(req.query.from ?? "").trim();
+      const toFilter = String(req.query.to ?? "").trim();
+
+      const query: Record<string, unknown> = { guildId: common.guildId };
+      if (commandFilter) query.commandName = commandFilter;
+      if (userFilter) query.discordUserId = userFilter;
+      if (resultFilter) query.result = resultFilter;
+
+      const dateRange: Record<string, Date> = {};
+      const parsedFrom = fromFilter ? new Date(fromFilter) : null;
+      const parsedTo = toFilter ? new Date(toFilter) : null;
+      if (parsedFrom && !Number.isNaN(parsedFrom.getTime())) {
+        dateRange.$gte = parsedFrom;
+      }
+      if (parsedTo && !Number.isNaN(parsedTo.getTime())) {
+        // Treat `to` as inclusive end-of-day so date pickers behave intuitively.
+        const inclusive = new Date(parsedTo);
+        inclusive.setHours(23, 59, 59, 999);
+        dateRange.$lte = inclusive;
+      }
+      if (Object.keys(dateRange).length > 0) {
+        query.createdAt = dateRange;
+      }
+
+      const [enabled, retentionDays, total, docs] = await Promise.all([
+        config.getBoolean("core.command_audit.enabled", true),
+        config.getNumber("core.command_audit.retention_days", 90),
+        DiscordCommandAuditLog.countDocuments(query).catch(() => 0),
+        DiscordCommandAuditLog.find(query)
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * pageSize)
+          .limit(pageSize)
+          .lean()
+          .catch(() => [] as Array<Record<string, unknown>>),
+      ]);
+
+      // Resolve user labels from the guild member cache so the table
+      // shows names rather than raw snowflakes. One fetch per request.
+      const userIdsOnPage = new Set<string>();
+      for (const d of docs) {
+        if (typeof d.discordUserId === "string") {
+          userIdsOnPage.add(d.discordUserId);
+        }
+      }
+      const userLabels = new Map<string, string>();
+      try {
+        const guild = await client.guilds.fetch(common.guildId);
+        for (const id of userIdsOnPage) {
+          try {
+            const member = await guild.members.fetch(id);
+            userLabels.set(id, member.displayName ?? member.user.username);
+          } catch {
+            // Member left the guild or fetch failed; fall back to ID.
+          }
+        }
+      } catch (err) {
+        logger.debug("audit page user-label fetch failed", err);
+      }
+
+      const channelData = await fetchChannelData(client, common.guildId);
+
+      const rows: CommandAuditRow[] = docs.map((d) => {
+        const userId = String(d.discordUserId ?? "");
+        const channelId = typeof d.channelId === "string" ? d.channelId : null;
+        return {
+          createdAt:
+            d.createdAt instanceof Date
+              ? d.createdAt.toISOString()
+              : String(d.createdAt ?? ""),
+          discordUserId: userId,
+          userLabel: userLabels.get(userId) ?? userId,
+          commandName: String(d.commandName ?? ""),
+          subcommand: typeof d.subcommand === "string" ? d.subcommand : null,
+          channelId,
+          channelLabel: channelId
+            ? (channelData.names.get(channelId) ?? channelId)
+            : null,
+          result: (d.result as "success" | "error" | "denied") ?? "success",
+          errorMessage:
+            typeof d.errorMessage === "string" ? d.errorMessage : null,
+          durationMs: typeof d.durationMs === "number" ? d.durationMs : 0,
+        };
+      });
+
+      const commandOptions = Array.from(client.commands.keys()).sort();
+      const userOptions = Array.from(userIdsOnPage)
+        .sort()
+        .map((id) => ({ id, label: userLabels.get(id) ?? id }));
+
+      res.type("text/html").send(
+        renderCommandAuditPage({
+          ...common,
+          enabled,
+          retentionDays,
+          commandOptions,
+          userOptions,
+          filters: {
+            commandName: commandFilter,
+            userId: userFilter,
+            result: resultFilter,
+            from: fromFilter,
+            to: toFilter,
+          },
+          rows,
+          total,
+          page,
+          pageSize,
         }),
       );
     }),

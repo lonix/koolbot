@@ -1724,3 +1724,184 @@ ${renderFlash(props.flash)}
     navFeatureStatus: props.navFeatureStatus,
   });
 }
+
+// ---------- Command Audit Log ----------
+
+export interface CommandAuditRow {
+  createdAt: string;
+  discordUserId: string;
+  userLabel: string;
+  commandName: string;
+  subcommand: string | null;
+  channelId: string | null;
+  channelLabel: string | null;
+  result: "success" | "error" | "denied";
+  errorMessage: string | null;
+  durationMs: number;
+}
+
+export interface CommandAuditProps extends CommonProps {
+  enabled: boolean;
+  retentionDays: number;
+  /** All command names registered on the bot — populates the filter dropdown. */
+  commandOptions: string[];
+  /** All distinct user IDs in the current result page — populates the user filter. */
+  userOptions: Array<{ id: string; label: string }>;
+  /** Currently-applied filter values, echoed back into the form. */
+  filters: {
+    commandName: string;
+    userId: string;
+    result: string;
+    from: string;
+    to: string;
+  };
+  rows: CommandAuditRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+function resultTag(result: "success" | "error" | "denied"): string {
+  if (result === "success") return '<span class="tag tag-on">success</span>';
+  if (result === "denied") return '<span class="tag tag-warn">denied</span>';
+  return '<span class="tag tag-off">error</span>';
+}
+
+function buildAuditQueryString(
+  filters: CommandAuditProps["filters"],
+  page: number,
+): string {
+  const parts: string[] = [];
+  if (filters.commandName)
+    parts.push(`command=${encodeURIComponent(filters.commandName)}`);
+  if (filters.userId) parts.push(`user=${encodeURIComponent(filters.userId)}`);
+  if (filters.result)
+    parts.push(`result=${encodeURIComponent(filters.result)}`);
+  if (filters.from) parts.push(`from=${encodeURIComponent(filters.from)}`);
+  if (filters.to) parts.push(`to=${encodeURIComponent(filters.to)}`);
+  if (page > 1) parts.push(`page=${page}`);
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
+export function renderCommandAuditPage(props: CommandAuditProps): string {
+  const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
+  const page = Math.min(Math.max(1, props.page), totalPages);
+
+  const commandOptionsHtml = props.commandOptions
+    .map((c) => {
+      const sel = c === props.filters.commandName ? " selected" : "";
+      return `<option value="${escapeHtml(c)}"${sel}>/${escapeHtml(c)}</option>`;
+    })
+    .join("");
+  const userOptionsHtml = props.userOptions
+    .map((u) => {
+      const sel = u.id === props.filters.userId ? " selected" : "";
+      return `<option value="${escapeHtml(u.id)}"${sel}>${escapeHtml(u.label)}</option>`;
+    })
+    .join("");
+  const resultOpt = (val: string, label: string): string => {
+    const sel = val === props.filters.result ? " selected" : "";
+    return `<option value="${escapeHtml(val)}"${sel}>${escapeHtml(label)}</option>`;
+  };
+
+  const rowsHtml =
+    props.rows.length === 0
+      ? `<div class="empty">No command invocations match the current filters.</div>`
+      : `<table>
+<thead><tr>
+<th>When</th><th>User</th><th>Command</th><th>Channel</th>
+<th>Result</th><th>Duration</th><th>Error</th>
+</tr></thead>
+<tbody>${props.rows
+          .map((r) => {
+            const cmd = r.subcommand
+              ? `/${escapeHtml(r.commandName)} ${escapeHtml(r.subcommand)}`
+              : `/${escapeHtml(r.commandName)}`;
+            return `<tr>
+<td class="muted mono">${escapeHtml(r.createdAt)}</td>
+<td title="${escapeHtml(r.discordUserId)}">${escapeHtml(r.userLabel)}</td>
+<td class="mono">${cmd}</td>
+<td class="muted">${escapeHtml(r.channelLabel ?? r.channelId ?? "—")}</td>
+<td>${resultTag(r.result)}</td>
+<td class="muted">${r.durationMs}ms</td>
+<td class="muted">${r.errorMessage ? escapeHtml(r.errorMessage.slice(0, 80)) : "—"}</td>
+</tr>`;
+          })
+          .join("")}</tbody></table>`;
+
+  const prevLink =
+    page > 1
+      ? `<a class="btn btn-sm" href="/admin/audit/commands${buildAuditQueryString(props.filters, page - 1)}">← Prev</a>`
+      : `<button class="btn btn-sm" disabled>← Prev</button>`;
+  const nextLink =
+    page < totalPages
+      ? `<a class="btn btn-sm" href="/admin/audit/commands${buildAuditQueryString(props.filters, page + 1)}">Next →</a>`
+      : `<button class="btn btn-sm" disabled>Next →</button>`;
+
+  const body = `
+<h1>Slash-command audit log</h1>
+<p class="subtitle">One row per Discord slash-command invocation. Raw command arguments are deliberately omitted.</p>
+
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Audit logging</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
+    <dt>Retention</dt><dd>${props.retentionDays} days</dd>
+    <dt>Rows matched</dt><dd>${props.total}</dd>
+  </dl>
+  ${props.enabled ? "" : '<p class="muted">Enable <code>core.command_audit.enabled</code> in Settings to start recording.</p>'}
+</div>
+
+<div class="card">
+  <h2>Filters</h2>
+  <form method="GET" action="/admin/audit/commands" class="inline-form">
+    <label>Command
+      <select name="command">
+        <option value="">— any —</option>
+        ${commandOptionsHtml}
+      </select>
+    </label>
+    <label>User
+      <select name="user">
+        <option value="">— any —</option>
+        ${userOptionsHtml}
+      </select>
+    </label>
+    <label>Result
+      <select name="result">
+        <option value="">— any —</option>
+        ${resultOpt("success", "success")}
+        ${resultOpt("error", "error")}
+        ${resultOpt("denied", "denied")}
+      </select>
+    </label>
+    <label>From
+      <input type="date" name="from" value="${escapeHtml(props.filters.from)}">
+    </label>
+    <label>To
+      <input type="date" name="to" value="${escapeHtml(props.filters.to)}">
+    </label>
+    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <a class="btn btn-sm" href="/admin/audit/commands">Reset</a>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Invocations (page ${page} of ${totalPages})</h2>
+  ${rowsHtml}
+  <div class="inline-form" style="margin-top:.75rem">
+    ${prevLink}
+    ${nextLink}
+    <span class="muted">${props.pageSize} per page</span>
+  </div>
+</div>
+`;
+  return renderAdminPage({
+    title: "Command audit",
+    active: "/admin/audit/commands",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
