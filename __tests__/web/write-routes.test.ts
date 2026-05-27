@@ -5,12 +5,23 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
+import { coerceConfigValue } from "../../src/web/write-routes.js";
 import {
+  BOOTSTRAP_VARS,
   PROTECTED_KEYS,
-  coerceConfigValue,
-} from "../../src/web/write-routes.js";
+} from "../../src/web/bootstrap-vars.js";
 
 describe("PROTECTED_KEYS", () => {
+  it("covers every bootstrap env variable (derived from BOOTSTRAP_VARS)", () => {
+    // PROTECTED_KEYS is derived from BOOTSTRAP_VARS so they cannot drift.
+    // This assertion guards against an accidental refactor that re-introduces
+    // a hand-maintained copy.
+    for (const v of BOOTSTRAP_VARS) {
+      expect(PROTECTED_KEYS.has(v.key)).toBe(true);
+    }
+    expect(PROTECTED_KEYS.size).toBe(BOOTSTRAP_VARS.length);
+  });
+
   it("covers every bootstrap and WebUI env variable", () => {
     // Locked snapshot — adding a new env var must force an intentional
     // update of this list, otherwise YAML import could overwrite it.
@@ -27,6 +38,7 @@ describe("PROTECTED_KEYS", () => {
         "WEBUI_INACTIVITY_TIMEOUT_MINUTES",
         "WEBUI_SESSION_SECRET",
         "WEBUI_SESSION_TTL_MINUTES",
+        "WEBUI_TRUST_PROXY",
       ].sort(),
     );
   });

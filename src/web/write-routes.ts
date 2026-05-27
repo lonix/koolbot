@@ -36,6 +36,7 @@ import type { IPollItem } from "../models/poll-item.js";
 import Notice from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { requireCsrf } from "./csrf.js";
+import { PROTECTED_KEYS } from "./bootstrap-vars.js";
 import type { AuthenticatedRequest } from "./session.js";
 import { recordAudit } from "./audit.js";
 import {
@@ -131,29 +132,6 @@ function asyncHandler(
     fn(req as AuthenticatedRequest, res).catch(next);
   };
 }
-
-/**
- * Environment / bootstrap keys that must never appear in YAML import payloads
- * or YAML export output. Defense in depth — they're never put into the export
- * dictionary in the first place, and import/apply refuses them again.
- *
- * Hand-maintained: keep in lock-step with the `WEBUI_*` and bootstrap env
- * vars consumed in src/index.ts and src/web/index.ts. Adding a new env var
- * without updating this list will silently let admins overwrite it via YAML.
- */
-export const PROTECTED_KEYS: ReadonlySet<string> = new Set([
-  "DISCORD_TOKEN",
-  "CLIENT_ID",
-  "GUILD_ID",
-  "MONGODB_URI",
-  "NODE_ENV",
-  "DEBUG",
-  "WEBUI_ENABLED",
-  "WEBUI_BASE_URL",
-  "WEBUI_SESSION_SECRET",
-  "WEBUI_SESSION_TTL_MINUTES",
-  "WEBUI_INACTIVITY_TIMEOUT_MINUTES",
-]);
 
 /**
  * Settings shown per wizard feature. Key order determines form order.
