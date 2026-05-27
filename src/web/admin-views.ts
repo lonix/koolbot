@@ -331,7 +331,7 @@ const WEEKDAY_NAMES = [
   "Saturday",
 ];
 
-function renderCronPicker(currentValue: string): string {
+function renderCronPicker(currentValue: string, valueName: string): string {
   const state = parseCronToPickerState(currentValue);
   const pad = (n: number) => String(n).padStart(2, "0");
   const timeAttr = `${pad(state.hour)}:${pad(state.minute)}`;
@@ -343,11 +343,13 @@ function renderCronPicker(currentValue: string): string {
       `<option value="${i}"${sel(state.dayOfWeek === i)}>${name}</option>`,
   ).join("");
 
-  // Hidden input is the canonical `name="value"` the form submits. The
-  // bootstrap script in admin-layout keeps it in sync with the controls.
+  // The hidden input is what the form actually submits. The bootstrap
+  // script in admin-layout keeps it in sync with the controls; it locates
+  // the input via the `.cron-hidden` class so the form-field name can vary
+  // per row (e.g. `value_<key>` under the per-section save form).
   return (
     `<div class="cron-picker" data-mode="${state.mode}">` +
-    `<input type="hidden" name="value" value="${escapeHtml(currentValue)}">` +
+    `<input type="hidden" class="cron-hidden" name="${escapeHtml(valueName)}" value="${escapeHtml(currentValue)}">` +
     `<select class="cron-mode" aria-label="Schedule type">` +
     `<option value="daily"${sel(state.mode === "daily")}>Daily</option>` +
     `<option value="weekly"${sel(state.mode === "weekly")}>Weekly</option>` +
@@ -370,35 +372,43 @@ function renderCronPicker(currentValue: string): string {
   );
 }
 
-function renderSettingInput(
+/**
+ * Form-field name for a setting's value inside the per-section save form.
+ * Prefixed so the section handler can read each row's value via
+ * `req.body[settingValueFieldName(key)]` and so the field can't collide
+ * with the form-level `_csrf` / `category` / `keys` / clicked-reset `key`
+ * fields. The dotted suffix is kept verbatim — `extended: false` on
+ * `express.urlencoded` treats names as opaque strings, so no nesting.
+ */
+export function settingValueFieldName(key: string): string {
+  return `value_${key}`;
+}
+
+function renderSettingControl(
   r: SettingRow,
-  csrfToken: string,
   pickers: {
     textChannels: ChannelOption[];
     categoryChannels: ChannelOption[];
     roles: RoleOption[];
   },
 ): string {
-  const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
-  const keyField = `<input type="hidden" name="key" value="${escapeHtml(r.key)}">`;
   const primitive = coerceToDisplayValue(r.current);
   const currentStr = typeof primitive === "string" ? primitive : "";
+  const valueName = escapeHtml(settingValueFieldName(r.key));
 
-  let control: string;
   if (r.type === "boolean") {
     const checked = primitive === true ? " checked" : "";
-    control =
+    return (
       `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
-      `<input type="checkbox" name="value" value="true"${checked}> ` +
+      `<input type="checkbox" name="${valueName}" value="true"${checked}> ` +
       `<span class="mono">${primitive === true ? "true" : "false"}</span>` +
-      `</label>`;
-  } else if (r.type === "number") {
-    control = `<input type="number" name="value" value="${escapeHtml(primitive)}" style="width:8rem">`;
-  } else if (
-    r.type === "channel" ||
-    r.type === "category" ||
-    r.type === "role"
-  ) {
+      `</label>`
+    );
+  }
+  if (r.type === "number") {
+    return `<input type="number" name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem">`;
+  }
+  if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
       r.type === "channel"
         ? pickers.textChannels
@@ -407,11 +417,13 @@ function renderSettingInput(
           : pickers.roles;
     const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
-    control =
-      `<select name="value">` +
+    return (
+      `<select name="${valueName}">` +
       buildOptionsHtml(options, selected, prefix, true) +
-      `</select>`;
-  } else if (r.type === "channel_list" || r.type === "role_list") {
+      `</select>`
+    );
+  }
+  if (r.type === "channel_list" || r.type === "role_list") {
     const options =
       r.type === "channel_list" ? pickers.textChannels : pickers.roles;
     const prefix = r.type === "role_list" ? "@" : "#";
@@ -421,29 +433,32 @@ function renderSettingInput(
         .map((v) => v.trim())
         .filter((v) => v !== ""),
     );
-    control =
-      `<select name="value" multiple size="${Math.min(8, Math.max(3, options.length))}">` +
+    return (
+      `<select name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}">` +
       buildOptionsHtml(options, selected, prefix, false) +
-      `</select>`;
-  } else if (r.type === "cron") {
-    control = renderCronPicker(currentStr);
-  } else {
-    // string or unknown type → plain text input.
-    control = `<input type="text" name="value" value="${escapeHtml(primitive)}">`;
+      `</select>`
+    );
   }
+  if (r.type === "cron") {
+    return renderCronPicker(currentStr, settingValueFieldName(r.key));
+  }
+  // string or unknown type → plain text input.
+  return `<input type="text" name="${valueName}" value="${escapeHtml(primitive)}">`;
+}
 
+/**
+ * Per-row Reset submit button. Lives inside the per-section save form and
+ * uses HTML5 `formaction` to redirect submission to the single-key reset
+ * route. Only the clicked button's `name`/`value` is sent on submission,
+ * so the `key=<row-key>` it contributes does not collide with the `keys`
+ * hidden inputs the section form uses to enumerate its rows.
+ */
+function renderResetButton(key: string): string {
+  const escaped = escapeHtml(key);
   return (
-    `<form method="POST" action="/admin/settings/set" class="inline-form">` +
-    csrf +
-    keyField +
-    control +
-    `<button type="submit" class="btn btn-primary btn-sm">Set</button>` +
-    `</form>` +
-    `<form method="POST" action="/admin/settings/reset" class="inline-form" style="margin-top:.25rem">` +
-    csrf +
-    keyField +
-    `<button type="submit" class="btn btn-sm">Reset</button>` +
-    `</form>`
+    `<button type="submit" formaction="/admin/settings/reset" ` +
+    `name="key" value="${escaped}" class="btn btn-sm" ` +
+    `style="margin-left:.4rem">Reset</button>`
   );
 }
 
@@ -478,8 +493,9 @@ export function renderSettingsPage(props: SettingsProps): string {
 <td>
   <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
+  <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td>${renderSettingInput(r, props.csrfToken, pickers)}</td>
+<td>${renderSettingControl(r, pickers)}${renderResetButton(r.key)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td style="white-space:nowrap">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
@@ -489,14 +505,24 @@ export function renderSettingsPage(props: SettingsProps): string {
       const descHtml = meta.description
         ? `<p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(meta.description)}</p>`
         : "";
+      // One <form> per category. Save submits every row's value in one
+      // atomic request; Reset buttons inside the same form use formaction
+      // to retarget /admin/settings/reset for a single key (issue #433).
       return `
 <div class="card">
   <h2>${escapeHtml(meta.title)}</h2>
   ${descHtml}
-  <table>
-    <thead><tr><th>Setting</th><th>Edit</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>
+  <form method="POST" action="/admin/settings/save-section">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <input type="hidden" name="category" value="${escapeHtml(g.category)}">
+    <table>
+      <thead><tr><th>Setting</th><th>Edit</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="actions" style="margin-top:.75rem">
+      <button type="submit" class="btn btn-primary">Save</button>
+    </div>
+  </form>
 </div>`;
     })
     .join("");

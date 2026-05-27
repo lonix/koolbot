@@ -248,7 +248,7 @@ const SCRIPT =
 const CRON_PICKER_SCRIPT =
   "(function(){" +
   "function clamp(n,lo,hi){return Math.max(lo,Math.min(hi,n))}" +
-  "function wire(p){var hidden=p.querySelector('input[name=value]');" +
+  "function wire(p){var hidden=p.querySelector('.cron-hidden');" +
   "var mode=p.querySelector('.cron-mode');" +
   "var time=p.querySelector('.cron-time');" +
   "var dow=p.querySelector('.cron-dow');" +

@@ -48,6 +48,7 @@ import {
   renderWizardPage,
   renderWizardStepPage,
   renderWizardConfirmPage,
+  settingValueFieldName,
   type ImportDiffRow,
 } from "./admin-views.js";
 
@@ -387,6 +388,142 @@ export function createWriteRouter(
           text: `Failed to reset ${key}: ${text}`,
         });
       }
+    }),
+  );
+
+  // Bulk save for a single Settings section (issue #433). Replaces the
+  // per-row "Set" button with one "Save" per category, posting every key
+  // in the section in a single request. Atomic: if any value fails to
+  // coerce, no DB writes happen and the operator gets a flash listing the
+  // offending keys. Once coercion passes, the writes are applied
+  // sequentially; a write that throws is reported in the flash but
+  // earlier writes are not rolled back (ConfigService has no transaction
+  // primitive, and partial application matches the YAML-import semantics).
+  router.post(
+    "/settings/save-section",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const category = getString(req, "category");
+
+      const rawKeys = body.keys;
+      const keys: string[] = Array.isArray(rawKeys)
+        ? rawKeys.map(String).filter((k) => k.length > 0)
+        : typeof rawKeys === "string" && rawKeys.length > 0
+          ? [rawKeys]
+          : [];
+
+      if (keys.length === 0) {
+        await recordAudit(session, {
+          action: "settings.save-section",
+          targetId: category || null,
+          result: "failure",
+          errorMessage: "no keys submitted",
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `No settings submitted for section ${category || "(unknown)"}.`,
+        });
+        return;
+      }
+
+      // Phase 1: coerce every value before touching the DB. An array of
+      // unique keys is required so a duplicate hidden input can't trick
+      // the handler into double-writing or mis-counting rejections.
+      const seen = new Set<string>();
+      const coerced: Array<{
+        key: string;
+        value: string | number | boolean;
+      }> = [];
+      const rejected: Array<{ key: string; reason: string }> = [];
+      for (const key of keys) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const raw = body[settingValueFieldName(key)];
+        const r = coerceConfigValue(key, raw);
+        if (r.ok) {
+          coerced.push({ key, value: r.value });
+        } else {
+          rejected.push({ key, reason: r.reason });
+        }
+      }
+
+      if (rejected.length > 0) {
+        await recordAudit(session, {
+          action: "settings.save-section",
+          targetId: category || null,
+          details: {
+            rejected,
+            attemptedCount: coerced.length + rejected.length,
+          },
+          result: "failure",
+          errorMessage: rejected.map((r) => `${r.key}: ${r.reason}`).join("; "),
+        });
+        const detail = rejected.map((r) => `${r.key} (${r.reason})`).join(", ");
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `No changes saved — ${rejected.length} invalid value${rejected.length === 1 ? "" : "s"} in ${category || "section"}: ${detail}.`,
+        });
+        return;
+      }
+
+      // Phase 2: apply. Snapshot `before` per key for the audit row.
+      const config = ConfigService.getInstance();
+      const applied: Array<{ key: string; before: unknown; after: unknown }> =
+        [];
+      const failed: Array<{ key: string; reason: string }> = [];
+      for (const { key, value } of coerced) {
+        let before: unknown;
+        try {
+          before = await config.get(key);
+        } catch {
+          before = defaultConfig[key as keyof typeof defaultConfig];
+        }
+        const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+        try {
+          await config.set(
+            key,
+            value,
+            meta?.description ?? "",
+            meta?.category ?? key.split(".")[0],
+          );
+          applied.push({ key, before, after: value });
+        } catch (err) {
+          const text = err instanceof Error ? err.message : "set failed";
+          logger.error(`save-section: failed to set ${key}`, err);
+          failed.push({ key, reason: text });
+        }
+      }
+
+      await recordAudit(session, {
+        action: "settings.save-section",
+        targetId: category || null,
+        details: {
+          applied,
+          failed,
+          appliedCount: applied.length,
+          failedCount: failed.length,
+        },
+        result: failed.length === 0 ? "success" : "failure",
+        errorMessage:
+          failed.length > 0
+            ? failed.map((f) => `${f.key}: ${f.reason}`).join("; ")
+            : null,
+      });
+
+      const label = category || "section";
+      if (failed.length === 0) {
+        flashRedirect(res, "/admin/settings", {
+          type: "ok",
+          text: `Saved ${applied.length} setting${applied.length === 1 ? "" : "s"} in ${label}.`,
+        });
+        return;
+      }
+      const firstError = failed[0];
+      flashRedirect(res, "/admin/settings", {
+        type: applied.length > 0 ? "warn" : "err",
+        text: `Saved ${applied.length}/${applied.length + failed.length} in ${label}. Failed: ${firstError.key} (${firstError.reason})${failed.length > 1 ? ` and ${failed.length - 1} more` : ""}.`,
+      });
     }),
   );
 
