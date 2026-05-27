@@ -468,17 +468,17 @@ export function createWriteRouter(
       }
 
       // Phase 2: apply. Snapshot `before` per key for the audit row.
+      // `config.get()` returns null (not throw) on errors and for keys
+      // that aren't stored, so fall back via `??` so unset keys record
+      // their schema default in the audit instead of a misleading null.
       const config = ConfigService.getInstance();
       const applied: Array<{ key: string; before: unknown; after: unknown }> =
         [];
       const failed: Array<{ key: string; reason: string }> = [];
       for (const { key, value } of coerced) {
-        let before: unknown;
-        try {
-          before = await config.get(key);
-        } catch {
-          before = defaultConfig[key as keyof typeof defaultConfig];
-        }
+        const stored = await config.get(key);
+        const before =
+          stored ?? defaultConfig[key as keyof typeof defaultConfig];
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
         try {
           await config.set(
@@ -499,6 +499,13 @@ export function createWriteRouter(
         }
       }
 
+      // Tri-state outcome that mirrors the YAML-import audit (see
+      // `/settings/import/apply`): `result: "failure"` only when nothing
+      // landed, otherwise `success` with a `partial` flag in details so
+      // an audit query for `result: "success"` doesn't exclude partial
+      // saves. The user-facing flash already uses `warn` for partial.
+      const outcome: "ok" | "partial" | "failed" =
+        failed.length === 0 ? "ok" : applied.length > 0 ? "partial" : "failed";
       await recordAudit(session, {
         action: "settings.save-section",
         targetId: category || null,
@@ -507,8 +514,9 @@ export function createWriteRouter(
           failed,
           appliedCount: applied.length,
           failedCount: failed.length,
+          outcome,
         },
-        result: failed.length === 0 ? "success" : "failure",
+        result: outcome === "failed" ? "failure" : "success",
         errorMessage:
           failed.length > 0
             ? failed.map((f) => `${f.key}: ${f.reason}`).join("; ")
