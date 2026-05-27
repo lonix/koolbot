@@ -246,6 +246,123 @@ function buildOptionsHtml(
   return parts.join("");
 }
 
+/**
+ * Parse a 5-field cron string into a "picker" state for the friendly
+ * schedule editor (#444). Returns `mode: "custom"` for anything that
+ * doesn't cleanly match the three supported shapes (daily, weekly,
+ * monthly with single-integer minute/hour and a single weekday or
+ * day-of-month), so the editor falls back to a raw cron input and the
+ * operator's expression round-trips verbatim.
+ *
+ * Supported shapes:
+ *   daily    `M H * * *`         e.g. "0 0 * * *"     midnight every day
+ *   weekly   `M H * * DOW`       e.g. "0 16 * * 5"    Friday 16:00
+ *   monthly  `M H DOM * *`       e.g. "0 0 1 * *"     first of every month
+ */
+export interface CronPickerState {
+  mode: "daily" | "weekly" | "monthly" | "custom";
+  minute: number; // 0–59, only meaningful when mode !== custom
+  hour: number; // 0–23, only meaningful when mode !== custom
+  dayOfWeek: number; // 0–6 (Sun–Sat), only meaningful when mode === weekly
+  dayOfMonth: number; // 1–31, only meaningful when mode === monthly
+  raw: string; // verbatim cron value, used by custom mode
+}
+
+export function parseCronToPickerState(cron: string): CronPickerState {
+  const fallback: CronPickerState = {
+    mode: "custom",
+    minute: 0,
+    hour: 0,
+    dayOfWeek: 0,
+    dayOfMonth: 1,
+    raw: cron,
+  };
+  const fields = cron.trim().split(/\s+/);
+  if (fields.length !== 5) return fallback;
+  const [mStr, hStr, domStr, monStr, dowStr] = fields;
+  const isInt = (s: string) => /^\d+$/.test(s);
+  const inRange = (n: number, lo: number, hi: number) => n >= lo && n <= hi;
+
+  if (!isInt(mStr) || !isInt(hStr)) return fallback;
+  const minute = Number(mStr);
+  const hour = Number(hStr);
+  if (!inRange(minute, 0, 59) || !inRange(hour, 0, 23)) return fallback;
+  // Month must be wildcard for any of the three supported shapes — we
+  // don't expose "every N months" / specific-month patterns.
+  if (monStr !== "*") return fallback;
+
+  // daily: dom=* dow=*
+  if (domStr === "*" && dowStr === "*") {
+    return { ...fallback, mode: "daily", minute, hour };
+  }
+  // weekly: dom=* dow=single integer (sun..sat = 0..6; 7 also means Sun
+  // in some implementations, normalise to 0)
+  if (domStr === "*" && isInt(dowStr)) {
+    let dow = Number(dowStr);
+    if (dow === 7) dow = 0;
+    if (inRange(dow, 0, 6)) {
+      return { ...fallback, mode: "weekly", minute, hour, dayOfWeek: dow };
+    }
+  }
+  // monthly: dom=single integer dow=*
+  if (dowStr === "*" && isInt(domStr)) {
+    const dom = Number(domStr);
+    if (inRange(dom, 1, 31)) {
+      return { ...fallback, mode: "monthly", minute, hour, dayOfMonth: dom };
+    }
+  }
+  return fallback;
+}
+
+const WEEKDAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+function renderCronPicker(currentValue: string): string {
+  const state = parseCronToPickerState(currentValue);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const timeAttr = `${pad(state.hour)}:${pad(state.minute)}`;
+  const sel = (cond: boolean) => (cond ? " selected" : "");
+  const hidden = (cond: boolean) => (cond ? " hidden" : "");
+
+  const dowOptions = WEEKDAY_NAMES.map(
+    (name, i) =>
+      `<option value="${i}"${sel(state.dayOfWeek === i)}>${name}</option>`,
+  ).join("");
+
+  // Hidden input is the canonical `name="value"` the form submits. The
+  // bootstrap script in admin-layout keeps it in sync with the controls.
+  return (
+    `<div class="cron-picker" data-mode="${state.mode}">` +
+    `<input type="hidden" name="value" value="${escapeHtml(currentValue)}">` +
+    `<select class="cron-mode" aria-label="Schedule type">` +
+    `<option value="daily"${sel(state.mode === "daily")}>Daily</option>` +
+    `<option value="weekly"${sel(state.mode === "weekly")}>Weekly</option>` +
+    `<option value="monthly"${sel(state.mode === "monthly")}>Monthly</option>` +
+    `<option value="custom"${sel(state.mode === "custom")}>Custom (cron)</option>` +
+    `</select>` +
+    `<span class="cron-time-wrap"${hidden(state.mode === "custom")}>` +
+    ` at <input type="time" class="cron-time" value="${timeAttr}">` +
+    `</span>` +
+    `<span class="cron-dow-wrap"${hidden(state.mode !== "weekly")}>` +
+    ` on <select class="cron-dow" aria-label="Day of week">${dowOptions}</select>` +
+    `</span>` +
+    `<span class="cron-dom-wrap"${hidden(state.mode !== "monthly")}>` +
+    ` on day <input type="number" class="cron-dom" min="1" max="31" value="${state.dayOfMonth}" style="width:5rem">` +
+    `</span>` +
+    `<span class="cron-custom-wrap"${hidden(state.mode !== "custom")}>` +
+    `<input type="text" class="cron-custom" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem">` +
+    `</span>` +
+    `</div>`
+  );
+}
+
 function renderSettingInput(
   r: SettingRow,
   csrfToken: string,
@@ -301,9 +418,10 @@ function renderSettingInput(
       `<select name="value" multiple size="${Math.min(8, Math.max(3, options.length))}">` +
       buildOptionsHtml(options, selected, prefix, false) +
       `</select>`;
+  } else if (r.type === "cron") {
+    control = renderCronPicker(currentStr);
   } else {
-    // string, cron, or any unknown type → plain text. Issue #444 will
-    // replace cron with a friendly picker.
+    // string or unknown type → plain text input.
     control = `<input type="text" name="value" value="${escapeHtml(primitive)}">`;
   }
 
