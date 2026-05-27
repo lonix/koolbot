@@ -11,6 +11,7 @@ import {
 import { config as dotenvConfig } from "dotenv";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
+import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { CooldownManager } from "./cooldown-manager.js";
@@ -425,6 +426,39 @@ export class CommandManager {
     const monitoringService = MonitoringService.getInstance();
     const startTime = Date.now();
     const trackingId = monitoringService.trackCommandStart(commandName);
+    // `getSubcommand(false)` returns null when the command has no
+    // subcommand group rather than throwing — safe to call on every
+    // chat-input interaction.
+    let subcommand: string | null = null;
+    try {
+      subcommand = interaction.options.getSubcommand(false) ?? null;
+    } catch {
+      subcommand = null;
+    }
+
+    const auditCommon = {
+      commandName,
+      subcommand,
+      channelId: interaction.channelId ?? null,
+      discordUserId: interaction.user.id,
+    };
+    const recordAudit = async (
+      result: "success" | "error" | "denied",
+      errorMessage: string | null,
+    ): Promise<void> => {
+      if (!interaction.guildId) return;
+      const enabled = await this.configService
+        .getBoolean("core.command_audit.enabled", true)
+        .catch(() => true);
+      if (!enabled) return;
+      await recordCommandAudit({
+        ...auditCommon,
+        guildId: interaction.guildId,
+        result,
+        errorMessage,
+        durationMs: Date.now() - startTime,
+      });
+    };
 
     try {
       // Check permissions (admins bypass this check inside the service)
@@ -451,6 +485,7 @@ export class CommandManager {
             startTime,
             false,
           );
+          await recordAudit("denied", "Permission denied");
           return;
         }
       }
@@ -506,6 +541,7 @@ export class CommandManager {
               startTime,
               false,
             );
+            await recordAudit("denied", "Rate limited");
             return;
           }
 
@@ -521,6 +557,7 @@ export class CommandManager {
         startTime,
         true,
       );
+      await recordAudit("success", null);
     } catch (error) {
       monitoringService.trackCommandEnd(
         commandName,
@@ -529,6 +566,7 @@ export class CommandManager {
         false,
       );
       monitoringService.trackError(commandName, error as Error);
+      await recordAudit("error", getErrorMessage(error).slice(0, 500));
       throw error;
     }
   }

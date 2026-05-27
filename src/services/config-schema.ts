@@ -75,6 +75,10 @@ export interface ConfigSchema {
   "leaderboard_roles.update_cron": string; // Cron schedule for recalculation
   "leaderboard_roles.tiers": string; // Comma-separated "topN:roleId" pairs, e.g. "1:111,3:222,10:333"
   "leaderboard_roles.announcement_channel_id": string; // Optional channel ID for role-change announcements
+
+  // Discord slash-command audit log (issue #459)
+  "core.command_audit.enabled": boolean;
+  "core.command_audit.retention_days": number;
 }
 
 /**
@@ -184,6 +188,12 @@ export const defaultConfig: ConfigSchema = {
   "leaderboard_roles.update_cron": "0 0 * * 1", // Every Monday at 00:00
   "leaderboard_roles.tiers": "",
   "leaderboard_roles.announcement_channel_id": "",
+
+  // Discord slash-command audit log defaults (#459). On by default so
+  // fresh installs get operator visibility out of the box; retention
+  // matches the proposal in the issue (90 days).
+  "core.command_audit.enabled": true,
+  "core.command_audit.retention_days": 90,
 };
 
 /**
@@ -289,6 +299,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Leaderboard Role Rewards",
     description:
       "Auto-assign Discord roles based on a user's position in the voice-activity leaderboard.",
+  },
+  core: {
+    title: "Core",
+    description:
+      "Core bot infrastructure: audit logging, retention, and other cross-cutting concerns.",
   },
   other: {
     title: "Other",
@@ -660,5 +675,21 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Optional channel ID where role-change announcements are posted. Leave empty to disable announcements.",
     category: "leaderboard_roles",
     type: "channel",
+  },
+
+  // Discord slash-command audit log (#459)
+  "core.command_audit.enabled": {
+    label: "Slash-command audit log enabled",
+    description:
+      "Record one row per Discord slash-command invocation (who, what, when, outcome) so operators can audit command usage from the WebUI. Raw command arguments are never recorded.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.command_audit.retention_days": {
+    label: "Slash-command audit retention (days)",
+    description:
+      "Days to keep slash-command audit rows before the cleanup job prunes them.",
+    category: "core",
+    type: "number",
   },
 };

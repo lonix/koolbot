@@ -596,6 +596,7 @@ side effect, since the HMAC key changes.
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
 | **Voice Channels** | `/vc reload`, `/vc force-reload`                                                                    |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
+| **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,

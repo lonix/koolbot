@@ -181,6 +181,13 @@ describe('Config Schema', () => {
       'achievements.dm_notifications.enabled': true,
       'notices.header_enabled': true,
       'notices.header_pin_enabled': true,
+
+      // ─── Core infrastructure (always on; not feature-gated) ─────────
+      // Audit logging is a cross-cutting operator-visibility feature
+      // rather than a user-facing toggle, so it ships on by default —
+      // analogous to how WebAuditLog records every WebUI write without
+      // requiring opt-in.
+      'core.command_audit.enabled': true,
     };
 
     // Parent feature each rule-2 (default-true) sub-feature is gated by.

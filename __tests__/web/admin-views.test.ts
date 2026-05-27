@@ -3,6 +3,7 @@ import {
   parseCronToPickerState,
   renderAnnouncementsPage,
   renderBootstrapPage,
+  renderCommandAuditPage,
   renderDashboardPage,
   renderDatabasePage,
   renderImportDiffPage,
@@ -1304,5 +1305,128 @@ describe("renderSettingsPage cron picker", () => {
     expect(html).toMatch(
       /<input type="number" class="cron-dom"[^>]*value="15"/,
     );
+  });
+});
+
+describe("renderCommandAuditPage", () => {
+  const BASE_FILTERS = {
+    commandName: "",
+    userId: "",
+    result: "",
+    from: "",
+    to: "",
+  };
+
+  it("renders the empty state when no rows match", () => {
+    const html = renderCommandAuditPage({
+      ...COMMON,
+      enabled: true,
+      retentionDays: 90,
+      commandOptions: ["ping", "quote"],
+      userOptions: [],
+      filters: BASE_FILTERS,
+      rows: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+    });
+    expect(html).toContain("Slash-command audit log");
+    expect(html).toContain("No command invocations match");
+    expect(html).toContain('class="tag tag-on">enabled');
+    expect(html).toContain("90 days");
+    // Prev/Next are disabled buttons on a single-page result set.
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>← Prev<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Next →<\/button>/);
+  });
+
+  it("renders an invocation row with the user, command, and result tag", () => {
+    const html = renderCommandAuditPage({
+      ...COMMON,
+      enabled: true,
+      retentionDays: 30,
+      commandOptions: ["quote"],
+      userOptions: [{ id: "u1", label: "Alice" }],
+      filters: BASE_FILTERS,
+      rows: [
+        {
+          createdAt: "2026-05-08T12:34:56.000Z",
+          discordUserId: "u1",
+          userLabel: "Alice",
+          commandName: "quote",
+          subcommand: "add",
+          channelId: "c1",
+          channelLabel: "general",
+          result: "success",
+          errorMessage: null,
+          durationMs: 123,
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 50,
+    });
+    expect(html).toContain("Alice");
+    expect(html).toContain("/quote add");
+    expect(html).toContain("general");
+    expect(html).toContain('class="tag tag-on">success');
+    expect(html).toContain("123ms");
+  });
+
+  it("preserves filters in pagination links and form state", () => {
+    const html = renderCommandAuditPage({
+      ...COMMON,
+      enabled: true,
+      retentionDays: 90,
+      commandOptions: ["quote", "ping"],
+      userOptions: [{ id: "u1", label: "Alice" }],
+      filters: {
+        commandName: "quote",
+        userId: "u1",
+        result: "error",
+        from: "2026-05-01",
+        to: "2026-05-31",
+      },
+      rows: Array.from({ length: 50 }, (_, i) => ({
+        createdAt: `2026-05-${(i + 1).toString().padStart(2, "0")}T00:00:00.000Z`,
+        discordUserId: "u1",
+        userLabel: "Alice",
+        commandName: "quote",
+        subcommand: null,
+        channelId: null,
+        channelLabel: null,
+        result: "error" as const,
+        errorMessage: "boom",
+        durationMs: 1,
+      })),
+      total: 120,
+      page: 1,
+      pageSize: 50,
+    });
+    expect(html).toContain('value="quote" selected');
+    expect(html).toContain('value="u1" selected');
+    expect(html).toContain('value="error" selected');
+    expect(html).toContain('value="2026-05-01"');
+    expect(html).toContain('value="2026-05-31"');
+    // Next link carries every active filter plus the next page number.
+    expect(html).toMatch(
+      /href="\/admin\/audit\/commands\?command=quote&user=u1&result=error&from=2026-05-01&to=2026-05-31&page=2"/,
+    );
+  });
+
+  it("renders the disabled-feature hint when audit logging is off", () => {
+    const html = renderCommandAuditPage({
+      ...COMMON,
+      enabled: false,
+      retentionDays: 90,
+      commandOptions: [],
+      userOptions: [],
+      filters: BASE_FILTERS,
+      rows: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+    });
+    expect(html).toContain('class="tag tag-off">disabled');
+    expect(html).toContain("core.command_audit.enabled");
   });
 });

@@ -25,6 +25,7 @@ import {
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { VoiceChannelTruncationService } from "./services/voice-channel-truncation.js";
+import { CommandAuditCleanupService } from "./services/command-audit-cleanup.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
@@ -417,6 +418,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         voiceChannelManager.destroy();
         voiceChannelAnnouncer.destroy();
         voiceChannelTruncation.destroy();
+        CommandAuditCleanupService.getInstance().destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
         leaderboardRoleService.destroy();
@@ -584,6 +586,9 @@ async function initializeServices(): Promise<void> {
 
     // Initialize leaderboard role rewards service
     await leaderboardRoleService.start();
+
+    // Start the slash-command audit log cleanup cron (#459)
+    CommandAuditCleanupService.getInstance().start();
 
     // Initialize permissions service and set up default permissions
     const permissionsService = PermissionsService.getInstance(client);
