@@ -14,11 +14,6 @@ describe('Config Schema', () => {
       expect(defaultConfig['quotes.enabled']).toBe(false);
     });
 
-    it('should have core.cleanup.channel_id empty by default', () => {
-      // Other core.* keys were declared but never read and have been removed.
-      expect(defaultConfig['core.cleanup.channel_id']).toBe('');
-    });
-
     it('should have reasonable default values for voice channel settings', () => {
       expect(defaultConfig['voicechannels.category.name']).toBe('Voice Channels');
       expect(defaultConfig['voicechannels.lobby.name']).toBe('Lobby');
@@ -43,7 +38,6 @@ describe('Config Schema', () => {
     });
 
     it('should have channel_id fields as strings', () => {
-      expect(typeof defaultConfig['core.cleanup.channel_id']).toBe('string');
       expect(typeof defaultConfig['quotes.channel_id']).toBe('string');
       expect(typeof defaultConfig['reactionroles.message_channel_id']).toBe('string');
     });
