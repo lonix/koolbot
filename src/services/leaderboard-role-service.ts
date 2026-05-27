@@ -86,6 +86,9 @@ export class LeaderboardRoleService {
   }
 
   public static reset(): void {
+    if (LeaderboardRoleService.instance) {
+      LeaderboardRoleService.instance.destroy();
+    }
     LeaderboardRoleService.instance =
       undefined as unknown as LeaderboardRoleService;
   }

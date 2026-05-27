@@ -29,6 +29,9 @@ export class VoiceChannelAnnouncer {
   }
 
   public static reset(): void {
+    if (VoiceChannelAnnouncer.instance) {
+      VoiceChannelAnnouncer.instance.destroy();
+    }
     VoiceChannelAnnouncer.instance =
       undefined as unknown as VoiceChannelAnnouncer;
   }

@@ -35,6 +35,9 @@ export class NoticesChannelManager {
   }
 
   public static reset(): void {
+    if (NoticesChannelManager.instance) {
+      void NoticesChannelManager.instance.stop();
+    }
     NoticesChannelManager.instance =
       undefined as unknown as NoticesChannelManager;
   }

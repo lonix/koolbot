@@ -153,6 +153,9 @@ export class PollService {
   }
 
   public static reset(): void {
+    if (PollService.instance) {
+      PollService.instance.destroy();
+    }
     PollService.instance = undefined as unknown as PollService;
   }
 

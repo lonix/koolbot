@@ -68,6 +68,9 @@ export class ScheduledAnnouncementService {
   }
 
   public static reset(): void {
+    if (ScheduledAnnouncementService.instance) {
+      ScheduledAnnouncementService.instance.destroy();
+    }
     ScheduledAnnouncementService.instance =
       undefined as unknown as ScheduledAnnouncementService;
   }

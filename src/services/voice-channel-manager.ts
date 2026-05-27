@@ -78,6 +78,9 @@ export class VoiceChannelManager {
   }
 
   public static reset(): void {
+    if (VoiceChannelManager.instance) {
+      VoiceChannelManager.instance.destroy();
+    }
     VoiceChannelManager.instance = undefined as unknown as VoiceChannelManager;
   }
 
