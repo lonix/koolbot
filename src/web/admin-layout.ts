@@ -220,6 +220,10 @@ const STYLE = [
   ".edit-details{flex:0 0 100%;margin-bottom:.35rem}",
   ".edit-details form.stack{margin-top:.5rem}",
   "button[disabled]{opacity:.5;cursor:not-allowed}",
+  ".cron-picker{display:inline-flex;align-items:center;gap:.4rem;flex-wrap:wrap}",
+  ".cron-picker select,.cron-picker input{font:inherit;font-size:.85rem;padding:.2rem .35rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px}",
+  ".cron-picker input[type=time]{width:7rem}",
+  ".cron-picker[hidden]{display:none}",
 ].join("");
 
 const SCRIPT =
@@ -232,6 +236,59 @@ const SCRIPT =
   // will reject the now-expired cookie and render the scaffold's 401 page.
   "if(r<=0&&!fired){fired=true;window.location.href='/admin/'}}" +
   "tick();setInterval(tick,1000)})();";
+
+// Cron schedule picker (#444). Each .cron-picker on the page wraps a
+// hidden `name="value"` input that the form actually submits, plus a
+// mode <select> ("daily" / "weekly" / "monthly" / "custom"), a time
+// picker, and day-of-week / day-of-month controls. This script keeps
+// the hidden input in sync as the operator changes the controls so the
+// form posts a canonical cron string. Custom mode just mirrors the raw
+// text input verbatim, which is what server-side coercion expects for
+// a `cron`-typed key today.
+const CRON_PICKER_SCRIPT =
+  "(function(){" +
+  "function clamp(n,lo,hi){return Math.max(lo,Math.min(hi,n))}" +
+  "function wire(p){var hidden=p.querySelector('input[name=value]');" +
+  "var mode=p.querySelector('.cron-mode');" +
+  "var time=p.querySelector('.cron-time');" +
+  "var dow=p.querySelector('.cron-dow');" +
+  "var dom=p.querySelector('.cron-dom');" +
+  "var custom=p.querySelector('.cron-custom');" +
+  "var timeWrap=p.querySelector('.cron-time-wrap');" +
+  "var dowWrap=p.querySelector('.cron-dow-wrap');" +
+  "var domWrap=p.querySelector('.cron-dom-wrap');" +
+  "var customWrap=p.querySelector('.cron-custom-wrap');" +
+  "function show(el,on){if(el)el.hidden=!on}" +
+  "function compute(){var m=mode.value;" +
+  "if(m==='custom'){return custom.value}" +
+  // Clamp every numeric field defensively. The day-of-month <input>
+  // carries min/max but browsers only enforce that on form-submit
+  // (and unevenly across vendors), so an operator typing 32 or 0 can
+  // still end up with an invalid cron string here. Time inputs are
+  // browser-constrained but we clamp anyway in case parseInt yields
+  // something silly.
+  "var parts=(time.value||'00:00').split(':');" +
+  "var h=clamp(parseInt(parts[0],10)||0,0,23);" +
+  "var mi=clamp(parseInt(parts[1],10)||0,0,59);" +
+  "if(m==='daily')return mi+' '+h+' * * *';" +
+  "if(m==='weekly')return mi+' '+h+' * * '+clamp(parseInt(dow.value,10)||0,0,6);" +
+  "if(m==='monthly')return mi+' '+h+' '+clamp(parseInt(dom.value,10)||1,1,31)+' * *';" +
+  "return hidden.value}" +
+  "function refresh(){var m=mode.value;" +
+  "show(timeWrap,m==='daily'||m==='weekly'||m==='monthly');" +
+  "show(dowWrap,m==='weekly');" +
+  "show(domWrap,m==='monthly');" +
+  "show(customWrap,m==='custom');" +
+  "hidden.value=compute();p.setAttribute('data-mode',m)}" +
+  "function update(){hidden.value=compute()}" +
+  "mode.addEventListener('change',refresh);" +
+  // Listen for both `input` and `change`. Text/number inputs fire
+  // `input` continuously; <select> elements only reliably fire
+  // `change` (some browsers don't fire `input` for selects at all).
+  "[time,dow,dom,custom].forEach(function(el){if(!el)return;" +
+  "el.addEventListener('input',update);el.addEventListener('change',update)});" +
+  "refresh()}" +
+  "document.querySelectorAll('.cron-picker').forEach(wire)})();";
 
 function renderNav(
   active: string,
@@ -277,6 +334,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<nav class="side"><ul>${renderNav(opts.active, opts.navFeatureStatus)}</ul></nav>`,
     `<main>${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
+    `<script>${CRON_PICKER_SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }

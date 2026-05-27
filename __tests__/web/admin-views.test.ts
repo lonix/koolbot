@@ -1,5 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
 import {
+  parseCronToPickerState,
   renderAnnouncementsPage,
   renderBootstrapPage,
   renderDashboardPage,
@@ -481,33 +482,6 @@ describe("renderSettingsPage", () => {
     );
   });
 
-  it("falls back to a text input for cron-type settings (placeholder until #444)", () => {
-    const html = renderSettingsPage({
-      ...COMMON,
-      textChannels: [],
-      categoryChannels: [],
-      roles: [],
-      groups: [
-        {
-          category: "voicetracking",
-          rows: [
-            {
-              key: "voicetracking.announcements.schedule",
-              label: "Schedule",
-              current: "0 16 * * 5",
-              defaultValue: "0 16 * * 5",
-              type: "cron",
-              description: "",
-              category: "voicetracking",
-            },
-          ],
-        },
-      ],
-    });
-    expect(html).toMatch(
-      /<input type="text" name="value" value="0 16 \* \* 5"/,
-    );
-  });
 });
 
 describe("renderPermissionsPage", () => {
@@ -1171,5 +1145,164 @@ describe("renderWizardConfirmPage", () => {
     });
     expect(html).toMatch(/<button[^>]*disabled[^>]*>Apply<\/button>/);
     expect(html).toContain("No settings configured");
+  });
+});
+
+describe("parseCronToPickerState", () => {
+  it("recognises a daily schedule", () => {
+    expect(parseCronToPickerState("0 0 * * *")).toMatchObject({
+      mode: "daily",
+      minute: 0,
+      hour: 0,
+    });
+    expect(parseCronToPickerState("30 8 * * *")).toMatchObject({
+      mode: "daily",
+      minute: 30,
+      hour: 8,
+    });
+  });
+
+  it("recognises a weekly schedule and normalises Sunday-7 to Sunday-0", () => {
+    expect(parseCronToPickerState("0 16 * * 5")).toMatchObject({
+      mode: "weekly",
+      minute: 0,
+      hour: 16,
+      dayOfWeek: 5,
+    });
+    expect(parseCronToPickerState("0 0 * * 7")).toMatchObject({
+      mode: "weekly",
+      dayOfWeek: 0,
+    });
+  });
+
+  it("recognises a monthly schedule", () => {
+    expect(parseCronToPickerState("0 0 1 * *")).toMatchObject({
+      mode: "monthly",
+      minute: 0,
+      hour: 0,
+      dayOfMonth: 1,
+    });
+    expect(parseCronToPickerState("45 9 15 * *")).toMatchObject({
+      mode: "monthly",
+      minute: 45,
+      hour: 9,
+      dayOfMonth: 15,
+    });
+  });
+
+  it("falls back to custom for patterns the picker can't represent", () => {
+    // Step values, ranges, lists, named months, and anything that doesn't
+    // fit the three supported shapes must round-trip verbatim so the
+    // operator's intent isn't lost.
+    for (const raw of [
+      "*/15 * * * *", // every 15 minutes
+      "0 9-17 * * 1-5", // ranges in hours and days
+      "0 0 1,15 * *", // first and 15th of month
+      "0 12 * JAN *", // named month
+      "garbage", // not a cron at all
+      "0 0 * *", // 4 fields
+      "0 0 32 * *", // dom out of range
+    ]) {
+      expect(parseCronToPickerState(raw)).toMatchObject({
+        mode: "custom",
+        raw,
+      });
+    }
+  });
+
+  it("preserves the raw cron verbatim on custom-mode fallback", () => {
+    const raw = "*/5 * * * MON-FRI";
+    expect(parseCronToPickerState(raw).raw).toBe(raw);
+  });
+
+  it("strips surrounding quotes before parsing, matching runtime services", () => {
+    // voice-channel-truncation, voice-channel-announcer, and
+    // scheduled-announcement-service all apply `.replace(/^["']|["']$/g, "")`
+    // before handing the cron to CronJob. The picker must agree, or a
+    // stored value like `"0 16 * * 5"` would round-trip as custom even
+    // though the bot itself treats it as the unquoted form.
+    expect(parseCronToPickerState('"0 16 * * 5"')).toMatchObject({
+      mode: "weekly",
+      minute: 0,
+      hour: 16,
+      dayOfWeek: 5,
+    });
+    expect(parseCronToPickerState("'0 0 * * *'")).toMatchObject({
+      mode: "daily",
+      minute: 0,
+      hour: 0,
+    });
+  });
+});
+
+describe("renderSettingsPage cron picker", () => {
+  const cronCommon = {
+    ...COMMON,
+    textChannels: [],
+    categoryChannels: [],
+    roles: [],
+  };
+
+  function withCron(current: string) {
+    return renderSettingsPage({
+      ...cronCommon,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.announcements.schedule",
+              label: "Announcement schedule",
+              current,
+              defaultValue: "0 16 * * 5",
+              type: "cron",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("renders the cron picker with mode selector and a hidden value field", () => {
+    const html = withCron("0 16 * * 5");
+    expect(html).toContain('<div class="cron-picker" data-mode="weekly">');
+    expect(html).toContain('<input type="hidden" name="value" value="0 16 * * 5">');
+    expect(html).toContain('<select class="cron-mode"');
+    expect(html).toContain('<option value="weekly" selected>Weekly</option>');
+    // Weekly mode reveals the day-of-week control with the right day picked.
+    expect(html).toMatch(/<option value="5" selected>Friday<\/option>/);
+    // Other mode-specific wrappers are present but hidden.
+    expect(html).toMatch(/<span class="cron-dom-wrap" hidden>/);
+    expect(html).toMatch(/<span class="cron-custom-wrap" hidden>/);
+  });
+
+  it("falls back to custom mode with the raw cron preserved for unrecognised patterns", () => {
+    const html = withCron("*/15 * * * *");
+    expect(html).toContain('<div class="cron-picker" data-mode="custom">');
+    expect(html).toContain(
+      '<option value="custom" selected>Custom (cron)</option>',
+    );
+    // The custom text input is visible (no `hidden` attr on its wrapper)
+    // and pre-populated with the raw value.
+    expect(html).toMatch(
+      /<span class="cron-custom-wrap"[^h]*>.*<input[^>]*class="cron-custom"[^>]*value="\*\/15 \* \* \* \*"/,
+    );
+  });
+
+  it("renders a daily schedule with the time pre-populated", () => {
+    const html = withCron("30 8 * * *");
+    expect(html).toContain('<div class="cron-picker" data-mode="daily">');
+    expect(html).toContain('<option value="daily" selected>Daily</option>');
+    expect(html).toContain('<input type="time" class="cron-time" value="08:30">');
+  });
+
+  it("renders a monthly schedule with the day-of-month pre-populated", () => {
+    const html = withCron("0 0 15 * *");
+    expect(html).toContain('<div class="cron-picker" data-mode="monthly">');
+    expect(html).toMatch(
+      /<input type="number" class="cron-dom"[^>]*value="15"/,
+    );
   });
 });
