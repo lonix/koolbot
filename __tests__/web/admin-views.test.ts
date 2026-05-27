@@ -1214,6 +1214,25 @@ describe("parseCronToPickerState", () => {
     const raw = "*/5 * * * MON-FRI";
     expect(parseCronToPickerState(raw).raw).toBe(raw);
   });
+
+  it("strips surrounding quotes before parsing, matching runtime services", () => {
+    // voice-channel-truncation, voice-channel-announcer, and
+    // scheduled-announcement-service all apply `.replace(/^["']|["']$/g, "")`
+    // before handing the cron to CronJob. The picker must agree, or a
+    // stored value like `"0 16 * * 5"` would round-trip as custom even
+    // though the bot itself treats it as the unquoted form.
+    expect(parseCronToPickerState('"0 16 * * 5"')).toMatchObject({
+      mode: "weekly",
+      minute: 0,
+      hour: 16,
+      dayOfWeek: 5,
+    });
+    expect(parseCronToPickerState("'0 0 * * *'")).toMatchObject({
+      mode: "daily",
+      minute: 0,
+      hour: 0,
+    });
+  });
 });
 
 describe("renderSettingsPage cron picker", () => {

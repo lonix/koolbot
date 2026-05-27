@@ -246,7 +246,8 @@ const SCRIPT =
 // text input verbatim, which is what server-side coercion expects for
 // a `cron`-typed key today.
 const CRON_PICKER_SCRIPT =
-  "(function(){function pad(n){return String(n).padStart(2,'0')}" +
+  "(function(){" +
+  "function clamp(n,lo,hi){return Math.max(lo,Math.min(hi,n))}" +
   "function wire(p){var hidden=p.querySelector('input[name=value]');" +
   "var mode=p.querySelector('.cron-mode');" +
   "var time=p.querySelector('.cron-time');" +
@@ -260,11 +261,18 @@ const CRON_PICKER_SCRIPT =
   "function show(el,on){if(el)el.hidden=!on}" +
   "function compute(){var m=mode.value;" +
   "if(m==='custom'){return custom.value}" +
+  // Clamp every numeric field defensively. The day-of-month <input>
+  // carries min/max but browsers only enforce that on form-submit
+  // (and unevenly across vendors), so an operator typing 32 or 0 can
+  // still end up with an invalid cron string here. Time inputs are
+  // browser-constrained but we clamp anyway in case parseInt yields
+  // something silly.
   "var parts=(time.value||'00:00').split(':');" +
-  "var h=parseInt(parts[0],10)||0;var mi=parseInt(parts[1],10)||0;" +
+  "var h=clamp(parseInt(parts[0],10)||0,0,23);" +
+  "var mi=clamp(parseInt(parts[1],10)||0,0,59);" +
   "if(m==='daily')return mi+' '+h+' * * *';" +
-  "if(m==='weekly')return mi+' '+h+' * * '+dow.value;" +
-  "if(m==='monthly')return mi+' '+h+' '+(dom.value||'1')+' * *';" +
+  "if(m==='weekly')return mi+' '+h+' * * '+clamp(parseInt(dow.value,10)||0,0,6);" +
+  "if(m==='monthly')return mi+' '+h+' '+clamp(parseInt(dom.value,10)||1,1,31)+' * *';" +
   "return hidden.value}" +
   "function refresh(){var m=mode.value;" +
   "show(timeWrap,m==='daily'||m==='weekly'||m==='monthly');" +
@@ -272,8 +280,13 @@ const CRON_PICKER_SCRIPT =
   "show(domWrap,m==='monthly');" +
   "show(customWrap,m==='custom');" +
   "hidden.value=compute();p.setAttribute('data-mode',m)}" +
+  "function update(){hidden.value=compute()}" +
   "mode.addEventListener('change',refresh);" +
-  "[time,dow,dom,custom].forEach(function(el){if(el)el.addEventListener('input',function(){hidden.value=compute()})});" +
+  // Listen for both `input` and `change`. Text/number inputs fire
+  // `input` continuously; <select> elements only reliably fire
+  // `change` (some browsers don't fire `input` for selects at all).
+  "[time,dow,dom,custom].forEach(function(el){if(!el)return;" +
+  "el.addEventListener('input',update);el.addEventListener('change',update)});" +
   "refresh()}" +
   "document.querySelectorAll('.cron-picker').forEach(wire)})();";
 

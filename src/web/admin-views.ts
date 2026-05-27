@@ -269,15 +269,22 @@ export interface CronPickerState {
 }
 
 export function parseCronToPickerState(cron: string): CronPickerState {
+  // Strip surrounding quotes the same way the runtime services do
+  // (voice-channel-truncation, voice-channel-announcer,
+  // scheduled-announcement-service all apply this normalisation before
+  // handing the string to CronJob). Without it a stored value like
+  // `"0 16 * * 5"` would silently fall back to custom mode here even
+  // though the bot itself treats it as the unquoted form.
+  const stripped = cron.replace(/^["']|["']$/g, "");
   const fallback: CronPickerState = {
     mode: "custom",
     minute: 0,
     hour: 0,
     dayOfWeek: 0,
     dayOfMonth: 1,
-    raw: cron,
+    raw: stripped,
   };
-  const fields = cron.trim().split(/\s+/);
+  const fields = stripped.trim().split(/\s+/);
   if (fields.length !== 5) return fallback;
   const [mStr, hStr, domStr, monStr, dowStr] = fields;
   const isInt = (s: string) => /^\d+$/.test(s);
