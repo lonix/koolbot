@@ -661,14 +661,21 @@ side effect, since the HMAC key changes.
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                    | What it's for                                                                                  |
-| ----------------------- | ---------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)   | Index for your own settings — placeholder cards listing the pages future sub-issues will land. |
+| Page                                    | What it's for                                                                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
+| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements today; #483 weekly digest and #484 Rewind once they land). Each toggle records a `WebAuditLog` row. |
 
-Per-user features bolt onto `/me` in #482 (notification preferences)
-and #484 (Rewind), among others. Each adds its own card to the index
-plus a dedicated sub-page; the layout, session, and self-scope
-plumbing are already in place.
+Notification preferences are scoped per `(userId, guildId)`. The page
+lists every notification type with the current state and a checkbox;
+toggling one row is a single POST that records the diff in the audit
+log and PRG-redirects back to the page. Rows for features that haven't
+shipped yet (`digest`, `rewind`) are still functional — the stored
+toggle is read by the dependent issues' DM paths when they land.
+
+Future per-user features (Rewind in #484, etc.) bolt onto `/me` as
+their own pages; the layout, session, and self-scope plumbing are
+already in place.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

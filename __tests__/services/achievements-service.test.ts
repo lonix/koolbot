@@ -35,6 +35,7 @@ jest.mock('../../src/services/quote-service.js', () => ({
 import { AchievementsService, GamificationService } from '../../src/services/achievements-service.js';
 import { UserAchievements } from '../../src/models/user-achievements.js';
 import { VoiceChannelTracking, type IVoiceChannelTracking } from '../../src/models/voice-channel-tracking.js';
+import { UserNotificationPrefsService } from '../../src/services/user-notification-prefs-service.js';
 
 // Helper to create an AchievementsService with injected config
 function createAchievementsService(mockClient: Partial<Client>) {
@@ -67,6 +68,21 @@ describe('AchievementsService', () => {
 
     // Reset singleton between tests
     (AchievementsService as unknown as { instance: unknown }).instance = undefined;
+
+    // Default the per-user prefs gate to "all enabled" so existing tests
+    // that don't care about #482 keep passing. `mockClear` resets the
+    // call history (jest.spyOn returns the same spy across tests, so
+    // without this `toHaveBeenCalled` assertions would see stale calls
+    // from earlier tests in the suite).
+    (UserNotificationPrefsService as unknown as { instance: unknown }).instance = null;
+    const prefsSpy = jest
+      .spyOn(UserNotificationPrefsService.prototype, 'getPrefs')
+      .mockResolvedValue({
+        achievements: true,
+        digest: true,
+        rewind: true,
+      });
+    prefsSpy.mockClear();
   });
 
   describe('singleton pattern', () => {
@@ -305,6 +321,68 @@ describe('AchievementsService', () => {
       await expect(
         service.notifyUserOfAccolades('user123', [{ type: 'first_hour', earnedAt: new Date(), metadata: {} }])
       ).resolves.not.toThrow();
+    });
+
+    it('skips DM when per-user notification prefs say achievements:false (#482)', async () => {
+      const { service, mockConfigService } = createAchievementsService(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.getString.mockResolvedValue('guild-1');
+
+      const mockUser = { username: 'TestUser', send: jest.fn().mockResolvedValue(undefined) };
+      (mockClient.users as any).fetch = jest.fn().mockResolvedValue(mockUser);
+
+      const getPrefsSpy = jest
+        .spyOn(UserNotificationPrefsService.prototype, 'getPrefs')
+        .mockResolvedValue({
+          achievements: false,
+          digest: true,
+          rewind: true,
+        });
+
+      await service.notifyUserOfAccolades('user123', [
+        { type: 'first_hour', earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(getPrefsSpy).toHaveBeenCalledWith('user123', 'guild-1');
+      expect(mockUser.send).not.toHaveBeenCalled();
+    });
+
+    it('sends DM and appends the /config footer when prefs leave achievements on (#482)', async () => {
+      const { service, mockConfigService } = createAchievementsService(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.getString.mockResolvedValue('guild-1');
+
+      const mockUser = { username: 'TestUser', send: jest.fn().mockResolvedValue(undefined) };
+      (mockClient.users as any).fetch = jest.fn().mockResolvedValue(mockUser);
+
+      await service.notifyUserOfAccolades('user123', [
+        { type: 'first_hour', earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(mockUser.send).toHaveBeenCalledTimes(1);
+      const sent = (mockUser.send as jest.Mock).mock.calls[0][0] as string;
+      expect(sent).toContain('Manage notifications: run `/config`');
+    });
+
+    it('falls through and DMs when GUILD_ID is unset (no prefs lookup possible)', async () => {
+      const { service, mockConfigService } = createAchievementsService(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.getString.mockResolvedValue('');
+
+      const mockUser = { username: 'TestUser', send: jest.fn().mockResolvedValue(undefined) };
+      (mockClient.users as any).fetch = jest.fn().mockResolvedValue(mockUser);
+
+      const getPrefsSpy = jest.spyOn(
+        UserNotificationPrefsService.prototype,
+        'getPrefs',
+      );
+
+      await service.notifyUserOfAccolades('user123', [
+        { type: 'first_hour', earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(getPrefsSpy).not.toHaveBeenCalled();
+      expect(mockUser.send).toHaveBeenCalledTimes(1);
     });
   });
 

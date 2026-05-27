@@ -233,6 +233,291 @@ describe("createUserRouter / index page", () => {
   });
 });
 
+describe("/me/notifications", () => {
+  beforeEach(() => {
+    process.env.WEBUI_SESSION_SECRET = SECRET;
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "30";
+    (WebSessionService as unknown as { instance: unknown }).instance = null;
+  });
+
+  async function dispatch(opts: {
+    method: "GET" | "POST";
+    body?: Record<string, unknown>;
+    csrfHeader?: string;
+    csrfCookie?: string;
+    prefs?: { achievements: boolean; digest: boolean; rewind: boolean };
+    setPrefsImpl?: jest.Mock;
+    role?: "admin" | "user";
+  }): Promise<{
+    statusCode: number;
+    body: string;
+    headers: Record<string, unknown>;
+    redirectedTo?: string;
+  }> {
+    const now = Date.now();
+    const payload: CookiePayload = {
+      sid: "session-id",
+      uid: "user-1",
+      gid: "guild-1",
+      rol: opts.role ?? "user",
+      iat: now - 60_000,
+      act: now - 60_000,
+    };
+    const csrfCookie = opts.csrfCookie ?? "csrf-1";
+    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=${csrfCookie}`;
+
+    const svc = WebSessionService.getInstance();
+    jest.spyOn(svc, "findById").mockResolvedValue({
+      discordUserId: "user-1",
+      guildId: "guild-1",
+      role: opts.role ?? "user",
+      scopes: [],
+      revokedAt: null,
+      expiresAt: new Date(now + 60 * 60 * 1000),
+    } as never);
+    jest.spyOn(svc, "revokeSession").mockResolvedValue(true);
+
+    const { PermissionsService } =
+      await import("../../src/services/permissions-service.js");
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      checkCommandPermission: async () => true,
+    } as never);
+
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    const getPrefs = jest
+      .fn<() => Promise<{ achievements: boolean; digest: boolean; rewind: boolean }>>()
+      .mockResolvedValue(
+        opts.prefs ?? { achievements: true, digest: true, rewind: true },
+      );
+    const setPrefs =
+      opts.setPrefsImpl ??
+      jest
+        .fn<
+          (
+            userId: string,
+            guildId: string,
+            patch: Record<string, boolean>,
+          ) => Promise<{ achievements: boolean; digest: boolean; rewind: boolean }>
+        >()
+        .mockImplementation(async (_u, _g, patch) => ({
+          achievements: true,
+          digest: true,
+          rewind: true,
+          ...patch,
+        }));
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getPrefs,
+      setPrefs,
+    } as never);
+
+    const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+    jest.spyOn(WebAuditLog, "create").mockResolvedValue({} as never);
+
+    const mockClient = {} as never;
+    const { createSessionMiddleware } =
+      await import("../../src/web/session.js");
+    const requireSession = createSessionMiddleware(mockClient);
+    const router = createUserRouter(mockClient, requireSession);
+
+    const headers: Record<string, unknown> = { cookie };
+    if (opts.method === "POST" && opts.csrfHeader) {
+      headers["x-csrf-token"] = opts.csrfHeader;
+    }
+
+    const captured: {
+      statusCode: number;
+      body: string;
+      headers: Record<string, unknown>;
+      redirectedTo?: string;
+    } = {
+      statusCode: 200,
+      body: "",
+      headers: {},
+    };
+    const res = {
+      ...makeRes(),
+    } as ReturnType<typeof makeRes> & {
+      redirect: jest.Mock;
+      header: jest.Mock;
+    };
+    res.status.mockImplementation((code: number) => {
+      captured.statusCode = code;
+      res.statusCode = code;
+      return res;
+    });
+    res.send.mockImplementation((body: unknown) => {
+      captured.body = typeof body === "string" ? body : String(body);
+      res.body = captured.body;
+      return res;
+    });
+    res.setHeader.mockImplementation((name: string, value: unknown) => {
+      captured.headers[name.toLowerCase()] = value;
+      return res;
+    });
+    res.redirect = jest.fn((code: unknown, url?: unknown) => {
+      if (typeof code === "number") {
+        captured.statusCode = code;
+        captured.redirectedTo = String(url);
+      } else {
+        captured.statusCode = 302;
+        captured.redirectedTo = String(code);
+      }
+      return res;
+    });
+    res.header = jest.fn(() => res);
+
+    const req = {
+      method: opts.method,
+      url: opts.method === "POST" ? "/notifications" : "/notifications",
+      originalUrl:
+        opts.method === "POST" ? "/me/notifications" : "/me/notifications",
+      path: "/notifications",
+      baseUrl: "/me",
+      headers,
+      body: opts.body ?? {},
+      query: {},
+      csrfToken: "csrf-1",
+      header: (name: string) => headers[name.toLowerCase()],
+    } as never as Parameters<typeof router>[0];
+
+    await new Promise<void>((resolve) => {
+      router(
+        req as never,
+        res as never,
+        (() => {
+          resolve();
+        }) as never,
+      );
+      setTimeout(resolve, 0);
+    });
+    await new Promise((r) => setTimeout(r, 10));
+    return captured;
+  }
+
+  it("renders the notifications form for a user-role session", async () => {
+    const out = await dispatch({ method: "GET" });
+    expect(out.body).toContain("Notifications");
+    expect(out.body).toContain('action="/me/notifications"');
+    expect(out.body).toContain('name="achievements"');
+    expect(out.body).toContain('name="digest"');
+    expect(out.body).toContain('name="rewind"');
+    // All checkboxes should be `checked` when prefs default to enabled.
+    expect(out.body).toContain(
+      'name="achievements" value="true" checked',
+    );
+  });
+
+  it("renders 'coming soon' hint for digest and rewind rows", async () => {
+    const out = await dispatch({ method: "GET" });
+    expect(out.body).toContain("#483");
+    expect(out.body).toContain("#484");
+  });
+
+  it("renders unchecked when stored prefs are off", async () => {
+    const out = await dispatch({
+      method: "GET",
+      prefs: { achievements: false, digest: true, rewind: false },
+    });
+    // achievements unchecked, digest checked
+    expect(out.body).toContain('name="achievements" value="true">');
+    expect(out.body).toContain('name="digest" value="true" checked');
+    expect(out.body).toContain('name="rewind" value="true">');
+  });
+
+  it("rejects POST without a CSRF token", async () => {
+    const out = await dispatch({
+      method: "POST",
+      body: { submitted_achievements: "1" },
+      // no csrfHeader, no _csrf in body
+    });
+    expect(out.statusCode).toBe(403);
+  });
+
+  it("treats checkbox absence as 'off' when the hidden submitted flag is present", async () => {
+    let captured: { patch: Record<string, boolean>; user: string; guild: string } | null = null;
+    const setPrefs = jest
+      .fn<
+        (
+          userId: string,
+          guildId: string,
+          patch: Record<string, boolean>,
+        ) => Promise<{ achievements: boolean; digest: boolean; rewind: boolean }>
+      >()
+      .mockImplementation(async (user, guild, patch) => {
+        captured = { user, guild, patch };
+        return {
+          achievements: patch.achievements ?? true,
+          digest: patch.digest ?? true,
+          rewind: patch.rewind ?? true,
+        };
+      });
+
+    const out = await dispatch({
+      method: "POST",
+      body: {
+        _csrf: "csrf-1",
+        // Only the achievements row was submitted, and the checkbox is
+        // absent (= unchecked).
+        submitted_achievements: "1",
+      },
+      csrfHeader: "csrf-1",
+      setPrefsImpl: setPrefs,
+    });
+    expect(out.statusCode).toBe(303);
+    expect(out.redirectedTo).toMatch(/^\/me\/notifications\?/);
+    expect(setPrefs).toHaveBeenCalledTimes(1);
+    expect(captured).not.toBeNull();
+    expect(captured!.user).toBe("user-1");
+    expect(captured!.guild).toBe("guild-1");
+    expect(captured!.patch).toEqual({ achievements: false });
+  });
+
+  it("records a WebAuditLog row with role:'user' on successful save", async () => {
+    const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+    const out = await dispatch({
+      method: "POST",
+      body: {
+        _csrf: "csrf-1",
+        submitted_achievements: "1",
+        achievements: "true",
+      },
+      csrfHeader: "csrf-1",
+    });
+    expect(out.statusCode).toBe(303);
+    expect(WebAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "user.notifications.set",
+        role: "user",
+        discordUserId: "user-1",
+        guildId: "guild-1",
+        result: "success",
+      }),
+    );
+  });
+
+  it("records role:'admin' when an admin toggles their own prefs", async () => {
+    const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+    const out = await dispatch({
+      method: "POST",
+      role: "admin",
+      body: {
+        _csrf: "csrf-1",
+        submitted_achievements: "1",
+        achievements: "true",
+      },
+      csrfHeader: "csrf-1",
+    });
+    expect(out.statusCode).toBe(303);
+    expect(WebAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "user.notifications.set",
+        role: "admin",
+      }),
+    );
+  });
+});
+
 describe("userWebErrorHandler", () => {
   it("rewrites SelfScopeError to a 403 HTML page (not a generic 500)", async () => {
     const { userWebErrorHandler } = await import("../../src/web/index.js");
