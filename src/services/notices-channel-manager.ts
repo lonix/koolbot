@@ -26,8 +26,20 @@ export class NoticesChannelManager {
   public static getInstance(client: Client): NoticesChannelManager {
     if (!NoticesChannelManager.instance) {
       NoticesChannelManager.instance = new NoticesChannelManager(client);
+    } else if (NoticesChannelManager.instance.client !== client) {
+      throw new Error(
+        "NoticesChannelManager already initialised with a different client",
+      );
     }
     return NoticesChannelManager.instance;
+  }
+
+  public static reset(): void {
+    if (NoticesChannelManager.instance) {
+      void NoticesChannelManager.instance.stop();
+    }
+    NoticesChannelManager.instance =
+      undefined as unknown as NoticesChannelManager;
   }
 
   private async waitForClientReady(): Promise<void> {

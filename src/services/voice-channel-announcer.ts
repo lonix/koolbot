@@ -20,8 +20,20 @@ export class VoiceChannelAnnouncer {
   public static getInstance(client: Client): VoiceChannelAnnouncer {
     if (!VoiceChannelAnnouncer.instance) {
       VoiceChannelAnnouncer.instance = new VoiceChannelAnnouncer(client);
+    } else if (VoiceChannelAnnouncer.instance.client !== client) {
+      throw new Error(
+        "VoiceChannelAnnouncer already initialised with a different client",
+      );
     }
     return VoiceChannelAnnouncer.instance;
+  }
+
+  public static reset(): void {
+    if (VoiceChannelAnnouncer.instance) {
+      VoiceChannelAnnouncer.instance.destroy();
+    }
+    VoiceChannelAnnouncer.instance =
+      undefined as unknown as VoiceChannelAnnouncer;
   }
 
   private validateCronExpression(expression: string): boolean {

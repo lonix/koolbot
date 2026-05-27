@@ -77,8 +77,20 @@ export class LeaderboardRoleService {
   public static getInstance(client: Client): LeaderboardRoleService {
     if (!LeaderboardRoleService.instance) {
       LeaderboardRoleService.instance = new LeaderboardRoleService(client);
+    } else if (LeaderboardRoleService.instance.client !== client) {
+      throw new Error(
+        "LeaderboardRoleService already initialised with a different client",
+      );
     }
     return LeaderboardRoleService.instance;
+  }
+
+  public static reset(): void {
+    if (LeaderboardRoleService.instance) {
+      LeaderboardRoleService.instance.destroy();
+    }
+    LeaderboardRoleService.instance =
+      undefined as unknown as LeaderboardRoleService;
   }
 
   private validateCronExpression(expression: string): boolean {

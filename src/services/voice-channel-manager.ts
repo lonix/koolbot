@@ -92,8 +92,19 @@ export class VoiceChannelManager {
   public static getInstance(client: Client): VoiceChannelManager {
     if (!VoiceChannelManager.instance) {
       VoiceChannelManager.instance = new VoiceChannelManager(client);
+    } else if (VoiceChannelManager.instance.client !== client) {
+      throw new Error(
+        "VoiceChannelManager already initialised with a different client",
+      );
     }
     return VoiceChannelManager.instance;
+  }
+
+  public static reset(): void {
+    if (VoiceChannelManager.instance) {
+      VoiceChannelManager.instance.destroy();
+    }
+    VoiceChannelManager.instance = undefined as unknown as VoiceChannelManager;
   }
 
   /**

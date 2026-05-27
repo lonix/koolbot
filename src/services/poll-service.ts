@@ -144,8 +144,19 @@ export class PollService {
   public static getInstance(client: Client): PollService {
     if (!PollService.instance) {
       PollService.instance = new PollService(client);
+    } else if (PollService.instance.client !== client) {
+      throw new Error(
+        "PollService already initialised with a different client",
+      );
     }
     return PollService.instance;
+  }
+
+  public static reset(): void {
+    if (PollService.instance) {
+      PollService.instance.destroy();
+    }
+    PollService.instance = undefined as unknown as PollService;
   }
 
   private validateCronExpression(expression: string): boolean {
