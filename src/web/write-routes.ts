@@ -490,7 +490,11 @@ export function createWriteRouter(
           applied.push({ key, before, after: value });
         } catch (err) {
           const text = err instanceof Error ? err.message : "set failed";
-          logger.error(`save-section: failed to set ${key}`, err);
+          // The audit row records which key failed (see `failed` below) so
+          // the log message keeps the user-supplied key out of the format
+          // string — CodeQL flags template interpolation of body fields as
+          // log injection even when validation guarantees the value.
+          logger.error("save-section: failed to write setting", err);
           failed.push({ key, reason: text });
         }
       }
