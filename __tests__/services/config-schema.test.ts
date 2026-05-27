@@ -145,50 +145,87 @@ describe('Config Schema', () => {
     //   2. Sub-feature toggles may default to true if they're inert
     //      until the parent feature is enabled and the operator who
     //      turns the parent on almost certainly wants them.
-    // These tests pin the matrix so a future contributor can't quietly
-    // flip a top-level gate to true (rule 1) or add a new sub-feature
-    // toggle without an explicit audit entry (rule 2).
+    //
+    // The matrix below is the *complete* set of `*enabled` keys in
+    // defaultConfig at this PR. The first test below derives the actual
+    // set from defaultConfig and fails when it drifts, forcing a future
+    // contributor to deliberately audit any new toggle they add.
 
-    it('keeps every top-level feature gate `enabled: false`', () => {
-      const topLevelGates = [
-        'voicechannels.enabled',
-        'voicetracking.enabled',
-        'voicetracking.announcements.enabled',
-        'voicetracking.cleanup.enabled',
-        'voicetracking.stats.top.enabled',
-        'voicetracking.stats.user.enabled',
-        'voicetracking.seen.enabled',
-        'ping.enabled',
-        'quotes.enabled',
-        'ratelimit.enabled',
-        'announcements.enabled',
-        'achievements.enabled',
-        'reactionroles.enabled',
-        'notices.enabled',
-        'polls.enabled',
-        'leaderboard_roles.enabled',
-      ];
-      for (const key of topLevelGates) {
-        expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(false);
+    const EXPECTED_ENABLED_DEFAULTS: Record<string, boolean> = {
+      // ─── Top-level feature gates (rule 1: must be false) ────────────
+      'voicechannels.enabled': false,
+      'voicetracking.enabled': false,
+      'ping.enabled': false,
+      'quotes.enabled': false,
+      'ratelimit.enabled': false,
+      'announcements.enabled': false,
+      'achievements.enabled': false,
+      'reactionroles.enabled': false,
+      'notices.enabled': false,
+      'polls.enabled': false,
+      'leaderboard_roles.enabled': false,
+
+      // ─── Sub-features that default off (auxiliary opt-ins) ──────────
+      'voicechannels.presets.enabled': false,
+      'voicetracking.stats.top.enabled': false,
+      'voicetracking.stats.user.enabled': false,
+      'voicetracking.seen.enabled': false,
+      'voicetracking.announcements.enabled': false,
+      'voicetracking.cleanup.enabled': false,
+
+      // ─── Sub-features that default on (rule 2: parent-gated) ────────
+      'voicechannels.controlpanel.enabled': true,
+      'quotes.header_enabled': true,
+      'quotes.header_pin_enabled': true,
+      'achievements.announcements.enabled': true,
+      'achievements.dm_notifications.enabled': true,
+      'notices.header_enabled': true,
+      'notices.header_pin_enabled': true,
+    };
+
+    // Parent feature each rule-2 (default-true) sub-feature is gated by.
+    // Used to prove the sub-feature is inert on a fresh install.
+    const PARENT_OF_DEFAULT_TRUE: Record<string, string> = {
+      'voicechannels.controlpanel.enabled': 'voicechannels.enabled',
+      'quotes.header_enabled': 'quotes.enabled',
+      'quotes.header_pin_enabled': 'quotes.enabled',
+      'achievements.announcements.enabled': 'achievements.enabled',
+      'achievements.dm_notifications.enabled': 'achievements.enabled',
+      'notices.header_enabled': 'notices.enabled',
+      'notices.header_pin_enabled': 'notices.enabled',
+    };
+
+    it('audits every `*enabled` key in defaultConfig (no drift)', () => {
+      // Derive the live set so a new toggle added to defaultConfig
+      // without an entry above immediately fails this test.
+      const liveEnabledKeys = Object.keys(defaultConfig).filter((k) =>
+        /enabled$/.test(k),
+      );
+      const audited = new Set(Object.keys(EXPECTED_ENABLED_DEFAULTS));
+      const unaudited = liveEnabledKeys.filter((k) => !audited.has(k));
+      const stale = Object.keys(EXPECTED_ENABLED_DEFAULTS).filter(
+        (k) => !(k in defaultConfig),
+      );
+      expect(unaudited).toEqual([]);
+      expect(stale).toEqual([]);
+    });
+
+    it('every audited `*enabled` key matches its expected default value', () => {
+      for (const [key, expected] of Object.entries(
+        EXPECTED_ENABLED_DEFAULTS,
+      )) {
+        expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(
+          expected,
+        );
       }
     });
 
-    it('keeps the parent-gated sub-feature toggles `true`', () => {
-      // Each is inert when its parent feature is off; defaulting on
-      // matches operator expectations when the parent is enabled.
-      const enabledByDefault: Record<string, string> = {
-        'voicechannels.controlpanel.enabled': 'voicechannels.enabled',
-        'quotes.header_enabled': 'quotes.enabled',
-        'quotes.header_pin_enabled': 'quotes.enabled',
-        'achievements.announcements.enabled': 'achievements.enabled',
-        'achievements.dm_notifications.enabled': 'achievements.enabled',
-        'notices.header_enabled': 'notices.enabled',
-        'notices.header_pin_enabled': 'notices.enabled',
-      };
-      for (const [key, parent] of Object.entries(enabledByDefault)) {
+    it('every default-true sub-feature has a parent gate that defaults to false', () => {
+      for (const [key, parent] of Object.entries(PARENT_OF_DEFAULT_TRUE)) {
         expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(true);
-        // Parent is off, so the sub-feature is inert on a fresh install.
-        expect(defaultConfig[parent as keyof typeof defaultConfig]).toBe(false);
+        expect(defaultConfig[parent as keyof typeof defaultConfig]).toBe(
+          false,
+        );
       }
     });
 
