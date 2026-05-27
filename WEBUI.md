@@ -661,10 +661,10 @@ side effect, since the HMAC key changes.
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                                | What it's for                                                                                                                                                                       |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)               | Index for your own settings — links to the available per-user pages.                                                                                                                |
-| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements today; weekly digest + year-in-review once #483 / #484 ship). Missing record = all enabled. Each toggle records a `WebAuditLog` row with `role: "user"` (or `"admin"` if the toggler is an admin on their own surface). |
+| Page                                    | What it's for                                                                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
+| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements today; #483 weekly digest and #484 Rewind once they land). Each toggle records a `WebAuditLog` row. |
 
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;
