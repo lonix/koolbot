@@ -148,23 +148,13 @@ Discord** on the Settings page so Discord picks up the change.
 
 ## 🧙 Setup Wizard
 
-Interactive guided configuration for new operators.
-
-| Setting | Default | Description |
-| --- | --- | --- |
-| `wizard.enabled` | `true` | Enable/disable the Setup Wizard page |
-
-The wizard is the **Setup Wizard** page inside the Web UI. It:
+Interactive guided configuration for new operators. Always accessible
+from the admin nav — no config key gates it. The wizard:
 
 - Auto-detects existing Discord resources (categories, channels)
 - Walks you through each feature step by step
 - Validates settings (channels must exist, etc.) before applying
 - Sets multiple related settings in one click
-
-**When to disable:** if you prefer to edit settings directly on the
-Settings page, or want to keep the wizard out of the navigation for an
-already-configured deployment. The wizard is on by default for new
-installs.
 
 ---
 
@@ -694,10 +684,6 @@ above).
 
 - `ping.enabled` (bool, default: false)
 - `quotes.enabled` (bool, default: false)
-
-#### Setup Wizard
-
-- `wizard.enabled` (bool, default: true)
 
 #### Reaction Roles
 
