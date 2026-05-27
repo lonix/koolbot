@@ -22,8 +22,16 @@ export class PermissionsService {
   public static getInstance(client: Client): PermissionsService {
     if (!PermissionsService.instance) {
       PermissionsService.instance = new PermissionsService(client);
+    } else if (PermissionsService.instance.client !== client) {
+      throw new Error(
+        "PermissionsService already initialised with a different client",
+      );
     }
     return PermissionsService.instance;
+  }
+
+  public static reset(): void {
+    PermissionsService.instance = undefined as unknown as PermissionsService;
   }
 
   /**

@@ -44,8 +44,16 @@ export class CommandManager {
   public static getInstance(client: Client): CommandManager {
     if (!CommandManager.instance) {
       CommandManager.instance = new CommandManager(client);
+    } else if (CommandManager.instance.client !== client) {
+      throw new Error(
+        "CommandManager already initialised with a different client",
+      );
     }
     return CommandManager.instance;
+  }
+
+  public static reset(): void {
+    CommandManager.instance = undefined as unknown as CommandManager;
   }
 
   async initialize(): Promise<unknown[]> {

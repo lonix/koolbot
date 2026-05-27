@@ -12,7 +12,8 @@ describe('VoiceChannelAnnouncer', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockClient = { 
+    VoiceChannelAnnouncer.reset();
+    mockClient = {
       user: { id: '123' },
       channels: { fetch: jest.fn() },
     };

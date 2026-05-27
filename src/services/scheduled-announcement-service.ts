@@ -59,8 +59,17 @@ export class ScheduledAnnouncementService {
       ScheduledAnnouncementService.instance = new ScheduledAnnouncementService(
         client,
       );
+    } else if (ScheduledAnnouncementService.instance.client !== client) {
+      throw new Error(
+        "ScheduledAnnouncementService already initialised with a different client",
+      );
     }
     return ScheduledAnnouncementService.instance;
+  }
+
+  public static reset(): void {
+    ScheduledAnnouncementService.instance =
+      undefined as unknown as ScheduledAnnouncementService;
   }
 
   private validateCronExpression(expression: string): boolean {

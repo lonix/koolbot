@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { CommandManager } from '../../src/services/command-manager.js';
+import { PermissionsService } from '../../src/services/permissions-service.js';
 
 // Mock dependencies
 jest.mock('../../src/services/config-service.js');
@@ -14,7 +15,9 @@ describe('CommandManager', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockClient = { 
+    CommandManager.reset();
+    PermissionsService.reset();
+    mockClient = {
       user: { id: '123' },
       application: { id: '456' },
     };

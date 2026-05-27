@@ -12,6 +12,7 @@ describe("NoticesChannelManager", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    NoticesChannelManager.reset();
 
     // Mock Discord client
     mockClient = {

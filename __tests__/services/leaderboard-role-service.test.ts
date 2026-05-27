@@ -139,9 +139,17 @@ describe("LeaderboardRoleService", () => {
 
   describe("singleton", () => {
     it("returns the same instance", () => {
-      const a = LeaderboardRoleService.getInstance(makeClient());
-      const b = LeaderboardRoleService.getInstance(makeClient());
+      const client = makeClient();
+      const a = LeaderboardRoleService.getInstance(client);
+      const b = LeaderboardRoleService.getInstance(client);
       expect(a).toBe(b);
+    });
+
+    it("throws when called with a different client", () => {
+      LeaderboardRoleService.getInstance(makeClient());
+      expect(() => LeaderboardRoleService.getInstance(makeClient())).toThrow(
+        /already initialised with a different client/,
+      );
     });
 
     it("registers a config reload callback on construction", () => {
