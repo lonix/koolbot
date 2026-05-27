@@ -13,7 +13,7 @@ import {
 import { renderConsent, renderInvalidLink, renderSignedOut } from "./views.js";
 import { createReadOnlyRouter } from "./read-only-routes.js";
 import { createWriteRouter } from "./write-routes.js";
-import { createUserRouter } from "./user-routes.js";
+import { createUserRouter, SelfScopeError } from "./user-routes.js";
 
 /**
  * Build the WebUI router. Caller mounts this at /admin on the existing
@@ -171,18 +171,57 @@ export function createUserWebRouter(client: Client): Router {
 
   router.use(createUserRouter(client, requireSession));
 
-  router.use(
-    (err: unknown, _req: Request, res: Response, next: NextFunction): void => {
-      logger.error("UserUI router error", err);
-      if (res.headersSent) {
-        next(err);
-        return;
-      }
-      res.status(500).type("text/plain").send("Internal Server Error");
-    },
-  );
+  router.use(userWebErrorHandler);
 
   return router;
+}
+
+/**
+ * Express error handler for the `/me/*` surface. Translates
+ * `SelfScopeError` into the documented 403 HTML page and lets every
+ * other error fall through to a generic 500 with logging. Exported
+ * so the branch can be unit-tested without spinning up an HTTP server
+ * (Express only dispatches errors to a router's error middleware when
+ * the error originates from within that router's stack, which makes
+ * a black-box HTTP test of just the error handler awkward).
+ */
+export function userWebErrorHandler(
+  err: unknown,
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  // Self-scope violations are a forbidden-access condition, not a
+  // bug — render the documented 403 instead of collapsing them into
+  // a generic 500. No real `/me/*` handler depends on this today
+  // (the v1 index page reads only the session's own ids), but #482
+  // /#484 will, so the branch lands with the helper.
+  if (err instanceof SelfScopeError) {
+    logger.warn("Self-scope violation on /me/*", err.message);
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    res
+      .status(403)
+      .type("text/html")
+      .send(
+        `<!doctype html><html><head><meta charset="utf-8"><title>Forbidden</title></head>` +
+          `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
+          `<h1>Forbidden</h1>` +
+          `<p>That request targeted another user's data. The user self-service ` +
+          `surface only lets you view and change your own. Head back to ` +
+          `<a href="/me/">/me</a>.</p>` +
+          `</body></html>`,
+      );
+    return;
+  }
+  logger.error("UserUI router error", err);
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  res.status(500).type("text/plain").send("Internal Server Error");
 }
 
 export function isWebUIEnabled(): boolean {

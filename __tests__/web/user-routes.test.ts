@@ -232,3 +232,35 @@ describe("createUserRouter / index page", () => {
     expect(html).toContain('href="/admin/"');
   });
 });
+
+describe("userWebErrorHandler", () => {
+  it("rewrites SelfScopeError to a 403 HTML page (not a generic 500)", async () => {
+    const { userWebErrorHandler } = await import("../../src/web/index.js");
+    const res = makeRes();
+    const next = jest.fn();
+    userWebErrorHandler(
+      new SelfScopeError("test: user-a tried to read user-b's row"),
+      {} as never,
+      res as never,
+      next as never,
+    );
+    expect(res.statusCode).toBe(403);
+    expect(res.body).toContain("Forbidden");
+    expect(res.body).toContain('href="/me/"');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("falls through to a generic 500 for any other error", async () => {
+    const { userWebErrorHandler } = await import("../../src/web/index.js");
+    const res = makeRes();
+    const next = jest.fn();
+    userWebErrorHandler(
+      new Error("totally unrelated"),
+      {} as never,
+      res as never,
+      next as never,
+    );
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toBe("Internal Server Error");
+  });
+});

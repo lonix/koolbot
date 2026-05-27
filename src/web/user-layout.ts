@@ -77,11 +77,13 @@ const STYLE = [
   ".feature-list .feature-desc{font-size:.8rem;color:#94a3b8}",
 ].join("");
 
-// Reuse the admin layout's session-banner script: same DOM hooks
-// (`#session-countdown`, `data-remaining-ms`, `data-inactivity-ms`),
-// same `/admin/session/ping` polling endpoint, so the countdown and
-// auto-logout behave identically across surfaces. Inlined verbatim to
-// keep `user-layout.ts` independently bundlable.
+// Same DOM hooks (`#session-countdown`, `data-remaining-ms`,
+// `data-inactivity-ms`) and behaviour as the admin layout's banner
+// script, but polls the surface-local `/me/session/ping` mount so
+// `/me/*` pages never reach into the `/admin` namespace. The two
+// pings hit identical handlers — the path split exists so a future
+// operational change to one surface can't silently break countdown
+// on the other.
 const SCRIPT =
   "(function(){var el=document.getElementById('session-countdown');if(!el)return;" +
   "function toMs(v){var n=Math.floor(Number(v));return isFinite(n)&&n>0?n:0}" +
@@ -99,7 +101,7 @@ const SCRIPT =
   "if(hardCapAt>0){var cap=hardCapAt-now;if(cap<target)target=cap}" +
   "if(target>0&&deadline-now<target)applyRemaining(target)}" +
   "function poll(){if(fired)return;" +
-  "fetch('/admin/session/ping',{credentials:'same-origin',headers:{'Accept':'application/json'},cache:'no-store'})" +
+  "fetch('/me/session/ping',{credentials:'same-origin',headers:{'Accept':'application/json'},cache:'no-store'})" +
   ".then(function(res){if(res.status===401){expire();return null}" +
   "if(!res.ok)return null;return res.json()})" +
   ".then(function(data){if(!data)return;" +

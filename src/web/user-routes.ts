@@ -21,6 +21,7 @@ import { requireCsrf } from "./csrf.js";
 import {
   AuthenticatedRequest,
   clearSessionCookie,
+  createSessionPingHandler,
   type WebSessionContext,
 } from "./session.js";
 import { getDisplayedRemainingMs } from "./admin-layout.js";
@@ -82,6 +83,16 @@ export function createUserRouter(
   requireSession: RequestHandler,
 ): Router {
   const router = Router();
+
+  // Surface-local session ping so the `/me` banner script never has to
+  // reach across to `/admin/session/ping`. Identical handler (the ping
+  // is surface-neutral — same cookie, same DB row), just mounted on
+  // both routers so a future split of the admin mount can't silently
+  // break the countdown on `/me/*`. Mounted BEFORE `requireSession` for
+  // the same reason the admin copy is: the ping itself does its own
+  // (non-mutating) cookie + DB validation and must NOT bump `act`.
+  router.get("/session/ping", createSessionPingHandler());
+
   router.use(requireSession);
 
   // ---------- Index ----------
