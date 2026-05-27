@@ -62,29 +62,36 @@ export class ConfigService {
       if (mongoose.connection.readyState !== 1) {
         logger.info("Waiting for MongoDB connection...");
         await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          let pollTimeoutId: ReturnType<typeof setTimeout> | null = null;
           const rejectTimeoutId = setTimeout(() => {
+            settled = true;
+            if (pollTimeoutId) clearTimeout(pollTimeoutId);
             reject(new Error("MongoDB connection timeout"));
           }, 10000);
-          let pollTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
           const checkConnection = async (): Promise<void> => {
+            if (settled) return;
             try {
               if (mongoose.connection.readyState === 1) {
+                settled = true;
                 clearTimeout(rejectTimeoutId);
-                if (pollTimeoutId) clearTimeout(pollTimeoutId);
                 resolve();
               } else if (mongoose.connection.readyState === 0) {
                 // Try to connect if not connected
                 await mongoose.connect(
                   process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
                 );
+                if (settled) return;
+                settled = true;
                 clearTimeout(rejectTimeoutId);
-                if (pollTimeoutId) clearTimeout(pollTimeoutId);
                 resolve();
               } else {
                 pollTimeoutId = setTimeout(checkConnection, 100);
               }
             } catch (error) {
+              if (settled) return;
+              settled = true;
               clearTimeout(rejectTimeoutId);
               if (pollTimeoutId) clearTimeout(pollTimeoutId);
               reject(error);
