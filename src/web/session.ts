@@ -4,7 +4,7 @@ import { Request, RequestHandler, Response, NextFunction } from "express";
 import logger from "../utils/logger.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { WebSessionService } from "../services/web-session-service.js";
-import type { IWebSession } from "../models/web-session.js";
+import type { IWebSession, WebSessionRole } from "../models/web-session.js";
 import {
   clearCookie,
   parseCookies,
@@ -15,7 +15,15 @@ import {
 import { shouldUseSecureCookies } from "./csrf.js";
 
 export const SESSION_COOKIE = "koolbot_session";
-export const SESSION_COOKIE_PATH = "/admin";
+/**
+ * Path on which the session cookie is set. Broadened from the original
+ * `/admin` to `/` in #481 so the same redeemed session covers both
+ * `/admin/*` (admin panel) and `/me/*` (user self-service). The cookie
+ * is still HttpOnly + HMAC-signed; broadening the path only makes the
+ * browser send it on more URLs of the same origin, which is exactly
+ * what we want now that one redemption authorises both surfaces.
+ */
+export const SESSION_COOKIE_PATH = "/";
 
 const DEFAULT_INACTIVITY_MINUTES = 30;
 
@@ -23,6 +31,12 @@ export interface WebSessionContext {
   sessionId: string;
   discordUserId: string;
   guildId: string;
+  /**
+   * Role of the redeemed session, sourced from the DB row on every
+   * request. Authoritative — handlers that need a role check should
+   * read this rather than re-decoding the cookie.
+   */
+  role: WebSessionRole;
   scopes: string[];
   lastActivityAt: number;
   /**
@@ -39,6 +53,13 @@ interface CookiePayload {
   sid: string;
   uid: string;
   gid: string;
+  /**
+   * Role claim. Optional in the parsed payload so legacy cookies issued
+   * before #481 (which had no role field) continue to deserialise — we
+   * cross-check against the DB row in `loadValidSession`, which is the
+   * authoritative source. New cookies always carry a `rol`.
+   */
+  rol?: WebSessionRole;
   iat: number;
   act: number;
 }
@@ -137,6 +158,16 @@ function readSessionCookie(req: Request): CookiePayload | null {
     ) {
       return null;
     }
+    // `rol` is optional for legacy cookies issued before #481; if present
+    // it must be one of the two known roles, else we refuse to parse so a
+    // mangled value can't sneak through.
+    if (
+      parsed.rol !== undefined &&
+      parsed.rol !== "admin" &&
+      parsed.rol !== "user"
+    ) {
+      return null;
+    }
     return parsed;
   } catch {
     return null;
@@ -196,19 +227,68 @@ export function createSessionMiddleware(
       return;
     }
 
-    const refreshed: CookiePayload = { ...payload, act: now };
+    // DB role is authoritative. Refresh the cookie's role claim so a
+    // legacy (pre-#481) cookie picks up its real role on the next hop,
+    // and so a stale `rol` (if someone ever rolled a session's role
+    // forward by DB hand-edit) heals itself.
+    const role = normalizeSessionRole(dbSession.role);
+    const refreshed: CookiePayload = { ...payload, rol: role, act: now };
     writeSessionCookie(res, refreshed);
 
     req.webSession = {
       sessionId: payload.sid,
       discordUserId: payload.uid,
       guildId: payload.gid,
+      role,
       scopes: dbSession.scopes,
       lastActivityAt: now,
       expiresAt: dbSession.expiresAt,
     };
     next();
   };
+}
+
+/**
+ * Express middleware that rejects any request whose redeemed session is
+ * not `role === "admin"`. Mount AFTER `createSessionMiddleware` so the
+ * session is already loaded onto `req.webSession`. A user-role session
+ * hitting this middleware gets a 403 page that explains the surface is
+ * admin-only and points them at their own `/me` surface; this matches
+ * the acceptance criterion in #481.
+ */
+export function requireAdminRoleMiddleware(): (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) => void {
+  return function requireAdminRole(req, res, next): void {
+    if (!req.webSession) {
+      // Defensive: caller forgot to mount `createSessionMiddleware` first.
+      // Treat as unauthenticated, not forbidden.
+      respondUnauthorized(res);
+      return;
+    }
+    if (req.webSession.role !== "admin") {
+      res
+        .status(403)
+        .type("text/html")
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8"><title>Forbidden</title></head>` +
+            `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
+            `<h1>Forbidden</h1>` +
+            `<p>This page is part of the admin panel and your sign-in link does not authorise it. ` +
+            `Visit <a href="/me/">/me</a> for your own preferences, or ask an Administrator to ` +
+            `re-issue your link via <code>/config</code>.</p>` +
+            `</body></html>`,
+        );
+      return;
+    }
+    next();
+  };
+}
+
+function normalizeSessionRole(raw: unknown): WebSessionRole {
+  return raw === "user" ? "user" : "admin";
 }
 
 /**

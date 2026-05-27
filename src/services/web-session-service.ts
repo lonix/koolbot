@@ -1,19 +1,36 @@
 import crypto from "crypto";
 import logger from "../utils/logger.js";
-import { WebSession, IWebSession } from "../models/web-session.js";
+import {
+  WebSession,
+  IWebSession,
+  WebSessionRole,
+} from "../models/web-session.js";
 
 const DEFAULT_TTL_MINUTES = 10;
+
+/**
+ * Translate a DB-stored `role` to a strict `WebSessionRole`. Rows written
+ * before #481 lack the field entirely; we treat that case as legacy
+ * `"admin"` (the only role that could exist back then). An unrecognised
+ * value also collapses to `"admin"` defensively so a corrupt row can't
+ * upgrade itself by claiming an unknown role.
+ */
+function normalizeRole(raw: unknown): WebSessionRole {
+  return raw === "user" ? "user" : "admin";
+}
 
 export interface CreatedSession {
   token: string;
   url: string;
   expiresAt: Date;
+  role: WebSessionRole;
 }
 
 export interface RedeemedSession {
   sessionId: string;
   discordUserId: string;
   guildId: string;
+  role: WebSessionRole;
   scopes: string[];
 }
 
@@ -58,10 +75,16 @@ export class WebSessionService {
   /**
    * Create a new magic-link session. Revokes any prior unused/active
    * sessions for this user so re-issuing a link invalidates the old one.
+   *
+   * `role` decides whether the redeemed session can use the admin surface
+   * (`/admin/*`) or only the user self-service surface (`/me/*`). The
+   * default of `"user"` is the safest choice — callers in possession of
+   * Administrator should pass `"admin"` explicitly. See #481.
    */
   public async create(
     discordUserId: string,
     guildId: string,
+    role: WebSessionRole = "user",
     scopes: string[] = [],
   ): Promise<CreatedSession> {
     if (!discordUserId) throw new Error("discordUserId required");
@@ -79,6 +102,7 @@ export class WebSessionService {
       tokenHash,
       discordUserId,
       guildId,
+      role,
       scopes,
       createdAt: now,
       expiresAt,
@@ -87,11 +111,11 @@ export class WebSessionService {
     });
 
     logger.info(
-      `Web session created for user=${discordUserId} guild=${guildId} expires=${expiresAt.toISOString()}`,
+      `Web session created for user=${discordUserId} guild=${guildId} role=${role} expires=${expiresAt.toISOString()}`,
     );
 
     const url = `${this.getBaseUrl()}/admin/s/${token}`;
-    return { token, url, expiresAt };
+    return { token, url, expiresAt, role };
   }
 
   /**
@@ -137,6 +161,7 @@ export class WebSessionService {
       sessionId: String(session._id),
       discordUserId: session.discordUserId,
       guildId: session.guildId,
+      role: normalizeRole(session.role),
       scopes: session.scopes,
     };
   }
@@ -191,6 +216,7 @@ export class WebSessionService {
       sessionId: String(existing._id),
       discordUserId: existing.discordUserId,
       guildId: existing.guildId,
+      role: normalizeRole(existing.role),
       scopes: existing.scopes,
     };
   }

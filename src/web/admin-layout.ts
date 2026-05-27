@@ -152,6 +152,8 @@ const STYLE = [
   ".banner form{display:inline;margin:0}",
   ".banner button{background:#ef4444;color:#fff;border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}",
   ".banner button:hover{background:#dc2626}",
+  ".banner a.surface{color:#cbd5e1;background:#374151;padding:.25rem .55rem;border-radius:4px;font-weight:600;text-decoration:none;margin-right:.5rem}",
+  ".banner a.surface:hover{background:#4b5563;color:#fff}",
   ".shell{display:flex;min-height:calc(100vh - 41px)}",
   "nav.side{background:#161a22;border-right:1px solid #2d3748;width:220px;padding:1rem .5rem;flex-shrink:0}",
   "nav.side ul{list-style:none;padding:0;margin:0}",
@@ -376,7 +378,12 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     "</head><body>",
     '<div class="banner">',
     '<div class="left"><strong>Koolbot Admin</strong></div>',
-    '<div class="right">Session expires in ',
+    '<div class="right">',
+    // "My preferences" link to the parallel `/me` surface added in #481.
+    // The same session covers both surfaces; clicking this never forces
+    // a re-sign-in and never burns a new magic-link token.
+    '<a class="surface" href="/me/">My preferences</a>',
+    "Session expires in ",
     `<span id="session-countdown" data-remaining-ms="${remainingMs}" data-inactivity-ms="${inactivityMs}" class="mono">--:--</span> · `,
     '<form method="POST" action="/admin/finish">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,

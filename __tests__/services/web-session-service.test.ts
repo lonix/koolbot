@@ -51,17 +51,34 @@ describe("WebSessionService", () => {
     (WebSession as unknown as { create: unknown }).create = create;
 
     const svc = WebSessionService.getInstance();
-    const result = await svc.create("user-1", "guild-1", ["scope:a"]);
+    const result = await svc.create("user-1", "guild-1", "admin", ["scope:a"]);
 
     expect(updateMany).toHaveBeenCalledWith(
       { discordUserId: "user-1", revokedAt: null },
       { $set: expect.objectContaining({ revokedAt: expect.any(Date) }) },
     );
     expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0]).toMatchObject({ role: "admin" });
     expect(result.url).toMatch(
       /^https:\/\/example\.test\/admin\/s\/[A-Za-z0-9_-]+$/,
     );
+    expect(result.role).toBe("admin");
     expect(result.expiresAt.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it("create defaults to user role when none is supplied", async () => {
+    (WebSession as unknown as { updateMany: unknown }).updateMany = jest
+      .fn()
+      .mockResolvedValue({ modifiedCount: 0 });
+    const create = jest.fn().mockResolvedValue({ _id: "abc" });
+    (WebSession as unknown as { create: unknown }).create = create;
+
+    const svc = WebSessionService.getInstance();
+    const result = await svc.create("user-1", "guild-1");
+
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(create.mock.calls[0][0]).toMatchObject({ role: "user" });
+    expect(result.role).toBe("user");
   });
 
   it("redeem returns null when no matching unused session exists", async () => {
@@ -81,11 +98,11 @@ describe("WebSessionService", () => {
       _id: { toString: () => "session-id" },
       discordUserId: "user-1",
       guildId: "guild-1",
+      role: "user",
       scopes: ["scope:a"],
     });
-    (
-      WebSession as unknown as { findOneAndUpdate: unknown }
-    ).findOneAndUpdate = findOneAndUpdate;
+    (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
+      findOneAndUpdate;
 
     const svc = WebSessionService.getInstance();
     const result = await svc.redeem("any-token");
@@ -94,6 +111,7 @@ describe("WebSessionService", () => {
       sessionId: "session-id",
       discordUserId: "user-1",
       guildId: "guild-1",
+      role: "user",
       scopes: ["scope:a"],
     });
     const call = findOneAndUpdate.mock.calls[0];
@@ -102,6 +120,20 @@ describe("WebSessionService", () => {
       revokedAt: null,
     });
     expect(call[1]).toMatchObject({ $set: { usedAt: expect.any(Date) } });
+  });
+
+  it("redeem promotes a missing role to legacy admin (pre-#481 rows)", async () => {
+    (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
+      jest.fn().mockResolvedValue({
+        _id: { toString: () => "session-id" },
+        discordUserId: "user-1",
+        guildId: "guild-1",
+        // role intentionally absent — pre-#481 row.
+        scopes: [],
+      });
+    const svc = WebSessionService.getInstance();
+    const result = await svc.redeem("any-token");
+    expect(result?.role).toBe("admin");
   });
 
   it("revokeSession returns true when modifiedCount > 0", async () => {
@@ -240,10 +272,11 @@ describe("WebSessionService", () => {
       const fn = jest.fn().mockResolvedValue(existing);
       (WebSession as unknown as { findOne: unknown }).findOne = fn;
       // No findOneAndUpdate stub — peek must not call it.
-      (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
-        jest.fn(() => {
-          throw new Error("peek() must not consume the token");
-        });
+      (
+        WebSession as unknown as { findOneAndUpdate: unknown }
+      ).findOneAndUpdate = jest.fn(() => {
+        throw new Error("peek() must not consume the token");
+      });
       return fn;
     }
 
@@ -252,6 +285,7 @@ describe("WebSessionService", () => {
         _id: { toString: () => "session-id" },
         discordUserId: "user-1",
         guildId: "guild-1",
+        role: "user",
         scopes: ["scope:a"],
         usedAt: null,
         revokedAt: null,
@@ -263,6 +297,7 @@ describe("WebSessionService", () => {
         sessionId: "session-id",
         discordUserId: "user-1",
         guildId: "guild-1",
+        role: "user",
         scopes: ["scope:a"],
       });
       expect(findOne).toHaveBeenCalledTimes(1);
@@ -297,9 +332,7 @@ describe("WebSessionService", () => {
       });
       const svc = WebSessionService.getInstance();
       expect(await svc.peek("anything")).toBeNull();
-      expect(infoMock).toHaveBeenCalledWith(
-        expect.stringContaining("revoked"),
-      );
+      expect(infoMock).toHaveBeenCalledWith(expect.stringContaining("revoked"));
     });
 
     it("returns null and logs 'already_used' when usedAt is set", async () => {
@@ -331,9 +364,7 @@ describe("WebSessionService", () => {
       });
       const svc = WebSessionService.getInstance();
       expect(await svc.peek("anything")).toBeNull();
-      expect(infoMock).toHaveBeenCalledWith(
-        expect.stringContaining("expired"),
-      );
+      expect(infoMock).toHaveBeenCalledWith(expect.stringContaining("expired"));
     });
   });
 });

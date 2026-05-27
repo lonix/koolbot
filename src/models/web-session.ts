@@ -1,9 +1,19 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+export type WebSessionRole = "admin" | "user";
+
 export interface IWebSession extends Document {
   tokenHash: string;
   discordUserId: string;
   guildId: string;
+  /**
+   * Determines which web surface this session is authorised for. `admin`
+   * sessions may use `/admin/*` and `/me/*`; `user` sessions are limited to
+   * `/me/*`. Pre-role rows in the DB are missing this field — callers must
+   * treat that case as legacy `admin` (the only role that could exist before
+   * #481) at read time.
+   */
+  role: WebSessionRole;
   scopes: string[];
   createdAt: Date;
   expiresAt: Date;
@@ -27,6 +37,12 @@ const WebSessionSchema = new Schema<IWebSession>(
     guildId: {
       type: String,
       required: true,
+    },
+    role: {
+      type: String,
+      enum: ["admin", "user"],
+      required: true,
+      default: "user",
     },
     scopes: {
       type: [String],

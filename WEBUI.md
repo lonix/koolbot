@@ -6,6 +6,12 @@ Everything that used to live behind `/config set`, `/permissions`, `/setup`,
 `/botstats` is now reached by running a single Discord slash command,
 `/config`, which DMs you a one-time sign-in link.
 
+Since #481 the same `/config` flow also opens a **user self-service
+surface** at `/me/*` — non-admin guild members can manage their own
+preferences (notifications, Rewind, etc.) without ever touching the
+admin panel, while admins can hop between the two surfaces using a
+single redeemed session.
+
 This document explains how to enable it, expose it, and operate it.
 
 ---
@@ -13,6 +19,7 @@ This document explains how to enable it, expose it, and operate it.
 ## 📋 Table of Contents
 
 - [TL;DR](#tldr)
+- [Two surfaces: `/admin` and `/me`](#two-surfaces-admin-and-me)
 - [How the magic-link flow works](#how-the-magic-link-flow-works)
 - [Configuration boundary: env vs. database](#configuration-boundary-env-vs-database)
 - [Bootstrap environment variables](#bootstrap-environment-variables)
@@ -43,6 +50,53 @@ port to learn. It is dark unless `WEBUI_ENABLED=true`.
 
 ---
 
+## Two surfaces: `/admin` and `/me`
+
+The Web UI ships two parallel surfaces on the same Express server, both
+gated by the same magic-link flow:
+
+| Surface | Mount     | Who can reach it           | What it's for                                            |
+| ------- | --------- | -------------------------- | -------------------------------------------------------- |
+| Admin   | `/admin/` | sessions with `role:admin` | Server-wide config — Settings, Permissions, Wizard, etc. |
+| Self    | `/me/`    | both `admin` and `user`    | The signed-in **user's own** preferences and Rewind      |
+
+What changes per session:
+
+- **Non-admin guild member runs `/config`.** They get a session with
+  `role:user`, the DM points at `/me/`, and `/admin/*` returns 403
+  (the page tells them to head to `/me`).
+- **Administrator runs `/config`.** They get a session with `role:admin`.
+  The DM mentions both entry points. They land on `/admin/` by default,
+  but every admin page header carries a "My preferences" link that takes
+  them to `/me/` without re-running `/config`. The `/me/*` layout in turn
+  carries a "Back to admin panel" link.
+- **A `/me/*` handler can only read/write the signed-in user's own rows.**
+  This is enforced by the `assertSelfScope` helper (see
+  `src/web/user-routes.ts`) and applies to admin-role sessions too — an
+  admin on `/me/notifications` sees *their* prefs, not the guild's. Admins
+  who need to act on another user's data do so via the admin panel's
+  audit/user tooling, not by impersonating them on `/me/*`.
+
+> **v1 is foundations only.** Today `/me/` is a stub index page that
+> announces the surface; the per-user features (notifications, Rewind,
+> achievements, etc.) land in the dependent sub-issues of #480. The
+> session model, layout, and self-scope helper are all in place so those
+> issues can bolt on without touching auth, routing, or layout.
+
+The role is decided **server-side** at `/config` time from the invoker's
+live guild permissions (`Administrator` bit → `admin`, anything else →
+`user`) and baked into the redeemed session row + signed cookie. The
+slash-command itself is not gated by `default_member_permissions` —
+that would hide the command from non-admins entirely, defeating the
+user surface.
+
+Audit-log rows produced through the Web UI now record the role the
+session was acting under, so the admin audit page can filter by `admin`
+vs. `user` writes. An admin acting on their own `/me/*` is logged with
+`role: "admin"` (the role is the session's, not the URL surface's).
+
+---
+
 ## How the magic-link flow works
 
 ```text
@@ -66,12 +120,16 @@ port to learn. It is dark unless `WEBUI_ENABLED=true`.
                             │ - mark used      │
                             │ - issue cookie   │
                             │ - 302 → /admin/  │
+                            │   (role=admin)   │
+                            │   or /me/        │
+                            │   (role=user)    │
                             └──────────────────┘
                                  │
                                  │ authenticated by signed cookie
                                  ▼
                             ┌──────────────────┐
-                            │ /admin/* pages   │
+                            │ /admin/* (admin) │
+                            │ /me/*   (either) │
                             │ permissions re-  │
                             │ checked each req │
                             └──────────────────┘
@@ -584,6 +642,8 @@ side effect, since the HMAC key changes.
 
 ## What the Web UI lets you do
 
+### Admin panel (`/admin/*`, admin-role sessions only)
+
 | Page               | Replaces                                                                                            |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
 | **Dashboard**      | `/botstats`                                                                                         |
@@ -598,6 +658,17 @@ side effect, since the HMAC key changes.
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
+
+### User self-service (`/me/*`, both admin and user roles)
+
+| Page                    | What it's for                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)   | Index for your own settings — placeholder cards listing the pages future sub-issues will land. |
+
+Per-user features bolt onto `/me` in #482 (notification preferences)
+and #484 (Rewind), among others. Each adds its own card to the index
+plus a dedicated sub-page; the layout, session, and self-scope
+plumbing are already in place.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

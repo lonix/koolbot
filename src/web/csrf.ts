@@ -5,7 +5,15 @@ import { parseCookies, setCookie } from "./cookies.js";
 
 export const CSRF_COOKIE = "koolbot_csrf";
 export const CSRF_HEADER = "x-csrf-token";
-export const CSRF_COOKIE_PATH = "/admin";
+/**
+ * Cookie path for the CSRF double-submit cookie. Broadened from `/admin`
+ * to `/` in #481 so the same token is mirrored back on POSTs to the new
+ * `/me/*` surface as well as `/admin/*`. The cookie is not HttpOnly by
+ * design — it's the page's mirror of the token — and broadening the
+ * path doesn't change any of that. Both surfaces share `requireCsrf`,
+ * so a single token is enough.
+ */
+export const CSRF_COOKIE_PATH = "/";
 
 /**
  * Double-submit-cookie CSRF protection. The cookie is non-HttpOnly so the

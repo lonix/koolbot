@@ -37,6 +37,7 @@ import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
 import {
   createSessionPingHandler,
+  requireAdminRoleMiddleware,
   type AuthenticatedRequest,
 } from "./session.js";
 import {
@@ -215,6 +216,9 @@ export function createReadOnlyRouter(
   router.get("/session/ping", createSessionPingHandler());
 
   router.use(requireSession);
+  // Every `/admin/*` page below this point is admin-only. User-role
+  // sessions get a 403 page that points them at `/me/` (#481).
+  router.use(requireAdminRoleMiddleware());
 
   // ---------- Dashboard ----------
   router.get(

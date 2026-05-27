@@ -53,9 +53,13 @@ describe("Config Command — metadata", () => {
     expect(json).toHaveProperty("description");
   });
 
-  it("requires administrator permissions", () => {
+  it("does NOT gate via default_member_permissions (#481: every guild member can run /config)", () => {
+    // Role is decided server-side from the invoker's live permissions
+    // and baked into the redeemed session; the slash-command itself is
+    // open. Discord's `default_member_permissions` would otherwise hide
+    // the command from non-admins, defeating the user surface.
     const json = data.toJSON();
-    expect(json.default_member_permissions).toBeDefined();
+    expect(json.default_member_permissions ?? null).toBeNull();
   });
 
   it("exposes no subcommands (bare /config launches the WebUI)", () => {
@@ -90,7 +94,16 @@ describe("Config Command — execute", () => {
   let userSend: jest.Mock;
 
   function buildInteraction(
-    overrides: { guildId?: string | null; userId?: string } = {},
+    overrides: {
+      guildId?: string | null;
+      userId?: string;
+      /**
+       * Permission bitfield string as Discord's interaction payload
+       * delivers it for non-cached members. "8" sets the Administrator
+       * bit. Omit to simulate a non-admin guild member.
+       */
+      permissionsBitfield?: string;
+    } = {},
   ): ChatInputCommandInteraction {
     deferReply = jest.fn().mockResolvedValue(undefined as never);
     editReply = jest.fn().mockResolvedValue(undefined as never);
@@ -100,6 +113,12 @@ describe("Config Command — execute", () => {
       deferReply,
       editReply,
       guildId: overrides.guildId === undefined ? "g1" : overrides.guildId,
+      member:
+        overrides.guildId === null
+          ? null
+          : {
+              permissions: overrides.permissionsBitfield ?? "0",
+            },
       user: {
         id: overrides.userId ?? "u1",
         send: userSend,
@@ -123,6 +142,7 @@ describe("Config Command — execute", () => {
     mockCreateSession.mockResolvedValue({
       url: "https://example.test/admin/s/tok",
       expiresAt: new Date(Date.now() + 10 * 60_000),
+      role: "user",
     });
     const interaction = buildInteraction();
 
@@ -173,12 +193,13 @@ describe("Config Command — execute", () => {
     mockCreateSession.mockResolvedValue({
       url: "https://example.test/admin/s/tok",
       expiresAt: new Date(Date.now() + 10 * 60_000),
+      role: "user",
     });
     const interaction = buildInteraction();
 
     await execute(interaction);
 
-    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1");
+    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1", "user");
     expect(userSend).toHaveBeenCalledWith(
       expect.stringContaining("https://example.test/admin/s/tok"),
     );
@@ -187,10 +208,47 @@ describe("Config Command — execute", () => {
     });
   });
 
+  it("issues an admin-role session when the invoker has Administrator", async () => {
+    mockCreateSession.mockResolvedValue({
+      url: "https://example.test/admin/s/tok",
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+      role: "admin",
+    });
+    // Administrator bit is `0x8`; the bitfield-as-string form is what
+    // non-cached interactions deliver.
+    const interaction = buildInteraction({ permissionsBitfield: "8" });
+
+    await execute(interaction);
+
+    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1", "admin");
+    // Admin DM body advertises both surfaces.
+    const dm = userSend.mock.calls[0][0] as string;
+    expect(dm).toContain("/admin/");
+    expect(dm).toContain("/me/");
+  });
+
+  it("issues a user-role session for non-administrators", async () => {
+    mockCreateSession.mockResolvedValue({
+      url: "https://example.test/admin/s/tok",
+      expiresAt: new Date(Date.now() + 10 * 60_000),
+      role: "user",
+    });
+    const interaction = buildInteraction({ permissionsBitfield: "0" });
+
+    await execute(interaction);
+
+    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1", "user");
+    // Non-admin DM body must NOT advertise the admin panel.
+    const dm = userSend.mock.calls[0][0] as string;
+    expect(dm).toContain("/me/");
+    expect(dm).not.toMatch(/admin panel/i);
+  });
+
   it("falls back to ephemeral reply when DM fails", async () => {
     mockCreateSession.mockResolvedValue({
       url: "https://example.test/admin/s/tok",
       expiresAt: new Date(Date.now() + 10 * 60_000),
+      role: "user",
     });
     const interaction = buildInteraction();
     userSend.mockRejectedValueOnce(new Error("DMs blocked") as never);
