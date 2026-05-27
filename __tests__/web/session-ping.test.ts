@@ -42,6 +42,7 @@ interface MockResponse {
   status: jest.Mock;
   json: jest.Mock;
   getHeader: jest.Mock;
+  setHeader: jest.Mock;
   headers: Record<string, unknown>;
 }
 
@@ -53,6 +54,7 @@ function makeRes(): MockResponse {
     status: jest.fn(),
     json: jest.fn(),
     getHeader: jest.fn(),
+    setHeader: jest.fn(),
   } as MockResponse;
   res.status.mockImplementation((code: number) => {
     res.statusCode = code;
@@ -65,6 +67,10 @@ function makeRes(): MockResponse {
   res.getHeader.mockImplementation(
     (name: string) => res.headers[name.toLowerCase()],
   );
+  res.setHeader.mockImplementation((name: string, value: unknown) => {
+    res.headers[name.toLowerCase()] = value;
+    return res;
+  });
   return res;
 }
 
@@ -132,6 +138,20 @@ describe("createSessionPingHandler", () => {
     // The crucial property from the issue's acceptance criteria:
     // the ping must NOT rewrite the session cookie / bump `act`.
     expect(res.headers["set-cookie"]).toBeUndefined();
+
+    // Per-session payload — should never be cached by intermediaries.
+    expect(res.headers["cache-control"]).toBe("no-store");
+  });
+
+  it("sets Cache-Control: no-store on the 401 path too", async () => {
+    const res = makeRes();
+    await createSessionPingHandler()(
+      makeReq() as never,
+      res as never,
+      jest.fn() as never,
+    );
+    expect(res.statusCode).toBe(401);
+    expect(res.headers["cache-control"]).toBe("no-store");
   });
 
   it("honours the server's hard cap when it ends before the inactivity window", async () => {

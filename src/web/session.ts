@@ -59,6 +59,16 @@ function getInactivityMinutes(): number {
     : DEFAULT_INACTIVITY_MINUTES;
 }
 
+/**
+ * Inactivity sliding-window length in ms. Single source of truth for
+ * both the server (cookie expiry / middleware checks) and the renderer
+ * (banner `data-inactivity-ms` attribute) so the two can't drift on
+ * what counts as "the full window".
+ */
+export function getInactivityWindowMs(): number {
+  return getInactivityMinutes() * 60 * 1000;
+}
+
 export function writeSessionCookie(
   res: Response,
   payload: CookiePayload,
@@ -70,7 +80,7 @@ export function writeSessionCookie(
     sameSite: "lax",
     secure: shouldUseSecureCookies(),
     path: SESSION_COOKIE_PATH,
-    maxAge: getInactivityMinutes() * 60 * 1000,
+    maxAge: getInactivityWindowMs(),
   });
 }
 
@@ -89,8 +99,7 @@ async function loadValidSession(
   payload: CookiePayload,
   now: number,
 ): Promise<IWebSession | null> {
-  const inactivityMs = getInactivityMinutes() * 60 * 1000;
-  if (now - payload.act > inactivityMs) return null;
+  if (now - payload.act > getInactivityWindowMs()) return null;
   const dbSession = await WebSessionService.getInstance().findById(payload.sid);
   if (
     !dbSession ||
@@ -224,6 +233,10 @@ export function createSessionPingHandler(): RequestHandler {
     next: NextFunction,
   ): Promise<void> {
     try {
+      // Per-session payload — must never be cached by browsers or
+      // intermediary proxies, else a 200 could be served across users.
+      // Applies to both the 200 and 401 paths below.
+      res.setHeader("Cache-Control", "no-store");
       const payload = readSessionCookie(req);
       if (!payload) {
         respondPingUnauthorized(res);
@@ -235,7 +248,7 @@ export function createSessionPingHandler(): RequestHandler {
         respondPingUnauthorized(res);
         return;
       }
-      const inactivityMs = getInactivityMinutes() * 60 * 1000;
+      const inactivityMs = getInactivityWindowMs();
       const inactivityRemaining = Math.max(0, payload.act + inactivityMs - now);
       const hardCapRemaining = Math.max(0, dbSession.expiresAt.getTime() - now);
       const remainingMs = Math.min(inactivityRemaining, hardCapRemaining);
