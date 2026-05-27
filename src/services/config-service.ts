@@ -335,15 +335,15 @@ export class ConfigService {
 
       // If not found, try to get from environment variables (for backward compatibility)
       const envValue = process.env[key];
-      if (envValue !== undefined) {
+      if (envValue !== undefined && envValue.trim() !== "") {
         // Convert string values to appropriate types
         if (envValue === "true" || envValue === "false") {
           const boolValue = envValue === "true";
           this.cache.set(key, boolValue);
           return boolValue;
         }
-        if (!isNaN(Number(envValue))) {
-          const numValue = Number(envValue);
+        const numValue = Number(envValue);
+        if (!isNaN(numValue)) {
           this.cache.set(key, numValue);
           return numValue;
         }

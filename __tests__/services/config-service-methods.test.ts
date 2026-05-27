@@ -122,6 +122,22 @@ describe('ConfigService - Methods', () => {
       expect(result).toBe('hello world');
     });
 
+    it('should treat empty-string env var as absent (not numeric 0)', async () => {
+      process.env['TEST_EMPTY_KEY'] = '';
+      mockFindOne.mockResolvedValue(null);
+
+      const result = await service.get('TEST_EMPTY_KEY');
+      expect(result).toBeNull();
+    });
+
+    it('should treat whitespace-only env var as absent', async () => {
+      process.env['TEST_WHITESPACE_KEY'] = '   ';
+      mockFindOne.mockResolvedValue(null);
+
+      const result = await service.get('TEST_WHITESPACE_KEY');
+      expect(result).toBeNull();
+    });
+
     it('should handle database errors gracefully', async () => {
       mockFindOne.mockRejectedValue(new Error('DB error'));
 
@@ -273,6 +289,14 @@ describe('ConfigService - Methods', () => {
 
       const result = await service.getNumber('nonexistent.key');
       expect(result).toBe(0);
+    });
+
+    it('should honor defaultValue when env var is set to empty string', async () => {
+      process.env['EMPTY_NUM_KEY'] = '';
+      mockFindOne.mockResolvedValue(null);
+
+      const result = await service.getNumber('EMPTY_NUM_KEY', 60);
+      expect(result).toBe(60);
     });
   });
 
