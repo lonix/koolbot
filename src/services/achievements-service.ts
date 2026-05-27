@@ -9,6 +9,7 @@ import {
   type IVoiceChannelTracking,
 } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
+import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import logger from "../utils/logger.js";
 import mongoose from "mongoose";
 import { quoteService } from "./quote-service.js";
@@ -1183,6 +1184,25 @@ export class AchievementsService {
         return;
       }
 
+      // Per-user opt-out (#482). Single-guild bot: resolve guildId from
+      // bootstrap config so this guard works whether or not the caller
+      // threaded it through. An empty/unset GUILD_ID falls through to the
+      // legacy "always send when global toggle is on" behaviour so a
+      // misconfiguration doesn't silence every DM.
+      const guildId = await this.configService.getString("GUILD_ID", "");
+      if (guildId) {
+        const prefs = await UserNotificationPrefsService.getInstance().getPrefs(
+          userId,
+          guildId,
+        );
+        if (!prefs.achievements) {
+          logger.info(
+            `Skipping accolade DM for ${userId}: per-user achievements pref is off`,
+          );
+          return;
+        }
+      }
+
       const messages = accolades
         .map((accolade) => {
           const definition = this.getAccoladeDefinition(accolade.type);
@@ -1202,6 +1222,8 @@ export class AchievementsService {
           ...messages,
           "",
           "Use `/achievements` to see all your earned badges!",
+          "",
+          "Manage notifications: run `/config`.",
         ].join("\n");
 
         await user.send(message);
