@@ -1,9 +1,10 @@
 import { Buffer } from "buffer";
 import { Client } from "discord.js";
-import { Request, Response, NextFunction } from "express";
+import { Request, RequestHandler, Response, NextFunction } from "express";
 import logger from "../utils/logger.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { WebSessionService } from "../services/web-session-service.js";
+import type { IWebSession } from "../models/web-session.js";
 import {
   clearCookie,
   parseCookies,
@@ -77,6 +78,32 @@ export function clearSessionCookie(res: Response): void {
   clearCookie(res, SESSION_COOKIE, { path: SESSION_COOKIE_PATH });
 }
 
+/**
+ * Cookie + DB validation shared by `createSessionMiddleware` and the
+ * read-only `/session/ping` handler. Enforces the sliding inactivity
+ * window against `payload.act` and the server-side hard cap on the DB
+ * row. Does NOT touch the cookie or run any permission revalidation —
+ * callers layer those on as needed.
+ */
+async function loadValidSession(
+  payload: CookiePayload,
+  now: number,
+): Promise<IWebSession | null> {
+  const inactivityMs = getInactivityMinutes() * 60 * 1000;
+  if (now - payload.act > inactivityMs) return null;
+  const dbSession = await WebSessionService.getInstance().findById(payload.sid);
+  if (
+    !dbSession ||
+    dbSession.revokedAt ||
+    dbSession.expiresAt.getTime() <= now ||
+    dbSession.discordUserId !== payload.uid ||
+    dbSession.guildId !== payload.gid
+  ) {
+    return null;
+  }
+  return dbSession;
+}
+
 function readSessionCookie(req: Request): CookiePayload | null {
   const cookies = parseCookies(req);
   const raw = cookies.get(SESSION_COOKIE);
@@ -129,26 +156,13 @@ export function createSessionMiddleware(
     }
 
     const now = Date.now();
-    const inactivityMs = getInactivityMinutes() * 60 * 1000;
-    if (now - payload.act > inactivityMs) {
+    const dbSession = await loadValidSession(payload, now);
+    if (!dbSession) {
       clearSessionCookie(res);
       respondUnauthorized(res);
       return;
     }
-
     const sessionService = WebSessionService.getInstance();
-    const dbSession = await sessionService.findById(payload.sid);
-    if (
-      !dbSession ||
-      dbSession.revokedAt ||
-      dbSession.expiresAt.getTime() <= now ||
-      dbSession.discordUserId !== payload.uid ||
-      dbSession.guildId !== payload.gid
-    ) {
-      clearSessionCookie(res);
-      respondUnauthorized(res);
-      return;
-    }
 
     try {
       const permissions = PermissionsService.getInstance(client);
@@ -186,6 +200,57 @@ export function createSessionMiddleware(
     };
     next();
   };
+}
+
+/**
+ * Read-only status handler for `GET /admin/session/ping` (#435).
+ *
+ * The banner polls this so an admin who has been working on a single
+ * page for a few minutes sees a fresh countdown rather than watching
+ * their (server-side genuinely fresh) session tick to zero.
+ *
+ * Crucial property: this handler must NOT count as activity. It does
+ * not call `writeSessionCookie`, so `payload.act` is never bumped and
+ * the inactivity sliding window keeps advancing for a user who is only
+ * polling and not making real requests. Validation otherwise mirrors
+ * `createSessionMiddleware`: cookie present, inactivity window OK, DB
+ * session live. Permission revalidation is intentionally omitted — the
+ * next real admin request will hit the middleware and revoke if needed.
+ */
+export function createSessionPingHandler(): RequestHandler {
+  return async function sessionPing(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ): Promise<void> {
+    try {
+      const payload = readSessionCookie(req);
+      if (!payload) {
+        respondPingUnauthorized(res);
+        return;
+      }
+      const now = Date.now();
+      const dbSession = await loadValidSession(payload, now);
+      if (!dbSession) {
+        respondPingUnauthorized(res);
+        return;
+      }
+      const inactivityMs = getInactivityMinutes() * 60 * 1000;
+      const inactivityRemaining = Math.max(0, payload.act + inactivityMs - now);
+      const hardCapRemaining = Math.max(0, dbSession.expiresAt.getTime() - now);
+      const remainingMs = Math.min(inactivityRemaining, hardCapRemaining);
+      res.status(200).json({
+        remainingMs,
+        expiresAt: dbSession.expiresAt.toISOString(),
+      });
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+function respondPingUnauthorized(res: Response): void {
+  res.status(401).json({ error: "unauthorized" });
 }
 
 function respondUnauthorized(res: Response): void {

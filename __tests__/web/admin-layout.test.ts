@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
 import {
   escapeHtml,
   getDisplayedRemainingMs,
+  getInactivityWindowMs,
   NAV_ITEMS,
   renderAdminPage,
   resolveNavFeatureStatus,
@@ -59,6 +60,41 @@ describe("renderAdminPage", () => {
     expect(html).toContain('action="/admin/finish"');
     expect(html).toContain('value="csrftoken"');
     expect(html).toContain("<p>hi</p>");
+  });
+
+  it("emits data-inactivity-ms so the banner script knows the sliding window", () => {
+    const saved = process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "20";
+    try {
+      const html = renderAdminPage({
+        title: "Test",
+        active: "/admin/",
+        body: "",
+        csrfToken: "",
+        remainingMs: 0,
+      });
+      expect(html).toContain(`data-inactivity-ms="${20 * 60 * 1000}"`);
+    } finally {
+      if (saved === undefined) {
+        delete process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
+      } else {
+        process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = saved;
+      }
+    }
+  });
+
+  it("ships a banner script that polls /admin/session/ping and handles activity", () => {
+    const html = renderAdminPage({
+      title: "Test",
+      active: "/admin/",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // The polling and activity-listener wiring from #435.
+    expect(html).toContain("/admin/session/ping");
+    expect(html).toContain("mousemove");
+    expect(html).toContain("keydown");
   });
 
   it("escapes the title", () => {
@@ -204,5 +240,36 @@ describe("getDisplayedRemainingMs", () => {
   it("returns 0 when the hard cap has already passed", () => {
     const expiresAt = new Date(Date.now() - 1000);
     expect(getDisplayedRemainingMs({ expiresAt })).toBe(0);
+  });
+});
+
+describe("getInactivityWindowMs", () => {
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
+    delete process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
+  });
+  afterEach(() => {
+    if (saved === undefined) {
+      delete process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
+    } else {
+      process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = saved;
+    }
+  });
+
+  it("defaults to 30 minutes when unset", () => {
+    expect(getInactivityWindowMs()).toBe(30 * 60 * 1000);
+  });
+
+  it("reads the env var when set to a positive number", () => {
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "5";
+    expect(getInactivityWindowMs()).toBe(5 * 60 * 1000);
+  });
+
+  it("falls back to the default on garbage values", () => {
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "nope";
+    expect(getInactivityWindowMs()).toBe(30 * 60 * 1000);
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "-5";
+    expect(getInactivityWindowMs()).toBe(30 * 60 * 1000);
   });
 });

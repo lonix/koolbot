@@ -226,16 +226,47 @@ const STYLE = [
   ".cron-picker[hidden]{display:none}",
 ].join("");
 
+// Session banner script (#367, refreshed in #435).
+//
+// In addition to the per-second local tick from #367, this:
+//   - polls `GET /admin/session/ping` every 30s and re-syncs the local
+//     deadline from the server's authoritative remaining time (the ping
+//     endpoint is read-only and does NOT itself extend the session).
+//   - resets the local deadline on `mousemove` / `keydown` (debounced)
+//     to the inactivity window length so the visible number stays
+//     snappy between polls when the admin is actually interacting.
+//
+// `data-inactivity-ms` is the full sliding window (matches the server's
+// `WEBUI_INACTIVITY_TIMEOUT_MINUTES`); local resets never go beyond
+// that. The ping reconciliation cap (server's hard `expiresAt`) is
+// enforced server-side and surfaces via the ping response.
 const SCRIPT =
   "(function(){var el=document.getElementById('session-countdown');if(!el)return;" +
   "var deadline=Date.now()+parseInt(el.getAttribute('data-remaining-ms'),10);" +
-  "var fired=false;" +
+  "var inactivityMs=parseInt(el.getAttribute('data-inactivity-ms'),10)||0;" +
+  "var fired=false;var lastReset=0;" +
+  "function expire(){if(fired)return;fired=true;window.location.href='/admin/'}" +
   "function tick(){var r=Math.max(0,deadline-Date.now());var s=Math.floor(r/1000);" +
   "var m=Math.floor(s/60);var ss=s%60;el.textContent=m+':'+(ss<10?'0'+ss:ss);" +
   // When the countdown hits 0, navigate to /admin/. The session middleware
   // will reject the now-expired cookie and render the scaffold's 401 page.
-  "if(r<=0&&!fired){fired=true;window.location.href='/admin/'}}" +
-  "tick();setInterval(tick,1000)})();";
+  "if(r<=0)expire()}" +
+  "function applyRemaining(ms){deadline=Date.now()+Math.max(0,ms|0);tick()}" +
+  "function onActivity(){if(inactivityMs<=0||fired)return;" +
+  // Debounce so a stream of mousemove events doesn't reset every frame.
+  // Only nudge the deadline forward (never back) — if the server has
+  // already told us a longer remaining via ping, keep it.
+  "var now=Date.now();if(now-lastReset<5000)return;lastReset=now;" +
+  "if(deadline-now<inactivityMs)applyRemaining(inactivityMs)}" +
+  "function poll(){if(fired)return;" +
+  "fetch('/admin/session/ping',{credentials:'same-origin',headers:{'Accept':'application/json'},cache:'no-store'})" +
+  ".then(function(res){if(res.status===401){expire();return null}" +
+  "if(!res.ok)return null;return res.json()})" +
+  ".then(function(data){if(data&&typeof data.remainingMs==='number')applyRemaining(data.remainingMs)})" +
+  ".catch(function(){})}" +
+  "tick();setInterval(tick,1000);setInterval(poll,30000);" +
+  "document.addEventListener('mousemove',onActivity,{passive:true});" +
+  "document.addEventListener('keydown',onActivity)})();";
 
 // Cron schedule picker (#444). Each .cron-picker on the page wraps a
 // hidden `name="value"` input that the form actually submits, plus a
@@ -313,6 +344,7 @@ function renderNav(
 
 export function renderAdminPage(opts: AdminPageOptions): string {
   const remainingMs = Math.max(0, Math.floor(opts.remainingMs));
+  const inactivityMs = getInactivityWindowMs();
   return [
     "<!doctype html>",
     '<html lang="en"><head>',
@@ -325,7 +357,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<div class="banner">',
     '<div class="left"><strong>Koolbot Admin</strong></div>',
     '<div class="right">Session expires in ',
-    `<span id="session-countdown" data-remaining-ms="${remainingMs}" class="mono">--:--</span> · `,
+    `<span id="session-countdown" data-remaining-ms="${remainingMs}" data-inactivity-ms="${inactivityMs}" class="mono">--:--</span> · `,
     '<form method="POST" action="/admin/finish">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<button type="submit">Finish</button>',
@@ -337,6 +369,18 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<script>${CRON_PICKER_SCRIPT}</script>`,
     "</body></html>",
   ].join("");
+}
+
+/**
+ * Inactivity sliding-window length in ms (`WEBUI_INACTIVITY_TIMEOUT_MINUTES`,
+ * defaults to 30 minutes). Used by the renderer to pass the window length
+ * to the banner script so client-side activity resets know what to reset to.
+ */
+export function getInactivityWindowMs(): number {
+  const raw = process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
+  const parsed = raw ? Number(raw) : NaN;
+  const inactivityMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
+  return inactivityMinutes * 60 * 1000;
 }
 
 /**
@@ -352,10 +396,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
  * fall back to inactivity-only (used by tests).
  */
 export function getDisplayedRemainingMs(session?: { expiresAt: Date }): number {
-  const raw = process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
-  const parsed = raw ? Number(raw) : NaN;
-  const inactivityMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : 30;
-  const inactivityMs = inactivityMinutes * 60 * 1000;
+  const inactivityMs = getInactivityWindowMs();
   if (!session) return inactivityMs;
   const hardCapMs = Math.max(0, session.expiresAt.getTime() - Date.now());
   return Math.min(inactivityMs, hardCapMs);

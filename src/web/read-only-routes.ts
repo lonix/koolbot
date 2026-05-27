@@ -34,7 +34,10 @@ import {
 } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
-import type { AuthenticatedRequest } from "./session.js";
+import {
+  createSessionPingHandler,
+  type AuthenticatedRequest,
+} from "./session.js";
 import {
   getDisplayedRemainingMs,
   resolveNavFeatureStatus,
@@ -200,6 +203,14 @@ export function createReadOnlyRouter(
   requireSession: RequestHandler,
 ): Router {
   const router = Router();
+
+  // Session ping (#435). Mounted BEFORE `requireSession` because the
+  // ping is a read-only status query and must NOT itself bump the
+  // session's `act` timestamp — otherwise polling every 30s would keep
+  // an idle session alive forever, defeating the inactivity window.
+  // The handler runs its own (non-mutating) cookie + DB validation.
+  router.get("/session/ping", createSessionPingHandler());
+
   router.use(requireSession);
 
   // ---------- Dashboard ----------
