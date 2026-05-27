@@ -287,17 +287,19 @@ const SCRIPT =
   "document.addEventListener('keydown',onActivity)})();";
 
 // Cron schedule picker (#444). Each .cron-picker on the page wraps a
-// hidden `name="value"` input that the form actually submits, plus a
-// mode <select> ("daily" / "weekly" / "monthly" / "custom"), a time
-// picker, and day-of-week / day-of-month controls. This script keeps
-// the hidden input in sync as the operator changes the controls so the
-// form posts a canonical cron string. Custom mode just mirrors the raw
-// text input verbatim, which is what server-side coercion expects for
-// a `cron`-typed key today.
+// hidden input (located via the `.cron-hidden` class — its form-field
+// name varies per row under the per-section save form, e.g.
+// `value_<key>`) that the form actually submits, plus a mode <select>
+// ("daily" / "weekly" / "monthly" / "custom"), a time picker, and
+// day-of-week / day-of-month controls. This script keeps the hidden
+// input in sync as the operator changes the controls so the form posts
+// a canonical cron string. Custom mode just mirrors the raw text input
+// verbatim, which is what server-side coercion expects for a `cron`-
+// typed key today.
 const CRON_PICKER_SCRIPT =
   "(function(){" +
   "function clamp(n,lo,hi){return Math.max(lo,Math.min(hi,n))}" +
-  "function wire(p){var hidden=p.querySelector('input[name=value]');" +
+  "function wire(p){var hidden=p.querySelector('.cron-hidden');" +
   "var mode=p.querySelector('.cron-mode');" +
   "var time=p.querySelector('.cron-time');" +
   "var dow=p.querySelector('.cron-dow');" +

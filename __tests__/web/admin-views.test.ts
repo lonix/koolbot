@@ -166,7 +166,7 @@ describe("renderSettingsPage", () => {
     expect(html).toContain('class="tag tag-info">boolean');
   });
 
-  it("renders inline set/reset forms with the current value pre-filled", () => {
+  it("wraps each section in one save form, exposes per-row reset, and pre-fills values (issue #433)", () => {
     const html = renderSettingsPage({
       ...COMMON,
       groups: [
@@ -193,11 +193,25 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toContain('action="/admin/settings/set"');
-    expect(html).toContain('action="/admin/settings/reset"');
+    // Single per-section save form (replaces the per-row "Set" button).
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain('name="category" value="quotes"');
+    expect(html).toContain('<button type="submit" class="btn btn-primary">Save</button>');
+    // Each row contributes its key via a hidden `keys` input so the
+    // handler can enumerate the section without trusting `value_*` names.
+    expect(html).toContain('name="keys" value="quotes.max_length"');
+    expect(html).toContain('name="keys" value="quotes.channel_id"');
+    // Per-row Reset is retained via HTML5 formaction so a single click
+    // posts just that key to the existing /settings/reset handler.
+    expect(html).toContain('formaction="/admin/settings/reset"');
     expect(html).toContain('name="key" value="quotes.max_length"');
+    // Value controls use the per-row name and round-trip the current value.
+    expect(html).toContain('name="value_quotes.max_length"');
+    expect(html).toContain('name="value_quotes.channel_id"');
     expect(html).toContain('value="500"');
     expect(html).toContain('value="12345"');
+    // No per-row "Set" submit survives.
+    expect(html).not.toContain('action="/admin/settings/set"');
   });
 
   it("renders the action bar and import textarea", () => {
@@ -238,7 +252,9 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(onHtml).toMatch(/type="checkbox" name="value" value="true" checked/);
+    expect(onHtml).toMatch(
+      /type="checkbox" name="value_x\.enabled" value="true" checked/,
+    );
 
     const offHtml = renderSettingsPage({
       ...COMMON,
@@ -259,7 +275,7 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(offHtml).not.toMatch(
-      /type="checkbox" name="value" value="true" checked/,
+      /type="checkbox" name="value_x\.enabled" value="true" checked/,
     );
   });
 
@@ -289,7 +305,9 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toContain('<select name="value">');
+    expect(html).toContain(
+      '<select name="value_voicetracking.announcements.channel_id">',
+    );
     expect(html).toContain('<option value="111">#general</option>');
     expect(html).toContain('<option value="222" selected>#voice-stats</option>');
   });
@@ -379,7 +397,9 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toMatch(/<select name="value" multiple/);
+    expect(html).toMatch(
+      /<select name="value_voicetracking\.excluded_channels" multiple/,
+    );
     expect(html).toContain('<option value="111" selected>#general</option>');
     expect(html).toContain('<option value="222">#afk</option>');
     expect(html).toContain('<option value="333" selected>#other</option>');
@@ -411,7 +431,9 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toMatch(/<select name="value" multiple/);
+    expect(html).toMatch(
+      /<select name="value_quotes\.delete_roles" multiple/,
+    );
     expect(html).toContain('<option value="r1">@Admin</option>');
     expect(html).toContain('<option value="r2" selected>@Mod</option>');
   });
@@ -1269,7 +1291,11 @@ describe("renderSettingsPage cron picker", () => {
   it("renders the cron picker with mode selector and a hidden value field", () => {
     const html = withCron("0 16 * * 5");
     expect(html).toContain('<div class="cron-picker" data-mode="weekly">');
-    expect(html).toContain('<input type="hidden" name="value" value="0 16 * * 5">');
+    // The hidden input is found by the bootstrap script via `.cron-hidden`
+    // so its `name` can vary per row under the per-section save form.
+    expect(html).toContain(
+      '<input type="hidden" class="cron-hidden" name="value_voicetracking.announcements.schedule" value="0 16 * * 5">',
+    );
     expect(html).toContain('<select class="cron-mode"');
     expect(html).toContain('<option value="weekly" selected>Weekly</option>');
     // Weekly mode reveals the day-of-week control with the right day picked.
