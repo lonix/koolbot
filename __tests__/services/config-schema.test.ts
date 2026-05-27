@@ -138,4 +138,62 @@ describe('Config Schema', () => {
       expect(missing).toEqual([]);
     });
   });
+
+  describe('enabled-default audit (#445)', () => {
+    // The audit's principle (documented in defaultConfig's leading comment):
+    //   1. Top-level feature gates default to false (opt-in).
+    //   2. Sub-feature toggles may default to true if they're inert
+    //      until the parent feature is enabled and the operator who
+    //      turns the parent on almost certainly wants them.
+    // These tests pin the matrix so a future contributor can't quietly
+    // flip a top-level gate to true (rule 1) or add a new sub-feature
+    // toggle without an explicit audit entry (rule 2).
+
+    it('keeps every top-level feature gate `enabled: false`', () => {
+      const topLevelGates = [
+        'voicechannels.enabled',
+        'voicetracking.enabled',
+        'voicetracking.announcements.enabled',
+        'voicetracking.cleanup.enabled',
+        'voicetracking.stats.top.enabled',
+        'voicetracking.stats.user.enabled',
+        'voicetracking.seen.enabled',
+        'ping.enabled',
+        'quotes.enabled',
+        'ratelimit.enabled',
+        'announcements.enabled',
+        'achievements.enabled',
+        'reactionroles.enabled',
+        'notices.enabled',
+        'polls.enabled',
+        'leaderboard_roles.enabled',
+      ];
+      for (const key of topLevelGates) {
+        expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(false);
+      }
+    });
+
+    it('keeps the parent-gated sub-feature toggles `true`', () => {
+      // Each is inert when its parent feature is off; defaulting on
+      // matches operator expectations when the parent is enabled.
+      const enabledByDefault: Record<string, string> = {
+        'voicechannels.controlpanel.enabled': 'voicechannels.enabled',
+        'quotes.header_enabled': 'quotes.enabled',
+        'quotes.header_pin_enabled': 'quotes.enabled',
+        'achievements.announcements.enabled': 'achievements.enabled',
+        'achievements.dm_notifications.enabled': 'achievements.enabled',
+        'notices.header_enabled': 'notices.enabled',
+        'notices.header_pin_enabled': 'notices.enabled',
+      };
+      for (const [key, parent] of Object.entries(enabledByDefault)) {
+        expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(true);
+        // Parent is off, so the sub-feature is inert on a fresh install.
+        expect(defaultConfig[parent as keyof typeof defaultConfig]).toBe(false);
+      }
+    });
+
+    it('does not declare wizard.enabled (#434 / #445 — wizard is always on)', () => {
+      expect('wizard.enabled' in defaultConfig).toBe(false);
+    });
+  });
 });

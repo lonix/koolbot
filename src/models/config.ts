@@ -44,7 +44,7 @@ const ConfigSchema = new Schema<IConfig>(
         "reactionroles",
         "voicechannels",
         "voicetracking",
-        "wizard",
+        "wizard", // Kept for backward compatibility; key removed but legacy rows may exist
       ],
     },
     updatedAt: {

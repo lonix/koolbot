@@ -57,9 +57,6 @@ export interface ConfigSchema {
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
 
-  // Setup Wizard
-  "wizard.enabled": boolean;
-
   // Notices System
   "notices.enabled": boolean;
   "notices.channel_id": string; // Channel ID for notice messages
@@ -80,6 +77,36 @@ export interface ConfigSchema {
   "leaderboard_roles.announcement_channel_id": string; // Optional channel ID for role-change announcements
 }
 
+/**
+ * Defaults applied to a fresh deployment. Two rules govern booleans:
+ *
+ *   1. **Top-level feature gates default to `false`.** Every
+ *      `<feature>.enabled` key that controls whether a feature runs at
+ *      all (voicechannels, voicetracking, quotes, polls, notices,
+ *      announcements, achievements, reactionroles, leaderboard_roles,
+ *      ratelimit, ping) ships off. Operators opt in via the Setup
+ *      Wizard or Settings page — consistent with #438's "wizard starts
+ *      blank" semantics and #445's broader audit.
+ *
+ *   2. **Sub-feature defaults may be `true` if they're inert until the
+ *      parent feature is enabled and the operator who turns the parent
+ *      on almost certainly wants them.** Examples:
+ *      - `voicechannels.controlpanel.enabled` — the in-channel control
+ *        panel is the headline UX of voice channels; nobody enabling
+ *        voicechannels wants it hidden.
+ *      - `quotes.header_enabled` / `notices.header_enabled` /
+ *        `*.header_pin_enabled` — pinned informational headers in the
+ *        managed channels; helpful by default, harmless when the
+ *        parent feature is off.
+ *      - `achievements.announcements.enabled` /
+ *        `achievements.dm_notifications.enabled` — silent achievements
+ *        are pointless; enabling achievements implies wanting at least
+ *        one notification path.
+ *
+ * If you add a new `<feature>.enabled` key, default it to `false`. If
+ * you add a sub-feature toggle, apply rule 2 deliberately and add a
+ * brief comment so the next reader can audit the choice.
+ */
 export const defaultConfig: ConfigSchema = {
   // Voice Channel Management
   "voicechannels.enabled": false,
@@ -138,9 +165,6 @@ export const defaultConfig: ConfigSchema = {
   // Reaction Roles defaults
   "reactionroles.enabled": false,
   "reactionroles.message_channel_id": "",
-
-  // Setup Wizard defaults
-  "wizard.enabled": true,
 
   // Notices System defaults
   "notices.enabled": false,
@@ -250,11 +274,6 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Reaction Roles",
     description:
       "Let users self-assign roles by reacting to a configured message.",
-  },
-  wizard: {
-    title: "Setup Wizard",
-    description:
-      "The /setup slash command that walks new admins through feature configuration.",
   },
   notices: {
     title: "Notices",
@@ -554,14 +573,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where reaction-role messages are posted.",
     category: "reactionroles",
     type: "channel",
-  },
-
-  // Setup Wizard
-  "wizard.enabled": {
-    label: "/setup wizard command enabled",
-    description: "Enable the /setup wizard command.",
-    category: "wizard",
-    type: "boolean",
   },
 
   // Notices System
