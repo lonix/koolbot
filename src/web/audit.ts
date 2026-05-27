@@ -26,6 +26,10 @@ export async function recordAudit(
       guildId: session.guildId,
       sessionId: session.sessionId,
       discordUserId: session.discordUserId,
+      // Whichever role the session is — an admin acting on their own
+      // `/me/*` is logged with role:"admin" (see #481): the role is the
+      // session's, not the URL surface's.
+      role: session.role,
       action: entry.action,
       targetId: entry.targetId ?? null,
       details: entry.details ?? {},

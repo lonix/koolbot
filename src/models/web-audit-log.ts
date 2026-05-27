@@ -10,6 +10,12 @@ export interface IWebAuditLog extends Document {
   guildId: string;
   sessionId: string;
   discordUserId: string;
+  /**
+   * Role of the session that produced this entry. Defaults to `"admin"` so
+   * audit rows written before #481 (when only admins could redeem a
+   * session) read back consistently.
+   */
+  role: "admin" | "user";
   action: string;
   targetId: string | null;
   details: Record<string, unknown>;
@@ -23,6 +29,13 @@ const WebAuditLogSchema = new Schema<IWebAuditLog>(
     guildId: { type: String, required: true, index: true },
     sessionId: { type: String, required: true, index: true },
     discordUserId: { type: String, required: true, index: true },
+    role: {
+      type: String,
+      enum: ["admin", "user"],
+      required: true,
+      default: "admin",
+      index: true,
+    },
     action: { type: String, required: true },
     targetId: { type: String, default: null },
     details: { type: Schema.Types.Mixed, default: {} },

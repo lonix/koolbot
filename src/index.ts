@@ -40,6 +40,7 @@ import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
+  createUserWebRouter,
   createWebRouter,
   getMissingWebUIEnvVars,
   isWebUIEnabled,
@@ -167,7 +168,8 @@ function startHealthServer(): void {
         logger.info(`WebUI trust proxy set to: ${trustProxyRaw}`);
       }
       healthApp.use("/admin", createWebRouter(client));
-      logger.info("WebUI mounted at /admin");
+      healthApp.use("/me", createUserWebRouter(client));
+      logger.info("WebUI mounted at /admin and user surface at /me");
     }
   } else {
     logger.debug("WEBUI_ENABLED is not true; /admin routes not mounted");

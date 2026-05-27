@@ -13,6 +13,7 @@ import {
 import { renderConsent, renderInvalidLink, renderSignedOut } from "./views.js";
 import { createReadOnlyRouter } from "./read-only-routes.js";
 import { createWriteRouter } from "./write-routes.js";
+import { createUserRouter } from "./user-routes.js";
 
 /**
  * Build the WebUI router. Caller mounts this at /admin on the existing
@@ -90,10 +91,16 @@ export function createWebRouter(client: Client): Router {
           sid: redeemed.sessionId,
           uid: redeemed.discordUserId,
           gid: redeemed.guildId,
+          rol: redeemed.role,
           iat: Date.now(),
           act: Date.now(),
         });
-        res.redirect(302, "/admin/");
+        // Role-based landing: admins drop on the admin panel they're
+        // used to; user-role sessions don't have admin access at all,
+        // so we route them to their own `/me` surface (#481). An admin
+        // can hop to `/me` afterwards via the in-page header link.
+        const dest = redeemed.role === "admin" ? "/admin/" : "/me/";
+        res.redirect(302, dest);
       } catch (err) {
         logger.error("Error redeeming web session token", err);
         res.status(500).type("text/plain").send("Internal Server Error");
@@ -134,6 +141,39 @@ export function createWebRouter(client: Client): Router {
   router.use(
     (err: unknown, _req: Request, res: Response, next: NextFunction): void => {
       logger.error("WebUI router error", err);
+      if (res.headersSent) {
+        next(err);
+        return;
+      }
+      res.status(500).type("text/plain").send("Internal Server Error");
+    },
+  );
+
+  return router;
+}
+
+/**
+ * Build the user self-service router for `/me/*` (#481).
+ *
+ * Lives on the same Express server as `createWebRouter` and shares the
+ * same session cookie (path `/`, set by the magic-link redemption in
+ * `/admin/s/:token`). Mounted at `/me` in `src/index.ts` so user-role
+ * AND admin-role sessions can both reach it — admins use it to manage
+ * their own preferences without giving up the admin panel.
+ */
+export function createUserWebRouter(client: Client): Router {
+  const router = Router();
+
+  router.use(express.urlencoded({ extended: false, limit: "256kb" }));
+  router.use(ensureCsrfCookie);
+
+  const requireSession = createSessionMiddleware(client);
+
+  router.use(createUserRouter(client, requireSession));
+
+  router.use(
+    (err: unknown, _req: Request, res: Response, next: NextFunction): void => {
+      logger.error("UserUI router error", err);
       if (res.headersSent) {
         next(err);
         return;

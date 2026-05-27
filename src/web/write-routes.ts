@@ -37,7 +37,10 @@ import Notice from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { requireCsrf } from "./csrf.js";
 import { PROTECTED_KEYS } from "./bootstrap-vars.js";
-import type { AuthenticatedRequest } from "./session.js";
+import {
+  requireAdminRoleMiddleware,
+  type AuthenticatedRequest,
+} from "./session.js";
 import { recordAudit } from "./audit.js";
 import {
   getDisplayedRemainingMs,
@@ -112,14 +115,9 @@ function parseHexColor(input: string): number | null {
   return parseInt(match[1], 16);
 }
 
-function requireSessionContext(req: AuthenticatedRequest): {
-  guildId: string;
-  discordUserId: string;
-  sessionId: string;
-  scopes: string[];
-  lastActivityAt: number;
-  expiresAt: Date;
-} {
+function requireSessionContext(
+  req: AuthenticatedRequest,
+): AuthenticatedRequest["webSession"] & object {
   if (!req.webSession) {
     throw new Error("requireSession middleware must run first");
   }
@@ -261,6 +259,10 @@ export function createWriteRouter(
 ): Router {
   const router = Router();
   router.use(requireSession);
+  // Every write handler below targets the admin panel. User-role
+  // sessions hitting these routes get a 403 from the role middleware;
+  // their own writes (when #482/#484 add them) live on `/me/*`.
+  router.use(requireAdminRoleMiddleware());
   router.use(requireCsrf);
 
   // ============================================================
