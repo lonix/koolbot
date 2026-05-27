@@ -1,13 +1,10 @@
-import {
-  Guild,
-  ChannelType,
-  CategoryChannel,
-  TextChannel,
-  Client,
-} from "discord.js";
+import { Guild, TextChannel, Client } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
-import { VoiceChannelManager } from "./voice-channel-manager.js";
+import {
+  VoiceChannelManager,
+  resolveManagedCategory,
+} from "./voice-channel-manager.js";
 
 export class ChannelInitializer {
   private static instance: ChannelInitializer;
@@ -85,15 +82,6 @@ export class ChannelInitializer {
         return;
       }
 
-      // Try correct config keys first, then fall back to old ones
-      const categoryName =
-        (await this.configService.getString("voicechannels.category.name")) ||
-        (await this.configService.getString("voice_channel.category_name")) ||
-        (await this.configService.getString(
-          "VC_CATEGORY_NAME",
-          "Dynamic Voice Channels",
-        ));
-
       const lobbyChannelName =
         (await this.configService.getString("voicechannels.lobby.name")) ||
         (await this.configService.getString(
@@ -101,25 +89,19 @@ export class ChannelInitializer {
         )) ||
         (await this.configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
 
-      logger.info(
-        `Initializing channels with category: ${categoryName} and lobby: ${lobbyChannelName}`,
-      );
-
-      // Find or create the category
-      let category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
-      if (!category) {
-        logger.info(`Creating category: ${categoryName}`);
-        category = await guild.channels.create({
-          name: categoryName,
-          type: ChannelType.GuildCategory,
-          position: 0,
-        });
-        logger.info(`Created category: ${categoryName}`);
+      // Verify the configured managed-VC category exists. We no longer
+      // auto-create one: operators pick an existing category via the
+      // admin panel (now stored as a Discord channel ID, not a name).
+      const category = await resolveManagedCategory(guild);
+      if (category) {
+        logger.info(
+          `Initializing channels with category: ${category.name} (${category.id}) and lobby: ${lobbyChannelName}`,
+        );
+      } else {
+        logger.warn(
+          "voicechannels.category_id is not set or doesn't resolve to a category in this guild; lobby + child-channel management cannot proceed",
+        );
+        return;
       }
 
       // Use the voice channel manager to ensure lobby channels exist

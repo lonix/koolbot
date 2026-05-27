@@ -1,7 +1,7 @@
 export interface ConfigSchema {
   // Voice Channel Management
   "voicechannels.enabled": boolean;
-  "voicechannels.category.name": string;
+  "voicechannels.category_id": string;
   "voicechannels.lobby.name": string;
   "voicechannels.lobby.offlinename": string;
   "voicechannels.channel.prefix": string;
@@ -110,7 +110,7 @@ export interface ConfigSchema {
 export const defaultConfig: ConfigSchema = {
   // Voice Channel Management
   "voicechannels.enabled": false,
-  "voicechannels.category.name": "Voice Channels",
+  "voicechannels.category_id": "",
   "voicechannels.lobby.name": "Lobby",
   "voicechannels.lobby.offlinename": "Offline Lobby",
   "voicechannels.channel.prefix": "🎮",
@@ -304,16 +304,12 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicechannels",
     type: "boolean",
   },
-  "voicechannels.category.name": {
-    label: "Managed category name",
+  "voicechannels.category_id": {
+    label: "Managed category",
     description:
-      "Name of the Discord category that contains managed voice channels.",
+      "Discord category that contains the bot-managed voice channels (lobby + per-user spawns).",
     category: "voicechannels",
-    // `string` (not "category") until #447 renames this to
-    // `voicechannels.category_id` and switches storage from name to ID.
-    // The renderer infrastructure for "category" already exists; flipping
-    // the type is a one-line change once #447 lands.
-    type: "string",
+    type: "category",
   },
   "voicechannels.lobby.name": {
     label: "Lobby channel display name",

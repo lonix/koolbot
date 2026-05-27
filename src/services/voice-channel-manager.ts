@@ -40,6 +40,29 @@ function isUnknownChannelError(error: unknown): boolean {
   );
 }
 
+/**
+ * Resolve the operator-configured "managed category" for voice channels
+ * by reading `voicechannels.category_id` from config and looking the
+ * channel up by ID in the guild's cache. Returns `null` when the key is
+ * unset or the stored ID no longer resolves to a category channel (e.g.
+ * the category was deleted from Discord).
+ *
+ * Replaces the legacy `voicechannels.category.name` / env-var fallback
+ * chain used at ~10 call sites prior to #447. The bot's startup name→ID
+ * migrator (`name-id-migrator.ts`) translates any previously-stored name
+ * into an ID on first Discord-ready event, so existing deployments keep
+ * working without any operator action.
+ */
+export async function resolveManagedCategory(
+  guild: Guild,
+): Promise<CategoryChannel | null> {
+  const id = await configService.getString("voicechannels.category_id", "");
+  if (!id) return null;
+  const ch = guild.channels.cache.get(id);
+  if (!ch || ch.type !== ChannelType.GuildCategory) return null;
+  return ch as CategoryChannel;
+}
+
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
@@ -346,15 +369,6 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Try correct config keys first, then fall back to old ones
-      const categoryName =
-        (await configService.getString("voicechannels.category.name")) ||
-        (await configService.getString("voice_channel.category_name")) ||
-        (await configService.getString(
-          "VC_CATEGORY_NAME",
-          "Dynamic Voice Channels",
-        ));
-
       const lobbyChannelName = await this.getLobbyChannelName();
 
       const offlineLobbyName =
@@ -370,15 +384,10 @@ export class VoiceChannelManager {
         return;
       }
 
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
         logger.error(
-          `Category ${categoryName} not found during initialization`,
+          "voicechannels.category_id is not set or doesn't resolve to a category — managed VC initialization aborted",
         );
         return;
       }
@@ -888,23 +897,11 @@ export class VoiceChannelManager {
 
       const guild = member.guild;
 
-      // Try new config keys first, then fall back to old ones
-      const categoryName =
-        (await configService.getString("voicechannels.category.name")) ||
-        (await configService.getString("voice_channel.category_name")) ||
-        (await configService.getString(
-          "VC_CATEGORY_NAME",
-          "Dynamic Voice Channels",
-        ));
-
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
-        logger.error(`Category ${categoryName} not found`);
+        logger.error(
+          "voicechannels.category_id is not set or doesn't resolve to a category — cannot create channel",
+        );
         return;
       }
 
@@ -1286,20 +1283,10 @@ export class VoiceChannelManager {
     channelName?: string,
   ): Promise<VoiceChannel | null> {
     try {
-      const categoryName = await configService.getString(
-        "voicechannels.category.name",
-        "Voice Channels",
-      );
-
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
         logger.error(
-          `Category ${categoryName} not found for dynamic channel creation`,
+          "voicechannels.category_id is not set or doesn't resolve to a category — cannot create dynamic channel",
         );
         return null;
       }
@@ -1385,10 +1372,6 @@ export class VoiceChannelManager {
    */
   public async renameLobbyToOffline(guild: Guild): Promise<void> {
     try {
-      const categoryName = await configService.getString(
-        "voicechannels.category.name",
-        "Voice Channels",
-      );
       const lobbyName = await configService.getString(
         "voicechannels.lobby.name",
         "Lobby",
@@ -1398,14 +1381,11 @@ export class VoiceChannelManager {
         "🔴 Lobby",
       );
 
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
-        logger.error(`Category ${categoryName} not found for lobby renaming`);
+        logger.error(
+          "voicechannels.category_id is not set or doesn't resolve — lobby rename skipped",
+        );
         return;
       }
 
@@ -1430,10 +1410,6 @@ export class VoiceChannelManager {
    */
   public async renameLobbyToOnline(guild: Guild): Promise<void> {
     try {
-      const categoryName = await configService.getString(
-        "voicechannels.category.name",
-        "Voice Channels",
-      );
       const lobbyName = await configService.getString(
         "voicechannels.lobby.name",
         "Lobby",
@@ -1443,14 +1419,11 @@ export class VoiceChannelManager {
         "🔴 Lobby",
       );
 
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
-        logger.error(`Category ${categoryName} not found for lobby renaming`);
+        logger.error(
+          "voicechannels.category_id is not set or doesn't resolve — lobby rename skipped",
+        );
         return;
       }
 
@@ -1513,10 +1486,6 @@ export class VoiceChannelManager {
    */
   public async ensureLobbyChannelExists(guild: Guild): Promise<void> {
     try {
-      const categoryName = await configService.getString(
-        "voicechannels.category.name",
-        "Voice Channels",
-      );
       const lobbyName = await configService.getString(
         "voicechannels.lobby.name",
         "Lobby",
@@ -1526,14 +1495,11 @@ export class VoiceChannelManager {
         "🔴 Lobby",
       );
 
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
-        logger.error(`Category ${categoryName} not found for lobby creation`);
+        logger.error(
+          "voicechannels.category_id is not set or doesn't resolve — lobby creation skipped",
+        );
         return;
       }
 
@@ -1602,23 +1568,16 @@ export class VoiceChannelManager {
    */
   public async ensureLobbyChannels(guild: Guild): Promise<void> {
     try {
-      const categoryName = await configService.getString(
-        "voicechannels.category.name",
-        "Voice Channels",
-      );
       const lobbyName = await configService.getString(
         "voicechannels.lobby.name",
         "Lobby",
       );
 
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
-        logger.error(`Category ${categoryName} not found for lobby creation`);
+        logger.error(
+          "voicechannels.category_id is not set or doesn't resolve — lobby creation skipped",
+        );
         return;
       }
 
@@ -1713,15 +1672,6 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Try correct config keys first, then fall back to old ones
-      const categoryName =
-        (await configService.getString("voicechannels.category.name")) ||
-        (await configService.getString("voice_channel.category_name")) ||
-        (await configService.getString(
-          "VC_CATEGORY_NAME",
-          "Dynamic Voice Channels",
-        ));
-
       const lobbyChannelName = await this.getLobbyChannelName();
 
       const offlineLobbyName =
@@ -1737,14 +1687,11 @@ export class VoiceChannelManager {
         return;
       }
 
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
-        logger.error(`Category ${categoryName} not found during cleanup`);
+        logger.error(
+          "voicechannels.category_id is not set or doesn't resolve — cleanup skipped",
+        );
         return;
       }
 
@@ -1840,10 +1787,6 @@ export class VoiceChannelManager {
         return;
       }
 
-      const categoryName = await configService.getString(
-        "voicechannels.category.name",
-        "Dynamic Voice Channels",
-      );
       const lobbyChannelName = (
         await configService.getString("voicechannels.lobby.name", "Lobby")
       ).replace(/["']/g, "");
@@ -1858,14 +1801,11 @@ export class VoiceChannelManager {
         return;
       }
 
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) {
-        logger.error(`Category ${categoryName} not found during health check`);
+        logger.error(
+          "voicechannels.category_id is not set or doesn't resolve — health check skipped",
+        );
         return;
       }
 
@@ -2208,18 +2148,7 @@ export class VoiceChannelManager {
       const guild = await this.getGuild(guildId);
       if (!guild) return 0;
 
-      // Get the voice channel category
-      const categoryName = await this.configService.getString(
-        "voicechannels.category.name",
-        "Voice Channels",
-      );
-
-      const category = guild.channels.cache.find(
-        (channel): channel is CategoryChannel =>
-          channel.type === ChannelType.GuildCategory &&
-          channel.name === categoryName,
-      );
-
+      const category = await resolveManagedCategory(guild);
       if (!category) return 0;
 
       // Count all users in voice channels within the category

@@ -3,8 +3,6 @@ import {
   Client,
   Events,
   GatewayIntentBits,
-  GuildBasedChannel,
-  CategoryChannel,
   ChannelType,
   Collection,
   ChatInputCommandInteraction,
@@ -20,7 +18,10 @@ import logger, { isDebugMode } from "./utils/logger.js";
 import { ConfigService } from "./services/config-service.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
 import { CommandManager } from "./services/command-manager.js";
-import { VoiceChannelManager } from "./services/voice-channel-manager.js";
+import {
+  VoiceChannelManager,
+  resolveManagedCategory,
+} from "./services/voice-channel-manager.js";
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { VoiceChannelTruncationService } from "./services/voice-channel-truncation.js";
@@ -251,18 +252,7 @@ async function cleanupVoiceChannels(): Promise<void> {
         await configService.getString("GUILD_ID", ""),
       );
       if (guild) {
-        // Get the VC category - try new config keys first, then fall back to old ones
-        const categoryName =
-          (await configService.getString("voice_channel.category_name")) ||
-          (await configService.getString(
-            "VC_CATEGORY_NAME",
-            "Dynamic Voice Channels",
-          ));
-        const category = guild.channels.cache.find(
-          (channel: GuildBasedChannel) =>
-            channel.type === ChannelType.GuildCategory &&
-            channel.name === categoryName,
-        ) as CategoryChannel;
+        const category = await resolveManagedCategory(guild);
 
         if (category) {
           // Get lobby channel name - try new config keys first, then fall back to old ones

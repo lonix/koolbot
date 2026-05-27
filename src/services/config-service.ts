@@ -186,6 +186,7 @@ export class ConfigService {
         // Pre-rename keys preserved until the Discord-ready name→ID
         // migrator runs (see name-id-migrator.ts).
         "voicetracking.announcements.channel",
+        "voicechannels.category.name",
       ];
       knownOldKeys.forEach((key) => validKeys.add(key));
 

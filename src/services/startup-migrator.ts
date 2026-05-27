@@ -19,13 +19,6 @@ const configMigrations: ConfigMigration[] = [
     defaultValue: "true",
   },
   {
-    oldKey: "VC_CATEGORY_NAME",
-    newKey: "voicechannels.category.name",
-    category: "voicechannels",
-    description: "Name of the category for voice channels",
-    defaultValue: "Voice Channels",
-  },
-  {
     oldKey: "LOBBY_CHANNEL_NAME",
     newKey: "voicechannels.lobby.name",
     category: "voicechannels",
@@ -240,7 +233,6 @@ export class StartupMigrator {
     // Define default values for each setting
     const defaultValues: Record<string, any> = {
       "voicechannels.enabled": true,
-      "voicechannels.category.name": "Voice Channels",
       "voicechannels.lobby.name": "🟢 Lobby",
       "voicechannels.lobby.offlinename": "🔴 Lobby",
       "voicechannels.channel.prefix": "🎮",
