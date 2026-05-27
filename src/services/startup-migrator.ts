@@ -44,7 +44,7 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicechannels.channel.suffix",
     category: "voicechannels",
     description: "Suffix for dynamically created channels",
-    defaultValue: "", // Fixed: match isDefaultValue method
+    defaultValue: "",
   },
 
   // Voice Activity Tracking
@@ -224,32 +224,6 @@ export class StartupMigrator {
    */
   private isFromEnvironment(key: string): boolean {
     return process.env[key] !== undefined;
-  }
-
-  /**
-   * Check if a setting has its default value
-   */
-  private isDefaultValue(key: string, value: any): boolean {
-    // Define default values for each setting
-    const defaultValues: Record<string, any> = {
-      "voicechannels.enabled": true,
-      "voicechannels.lobby.name": "🟢 Lobby",
-      "voicechannels.lobby.offlinename": "🔴 Lobby",
-      "voicechannels.channel.prefix": "🎮",
-      "voicechannels.channel.suffix": "", // Fixed: match migration defaultValue
-      "voicetracking.enabled": true,
-      "voicetracking.seen.enabled": true,
-      "voicetracking.excluded_channels": "",
-      "voicetracking.announcements.enabled": true,
-      "voicetracking.announcements.schedule": "0 16 * * 5",
-      "ping.enabled": true,
-      "quotes.enabled": true,
-      "quotes.delete_roles": "None",
-      "quotes.max_length": 1000,
-      "quotes.cooldown": 60,
-    };
-
-    return defaultValues[key] === value;
   }
 
   /**
