@@ -35,6 +35,7 @@ import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
+import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
 import type { AuthenticatedRequest } from "./session.js";
 import {
   getDisplayedRemainingMs,
@@ -60,31 +61,6 @@ import {
   type RoleOption,
   type SettingRow,
 } from "./admin-views.js";
-
-interface BootstrapEnvVar {
-  key: string;
-  category: "Discord" | "Database" | "Process" | "WebUI";
-  isSecret: boolean;
-}
-
-const BOOTSTRAP_VARS: BootstrapEnvVar[] = [
-  { key: "DISCORD_TOKEN", category: "Discord", isSecret: true },
-  { key: "CLIENT_ID", category: "Discord", isSecret: false },
-  { key: "GUILD_ID", category: "Discord", isSecret: false },
-  { key: "MONGODB_URI", category: "Database", isSecret: true },
-  { key: "NODE_ENV", category: "Process", isSecret: false },
-  { key: "DEBUG", category: "Process", isSecret: false },
-  { key: "WEBUI_ENABLED", category: "WebUI", isSecret: false },
-  { key: "WEBUI_BASE_URL", category: "WebUI", isSecret: false },
-  { key: "WEBUI_SESSION_SECRET", category: "WebUI", isSecret: true },
-  { key: "WEBUI_SESSION_TTL_MINUTES", category: "WebUI", isSecret: false },
-  {
-    key: "WEBUI_INACTIVITY_TIMEOUT_MINUTES",
-    category: "WebUI",
-    isSecret: false,
-  },
-  { key: "WEBUI_TRUST_PROXY", category: "WebUI", isSecret: false },
-];
 
 function deriveCategory(key: string): string {
   const dot = key.indexOf(".");
