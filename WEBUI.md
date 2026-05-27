@@ -55,10 +55,10 @@ port to learn. It is dark unless `WEBUI_ENABLED=true`.
 The Web UI ships two parallel surfaces on the same Express server, both
 gated by the same magic-link flow:
 
-| Surface  | Mount     | Who can reach it          | What it's for                                              |
-| -------- | --------- | ------------------------- | ---------------------------------------------------------- |
-| Admin    | `/admin/` | sessions with `role:admin` | Server-wide config — Settings, Permissions, Wizard, etc.   |
-| Self     | `/me/`    | both `admin` and `user`   | The signed-in **user's own** preferences and Rewind        |
+| Surface | Mount     | Who can reach it           | What it's for                                            |
+| ------- | --------- | -------------------------- | -------------------------------------------------------- |
+| Admin   | `/admin/` | sessions with `role:admin` | Server-wide config — Settings, Permissions, Wizard, etc. |
+| Self    | `/me/`    | both `admin` and `user`    | The signed-in **user's own** preferences and Rewind      |
 
 What changes per session:
 
@@ -665,10 +665,10 @@ side effect, since the HMAC key changes.
 | ----------------------- | ---------------------------------------------------------------------------------------------- |
 | **Overview** (`/me/`)   | Index for your own settings — placeholder cards listing the pages future sub-issues will land. |
 
-Per-user features bolt onto `/me` in #482 (notification preferences),
-#484 (Rewind), and friends. Each adds its own card to the index plus a
-dedicated sub-page; the layout, session, and self-scope plumbing are
-already in place.
+Per-user features bolt onto `/me` in #482 (notification preferences)
+and #484 (Rewind), among others. Each adds its own card to the index
+plus a dedicated sub-page; the layout, session, and self-scope
+plumbing are already in place.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in
