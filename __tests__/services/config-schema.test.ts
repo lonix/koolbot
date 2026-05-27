@@ -15,7 +15,7 @@ describe('Config Schema', () => {
     });
 
     it('should have reasonable default values for voice channel settings', () => {
-      expect(defaultConfig['voicechannels.category.name']).toBe('Voice Channels');
+      expect(defaultConfig['voicechannels.category_id']).toBe('');
       expect(defaultConfig['voicechannels.lobby.name']).toBe('Lobby');
       expect(defaultConfig['voicechannels.channel.prefix']).toBe('🎮');
     });

@@ -55,8 +55,8 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
     mockConfigService.getString = jest
       .fn()
       .mockImplementation((key: string, defaultValue?: string) => {
-        if (key === "voicechannels.category.name")
-          return Promise.resolve("Dynamic Voice Channels");
+        if (key === "voicechannels.category_id")
+          return Promise.resolve("category-id");
         if (key === "voicechannels.channel.suffix")
           return Promise.resolve("'s Room");
         if (key === "voicechannels.channel.prefix") return Promise.resolve("🎮");
@@ -81,6 +81,9 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
     mockGuild = {
       channels: {
         cache: {
+          // resolveManagedCategory uses cache.get(id); the mock category
+          // stands in for the category at "category-id".
+          get: jest.fn().mockReturnValue(mockCategory),
           find: jest.fn().mockReturnValue(mockCategory),
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,

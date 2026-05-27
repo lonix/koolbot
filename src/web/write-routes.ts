@@ -163,7 +163,7 @@ export const PROTECTED_KEYS: ReadonlySet<string> = new Set([
 const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
   voicechannels: [
     "voicechannels.enabled",
-    "voicechannels.category.name",
+    "voicechannels.category_id",
     "voicechannels.lobby.name",
     "voicechannels.lobby.offlinename",
     "voicechannels.channel.prefix",

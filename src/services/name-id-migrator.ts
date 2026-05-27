@@ -51,6 +51,17 @@ const RENAMES: RenameSpec[] = [
       return channel ? channel.id : null;
     },
   },
+  {
+    oldKey: "voicechannels.category.name",
+    newKey: "voicechannels.category_id",
+    description: "managed voice-channel category",
+    resolve: (guild, name) => {
+      const category = guild.channels.cache.find(
+        (ch) => ch.type === ChannelType.GuildCategory && ch.name === name,
+      );
+      return category ? category.id : null;
+    },
+  },
 ];
 
 export async function runNameToIdMigrations(

@@ -12,12 +12,7 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
-import {
-  CategoryChannel,
-  ChannelType,
-  Client,
-  type GuildBasedChannel,
-} from "discord.js";
+import { ChannelType, Client } from "discord.js";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
@@ -33,7 +28,10 @@ import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import Notice from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
-import { VoiceChannelManager } from "../services/voice-channel-manager.js";
+import {
+  VoiceChannelManager,
+  resolveManagedCategory,
+} from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
 import type { AuthenticatedRequest } from "./session.js";
 import {
@@ -815,18 +813,20 @@ export function createReadOnlyRouter(
       const [
         enabled,
         controlPanelEnabled,
-        categoryName,
         lobbyName,
         offlineLobbyName,
         prefix,
       ] = await Promise.all([
         config.getBoolean("voicechannels.enabled", false),
         config.getBoolean("voicechannels.controlpanel.enabled", true),
-        config.getString("voicechannels.category.name", "Voice Channels"),
         config.getString("voicechannels.lobby.name", "Lobby"),
         config.getString("voicechannels.lobby.offlinename", "Offline Lobby"),
         config.getString("voicechannels.channel.prefix", "🎮"),
       ]);
+      // Resolved below from the configured `voicechannels.category_id`;
+      // falls back to "(not configured)" so the renderer always has
+      // a string to show.
+      let categoryName = "(not configured)";
 
       let categoryFound = false;
       let totalManaged = 0;
@@ -843,14 +843,11 @@ export function createReadOnlyRouter(
       try {
         const guild = await client.guilds.fetch(common.guildId);
         await guild.channels.fetch();
-        const category = guild.channels.cache.find(
-          (c: GuildBasedChannel) =>
-            c.type === ChannelType.GuildCategory &&
-            (c as CategoryChannel).name === categoryName,
-        ) as CategoryChannel | undefined;
+        const category = await resolveManagedCategory(guild);
 
         if (category) {
           categoryFound = true;
+          categoryName = category.name;
           const voice = Array.from(category.children.cache.values())
             .filter((c) => c.type === ChannelType.GuildVoice)
             .sort((a, b) => a.name.localeCompare(b.name));

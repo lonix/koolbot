@@ -304,7 +304,7 @@ describe("renderSettingsPage", () => {
           category: "voicechannels",
           rows: [
             {
-              key: "voicechannels.category.name",
+              key: "voicechannels.category_id",
               label: "Managed category",
               current: "cat-1",
               defaultValue: "",

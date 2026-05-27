@@ -303,7 +303,8 @@ export class WizardService {
     const descriptions: Record<string, string> = {
       "voicechannels.enabled":
         "Enable/disable dynamic voice channel management",
-      "voicechannels.category.name": "Name of the category for voice channels",
+      "voicechannels.category_id":
+        "Discord category ID for managed voice channels",
       "voicechannels.lobby.name": "Name of the lobby channel",
       "voicechannels.lobby.offlinename": "Name of the offline lobby channel",
       "voicechannels.channel.prefix": "Prefix for dynamically created channels",

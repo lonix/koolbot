@@ -291,7 +291,7 @@ Dynamic voice channel creation and management.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `voicechannels.enabled` | `false` | Enable dynamic voice channel management |
-| `voicechannels.category.name` | `"Voice Channels"` | Discord category name for managed channels |
+| `voicechannels.category_id` | `""` | Discord category ID for managed channels (pick from the dropdown in /admin/settings) |
 | `voicechannels.lobby.name` | `"Lobby"` | Lobby channel name when bot is online |
 | `voicechannels.lobby.offlinename` | `"Offline Lobby"` | Lobby channel name when bot is offline |
 | `voicechannels.channel.prefix` | `"🎮"` | Prefix for user-created channels |
@@ -724,7 +724,7 @@ above).
 #### Voice Channels
 
 - `voicechannels.enabled` (bool, default: false)
-- `voicechannels.category.name` (string, default: "Voice Channels")
+- `voicechannels.category_id` (category, default: "")
 - `voicechannels.lobby.name` (string, default: "Lobby")
 - `voicechannels.lobby.offlinename` (string, default: "Offline Lobby")
 - `voicechannels.channel.prefix` (string, default: "🎮")
