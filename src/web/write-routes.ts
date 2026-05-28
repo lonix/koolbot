@@ -239,6 +239,27 @@ export function coerceConfigValue(
   return { ok: true, value: String(raw ?? "") };
 }
 
+/**
+ * Pick the cascade "master" toggle for a Settings section: the boolean
+ * `.enabled` key with the fewest dotted segments among the submitted keys
+ * (the top-level feature switch). Mirrors `findCascadeMasterKey` in
+ * admin-views so the server skips the same dependents the client greyed out
+ * (issue #485). Returns null when the section has no boolean `.enabled` key.
+ */
+export function findSectionMasterKey(keys: string[]): string | null {
+  let master: string | null = null;
+  for (const key of keys) {
+    if (!key.endsWith(".enabled")) continue;
+    if (typeof defaultConfig[key as keyof typeof defaultConfig] !== "boolean") {
+      continue;
+    }
+    if (master === null || key.split(".").length < master.split(".").length) {
+      master = key;
+    }
+  }
+  return master;
+}
+
 function getCsrfFromReq(req: AuthenticatedRequest): string {
   return (req as Request & { csrfToken?: string }).csrfToken ?? "";
 }
@@ -429,6 +450,19 @@ export function createWriteRouter(
         return;
       }
 
+      // Cascading disable (#485): when the section's master `.enabled` toggle
+      // (the shortest boolean `.enabled` key in the section) is unchecked, the
+      // dependent controls were greyed out client-side and aren't submitted.
+      // Honour that here — write only the master flag and leave the rest
+      // untouched, so disabling a feature can't silently clobber its
+      // sub-settings (an absent number field would otherwise be rejected, an
+      // absent string blanked).
+      const masterKey = findSectionMasterKey(keys);
+      const masterOff =
+        masterKey !== null &&
+        body[settingValueFieldName(masterKey)] !== "true" &&
+        body[settingValueFieldName(masterKey)] !== true;
+
       // Phase 1: coerce every value before touching the DB. An array of
       // unique keys is required so a duplicate hidden input can't trick
       // the handler into double-writing or mis-counting rejections.
@@ -441,6 +475,7 @@ export function createWriteRouter(
       for (const key of keys) {
         if (seen.has(key)) continue;
         seen.add(key);
+        if (masterOff && key !== masterKey) continue;
         const raw = body[settingValueFieldName(key)];
         const r = coerceConfigValue(key, raw);
         if (r.ok) {
@@ -1081,9 +1116,23 @@ export function createWriteRouter(
 
       const featureKey = state.selectedFeatures[stepIndex];
       const settingKeys = WIZARD_FEATURE_SETTINGS[featureKey] ?? [];
+
+      // Cascading disable (#485): when the feature's master `.enabled` toggle
+      // is off, the dependent controls were greyed out client-side and aren't
+      // submitted. Mirror that on the server — record only `<feature>.enabled
+      // = false` and skip the rest, so absent dependents don't surface as
+      // bogus "invalid input" drops (a missing number field would otherwise
+      // fail coercion).
+      const masterKey = `${featureKey}.enabled`;
+      const masterOff =
+        settingKeys.includes(masterKey) &&
+        (req.body as Record<string, unknown> | undefined)?.[masterKey] !==
+          "true";
+
       const saved: Record<string, unknown> = {};
       const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
+        if (masterOff && k !== masterKey) continue;
         const raw = (req.body as Record<string, unknown> | undefined)?.[k];
         const coerced = coerceConfigValue(k, raw);
         if (coerced.ok) {

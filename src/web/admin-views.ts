@@ -384,6 +384,28 @@ export function settingValueFieldName(key: string): string {
   return `value_${key}`;
 }
 
+/**
+ * Pick the cascade "master" toggle for a settings section: the boolean
+ * `.enabled` key with the fewest dotted segments (the top-level feature
+ * switch). Sub-feature toggles like `voicetracking.announcements.enabled`
+ * are dependents, not masters. Returns null when the section has no
+ * `.enabled` boolean to gate on. Shared by the wizard and Settings page so
+ * both surfaces grey out the same way (issue #485).
+ */
+export function findCascadeMasterKey(rows: SettingRow[]): string | null {
+  let master: SettingRow | null = null;
+  for (const r of rows) {
+    if (r.type !== "boolean" || !r.key.endsWith(".enabled")) continue;
+    if (
+      master === null ||
+      r.key.split(".").length < master.key.split(".").length
+    ) {
+      master = r;
+    }
+  }
+  return master?.key ?? null;
+}
+
 function renderSettingControl(
   r: SettingRow,
   pickers: {
@@ -391,6 +413,7 @@ function renderSettingControl(
     categoryChannels: ChannelOption[];
     roles: RoleOption[];
   },
+  isCascadeMaster = false,
 ): string {
   const primitive = coerceToDisplayValue(r.current);
   const currentStr = typeof primitive === "string" ? primitive : "";
@@ -398,9 +421,10 @@ function renderSettingControl(
 
   if (r.type === "boolean") {
     const checked = primitive === true ? " checked" : "";
+    const masterAttr = isCascadeMaster ? " data-cascade-master" : "";
     return (
       `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
-      `<input type="checkbox" name="${valueName}" value="true"${checked}> ` +
+      `<input type="checkbox" name="${valueName}" value="true"${checked}${masterAttr}> ` +
       `<span class="mono">${primitive === true ? "true" : "false"}</span>` +
       `</label>`
     );
@@ -487,6 +511,13 @@ export function renderSettingsPage(props: SettingsProps): string {
         title: g.category,
         description: "",
       };
+      // The section's top-level feature toggle is the cascade master: the
+      // shortest `.enabled` boolean key in the section (e.g.
+      // `voicechannels.enabled`, not `voicechannels.controlpanel.enabled`).
+      // When it's off, every other control in the section greys out and is
+      // ignored on save — the save-section handler skips the dependents so
+      // they aren't clobbered (issue #485).
+      const cascadeMasterKey = findCascadeMasterKey(g.rows);
       const rows = g.rows
         .map(
           (r) => `<tr>
@@ -495,7 +526,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td>${renderSettingControl(r, pickers)}${renderResetButton(r.key)}</td>
+<td>${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td style="white-space:nowrap">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
@@ -508,11 +539,12 @@ export function renderSettingsPage(props: SettingsProps): string {
       // One <form> per category. Save submits every row's value in one
       // atomic request; Reset buttons inside the same form use formaction
       // to retarget /admin/settings/reset for a single key (issue #433).
+      const scopeAttr = cascadeMasterKey ? " data-cascade-scope" : "";
       return `
 <div class="card">
   <h2>${escapeHtml(meta.title)}</h2>
   ${descHtml}
-  <form method="POST" action="/admin/settings/save-section">
+  <form method="POST" action="/admin/settings/save-section"${scopeAttr}>
     <input type="hidden" name="_csrf" value="${csrf}">
     <input type="hidden" name="category" value="${escapeHtml(g.category)}">
     <table>
@@ -854,6 +886,12 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     desc: "",
   };
 
+  // The feature's top-level `.enabled` toggle is the "master" for this step:
+  // when it's off, every other control greys out and is ignored on submit
+  // (issue #485). Sub-toggles like `voicetracking.announcements.enabled` are
+  // dependents, not masters.
+  const masterKey = `${props.featureKey}.enabled`;
+
   const fields = props.settingKeys
     .map((k) => {
       const current = props.currentValues[k];
@@ -877,7 +915,8 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       let control: string;
       if (type === "boolean") {
         const checked = current === true ? " checked" : "";
-        control = `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="true"${checked}> Enable</label>`;
+        const masterAttr = k === masterKey ? " data-cascade-master" : "";
+        control = `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="true"${checked}${masterAttr}> Enable</label>`;
       } else if (type === "number") {
         control = `<input type="number" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="${escapeHtml(display)}">`;
       } else {
@@ -896,15 +935,26 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   const nextLabel =
     props.stepIndex + 1 < props.totalSteps ? "Next →" : "Review →";
 
+  // A "← Previous" link appears on every step after the first. It's a plain
+  // GET back to the prior step — the wizard session already holds the saved
+  // values, and the step renderer pre-fills from `wizard.getConfiguration`,
+  // so navigating back preserves in-progress state without re-submitting
+  // this step's form (issue #485).
+  const previousButton =
+    props.stepIndex >= 1
+      ? `<a href="/admin/wizard?step=${props.stepIndex - 1}" class="btn">← Previous</a>`
+      : "";
+
   const body = `
 <h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
 <p class="subtitle">${escapeHtml(info.desc)}</p>
 ${renderFlash(props.flash)}
-<form method="POST" action="/admin/wizard/step/${props.stepIndex}">
+<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
   <input type="hidden" name="_csrf" value="${csrf}">
   <div class="card">${fields}</div>
   <div class="actions">
     <button type="submit" class="btn btn-primary">${nextLabel}</button>
+    ${previousButton}
     <a href="/admin/wizard" class="btn">← Back to features</a>
   </div>
 </form>

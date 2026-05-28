@@ -212,6 +212,8 @@ const STYLE = [
   ".field-row{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.75rem}",
   ".field-row > label{font-size:.85rem;color:#94a3b8}",
   ".field-row .help{font-size:.75rem;color:#6b7280;margin-top:.15rem}",
+  // Cascade greying: rows whose master `.enabled` toggle is off (#485).
+  ".cascade-off{opacity:.5}",
   ".wizard-features{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.75rem;margin-bottom:1rem}",
   ".feature-card{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.75rem 1rem;display:flex;gap:.75rem;align-items:flex-start}",
   ".feature-card input{margin-top:.2rem;flex-shrink:0}",
@@ -343,6 +345,27 @@ const CRON_PICKER_SCRIPT =
   "refresh()}" +
   "document.querySelectorAll('.cron-picker').forEach(wire)})();";
 
+// Cascading disable (#485). When a master `.enabled` checkbox
+// (`[data-cascade-master]`) inside a `[data-cascade-scope]` container is
+// unchecked, every other input/select/textarea in that scope is disabled
+// and its row greyed via `.cascade-off`. Re-checking re-enables them with
+// their values intact (we only toggle `disabled`, never the value). Hidden
+// inputs (csrf/keys/category) and buttons are left alone so the form still
+// submits correctly. Used by both the wizard step form and the per-section
+// Settings forms.
+const CASCADE_DISABLE_SCRIPT =
+  "(function(){" +
+  "function wire(master){" +
+  "var scope=master.closest('[data-cascade-scope]');if(!scope)return;" +
+  "function apply(){var off=!master.checked;" +
+  "scope.querySelectorAll('input,select,textarea').forEach(function(el){" +
+  "if(el===master||el.type==='hidden')return;" +
+  "el.disabled=off;" +
+  "var row=el.closest('.field-row,tr');" +
+  "if(row)row.classList.toggle('cascade-off',off)})}" +
+  "master.addEventListener('change',apply);apply()}" +
+  "document.querySelectorAll('[data-cascade-master]').forEach(wire)})();";
+
 function renderNav(
   active: string,
   navFeatureStatus?: NavFeatureStatus,
@@ -394,6 +417,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<main>${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     `<script>${CRON_PICKER_SCRIPT}</script>`,
+    `<script>${CASCADE_DISABLE_SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }

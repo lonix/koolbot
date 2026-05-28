@@ -1,5 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
 import {
+  findCascadeMasterKey,
   parseCronToPickerState,
   renderAnnouncementsPage,
   renderBootstrapPage,
@@ -1136,6 +1137,186 @@ describe("renderWizardStepPage", () => {
     });
     expect(html).toContain("Review →");
     expect(html).not.toContain("Next →");
+  });
+
+  it("omits the Previous button on the first step (#485)", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      stepIndex: 0,
+      totalSteps: 3,
+      featureKey: "quotes",
+      settingKeys: [],
+      currentValues: {},
+      defaultValues: {},
+      metadata: {},
+    });
+    expect(html).not.toContain("← Previous");
+  });
+
+  it("shows a Previous button linking to the prior step on later steps (#485)", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      stepIndex: 2,
+      totalSteps: 3,
+      featureKey: "quotes",
+      settingKeys: [],
+      currentValues: {},
+      defaultValues: {},
+      metadata: {},
+    });
+    expect(html).toContain("← Previous");
+    expect(html).toContain('href="/admin/wizard?step=1"');
+  });
+
+  it("marks the feature master toggle and form scope for cascading disable (#485)", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      stepIndex: 0,
+      totalSteps: 1,
+      featureKey: "voicetracking",
+      settingKeys: [
+        "voicetracking.enabled",
+        "voicetracking.announcements.enabled",
+        "voicetracking.announcements.channel_id",
+      ],
+      currentValues: {
+        "voicetracking.enabled": true,
+        "voicetracking.announcements.enabled": false,
+        "voicetracking.announcements.channel_id": "",
+      },
+      defaultValues: {
+        "voicetracking.enabled": false,
+        "voicetracking.announcements.enabled": false,
+        "voicetracking.announcements.channel_id": "",
+      },
+      metadata: {},
+    });
+    // The step form is the cascade scope.
+    expect(html).toContain(
+      'action="/admin/wizard/step/0" data-cascade-scope',
+    );
+    // Only the top-level feature toggle is the master; the sub-toggle is a
+    // dependent (no data-cascade-master attribute).
+    expect(html).toMatch(
+      /name="voicetracking.enabled"[^>]*value="true"[^>]*data-cascade-master/,
+    );
+    expect(html).not.toMatch(
+      /name="voicetracking.announcements.enabled"[^>]*data-cascade-master/,
+    );
+  });
+});
+
+describe("findCascadeMasterKey", () => {
+  const row = (key: string, type: string) => ({
+    key,
+    label: key,
+    current: undefined,
+    defaultValue: undefined,
+    type,
+    description: "",
+    category: key.split(".")[0],
+  });
+
+  it("returns the shortest boolean .enabled key as the master", () => {
+    expect(
+      findCascadeMasterKey([
+        row("voicetracking.enabled", "boolean"),
+        row("voicetracking.announcements.enabled", "boolean"),
+        row("voicetracking.announcements.channel_id", "channel"),
+      ]),
+    ).toBe("voicetracking.enabled");
+  });
+
+  it("ignores non-boolean .enabled keys", () => {
+    expect(
+      findCascadeMasterKey([row("quotes.enabled", "string")]),
+    ).toBeNull();
+  });
+
+  it("returns null when no .enabled key exists", () => {
+    expect(
+      findCascadeMasterKey([
+        row("quotes.max_length", "number"),
+        row("quotes.channel_id", "channel"),
+      ]),
+    ).toBeNull();
+  });
+});
+
+describe("renderSettingsPage cascading disable (#485)", () => {
+  it("marks the section master toggle and scopes the form when a .enabled row exists", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicechannels",
+          rows: [
+            {
+              key: "voicechannels.enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "voicechannels",
+            },
+            {
+              key: "voicechannels.controlpanel.enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "voicechannels",
+            },
+            {
+              key: "voicechannels.lobby.name",
+              current: "Lobby",
+              defaultValue: "Lobby",
+              type: "string",
+              description: "",
+              category: "voicechannels",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain(
+      'action="/admin/settings/save-section" data-cascade-scope',
+    );
+    expect(html).toMatch(
+      /name="value_voicechannels.enabled"[^>]*data-cascade-master/,
+    );
+    // The sub-toggle is a dependent, not a master.
+    expect(html).not.toMatch(
+      /name="value_voicechannels.controlpanel.enabled"[^>]*data-cascade-master/,
+    );
+  });
+
+  it("does not scope sections without a boolean .enabled row", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "quotes",
+          rows: [
+            {
+              key: "quotes.max_length",
+              current: 500,
+              defaultValue: 1000,
+              type: "number",
+              description: "",
+              category: "quotes",
+            },
+          ],
+        },
+      ],
+    });
+    // The save-section form carries no cascade-scope attribute, and no
+    // control is tagged as a master. (The shared client script — which
+    // references these attribute names as query selectors — is always
+    // embedded, so assert against the form/control markup specifically.)
+    expect(html).toContain('action="/admin/settings/save-section">');
+    expect(html).not.toMatch(/<form[^>]*data-cascade-scope/);
+    expect(html).not.toMatch(/name="value_[^"]*"[^>]*data-cascade-master/);
   });
 });
 
