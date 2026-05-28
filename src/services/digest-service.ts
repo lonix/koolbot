@@ -12,10 +12,7 @@ import { AchievementsService } from "./achievements-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import { DigestState } from "../models/digest-state.js";
 import { UserAchievements } from "../models/user-achievements.js";
-import {
-  ACCOLADE_METADATA,
-  type AccoladeType,
-} from "../content/accolades.js";
+import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
 import logger from "../utils/logger.js";
 
@@ -83,10 +80,12 @@ function formatRankDelta(
  * library — every line ties back to a real badge the user could earn.
  */
 function pickMotivationalFooter(seed: number): string {
-  const descriptions = Object.values(ACCOLADE_METADATA).map((m) => m.description);
+  const descriptions = Object.values(ACCOLADE_METADATA).map(
+    (m) => m.description,
+  );
   if (descriptions.length === 0) return "Keep it up!";
-  const index = ((seed % descriptions.length) + descriptions.length) %
-    descriptions.length;
+  const index =
+    ((seed % descriptions.length) + descriptions.length) % descriptions.length;
   return descriptions[index];
 }
 
@@ -180,9 +179,7 @@ export class DigestService {
       const cronExpression = sanitizeCronExpression(rawCron);
 
       if (!this.validateCronExpression(cronExpression)) {
-        logger.error(
-          `Digest service not started: invalid cron "${rawCron}"`,
-        );
+        logger.error(`Digest service not started: invalid cron "${rawCron}"`);
         this.isInitialized = true;
         return;
       }
@@ -259,8 +256,10 @@ export class DigestService {
         true,
       );
 
-      const minActiveSeconds = Math.max(0, minActiveMinutes) * SECONDS_PER_MINUTE;
-      const streakMinSeconds = Math.max(0, streakMinMinutes) * SECONDS_PER_MINUTE;
+      const minActiveSeconds =
+        Math.max(0, minActiveMinutes) * SECONDS_PER_MINUTE;
+      const streakMinSeconds =
+        Math.max(0, streakMinMinutes) * SECONDS_PER_MINUTE;
 
       const tracker = VoiceChannelTracker.getInstance(this.client);
       const prefsService = UserNotificationPrefsService.getInstance();
@@ -410,7 +409,8 @@ export class DigestService {
     const row = await UserAchievements.findOne({ userId });
     if (!row) return [];
 
-    const lines: Array<{ emoji: string; name: string; description: string }> = [];
+    const lines: Array<{ emoji: string; name: string; description: string }> =
+      [];
 
     for (const accolade of row.accolades ?? []) {
       if (!accolade.earnedAt || accolade.earnedAt < oneWeekAgo) continue;
@@ -444,12 +444,10 @@ export class DigestService {
 
   private buildEmbed(args: {
     user: QualifyingUser;
-    previousState:
-      | {
-          lastWeekTotalTime: number;
-          lastWeekRank: number | null;
-        }
-      | null;
+    previousState: {
+      lastWeekTotalTime: number;
+      lastWeekRank: number | null;
+    } | null;
     streakWeeks: number;
     includeAchievements: boolean;
     weeklyAchievements: Array<{
@@ -458,7 +456,13 @@ export class DigestService {
       description: string;
     }>;
   }): EmbedBuilder {
-    const { user, previousState, streakWeeks, includeAchievements, weeklyAchievements } = args;
+    const {
+      user,
+      previousState,
+      streakWeeks,
+      includeAchievements,
+      weeklyAchievements,
+    } = args;
     const previousTime = previousState?.lastWeekTotalTime ?? 0;
     const previousRank = previousState?.lastWeekRank ?? null;
 
