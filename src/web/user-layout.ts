@@ -311,7 +311,7 @@ function renderYearPicker(current: number, years: number[]): string {
 
 function renderBadges(badges: RewindBadgeView[]): string {
   if (badges.length === 0) {
-    return '<div class="empty">_None this year — there\'s always next year!_</div>';
+    return '<div class="empty">None this year — there\'s always next year!</div>';
   }
   return (
     '<div class="rw-badges">' +

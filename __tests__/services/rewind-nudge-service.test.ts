@@ -23,6 +23,9 @@ const mockUsersFetch = jest.fn();
 
 const mockTrackingAggregate = jest.fn();
 
+const mockNudgeStateFindOne = jest.fn();
+const mockNudgeStateFindOneAndUpdate = jest.fn();
+
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
@@ -48,6 +51,13 @@ jest.unstable_mockModule("../../src/services/discord-logger.js", () => ({
 jest.unstable_mockModule("../../src/models/voice-channel-tracking.js", () => ({
   VoiceChannelTracking: {
     aggregate: (...args: unknown[]) => mockTrackingAggregate(...args),
+  },
+}));
+
+jest.unstable_mockModule("../../src/models/rewind-nudge-state.js", () => ({
+  RewindNudgeState: {
+    findOne: mockNudgeStateFindOne,
+    findOneAndUpdate: mockNudgeStateFindOneAndUpdate,
   },
 }));
 
@@ -110,6 +120,9 @@ describe("RewindNudgeService", () => {
     }));
     mockUserSend.mockResolvedValue(undefined);
     mockTrackingAggregate.mockResolvedValue([]);
+    // Default: no prior delivery marker → not a duplicate run.
+    mockNudgeStateFindOne.mockResolvedValue(null);
+    mockNudgeStateFindOneAndUpdate.mockResolvedValue({});
   });
 
   describe("singleton", () => {
@@ -175,7 +188,7 @@ describe("RewindNudgeService", () => {
       expect(mockUserSend).not.toHaveBeenCalled();
     });
 
-    it("sends a DM when prefs.rewind is true", async () => {
+    it("sends a DM when prefs.rewind is true and writes the delivery marker", async () => {
       mockTrackingAggregate.mockResolvedValueOnce([
         { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
       ]);
@@ -185,6 +198,39 @@ describe("RewindNudgeService", () => {
 
       expect(result!.sent).toBe(1);
       expect(mockUserSend).toHaveBeenCalledTimes(1);
+      expect(mockNudgeStateFindOneAndUpdate).toHaveBeenCalledTimes(1);
+      const [filter, update] =
+        mockNudgeStateFindOneAndUpdate.mock.calls[0] as [
+          Record<string, unknown>,
+          { $set: Record<string, unknown> },
+        ];
+      const year = new Date().getUTCFullYear();
+      expect(filter).toEqual({ userId: "u1", guildId: "guild-1", year });
+      expect(update.$set).toMatchObject({
+        userId: "u1",
+        guildId: "guild-1",
+        year,
+      });
+    });
+
+    it("skips users who have already been nudged this year (one-shot guard)", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+      mockNudgeStateFindOne.mockResolvedValueOnce({
+        userId: "u1",
+        guildId: "guild-1",
+        year: new Date().getUTCFullYear(),
+        sentAt: new Date(),
+      });
+
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.sent).toBe(0);
+      expect(result!.skippedAlreadySent).toBe(1);
+      expect(mockUserSend).not.toHaveBeenCalled();
+      expect(mockNudgeStateFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("silently skips users with DMs closed (Discord error 50007)", async () => {
@@ -200,6 +246,9 @@ describe("RewindNudgeService", () => {
       expect(result!.sent).toBe(0);
       expect(result!.skippedDmsClosed).toBe(1);
       expect(result!.failed).toBe(0);
+      // Marker is only persisted on successful delivery, so a retry on
+      // the next run can pick the user up again.
+      expect(mockNudgeStateFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
     it("counts non-DM-closed errors as failed", async () => {

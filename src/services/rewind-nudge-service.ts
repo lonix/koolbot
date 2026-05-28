@@ -4,6 +4,7 @@ import { ConfigService } from "./config-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
+import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -29,6 +30,8 @@ export interface RewindNudgeRunSummary {
   sent: number;
   skippedOptOut: number;
   skippedDmsClosed: number;
+  /** Already nudged for this year — duplicate-delivery guard. */
+  skippedAlreadySent: number;
   failed: number;
 }
 
@@ -203,6 +206,7 @@ export class RewindNudgeService {
         sent: 0,
         skippedOptOut: 0,
         skippedDmsClosed: 0,
+        skippedAlreadySent: 0,
         failed: 0,
       };
 
@@ -243,6 +247,20 @@ export class RewindNudgeService {
 
       for (const user of qualifying) {
         try {
+          // One-shot per (userId, guildId, year). A re-run of the cron
+          // — or a manual `runNow()` for validation — must not produce
+          // a duplicate DM. We check before any other work so an
+          // already-nudged user costs only this lookup.
+          const existing = await RewindNudgeState.findOne({
+            userId: user.userId,
+            guildId,
+            year,
+          });
+          if (existing) {
+            summary.skippedAlreadySent += 1;
+            continue;
+          }
+
           const prefs = await prefsService.getPrefs(user.userId, guildId);
           if (!prefs.rewind) {
             summary.skippedOptOut += 1;
@@ -255,6 +273,21 @@ export class RewindNudgeService {
             continue;
           }
           summary.sent += 1;
+
+          // Record the delivery marker only after a successful send so
+          // DM-closed / failed deliveries can be retried on the next run.
+          await RewindNudgeState.findOneAndUpdate(
+            { userId: user.userId, guildId, year },
+            {
+              $set: {
+                userId: user.userId,
+                guildId,
+                year,
+                sentAt: summary.ranAt,
+              },
+            },
+            { upsert: true, new: true, setDefaultsOnInsert: true },
+          );
         } catch (error) {
           summary.failed += 1;
           logger.error(
@@ -267,6 +300,7 @@ export class RewindNudgeService {
       logger.info(
         `Rewind nudge complete: year=${summary.year} qualifying=${summary.qualifying} ` +
           `sent=${summary.sent} opted_out=${summary.skippedOptOut} ` +
+          `already_sent=${summary.skippedAlreadySent} ` +
           `dms_closed=${summary.skippedDmsClosed} failed=${summary.failed}`,
       );
 
@@ -319,6 +353,7 @@ export class RewindNudgeService {
       const message =
         `Year ${summary.year} · qualifying: ${summary.qualifying} · ` +
         `sent: ${summary.sent} · opted out: ${summary.skippedOptOut} · ` +
+        `already sent: ${summary.skippedAlreadySent} · ` +
         `DMs closed: ${summary.skippedDmsClosed} · failed: ${summary.failed}`;
       await discordLogger.logCronSuccess("Rewind Nudge", message);
     } catch (error) {
