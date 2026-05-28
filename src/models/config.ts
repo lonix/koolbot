@@ -43,6 +43,7 @@ const ConfigSchema = new Schema<IConfig>(
         "quotes",
         "ratelimit",
         "reactionroles",
+        "rewind",
         "voicechannels",
         "voicetracking",
         "wizard", // Kept for backward compatibility; key removed but legacy rows may exist

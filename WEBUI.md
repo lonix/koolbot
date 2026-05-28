@@ -661,21 +661,23 @@ side effect, since the HMAC key changes.
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                                    | What it's for                                                                                                                                             |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
-| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements today; #483 weekly digest and #484 Rewind once they land). Each toggle records a `WebAuditLog` row. |
+| Page                                    | What it's for                                                                                                                          |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                   |
+| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements, weekly digest, Rewind nudge). Each toggle records a `WebAuditLog` row.          |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top channels, peak day, longest streak, badges earned, annual rank, and a weekly-rank journey.    |
 
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;
 toggling one row is a single POST that records the diff in the audit
-log and PRG-redirects back to the page. Rows for features that haven't
-shipped yet (`digest`, `rewind`) are still functional — the stored
-toggle is read by the dependent issues' DM paths when they land.
+log and PRG-redirects back to the page.
 
-Future per-user features (Rewind in #484, etc.) bolt onto `/me` as
-their own pages; the layout, session, and self-scope plumbing are
-already in place.
+The **Rewind** page defaults to the current calendar year (UTC);
+`/me/rewind/:year` lets you browse past years. A small year picker at
+the top of the page only offers years for which you have data (voice
+sessions or badges). Years with no data render a friendly empty state.
+Aggregation is on-demand and not cached in v1 — see [`SETTINGS.md`](SETTINGS.md#-rewind-year-in-review)
+for the `rewind.*` keys that control the end-of-year DM nudge.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

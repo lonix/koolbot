@@ -38,6 +38,7 @@ import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
 import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
 import { DigestService } from "./services/digest-service.js";
+import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
@@ -426,6 +427,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         pollService.destroy();
         leaderboardRoleService.destroy();
         digestService.destroy();
+        rewindNudgeService.destroy();
         WizardService.getInstance().shutdown();
         MonitoringService.getInstance().destroy();
         await botStatusService.shutdown();
@@ -487,6 +489,7 @@ let reactionRoleService: ReactionRoleService;
 let pollService: PollService;
 let leaderboardRoleService: LeaderboardRoleService;
 let digestService: DigestService;
+let rewindNudgeService: RewindNudgeService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
@@ -506,6 +509,7 @@ try {
   pollService = PollService.getInstance(client);
   leaderboardRoleService = LeaderboardRoleService.getInstance(client);
   digestService = DigestService.getInstance(client);
+  rewindNudgeService = RewindNudgeService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
@@ -595,6 +599,11 @@ async function initializeServices(): Promise<void> {
 
     // Initialize weekly voice-activity digest service (#483)
     await digestService.start();
+
+    // Initialize annual rewind nudge service (#484). The /me/rewind
+    // page itself is served by the user WebUI router regardless of
+    // this service — this only schedules the end-of-year DM nudge.
+    await rewindNudgeService.start();
 
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();

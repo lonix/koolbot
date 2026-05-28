@@ -61,6 +61,11 @@ export interface ConfigSchema {
   "digest.streak_min_minutes": number; // Per-week minutes that count toward a streak
   "digest.include_achievements": boolean;
 
+  // Annual Personal Year-in-Review (Rewind) (#484)
+  "rewind.enabled": boolean;
+  "rewind.cron": string; // Cron schedule for the end-of-year DM nudge
+  "rewind.min_minutes": number; // Min annual minutes to qualify for the nudge
+
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
@@ -184,6 +189,14 @@ export const defaultConfig: ConfigSchema = {
   "digest.min_active_minutes": 30,
   "digest.streak_min_minutes": 30,
   "digest.include_achievements": true,
+
+  // Rewind year-in-review defaults (#484). Master gate off, follows
+  // rule 1. The page works whenever the data exists; this gate only
+  // controls the end-of-year DM nudge.
+  "rewind.enabled": false,
+  "rewind.cron": "0 10 30 12 *", // Dec 30 at 10:00 in the host timezone
+  "rewind.min_minutes": 60,
+
   // Reaction Roles defaults
   "reactionroles.enabled": false,
   "reactionroles.message_channel_id": "",
@@ -302,6 +315,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Weekly Digest",
     description:
       "Personalised weekly DM summarising each user's voice activity, rank, streak, and new achievements. Opt-out lives on the user's /me/notifications page.",
+  },
+  rewind: {
+    title: "Rewind (Year-in-Review)",
+    description:
+      "Personalised end-of-year recap at /me/rewind plus a one-shot DM nudge in late December. Opt-out lives on the user's /me/notifications page.",
   },
   reactionroles: {
     title: "Reaction Roles",
@@ -630,6 +648,29 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Embed the achievements earned during the past week alongside the activity summary.",
     category: "digest",
     type: "boolean",
+  },
+
+  // Rewind year-in-review (#484)
+  "rewind.enabled": {
+    label: "Rewind end-of-year nudge enabled",
+    description:
+      "Send a one-shot end-of-year DM linking eligible users to their personal year-in-review at /me/rewind. The page itself is always available.",
+    category: "rewind",
+    type: "boolean",
+  },
+  "rewind.cron": {
+    label: "Rewind nudge schedule (cron)",
+    description:
+      "Cron expression for when the end-of-year DM nudge runs (defaults to December 30 at 10:00 in the host timezone).",
+    category: "rewind",
+    type: "cron",
+  },
+  "rewind.min_minutes": {
+    label: "Minimum annual minutes to qualify",
+    description:
+      "Users with less than this many minutes of voice activity in the year are skipped by the end-of-year DM nudge. The /me/rewind page itself is unaffected.",
+    category: "rewind",
+    type: "number",
   },
 
   // Reaction Roles

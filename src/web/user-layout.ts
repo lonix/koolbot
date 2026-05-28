@@ -27,6 +27,7 @@ interface UserNavItem {
 export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/", label: "Overview" },
   { href: "/me/notifications", label: "Notifications" },
+  { href: "/me/rewind", label: "Rewind" },
 ];
 
 export interface UserFlashMessage {
@@ -105,6 +106,36 @@ const STYLE = [
   ".page-nav a{padding:.35rem .75rem;border-radius:4px;background:#161a22;border:1px solid #2d3748;color:#cbd5e1;font-size:.85rem;font-weight:600}",
   ".page-nav a:hover{background:#1f2937;text-decoration:none;color:#fff}",
   ".page-nav a.active{background:#1e3a8a;border-color:#1e3a8a;color:#fff}",
+  ".rw-hero{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%);border:1px solid #4338ca;border-radius:8px;padding:1.5rem;margin:0 0 1rem;text-align:center}",
+  ".rw-hero .total{font-size:2.5rem;font-weight:700;color:#fff;line-height:1.1}",
+  ".rw-hero .compare{margin-top:.4rem;color:#c7d2fe;font-size:1rem}",
+  ".rw-hero .sub{margin-top:.6rem;color:#a5b4fc;font-size:.85rem}",
+  ".rw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin:0 0 1rem}",
+  ".rw-stat{background:#161a22;border:1px solid #2d3748;border-radius:8px;padding:.85rem 1rem}",
+  ".rw-stat .label{font-size:.7rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}",
+  ".rw-stat .value{font-size:1.2rem;color:#e4e6eb;font-weight:600;margin-top:.2rem}",
+  ".rw-stat .detail{font-size:.8rem;color:#94a3b8;margin-top:.1rem}",
+  ".rw-channels{list-style:none;padding:0;margin:0}",
+  ".rw-channels li{display:flex;justify-content:space-between;align-items:baseline;padding:.4rem 0;border-bottom:1px solid #1f2937;gap:.5rem}",
+  ".rw-channels li:last-child{border-bottom:0}",
+  ".rw-channels .name{color:#e4e6eb;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}",
+  ".rw-channels .dur{color:#94a3b8;font-size:.85rem;flex-shrink:0}",
+  ".rw-badges{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:.6rem}",
+  ".rw-badge{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.6rem .8rem;display:flex;gap:.6rem;align-items:flex-start}",
+  ".rw-badge .emoji{font-size:1.4rem;line-height:1}",
+  ".rw-badge .body{flex:1;min-width:0}",
+  ".rw-badge .body .name{font-weight:600;color:#e4e6eb;font-size:.9rem}",
+  ".rw-badge .body .desc{color:#94a3b8;font-size:.75rem;margin-top:.15rem}",
+  ".rw-badge .body .date{color:#64748b;font-size:.7rem;margin-top:.2rem}",
+  ".rw-year-picker{display:flex;gap:.4rem;flex-wrap:wrap;margin:0 0 1rem}",
+  ".rw-year-picker a{padding:.3rem .7rem;border-radius:999px;background:#161a22;border:1px solid #2d3748;color:#cbd5e1;font-size:.8rem;font-weight:600}",
+  ".rw-year-picker a:hover{background:#1f2937;text-decoration:none;color:#fff}",
+  ".rw-year-picker a.current{background:#312e81;border-color:#4338ca;color:#fff}",
+  ".rw-journey{display:flex;justify-content:space-around;gap:.5rem;flex-wrap:wrap}",
+  ".rw-journey .step{text-align:center;flex:1;min-width:100px}",
+  ".rw-journey .step .num{font-size:1.4rem;font-weight:700;color:#e4e6eb}",
+  ".rw-journey .step .when{font-size:.75rem;color:#94a3b8;margin-top:.15rem}",
+  ".rw-journey .step .label{font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem}",
 ].join("");
 
 // Same DOM hooks (`#session-countdown`, `data-remaining-ms`,
@@ -214,8 +245,8 @@ export function renderUserIndexBody(opts: {
     '<ul class="feature-list">',
     '<li><span class="feature-name"><a href="/me/notifications">Notifications</a></span>' +
       '<span class="feature-desc">Opt in or out of DM nudges from Koolbot.</span></li>',
-    '<li><span class="feature-name">Rewind</span>' +
-      '<span class="feature-desc">A personal recap of your activity on this server (coming in #484).</span></li>',
+    '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
+      '<span class="feature-desc">Your personal year-in-review of voice activity, top channels, peak day, and badges earned.</span></li>',
     "</ul>",
     "</div>",
     '<div class="card">',
@@ -223,6 +254,206 @@ export function renderUserIndexBody(opts: {
     `<p class="mono">User: ${escapeHtml(opts.discordUserId)} · Guild: ${escapeHtml(opts.guildId)}</p>`,
     "<p>To sign in as a different user, run <code>/config</code> in Discord with that account.</p>",
     "</div>",
+  ].join("");
+}
+
+// --------------------------------------------------------------------
+// Rewind page (#484)
+// --------------------------------------------------------------------
+
+export interface RewindBadgeView {
+  emoji: string;
+  name: string;
+  description: string;
+  earnedAt: string; // ISO date already formatted by the route
+}
+
+export interface RewindChannelView {
+  channelId: string;
+  channelName: string;
+  duration: string; // pre-formatted
+}
+
+export interface RewindBodyOptions {
+  year: number;
+  availableYears: number[]; // includes `year` for the current selection
+  hasData: boolean;
+  totalDuration: string; // pre-formatted "X hr Y min"
+  funComparison: string | null;
+  sessionCount: number;
+  daysActive: number;
+  topChannels: RewindChannelView[];
+  peakDay: { date: string; duration: string } | null;
+  longestStreakDays: number;
+  longestStreakRange: { startDate: string; endDate: string } | null;
+  accolades: RewindBadgeView[];
+  achievements: RewindBadgeView[];
+  annualRank: number | null;
+  annualGuildMembers: number;
+  percentAboveMedian: number | null;
+  weeklyJourney: {
+    first: { isoYear: number; isoWeek: number; rank: number } | null;
+    last: { isoYear: number; isoWeek: number; rank: number } | null;
+    best: { isoYear: number; isoWeek: number; rank: number } | null;
+  };
+}
+
+function renderYearPicker(current: number, years: number[]): string {
+  if (years.length <= 1) return "";
+  const items = years
+    .map((y) => {
+      const cls = y === current ? ' class="current"' : "";
+      return `<a href="/me/rewind/${y}"${cls}>${y}</a>`;
+    })
+    .join("");
+  return `<nav class="rw-year-picker">${items}</nav>`;
+}
+
+function renderBadges(badges: RewindBadgeView[]): string {
+  if (badges.length === 0) {
+    return '<div class="empty">None this year — there\'s always next year!</div>';
+  }
+  return (
+    '<div class="rw-badges">' +
+    badges
+      .map(
+        (b) =>
+          '<div class="rw-badge">' +
+          `<div class="emoji">${escapeHtml(b.emoji)}</div>` +
+          '<div class="body">' +
+          `<div class="name">${escapeHtml(b.name)}</div>` +
+          `<div class="desc">${escapeHtml(b.description)}</div>` +
+          `<div class="date">Earned ${escapeHtml(b.earnedAt)}</div>` +
+          "</div></div>",
+      )
+      .join("") +
+    "</div>"
+  );
+}
+
+function renderJourney(j: RewindBodyOptions["weeklyJourney"]): string {
+  if (!j.first && !j.last && !j.best) {
+    return '<div class="empty">No qualifying weekly leaderboards this year.</div>';
+  }
+  const cell = (
+    label: string,
+    entry: { isoYear: number; isoWeek: number; rank: number } | null,
+  ): string => {
+    if (!entry) {
+      return (
+        '<div class="step">' +
+        `<div class="label">${escapeHtml(label)}</div>` +
+        '<div class="num">—</div>' +
+        "</div>"
+      );
+    }
+    return (
+      '<div class="step">' +
+      `<div class="label">${escapeHtml(label)}</div>` +
+      `<div class="num">#${entry.rank}</div>` +
+      `<div class="when">${entry.isoYear} · W${entry.isoWeek}</div>` +
+      "</div>"
+    );
+  };
+  return (
+    '<div class="rw-journey">' +
+    cell("First", j.first) +
+    cell("Best", j.best) +
+    cell("Last", j.last) +
+    "</div>"
+  );
+}
+
+export function renderUserRewindBody(opts: RewindBodyOptions): string {
+  const years = opts.availableYears.includes(opts.year)
+    ? opts.availableYears
+    : [opts.year, ...opts.availableYears];
+  const picker = renderYearPicker(opts.year, years);
+
+  if (!opts.hasData) {
+    return [
+      `<h1>Rewind ${opts.year}</h1>`,
+      '<p class="subtitle">Your personal year-in-review.</p>',
+      picker,
+      '<div class="card">',
+      "<h2>Nothing to recap yet</h2>",
+      `<p class="muted">We didn't find any voice activity or badges for you in ${opts.year}. Hop into a tracked voice channel and your stats will start filling in.</p>`,
+      "</div>",
+    ].join("");
+  }
+
+  const hero = [
+    '<div class="rw-hero">',
+    `<div class="total">${escapeHtml(opts.totalDuration)}</div>`,
+    opts.funComparison
+      ? `<div class="compare">${escapeHtml(opts.funComparison)}</div>`
+      : "",
+    `<div class="sub">${opts.sessionCount} session${opts.sessionCount === 1 ? "" : "s"} across ${opts.daysActive} day${opts.daysActive === 1 ? "" : "s"}</div>`,
+    "</div>",
+  ].join("");
+
+  const peak = opts.peakDay
+    ? `<div class="value">${escapeHtml(opts.peakDay.date)}</div><div class="detail">${escapeHtml(opts.peakDay.duration)} that day</div>`
+    : '<div class="value">—</div>';
+
+  const streak = opts.longestStreakDays
+    ? `<div class="value">${opts.longestStreakDays} day${opts.longestStreakDays === 1 ? "" : "s"}</div>` +
+      (opts.longestStreakRange
+        ? `<div class="detail">${escapeHtml(opts.longestStreakRange.startDate)} → ${escapeHtml(opts.longestStreakRange.endDate)}</div>`
+        : "")
+    : '<div class="value">—</div>';
+
+  const rankStat =
+    opts.annualRank !== null
+      ? `<div class="value">#${opts.annualRank}</div><div class="detail">of ${opts.annualGuildMembers} active members</div>`
+      : '<div class="value">—</div>';
+
+  const medianStat =
+    opts.percentAboveMedian !== null
+      ? opts.percentAboveMedian >= 0
+        ? `<div class="value">+${opts.percentAboveMedian}%</div><div class="detail">vs. the guild median</div>`
+        : `<div class="value">${opts.percentAboveMedian}%</div><div class="detail">vs. the guild median</div>`
+      : '<div class="value">—</div>';
+
+  const channels =
+    opts.topChannels.length === 0
+      ? '<div class="empty">No tracked channels this year.</div>'
+      : '<ul class="rw-channels">' +
+        opts.topChannels
+          .map(
+            (c) =>
+              "<li>" +
+              `<span class="name">${escapeHtml(c.channelName)}</span>` +
+              `<span class="dur">${escapeHtml(c.duration)}</span>` +
+              "</li>",
+          )
+          .join("") +
+        "</ul>";
+
+  return [
+    `<h1>Rewind ${opts.year}</h1>`,
+    '<p class="subtitle">Your personal year-in-review.</p>',
+    picker,
+    hero,
+    '<div class="rw-grid">',
+    '<div class="rw-stat"><div class="label">Peak day</div>' + peak + "</div>",
+    '<div class="rw-stat"><div class="label">Longest streak</div>' +
+      streak +
+      "</div>",
+    '<div class="rw-stat"><div class="label">Annual rank</div>' +
+      rankStat +
+      "</div>",
+    '<div class="rw-stat"><div class="label">Above median</div>' +
+      medianStat +
+      "</div>",
+    "</div>",
+    '<div class="card"><h2>Top channels</h2>' + channels + "</div>",
+    '<div class="card"><h2>Rank journey</h2>' +
+      renderJourney(opts.weeklyJourney) +
+      "</div>",
+    '<div class="card"><h2>Badges earned this year</h2>' +
+      renderBadges([...opts.accolades, ...opts.achievements]) +
+      "</div>",
   ].join("");
 }
 
