@@ -119,7 +119,65 @@ describe("WebSessionService", () => {
       usedAt: null,
       revokedAt: null,
     });
-    expect(call[1]).toMatchObject({ $set: { usedAt: expect.any(Date) } });
+    expect(call[1]).toMatchObject({
+      $set: { usedAt: expect.any(Date), expiresAt: expect.any(Date) },
+    });
+  });
+
+  it("redeem extends expiresAt to the session lifetime, not the short link TTL (#486)", async () => {
+    process.env.WEBUI_SESSION_TTL_MINUTES = "10";
+    process.env.WEBUI_SESSION_LIFETIME_HOURS = "24";
+
+    const findOneAndUpdate = jest.fn().mockResolvedValue({
+      _id: { toString: () => "session-id" },
+      discordUserId: "user-1",
+      guildId: "guild-1",
+      role: "user",
+      scopes: [],
+    });
+    (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
+      findOneAndUpdate;
+
+    const before = Date.now();
+    const svc = WebSessionService.getInstance();
+    await svc.redeem("any-token");
+    const after = Date.now();
+
+    const update = findOneAndUpdate.mock.calls[0]?.[1] as {
+      $set: { expiresAt: Date };
+    };
+    const newExpiresAt = update.$set.expiresAt.getTime();
+    // The bumped expiresAt must land roughly 24h out — well past the
+    // 10-minute link TTL that used to double as the hard cap.
+    const lifetimeMs = 24 * 60 * 60 * 1000;
+    expect(newExpiresAt).toBeGreaterThanOrEqual(before + lifetimeMs - 1000);
+    expect(newExpiresAt).toBeLessThanOrEqual(after + lifetimeMs + 1000);
+  });
+
+  it("redeem defaults the session lifetime to 24h when env is unset", async () => {
+    delete process.env.WEBUI_SESSION_LIFETIME_HOURS;
+
+    const findOneAndUpdate = jest.fn().mockResolvedValue({
+      _id: { toString: () => "session-id" },
+      discordUserId: "user-1",
+      guildId: "guild-1",
+      role: "user",
+      scopes: [],
+    });
+    (WebSession as unknown as { findOneAndUpdate: unknown }).findOneAndUpdate =
+      findOneAndUpdate;
+
+    const before = Date.now();
+    await WebSessionService.getInstance().redeem("any-token");
+    const after = Date.now();
+
+    const update = findOneAndUpdate.mock.calls[0]?.[1] as {
+      $set: { expiresAt: Date };
+    };
+    const newExpiresAt = update.$set.expiresAt.getTime();
+    const defaultLifetimeMs = 24 * 60 * 60 * 1000;
+    expect(newExpiresAt).toBeGreaterThanOrEqual(before + defaultLifetimeMs - 1000);
+    expect(newExpiresAt).toBeLessThanOrEqual(after + defaultLifetimeMs + 1000);
   });
 
   it("redeem promotes a missing role to legacy admin (pre-#481 rows)", async () => {

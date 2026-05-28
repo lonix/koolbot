@@ -153,7 +153,10 @@ Key properties:
   whether or not they're used.
 - **Sliding inactivity.** Once redeemed, the cookie has a sliding
   inactivity window (default `WEBUI_INACTIVITY_TIMEOUT_MINUTES=30`)
-  hard-capped at the session's server-side `expiresAt`.
+  hard-capped at the session's server-side `expiresAt`. On redemption
+  that hard cap is bumped to `now + WEBUI_SESSION_LIFETIME_HOURS`
+  (default 24h) so an active operator isn't kicked out at the much
+  shorter link TTL.
 - **Re-issuing kills the prior session.** Running `/config` again revokes
   all of *your* unrevoked sessions and mints a new one. Other admins'
   sessions are untouched.
@@ -226,6 +229,7 @@ by editing `.env` and restarting the container.
 | `WEBUI_BASE_URL`                    | yes when enabled  | —       | Public URL the DM'd link points at, e.g. `https://bot.example.com`. No trailing slash needed.    |
 | `WEBUI_SESSION_SECRET`              | yes when enabled  | —       | HMAC key for token hashes and signed cookies. Use 32+ random bytes (`openssl rand -base64 32`).  |
 | `WEBUI_SESSION_TTL_MINUTES`         | no                | `10`    | TTL of the DM'd link from issuance.                                                              |
+| `WEBUI_SESSION_LIFETIME_HOURS`      | no                | `24`    | Hard cap on a redeemed session, measured from redemption. Bounds the sliding inactivity window.  |
 | `WEBUI_INACTIVITY_TIMEOUT_MINUTES`  | no                | `30`    | Sliding cookie window after redemption.                                                          |
 | `WEBUI_TRUST_PROXY`                 | no                | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.     |
 
@@ -253,6 +257,7 @@ WEBUI_BASE_URL=https://bot.example.com
 WEBUI_SESSION_SECRET=replace-with-openssl-rand-base64-32-output
 # Optional tuning
 WEBUI_SESSION_TTL_MINUTES=10
+WEBUI_SESSION_LIFETIME_HOURS=24
 WEBUI_INACTIVITY_TIMEOUT_MINUTES=30
 ```
 
@@ -713,8 +718,8 @@ One of:
 Possible causes (in roughly decreasing likelihood):
 
 - Your cookie expired (idle past `WEBUI_INACTIVITY_TIMEOUT_MINUTES`).
-- The DB session row passed its hard TTL (`WEBUI_SESSION_TTL_MINUTES`
-  from issuance).
+- The DB session row passed its hard cap (`WEBUI_SESSION_LIFETIME_HOURS`
+  from redemption).
 - You ran `/config` again and revoked this session server-side.
 - Permission re-check failed: someone configured Web UI Permissions →
   `config` to restrict the command, and your roles no longer match.

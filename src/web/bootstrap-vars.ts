@@ -28,6 +28,7 @@ export const BOOTSTRAP_VARS: readonly BootstrapEnvVar[] = [
   { key: "WEBUI_BASE_URL", category: "WebUI", isSecret: false },
   { key: "WEBUI_SESSION_SECRET", category: "WebUI", isSecret: true },
   { key: "WEBUI_SESSION_TTL_MINUTES", category: "WebUI", isSecret: false },
+  { key: "WEBUI_SESSION_LIFETIME_HOURS", category: "WebUI", isSecret: false },
   {
     key: "WEBUI_INACTIVITY_TIMEOUT_MINUTES",
     category: "WebUI",
