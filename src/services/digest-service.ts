@@ -1,9 +1,4 @@
-import {
-  Client,
-  EmbedBuilder,
-  type ColorResolvable,
-  type User,
-} from "discord.js";
+import { Client, EmbedBuilder, type ColorResolvable } from "discord.js";
 import { CronJob, CronTime } from "cron";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
@@ -268,10 +263,7 @@ export class DigestService {
       // ready when we look up weekly rows below.
       AchievementsService.getInstance(this.client);
 
-      // Top-N is large enough that ranks are meaningful for nearly any
-      // realistic guild; users below this rank still get a digest, just
-      // marked "unranked".
-      const ranked = await tracker.getTopUsers(1000, "week");
+      const ranked = await tracker.getTopUsers(0, "week");
       const qualifying: QualifyingUser[] = ranked
         .map((user, index) => ({
           userId: user.userId,
@@ -393,7 +385,7 @@ export class DigestService {
     const elapsedMs = now.getTime() - lastSentAt.getTime();
     const tenDaysMs = 10 * 24 * 60 * 60 * 1000;
     if (elapsedMs > tenDaysMs) return 1;
-    return Math.max(1, previousStreak) + 1;
+    return previousStreak > 0 ? previousStreak + 1 : 1;
   }
 
   /**
@@ -528,19 +520,13 @@ export class DigestService {
   /**
    * Send the digest DM. Returns true on delivery, false if the user has
    * DMs closed (silent skip, matches `AchievementsService` behaviour).
-   * Any other error rethrows so the caller can record `failed`.
+   * Fetch failures and other errors rethrow so the caller records `failed`.
    */
   private async sendDigestDM(
     userId: string,
     embed: EmbedBuilder,
   ): Promise<boolean> {
-    let user: User;
-    try {
-      user = await this.client.users.fetch(userId);
-    } catch (error) {
-      logger.warn(`Digest: could not fetch user ${userId}: ${error}`);
-      return false;
-    }
+    const user = await this.client.users.fetch(userId);
     try {
       await user.send({ embeds: [embed] });
       return true;

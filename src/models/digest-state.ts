@@ -8,8 +8,7 @@ import mongoose, { Document, Schema } from "mongoose";
  * (voice-time, rank) and maintain the consecutive-weeks streak without
  * re-aggregating beyond the current 7-day window.
  *
- * Rows are written by `DigestService` after a digest is sent (or after
- * a qualifying-but-undeliverable week, to keep streak math correct);
+ * Rows are written by `DigestService` after a digest is successfully sent;
  * deletions happen only when the user is purged from the guild and are
  * not the digest job's responsibility.
  */
