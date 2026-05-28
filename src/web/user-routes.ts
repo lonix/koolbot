@@ -36,8 +36,14 @@ import {
   renderUserIndexBody,
   renderUserNotificationsBody,
   renderUserPage,
+  renderUserRewindBody,
   type UserFlashMessage,
 } from "./user-layout.js";
+import {
+  RewindService,
+  formatFunComparison,
+  formatHoursMinutes,
+} from "../services/rewind-service.js";
 import { recordAudit } from "./audit.js";
 import { renderSignedOut } from "./views.js";
 
@@ -112,8 +118,8 @@ const NOTIFICATION_ROW_DEFS: readonly NotificationRowDef[] = [
   {
     key: "rewind",
     label: "Year-in-review (Rewind)",
-    description: "End-of-year personal recap of your activity on this server.",
-    comingSoon: "Toggle works today; the matching DM lands in #484.",
+    description:
+      "End-of-year DM nudge with a link to your personal recap at /me/rewind.",
   },
 ];
 
@@ -171,8 +177,18 @@ export class SelfScopeError extends Error {
   }
 }
 
+function parseYearParam(raw: unknown, fallback: number): number {
+  if (typeof raw !== "string" || raw.length === 0) return fallback;
+  const n = Number.parseInt(raw, 10);
+  // Clamp to a plausible range so a junk URL can't produce a billion-year
+  // query against Mongo. Years before the project existed have no data
+  // anyway; far-future years are nonsense.
+  if (!Number.isFinite(n) || n < 2000 || n > 9999) return fallback;
+  return n;
+}
+
 export function createUserRouter(
-  _client: Client,
+  client: Client,
   requireSession: RequestHandler,
 ): Router {
   const router = Router();
@@ -332,6 +348,99 @@ export function createUserRouter(
       res.redirect(303, flashUrl("/me/notifications", flash));
     }),
   );
+
+  // ---------- Rewind (#484) ----------
+  // `/me/rewind` defaults to the current calendar year (UTC); the
+  // `/:year` variant lets users browse past years. Both gate on
+  // `assertSelfScope` — admin sessions land on their own Rewind.
+  const rewindHandler = asyncHandler(async (req, res) => {
+    const session = req.webSession;
+    if (!session) {
+      res.status(500).type("text/plain").send("session missing");
+      return;
+    }
+    const { userId, guildId } = assertSelfScope(session, {
+      userId: session.discordUserId,
+      guildId: session.guildId,
+    });
+    const currentYear = new Date().getUTCFullYear();
+    const year = parseYearParam(req.params.year, currentYear);
+
+    const summary = await RewindService.getInstance(client).getSummary(
+      userId,
+      guildId,
+      year,
+    );
+
+    if (!summary) {
+      res
+        .status(500)
+        .type("text/html")
+        .send(
+          renderUserPage({
+            title: "Rewind",
+            active: "/me/rewind",
+            body:
+              `<h1>Rewind ${year}</h1>` +
+              '<div class="notice err">Could not load your year-in-review. Please try again later.</div>',
+            csrfToken: getCsrfToken(req),
+            remainingMs: getDisplayedRemainingMs(session),
+            isAdmin: session.role === "admin",
+          }),
+        );
+      return;
+    }
+
+    res.type("text/html").send(
+      renderUserPage({
+        title: `Rewind ${year}`,
+        active: "/me/rewind",
+        body: renderUserRewindBody({
+          year: summary.year,
+          availableYears: summary.availableYears,
+          hasData: summary.hasData,
+          totalDuration: formatHoursMinutes(summary.totalSeconds),
+          funComparison: formatFunComparison(summary.totalSeconds),
+          sessionCount: summary.sessionCount,
+          daysActive: summary.daysActive,
+          topChannels: summary.topChannels.map((c) => ({
+            channelId: c.channelId,
+            channelName: c.channelName,
+            duration: formatHoursMinutes(c.totalSeconds),
+          })),
+          peakDay: summary.peakDay
+            ? {
+                date: summary.peakDay.date,
+                duration: formatHoursMinutes(summary.peakDay.totalSeconds),
+              }
+            : null,
+          longestStreakDays: summary.longestStreakDays,
+          longestStreakRange: summary.longestStreakRange,
+          accolades: summary.accolades.map((a) => ({
+            emoji: a.emoji,
+            name: a.name,
+            description: a.description,
+            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+          })),
+          achievements: summary.achievements.map((a) => ({
+            emoji: a.emoji,
+            name: a.name,
+            description: a.description,
+            earnedAt: a.earnedAt.toISOString().slice(0, 10),
+          })),
+          annualRank: summary.annualRank,
+          annualGuildMembers: summary.annualGuildMembers,
+          percentAboveMedian: summary.percentAboveMedian,
+          weeklyJourney: summary.weeklyJourney,
+        }),
+        csrfToken: getCsrfToken(req),
+        remainingMs: getDisplayedRemainingMs(session),
+        isAdmin: session.role === "admin",
+      }),
+    );
+  });
+  router.get("/rewind", rewindHandler);
+  router.get("/rewind/:year", rewindHandler);
 
   // ---------- Finish (sign out) ----------
   // CSRF-checked, same pattern as `/admin/finish`. The session row is

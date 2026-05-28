@@ -161,6 +161,7 @@ describe('Config Schema', () => {
       'announcements.enabled': false,
       'achievements.enabled': false,
       'digest.enabled': false,
+      'rewind.enabled': false,
       'reactionroles.enabled': false,
       'notices.enabled': false,
       'polls.enabled': false,

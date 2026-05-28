@@ -35,6 +35,7 @@ Complete configuration reference for all KoolBot settings.
 - [Announcements](#-announcements)
 - [Achievements System](#-achievements-system)
 - [Weekly Digest](#-weekly-digest)
+- [Rewind (Year-in-Review)](#-rewind-year-in-review)
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
 - [Rate Limiting](#-rate-limiting)
@@ -450,6 +451,38 @@ the user's **/me/notifications** page (no slash command).
 
 ---
 
+## ✨ Rewind (Year-in-Review)
+
+Per-user year-in-review page at **`/me/rewind`** (also `/me/rewind/:year`
+for past years). Renders total voice time, top channels, peak day,
+longest streak, badges earned, annual rank, and a first/best/last
+weekly-rank journey. Year picker bottom-anchored to years with data.
+The page is always available; the cron job below only sends a one-shot
+end-of-year DM nudge.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `rewind.enabled` | `false` | Master switch for the end-of-year DM nudge (the WebUI page is unaffected) |
+| `rewind.cron` | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone) |
+| `rewind.min_minutes` | `60` | Minimum annual voice minutes a user needs to receive the nudge |
+
+**Notes:**
+
+- Requires `voicetracking.enabled = true` so the underlying session
+  data exists; the page renders an empty state otherwise.
+- Per-user opt-out is honoured before sending each nudge via the
+  `prefs.rewind` field set on `/me/notifications`.
+- Users with DMs closed are silently skipped (same pattern the digest
+  and `AchievementsService` already use).
+- Aggregation is on-demand and not cached in v1. If real data shows
+  the queries are too slow, a `RewindCache` collection keyed by
+  `(userId, guildId, year)` is the planned follow-up.
+- A summary row (qualifying / sent / opted-out / DMs closed / failed)
+  is posted to the configured `core.cron.channel_id` log channel after
+  every run.
+
+---
+
 ### Cron schedule format
 
 ```text
@@ -791,6 +824,12 @@ above).
 - `digest.min_active_minutes` (number, default: 30)
 - `digest.streak_min_minutes` (number, default: 30)
 - `digest.include_achievements` (bool, default: true)
+
+#### Rewind (Year-in-Review)
+
+- `rewind.enabled` (bool, default: false)
+- `rewind.cron` (string, default: `"0 10 30 12 *"`)
+- `rewind.min_minutes` (number, default: 60)
 
 #### Cleanup
 
