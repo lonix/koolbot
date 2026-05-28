@@ -5,7 +5,10 @@
  */
 
 import { describe, it, expect } from "@jest/globals";
-import { coerceConfigValue } from "../../src/web/write-routes.js";
+import {
+  coerceConfigValue,
+  findSectionMasterKey,
+} from "../../src/web/write-routes.js";
 import {
   BOOTSTRAP_VARS,
   PROTECTED_KEYS,
@@ -152,5 +155,29 @@ describe("coerceConfigValue", () => {
   it("rejects an array payload for a number key", () => {
     const r = coerceConfigValue("quotes.max_length", [500]);
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("findSectionMasterKey", () => {
+  it("returns the shortest boolean .enabled key in the section (#485)", () => {
+    expect(
+      findSectionMasterKey([
+        "voicechannels.enabled",
+        "voicechannels.controlpanel.enabled",
+        "voicechannels.lobby.name",
+      ]),
+    ).toBe("voicechannels.enabled");
+  });
+
+  it("ignores .enabled keys that aren't boolean in the schema", () => {
+    // `quotes.channel_id` ends with neither; a hypothetical non-boolean
+    // `.enabled` (not present in defaultConfig) is also skipped.
+    expect(
+      findSectionMasterKey(["quotes.channel_id", "quotes.max_length"]),
+    ).toBeNull();
+  });
+
+  it("returns null for an unknown key that merely ends with .enabled", () => {
+    expect(findSectionMasterKey(["bogus.feature.enabled"])).toBeNull();
   });
 });
