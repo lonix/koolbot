@@ -12,7 +12,14 @@
  */
 
 import { Buffer } from "buffer";
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import { Client } from "discord.js";
 import {
   createSessionMiddleware,
@@ -24,6 +31,7 @@ import { PermissionsService } from "../../src/services/permissions-service.js";
 import type { Response, NextFunction } from "express";
 
 const SECRET = "test-secret-for-sliding-window";
+const ORIGINAL_ENV = { ...process.env };
 
 interface CookiePayload {
   sid: string;
@@ -102,6 +110,14 @@ describe("createSessionMiddleware sliding window (#486)", () => {
     process.env.WEBUI_SESSION_SECRET = SECRET;
     process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "10";
     process.env.WEBUI_SESSION_LIFETIME_HOURS = "24";
+    (WebSessionService as unknown as { instance: unknown }).instance = null;
+  });
+
+  afterEach(() => {
+    // Restore mutated globals so this file can't leak into others
+    // when Jest reorders suites (see Copilot review on #497).
+    process.env = { ...ORIGINAL_ENV };
+    jest.restoreAllMocks();
     (WebSessionService as unknown as { instance: unknown }).instance = null;
   });
 
