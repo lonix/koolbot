@@ -466,14 +466,8 @@ export class VoiceChannelTracker {
         case "week":
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
           users = await VoiceChannelTracking.aggregate([
-            {
-              $unwind: "$sessions",
-            },
-            {
-              $match: {
-                "sessions.startTime": { $gte: startDate },
-              },
-            },
+            { $unwind: "$sessions" },
+            { $match: { "sessions.startTime": { $gte: startDate } } },
             {
               $group: {
                 _id: "$userId",
@@ -481,25 +475,15 @@ export class VoiceChannelTracker {
                 totalTime: { $sum: "$sessions.duration" },
               },
             },
-            {
-              $sort: { totalTime: -1 },
-            },
-            {
-              $limit: limit,
-            },
+            { $sort: { totalTime: -1 } },
+            ...(limit > 0 ? [{ $limit: limit }] : []),
           ]);
           break;
         case "month":
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
           users = await VoiceChannelTracking.aggregate([
-            {
-              $unwind: "$sessions",
-            },
-            {
-              $match: {
-                "sessions.startTime": { $gte: startDate },
-              },
-            },
+            { $unwind: "$sessions" },
+            { $match: { "sessions.startTime": { $gte: startDate } } },
             {
               $group: {
                 _id: "$userId",
@@ -507,12 +491,8 @@ export class VoiceChannelTracker {
                 totalTime: { $sum: "$sessions.duration" },
               },
             },
-            {
-              $sort: { totalTime: -1 },
-            },
-            {
-              $limit: limit,
-            },
+            { $sort: { totalTime: -1 } },
+            ...(limit > 0 ? [{ $limit: limit }] : []),
           ]);
           break;
         case "alltime":
@@ -524,12 +504,8 @@ export class VoiceChannelTracker {
                 totalTime: { $sum: "$totalTime" },
               },
             },
-            {
-              $sort: { totalTime: -1 },
-            },
-            {
-              $limit: limit,
-            },
+            { $sort: { totalTime: -1 } },
+            ...(limit > 0 ? [{ $limit: limit }] : []),
           ]);
           break;
       }

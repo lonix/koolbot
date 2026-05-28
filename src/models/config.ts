@@ -32,6 +32,7 @@ const ConfigSchema = new Schema<IConfig>(
         "amikool", // Kept for backward compatibility; key removed but legacy rows may exist
         "announcements",
         "core",
+        "digest",
         "fun", // Kept for backward compatibility; key removed but legacy rows may exist
         "gamification", // Kept for backward compatibility during migration
         "help",

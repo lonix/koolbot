@@ -160,6 +160,7 @@ describe('Config Schema', () => {
       'ratelimit.enabled': false,
       'announcements.enabled': false,
       'achievements.enabled': false,
+      'digest.enabled': false,
       'reactionroles.enabled': false,
       'notices.enabled': false,
       'polls.enabled': false,
@@ -179,6 +180,7 @@ describe('Config Schema', () => {
       'quotes.header_pin_enabled': true,
       'achievements.announcements.enabled': true,
       'achievements.dm_notifications.enabled': true,
+      'digest.include_achievements': true,
       'notices.header_enabled': true,
       'notices.header_pin_enabled': true,
 
@@ -198,6 +200,7 @@ describe('Config Schema', () => {
       'quotes.header_pin_enabled': 'quotes.enabled',
       'achievements.announcements.enabled': 'achievements.enabled',
       'achievements.dm_notifications.enabled': 'achievements.enabled',
+      'digest.include_achievements': 'digest.enabled',
       'notices.header_enabled': 'notices.enabled',
       'notices.header_pin_enabled': 'notices.enabled',
     };

@@ -37,6 +37,7 @@ import { PermissionsService } from "./services/permissions-service.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
 import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
+import { DigestService } from "./services/digest-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
@@ -424,6 +425,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         await noticesChannelManager.stop();
         pollService.destroy();
         leaderboardRoleService.destroy();
+        digestService.destroy();
         WizardService.getInstance().shutdown();
         MonitoringService.getInstance().destroy();
         await botStatusService.shutdown();
@@ -484,6 +486,7 @@ let noticesChannelManager: NoticesChannelManager;
 let reactionRoleService: ReactionRoleService;
 let pollService: PollService;
 let leaderboardRoleService: LeaderboardRoleService;
+let digestService: DigestService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
@@ -502,6 +505,7 @@ try {
   reactionRoleService = ReactionRoleService.getInstance(client);
   pollService = PollService.getInstance(client);
   leaderboardRoleService = LeaderboardRoleService.getInstance(client);
+  digestService = DigestService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
@@ -588,6 +592,9 @@ async function initializeServices(): Promise<void> {
 
     // Initialize leaderboard role rewards service
     await leaderboardRoleService.start();
+
+    // Initialize weekly voice-activity digest service (#483)
+    await digestService.start();
 
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();

@@ -43,6 +43,7 @@ describe("settingsMetadata", () => {
       "help",
       "quotes",
       "core",
+      "digest",
       "ratelimit",
       "announcements",
       "achievements",
