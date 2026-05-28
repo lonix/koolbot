@@ -713,6 +713,28 @@ re-syncs the registration.
 
 For any setting, click **Reset to default** on the Settings page.
 
+### Reset all settings to defaults
+
+The **Danger zone** at the bottom of the Settings page wipes the live
+config back to the built-in defaults from `src/services/config-schema.ts`
+in one action — the equivalent of clicking **Reset to default** on every
+row at once, without touching MongoDB by hand.
+
+- **Scope** — every key in the schema is rewritten to its default value,
+  and any **orphan** keys left in the DB by removed features (keys no
+  longer present in the schema) are deleted.
+- **Two-step confirm** — a browser prompt guards the click, and you must
+  additionally type the **guild name** (or guild id, if the name can't be
+  fetched) into the confirmation field before the reset commits.
+- **Not touched** — bootstrap / environment variables (`DISCORD_TOKEN`,
+  `MONGODB_URI`, every `WEBUI_*`, and the rest of the `.env` values) are
+  never affected; they don't live in the `configs` collection.
+- **After resetting** — the flash banner reports how many keys were
+  updated (and how many orphans removed). Because command enablement may
+  have changed, click **Reload commands to Discord** afterwards.
+- **Audit** — the reset records a single `WebAuditLog` entry with
+  `action: "settings.reset-defaults"` and the count of keys touched.
+
 ### Value types
 
 The Web UI form controls map to the underlying schema types:

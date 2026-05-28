@@ -265,6 +265,75 @@ function getCsrfFromReq(req: AuthenticatedRequest): string {
 }
 
 /**
+ * Minimal config-store surface the bulk reset needs. `ConfigService`
+ * satisfies it structurally; the narrow shape keeps the reset logic
+ * unit-testable against a fake store without Express or Mongo.
+ */
+export interface ResetConfigStore {
+  getAll(): Promise<Array<{ key: string }>>;
+  set(
+    key: string,
+    value: unknown,
+    description: string,
+    category: string,
+  ): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+/**
+ * Reset the live config back to `defaultConfig`:
+ *   - every key in the schema is rewritten to its default value;
+ *   - orphan DB rows (keys no longer in the schema) are deleted.
+ *
+ * Protected bootstrap keys never live in the `configs` collection, but are
+ * skipped on the delete pass defensively so a stray row can't be dropped
+ * here. Mirrors the partial-application semantics of the YAML import: a
+ * write/delete that throws is collected in `failed` and the rest continue.
+ */
+export async function resetConfigToDefaults(config: ResetConfigStore): Promise<{
+  updated: number;
+  deleted: number;
+  failed: Array<{ key: string; reason: string }>;
+}> {
+  const all = await config.getAll();
+  const failed: Array<{ key: string; reason: string }> = [];
+
+  let updated = 0;
+  for (const [key, value] of Object.entries(defaultConfig)) {
+    const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+    try {
+      await config.set(
+        key,
+        value,
+        meta?.description ?? "",
+        meta?.category ?? key.split(".")[0],
+      );
+      updated++;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "set failed";
+      logger.error("reset-defaults: failed to write setting", err);
+      failed.push({ key, reason });
+    }
+  }
+
+  let deleted = 0;
+  for (const entry of all) {
+    if (entry.key in defaultConfig) continue;
+    if (PROTECTED_KEYS.has(entry.key)) continue;
+    try {
+      await config.delete(entry.key);
+      deleted++;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "delete failed";
+      logger.error("reset-defaults: failed to delete orphan key", err);
+      failed.push({ key: entry.key, reason });
+    }
+  }
+
+  return { updated, deleted, failed };
+}
+
+/**
  * Enabled-state of feature-gated nav items for the pages rendered by the
  * write router (wizard steps, import preview). Keeps their sidebar
  * consistent with the read-only pages.
@@ -409,6 +478,124 @@ export function createWriteRouter(
         flashRedirect(res, "/admin/settings", {
           type: "err",
           text: `Failed to reset ${key}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // Reset every setting to its schema default (issue #487). Two-step
+  // confirm: the page guards the click with a JS confirm() and requires the
+  // operator to type the guild name (the form field re-validated below).
+  router.post(
+    "/settings/reset-defaults",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+
+      // Defence-in-depth: this endpoint takes no per-key payload, but a
+      // crafted request that smuggles a protected bootstrap key (Discord
+      // token, Mongo URI, WebUI session config) is refused outright — those
+      // keys must never be touched by a settings reset.
+      const protectedHit = Object.keys(body).find((k) =>
+        PROTECTED_KEYS.has(k),
+      );
+      if (protectedHit) {
+        await recordAudit(session, {
+          action: "settings.reset-defaults",
+          result: "failure",
+          errorMessage: "protected key in payload",
+          details: { protectedKey: protectedHit },
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: "Reset refused: request contained a protected bootstrap key.",
+        });
+        return;
+      }
+
+      // The operator must type the guild name (falling back to the guild id
+      // when Discord can't be reached) to commit. Accept either so a fetch
+      // failure between render and submit can't lock the operator out.
+      let guildName: string | null = null;
+      try {
+        const guild = await client.guilds.fetch(session.guildId);
+        guildName = guild.name;
+      } catch (err) {
+        logger.debug("reset-defaults guild fetch failed", err);
+      }
+      const expected = guildName ?? session.guildId;
+      const confirmText = getString(req, "confirm");
+      const confirmed =
+        confirmText.length > 0 &&
+        (confirmText === expected || confirmText === session.guildId);
+      if (!confirmed) {
+        await recordAudit(session, {
+          action: "settings.reset-defaults",
+          result: "failure",
+          errorMessage: "confirmation text did not match",
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Reset cancelled — type "${expected}" exactly to confirm.`,
+        });
+        return;
+      }
+
+      const config = ConfigService.getInstance();
+      try {
+        const { updated, deleted, failed } =
+          await resetConfigToDefaults(config);
+        const landed = updated + deleted;
+        // Mirror the YAML-import audit: `result: "failure"` only when nothing
+        // landed, otherwise `success` with a `partial` flag for reporting.
+        const outcome: "ok" | "partial" | "failed" =
+          failed.length === 0 ? "ok" : landed > 0 ? "partial" : "failed";
+        await recordAudit(session, {
+          action: "settings.reset-defaults",
+          details: {
+            updated,
+            deleted,
+            failed,
+            failedCount: failed.length,
+            outcome,
+          },
+          result: outcome === "failed" ? "failure" : "success",
+          errorMessage:
+            failed.length > 0
+              ? failed
+                  .slice(0, 5)
+                  .map((f) => `${f.key}: ${f.reason}`)
+                  .join("; ")
+              : null,
+        });
+
+        const orphanNote =
+          deleted > 0
+            ? `, ${deleted} orphan key${deleted === 1 ? "" : "s"} removed`
+            : "";
+        const reloadNote = " You may need to Reload commands.";
+        if (failed.length === 0) {
+          flashRedirect(res, "/admin/settings", {
+            type: "ok",
+            text: `Settings reset to defaults — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}.${reloadNote}`,
+          });
+          return;
+        }
+        flashRedirect(res, "/admin/settings", {
+          type: landed > 0 ? "warn" : "err",
+          text: `Reset ${landed > 0 ? "partially " : ""}failed — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}, ${failed.length} failed (first: ${failed[0].key} — ${failed[0].reason}).${landed > 0 ? reloadNote : ""}`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Reset to defaults failed", err);
+        await recordAudit(session, {
+          action: "settings.reset-defaults",
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/settings", {
+          type: "err",
+          text: `Reset failed: ${text}`,
         });
       }
     }),

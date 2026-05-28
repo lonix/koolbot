@@ -185,6 +185,10 @@ export interface SettingsProps extends CommonProps {
   textChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
   roles: RoleOption[];
+  /** Guild id of the session, used as the reset-confirmation fallback. */
+  guildId: string;
+  /** Guild name (when fetchable); the preferred reset-confirmation phrase. */
+  guildName: string | null;
   flash?: FlashMessage | null;
 }
 
@@ -572,6 +576,27 @@ export function renderSettingsPage(props: SettingsProps): string {
   </form>
 </div>`;
 
+  // Two-step confirm: the JS confirm() guards the click, and the operator
+  // must additionally type the guild name (or guild id when the name can't
+  // be fetched) into the text field, which the server re-validates. The
+  // `required` attribute and `confirmTarget` keep the client and server in
+  // step. See `POST /admin/settings/reset-defaults` in write-routes.ts.
+  const confirmTarget = props.guildName ?? props.guildId;
+  const dangerSection = `
+<div id="danger-zone" class="card" style="border-color:#7f1d1d">
+  <h2>Danger zone</h2>
+  <p class="muted" style="margin:0 0 .75rem">Reset every setting to its built-in default. All keys in the schema are rewritten to their default value, and any orphaned keys left behind by removed features are deleted. Bootstrap / environment variables (Discord token, Mongo URI, WebUI session config) are <strong>not</strong> touched. You may need to <strong>Reload commands</strong> afterwards.</p>
+  <form method="POST" action="/admin/settings/reset-defaults" class="stack" onsubmit="return confirm('Reset ALL settings to their defaults? This cannot be undone.');">
+    <input type="hidden" name="_csrf" value="${csrf}">
+    <label>Type <code>${escapeHtml(confirmTarget)}</code> to confirm:
+      <input type="text" name="confirm" autocomplete="off" placeholder="${escapeHtml(confirmTarget)}" required>
+    </label>
+    <div>
+      <button type="submit" class="btn btn-danger">Reset all settings to defaults</button>
+    </div>
+  </form>
+</div>`;
+
   const body = `
 <h1>Settings</h1>
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
@@ -579,6 +604,7 @@ ${renderFlash(props.flash)}
 ${actionBar}
 ${sections}
 ${importSection}
+${dangerSection}
 `;
   return renderAdminPage({
     title: "Settings",
