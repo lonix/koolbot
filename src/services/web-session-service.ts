@@ -7,6 +7,7 @@ import {
 } from "../models/web-session.js";
 
 const DEFAULT_TTL_MINUTES = 10;
+const DEFAULT_SESSION_LIFETIME_HOURS = 24;
 
 /**
  * Translate a DB-stored `role` to a strict `WebSessionRole`. Rows written
@@ -62,6 +63,28 @@ export class WebSessionService {
     const raw = process.env.WEBUI_SESSION_TTL_MINUTES;
     const parsed = raw ? Number(raw) : NaN;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TTL_MINUTES;
+  }
+
+  /**
+   * Hard-cap lifetime applied to a *redeemed* session, in milliseconds.
+   * Distinct from `getTtlMinutes()`, which only governs how long the
+   * magic link itself remains valid before redemption (#486).
+   *
+   * Before the fix, the same `WEBUI_SESSION_TTL_MINUTES` value did
+   * double-duty as both link TTL and session hard cap — so a session
+   * was killed ~10 min after the link was issued, regardless of the
+   * sliding inactivity window. After redemption we bump `expiresAt`
+   * to `now + sessionLifetime` so the hard cap can be e.g. 24h while
+   * the link TTL stays short.
+   */
+  private getSessionLifetimeMs(): number {
+    const raw = process.env.WEBUI_SESSION_LIFETIME_HOURS;
+    const parsed = raw ? Number(raw) : NaN;
+    const hours =
+      Number.isFinite(parsed) && parsed > 0
+        ? parsed
+        : DEFAULT_SESSION_LIFETIME_HOURS;
+    return hours * 60 * 60 * 1000;
   }
 
   private getBaseUrl(): string {
@@ -136,6 +159,15 @@ export class WebSessionService {
     }
 
     const now = new Date();
+    // On redemption, extend `expiresAt` from "link TTL from issuance"
+    // to "session lifetime from redemption" (#486). Before this fix the
+    // row's `expiresAt` was left at its short link-TTL value (default
+    // 10 min), which then doubled as the session hard cap — so the
+    // user was logged out ~10 min after the link was issued no matter
+    // how active they were.
+    const sessionExpiresAt = new Date(
+      now.getTime() + this.getSessionLifetimeMs(),
+    );
     const session = await WebSession.findOneAndUpdate(
       {
         tokenHash,
@@ -143,7 +175,7 @@ export class WebSessionService {
         revokedAt: null,
         expiresAt: { $gt: now },
       },
-      { $set: { usedAt: now } },
+      { $set: { usedAt: now, expiresAt: sessionExpiresAt } },
       { new: true },
     );
 
@@ -154,7 +186,7 @@ export class WebSessionService {
     }
 
     logger.info(
-      `Web session redeemed for user=${session.discordUserId} guild=${session.guildId} session=${String(session._id)}`,
+      `Web session redeemed for user=${session.discordUserId} guild=${session.guildId} session=${String(session._id)} expires=${sessionExpiresAt.toISOString()}`,
     );
 
     return {
