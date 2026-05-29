@@ -13,6 +13,7 @@ import {
   verifySignedValue,
 } from "./cookies.js";
 import { shouldUseSecureCookies } from "./csrf.js";
+import { env } from "../config/env.js";
 
 export const SESSION_COOKIE = "koolbot_session";
 /**
@@ -65,7 +66,7 @@ interface CookiePayload {
 }
 
 function getSecret(): string {
-  const secret = process.env.WEBUI_SESSION_SECRET;
+  const secret = env.webui.sessionSecret;
   if (!secret) {
     throw new Error("WEBUI_SESSION_SECRET not configured");
   }
@@ -73,7 +74,7 @@ function getSecret(): string {
 }
 
 function getInactivityMinutes(): number {
-  const raw = process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES;
+  const raw = env.webui.inactivityTimeoutMinutes;
   const parsed = raw ? Number(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0
     ? parsed

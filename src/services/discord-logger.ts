@@ -1,4 +1,5 @@
 import { Client, TextChannel, EmbedBuilder, ColorResolvable } from "discord.js";
+import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 
@@ -194,7 +195,7 @@ export class DiscordLogger {
         { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         {
           name: "Environment",
-          value: process.env.NODE_ENV || "development",
+          value: env.nodeEnv,
           inline: true,
         },
       ],
@@ -233,7 +234,7 @@ export class DiscordLogger {
         { name: "Timestamp", value: new Date().toLocaleString(), inline: true },
         {
           name: "Guild",
-          value: process.env.GUILD_ID || "Unknown",
+          value: env.guildId || "Unknown",
           inline: true,
         },
       ],

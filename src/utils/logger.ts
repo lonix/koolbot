@@ -1,9 +1,7 @@
 import winston from "winston";
-import { config as dotenvConfig } from "dotenv";
+import { env } from "../config/env.js";
 
-dotenvConfig();
-
-export const isDebugMode = (): boolean => process.env.DEBUG === "true";
+export const isDebugMode = (): boolean => env.debug;
 
 const logger = winston.createLogger({
   level: isDebugMode() ? "debug" : "info",

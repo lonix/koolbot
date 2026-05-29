@@ -1,19 +1,17 @@
 import { REST, Routes } from "discord.js";
-import { config } from "dotenv";
+import { requireEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
-
-config();
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
     const rest = new REST({ version: "10" }).setToken(
-      process.env.DISCORD_TOKEN!,
+      requireEnv("DISCORD_TOKEN"),
     );
 
     logger.info("Starting global commands cleanup...");
 
     // Deregister all global commands
-    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
+    await rest.put(Routes.applicationCommands(requireEnv("CLIENT_ID")), {
       body: [],
     });
 

@@ -1,10 +1,8 @@
 import { REST, Routes } from "discord.js";
-import { config } from "dotenv";
+import { env, requireEnv } from "./config/env.js";
 import logger from "./utils/logger.js";
 
-config();
-
-const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
+const rest = new REST({ version: "10" }).setToken(requireEnv("DISCORD_TOKEN"));
 
 interface DiscordCommand {
   id: string;
@@ -13,22 +11,19 @@ interface DiscordCommand {
 }
 
 async function unregisterGuildCommands(): Promise<void> {
-  if (!process.env.GUILD_ID) {
+  const guildId = env.guildId;
+  if (!guildId) {
     logger.error("GUILD_ID environment variable is not set");
     process.exit(1);
   }
+  const clientId = requireEnv("CLIENT_ID");
 
   try {
-    logger.info(
-      `Starting to unregister commands for guild ${process.env.GUILD_ID}...`,
-    );
+    logger.info(`Starting to unregister commands for guild ${guildId}...`);
 
     // Get all commands for the guild
     const commands = (await rest.get(
-      Routes.applicationGuildCommands(
-        process.env.CLIENT_ID!,
-        process.env.GUILD_ID,
-      ),
+      Routes.applicationGuildCommands(clientId, guildId),
     )) as DiscordCommand[];
 
     logger.info(`Found ${commands.length} commands to unregister`);
@@ -36,11 +31,7 @@ async function unregisterGuildCommands(): Promise<void> {
     // Delete each command
     for (const command of commands) {
       await rest.delete(
-        Routes.applicationGuildCommand(
-          process.env.CLIENT_ID!,
-          process.env.GUILD_ID,
-          command.id,
-        ),
+        Routes.applicationGuildCommand(clientId, guildId, command.id),
       );
       logger.info(`Unregistered command: ${command.name}`);
     }

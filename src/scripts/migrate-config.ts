@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { ConfigService } from "../services/config-service.js";
+import { env, getEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
 
 interface ConfigMigration {
@@ -136,9 +137,7 @@ async function migrateConfiguration(): Promise<void> {
   try {
     logger.info("Starting configuration migration...");
 
-    await mongoose.connect(
-      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
-    );
+    await mongoose.connect(env.mongoUri);
 
     const configService = ConfigService.getInstance();
     await configService.initialize();
@@ -160,7 +159,7 @@ async function migrateConfiguration(): Promise<void> {
         }
 
         // Get value from old environment variable
-        const envValue = process.env[migration.oldKey];
+        const envValue = getEnv(migration.oldKey);
         if (!envValue) {
           logger.info(
             `Environment variable ${migration.oldKey} not set, using default value`,
