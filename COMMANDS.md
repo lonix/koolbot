@@ -8,6 +8,16 @@ KoolBot's slash-command surface is intentionally small. All
 **administration and configuration** lives in the Web UI, reached via the
 single `/config` launcher.
 
+`/config` is open to **every guild member**, not just admins. The
+sign-in link it DMs you lands on the surface that matches your
+permissions: administrators get the **admin panel** (`/admin/`) plus
+their own **personal preferences** (`/me/`), while everyone else gets
+the personal self-service surface (`/me/`) only — opt out of DM
+notifications, view your Rewind, and manage your own settings. There are
+deliberately **no per-feature slash commands** (no `/notifications`,
+`/digest`, `/rewind`); those preferences live behind `/config` → `/me/`.
+See [WEBUI.md](WEBUI.md) for the full surface breakdown.
+
 > **Note:** Most commands must be enabled before they appear in Discord.
 > Toggle them from the Web UI's **Settings** page (run `/config` to get a
 > single-use sign-in link), then click **Reload commands to Discord** to
@@ -24,7 +34,7 @@ single `/config` launcher.
   - [/seen](#seen)
   - [/achievements](#achievements)
   - [/quote](#quote)
-- [Admin: Web UI launcher](#-admin-web-ui-launcher)
+- [Web UI launcher](#-web-ui-launcher)
   - [/config](#config)
 - [Voice Channel Control Panel](#voice-channel-control-panel)
 - [Permission Requirements](#-permission-requirements)
@@ -369,26 +379,38 @@ and is auto-recreated if deleted.
 
 ---
 
-## 🔧 Admin: Web UI launcher
+## 🔧 Web UI launcher
 
-KoolBot has exactly one admin slash command. It does one thing: mint a
-single-use sign-in link for the admin Web UI and DM it to you.
+KoolBot has exactly one Web UI slash command. It does one thing: mint a
+single-use sign-in link for the Web UI and DM it to you. The surface you
+land on depends on your permissions — administrators get the admin panel
+(and their own preferences); everyone else gets the personal
+self-service surface.
 
 ### `/config`
 
-**Description:** Open the admin web UI. Sends you a single-use, time-limited
-sign-in link via DM. Every administrative action — settings, permissions,
-the setup wizard, announcements, polls, reaction roles, notices, voice
-channel management, database cleanup, bot stats — happens in the Web UI.
+**Description:** Open the Web UI. Sends you a single-use, time-limited
+sign-in link via DM. The link lands on the surface that matches your
+permissions:
 
-**Permission:** Discord **Administrator** by default. `/config` is
-registered with `setDefaultMemberPermissions(Administrator)`, so
-Discord itself blocks non-administrators from invoking it before the
-bot ever sees the interaction. To grant `/config` to non-admin roles,
-override the command's permissions in Discord
-(**Server Settings → Integrations → KoolBot → /config**); the Web UI's
-Permissions page can only further restrict who is allowed once Discord
-has admitted the interaction.
+- **Administrators** reach the **admin panel** (`/admin/`) — settings,
+  permissions, the setup wizard, announcements, polls, reaction roles,
+  notices, voice channel management, database cleanup, bot stats — and
+  can jump to their own **personal preferences** (`/me/`) from a header
+  link without re-running `/config`.
+- **Everyone else** reaches the **personal self-service surface**
+  (`/me/`) — opt out of DM notifications, view their Rewind, and manage
+  their own per-user settings. They never see the admin panel.
+
+**Permission:** Open to **every guild member**. `/config` is no longer
+registered with `setDefaultMemberPermissions(Administrator)` — any member
+can run it. The session **role** is decided at issue time from the
+invoker's live guild permissions: a member with **Administrator** gets an
+`admin` session (authorised for both `/admin/*` and their own `/me/*`);
+everyone else gets a `user` session (authorised for `/me/*` only). A
+`user` session that tries to reach `/admin/*` gets a clear 403 pointing
+it at `/me/`. The Web UI's Permissions page governs the *other* slash
+commands, not `/config` itself.
 
 **Prerequisites:** Operator must have set `WEBUI_ENABLED=true`,
 `WEBUI_BASE_URL`, and `WEBUI_SESSION_SECRET` in `.env` and restarted the
@@ -404,22 +426,25 @@ No subcommands, no parameters.
 
 **Behavior:**
 
-1. Discord routes the interaction to the bot (it only does this for
-   members the command's Discord-level permissions allow — Administrator
-   by default; non-admin roles allowed only when an operator has added
-   them via Server Settings → Integrations).
-2. Bot revokes any prior unrevoked sessions you have.
-3. Bot generates a single-use token bound to your Discord user ID
-   (default TTL: 10 minutes; configurable via
+1. Discord routes the interaction to the bot (any guild member may run
+   `/config`).
+2. Bot determines your session **role** from your live guild
+   permissions: `admin` if you have Administrator, otherwise `user`.
+3. Bot revokes any prior unrevoked sessions you have.
+4. Bot generates a single-use token bound to your Discord user ID and
+   the chosen role (default TTL: 10 minutes; configurable via
    `WEBUI_SESSION_TTL_MINUTES`).
-4. Bot DMs you a unique URL of the form
-   `https://your-bot.example.com/admin/s/<token>`.
-5. You open the link. The bot exchanges the token for a signed session
-   cookie scoped to your user ID and redirects to `/admin/`.
-6. You configure the bot in the Web UI. The session sliding window
-   defaults to 30 minutes of inactivity and is hard-capped at the
-   server-side TTL.
-7. You end the session one of four ways:
+5. Bot DMs you a unique URL of the form
+   `https://your-bot.example.com/admin/s/<token>`. (The redemption path
+   is the same for both roles; an admin DM additionally points out the
+   `/me/` entry point.)
+6. You open the link. The bot exchanges the token for a signed session
+   cookie scoped to your user ID and role, then redirects you to
+   `/admin/` (admin role) or `/me/` (user role).
+7. You use the Web UI (configure the bot, or manage your own
+   preferences). The session sliding window defaults to 30 minutes of
+   inactivity and is hard-capped at the server-side TTL.
+8. You end the session one of four ways:
    - Click **Finish** — server-side revoke + cookie cleared, immediate.
    - Re-run `/config` — server-side revoke of the prior session +
      fresh link minted.
@@ -439,11 +464,31 @@ DM is delivered:
 ✅ I've DMed you a single-use sign-in link. Check your direct messages.
 ```
 
-DM is blocked (fallback to ephemeral reply, visible only to you):
+DM is blocked (fallback to ephemeral reply, visible only to you). The
+body depends on your role.
+
+For an **admin** session (both entry points advertised):
 
 ```text
-🔗 Koolbot admin sign-in link
+🔗 Koolbot sign-in link
 https://bot.example.com/admin/s/9f4b...
+
+Once you've signed in:
+• Admin panel: the link above drops you on /admin/.
+• My preferences: switch to /me/ for your own settings (also reachable
+  via the header link on every admin page).
+
+This link is single-use and expires in about 10 minute(s).
+If you did not run /config, ignore this message.
+```
+
+For a **user** session (personal surface only):
+
+```text
+🔗 Koolbot sign-in link
+https://bot.example.com/admin/s/9f4b...
+Opens My preferences (/me/) — your personal Koolbot settings for this server.
+
 This link is single-use and expires in about 10 minute(s).
 If you did not run /config, ignore this message.
 ```
@@ -583,16 +628,19 @@ button to admit them. **🗑️ Remove Waiting Room** deletes it.
 
 \* Per-command role gating can be added in the Web UI's **Permissions** page.
 
-### Admin command permissions
+### Web UI launcher permissions
 
-| Command   | Permission                                                                                                     |
-| --------- | -------------------------------------------------------------------------------------------------------------- |
-| `/config` | Administrator (Discord-level default; to widen to non-admin roles, override in Server Settings → Integrations) |
+| Command   | Permission                                                                                                |
+| --------- | --------------------------------------------------------------------------------------------------------- |
+| `/config` | Everyone — session role (`admin` vs `user`) is derived from the invoker's Administrator permission at run |
 
-The Web UI's Permissions page can only **further restrict** who is
-allowed to use `/config` once Discord has admitted the interaction. It
-cannot widen access past Discord's `setDefaultMemberPermissions(Administrator)`
-gate.
+`/config` is intentionally **not** gated to Administrator. Any guild
+member can run it; what differs is the surface they reach. A member with
+Administrator gets an `admin` session (admin panel + their own `/me/`);
+everyone else gets a `user` session scoped to `/me/` only. The
+ownership check on `/me/*` ensures a session — admin or user — can only
+read and write its **own** `(userId, guildId)` rows, so widening
+`/config` access never grants visibility into anyone else's data.
 
 ### Bot permissions required
 
@@ -638,13 +686,17 @@ The bot needs these Discord permissions:
 /quote edit id:"..." [text:"..."] [author:@User]
 ```
 
-### Admin command
+### Web UI launcher
 
 ```text
-/config                             # Open the admin Web UI (DMs a sign-in link)
+/config                             # Open the Web UI (DMs a sign-in link)
 ```
 
-Once in the Web UI:
+Available to every member. Admins land on the admin panel below; other
+members land on their personal `/me/` self-service surface (notification
+opt-outs, Rewind, personal settings).
+
+Once in the admin Web UI (admin sessions):
 
 | Page           | Replaces (legacy slash command)                                            |
 | -------------- | -------------------------------------------------------------------------- |
@@ -659,6 +711,15 @@ Once in the Web UI:
 | Voice Channels | `/vc reload`, `/vc force-reload`                                           |
 | Database       | `/dbtrunk status`, `/dbtrunk run`                                          |
 | Bootstrap      | (new — read-only `.env` diagnostics)                                       |
+
+On the personal surface (`/me/`, available to every member — admins
+reach it from a header link on any admin page):
+
+| Page          | What it does                                                                        |
+| ------------- | ----------------------------------------------------------------------------------- |
+| Overview      | `/me/` index linking to your per-user pages                                         |
+| Notifications | `/me/notifications` — opt in/out of DM nudges (achievements, weekly digest, Rewind) |
+| Rewind        | `/me/rewind` — personal year-in-review (voice time, top channels, rank journey, …)  |
 
 ---
 
@@ -735,7 +796,9 @@ Once in the Web UI:
 
 ### "Permission denied" errors
 
-- Do you have Administrator permission (for `/config`)?
+- `/config` itself is open to everyone — but only **Administrators** get
+  the admin panel. If a non-admin's link lands on `/me/` and `/admin/*`
+  returns 403, that's expected: admin pages need an Administrator.
 - Is the bot's role high enough in the Discord role hierarchy?
 - Is the feature enabled in the Web UI's Settings page?
 - For `/config`: is `WEBUI_ENABLED=true` and are the other `WEBUI_*`
