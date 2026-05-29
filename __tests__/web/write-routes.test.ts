@@ -8,7 +8,9 @@ import { describe, it, expect } from "@jest/globals";
 import {
   coerceConfigValue,
   findSectionMasterKey,
+  firstLengthError,
   resetConfigToDefaults,
+  TEXT_LIMITS,
   type ResetConfigStore,
 } from "../../src/web/write-routes.js";
 import {
@@ -137,14 +139,16 @@ describe("coerceConfigValue", () => {
       ok: true,
       value: "Lobby",
     });
-    expect(
-      coerceConfigValue("voicechannels.lobby.name", 123),
-    ).toEqual({ ok: true, value: "123" });
+    expect(coerceConfigValue("voicechannels.lobby.name", 123)).toEqual({
+      ok: true,
+      value: "123",
+    });
     // null / undefined become an empty string rather than the literal
     // "null" / "undefined", which is what an unset string field should be.
-    expect(
-      coerceConfigValue("voicechannels.lobby.name", null),
-    ).toEqual({ ok: true, value: "" });
+    expect(coerceConfigValue("voicechannels.lobby.name", null)).toEqual({
+      ok: true,
+      value: "",
+    });
   });
 
   it("joins array input into a comma-separated string for *_list keys", () => {
@@ -169,9 +173,10 @@ describe("coerceConfigValue", () => {
   });
 
   it("yields an empty string when nothing is selected in a multi-select", () => {
-    expect(
-      coerceConfigValue("voicetracking.excluded_channels", []),
-    ).toEqual({ ok: true, value: "" });
+    expect(coerceConfigValue("voicetracking.excluded_channels", [])).toEqual({
+      ok: true,
+      value: "",
+    });
   });
 
   it("rejects an array payload for a non-list string key", () => {
@@ -194,15 +199,18 @@ describe("coerceConfigValue", () => {
     // leaderboard_roles.period is a string key with an `options` whitelist
     // (week / month / alltime); values outside it must be refused.
     it("accepts a value in the options whitelist", () => {
-      expect(
-        coerceConfigValue("leaderboard_roles.period", "week"),
-      ).toEqual({ ok: true, value: "week" });
-      expect(
-        coerceConfigValue("leaderboard_roles.period", "month"),
-      ).toEqual({ ok: true, value: "month" });
-      expect(
-        coerceConfigValue("leaderboard_roles.period", "alltime"),
-      ).toEqual({ ok: true, value: "alltime" });
+      expect(coerceConfigValue("leaderboard_roles.period", "week")).toEqual({
+        ok: true,
+        value: "week",
+      });
+      expect(coerceConfigValue("leaderboard_roles.period", "month")).toEqual({
+        ok: true,
+        value: "month",
+      });
+      expect(coerceConfigValue("leaderboard_roles.period", "alltime")).toEqual({
+        ok: true,
+        value: "alltime",
+      });
     });
 
     it("rejects a value outside the options whitelist with an enumerated reason", () => {
@@ -221,6 +229,71 @@ describe("coerceConfigValue", () => {
       const r = coerceConfigValue("leaderboard_roles.period", "");
       expect(r.ok).toBe(false);
     });
+  });
+
+  describe("free-text length cap (#508)", () => {
+    it("accepts a string value at the configValue limit", () => {
+      const atLimit = "x".repeat(TEXT_LIMITS.configValue);
+      expect(coerceConfigValue("voicechannels.lobby.name", atLimit)).toEqual({
+        ok: true,
+        value: atLimit,
+      });
+    });
+
+    it("rejects a string value one character over the configValue limit", () => {
+      const tooLong = "x".repeat(TEXT_LIMITS.configValue + 1);
+      const r = coerceConfigValue("voicechannels.lobby.name", tooLong);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toMatch(/too long/i);
+    });
+
+    it("does not cap *_list CSV values (bounded by entity IDs, not text)", () => {
+      // A long multi-select selection collapses to CSV in the array branch,
+      // which must not be rejected by the scalar free-text cap.
+      // 150 snowflake-length IDs collapse to a CSV well over the 2000-char
+      // scalar cap; the *_list branch must still accept it.
+      const manyIds = Array.from(
+        { length: 150 },
+        (_, i) => `1000000000000000${String(i).padStart(3, "0")}`,
+      );
+      const r = coerceConfigValue("voicetracking.excluded_channels", manyIds);
+      expect(r.ok).toBe(true);
+      if (r.ok)
+        expect(String(r.value).length).toBeGreaterThan(TEXT_LIMITS.configValue);
+    });
+  });
+});
+
+describe("firstLengthError (#508)", () => {
+  it("returns null when every field is within its limit", () => {
+    expect(
+      firstLengthError([
+        { label: "Title", value: "short", max: 256 },
+        { label: "Content", value: "also short", max: 4000 },
+      ]),
+    ).toBeNull();
+  });
+
+  it("accepts a value exactly at its limit (boundary)", () => {
+    expect(
+      firstLengthError([{ label: "Title", value: "x".repeat(256), max: 256 }]),
+    ).toBeNull();
+  });
+
+  it("reports the first oversized field with its cap", () => {
+    const err = firstLengthError([
+      { label: "Title", value: "ok", max: 256 },
+      { label: "Content", value: "x".repeat(4001), max: 4000 },
+    ]);
+    expect(err).toBe("Content must be 4000 characters or fewer.");
+  });
+
+  it("stops at the first failing field even when several exceed", () => {
+    const err = firstLengthError([
+      { label: "Message", value: "x".repeat(3000), max: 2000 },
+      { label: "Embed description", value: "x".repeat(5000), max: 4000 },
+    ]);
+    expect(err).toBe("Message must be 2000 characters or fewer.");
   });
 });
 

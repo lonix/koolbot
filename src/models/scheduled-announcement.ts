@@ -33,11 +33,13 @@ const ScheduledAnnouncementSchema = new Schema<IScheduledAnnouncement>(
     guildId: { type: String, required: true, index: true },
     channelId: { type: String, required: true },
     cronSchedule: { type: String, required: true },
-    message: { type: String, required: true },
+    // Discord message content cap (#508).
+    message: { type: String, required: true, maxlength: 2000 },
     embedData: {
       type: {
-        title: { type: String },
-        description: { type: String },
+        // Discord embed title / description caps (#508).
+        title: { type: String, maxlength: 256 },
+        description: { type: String, maxlength: 4000 },
         color: { type: Number },
         fields: [
           {

@@ -59,6 +59,52 @@ type Flash = { type: "ok" | "warn" | "err"; text: string };
 
 const FLASH_MAX = 500;
 
+/**
+ * Maximum lengths for user-supplied free text (issue #508). Each cap is
+ * derived from the real-world constraint the value eventually hits — a
+ * Discord embed/message/poll limit, or a sane ceiling for a stored setting.
+ * Server-side validation uses these so an oversized payload is rejected with
+ * a clean flash *before* it reaches MongoDB or the Discord API, rather than
+ * surfacing later as an opaque Mongoose `ValidationError` (formatted as a 500)
+ * or a silent Discord rejection at send time. The matching schema `maxlength`
+ * constraints are defence-in-depth for non-route writers.
+ */
+export const TEXT_LIMITS = {
+  /** Discord embed title cap — notice titles render as the embed title. */
+  noticeTitle: 256,
+  /** Discord embed description (body) cap — notices render as embeds. */
+  noticeContent: 4000,
+  /** Discord message content cap. */
+  announcementMessage: 2000,
+  /** Discord embed title cap. */
+  embedTitle: 256,
+  /** Discord embed description cap. */
+  embedDescription: 4000,
+  /** Discord poll question cap. */
+  pollQuestion: 300,
+  /** Discord poll answer (option) cap. */
+  pollAnswer: 55,
+  /** Ceiling for any single free-text setting value. */
+  configValue: 2000,
+} as const;
+
+/**
+ * Validate a labelled set of strings against their maximum lengths. Returns a
+ * human-readable error for the first field that exceeds its cap, or null when
+ * everything fits. Pure and exported so the route-layer length checks can be
+ * unit-tested without Express or Mongo.
+ */
+export function firstLengthError(
+  fields: Array<{ label: string; value: string; max: number }>,
+): string | null {
+  for (const { label, value, max } of fields) {
+    if (value.length > max) {
+      return `${label} must be ${max} characters or fewer.`;
+    }
+  }
+  return null;
+}
+
 function flashRedirect(res: Response, path: string, flash: Flash): void {
   // Mirror the renderer's 500-char cap on the way out so the redirect
   // URL itself can't balloon to header/URI limits on a noisy failure.
@@ -237,6 +283,16 @@ export function coerceConfigValue(
     return { ok: true, value: n };
   }
   const value = String(raw ?? "");
+  // Cap free-text setting values so an oversized string can't be stored and
+  // then overflow the Settings display or a downstream Discord payload (#508).
+  // List keys are handled in the array branch above and are bounded by their
+  // entity IDs, so the cap only applies to scalar string values here.
+  if (value.length > TEXT_LIMITS.configValue) {
+    return {
+      ok: false,
+      reason: `too long (max ${TEXT_LIMITS.configValue} characters)`,
+    };
+  }
   // Fixed-options keys carry an `options` whitelist in their metadata. Any
   // value outside it (mistyped form field, crafted POST, stale YAML import)
   // is refused with a clear, enumerated error rather than silently stored.
@@ -1510,6 +1566,32 @@ export function createWriteRouter(
         });
         return;
       }
+      // Reject oversized text up front so the operator gets a readable flash
+      // rather than a Discord rejection at send time or a Mongoose error (#508).
+      const lengthError = firstLengthError([
+        {
+          label: "Message",
+          value: message,
+          max: TEXT_LIMITS.announcementMessage,
+        },
+        {
+          label: "Embed title",
+          value: embedTitle,
+          max: TEXT_LIMITS.embedTitle,
+        },
+        {
+          label: "Embed description",
+          value: embedDescription,
+          max: TEXT_LIMITS.embedDescription,
+        },
+      ]);
+      if (lengthError) {
+        flashRedirect(res, "/admin/announcements", {
+          type: "err",
+          text: lengthError,
+        });
+        return;
+      }
 
       let embedData: IScheduledAnnouncement["embedData"] | undefined;
       if (embedTitle || embedDescription || embedColorHex) {
@@ -1902,10 +1984,10 @@ export function createWriteRouter(
         });
         return;
       }
-      if (question.length > 300) {
+      if (question.length > TEXT_LIMITS.pollQuestion) {
         flashRedirect(res, "/admin/polls", {
           type: "err",
-          text: "Question must be 300 characters or fewer.",
+          text: `Question must be ${TEXT_LIMITS.pollQuestion} characters or fewer.`,
         });
         return;
       }
@@ -1917,6 +1999,16 @@ export function createWriteRouter(
         flashRedirect(res, "/admin/polls", {
           type: "err",
           text: "Provide 2–10 comma-separated answers.",
+        });
+        return;
+      }
+      // Discord caps each poll answer (option) at 55 characters; reject an
+      // oversized one here so it fails with a clean flash rather than being
+      // stored and only rejected when Discord receives the payload (#508).
+      if (answers.some((a) => a.length > TEXT_LIMITS.pollAnswer)) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Each answer must be ${TEXT_LIMITS.pollAnswer} characters or fewer.`,
         });
         return;
       }
@@ -2354,17 +2446,14 @@ export function createWriteRouter(
         });
         return;
       }
-      if (title.length > 256) {
+      const lengthError = firstLengthError([
+        { label: "Title", value: title, max: TEXT_LIMITS.noticeTitle },
+        { label: "Content", value: content, max: TEXT_LIMITS.noticeContent },
+      ]);
+      if (lengthError) {
         flashRedirect(res, "/admin/notices", {
           type: "err",
-          text: "Title must be 256 characters or fewer.",
-        });
-        return;
-      }
-      if (content.length > 4000) {
-        flashRedirect(res, "/admin/notices", {
-          type: "err",
-          text: "Content must be 4000 characters or fewer.",
+          text: lengthError,
         });
         return;
       }
@@ -2464,6 +2553,20 @@ export function createWriteRouter(
         flashRedirect(res, "/admin/notices", {
           type: "err",
           text: "Title, content, and category are all required.",
+        });
+        return;
+      }
+      // Mirror the create-route length checks: `notice.save()` would otherwise
+      // reject the oversized field as a Mongoose ValidationError surfaced as a
+      // 500-style flash instead of this readable message (#508).
+      const lengthError = firstLengthError([
+        { label: "Title", value: title, max: TEXT_LIMITS.noticeTitle },
+        { label: "Content", value: content, max: TEXT_LIMITS.noticeContent },
+      ]);
+      if (lengthError) {
+        flashRedirect(res, "/admin/notices", {
+          type: "err",
+          text: lengthError,
         });
         return;
       }

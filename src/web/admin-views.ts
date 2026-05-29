@@ -517,8 +517,10 @@ function renderSettingControl(
   if (r.type === "cron") {
     return renderCronPicker(currentStr, settingValueFieldName(r.key));
   }
-  // string or unknown type → plain text input.
-  return `<input type="text" name="${valueName}" value="${escapeHtml(primitive)}">`;
+  // string or unknown type → plain text input. The maxlength mirrors the
+  // server-side `TEXT_LIMITS.configValue` cap in write-routes (#508) — kept as
+  // a literal here to avoid a circular import (write-routes imports this file).
+  return `<input type="text" name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}">`;
 }
 
 /**
@@ -1001,7 +1003,8 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       } else if (type === "number") {
         control = `<input type="number" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="${escapeHtml(display)}">`;
       } else {
-        control = `<input type="text" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="${escapeHtml(display)}">`;
+        // maxlength mirrors TEXT_LIMITS.configValue in write-routes (#508).
+        control = `<input type="text" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" maxlength="2000" value="${escapeHtml(display)}">`;
       }
 
       return `<div class="field-row">
@@ -1413,8 +1416,8 @@ ${renderFlash(props.flash)}
     <label>Question
       <input type="text" name="question" maxlength="300" required>
     </label>
-    <label>Answers (comma-separated, 2–10 options)
-      <input type="text" name="answers" placeholder="Yes, No, Maybe" required>
+    <label>Answers (comma-separated, 2–10 options, ≤55 chars each)
+      <input type="text" name="answers" maxlength="600" placeholder="Yes, No, Maybe" required>
     </label>
     <label>Tags (comma-separated, optional)
       <input type="text" name="tags" placeholder="icebreaker, funny">
