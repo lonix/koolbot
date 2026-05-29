@@ -535,6 +535,118 @@ describe("renderSettingsPage", () => {
       '<option value="999-deleted" selected>(missing) 999-deleted</option>',
     );
   });
+
+  it("renders an options-typed setting as a single-select with the current value pre-selected", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "leaderboard_roles",
+          rows: [
+            {
+              key: "leaderboard_roles.period",
+              label: "Period",
+              current: "month",
+              defaultValue: "alltime",
+              type: "string",
+              description: "",
+              category: "leaderboard_roles",
+              options: [
+                { value: "week", label: "This week" },
+                { value: "month", label: "This month" },
+                { value: "alltime", label: "All time" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain('<select name="value_leaderboard_roles.period">');
+    expect(html).toContain('<option value="week">This week</option>');
+    expect(html).toContain(
+      '<option value="month" selected>This month</option>',
+    );
+    expect(html).toContain('<option value="alltime">All time</option>');
+    // No free-text input is emitted for an options key.
+    expect(html).not.toContain(
+      '<input type="text" name="value_leaderboard_roles.period"',
+    );
+  });
+
+  it("surfaces an out-of-range options value as a selected `(unknown)` option", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "leaderboard_roles",
+          rows: [
+            {
+              key: "leaderboard_roles.period",
+              label: "Period",
+              current: "fortnight",
+              defaultValue: "alltime",
+              type: "string",
+              description: "",
+              category: "leaderboard_roles",
+              options: [
+                { value: "week", label: "This week" },
+                { value: "month", label: "This month" },
+                { value: "alltime", label: "All time" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain(
+      '<option value="fortnight" selected>(unknown) fortnight</option>',
+    );
+    // None of the known options should be selected when the stored value is
+    // out of range.
+    expect(html).not.toMatch(/value="(week|month|alltime)" selected/);
+  });
+
+  it("surfaces an empty options value as a selected `(choose a value)` placeholder rather than defaulting to the first option", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "leaderboard_roles",
+          rows: [
+            {
+              key: "leaderboard_roles.period",
+              label: "Period",
+              current: "",
+              defaultValue: "alltime",
+              type: "string",
+              description: "",
+              category: "leaderboard_roles",
+              options: [
+                { value: "week", label: "This week" },
+                { value: "month", label: "This month" },
+                { value: "alltime", label: "All time" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    // An empty stored value is out-of-range for an options key (coerceConfigValue
+    // rejects ""), so it must not silently select+submit the first valid option.
+    expect(html).toContain(
+      '<option value="" selected>(choose a value)</option>',
+    );
+    expect(html).not.toMatch(/value="(week|month|alltime)" selected/);
+  });
 });
 
 describe("renderPermissionsPage", () => {
@@ -1134,6 +1246,67 @@ describe("renderWizardStepPage", () => {
     expect(html).toContain("Enable VC");
   });
 
+  it("renders an options-backed key as a <select> using the raw key name and pre-selects the current value", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      stepIndex: 0,
+      totalSteps: 1,
+      featureKey: "leaderboard_roles",
+      settingKeys: ["leaderboard_roles.period"],
+      currentValues: { "leaderboard_roles.period": "month" },
+      defaultValues: { "leaderboard_roles.period": "alltime" },
+      metadata: {
+        "leaderboard_roles.period": {
+          description: "Activity window",
+          category: "leaderboard_roles",
+          options: [
+            { value: "week", label: "This week" },
+            { value: "month", label: "This month" },
+            { value: "alltime", label: "All time" },
+          ],
+        },
+      },
+    });
+    // The wizard posts raw key names (not the value_-prefixed settings form
+    // field), so the select must carry the bare key.
+    expect(html).toContain('<select name="leaderboard_roles.period">');
+    expect(html).toContain(
+      '<option value="month" selected>This month</option>',
+    );
+    expect(html).toContain('<option value="week">This week</option>');
+    // No free-text input for an options key.
+    expect(html).not.toContain(
+      '<input type="text" id="wiz-leaderboard_roles.period"',
+    );
+  });
+
+  it("surfaces an out-of-range options value in the wizard as a selected `(unknown)` option", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      stepIndex: 0,
+      totalSteps: 1,
+      featureKey: "leaderboard_roles",
+      settingKeys: ["leaderboard_roles.period"],
+      currentValues: { "leaderboard_roles.period": "fortnight" },
+      defaultValues: { "leaderboard_roles.period": "alltime" },
+      metadata: {
+        "leaderboard_roles.period": {
+          description: "Activity window",
+          category: "leaderboard_roles",
+          options: [
+            { value: "week", label: "This week" },
+            { value: "month", label: "This month" },
+            { value: "alltime", label: "All time" },
+          ],
+        },
+      },
+    });
+    expect(html).toContain(
+      '<option value="fortnight" selected>(unknown) fortnight</option>',
+    );
+    expect(html).not.toMatch(/value="(week|month|alltime)" selected/);
+  });
+
   it("renders a flash banner when coercion drops fields", () => {
     const html = renderWizardStepPage({
       ...COMMON,
@@ -1221,9 +1394,7 @@ describe("renderWizardStepPage", () => {
       metadata: {},
     });
     // The step form is the cascade scope.
-    expect(html).toContain(
-      'action="/admin/wizard/step/0" data-cascade-scope',
-    );
+    expect(html).toContain('action="/admin/wizard/step/0" data-cascade-scope');
     // Only the top-level feature toggle is the master; the sub-toggle is a
     // dependent (no data-cascade-master attribute).
     expect(html).toMatch(
@@ -1257,9 +1428,7 @@ describe("findCascadeMasterKey", () => {
   });
 
   it("ignores non-boolean .enabled keys", () => {
-    expect(
-      findCascadeMasterKey([row("quotes.enabled", "string")]),
-    ).toBeNull();
+    expect(findCascadeMasterKey([row("quotes.enabled", "string")])).toBeNull();
   });
 
   it("returns null when no .enabled key exists", () => {

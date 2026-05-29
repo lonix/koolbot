@@ -10,7 +10,10 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
-import { categoryMetadata } from "../services/config-schema.js";
+import {
+  categoryMetadata,
+  type SettingOption,
+} from "../services/config-schema.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -178,6 +181,12 @@ export interface SettingRow {
   type: string;
   description: string;
   category: string;
+  /**
+   * When present, the value control renders as a `<select>` limited to
+   * these choices instead of a free-text input. Sourced from the key's
+   * `SettingMetadata.options`.
+   */
+  options?: SettingOption[];
 }
 
 export interface SettingsProps extends CommonProps {
@@ -410,6 +419,38 @@ export function findCascadeMasterKey(rows: SettingRow[]): string | null {
   return master?.key ?? null;
 }
 
+/**
+ * Render a single-select `<select>` for a fixed-options setting. Each
+ * option's `value` is the raw stored value; `label` is the display text.
+ * If the current stored value isn't one of the known options it's surfaced
+ * as a selected placeholder so the browser doesn't silently default to the
+ * first valid choice and overwrite the out-of-range value on save:
+ *   - a non-empty unknown value (stale row, hand-edited DB) shows as
+ *     `(unknown) <value>`;
+ *   - an empty value shows a neutral `(choose a value)` placeholder.
+ * Both round-trip the current value, so on save `coerceConfigValue`
+ * rejects it with a clear error and forces the operator to pick.
+ */
+function renderOptionsSelect(
+  valueName: string,
+  options: SettingOption[],
+  current: string,
+): string {
+  const known = options.some((o) => o.value === current);
+  const opts = options
+    .map((o) => {
+      const sel = o.value === current ? " selected" : "";
+      return `<option value="${escapeHtml(o.value)}"${sel}>${escapeHtml(o.label)}</option>`;
+    })
+    .join("");
+  const placeholder = known
+    ? ""
+    : `<option value="${escapeHtml(current)}" selected>${
+        current === "" ? "(choose a value)" : `(unknown) ${escapeHtml(current)}`
+      }</option>`;
+  return `<select name="${valueName}">${opts}${placeholder}</select>`;
+}
+
 function renderSettingControl(
   r: SettingRow,
   pickers: {
@@ -423,6 +464,12 @@ function renderSettingControl(
   const currentStr = typeof primitive === "string" ? primitive : "";
   const valueName = escapeHtml(settingValueFieldName(r.key));
 
+  // Fixed-options keys render as a single-select dropdown regardless of
+  // their underlying `type`, so operators pick from the valid set instead
+  // of typing a value the server will reject.
+  if (r.options && r.options.length > 0) {
+    return renderOptionsSelect(valueName, r.options, currentStr);
+  }
   if (r.type === "boolean") {
     const checked = primitive === true ? " checked" : "";
     const masterAttr = isCascadeMaster ? " data-cascade-master" : "";
@@ -900,7 +947,10 @@ export interface WizardStepPageProps extends CommonProps {
   featureKey: string;
   settingKeys: string[];
   currentValues: Record<string, unknown>;
-  metadata: Record<string, { description: string; category: string }>;
+  metadata: Record<
+    string,
+    { description: string; category: string; options?: SettingOption[] }
+  >;
   defaultValues: Record<string, unknown>;
   flash?: FlashMessage | null;
 }
@@ -939,7 +989,12 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
           : "";
 
       let control: string;
-      if (type === "boolean") {
+      if (meta?.options && meta.options.length > 0) {
+        // Fixed-options keys render as a dropdown in the wizard too, so the
+        // value posted back is always one the server will accept.
+        const currentStr = typeof current === "string" ? current : "";
+        control = renderOptionsSelect(escapeHtml(k), meta.options, currentStr);
+      } else if (type === "boolean") {
         const checked = current === true ? " checked" : "";
         const masterAttr = k === masterKey ? " data-cascade-master" : "";
         control = `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="true"${checked}${masterAttr}> Enable</label>`;

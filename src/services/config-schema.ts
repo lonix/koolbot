@@ -260,11 +260,29 @@ export type SettingType =
   | "channel_list"
   | "role_list";
 
+/**
+ * A single choice in a fixed-options setting. `value` is the raw value
+ * stored in the DB (and validated against on POST); `label` is the
+ * human-readable text shown in the `<select>` option.
+ */
+export interface SettingOption {
+  value: string;
+  label: string;
+}
+
 export interface SettingMetadata {
   label: string;
   description: string;
   category: string;
   type: SettingType;
+  /**
+   * When present, the WebUI renders this setting as a `<select>` whose
+   * choices are exactly these options (instead of a free-text input), and
+   * server-side POST validation refuses any value not in this whitelist.
+   * Only meaningful for `string`-typed keys with a fixed enumerated set of
+   * valid values (e.g. `leaderboard_roles.period`).
+   */
+  options?: SettingOption[];
 }
 
 /**
@@ -750,11 +768,16 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "boolean",
   },
   "leaderboard_roles.period": {
-    label: "Leaderboard period",
+    label: "Period",
     description:
-      'Leaderboard period to evaluate: "week", "month", or "alltime".',
+      "Activity window the leaderboard role tiers are computed from.",
     category: "leaderboard_roles",
     type: "string",
+    options: [
+      { value: "week", label: "This week" },
+      { value: "month", label: "This month" },
+      { value: "alltime", label: "All time" },
+    ],
   },
   "leaderboard_roles.update_cron": {
     label: "Recalculation schedule (cron)",
