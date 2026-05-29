@@ -468,12 +468,19 @@ export class VoiceChannelTracker {
       // non-positive `limit` is the documented "all ranked users" sentinel
       // used by internal aggregation consumers (weekly digest fan-out,
       // leaderboard-role reconcile), which still receive every row.
-      const maxResults = await this.configService.getNumber(
+      //
+      // Both values are sanitised to a finite positive integer: `$limit` must
+      // be an integer, and a fractional/NaN/Infinity config value would
+      // otherwise produce an invalid stage or silently disable the cap.
+      const rawMax = await this.configService.getNumber(
         "voicetracking.stats.leaderboard_max_results",
         50,
       );
+      const maxResults =
+        Number.isFinite(rawMax) && rawMax >= 1 ? Math.floor(rawMax) : 50;
+      const requestedLimit = Number.isFinite(limit) ? Math.floor(limit) : 0;
       const effectiveLimit =
-        limit > 0 ? Math.min(limit, Math.max(1, maxResults)) : 0;
+        requestedLimit > 0 ? Math.min(requestedLimit, maxResults) : 0;
       const limitStage = effectiveLimit > 0 ? [{ $limit: effectiveLimit }] : [];
 
       switch (timePeriod) {

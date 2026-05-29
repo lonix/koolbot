@@ -40,15 +40,15 @@ import { UserNotificationPrefsService } from '../../src/services/user-notificati
 // Helper that mimics a Mongoose query cursor over a fixed set of docs, so
 // tests can exercise the streaming `.find({}).cursor()` path.
 function mockFindCursor(docs: unknown[]) {
-  return {
-    cursor: () => ({
-      async *[Symbol.asyncIterator]() {
-        for (const doc of docs) {
-          yield doc;
-        }
-      },
-    }),
-  };
+  const cursor = () => ({
+    async *[Symbol.asyncIterator]() {
+      for (const doc of docs) {
+        yield doc;
+      }
+    },
+  });
+  // Mirrors the `.select(...).lean().cursor()` chain the service uses.
+  return { select: () => ({ lean: () => ({ cursor }) }) };
 }
 
 // Helper to create an AchievementsService with injected config

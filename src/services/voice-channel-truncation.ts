@@ -342,9 +342,9 @@ export class VoiceChannelTruncationService {
       const retentionConfig = await this.getRetentionConfig();
 
       // Stream users one at a time via a cursor instead of loading the whole
-      // (append-heavy) collection into memory. Each document is processed and
-      // updated independently, so we never materialise more than one row.
-      const cursor = VoiceChannelTracking.find({}).lean(false).cursor();
+      // (append-heavy) collection into memory. The loop only reads fields and
+      // writes back via `updateOne`, so `.lean()` avoids hydration overhead.
+      const cursor = VoiceChannelTracking.find({}).lean().cursor();
 
       for await (const user of cursor) {
         try {

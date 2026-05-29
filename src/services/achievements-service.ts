@@ -1250,10 +1250,14 @@ export class AchievementsService {
 
       // Stream matching documents via a cursor rather than materialising the
       // whole result set, so this stays bounded as the achievements
-      // collection grows.
+      // collection grows. Only the three fields read below are projected, and
+      // `.lean()` avoids hydrating full Mongoose documents.
       const cursor = UserAchievements.find({
         "accolades.earnedAt": { $gte: oneWeekAgo },
-      }).cursor();
+      })
+        .select("userId username accolades")
+        .lean()
+        .cursor();
 
       const result: Array<{
         userId: string;
