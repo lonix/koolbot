@@ -1,6 +1,8 @@
 import { Client } from "discord.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { UserAchievements } from "../models/user-achievements.js";
+import { MessageActivityTracking } from "../models/message-activity-tracking.js";
+import { ConfigService } from "./config-service.js";
 import { ACCOLADE_METADATA } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
 import logger from "../utils/logger.js";
@@ -28,6 +30,17 @@ export interface RewindChannel {
   totalSeconds: number;
 }
 
+/**
+ * Top text channel for the Rewind summary (#496). Mirrors `RewindChannel`
+ * but ranked by message count rather than seconds, since text activity is
+ * counted per message.
+ */
+export interface RewindTextChannel {
+  channelId: string;
+  channelName: string;
+  count: number;
+}
+
 export interface RewindAchievement {
   type: string;
   emoji: string;
@@ -52,6 +65,11 @@ export interface RewindSummary {
   daysActive: number;
   topChannels: RewindChannel[];
   peakDay: { date: string; totalSeconds: number } | null; // ISO date (YYYY-MM-DD)
+  // Text-message activity (#496). Mirrors the voice aggregates above and
+  // reads as zero / empty when message tracking is disabled or absent.
+  messagesSent: number;
+  topTextChannels: RewindTextChannel[];
+  peakMessageDay: { date: string; count: number } | null; // ISO date (YYYY-MM-DD)
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
   accolades: RewindAchievement[];
@@ -64,8 +82,9 @@ export interface RewindSummary {
     last: RewindWeeklyRank | null;
     best: RewindWeeklyRank | null;
   };
-  // Years for which the user has any data (sessions or achievements).
-  // Used by the page to render a small year picker.
+  // Years for which the user has any data (voice sessions, text-message
+  // activity, or achievements). Used by the page to render a small year
+  // picker.
   availableYears: number[];
 }
 
@@ -75,6 +94,11 @@ interface RawSession {
   duration?: number;
   channelId: string;
   channelName?: string;
+}
+
+interface RawTextMessage {
+  sentAt: Date;
+  channelId: string;
 }
 
 // --------------------------------------------------------------------
@@ -163,6 +187,60 @@ export function computePeakDay(
 }
 
 /**
+ * Filter text messages to those sent within `[start, end)`. Used to scope
+ * the retained `recentMessages` detail to a single year. The window is
+ * half-open so the year boundary (and, in practice, the retention cutoff
+ * the cleanup pass enforces) is handled consistently with the voice flow.
+ */
+export function messagesInWindow(
+  messages: RawTextMessage[],
+  start: Date,
+  end: Date,
+): RawTextMessage[] {
+  return messages.filter((m) => m.sentAt >= start && m.sentAt < end);
+}
+
+/**
+ * Count messages per channel, sorted by count desc and capped at `limit`.
+ * Returns ids + counts; the service resolves channel names so this stays
+ * pure and testable.
+ */
+export function computeTopTextChannels(
+  messages: RawTextMessage[],
+  limit = 3,
+): Array<{ channelId: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const m of messages) {
+    counts.set(m.channelId, (counts.get(m.channelId) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([channelId, count]) => ({ channelId, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, limit);
+}
+
+/** The UTC day with the most messages, or null when there are none. */
+export function computePeakMessageDay(
+  messages: RawTextMessage[],
+): { date: string; count: number } | null {
+  const byDay = new Map<string, number>();
+  for (const m of messages) {
+    const key = toIsoDate(m.sentAt);
+    byDay.set(key, (byDay.get(key) ?? 0) + 1);
+  }
+  if (byDay.size === 0) return null;
+  let bestDate: string | null = null;
+  let bestCount = 0;
+  for (const [date, count] of byDay) {
+    if (count > bestCount) {
+      bestDate = date;
+      bestCount = count;
+    }
+  }
+  return bestDate ? { date: bestDate, count: bestCount } : null;
+}
+
+/**
  * Longest run of consecutive UTC days that contain ≥1 session. Returns
  * the day count and the start/end ISO dates of the winning run. A single
  * day of activity counts as a streak of 1.
@@ -241,9 +319,11 @@ function lookupAchievement(type: string): {
 export class RewindService {
   private static instance: RewindService;
   private client: Client;
+  private configService: ConfigService;
 
   private constructor(client: Client) {
     this.client = client;
+    this.configService = ConfigService.getInstance();
   }
 
   public static getInstance(client: Client): RewindService {
@@ -325,13 +405,28 @@ export class RewindService {
         })
         .filter((a): a is RewindAchievement => a !== null);
 
-      const { annualRank, annualGuildMembers, percentAboveMedian } =
-        await this.computeAnnualRank(userId, start, end, totalSeconds);
+      // These three reads are independent — run them concurrently so the
+      // on-demand /me/rewind render doesn't pay their latency in series.
+      const [
+        { annualRank, annualGuildMembers, percentAboveMedian },
+        weeklyJourney,
+        text,
+      ] = await Promise.all([
+        this.computeAnnualRank(userId, start, end, totalSeconds),
+        this.computeWeeklyJourney(userId, start, end),
+        this.computeTextActivity(userId, guildId, start, end),
+      ]);
 
-      const weeklyJourney = await this.computeWeeklyJourney(userId, start, end);
+      // The picker should offer any year the user has either kind of data.
+      const mergedYears = [...new Set([...availableYears, ...text.years])].sort(
+        (a, b) => b - a,
+      );
 
       const hasData =
-        totalSeconds > 0 || accolades.length > 0 || achievements.length > 0;
+        totalSeconds > 0 ||
+        accolades.length > 0 ||
+        achievements.length > 0 ||
+        text.messagesSent > 0;
 
       return {
         userId,
@@ -343,6 +438,9 @@ export class RewindService {
         daysActive,
         topChannels,
         peakDay,
+        messagesSent: text.messagesSent,
+        topTextChannels: text.topTextChannels,
+        peakMessageDay: text.peakMessageDay,
         longestStreakDays: streak.days,
         longestStreakRange:
           streak.startDate && streak.endDate
@@ -354,7 +452,7 @@ export class RewindService {
         annualGuildMembers,
         percentAboveMedian,
         weeklyJourney,
-        availableYears,
+        availableYears: mergedYears,
       };
     } catch (error) {
       logger.error(
@@ -403,6 +501,88 @@ export class RewindService {
       );
     }
     return [...years].sort((a, b) => b - a);
+  }
+
+  /**
+   * Aggregate text-message activity for the year from the retained
+   * `recentMessages` detail. Returns zero / empty when message tracking
+   * is disabled (per the feature gate) or the user has no document, so
+   * the view can hide the card without special-casing.
+   *
+   * `years` reflects every year present in the retained detail (bounded
+   * by `messagetracking.cleanup.retention.detailed_days`) so the year
+   * picker can offer them even when the requested year itself has no
+   * text data.
+   */
+  private async computeTextActivity(
+    userId: string,
+    guildId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{
+    messagesSent: number;
+    topTextChannels: RewindTextChannel[];
+    peakMessageDay: { date: string; count: number } | null;
+    years: number[];
+  }> {
+    const empty = {
+      messagesSent: 0,
+      topTextChannels: [] as RewindTextChannel[],
+      peakMessageDay: null,
+      years: [] as number[],
+    };
+    try {
+      const enabled = await this.configService.getBoolean(
+        "messagetracking.enabled",
+        false,
+      );
+      if (!enabled) return empty;
+
+      const doc = await MessageActivityTracking.findOne(
+        { userId, guildId },
+        // Only the per-message detail is needed here — skip channels[] /
+        // totalCount to keep the payload small.
+        { recentMessages: 1 },
+      ).lean<{ recentMessages?: RawTextMessage[] }>();
+      const all = doc?.recentMessages ?? [];
+      const years = [...new Set(all.map((m) => m.sentAt.getUTCFullYear()))];
+
+      const inYear = messagesInWindow(all, start, end);
+      if (inYear.length === 0) {
+        return { ...empty, years };
+      }
+
+      const topTextChannels = computeTopTextChannels(inYear, 3).map((c) => ({
+        channelId: c.channelId,
+        channelName: this.resolveChannelName(c.channelId),
+        count: c.count,
+      }));
+
+      return {
+        messagesSent: inYear.length,
+        topTextChannels,
+        peakMessageDay: computePeakMessageDay(inYear),
+        years,
+      };
+    } catch (error) {
+      logger.warn(
+        `RewindService.computeTextActivity failed for ${userId}:`,
+        error,
+      );
+      return empty;
+    }
+  }
+
+  /**
+   * Resolve a channel id to its current name via the client cache,
+   * falling back to a placeholder for deleted / uncached channels.
+   */
+  private resolveChannelName(channelId: string): string {
+    const channel = this.client.channels.cache.get(channelId);
+    if (channel && "name" in channel && typeof channel.name === "string") {
+      return channel.name;
+    }
+    return "Unknown channel";
   }
 
   /**

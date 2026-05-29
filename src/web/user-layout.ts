@@ -274,6 +274,12 @@ export interface RewindChannelView {
   duration: string; // pre-formatted
 }
 
+export interface RewindTextChannelView {
+  channelId: string;
+  channelName: string;
+  count: number;
+}
+
 export interface RewindBodyOptions {
   year: number;
   availableYears: number[]; // includes `year` for the current selection
@@ -296,6 +302,11 @@ export interface RewindBodyOptions {
     last: { isoYear: number; isoWeek: number; rank: number } | null;
     best: { isoYear: number; isoWeek: number; rank: number } | null;
   };
+  // Text-message activity (#496). Mirrors the voice fields above; the
+  // card is hidden when `messagesSent` is 0 (no data or tracking off).
+  messagesSent: number;
+  topTextChannels: RewindTextChannelView[];
+  peakMessageDay: { date: string; count: number } | null;
 }
 
 function renderYearPicker(current: number, years: number[]): string {
@@ -364,6 +375,47 @@ function renderJourney(j: RewindBodyOptions["weeklyJourney"]): string {
   );
 }
 
+/**
+ * Text-message activity card (#496). Reuses the voice Rewind styling
+ * (`.rw-stat`, `.rw-channels`). Returns "" when the user has no text
+ * activity for the year so the route can append it unconditionally and
+ * the card simply disappears.
+ */
+function renderTextActivity(opts: RewindBodyOptions): string {
+  if (opts.messagesSent <= 0) return "";
+
+  const peak = opts.peakMessageDay
+    ? `<div class="value">${escapeHtml(opts.peakMessageDay.date)}</div><div class="detail">${opts.peakMessageDay.count} message${opts.peakMessageDay.count === 1 ? "" : "s"} that day</div>`
+    : '<div class="value">—</div>';
+
+  const channels =
+    opts.topTextChannels.length === 0
+      ? '<div class="empty">No tracked text channels this year.</div>'
+      : '<ul class="rw-channels">' +
+        opts.topTextChannels
+          .map(
+            (c) =>
+              "<li>" +
+              `<span class="name">${escapeHtml(c.channelName)}</span>` +
+              `<span class="dur">${c.count} msg${c.count === 1 ? "" : "s"}</span>` +
+              "</li>",
+          )
+          .join("") +
+        "</ul>";
+
+  return [
+    "<h2>Text activity</h2>",
+    '<div class="rw-grid">',
+    '<div class="rw-stat"><div class="label">Messages sent</div>' +
+      `<div class="value">${opts.messagesSent}</div></div>`,
+    '<div class="rw-stat"><div class="label">Peak message day</div>' +
+      peak +
+      "</div>",
+    "</div>",
+    '<div class="card"><h2>Top text channels</h2>' + channels + "</div>",
+  ].join("");
+}
+
 export function renderUserRewindBody(opts: RewindBodyOptions): string {
   const years = opts.availableYears.includes(opts.year)
     ? opts.availableYears
@@ -377,7 +429,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       picker,
       '<div class="card">',
       "<h2>Nothing to recap yet</h2>",
-      `<p class="muted">We didn't find any voice activity or badges for you in ${opts.year}. Hop into a tracked voice channel and your stats will start filling in.</p>`,
+      `<p class="muted">We didn't find any voice or text activity or badges for you in ${opts.year}. Hop into a tracked voice channel or send a few messages and your stats will start filling in.</p>`,
       "</div>",
     ].join("");
   }
@@ -448,6 +500,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       "</div>",
     "</div>",
     '<div class="card"><h2>Top channels</h2>' + channels + "</div>",
+    renderTextActivity(opts),
     '<div class="card"><h2>Rank journey</h2>' +
       renderJourney(opts.weeklyJourney) +
       "</div>",

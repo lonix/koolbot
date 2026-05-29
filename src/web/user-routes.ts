@@ -432,6 +432,13 @@ export function createUserRouter(
           annualGuildMembers: summary.annualGuildMembers,
           percentAboveMedian: summary.percentAboveMedian,
           weeklyJourney: summary.weeklyJourney,
+          messagesSent: summary.messagesSent,
+          topTextChannels: summary.topTextChannels.map((c) => ({
+            channelId: c.channelId,
+            channelName: c.channelName,
+            count: c.count,
+          })),
+          peakMessageDay: summary.peakMessageDay,
         }),
         csrfToken: getCsrfToken(req),
         remainingMs: getDisplayedRemainingMs(session),
