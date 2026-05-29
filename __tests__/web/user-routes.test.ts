@@ -286,7 +286,13 @@ describe("/me/notifications", () => {
     const { UserNotificationPrefsService } =
       await import("../../src/services/user-notification-prefs-service.js");
     const getPrefs = jest
-      .fn<() => Promise<{ achievements: boolean; digest: boolean; rewind: boolean }>>()
+      .fn<
+        () => Promise<{
+          achievements: boolean;
+          digest: boolean;
+          rewind: boolean;
+        }>
+      >()
       .mockResolvedValue(
         opts.prefs ?? { achievements: true, digest: true, rewind: true },
       );
@@ -298,7 +304,11 @@ describe("/me/notifications", () => {
             userId: string,
             guildId: string,
             patch: Record<string, boolean>,
-          ) => Promise<{ achievements: boolean; digest: boolean; rewind: boolean }>
+          ) => Promise<{
+            achievements: boolean;
+            digest: boolean;
+            rewind: boolean;
+          }>
         >()
         .mockImplementation(async (_u, _g, patch) => ({
           achievements: true,
@@ -403,9 +413,7 @@ describe("/me/notifications", () => {
     expect(out.body).toContain('name="digest"');
     expect(out.body).toContain('name="rewind"');
     // All checkboxes should be `checked` when prefs default to enabled.
-    expect(out.body).toContain(
-      'name="achievements" value="true" checked',
-    );
+    expect(out.body).toContain('name="achievements" value="true" checked');
   });
 
   it("no longer renders 'coming soon' hints for digest or rewind (both shipped)", async () => {
@@ -438,14 +446,22 @@ describe("/me/notifications", () => {
   });
 
   it("treats checkbox absence as 'off' when the hidden submitted flag is present", async () => {
-    let captured: { patch: Record<string, boolean>; user: string; guild: string } | null = null;
+    let captured: {
+      patch: Record<string, boolean>;
+      user: string;
+      guild: string;
+    } | null = null;
     const setPrefs = jest
       .fn<
         (
           userId: string,
           guildId: string,
           patch: Record<string, boolean>,
-        ) => Promise<{ achievements: boolean; digest: boolean; rewind: boolean }>
+        ) => Promise<{
+          achievements: boolean;
+          digest: boolean;
+          rewind: boolean;
+        }>
       >()
       .mockImplementation(async (user, guild, patch) => {
         captured = { user, guild, patch };
@@ -618,11 +634,7 @@ describe("/me/rewind", () => {
     } as never as Parameters<typeof router>[0];
     const res = makeRes();
     await new Promise<void>((resolve) => {
-      router(
-        req as never,
-        res as never,
-        (() => resolve()) as never,
-      );
+      router(req as never, res as never, (() => resolve()) as never);
       setTimeout(resolve, 0);
     });
     await new Promise((r) => setTimeout(r, 10));
@@ -646,6 +658,9 @@ describe("/me/rewind", () => {
         { channelId: "c3", channelName: "afk", totalSeconds: 3600 * 2 },
       ],
       peakDay: { date: "2026-03-15", totalSeconds: 3600 * 3 },
+      messagesSent: 0,
+      topTextChannels: [],
+      peakMessageDay: null,
       longestStreakDays: 4,
       longestStreakRange: { startDate: "2026-03-12", endDate: "2026-03-15" },
       accolades: [],
@@ -679,6 +694,33 @@ describe("/me/rewind", () => {
     });
     expect(out.statusCode).toBe(200);
     expect(out.body).toContain("Rewind 2024");
+  });
+
+  it("renders the text-activity card when text data exists (#496)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({
+        messagesSent: 42,
+        topTextChannels: [
+          { channelId: "t1", channelName: "general-chat", count: 30 },
+        ],
+        peakMessageDay: { date: "2026-02-01", count: 12 },
+      }),
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("Text activity");
+    expect(out.body).toContain("Top text channels");
+    expect(out.body).toContain("general-chat");
+    expect(out.body).toContain("42"); // messages sent
+  });
+
+  it("hides the text-activity card when there is no text data (#496)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary(), // messagesSent defaults to 0
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).not.toContain("Text activity");
   });
 
   it("renders the empty-state body when the user has no data", async () => {
