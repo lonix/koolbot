@@ -50,6 +50,12 @@ import {
   getMissingWebUIEnvVars,
   isWebUIEnabled,
 } from "./web/index.js";
+import {
+  createMetricsRouter,
+  recordDiscordEvent,
+  setBotUp,
+  setVoiceSessionsProvider,
+} from "./web/metrics.js";
 import mongoose from "mongoose";
 
 dotenvConfig();
@@ -171,6 +177,14 @@ function startHealthServer(): void {
     logger.debug("WEBUI_ENABLED is not true; /admin routes not mounted");
   }
 
+  // Prometheus/OpenMetrics scrape endpoint (#509). Mounted only when
+  // METRICS_ENABLED=true; otherwise nothing is registered and /metrics
+  // stays 404. Optionally bearer-token protected via METRICS_TOKEN.
+  const metricsRouter = createMetricsRouter();
+  if (metricsRouter) {
+    healthApp.use(metricsRouter);
+  }
+
   healthApp.listen(3000, () => {
     logger.info("Healthcheck server running on port 3000");
   });
@@ -179,6 +193,9 @@ function startHealthServer(): void {
 // Add health server startup to main ready handler
 client.once(Events.ClientReady, async (readyClient) => {
   logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
+
+  // koolbot_up = 1: connected to Discord (#509).
+  setBotUp(true);
 
   // Set connecting status (yellow) immediately when Discord is ready
   botStatusService.setConnectingStatus();
@@ -296,6 +313,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
 
   isShuttingDown = true;
   const startTime = Date.now();
+
+  // koolbot_up = 0: no longer serving (#509).
+  setBotUp(false);
 
   try {
     logger.info(`🔄 Received ${signal}, starting graceful shutdown...`);
@@ -491,6 +511,8 @@ try {
   configService = ConfigService.getInstance();
   commandManager = CommandManager.getInstance(client);
   voiceChannelManager = VoiceChannelManager.getInstance(client);
+  // Feed the koolbot_voice_sessions_active gauge (#509) at scrape time.
+  setVoiceSessionsProvider(() => voiceChannelManager.getActiveSessionCount());
   voiceChannelTracker = VoiceChannelTracker.getInstance(client);
   voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
   voiceChannelTruncation = VoiceChannelTruncationService.getInstance(client);
@@ -639,7 +661,19 @@ async function initializeServices(): Promise<void> {
   }
 }
 
+// Track Discord connectivity for koolbot_up (#509). ClientReady flips it
+// to 1; a shard dropping flips it to 0, and a resume brings it back.
+client.on(Events.ShardDisconnect, () => {
+  recordDiscordEvent("shardDisconnect");
+  setBotUp(false);
+});
+client.on(Events.ShardResume, () => {
+  recordDiscordEvent("shardResume");
+  setBotUp(true);
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
+  recordDiscordEvent("interactionCreate");
   // Handle autocomplete interactions
   if (interaction.isAutocomplete()) {
     try {
@@ -780,6 +814,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  recordDiscordEvent("voiceStateUpdate");
   try {
     const member = newState.member || oldState.member;
     if (member) {
@@ -804,6 +839,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 // Handle text messages for per-user/per-channel activity tracking (#495).
 // Gating (enabled, bot/DM, excluded channels) lives in the tracker.
 client.on(Events.MessageCreate, async (message) => {
+  recordDiscordEvent("messageCreate");
   try {
     await messageActivityTracker.handleMessageCreate(message);
   } catch (error) {

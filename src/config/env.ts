@@ -114,4 +114,16 @@ export const env = Object.freeze({
       return process.env.WEBUI_TRUST_PROXY;
     },
   }),
+  metrics: Object.freeze({
+    get enabled(): boolean {
+      return (process.env.METRICS_ENABLED || "").toLowerCase() === "true";
+    },
+    // Returns the configured bearer token, trimmed, or undefined when the
+    // var is unset/blank. A blank token means "no auth required" so we
+    // never treat whitespace as a real credential.
+    get token(): string | undefined {
+      const raw = (process.env.METRICS_TOKEN || "").trim();
+      return raw ? raw : undefined;
+    },
+  }),
 });

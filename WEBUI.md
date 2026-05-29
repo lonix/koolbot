@@ -29,6 +29,7 @@ This document explains how to enable it, expose it, and operate it.
 - [Public-internet exposure](#public-internet-exposure)
 - [DM-closed fallback](#dm-closed-fallback)
 - [Session lifecycle and revocation](#session-lifecycle-and-revocation)
+- [Prometheus / OpenMetrics endpoint](#prometheus--openmetrics-endpoint)
 - [What the Web UI lets you do](#what-the-web-ui-lets-you-do)
 - [Troubleshooting](#troubleshooting)
 
@@ -242,6 +243,18 @@ Generate a strong secret:
 ```bash
 openssl rand -base64 32
 ```
+
+### Prometheus metrics (optional)
+
+These two vars are independent of the Web UI — the `/metrics` endpoint is
+served on the same port (3000) as `/health` whether or not the Web UI is
+enabled. See [Prometheus / OpenMetrics endpoint](#prometheus--openmetrics-endpoint)
+below for the full rundown.
+
+| Variable          | Required | Default | Notes                                                                 |
+| ----------------- | -------- | ------- | --------------------------------------------------------------------- |
+| `METRICS_ENABLED` | no       | `false` | `true` mounts `/metrics`; anything else leaves it 404.                |
+| `METRICS_TOKEN`   | no       | (empty) | When set, requests must send `Authorization: Bearer <token>` or 401.  |
 
 ---
 
@@ -642,6 +655,80 @@ docker compose exec mongodb mongosh koolbot --eval '
 Or rotate `WEBUI_SESSION_SECRET` in `.env` and restart — that
 invalidates every signed cookie and every outstanding magic link as a
 side effect, since the HMAC key changes.
+
+---
+
+## Prometheus / OpenMetrics endpoint
+
+KoolBot can expose a pull-based `/metrics` endpoint for Prometheus (or any
+OpenMetrics-compatible collector). It lives on the same Express server as
+`/health` — port 3000 — so no new process, container, or port is needed.
+
+It is **opt-in and disabled by default**:
+
+```env
+# Turn it on
+METRICS_ENABLED=true
+
+# Optional: require a bearer token on every scrape. Leave blank to rely
+# on network-level ACLs instead (e.g. only your Prometheus host can reach
+# port 3000).
+METRICS_TOKEN=replace-with-a-long-random-string
+```
+
+- When `METRICS_ENABLED` is anything other than `true`, the route is never
+  registered and `/metrics` returns **404**.
+- When `METRICS_TOKEN` is set, a scrape without a matching
+  `Authorization: Bearer <token>` header receives **401**. The comparison
+  is constant-time.
+
+Verify it locally:
+
+```bash
+# Without a token
+curl -s http://localhost:3000/metrics | head
+
+# With a token
+curl -s -H "Authorization: Bearer $METRICS_TOKEN" http://localhost:3000/metrics | head
+```
+
+A matching Prometheus scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: koolbot
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials: "replace-with-METRICS_TOKEN" # omit when no token is set
+    static_configs:
+      - targets: ["koolbot:3000"]
+```
+
+### Exposed metrics
+
+| Metric                              | Type    | Description                                                            |
+| ----------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `koolbot_command_invocations_total` | Counter | Slash commands run, labelled by `command` and `status` (`ok`/`error`). |
+| `koolbot_discord_events_total`      | Counter | Discord gateway events received, labelled by `event`.                  |
+| `koolbot_voice_sessions_active`     | Gauge   | Current number of active managed voice channels.                       |
+| `koolbot_up`                        | Gauge   | `1` while connected to Discord, `0` after a disconnect or shutdown.    |
+| `process_*` / `nodejs_*`            | various | Node.js process metrics provided automatically by `prom-client`.       |
+
+### Suggested Grafana panels
+
+No dashboard JSON ships with the bot — wire these up to taste:
+
+- **Commands per minute** — `rate(koolbot_command_invocations_total[5m])`.
+- **Command error rate** — `sum(rate(koolbot_command_invocations_total{status="error"}[5m])) / sum(rate(koolbot_command_invocations_total[5m]))`.
+- **Active voice sessions** — Gauge panel on `koolbot_voice_sessions_active`.
+- **Connectivity** — Stat/State-timeline panel on `koolbot_up` (alert when `koolbot_up == 0`).
+- **Event throughput** — `sum by (event) (rate(koolbot_discord_events_total[5m]))`.
+- **Memory usage** — `process_resident_memory_bytes`.
+
+> ⚠️ **Don't expose `/metrics` to the public internet unprotected.** Set
+> `METRICS_TOKEN`, restrict port 3000 to your monitoring host, or both. The
+> same reverse-proxy guidance that applies to `/admin` applies here.
 
 ---
 
