@@ -14,6 +14,7 @@ export interface ConfigSchema {
   "voicetracking.enabled": boolean;
   "voicetracking.stats.top.enabled": boolean; // Enable /voicestats top subcommand
   "voicetracking.stats.user.enabled": boolean; // Enable /voicestats user subcommand
+  "voicetracking.stats.leaderboard_max_results": number; // Server-side cap on /voicestats top rows
   "voicetracking.seen.enabled": boolean;
   "voicetracking.excluded_channels": string; // Comma-separated channel IDs
   "voicetracking.announcements.enabled": boolean;
@@ -147,6 +148,7 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.enabled": false,
   "voicetracking.stats.top.enabled": false,
   "voicetracking.stats.user.enabled": false,
+  "voicetracking.stats.leaderboard_max_results": 50,
   "voicetracking.seen.enabled": false,
   "voicetracking.excluded_channels": "",
   "voicetracking.announcements.enabled": false,
@@ -472,6 +474,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Enable the /voicestats user personal-stats subcommand.",
     category: "voicetracking",
     type: "boolean",
+  },
+  "voicetracking.stats.leaderboard_max_results": {
+    label: "Leaderboard max results",
+    description:
+      "Server-side cap on how many ranked users the /voicestats top leaderboard returns. Bounds the aggregation pipeline so a single request can never materialise the whole collection.",
+    category: "voicetracking",
+    type: "number",
   },
   "voicetracking.seen.enabled": {
     label: "/seen command enabled",

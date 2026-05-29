@@ -22,6 +22,22 @@ import { MessageActivityTracking } from "../../src/models/message-activity-track
 (MessageActivityTracking as unknown as { updateOne: jest.Mock }).updateOne =
   jest.fn();
 
+// Mimics the streaming `find({}).lean(false).cursor()` chain the cleanup
+// service uses, yielding each doc one at a time.
+function findCursor(docs: unknown[]) {
+  return {
+    lean: () => ({
+      cursor: () => ({
+        async *[Symbol.asyncIterator]() {
+          for (const doc of docs) {
+            yield doc;
+          }
+        },
+      }),
+    }),
+  };
+}
+
 function createService() {
   const service = MessageActivityCleanupService.getInstance({} as Client);
 
@@ -77,7 +93,7 @@ describe("MessageActivityCleanupService", () => {
       recentMessages: [oldEntry, recentEntry],
     };
 
-    find.mockReturnValue({ exec: jest.fn().mockResolvedValue([userDoc]) });
+    find.mockReturnValue(findCursor([userDoc]));
 
     const stats = await service.runCleanup();
 
@@ -102,8 +118,8 @@ describe("MessageActivityCleanupService", () => {
       sentAt: new Date(Date.now() - 5 * DAY_MS),
       channelId: "c1",
     };
-    find.mockReturnValue({
-      exec: jest.fn().mockResolvedValue([
+    find.mockReturnValue(
+      findCursor([
         {
           _id: "id1",
           username: "User1",
@@ -112,13 +128,31 @@ describe("MessageActivityCleanupService", () => {
           recentMessages: [recentEntry],
         },
       ]),
-    });
+    );
 
     const stats = await service.runCleanup();
 
     expect(stats.messagesPruned).toBe(0);
     expect(stats.usersProcessed).toBe(0);
     expect(updateOne).not.toHaveBeenCalled();
+  });
+
+  it("streams via a cursor and never materialises the whole collection", async () => {
+    const { service } = createService();
+
+    const cursor = jest.fn(() => ({
+      async *[Symbol.asyncIterator]() {},
+    }));
+    const lean = jest.fn(() => ({ cursor }));
+    find.mockReturnValue({ lean });
+
+    await service.runCleanup();
+
+    // The cleanup must page through the collection with a cursor rather than
+    // awaiting an unbounded `.find({}).exec()` that loads every document.
+    expect(find).toHaveBeenCalledTimes(1);
+    expect(cursor).toHaveBeenCalledTimes(1);
+    expect(find.mock.results[0].value).not.toHaveProperty("exec");
   });
 
   it("skips when the cleanup job is disabled", async () => {

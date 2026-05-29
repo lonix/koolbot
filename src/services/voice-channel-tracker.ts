@@ -462,6 +462,20 @@ export class VoiceChannelTracker {
       let startDate: Date;
       let users;
 
+      // Server-side safety cap. A positive `limit` (e.g. the user-supplied
+      // `/voicestats top` count) is clamped to the configurable maximum so a
+      // single request can never materialise an unbounded result set. A
+      // non-positive `limit` is the documented "all ranked users" sentinel
+      // used by internal aggregation consumers (weekly digest fan-out,
+      // leaderboard-role reconcile), which still receive every row.
+      const maxResults = await this.configService.getNumber(
+        "voicetracking.stats.leaderboard_max_results",
+        50,
+      );
+      const effectiveLimit =
+        limit > 0 ? Math.min(limit, Math.max(1, maxResults)) : 0;
+      const limitStage = effectiveLimit > 0 ? [{ $limit: effectiveLimit }] : [];
+
       switch (timePeriod) {
         case "week":
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -476,7 +490,7 @@ export class VoiceChannelTracker {
               },
             },
             { $sort: { totalTime: -1 } },
-            ...(limit > 0 ? [{ $limit: limit }] : []),
+            ...limitStage,
           ]);
           break;
         case "month":
@@ -492,7 +506,7 @@ export class VoiceChannelTracker {
               },
             },
             { $sort: { totalTime: -1 } },
-            ...(limit > 0 ? [{ $limit: limit }] : []),
+            ...limitStage,
           ]);
           break;
         case "alltime":
@@ -505,7 +519,7 @@ export class VoiceChannelTracker {
               },
             },
             { $sort: { totalTime: -1 } },
-            ...(limit > 0 ? [{ $limit: limit }] : []),
+            ...limitStage,
           ]);
           break;
       }
