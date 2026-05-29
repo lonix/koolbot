@@ -109,6 +109,25 @@ describe("renderAdminPage", () => {
     expect(html).not.toContain("<title><bad>");
   });
 
+  it("ships CSS that bounds long settings values within their cell (issue #489)", () => {
+    const html = renderAdminPage({
+      title: "Settings",
+      active: "/admin/settings",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // Editable controls are capped to the cell width so long channel/role
+    // lists or custom strings don't push the table past the page edge.
+    expect(html).toContain(
+      "td.settings-value input[type=text],td.settings-value select{width:100%;box-sizing:border-box}",
+    );
+    // The default-value cell wraps long content instead of forcing a wide row.
+    expect(html).toContain(
+      "td.settings-default{overflow-wrap:anywhere;word-break:break-word}",
+    );
+  });
+
   it("marks the active nav item", () => {
     const html = renderAdminPage({
       title: "Settings",

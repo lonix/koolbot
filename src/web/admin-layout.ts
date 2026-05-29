@@ -170,6 +170,11 @@ const STYLE = [
   "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid #2d3748;vertical-align:top}",
   "th{font-weight:600;color:#94a3b8;background:#1a1f2a}",
   "tr:hover td{background:#1a1f2a}",
+  // Settings page: keep editable controls inside their cell and let long
+  // current/default values wrap instead of pushing the table wide (issue #489).
+  "td.settings-value{min-width:12rem}",
+  "td.settings-value input[type=text],td.settings-value select{width:100%;box-sizing:border-box}",
+  "td.settings-default{overflow-wrap:anywhere;word-break:break-word}",
   ".muted{color:#94a3b8}",
   ".mono{font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace;font-size:.85rem}",
   ".tag{display:inline-block;padding:.1rem .45rem;border-radius:4px;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}",

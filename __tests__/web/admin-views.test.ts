@@ -105,9 +105,7 @@ describe("renderSettingsPage", () => {
       ],
     });
     // Human label appears as bold primary text.
-    expect(html).toContain(
-      "<strong>Voice Channel Management enabled</strong>",
-    );
+    expect(html).toContain("<strong>Voice Channel Management enabled</strong>");
     // Raw dotted key still rendered, but de-emphasised as a small code ref.
     expect(html).toMatch(
       /<code class="mono muted"[^>]*>voicechannels\.enabled<\/code>/,
@@ -197,7 +195,9 @@ describe("renderSettingsPage", () => {
     // Single per-section save form (replaces the per-row "Set" button).
     expect(html).toContain('action="/admin/settings/save-section"');
     expect(html).toContain('name="category" value="quotes"');
-    expect(html).toContain('<button type="submit" class="btn btn-primary">Save</button>');
+    expect(html).toContain(
+      '<button type="submit" class="btn btn-primary">Save</button>',
+    );
     // Each row contributes its key via a hidden `keys` input so the
     // handler can enumerate the section without trusting `value_*` names.
     expect(html).toContain('name="keys" value="quotes.max_length"');
@@ -213,6 +213,36 @@ describe("renderSettingsPage", () => {
     expect(html).toContain('value="12345"');
     // No per-row "Set" submit survives.
     expect(html).not.toContain('action="/admin/settings/set"');
+  });
+
+  it("tags the value and default cells so long values stay bounded, not nowrap (issue #489)", () => {
+    const longTiers =
+      "role-aaaaaaaaaaaaaaaa:1000,role-bbbbbbbbbbbbbbbb:2500,role-cccccccccccccccc:5000,role-dddddddddddddddd:10000";
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "leaderboard_roles",
+          rows: [
+            {
+              key: "leaderboard_roles.tiers",
+              current: longTiers,
+              defaultValue: longTiers,
+              type: "string",
+              description: "",
+              category: "leaderboard_roles",
+            },
+          ],
+        },
+      ],
+    });
+    // The editable value cell and the default cell carry the classes the
+    // stylesheet uses to bound long content within the column.
+    expect(html).toContain('<td class="settings-value">');
+    expect(html).toContain('<td class="settings-default">');
+    // The previous fixed `white-space:nowrap` on the default cell forced
+    // long values to push the table wide — it must be gone.
+    expect(html).not.toContain('<td style="white-space:nowrap">');
   });
 
   it("renders the action bar and import textarea", () => {
@@ -310,7 +340,9 @@ describe("renderSettingsPage", () => {
       '<select name="value_voicetracking.announcements.channel_id">',
     );
     expect(html).toContain('<option value="111">#general</option>');
-    expect(html).toContain('<option value="222" selected>#voice-stats</option>');
+    expect(html).toContain(
+      '<option value="222" selected>#voice-stats</option>',
+    );
   });
 
   it("renders a category-type setting from categoryChannels", () => {
@@ -432,9 +464,7 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toMatch(
-      /<select name="value_quotes\.delete_roles" multiple/,
-    );
+    expect(html).toMatch(/<select name="value_quotes\.delete_roles" multiple/);
     expect(html).toContain('<option value="r1">@Admin</option>');
     expect(html).toContain('<option value="r2" selected>@Mod</option>');
   });
@@ -505,7 +535,6 @@ describe("renderSettingsPage", () => {
       '<option value="999-deleted" selected>(missing) 999-deleted</option>',
     );
   });
-
 });
 
 describe("renderPermissionsPage", () => {
@@ -1503,7 +1532,9 @@ describe("renderSettingsPage cron picker", () => {
     const html = withCron("30 8 * * *");
     expect(html).toContain('<div class="cron-picker" data-mode="daily">');
     expect(html).toContain('<option value="daily" selected>Daily</option>');
-    expect(html).toContain('<input type="time" class="cron-time" value="08:30">');
+    expect(html).toContain(
+      '<input type="time" class="cron-time" value="08:30">',
+    );
   });
 
   it("renders a monthly schedule with the day-of-month pre-populated", () => {
