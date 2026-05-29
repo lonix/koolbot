@@ -57,6 +57,9 @@ const {
   computeLongestStreak,
   computePeakDay,
   computeTopChannels,
+  computePeakMessageDay,
+  computeTopTextChannels,
+  messagesInWindow,
   formatFunComparison,
   formatHoursMinutes,
   sessionSeconds,
@@ -223,13 +226,33 @@ describe("RewindService pure helpers", () => {
     it("returns the longest run of consecutive UTC days", () => {
       const r = computeLongestStreak([
         // Run of 3: 03-10 → 03-12
-        { startTime: new Date("2026-03-10T10:00:00Z"), duration: 60, channelId: "a" },
-        { startTime: new Date("2026-03-11T10:00:00Z"), duration: 60, channelId: "a" },
-        { startTime: new Date("2026-03-12T10:00:00Z"), duration: 60, channelId: "a" },
+        {
+          startTime: new Date("2026-03-10T10:00:00Z"),
+          duration: 60,
+          channelId: "a",
+        },
+        {
+          startTime: new Date("2026-03-11T10:00:00Z"),
+          duration: 60,
+          channelId: "a",
+        },
+        {
+          startTime: new Date("2026-03-12T10:00:00Z"),
+          duration: 60,
+          channelId: "a",
+        },
         // Gap
         // Run of 2: 03-20 → 03-21
-        { startTime: new Date("2026-03-20T10:00:00Z"), duration: 60, channelId: "a" },
-        { startTime: new Date("2026-03-21T10:00:00Z"), duration: 60, channelId: "a" },
+        {
+          startTime: new Date("2026-03-20T10:00:00Z"),
+          duration: 60,
+          channelId: "a",
+        },
+        {
+          startTime: new Date("2026-03-21T10:00:00Z"),
+          duration: 60,
+          channelId: "a",
+        },
       ]);
       expect(r.days).toBe(3);
       expect(r.startDate).toBe("2026-03-10");
@@ -353,9 +376,21 @@ describe("RewindService.getSummary", () => {
       ])
       // computeWeeklyJourney — first/last/best weekly rank for u1
       .mockResolvedValueOnce([
-        { _id: { userId: "u1", isoYear: 2026, isoWeek: 3 }, totalTime: 5400, rank: 5 },
-        { _id: { userId: "u1", isoYear: 2026, isoWeek: 4 }, totalTime: 7000, rank: 2 },
-        { _id: { userId: "u1", isoYear: 2026, isoWeek: 5 }, totalTime: 4000, rank: 8 },
+        {
+          _id: { userId: "u1", isoYear: 2026, isoWeek: 3 },
+          totalTime: 5400,
+          rank: 5,
+        },
+        {
+          _id: { userId: "u1", isoYear: 2026, isoWeek: 4 },
+          totalTime: 7000,
+          rank: 2,
+        },
+        {
+          _id: { userId: "u1", isoYear: 2026, isoWeek: 5 },
+          totalTime: 4000,
+          rank: 8,
+        },
       ]);
 
     const svc = RewindService.getInstance(
@@ -395,10 +430,16 @@ describe("RewindService.getSummary", () => {
           // Wrong year — drop
           { type: "night_owl", earnedAt: new Date(`2025-12-31T00:00:00Z`) },
           // Unknown type — drop (no metadata)
-          { type: "mystery_badge", earnedAt: new Date(`${year}-04-01T00:00:00Z`) },
+          {
+            type: "mystery_badge",
+            earnedAt: new Date(`${year}-04-01T00:00:00Z`),
+          },
         ],
         achievements: [
-          { type: "weekly_active", earnedAt: new Date(`${year}-04-01T00:00:00Z`) },
+          {
+            type: "weekly_active",
+            earnedAt: new Date(`${year}-04-01T00:00:00Z`),
+          },
         ],
       }),
     );
@@ -452,5 +493,77 @@ describe("RewindService singleton", () => {
         makeClient() as Parameters<typeof RewindService.getInstance>[0],
       ),
     ).toThrow(/different client/);
+  });
+});
+
+describe("RewindService text helpers (#496)", () => {
+  const msgs = [
+    { sentAt: new Date("2023-12-31T23:59:59Z"), channelId: "c1" },
+    { sentAt: new Date("2024-01-01T00:00:00Z"), channelId: "c1" },
+    { sentAt: new Date("2024-06-15T12:00:00Z"), channelId: "c2" },
+    { sentAt: new Date("2025-01-01T00:00:00Z"), channelId: "c1" },
+  ];
+
+  describe("messagesInWindow", () => {
+    it("keeps only messages within the half-open year window", () => {
+      const { start, end } = yearBounds(2024);
+      const inYear = messagesInWindow(msgs, start, end);
+      expect(inYear).toHaveLength(2);
+      expect(inYear.map((m) => m.channelId)).toEqual(["c1", "c2"]);
+    });
+
+    it("includes the start boundary and excludes the end boundary", () => {
+      const { start, end } = yearBounds(2024);
+      const inYear = messagesInWindow(msgs, start, end);
+      expect(inYear.some((m) => m.sentAt.getTime() === start.getTime())).toBe(
+        true,
+      );
+      expect(inYear.some((m) => m.sentAt.getTime() === end.getTime())).toBe(
+        false,
+      );
+    });
+
+    it("drops messages older than the window (retention boundary)", () => {
+      const { start, end } = yearBounds(2024);
+      const older = [
+        { sentAt: new Date("2020-05-01T00:00:00Z"), channelId: "c1" },
+      ];
+      expect(messagesInWindow(older, start, end)).toEqual([]);
+    });
+  });
+
+  describe("computeTopTextChannels", () => {
+    it("counts per channel, sorts desc, and applies the limit", () => {
+      const m = [
+        { sentAt: new Date("2024-01-01T00:00:00Z"), channelId: "c1" },
+        { sentAt: new Date("2024-01-02T00:00:00Z"), channelId: "c2" },
+        { sentAt: new Date("2024-01-03T00:00:00Z"), channelId: "c1" },
+        { sentAt: new Date("2024-01-04T00:00:00Z"), channelId: "c1" },
+      ];
+      const top = computeTopTextChannels(m, 1);
+      expect(top).toEqual([{ channelId: "c1", count: 3 }]);
+    });
+
+    it("returns an empty array when there are no messages", () => {
+      expect(computeTopTextChannels([], 3)).toEqual([]);
+    });
+  });
+
+  describe("computePeakMessageDay", () => {
+    it("returns the UTC day with the most messages", () => {
+      const m = [
+        { sentAt: new Date("2024-01-01T10:00:00Z"), channelId: "c1" },
+        { sentAt: new Date("2024-01-01T11:00:00Z"), channelId: "c1" },
+        { sentAt: new Date("2024-01-02T10:00:00Z"), channelId: "c1" },
+      ];
+      expect(computePeakMessageDay(m)).toEqual({
+        date: "2024-01-01",
+        count: 2,
+      });
+    });
+
+    it("returns null when there are no messages", () => {
+      expect(computePeakMessageDay([])).toBeNull();
+    });
   });
 });

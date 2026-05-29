@@ -412,9 +412,9 @@ export class RewindService {
       const text = await this.computeTextActivity(userId, guildId, start, end);
 
       // The picker should offer any year the user has either kind of data.
-      const mergedYears = [
-        ...new Set([...availableYears, ...text.years]),
-      ].sort((a, b) => b - a);
+      const mergedYears = [...new Set([...availableYears, ...text.years])].sort(
+        (a, b) => b - a,
+      );
 
       const hasData =
         totalSeconds > 0 ||
@@ -536,9 +536,7 @@ export class RewindService {
         guildId,
       }).lean<{ recentMessages?: RawTextMessage[] }>();
       const all = doc?.recentMessages ?? [];
-      const years = [
-        ...new Set(all.map((m) => m.sentAt.getUTCFullYear())),
-      ];
+      const years = [...new Set(all.map((m) => m.sentAt.getUTCFullYear()))];
 
       const inYear = messagesInWindow(all, start, end);
       if (inYear.length === 0) {
