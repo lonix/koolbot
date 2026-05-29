@@ -1,5 +1,70 @@
 # Changelog
 
+## [1.0.0](https://github.com/lonix/koolbot/compare/v0.9.0...v1.0.0) (2026-05-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* /amikool is no longer registered with Discord and the amikool.* / fun.friendship settings are no longer recognised. Existing DB rows for these keys become inert and will be reported as "unknown settings" until removed.
+* All admin slash commands except `/config web` have been removed. `WEBUI_ENABLED=true` (with the supporting env vars) is now required to administer the bot. Operators must enable the WebUI before upgrading to this release.
+
+### 🚀 Features
+
+* annual rewind year-in-review WebUI + end-of-year DM nudge (closes [#484](https://github.com/lonix/koolbot/issues/484)) ([#494](https://github.com/lonix/koolbot/issues/494)) ([0fb8b19](https://github.com/lonix/koolbot/commit/0fb8b19b71868d7af8f4d0e0d4771be6a4d5ff8c))
+* **commands:** deprecate legacy admin slash commands ([#385](https://github.com/lonix/koolbot/issues/385)) ([#406](https://github.com/lonix/koolbot/issues/406)) ([1ed4b0e](https://github.com/lonix/koolbot/commit/1ed4b0ef914c1f7784b222f50466fc0ac4b212b6))
+* expose opt-in Prometheus/OpenMetrics endpoint ([#509](https://github.com/lonix/koolbot/issues/509)) ([#514](https://github.com/lonix/koolbot/issues/514)) ([a7fc790](https://github.com/lonix/koolbot/commit/a7fc790ead45f5cb9bf6dcd418fdf47717898105))
+* **leaderboard-roles:** auto-assign Discord roles from voice leaderboard ([#403](https://github.com/lonix/koolbot/issues/403)) ([d7d8f16](https://github.com/lonix/koolbot/commit/d7d8f168c4831168a87626e68fcfdb518869b2a8))
+* remove /amikool and friendship-listener novelty features ([#449](https://github.com/lonix/koolbot/issues/449)) ([4a7f73d](https://github.com/lonix/koolbot/commit/4a7f73d82246ba896bbf97b42ca018122e81e8f5))
+* remove legacy admin slash commands ([#386](https://github.com/lonix/koolbot/issues/386)) ([#414](https://github.com/lonix/koolbot/issues/414)) ([9a67fea](https://github.com/lonix/koolbot/commit/9a67fea93b9d42e51d68b4601ac3236c35a148c3))
+* **rewind:** surface text-message stats on /me/rewind ([#496](https://github.com/lonix/koolbot/issues/496)) ([#515](https://github.com/lonix/koolbot/issues/515)) ([9513e58](https://github.com/lonix/koolbot/commit/9513e58860821de4dfd2d9d98936c998ebf16380))
+* text-message tracking foundation (per-user, per-channel) ([#504](https://github.com/lonix/koolbot/issues/504)) ([bd1835e](https://github.com/lonix/koolbot/commit/bd1835ef2c7e87745ed849a3b5a7d8276974b301))
+* **web:** Discord slash-command audit log + admin viewer (closes [#459](https://github.com/lonix/koolbot/issues/459)) ([#479](https://github.com/lonix/koolbot/issues/479)) ([8c7d108](https://github.com/lonix/koolbot/commit/8c7d1088cd76fc965bafb6ac9419aa50d857377e))
+* **web:** per-user notification preferences via /me/notifications (closes [#482](https://github.com/lonix/koolbot/issues/482)) ([#492](https://github.com/lonix/koolbot/issues/492)) ([6732033](https://github.com/lonix/koolbot/commit/6732033e6a49e1c0fd0d829db863db977a2ab42b))
+* **webui:** add "Reset all settings to defaults" action ([#487](https://github.com/lonix/koolbot/issues/487)) ([#500](https://github.com/lonix/koolbot/issues/500)) ([96c8e5f](https://github.com/lonix/koolbot/commit/96c8e5fb8e8a41753bd8ac8dc7483563d2420900))
+* **webui:** collapse VC cleanup buttons to single "Force VC cleanup" ([#503](https://github.com/lonix/koolbot/issues/503)) ([6a10690](https://github.com/lonix/koolbot/commit/6a10690dfa470041fb666647ec432909c8d57e24))
+* **webui:** read-only admin views ([#381](https://github.com/lonix/koolbot/issues/381)) ([#389](https://github.com/lonix/koolbot/issues/389)) ([e881ddc](https://github.com/lonix/koolbot/commit/e881ddc9008c8d9e9f889fcc9bb4b71fe6f80f28))
+* **webui:** render fixed-option settings as selectors ([#499](https://github.com/lonix/koolbot/issues/499)) ([a131d23](https://github.com/lonix/koolbot/commit/a131d23b44d2dd45c9238acafc44a924b256772f)), closes [#488](https://github.com/lonix/koolbot/issues/488)
+* **webui:** scaffold WebUI behind feature flag with magic-link auth ([#388](https://github.com/lonix/koolbot/issues/388)) ([4cd3be9](https://github.com/lonix/koolbot/commit/4cd3be9ea1739798c0617aa4e34e95d5c7dced6a))
+* **webui:** write surface for announcements + polls ([#383](https://github.com/lonix/koolbot/issues/383)) ([#402](https://github.com/lonix/koolbot/issues/402)) ([58ac172](https://github.com/lonix/koolbot/commit/58ac17274632b704c2865abecb66032925bcff45))
+* **webui:** writes for reaction roles, notices, dbtrunk, voice channels ([#384](https://github.com/lonix/koolbot/issues/384)) ([#405](https://github.com/lonix/koolbot/issues/405)) ([c9480a3](https://github.com/lonix/koolbot/commit/c9480a3b3116603f98b7a105488aa9bbaecf4e3e))
+* **webui:** writes for settings, permissions, YAML import/export, wizard ([#415](https://github.com/lonix/koolbot/issues/415)) ([79d7cfc](https://github.com/lonix/koolbot/commit/79d7cfcfde24f0e7873e0040580c852ef3ec46b1))
+* **web:** user-scoped sessions + /me self-service surface (closes [#481](https://github.com/lonix/koolbot/issues/481)) ([#491](https://github.com/lonix/koolbot/issues/491)) ([681f610](https://github.com/lonix/koolbot/commit/681f6106138f6cb3d071c824eb6eda9369a0df26))
+* **web:** wizard Previous button + cascading disable on master toggle (closes [#485](https://github.com/lonix/koolbot/issues/485)) ([#498](https://github.com/lonix/koolbot/issues/498)) ([a5482d5](https://github.com/lonix/koolbot/commit/a5482d52ff19ab0b25b6dd4a05d6a2a43dbaf3cd))
+* weekly voice-activity digest with WebUI opt-out (closes [#483](https://github.com/lonix/koolbot/issues/483)) ([#493](https://github.com/lonix/koolbot/issues/493)) ([41a8c78](https://github.com/lonix/koolbot/commit/41a8c78f44241d91d5112c6c353ec793d6d45e8b))
+
+
+### 🐛 Bug Fixes
+
+* bound unbounded `.find({})` service queries to avoid scale regression ([#505](https://github.com/lonix/koolbot/issues/505)) ([#512](https://github.com/lonix/koolbot/issues/512)) ([125b274](https://github.com/lonix/koolbot/commit/125b27499a287d4faa8452e2ba232d9eaf8b754d))
+* **config:** consent screen on magic-link redeem so unfurlers don't burn tokens ([#430](https://github.com/lonix/koolbot/issues/430)) ([5652cd0](https://github.com/lonix/koolbot/commit/5652cd0a31cf948e7e7f0386e5619ddcd2d1dd91))
+* **config:** drop CSRF check on magic-link redeem POST ([#431](https://github.com/lonix/koolbot/issues/431)) ([54e6560](https://github.com/lonix/koolbot/commit/54e656072ce74c617c74193129590c441ba2ddd2))
+* **config:** log /config invocations and web-session redeem outcomes ([#429](https://github.com/lonix/koolbot/issues/429)) ([c92bdf7](https://github.com/lonix/koolbot/commit/c92bdf737cb30cfbddfcfddd7aca4caa41ea3d6e))
+* **config:** set cookie Secure flag from WEBUI_BASE_URL scheme, not NODE_ENV ([#432](https://github.com/lonix/koolbot/issues/432)) ([1eca08a](https://github.com/lonix/koolbot/commit/1eca08af4693421459eefcf62b1b48b347cdcba4))
+* **config:** treat empty-string env vars as absent (closes [#455](https://github.com/lonix/koolbot/issues/455)) ([#472](https://github.com/lonix/koolbot/issues/472)) ([5516f15](https://github.com/lonix/koolbot/commit/5516f1527731a3239f1c7c816329f417c994dee3))
+* **docker:** exclude devDependencies from production image ([#428](https://github.com/lonix/koolbot/issues/428)) ([0e77bda](https://github.com/lonix/koolbot/commit/0e77bdaf0c2f017f39ddc72a5857d704a3b60379)), closes [#410](https://github.com/lonix/koolbot/issues/410)
+* enforce server-side length validation on WebUI write routes ([#508](https://github.com/lonix/koolbot/issues/508)) ([#513](https://github.com/lonix/koolbot/issues/513)) ([028f8e5](https://github.com/lonix/koolbot/commit/028f8e530500199401a0ac301c21fb1519e31b02))
+* validate Content-Type and cap size on poll import fetches ([#510](https://github.com/lonix/koolbot/issues/510)) ([ee17059](https://github.com/lonix/koolbot/commit/ee170598eb11a403cbf911b90c43d8d98fe7a723))
+* **voice:** reconcile userChannels when cleanupUserChannel hits 10003 ([#407](https://github.com/lonix/koolbot/issues/407)) ([9b6455a](https://github.com/lonix/koolbot/commit/9b6455a802601d0bb3080f28860ddaf0fee48281))
+* **web:** bound long setting values within their cell on Settings page ([#501](https://github.com/lonix/koolbot/issues/501)) ([8efcbc4](https://github.com/lonix/koolbot/commit/8efcbc4107a451003deaaa0a76a5eb1bf4335ce7))
+* **web:** extend session expiresAt on redemption (closes [#486](https://github.com/lonix/koolbot/issues/486)) ([#497](https://github.com/lonix/koolbot/issues/497)) ([3e3b017](https://github.com/lonix/koolbot/commit/3e3b017a50aba61ca46de947e2fe86f7188c3c8e))
+
+
+### ♻️ Refactoring
+
+* **web:** derive PROTECTED_KEYS from shared BOOTSTRAP_VARS (closes [#457](https://github.com/lonix/koolbot/issues/457)) ([#473](https://github.com/lonix/koolbot/issues/473)) ([96bdb77](https://github.com/lonix/koolbot/commit/96bdb772d8b0396d368af679155810abe9ccfb87))
+
+
+### 📚 Documentation
+
+* delete stale root markdown files (closes [#390](https://github.com/lonix/koolbot/issues/390)) ([#425](https://github.com/lonix/koolbot/issues/425)) ([9f494fe](https://github.com/lonix/koolbot/commit/9f494fef50602417f635976818ee772fad7d4dfc))
+* document role-aware /config and /me user self-service surface (closes [#480](https://github.com/lonix/koolbot/issues/480)) ([#502](https://github.com/lonix/koolbot/issues/502)) ([4ccfa60](https://github.com/lonix/koolbot/commit/4ccfa60ca59131b0dd1217e53895f1e57caab04c))
+* rework for v1.0 Web UI surface ([#387](https://github.com/lonix/koolbot/issues/387)) ([#416](https://github.com/lonix/koolbot/issues/416)) ([7b936bd](https://github.com/lonix/koolbot/commit/7b936bd6a8fff119346e53f0ae4bfe8e2553e359))
+
+
+### 🔧 Maintenance
+
+* delete dead code and abandoned helper scripts ([#424](https://github.com/lonix/koolbot/issues/424)) ([6a86976](https://github.com/lonix/koolbot/commit/6a869760f6448e4bbe8658a3e6f317c6614aed0f)), closes [#391](https://github.com/lonix/koolbot/issues/391)
+
 ## [0.9.0](https://github.com/lonix/koolbot/compare/v0.8.0...v0.9.0) (2026-05-07)
 
 
