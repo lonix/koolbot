@@ -14,6 +14,7 @@ import { getErrorMessage } from "../utils/error-guards.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
+import { recordCommandInvocation } from "../web/metrics.js";
 import { CooldownManager } from "./cooldown-manager.js";
 import { PermissionsService } from "./permissions-service.js";
 
@@ -557,6 +558,7 @@ export class CommandManager {
         startTime,
         true,
       );
+      recordCommandInvocation(commandName, "ok");
       await recordAudit("success", null);
     } catch (error) {
       monitoringService.trackCommandEnd(
@@ -566,6 +568,7 @@ export class CommandManager {
         false,
       );
       monitoringService.trackError(commandName, error as Error);
+      recordCommandInvocation(commandName, "error");
       await recordAudit("error", getErrorMessage(error).slice(0, 500));
       throw error;
     }

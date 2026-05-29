@@ -115,6 +115,15 @@ export class VoiceChannelManager {
   }
 
   /**
+   * Number of currently active managed voice channels. One entry exists
+   * per owned dynamic channel, so the map size is the live session count
+   * surfaced by the koolbot_voice_sessions_active metric (#509).
+   */
+  public getActiveSessionCount(): number {
+    return this.userChannels.size;
+  }
+
+  /**
    * Mark a channel as having a custom name
    */
   public setCustomChannelName(channelId: string, name: string): void {

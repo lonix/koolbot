@@ -93,6 +93,22 @@ WEBUI_INACTIVITY_TIMEOUT_MINUTES=30
 See [WEBUI.md → Bootstrap environment variables](WEBUI.md#bootstrap-environment-variables)
 for full descriptions and threat-model notes.
 
+### Prometheus metrics (optional)
+
+```env
+# Master switch — when true, GET /metrics is served on port 3000.
+# Disabled by default (the endpoint is 404 until set to true).
+METRICS_ENABLED=false
+
+# Optional bearer token. When set, scrapes must send
+# `Authorization: Bearer <token>` or receive 401. Leave blank to rely on
+# network-level ACLs instead.
+# METRICS_TOKEN=replace-with-a-long-random-string
+```
+
+See [WEBUI.md → Prometheus / OpenMetrics endpoint](WEBUI.md#prometheus--openmetrics-endpoint)
+for the metric list, a Prometheus scrape config, and suggested Grafana panels.
+
 ### How to get Discord credentials
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
