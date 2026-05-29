@@ -23,10 +23,14 @@ const PollItemSchema = new Schema<IPollItem>(
       type: [String],
       required: true,
       validate: {
+        // 2–10 answers, each within Discord's 55-char poll-option cap (#508).
         validator: function (v: string[]) {
-          return v.length >= 2 && v.length <= 10;
+          return (
+            v.length >= 2 && v.length <= 10 && v.every((a) => a.length <= 55)
+          );
         },
-        message: "Poll must have between 2 and 10 answers",
+        message:
+          "Poll must have between 2 and 10 answers, each 55 characters or fewer",
       },
     },
     multiSelect: { type: Boolean, default: false },
