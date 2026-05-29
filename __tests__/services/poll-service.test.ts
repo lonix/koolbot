@@ -61,7 +61,11 @@ describe("PollService", () => {
   it("rejects invalid URL formats before fetching", async () => {
     const service = PollService.getInstance({} as never);
 
-    const result = await service.importFromUrl("not-a-url", "guild-1", "user-1");
+    const result = await service.importFromUrl(
+      "not-a-url",
+      "guild-1",
+      "user-1",
+    );
 
     expect(result).toEqual({
       imported: 0,
@@ -107,7 +111,11 @@ describe("PollService", () => {
     ];
 
     for (const blockedUrl of blockedUrls) {
-      const result = await service.importFromUrl(blockedUrl, "guild-1", "user-1");
+      const result = await service.importFromUrl(
+        blockedUrl,
+        "guild-1",
+        "user-1",
+      );
 
       expect(result).toEqual({
         imported: 0,
@@ -137,15 +145,18 @@ describe("PollService", () => {
       "user-1",
     );
 
-    expect(mockAxiosGet).toHaveBeenCalledWith("https://example.com/polls.yaml", {
-      timeout: 10000,
-      maxContentLength: 2 * 1024 * 1024,
-      maxBodyLength: 2 * 1024 * 1024,
-      responseType: "text",
-      headers: {
-        "User-Agent": "KoolBot-PollService/1.0",
+    expect(mockAxiosGet).toHaveBeenCalledWith(
+      "https://example.com/polls.yaml",
+      {
+        timeout: 10000,
+        maxContentLength: 2 * 1024 * 1024,
+        maxBodyLength: 2 * 1024 * 1024,
+        responseType: "text",
+        headers: {
+          "User-Agent": "KoolBot-PollService/1.0",
+        },
       },
-    });
+    );
     expect(mockPollItemFindOne).toHaveBeenCalledWith({
       guildId: "guild-1",
       question: "Favorite color?",
@@ -190,11 +201,33 @@ describe("PollService", () => {
     expect(mockPollItemCreate).not.toHaveBeenCalled();
   });
 
+  it("reports an invalid-format error for an empty or non-object body", async () => {
+    mockAxiosGet.mockResolvedValue({
+      data: "",
+      headers: { "content-type": "text/plain" },
+    });
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com/empty.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["Invalid format: expected { polls: [...] }"],
+    });
+    expect(mockPollItemCreate).not.toHaveBeenCalled();
+  });
+
   it("reports a clear error when the payload exceeds the size cap", async () => {
     mockAxiosIsAxiosError.mockReturnValue(true);
     mockAxiosGet.mockRejectedValue({
-      code: "ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED",
-      message: "maxContentLength size of 2097152 exceeded",
+      code: "ERR_FR_MAX_BODY_LENGTH_EXCEEDED",
+      message: "maxBodyLength size of 2097152 exceeded",
     });
 
     const service = PollService.getInstance({} as never);

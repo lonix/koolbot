@@ -515,7 +515,9 @@ export class PollService {
         pollData = JSON.parse(response.data);
       }
 
-      if (!pollData.polls || !Array.isArray(pollData.polls)) {
+      // yaml.load / JSON.parse can yield null, undefined, or a scalar for an
+      // empty or non-object body, so guard before dereferencing.
+      if (!pollData?.polls || !Array.isArray(pollData.polls)) {
         results.errors.push("Invalid format: expected { polls: [...] }");
         return results;
       }
@@ -582,7 +584,10 @@ export class PollService {
       if (axios.isAxiosError(error)) {
         if (error.code === "ECONNABORTED") {
           results.errors.push("Request timeout - URL took too long to respond");
-        } else if (error.code === "ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED") {
+        } else if (
+          error.code === "ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED" ||
+          error.code === "ERR_FR_MAX_BODY_LENGTH_EXCEEDED"
+        ) {
           results.errors.push(
             `URL response too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
           );
