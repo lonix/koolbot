@@ -417,6 +417,17 @@ export function createReadOnlyRouter(
         roles: roleData.roles,
       }));
 
+      // Guild name backs the "type to confirm" step of the danger-zone
+      // reset. Best-effort: when the fetch fails the renderer falls back to
+      // the guild id, which the reset handler also accepts.
+      let guildName: string | null = null;
+      try {
+        const guild = await client.guilds.fetch(common.guildId);
+        guildName = guild.name;
+      } catch (err) {
+        logger.debug("settings guild fetch failed", err);
+      }
+
       res.type("text/html").send(
         renderSettingsPage({
           ...common,
@@ -424,6 +435,8 @@ export function createReadOnlyRouter(
           textChannels,
           categoryChannels,
           roles,
+          guildId: common.guildId,
+          guildName,
         }),
       );
     }),

@@ -652,7 +652,7 @@ side effect, since the HMAC key changes.
 | Page               | Replaces                                                                                            |
 | ------------------ | --------------------------------------------------------------------------------------------------- |
 | **Dashboard**      | `/botstats`                                                                                         |
-| **Settings**       | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload`                                 |
+| **Settings**       | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
 | **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
 | **Setup Wizard**   | `/setup wizard`                                                                                     |
 | **Announcements**  | `/announce create`, `list`, `delete`                                                                |

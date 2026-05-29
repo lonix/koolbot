@@ -8,11 +8,44 @@ import { describe, it, expect } from "@jest/globals";
 import {
   coerceConfigValue,
   findSectionMasterKey,
+  resetConfigToDefaults,
+  type ResetConfigStore,
 } from "../../src/web/write-routes.js";
 import {
   BOOTSTRAP_VARS,
   PROTECTED_KEYS,
 } from "../../src/web/bootstrap-vars.js";
+import { defaultConfig } from "../../src/services/config-schema.js";
+
+/**
+ * In-memory `ResetConfigStore` seeded from `initial` rows. Records every
+ * set/delete so the reset behaviour can be asserted without Mongo.
+ */
+function makeFakeStore(initial: Record<string, unknown>): ResetConfigStore & {
+  rows: Map<string, unknown>;
+  setCalls: Array<{ key: string; value: unknown }>;
+  deleted: string[];
+} {
+  const rows = new Map<string, unknown>(Object.entries(initial));
+  const setCalls: Array<{ key: string; value: unknown }> = [];
+  const deleted: string[] = [];
+  return {
+    rows,
+    setCalls,
+    deleted,
+    async getAll() {
+      return Array.from(rows.keys()).map((key) => ({ key }));
+    },
+    async set(key, value) {
+      setCalls.push({ key, value });
+      rows.set(key, value);
+    },
+    async delete(key) {
+      deleted.push(key);
+      rows.delete(key);
+    },
+  };
+}
 
 describe("PROTECTED_KEYS", () => {
   it("covers every bootstrap env variable (derived from BOOTSTRAP_VARS)", () => {
@@ -179,5 +212,80 @@ describe("findSectionMasterKey", () => {
 
   it("returns null for an unknown key that merely ends with .enabled", () => {
     expect(findSectionMasterKey(["bogus.feature.enabled"])).toBeNull();
+  });
+});
+
+describe("resetConfigToDefaults (#487)", () => {
+  const schemaKeys = Object.keys(defaultConfig);
+
+  it("rewrites every schema key back to its default value", async () => {
+    // Fixture DB with a couple of non-default overrides.
+    const store = makeFakeStore({
+      "voicechannels.enabled": true,
+      "quotes.max_length": 999,
+    });
+
+    const { updated } = await resetConfigToDefaults(store);
+
+    expect(updated).toBe(schemaKeys.length);
+    // Every schema key was written exactly once, with its default value.
+    expect(store.setCalls.map((c) => c.key).sort()).toEqual(
+      [...schemaKeys].sort(),
+    );
+    for (const key of schemaKeys) {
+      expect(store.rows.get(key)).toEqual(
+        defaultConfig[key as keyof typeof defaultConfig],
+      );
+    }
+  });
+
+  it("deletes orphan DB keys that are no longer in the schema", async () => {
+    const store = makeFakeStore({
+      "voicechannels.enabled": true,
+      "legacy.removed_feature": "stale",
+      "another.orphan": 42,
+    });
+
+    const { updated, deleted } = await resetConfigToDefaults(store);
+
+    expect(updated).toBe(schemaKeys.length);
+    expect(deleted).toBe(2);
+    expect(store.deleted.sort()).toEqual(
+      ["another.orphan", "legacy.removed_feature"].sort(),
+    );
+    expect(store.rows.has("legacy.removed_feature")).toBe(false);
+    expect(store.rows.has("another.orphan")).toBe(false);
+  });
+
+  it("never deletes a protected bootstrap key, even if a stray row exists", async () => {
+    // PROTECTED_KEYS shouldn't live in the configs collection, but a stray
+    // row must not be dropped by the reset.
+    const store = makeFakeStore({
+      DISCORD_TOKEN: "should-not-be-touched",
+      "orphan.key": "x",
+    });
+
+    const { deleted } = await resetConfigToDefaults(store);
+
+    expect(deleted).toBe(1);
+    expect(store.deleted).toEqual(["orphan.key"]);
+    expect(store.deleted).not.toContain("DISCORD_TOKEN");
+    expect(store.rows.get("DISCORD_TOKEN")).toBe("should-not-be-touched");
+  });
+
+  it("collects per-key failures and keeps going (partial application)", async () => {
+    const store = makeFakeStore({ "orphan.key": "x" });
+    const firstSchemaKey = schemaKeys[0];
+    const realSet = store.set.bind(store);
+    store.set = async (key, value, description, category) => {
+      if (key === firstSchemaKey) throw new Error("write boom");
+      return realSet(key, value, description, category);
+    };
+
+    const { updated, deleted, failed } = await resetConfigToDefaults(store);
+
+    expect(updated).toBe(schemaKeys.length - 1);
+    expect(deleted).toBe(1);
+    expect(failed).toEqual([{ key: firstSchemaKey, reason: "write boom" }]);
   });
 });
