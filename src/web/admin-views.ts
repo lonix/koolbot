@@ -530,9 +530,9 @@ export function renderSettingsPage(props: SettingsProps): string {
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td>${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}</td>
+<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
-<td style="white-space:nowrap">${formatValue(r.defaultValue)}</td>
+<td class="settings-default">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
 </tr>`,
         )
