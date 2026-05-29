@@ -4,7 +4,12 @@ import type { Client, Message } from "discord.js";
 // Rely on the global mongoose mock from setup.ts for a stable shared model
 // object whose methods we reconfigure per-test.
 jest.mock("../../src/utils/logger.js", () => ({
-  default: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+  default: {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+  },
   isDebugMode: jest.fn(() => false),
 }));
 
@@ -32,13 +37,15 @@ function createTracker() {
   return { tracker, mockConfigService };
 }
 
-function makeMessage(overrides: Partial<{
-  bot: boolean;
-  guildId: string | null;
-  channelId: string;
-  userId: string;
-  username: string;
-}> = {}): Message {
+function makeMessage(
+  overrides: Partial<{
+    bot: boolean;
+    guildId: string | null;
+    channelId: string;
+    userId: string;
+    username: string;
+  }> = {},
+): Message {
   const {
     bot = false,
     guildId = "guild1",
@@ -106,22 +113,65 @@ describe("MessageActivityTracker", () => {
   describe("increment behaviour", () => {
     it("creates a counter on a clean collection (no existing channel)", async () => {
       const { tracker } = createTracker();
-      // First update matches nothing → triggers the upsert path.
+      // Fast path misses (matchedCount 0) → atomic seed-then-increment path:
+      // (1) upsert doc, (2) push channel if absent, (3) positional $inc.
       updateOne
-        .mockResolvedValueOnce({ matchedCount: 0 })
-        .mockResolvedValueOnce({ matchedCount: 1, upsertedCount: 1 });
+        .mockResolvedValueOnce({ matchedCount: 0 }) // fast path miss
+        .mockResolvedValueOnce({ matchedCount: 1, upsertedCount: 1 }) // ensure doc
+        .mockResolvedValueOnce({ matchedCount: 1 }) // ensure channel entry
+        .mockResolvedValueOnce({ matchedCount: 1 }); // increment
 
       await tracker.handleMessageCreate(makeMessage());
 
-      expect(updateOne).toHaveBeenCalledTimes(2);
+      expect(updateOne).toHaveBeenCalledTimes(4);
 
-      // Second call is the upsert that seeds channels[] and recentMessages.
-      const [filter, update, options] = updateOne.mock.calls[1];
-      expect(filter).toEqual({ userId: "user1", guildId: "guild1" });
-      expect(update.$inc).toEqual({ totalCount: 1 });
-      expect(update.$push.channels).toEqual({ channelId: "chan1", count: 1 });
-      expect(update.$push.recentMessages.channelId).toBe("chan1");
-      expect(options).toEqual({ upsert: true });
+      // (2) document upsert seeds only userId/guildId.
+      const [docFilter, docUpdate, docOptions] = updateOne.mock.calls[1];
+      expect(docFilter).toEqual({ userId: "user1", guildId: "guild1" });
+      expect(docUpdate.$setOnInsert).toEqual({
+        userId: "user1",
+        guildId: "guild1",
+      });
+      expect(docOptions).toEqual({ upsert: true });
+
+      // (3) channel counter is pushed only when not already present.
+      const [chanFilter, chanUpdate] = updateOne.mock.calls[2];
+      expect(chanFilter).toEqual({
+        userId: "user1",
+        guildId: "guild1",
+        "channels.channelId": { $ne: "chan1" },
+      });
+      expect(chanUpdate.$push.channels).toEqual({
+        channelId: "chan1",
+        count: 0,
+      });
+
+      // (4) positional increment bumps the per-channel and total counters.
+      const [incFilter, incUpdate] = updateOne.mock.calls[3];
+      expect(incFilter).toEqual({
+        userId: "user1",
+        guildId: "guild1",
+        "channels.channelId": "chan1",
+      });
+      expect(incUpdate.$inc).toEqual({ totalCount: 1, "channels.$.count": 1 });
+      expect(incUpdate.$push.recentMessages.channelId).toBe("chan1");
+    });
+
+    it("ignores a duplicate-key error when seeding the document", async () => {
+      const { tracker } = createTracker();
+      const dupErr = Object.assign(new Error("E11000 duplicate key"), {
+        code: 11000,
+      });
+      updateOne
+        .mockResolvedValueOnce({ matchedCount: 0 }) // fast path miss
+        .mockRejectedValueOnce(dupErr) // ensure doc loses the race
+        .mockResolvedValueOnce({ matchedCount: 1 }) // ensure channel entry
+        .mockResolvedValueOnce({ matchedCount: 1 }); // increment
+
+      await tracker.handleMessageCreate(makeMessage());
+
+      // The seed-then-increment path still completes all four writes.
+      expect(updateOne).toHaveBeenCalledTimes(4);
     });
 
     it("increments an existing channel counter without a second write", async () => {

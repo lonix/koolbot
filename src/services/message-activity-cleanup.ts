@@ -43,6 +43,24 @@ export class MessageActivityCleanupService {
     this.client = client;
     this.configService = ConfigService.getInstance();
     this.discordLogger = DiscordLogger.getInstance(client);
+
+    // Apply config changes at runtime (e.g. after /config reload) so the
+    // cron is (re)started, rescheduled, or stopped without a bot restart —
+    // matching digest-service and scheduled-announcement-service.
+    this.configService.registerReloadCallback(async () => {
+      try {
+        logger.info("Message cleanup configuration changed, reloading...");
+        // Tear down any existing schedule, then re-evaluate from config.
+        // startScheduledCleanup() is a no-op when the feature is disabled.
+        this.destroy();
+        await this.startScheduledCleanup();
+      } catch (error) {
+        logger.error(
+          "Error reloading message cleanup service after configuration change:",
+          error,
+        );
+      }
+    });
   }
 
   public static getInstance(client: Client): MessageActivityCleanupService {

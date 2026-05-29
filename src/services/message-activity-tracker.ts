@@ -147,11 +147,21 @@ export class MessageActivityTracker {
   }
 
   /**
-   * Atomically increments the per-channel and total counters and appends a
-   * thin timestamp entry. Uses a match-then-upsert pair so the per-channel
-   * counter is created on first sight of a channel without losing the
-   * increment, mirroring the non-transactional approach the voice tracker
-   * already takes.
+   * Increments the per-channel and total counters and appends a thin
+   * timestamp entry.
+   *
+   * The steady-state fast path is a single positional `$inc`. When the
+   * per-channel counter doesn't exist yet (first message in a channel),
+   * the slow path seeds it without risking duplicate `channels[]` entries
+   * under concurrency:
+   *
+   *   1. Upsert the document (unique `(userId, guildId)` index serialises
+   *      the rare concurrent first-insert; the duplicate-key loser is
+   *      ignored because the document already exists).
+   *   2. Push the channel counter only if it isn't already present
+   *      (`$ne`). MongoDB applies this per-document atomically, so two
+   *      concurrent first messages can't both push the same channel.
+   *   3. Positional `$inc` — now guaranteed to match.
    */
   private async recordMessage(message: Message): Promise<void> {
     await this.ensureConnection();
@@ -172,23 +182,59 @@ export class MessageActivityTracker {
       },
     );
 
-    // No matching channel sub-document (new user or new channel for this
-    // user): upsert the document and push a fresh channel counter.
-    if (result.matchedCount === 0) {
-      await MessageActivityTracking.updateOne(
-        { userId, guildId },
-        {
-          $set: { username, lastMessageAt: sentAt },
-          $inc: { totalCount: 1 },
-          $push: {
-            channels: { channelId, count: 1 },
-            recentMessages: { sentAt, channelId },
-          },
-        },
-        { upsert: true },
-      );
+    if (result.matchedCount > 0) {
+      this.logRecorded(username, userId, channelId);
+      return;
     }
 
+    // Slow path: first message in this channel for this user.
+    // 1. Ensure the document exists.
+    try {
+      await MessageActivityTracking.updateOne(
+        { userId, guildId },
+        { $setOnInsert: { userId, guildId } },
+        { upsert: true },
+      );
+    } catch (error: unknown) {
+      // A concurrent first-insert may lose the unique-index race; the
+      // document now exists either way, so swallow that and rethrow the rest.
+      if (!this.isDuplicateKeyError(error)) {
+        throw error;
+      }
+    }
+
+    // 2. Seed the channel counter only if it isn't already present.
+    await MessageActivityTracking.updateOne(
+      { userId, guildId, "channels.channelId": { $ne: channelId } },
+      { $push: { channels: { channelId, count: 0 } } },
+    );
+
+    // 3. Increment the now-guaranteed channel counter.
+    await MessageActivityTracking.updateOne(
+      { userId, guildId, "channels.channelId": channelId },
+      {
+        $set: { username, lastMessageAt: sentAt },
+        $inc: { totalCount: 1, "channels.$.count": 1 },
+        $push: { recentMessages: { sentAt, channelId } },
+      },
+    );
+
+    this.logRecorded(username, userId, channelId);
+  }
+
+  private isDuplicateKeyError(error: unknown): boolean {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      (error as { code?: number }).code === 11000
+    );
+  }
+
+  private logRecorded(
+    username: string,
+    userId: string,
+    channelId: string,
+  ): void {
     if (isDebugMode()) {
       logger.info(
         `[DEBUG] Recorded message for ${username} (${userId}) in channel ${channelId}`,
