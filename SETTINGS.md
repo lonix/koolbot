@@ -32,6 +32,7 @@ Complete configuration reference for all KoolBot settings.
 - [Voice Channel Management](#-voice-channel-management)
 - [Voice Activity Tracking](#-voice-activity-tracking)
 - [Voice Channel Cleanup](#-voice-channel-cleanup)
+- [Message Tracking](#-message-tracking)
 - [Announcements](#-announcements)
 - [Achievements System](#-achievements-system)
 - [Weekly Digest](#-weekly-digest)
@@ -624,6 +625,42 @@ calculations:
 
 ---
 
+## 💬 Message Tracking
+
+Track text-message activity the same way voice activity is tracked: a
+`messageCreate` listener writes per-user, per-channel counts (plus a thin,
+retention-trimmed log of message timestamps) into a dedicated collection.
+This is the **data-capture foundation only** — nothing is surfaced on
+Rewind or the Web UI yet (that lives in a follow-up). No slash command is
+introduced.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `messagetracking.enabled` | `false` | Master switch — turning this off stops the listener entirely |
+| `messagetracking.excluded_channels` | `""` | Channel IDs to skip (comma-separated; mirrors `voicetracking.excluded_channels`) |
+| `messagetracking.cleanup.enabled` | `false` | Master switch for the per-message detail cleanup job |
+| `messagetracking.cleanup.schedule` | `"0 3 * * *"` | Cron schedule (default: daily at 03:00) |
+| `messagetracking.cleanup.retention.detailed_days` | `400` | Drop per-message detail older than N days (allows a full Rewind year + buffer) |
+
+**What's tracked:**
+
+- Bot messages and DMs are ignored; only guild messages count.
+- Messages in excluded channels are skipped.
+- Each message increments a per-`(user, guild, channel)` counter, bumps
+  the user's all-time `totalCount`, and updates `lastMessageAt`.
+- A lightweight `{ sentAt, channelId }` entry is appended so per-day /
+  per-week / per-year aggregates can be derived later without scanning
+  Discord history.
+
+**What cleanup prunes:**
+
+The cleanup job only trims the per-message detail (`recentMessages`)
+beyond the retention window. The all-time per-channel totals and
+`totalCount` are **never** pruned — they're cheap to keep and feed
+all-time leaderboards.
+
+---
+
 ## 🔒 Rate Limiting
 
 Protect your bot from command spam with global rate limiting.
@@ -861,6 +898,14 @@ above).
 - `voicetracking.cleanup.retention.detailed_sessions_days` (number, default: 30)
 - `voicetracking.cleanup.retention.monthly_summaries_months` (number, default: 6)
 - `voicetracking.cleanup.retention.yearly_summaries_years` (number, default: 1)
+
+#### Message Tracking
+
+- `messagetracking.enabled` (bool, default: false)
+- `messagetracking.excluded_channels` (string, default: "")
+- `messagetracking.cleanup.enabled` (bool, default: false)
+- `messagetracking.cleanup.schedule` (string, default: `"0 3 * * *"`)
+- `messagetracking.cleanup.retention.detailed_days` (number, default: 400)
 
 #### Rate Limiting
 
