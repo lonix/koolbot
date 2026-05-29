@@ -187,6 +187,11 @@ export class ConfigService {
         // migrator runs (see name-id-migrator.ts).
         "voicetracking.announcements.channel",
         "voicechannels.category.name",
+        // Runtime bookkeeping keys written by cleanup services. These are
+        // not part of defaultConfig (they hold a timestamp, not an
+        // operator-tunable default) but must survive the unknown-settings
+        // sweep so the 24h cleanup guard persists across restarts.
+        "messagetracking.cleanup.last_run",
       ];
       knownOldKeys.forEach((key) => validKeys.add(key));
 
@@ -205,6 +210,7 @@ export class ConfigService {
         "announcements",
         "core",
         "help",
+        "messagetracking",
         "ping",
         "quotes",
         "ratelimit",

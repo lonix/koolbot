@@ -27,6 +27,13 @@ export interface ConfigSchema {
   "voicetracking.cleanup.retention.monthly_summaries_months": number;
   "voicetracking.cleanup.retention.yearly_summaries_years": number;
 
+  // Text-Message Activity Tracking (#495)
+  "messagetracking.enabled": boolean; // Master switch — turning this off stops the listener entirely
+  "messagetracking.excluded_channels": string; // Comma-separated channel IDs to skip
+  "messagetracking.cleanup.enabled": boolean; // Master switch for the cleanup job
+  "messagetracking.cleanup.schedule": string; // Cron schedule for the cleanup job
+  "messagetracking.cleanup.retention.detailed_days": number; // Drop recentMessages older than N days
+
   // Individual Features
   "ping.enabled": boolean;
 
@@ -152,6 +159,16 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.cleanup.retention.detailed_sessions_days": 30,
   "voicetracking.cleanup.retention.monthly_summaries_months": 6,
   "voicetracking.cleanup.retention.yearly_summaries_years": 1,
+
+  // Text-Message Activity Tracking defaults (#495). Master gate off,
+  // follows rule 1 — the listener does nothing until an operator opts in.
+  // This is the data-capture foundation; surfacing lives in the Rewind
+  // text-stats follow-up.
+  "messagetracking.enabled": false,
+  "messagetracking.excluded_channels": "",
+  "messagetracking.cleanup.enabled": false,
+  "messagetracking.cleanup.schedule": "0 3 * * *", // Daily at 03:00 host timezone
+  "messagetracking.cleanup.retention.detailed_days": 400, // Full Rewind year + buffer
 
   // Individual Features
   "ping.enabled": false,
@@ -305,6 +322,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Voice Tracking",
     description:
       "Time-in-voice tracking, leaderboards, last-seen, scheduled announcements, and DB cleanup.",
+  },
+  messagetracking: {
+    title: "Message Tracking",
+    description:
+      "Per-user, per-channel text-message activity tracking with a retention-trimmed detail log. Data-capture foundation for text stats; surfacing lives in the Rewind follow-up.",
   },
   ping: {
     title: "Ping",
@@ -514,6 +536,42 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Yearly-summary retention (years)",
     description: "Years to keep yearly summary rows.",
     category: "voicetracking",
+    type: "number",
+  },
+
+  // Text-Message Activity Tracking (#495)
+  "messagetracking.enabled": {
+    label: "Message Tracking enabled",
+    description:
+      "Enable per-user, per-channel text-message activity tracking. Turning this off stops the messageCreate listener entirely.",
+    category: "messagetracking",
+    type: "boolean",
+  },
+  "messagetracking.excluded_channels": {
+    label: "Excluded channel IDs",
+    description:
+      "Comma-separated channel IDs to exclude from text-message tracking (mirrors voicetracking.excluded_channels).",
+    category: "messagetracking",
+    type: "channel_list",
+  },
+  "messagetracking.cleanup.enabled": {
+    label: "Scheduled message-detail cleanup enabled",
+    description:
+      "Enable the scheduled job that prunes old per-message detail. All-time per-channel totals are always kept.",
+    category: "messagetracking",
+    type: "boolean",
+  },
+  "messagetracking.cleanup.schedule": {
+    label: "Message cleanup schedule (cron)",
+    description: "Cron schedule for the message-detail cleanup job.",
+    category: "messagetracking",
+    type: "cron",
+  },
+  "messagetracking.cleanup.retention.detailed_days": {
+    label: "Message-detail retention (days)",
+    description:
+      "Days to keep per-message detail (recentMessages) before it is pruned. All-time per-channel totals are never pruned.",
+    category: "messagetracking",
     type: "number",
   },
 

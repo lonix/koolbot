@@ -166,6 +166,7 @@ describe('Config Schema', () => {
       'notices.enabled': false,
       'polls.enabled': false,
       'leaderboard_roles.enabled': false,
+      'messagetracking.enabled': false,
 
       // ─── Sub-features that default off (auxiliary opt-ins) ──────────
       'voicechannels.presets.enabled': false,
@@ -174,6 +175,7 @@ describe('Config Schema', () => {
       'voicetracking.seen.enabled': false,
       'voicetracking.announcements.enabled': false,
       'voicetracking.cleanup.enabled': false,
+      'messagetracking.cleanup.enabled': false,
 
       // ─── Sub-features that default on (rule 2: parent-gated) ────────
       'voicechannels.controlpanel.enabled': true,

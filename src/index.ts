@@ -25,6 +25,8 @@ import {
 import { VoiceChannelTracker } from "./services/voice-channel-tracker.js";
 import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { VoiceChannelTruncationService } from "./services/voice-channel-truncation.js";
+import { MessageActivityTracker } from "./services/message-activity-tracker.js";
+import { MessageActivityCleanupService } from "./services/message-activity-cleanup.js";
 import { CommandAuditCleanupService } from "./services/command-audit-cleanup.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
@@ -422,6 +424,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         voiceChannelManager.destroy();
         voiceChannelAnnouncer.destroy();
         voiceChannelTruncation.destroy();
+        messageActivityCleanup.destroy();
         CommandAuditCleanupService.getInstance().destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
@@ -480,6 +483,8 @@ let voiceChannelManager: VoiceChannelManager;
 let voiceChannelTracker: VoiceChannelTracker;
 let voiceChannelAnnouncer: VoiceChannelAnnouncer;
 let voiceChannelTruncation: VoiceChannelTruncationService;
+let messageActivityTracker: MessageActivityTracker;
+let messageActivityCleanup: MessageActivityCleanupService;
 let scheduledAnnouncementService: ScheduledAnnouncementService;
 let channelInitializer: ChannelInitializer;
 let startupMigrator: StartupMigrator;
@@ -499,6 +504,8 @@ try {
   voiceChannelTracker = VoiceChannelTracker.getInstance(client);
   voiceChannelAnnouncer = VoiceChannelAnnouncer.getInstance(client);
   voiceChannelTruncation = VoiceChannelTruncationService.getInstance(client);
+  messageActivityTracker = MessageActivityTracker.getInstance(client);
+  messageActivityCleanup = MessageActivityCleanupService.getInstance(client);
   scheduledAnnouncementService =
     ScheduledAnnouncementService.getInstance(client);
   channelInitializer = ChannelInitializer.getInstance(client);
@@ -576,6 +583,8 @@ async function initializeServices(): Promise<void> {
     await voiceChannelManager.initialize(guildId);
     await voiceChannelTracker.initialize();
     await voiceChannelTruncation.initialize();
+    await messageActivityTracker.initialize();
+    await messageActivityCleanup.initialize();
     await voiceChannelAnnouncer.start();
     await scheduledAnnouncementService.start();
     await channelInitializer.initializeChannels(
@@ -799,6 +808,16 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     }
   } catch (error) {
     logger.error("Error handling voice state update:", error);
+  }
+});
+
+// Handle text messages for per-user/per-channel activity tracking (#495).
+// Gating (enabled, bot/DM, excluded channels) lives in the tracker.
+client.on(Events.MessageCreate, async (message) => {
+  try {
+    await messageActivityTracker.handleMessageCreate(message);
+  } catch (error) {
+    logger.error("Error handling messageCreate:", error);
   }
 });
 

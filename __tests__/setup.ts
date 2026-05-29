@@ -10,6 +10,7 @@ jest.mock('../src/services/config-service.js', () => ({
       getConfig: jest.fn().mockResolvedValue(new Map()),
       triggerReload: jest.fn().mockResolvedValue(undefined),
       onReload: jest.fn(),
+      registerReloadCallback: jest.fn(),
     })),
   },
 }));
