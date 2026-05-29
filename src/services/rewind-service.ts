@@ -82,8 +82,9 @@ export interface RewindSummary {
     last: RewindWeeklyRank | null;
     best: RewindWeeklyRank | null;
   };
-  // Years for which the user has any data (sessions or achievements).
-  // Used by the page to render a small year picker.
+  // Years for which the user has any data (voice sessions, text-message
+  // activity, or achievements). Used by the page to render a small year
+  // picker.
   availableYears: number[];
 }
 
@@ -404,12 +405,17 @@ export class RewindService {
         })
         .filter((a): a is RewindAchievement => a !== null);
 
-      const { annualRank, annualGuildMembers, percentAboveMedian } =
-        await this.computeAnnualRank(userId, start, end, totalSeconds);
-
-      const weeklyJourney = await this.computeWeeklyJourney(userId, start, end);
-
-      const text = await this.computeTextActivity(userId, guildId, start, end);
+      // These three reads are independent — run them concurrently so the
+      // on-demand /me/rewind render doesn't pay their latency in series.
+      const [
+        { annualRank, annualGuildMembers, percentAboveMedian },
+        weeklyJourney,
+        text,
+      ] = await Promise.all([
+        this.computeAnnualRank(userId, start, end, totalSeconds),
+        this.computeWeeklyJourney(userId, start, end),
+        this.computeTextActivity(userId, guildId, start, end),
+      ]);
 
       // The picker should offer any year the user has either kind of data.
       const mergedYears = [...new Set([...availableYears, ...text.years])].sort(
@@ -504,8 +510,9 @@ export class RewindService {
    * the view can hide the card without special-casing.
    *
    * `years` reflects every year present in the retained detail (bounded
-   * by `messagetracking.retention_days`) so the year picker can offer
-   * them even when the requested year itself has no text data.
+   * by `messagetracking.cleanup.retention.detailed_days`) so the year
+   * picker can offer them even when the requested year itself has no
+   * text data.
    */
   private async computeTextActivity(
     userId: string,
@@ -531,10 +538,12 @@ export class RewindService {
       );
       if (!enabled) return empty;
 
-      const doc = await MessageActivityTracking.findOne({
-        userId,
-        guildId,
-      }).lean<{ recentMessages?: RawTextMessage[] }>();
+      const doc = await MessageActivityTracking.findOne(
+        { userId, guildId },
+        // Only the per-message detail is needed here — skip channels[] /
+        // totalCount to keep the payload small.
+        { recentMessages: 1 },
+      ).lean<{ recentMessages?: RawTextMessage[] }>();
       const all = doc?.recentMessages ?? [];
       const years = [...new Set(all.map((m) => m.sentAt.getUTCFullYear()))];
 
