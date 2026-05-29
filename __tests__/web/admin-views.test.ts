@@ -1091,8 +1091,8 @@ describe("renderVoiceChannelsPage", () => {
     expect(html).toContain('class="tag tag-warn">dynamic');
     expect(html).toContain('class="tag tag-warn">LIVE');
     expect(html).toContain("Friday night");
-    expect(html).toContain("/admin/voice-channels/reload");
     expect(html).toContain("/admin/voice-channels/force-reload");
+    expect(html).not.toContain('action="/admin/voice-channels/reload"');
   });
 
   it("disables cleanup actions when the feature is off or the category is missing", () => {
@@ -1110,11 +1110,9 @@ describe("renderVoiceChannelsPage", () => {
       categoryFound: false,
     });
     expect(html).toMatch(
-      /<button[^>]*type="submit"[^>]*disabled[^>]*>Clean up empty channels<\/button>/,
+      /<button[^>]*type="submit"[^>]*disabled[^>]*>Force VC cleanup<\/button>/,
     );
-    expect(html).toMatch(
-      /<button[^>]*type="submit"[^>]*disabled[^>]*>Force cleanup/,
-    );
+    expect(html).not.toContain("Clean up empty channels");
   });
 });
 

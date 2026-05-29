@@ -1841,7 +1841,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
 
   const body = `
 <h1>Voice Channels</h1>
-<p class="subtitle">Voice-channel category contents and live state. Replaces <code>/vc reload|force-reload</code>; the slash commands still work in parallel during migration.</p>
+<p class="subtitle">Voice-channel category contents and live state. Replaces <code>/vc force-reload</code>; for the gentler empty-channel cleanup use <code>/vc reload</code>. The slash commands still work in parallel during migration.</p>
 ${renderFlash(props.flash)}
 <div class="card">
   <h2>Status</h2>
@@ -1858,15 +1858,10 @@ ${renderFlash(props.flash)}
 </div>
 <div class="card">
   <h2>Cleanup actions</h2>
-  <form method="POST" action="/admin/voice-channels/reload" class="inline-form" onsubmit="return confirm('Clean up empty dynamic voice channels now?');">
-    ${csrfInput}
-    <button type="submit" class="btn btn-primary"${reloadDisabled ? " disabled" : ""}>Clean up empty channels</button>
-    <span class="muted">Same effect as <code>/vc reload</code>.</span>
-  </form>
   <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of ALL unmanaged channels in the category and re-create lobby channels?');">
     ${csrfInput}
-    <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force cleanup &amp; ensure lobby</button>
-    <span class="muted">Same effect as <code>/vc force-reload</code>.</span>
+    <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force VC cleanup</button>
+    <span class="muted">Removes ALL unmanaged channels in the category and re-creates the lobby. Same effect as <code>/vc force-reload</code>.</span>
   </form>
   ${reloadHint ? `<p class="muted">${reloadHint}</p>` : ""}
 </div>

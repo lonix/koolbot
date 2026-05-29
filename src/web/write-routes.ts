@@ -2780,37 +2780,6 @@ export function createWriteRouter(
   // ============================================================
 
   router.post(
-    "/voice-channels/reload",
-    asyncHandler(async (req, res) => {
-      const session = requireSessionContext(req);
-      const manager = VoiceChannelManager.getInstance(client);
-      try {
-        await manager.cleanupEmptyChannels();
-        await recordAudit(session, {
-          action: "voicechannels.reload",
-          result: "success",
-        });
-        flashRedirect(res, "/admin/voice-channels", {
-          type: "ok",
-          text: "Cleaned up empty voice channels.",
-        });
-      } catch (err) {
-        const text = err instanceof Error ? err.message : "Unknown error";
-        logger.error("VC reload failed", err);
-        await recordAudit(session, {
-          action: "voicechannels.reload",
-          result: "failure",
-          errorMessage: text,
-        });
-        flashRedirect(res, "/admin/voice-channels", {
-          type: "err",
-          text: `Cleanup failed: ${text}`,
-        });
-      }
-    }),
-  );
-
-  router.post(
     "/voice-channels/force-reload",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
