@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 
 const mockAxiosGet = jest.fn();
+const mockAxiosIsAxiosError = jest.fn();
 const mockPollItemFindOne = jest.fn();
 const mockPollItemCreate = jest.fn();
 const mockRegisterReloadCallback = jest.fn();
@@ -10,7 +11,7 @@ const mockConfigGetNumber = jest.fn();
 jest.unstable_mockModule("axios", () => ({
   default: {
     get: mockAxiosGet,
-    isAxiosError: jest.fn(() => false),
+    isAxiosError: mockAxiosIsAxiosError,
   },
 }));
 
@@ -50,6 +51,7 @@ describe("PollService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (PollService as unknown as { instance: unknown }).instance = undefined;
+    mockAxiosIsAxiosError.mockReturnValue(false);
     mockConfigGetBoolean.mockResolvedValue(false);
     mockConfigGetNumber.mockResolvedValue(7);
     mockPollItemFindOne.mockResolvedValue(null);
@@ -124,6 +126,7 @@ describe("PollService", () => {
       - Blue
       - Green
 `,
+      headers: { "content-type": "text/yaml; charset=utf-8" },
     });
 
     const service = PollService.getInstance({} as never);
@@ -136,7 +139,9 @@ describe("PollService", () => {
 
     expect(mockAxiosGet).toHaveBeenCalledWith("https://example.com/polls.yaml", {
       timeout: 10000,
-      maxContentLength: 1024 * 1024,
+      maxContentLength: 2 * 1024 * 1024,
+      maxBodyLength: 2 * 1024 * 1024,
+      responseType: "text",
       headers: {
         "User-Agent": "KoolBot-PollService/1.0",
       },
@@ -159,5 +164,75 @@ describe("PollService", () => {
       skipped: 0,
       errors: [],
     });
+  });
+
+  it("rejects responses with a non-JSON/YAML Content-Type", async () => {
+    mockAxiosGet.mockResolvedValue({
+      data: "<!DOCTYPE html><html><body>Login required</body></html>",
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com/login",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: [
+        'Unexpected Content-Type from import URL: "text/html". Expected JSON or YAML.',
+      ],
+    });
+    expect(mockPollItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports a clear error when the payload exceeds the size cap", async () => {
+    mockAxiosIsAxiosError.mockReturnValue(true);
+    mockAxiosGet.mockRejectedValue({
+      code: "ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED",
+      message: "maxContentLength size of 2097152 exceeded",
+    });
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com/huge.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["URL response too large (max 2 MB)"],
+    });
+    expect(mockPollItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports a clear error when the request times out", async () => {
+    mockAxiosIsAxiosError.mockReturnValue(true);
+    mockAxiosGet.mockRejectedValue({
+      code: "ECONNABORTED",
+      message: "timeout of 10000ms exceeded",
+    });
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com/slow.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["Request timeout - URL took too long to respond"],
+    });
+    expect(mockPollItemCreate).not.toHaveBeenCalled();
   });
 });

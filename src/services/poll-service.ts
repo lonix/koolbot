@@ -25,6 +25,30 @@ interface PollSource {
   polls: PollData[];
 }
 
+// Cap the size of an imported poll library. 2 MB comfortably holds thousands of
+// questions while preventing a malicious or misconfigured URL from streaming an
+// unbounded body into memory before parsing fails.
+const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
+
+// Reject the request if it has not completed within this window so a slow or
+// unresponsive server cannot hang the import indefinitely.
+const IMPORT_TIMEOUT_MS = 10_000;
+
+// The importer accepts YAML or JSON, so we allow JSON, YAML, and generic
+// plain-text/octet-stream responses. Anything else (e.g. an HTML login,
+// redirect, or Cloudflare challenge page) is rejected before parsing so the
+// admin gets a clear error instead of a confusing parse failure.
+const ALLOWED_IMPORT_CONTENT_TYPES = [
+  "application/json",
+  "text/json",
+  "application/yaml",
+  "text/yaml",
+  "application/x-yaml",
+  "text/x-yaml",
+  "text/plain",
+  "application/octet-stream",
+];
+
 /**
  * Block obvious local/private destinations so poll imports cannot be used for
  * direct SSRF probes against loopback, link-local, RFC1918, or unique-local
@@ -455,14 +479,31 @@ export class PollService {
     }
 
     try {
-      // Fetch the content with timeout
+      // Fetch the content with timeout. Receive the body as raw text so we can
+      // inspect the Content-Type and parse it ourselves rather than letting
+      // Axios silently coerce a non-JSON response.
       const response = await axios.get(parsedUrl.toString(), {
-        timeout: 10000,
-        maxContentLength: 1024 * 1024, // 1MB max
+        timeout: IMPORT_TIMEOUT_MS,
+        maxContentLength: MAX_IMPORT_BYTES,
+        maxBodyLength: MAX_IMPORT_BYTES,
+        responseType: "text",
         headers: {
           "User-Agent": "KoolBot-PollService/1.0",
         },
       });
+
+      // Validate the Content-Type before parsing. An HTML login/redirect or
+      // challenge page would otherwise surface as a cryptic parse error.
+      const contentType = String(response.headers?.["content-type"] ?? "")
+        .split(";")[0]
+        .trim()
+        .toLowerCase();
+      if (contentType && !ALLOWED_IMPORT_CONTENT_TYPES.includes(contentType)) {
+        results.errors.push(
+          `Unexpected Content-Type from import URL: "${contentType}". Expected JSON or YAML.`,
+        );
+        return results;
+      }
 
       let pollData: PollSource;
 
@@ -541,6 +582,10 @@ export class PollService {
       if (axios.isAxiosError(error)) {
         if (error.code === "ECONNABORTED") {
           results.errors.push("Request timeout - URL took too long to respond");
+        } else if (error.code === "ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED") {
+          results.errors.push(
+            `URL response too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
+          );
         } else if (error.response) {
           results.errors.push(
             `HTTP ${error.response.status}: ${error.response.statusText}`,
