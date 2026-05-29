@@ -404,6 +404,7 @@ function renderTextActivity(opts: RewindBodyOptions): string {
         "</ul>";
 
   return [
+    "<h2>Text activity</h2>",
     '<div class="rw-grid">',
     '<div class="rw-stat"><div class="label">Messages sent</div>' +
       `<div class="value">${opts.messagesSent}</div></div>`,
