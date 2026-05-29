@@ -341,10 +341,12 @@ export class VoiceChannelTruncationService {
       // Get retention configuration
       const retentionConfig = await this.getRetentionConfig();
 
-      // Get all users with voice tracking data
-      const users = await VoiceChannelTracking.find({}).exec();
+      // Stream users one at a time via a cursor instead of loading the whole
+      // (append-heavy) collection into memory. The loop only reads fields and
+      // writes back via `updateOne`, so `.lean()` avoids hydration overhead.
+      const cursor = VoiceChannelTracking.find({}).lean().cursor();
 
-      for (const user of users) {
+      for await (const user of cursor) {
         try {
           if (user.sessions && user.sessions.length > 0) {
             const cutoffDate = new Date();

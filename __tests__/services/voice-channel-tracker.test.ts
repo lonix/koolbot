@@ -265,6 +265,48 @@ describe('VoiceChannelTracker', () => {
       (VoiceChannelTracking.aggregate as jest.Mock).mockRejectedValue(new Error('DB error'));
       expect(await tracker.getTopUsers()).toEqual([]);
     });
+
+    it('reads the cap from the leaderboard_max_results config key', async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
+
+      await tracker.getTopUsers(10, 'alltime');
+
+      expect(mockConfigService.getNumber).toHaveBeenCalledWith(
+        'voicetracking.stats.leaderboard_max_results',
+        50,
+      );
+    });
+
+    it('clamps a large requested limit to the configurable cap', async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getNumber.mockResolvedValue(5);
+      (VoiceChannelTracking.aggregate as jest.Mock).mockClear();
+      (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
+
+      await tracker.getTopUsers(1000, 'alltime');
+
+      const pipeline = (VoiceChannelTracking.aggregate as jest.Mock).mock.calls[0][0];
+      const limitStage = pipeline.find(
+        (stage: Record<string, unknown>) => '$limit' in stage,
+      );
+      expect(limitStage).toEqual({ $limit: 5 });
+    });
+
+    it('keeps every row for the "all" sentinel (non-positive limit)', async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getNumber.mockResolvedValue(5);
+      (VoiceChannelTracking.aggregate as jest.Mock).mockClear();
+      (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
+
+      await tracker.getTopUsers(0, 'week');
+
+      const pipeline = (VoiceChannelTracking.aggregate as jest.Mock).mock.calls[0][0];
+      const limitStage = pipeline.find(
+        (stage: Record<string, unknown>) => '$limit' in stage,
+      );
+      expect(limitStage).toBeUndefined();
+    });
   });
 
   describe('getUserLastSeen', () => {

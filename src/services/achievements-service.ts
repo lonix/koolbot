@@ -1248,17 +1248,37 @@ export class AchievementsService {
 
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-      const users = await UserAchievements.find({
+      // Stream matching documents via a cursor rather than materialising the
+      // whole result set, so this stays bounded as the achievements
+      // collection grows. Only the three fields read below are projected, and
+      // `.lean()` avoids hydrating full Mongoose documents.
+      const cursor = UserAchievements.find({
         "accolades.earnedAt": { $gte: oneWeekAgo },
-      });
+      })
+        .select("userId username accolades")
+        .lean()
+        .cursor();
 
-      return users
-        .map((user) => ({
-          userId: user.userId,
-          username: user.username,
-          accolades: user.accolades.filter((a) => a.earnedAt >= oneWeekAgo),
-        }))
-        .filter((u) => u.accolades.length > 0);
+      const result: Array<{
+        userId: string;
+        username: string;
+        accolades: IAccolade[];
+      }> = [];
+
+      for await (const user of cursor) {
+        const accolades = user.accolades.filter(
+          (a) => a.earnedAt >= oneWeekAgo,
+        );
+        if (accolades.length > 0) {
+          result.push({
+            userId: user.userId,
+            username: user.username,
+            accolades,
+          });
+        }
+      }
+
+      return result;
     } catch (error) {
       logger.error("Error getting new accolades since last week:", error);
       return [];

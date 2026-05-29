@@ -300,9 +300,12 @@ export class MessageActivityCleanupService {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
-      const users = await MessageActivityTracking.find({}).exec();
+      // Stream users one at a time via a cursor instead of loading the whole
+      // (append-heavy) collection into memory. The loop only reads fields and
+      // writes back via `updateOne`, so `.lean()` avoids hydration overhead.
+      const cursor = MessageActivityTracking.find({}).lean().cursor();
 
-      for (const user of users) {
+      for await (const user of cursor) {
         try {
           if (user.recentMessages && user.recentMessages.length > 0) {
             const recent = user.recentMessages.filter(

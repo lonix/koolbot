@@ -37,6 +37,20 @@ import { UserAchievements } from '../../src/models/user-achievements.js';
 import { VoiceChannelTracking, type IVoiceChannelTracking } from '../../src/models/voice-channel-tracking.js';
 import { UserNotificationPrefsService } from '../../src/services/user-notification-prefs-service.js';
 
+// Helper that mimics a Mongoose query cursor over a fixed set of docs, so
+// tests can exercise the streaming `.find({}).cursor()` path.
+function mockFindCursor(docs: unknown[]) {
+  const cursor = () => ({
+    async *[Symbol.asyncIterator]() {
+      for (const doc of docs) {
+        yield doc;
+      }
+    },
+  });
+  // Mirrors the `.select(...).lean().cursor()` chain the service uses.
+  return { select: () => ({ lean: () => ({ cursor }) }) };
+}
+
 // Helper to create an AchievementsService with injected config
 function createAchievementsService(mockClient: Partial<Client>) {
   const service = AchievementsService.getInstance(mockClient as Client);
@@ -61,7 +75,7 @@ describe('AchievementsService', () => {
   beforeEach(() => {
     // Reconfigure mock methods for each test
     (UserAchievements.findOne as jest.Mock).mockResolvedValue(null);
-    (UserAchievements.find as jest.Mock).mockResolvedValue([]);
+    (UserAchievements.find as jest.Mock).mockReturnValue(mockFindCursor([]));
     (VoiceChannelTracking.findOne as jest.Mock).mockResolvedValue(null);
 
     mockClient = { users: { fetch: jest.fn() } as any };
@@ -389,20 +403,22 @@ describe('AchievementsService', () => {
   describe('getNewAccoladesSinceLastWeek', () => {
     it('should return empty array when no recent accolades', async () => {
       const { service } = createAchievementsService(mockClient);
-      (UserAchievements.find as jest.Mock).mockResolvedValue([]);
+      (UserAchievements.find as jest.Mock).mockReturnValue(mockFindCursor([]));
       expect(await service.getNewAccoladesSinceLastWeek()).toEqual([]);
     });
 
     it('should return users with accolades earned in the past week', async () => {
       const { service } = createAchievementsService(mockClient);
       const recentDate = new Date();
-      (UserAchievements.find as jest.Mock).mockResolvedValue([
-        {
-          userId: 'user1',
-          username: 'User1',
-          accolades: [{ type: 'first_hour', earnedAt: recentDate, metadata: {} }],
-        },
-      ]);
+      (UserAchievements.find as jest.Mock).mockReturnValue(
+        mockFindCursor([
+          {
+            userId: 'user1',
+            username: 'User1',
+            accolades: [{ type: 'first_hour', earnedAt: recentDate, metadata: {} }],
+          },
+        ]),
+      );
 
       const result = await service.getNewAccoladesSinceLastWeek();
       expect(result).toHaveLength(1);
@@ -411,7 +427,9 @@ describe('AchievementsService', () => {
 
     it('should handle database errors gracefully', async () => {
       const { service } = createAchievementsService(mockClient);
-      (UserAchievements.find as jest.Mock).mockRejectedValue(new Error('DB error'));
+      (UserAchievements.find as jest.Mock).mockImplementation(() => {
+        throw new Error('DB error');
+      });
       expect(await service.getNewAccoladesSinceLastWeek()).toEqual([]);
     });
   });
