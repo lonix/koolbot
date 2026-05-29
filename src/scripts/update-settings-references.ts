@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { ConfigService } from "../services/config-service.js";
+import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 
 interface SettingReference {
@@ -85,9 +86,7 @@ async function updateSettingsReferences(): Promise<void> {
   try {
     logger.info("Starting settings reference update...");
 
-    await mongoose.connect(
-      process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
-    );
+    await mongoose.connect(env.mongoUri);
 
     const configService = ConfigService.getInstance();
     await configService.initialize();

@@ -1,4 +1,5 @@
 import { ConfigService } from "./config-service.js";
+import { hasEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
 
 interface ConfigMigration {
@@ -223,7 +224,7 @@ export class StartupMigrator {
    * Check if a setting value comes from environment variables
    */
   private isFromEnvironment(key: string): boolean {
-    return process.env[key] !== undefined;
+    return hasEnv(key);
   }
 
   /**

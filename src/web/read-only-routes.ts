@@ -35,6 +35,7 @@ import {
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
+import { getEnv } from "../config/env.js";
 import {
   createSessionPingHandler,
   requireAdminRoleMiddleware,
@@ -318,7 +319,7 @@ export function createReadOnlyRouter(
         }>
       >();
       for (const v of BOOTSTRAP_VARS) {
-        const raw = process.env[v.key];
+        const raw = getEnv(v.key);
         const present = typeof raw === "string" && raw.length > 0;
         let display: string | undefined;
         if (present && raw) {

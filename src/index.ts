@@ -14,6 +14,7 @@ import {
   AuditLogEvent,
 } from "discord.js";
 import { config as dotenvConfig } from "dotenv";
+import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
 import { ConfigService } from "./services/config-service.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
@@ -54,16 +55,7 @@ import mongoose from "mongoose";
 dotenvConfig();
 
 // Validate critical environment variables
-const requiredEnvVars = {
-  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
-  CLIENT_ID: process.env.CLIENT_ID,
-  GUILD_ID: process.env.GUILD_ID,
-  MONGODB_URI: process.env.MONGODB_URI,
-};
-
-const missingVars = Object.entries(requiredEnvVars)
-  .filter(([, value]) => !value)
-  .map(([key]) => key);
+const missingVars = getMissingRequiredEnv();
 
 if (missingVars.length > 0) {
   logger.error(
@@ -159,7 +151,7 @@ function startHealthServer(): void {
       // a reverse proxy can opt in by setting WEBUI_TRUST_PROXY to a hop
       // count (e.g. "1") or to one of express' supported strings ("loopback",
       // "linklocal", "uniquelocal", "true").
-      const trustProxyRaw = (process.env.WEBUI_TRUST_PROXY || "").trim();
+      const trustProxyRaw = (env.webui.trustProxy || "").trim();
       if (trustProxyRaw) {
         const asNumber = Number(trustProxyRaw);
         if (Number.isFinite(asNumber) && asNumber >= 0) {
@@ -199,8 +191,8 @@ client.once(Events.ClientReady, async (readyClient) => {
 
 async function cleanupGlobalCommands(): Promise<void> {
   try {
-    const token = process.env.DISCORD_TOKEN;
-    const clientId = process.env.CLIENT_ID;
+    const token = env.discordToken;
+    const clientId = env.clientId;
 
     if (!token || !clientId) {
       logger.warn(
@@ -375,11 +367,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
       async () => {
         const guildId = await configService.getString("GUILD_ID", "");
         if (guildId) {
-          const rest = new REST({ version: "10" }).setToken(
-            process.env.DISCORD_TOKEN!,
-          );
+          const rest = new REST({ version: "10" }).setToken(env.discordToken!);
           await rest.put(
-            Routes.applicationGuildCommands(process.env.CLIENT_ID!, guildId),
+            Routes.applicationGuildCommands(env.clientId!, guildId),
             { body: [] },
           );
           logger.info("✅ Commands deregistered from Discord");
@@ -891,7 +881,7 @@ client.on(Events.GuildMemberAdd, async (member) => {
 });
 
 // Login to Discord (errors will be caught by global error handlers)
-client.login(process.env.DISCORD_TOKEN).catch((error) => {
+client.login(env.discordToken).catch((error) => {
   logger.error("❌ Failed to login to Discord:", error);
   process.exit(1);
 });

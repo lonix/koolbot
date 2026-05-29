@@ -1,6 +1,7 @@
 import express, { NextFunction, Request, Response, Router } from "express";
 import { Client } from "discord.js";
 import logger from "../utils/logger.js";
+import { env, getEnv } from "../config/env.js";
 import { WebSessionService } from "../services/web-session-service.js";
 import { ensureCsrfCookie, requireCsrf } from "./csrf.js";
 import { createRateLimiter } from "./rate-limit.js";
@@ -225,7 +226,7 @@ export function userWebErrorHandler(
 }
 
 export function isWebUIEnabled(): boolean {
-  return (process.env.WEBUI_ENABLED || "").toLowerCase() === "true";
+  return env.webui.enabled;
 }
 
 /**
@@ -234,5 +235,5 @@ export function isWebUIEnabled(): boolean {
  */
 export function getMissingWebUIEnvVars(): string[] {
   const required = ["WEBUI_BASE_URL", "WEBUI_SESSION_SECRET"];
-  return required.filter((k) => !process.env[k]);
+  return required.filter((k) => !getEnv(k));
 }

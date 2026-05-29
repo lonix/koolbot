@@ -1,4 +1,5 @@
 import { Config, IConfig } from "../models/config.js";
+import { env, getEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { Client } from "discord.js";
 import mongoose from "mongoose";
@@ -79,9 +80,7 @@ export class ConfigService {
                 resolve();
               } else if (mongoose.connection.readyState === 0) {
                 // Try to connect if not connected
-                await mongoose.connect(
-                  process.env.MONGODB_URI || "mongodb://mongodb:27017/koolbot",
-                );
+                await mongoose.connect(env.mongoUri);
                 if (settled) return;
                 settled = true;
                 clearTimeout(rejectTimeoutId);
@@ -104,12 +103,12 @@ export class ConfigService {
 
       // Load critical settings from environment variables first
       const criticalSettings = {
-        GUILD_ID: process.env.GUILD_ID,
-        CLIENT_ID: process.env.CLIENT_ID,
-        DISCORD_TOKEN: process.env.DISCORD_TOKEN,
-        MONGODB_URI: process.env.MONGODB_URI,
-        DEBUG: process.env.DEBUG,
-        NODE_ENV: process.env.NODE_ENV,
+        GUILD_ID: getEnv("GUILD_ID"),
+        CLIENT_ID: getEnv("CLIENT_ID"),
+        DISCORD_TOKEN: getEnv("DISCORD_TOKEN"),
+        MONGODB_URI: getEnv("MONGODB_URI"),
+        DEBUG: getEnv("DEBUG"),
+        NODE_ENV: getEnv("NODE_ENV"),
       };
 
       for (const [key, value] of Object.entries(criticalSettings)) {
@@ -341,7 +340,7 @@ export class ConfigService {
       }
 
       // If not found, try to get from environment variables (for backward compatibility)
-      const envValue = process.env[key];
+      const envValue = getEnv(key);
       if (envValue !== undefined && envValue.trim() !== "") {
         // Convert string values to appropriate types
         if (envValue === "true" || envValue === "false") {
@@ -574,7 +573,7 @@ export class ConfigService {
         continue;
       }
 
-      const envValue = process.env[mapping.key];
+      const envValue = getEnv(mapping.key);
       if (envValue !== undefined) {
         try {
           await this.set(

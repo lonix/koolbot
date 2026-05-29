@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Buffer } from "buffer";
 import { Request, Response, NextFunction } from "express";
 import { parseCookies, setCookie } from "./cookies.js";
+import { env } from "../config/env.js";
 
 export const CSRF_COOKIE = "koolbot_csrf";
 export const CSRF_HEADER = "x-csrf-token";
@@ -85,8 +86,8 @@ export function requireCsrf(
  * deployment that just forgot to set the variable.
  */
 export function shouldUseSecureCookies(): boolean {
-  const baseUrl = process.env.WEBUI_BASE_URL ?? "";
+  const baseUrl = env.webui.baseUrl;
   if (baseUrl.startsWith("https://")) return true;
   if (baseUrl.startsWith("http://")) return false;
-  return process.env.NODE_ENV === "production";
+  return env.isProduction;
 }

@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import {
   WebSession,
@@ -52,7 +53,7 @@ export class WebSessionService {
    * row alone cannot be replayed.
    */
   public hashToken(token: string): string {
-    const secret = process.env.WEBUI_SESSION_SECRET;
+    const secret = env.webui.sessionSecret;
     if (!secret) {
       throw new Error("WEBUI_SESSION_SECRET not configured");
     }
@@ -60,7 +61,7 @@ export class WebSessionService {
   }
 
   private getTtlMinutes(): number {
-    const raw = process.env.WEBUI_SESSION_TTL_MINUTES;
+    const raw = env.webui.sessionTtlMinutes;
     const parsed = raw ? Number(raw) : NaN;
     return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TTL_MINUTES;
   }
@@ -78,7 +79,7 @@ export class WebSessionService {
    * the link TTL stays short.
    */
   private getSessionLifetimeMs(): number {
-    const raw = process.env.WEBUI_SESSION_LIFETIME_HOURS;
+    const raw = env.webui.sessionLifetimeHours;
     const parsed = raw ? Number(raw) : NaN;
     const hours =
       Number.isFinite(parsed) && parsed > 0
@@ -88,7 +89,7 @@ export class WebSessionService {
   }
 
   private getBaseUrl(): string {
-    const baseUrl = process.env.WEBUI_BASE_URL;
+    const baseUrl = env.webui.baseUrl;
     if (!baseUrl) {
       throw new Error("WEBUI_BASE_URL not configured");
     }
