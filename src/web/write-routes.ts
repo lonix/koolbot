@@ -496,9 +496,7 @@ export function createWriteRouter(
       // crafted request that smuggles a protected bootstrap key (Discord
       // token, Mongo URI, WebUI session config) is refused outright — those
       // keys must never be touched by a settings reset.
-      const protectedHit = Object.keys(body).find((k) =>
-        PROTECTED_KEYS.has(k),
-      );
+      const protectedHit = Object.keys(body).find((k) => PROTECTED_KEYS.has(k));
       if (protectedHit) {
         await recordAudit(session, {
           action: "settings.reset-defaults",
