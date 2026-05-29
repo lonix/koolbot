@@ -659,7 +659,7 @@ side effect, since the HMAC key changes.
 | **Polls**          | `/poll create`, `list`, `add-item`, `import-url`, `delete`, `delete-item`, `test`, `list-items`     |
 | **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
-| **Voice Channels** | `/vc reload`, `/vc force-reload`                                                                    |
+| **Voice Channels** | `/vc force-reload` (single **Force VC cleanup** button)                                             |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
