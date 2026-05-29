@@ -670,7 +670,7 @@ side effect, since the HMAC key changes.
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
 | **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                   |
 | **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements, weekly digest, Rewind nudge). Each toggle records a `WebAuditLog` row.          |
-| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top channels, peak day, longest streak, badges earned, annual rank, and a weekly-rank journey.    |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top channels, peak day, longest streak, badges earned, annual rank, a weekly-rank journey, and text-message activity (messages sent, top text channels, peak message day). |
 
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;
