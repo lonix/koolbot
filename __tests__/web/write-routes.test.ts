@@ -189,6 +189,39 @@ describe("coerceConfigValue", () => {
     const r = coerceConfigValue("quotes.max_length", [500]);
     expect(r.ok).toBe(false);
   });
+
+  describe("fixed-options (selector) keys", () => {
+    // leaderboard_roles.period is a string key with an `options` whitelist
+    // (week / month / alltime); values outside it must be refused.
+    it("accepts a value in the options whitelist", () => {
+      expect(
+        coerceConfigValue("leaderboard_roles.period", "week"),
+      ).toEqual({ ok: true, value: "week" });
+      expect(
+        coerceConfigValue("leaderboard_roles.period", "month"),
+      ).toEqual({ ok: true, value: "month" });
+      expect(
+        coerceConfigValue("leaderboard_roles.period", "alltime"),
+      ).toEqual({ ok: true, value: "alltime" });
+    });
+
+    it("rejects a value outside the options whitelist with an enumerated reason", () => {
+      const r = coerceConfigValue("leaderboard_roles.period", "daily");
+      expect(r.ok).toBe(false);
+      if (!r.ok) {
+        expect(r.reason).toMatch(/invalid option/i);
+        // The error enumerates the valid choices so the operator can fix it.
+        expect(r.reason).toContain("week");
+        expect(r.reason).toContain("month");
+        expect(r.reason).toContain("alltime");
+      }
+    });
+
+    it("rejects an empty value for an options key (no blank choice)", () => {
+      const r = coerceConfigValue("leaderboard_roles.period", "");
+      expect(r.ok).toBe(false);
+    });
+  });
 });
 
 describe("findSectionMasterKey", () => {

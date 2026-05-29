@@ -236,7 +236,21 @@ export function coerceConfigValue(
     if (!Number.isFinite(n)) return { ok: false, reason: "invalid number" };
     return { ok: true, value: n };
   }
-  return { ok: true, value: String(raw ?? "") };
+  const value = String(raw ?? "");
+  // Fixed-options keys carry an `options` whitelist in their metadata. Any
+  // value outside it (mistyped form field, crafted POST, stale YAML import)
+  // is refused with a clear, enumerated error rather than silently stored.
+  const options =
+    settingsMetadata[key as keyof typeof settingsMetadata]?.options;
+  if (options && !options.some((o) => o.value === value)) {
+    return {
+      ok: false,
+      reason: `invalid option (must be one of: ${options
+        .map((o) => o.value)
+        .join(", ")})`,
+    };
+  }
+  return { ok: true, value };
 }
 
 /**

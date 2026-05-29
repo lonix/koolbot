@@ -374,6 +374,7 @@ export function createReadOnlyRouter(
             description: dbEntry?.description ?? meta?.description ?? "",
             category:
               dbEntry?.category ?? meta?.category ?? deriveCategory(key),
+            options: meta?.options,
           };
         },
       );
