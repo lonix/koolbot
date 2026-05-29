@@ -1841,7 +1841,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
 
   const body = `
 <h1>Voice Channels</h1>
-<p class="subtitle">Voice-channel category contents and live state. Replaces <code>/vc reload|force-reload</code>; the slash commands still work in parallel during migration.</p>
+<p class="subtitle">Voice-channel category contents and live state. Replaces <code>/vc force-reload</code>; for the gentler empty-channel cleanup use <code>/vc reload</code>. The slash commands still work in parallel during migration.</p>
 ${renderFlash(props.flash)}
 <div class="card">
   <h2>Status</h2>
