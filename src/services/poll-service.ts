@@ -543,6 +543,9 @@ export class PollService {
       });
 
       if (!response.ok) {
+        // Cancel the unconsumed body so undici can release the socket instead
+        // of holding it open until garbage collection.
+        await response.body?.cancel().catch(() => {});
         results.errors.push(`HTTP ${response.status}: ${response.statusText}`);
         return results;
       }
@@ -554,6 +557,7 @@ export class PollService {
         .trim()
         .toLowerCase();
       if (contentType && !ALLOWED_IMPORT_CONTENT_TYPES.includes(contentType)) {
+        await response.body?.cancel().catch(() => {});
         results.errors.push(
           `Unexpected Content-Type from import URL: "${contentType}". Expected JSON or YAML.`,
         );
@@ -569,6 +573,7 @@ export class PollService {
         Number.isFinite(declaredLength) &&
         declaredLength > MAX_IMPORT_BYTES
       ) {
+        await response.body?.cancel().catch(() => {});
         results.errors.push(
           `URL response too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
         );

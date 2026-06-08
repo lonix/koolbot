@@ -40,10 +40,7 @@ export default [
         'TextEncoder': 'readonly',
         'TextDecoder': 'readonly',
         'DOMException': 'readonly',
-        'URL': 'readonly',
-        'BodyInit': 'readonly',
-        'ResponseInit': 'readonly',
-        'RequestInit': 'readonly'
+        'URL': 'readonly'
       }
     },
     plugins: {

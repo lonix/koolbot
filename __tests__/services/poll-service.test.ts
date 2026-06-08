@@ -42,9 +42,13 @@ const { PollService } = await import("../../src/services/poll-service.js");
 // Build a real fetch Response so the service exercises the genuine
 // Headers/ReadableStream plumbing it relies on at runtime (Node 22+).
 function makeResponse(
-  body: BodyInit | null,
+  body: string | ReadableStream<Uint8Array> | null,
   contentType: string,
-  init: ResponseInit = {},
+  init: {
+    status?: number;
+    statusText?: string;
+    headers?: Record<string, string>;
+  } = {},
 ): Response {
   const headers = new Headers(init.headers);
   if (contentType) {
