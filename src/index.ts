@@ -256,11 +256,13 @@ async function cleanupVoiceChannels(): Promise<void> {
   try {
     const configService = ConfigService.getInstance();
 
-    // Check if voice channel management is enabled using new config keys
-    const isEnabled =
-      (await configService.getBoolean("voicechannels.enabled", false)) ||
-      (await configService.getBoolean("voice_channel.enabled", false)) ||
-      (await configService.getBoolean("ENABLE_VC_MANAGEMENT", false));
+    // Check if voice channel management is enabled. Legacy keys
+    // (voice_channel.enabled, ENABLE_VC_MANAGEMENT) are migrated to this
+    // canonical key by StartupMigrator, so only the canonical key is read here.
+    const isEnabled = await configService.getBoolean(
+      "voicechannels.enabled",
+      false,
+    );
 
     if (isEnabled) {
       logger.info("Cleaning up voice channels...");
@@ -271,12 +273,13 @@ async function cleanupVoiceChannels(): Promise<void> {
         const category = await resolveManagedCategory(guild);
 
         if (category) {
-          // Get lobby channel name - try new config keys first, then fall back to old ones
-          const lobbyChannelName =
-            (await configService.getString(
-              "voice_channel.lobby_channel_name",
-            )) ||
-            (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+          // Get lobby channel name. Legacy keys (voice_channel.lobby_channel_name,
+          // LOBBY_CHANNEL_NAME) are migrated to this canonical key by
+          // StartupMigrator, so only the canonical key is read here.
+          const lobbyChannelName = await configService.getString(
+            "voicechannels.lobby.name",
+            "Lobby",
+          );
 
           // Clean up any empty channels in the category
           for (const channel of category.children.cache.values()) {
