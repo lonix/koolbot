@@ -256,9 +256,11 @@ async function cleanupVoiceChannels(): Promise<void> {
   try {
     const configService = ConfigService.getInstance();
 
-    // Check if voice channel management is enabled. Legacy keys
-    // (voice_channel.enabled, ENABLE_VC_MANAGEMENT) are migrated to this
-    // canonical key by StartupMigrator, so only the canonical key is read here.
+    // Check if voice channel management is enabled. Only the canonical
+    // config-schema key is read here; legacy keys (voice_channel.enabled,
+    // ENABLE_VC_MANAGEMENT) are no longer consulted. Deployments still on
+    // legacy keys should run `npm run migrate-config` to populate the
+    // canonical keys.
     const isEnabled = await configService.getBoolean(
       "voicechannels.enabled",
       false,
@@ -273,13 +275,17 @@ async function cleanupVoiceChannels(): Promise<void> {
         const category = await resolveManagedCategory(guild);
 
         if (category) {
-          // Get lobby channel name. Legacy keys (voice_channel.lobby_channel_name,
-          // LOBBY_CHANNEL_NAME) are migrated to this canonical key by
-          // StartupMigrator, so only the canonical key is read here.
-          const lobbyChannelName = await configService.getString(
-            "voicechannels.lobby.name",
-            "Lobby",
-          );
+          // Get lobby channel name from the canonical config-schema key.
+          // Legacy keys (voice_channel.lobby_channel_name, LOBBY_CHANNEL_NAME)
+          // are no longer consulted; run `npm run migrate-config` to populate
+          // the canonical key. Guard against a present-but-blank value: an
+          // empty name would make every channel compare unequal below and
+          // delete the lobby itself.
+          const lobbyChannelName =
+            (await configService.getString(
+              "voicechannels.lobby.name",
+              "Lobby",
+            )) || "Lobby";
 
           // Clean up any empty channels in the category
           for (const channel of category.children.cache.values()) {
