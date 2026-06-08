@@ -115,44 +115,67 @@ client.commands = new Collection();
 
 let isShuttingDown = false;
 // Flipped to true once initializeServices() completes (#521). Until then the
-// /health endpoint reports 503 "Starting" rather than refusing connections,
-// so orchestrators can tell "still booting" apart from "crashed".
+// readiness endpoints (/ready, /health) report 503 instead of refusing the
+// connection, which surfaces a slow startup as an observable HTTP response.
 let isReady = false;
 let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
-// Healthcheck endpoint for Docker/Kubernetes. The server starts listening
+// HTTP health server for Docker/Kubernetes. The server starts listening
 // immediately at process startup — before client.login() — so the port is
-// always open (#521). While the bot is still booting it returns 503
-// "Starting"; only once initializeServices() finishes (isReady) does it run
-// the Discord + MongoDB readiness checks and return 200.
+// always open (#521), and exposes separate liveness and readiness probes:
+//
+//   /live   liveness  — 200 as soon as the process is up and the event loop
+//                       is responsive. Point a Kubernetes livenessProbe here
+//                       so a slow Discord/MongoDB startup never triggers a
+//                       restart.
+//   /ready  readiness — 200 only once initialization has finished and Discord
+//                       and MongoDB are connected; 503 otherwise. Point a
+//                       readinessProbe / load-balancer check here.
+//   /health           — backward-compatible alias of /ready (Docker
+//                       HEALTHCHECK and existing setups). Same semantics.
+
+// Readiness gate shared by /ready and /health. Returns true only once
+// initialization has completed and both Discord and MongoDB are connected.
+function isAppReady(): boolean {
+  if (!isReady) {
+    return false;
+  }
+  let discordReady = false;
+  let mongoReady = false;
+  try {
+    discordReady =
+      typeof client.isReady === "function" ? client.isReady() : false;
+  } catch {
+    discordReady = false;
+  }
+  try {
+    mongoReady = mongoose.connection.readyState === 1;
+  } catch {
+    mongoReady = false;
+  }
+  return discordReady && mongoReady;
+}
 
 function startHealthServer(): void {
   const healthApp = express();
-  healthApp.get("/health", (_req: Request, res: Response) => {
-    if (!isReady) {
-      res.status(503).send("Starting");
-      return;
-    }
-    let discordReady = false;
-    let mongoReady = false;
-    try {
-      discordReady =
-        typeof client.isReady === "function" ? client.isReady() : false;
-    } catch {
-      discordReady = false;
-    }
-    try {
-      mongoReady = mongoose.connection.readyState === 1;
-    } catch {
-      mongoReady = false;
-    }
-    if (discordReady && mongoReady) {
+
+  // Liveness: the process is running. Always 200 once the server is listening.
+  healthApp.get("/live", (_req: Request, res: Response) => {
+    res.status(200).send("OK");
+  });
+
+  // Readiness: ready to serve only when fully initialized and connected.
+  const readinessHandler = (_req: Request, res: Response): void => {
+    if (isAppReady()) {
       res.status(200).send("OK");
     } else {
-      res.status(503).send("Service Unavailable");
+      res.status(503).send(isReady ? "Service Unavailable" : "Starting");
     }
-  });
+  };
+  healthApp.get("/ready", readinessHandler);
+  // /health is retained as a backward-compatible alias of /ready.
+  healthApp.get("/health", readinessHandler);
 
   // Mount the WebUI behind the feature flag. When disabled, no /admin/*
   // route is registered, so the server responds 404 for those paths
