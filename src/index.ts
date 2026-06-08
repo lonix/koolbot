@@ -114,14 +114,26 @@ const client = new Client({
 client.commands = new Collection();
 
 let isShuttingDown = false;
+// Flipped to true once initializeServices() completes (#521). Until then the
+// /health endpoint reports 503 "Starting" rather than refusing connections,
+// so orchestrators can tell "still booting" apart from "crashed".
+let isReady = false;
 let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
-// Healthcheck endpoint for Docker (start only after bot is ready)
+// Healthcheck endpoint for Docker/Kubernetes. The server starts listening
+// immediately at process startup — before client.login() — so the port is
+// always open (#521). While the bot is still booting it returns 503
+// "Starting"; only once initializeServices() finishes (isReady) does it run
+// the Discord + MongoDB readiness checks and return 200.
 
 function startHealthServer(): void {
   const healthApp = express();
   healthApp.get("/health", (_req: Request, res: Response) => {
+    if (!isReady) {
+      res.status(503).send("Starting");
+      return;
+    }
     let discordReady = false;
     let mongoReady = false;
     try {
@@ -190,7 +202,6 @@ function startHealthServer(): void {
   });
 }
 
-// Add health server startup to main ready handler
 client.once(Events.ClientReady, async (readyClient) => {
   logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
 
@@ -202,8 +213,10 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   await initializeServices();
 
-  // Start healthcheck server after all other initialization
-  startHealthServer();
+  // Flip the health flag so /health switches from 503 "Starting" to its
+  // normal Discord + MongoDB readiness checks (#521). The server itself is
+  // already listening — it was started before client.login() below.
+  isReady = true;
 });
 
 async function cleanupGlobalCommands(): Promise<void> {
@@ -915,6 +928,10 @@ client.on(Events.GuildMemberAdd, async (member) => {
     }
   }
 });
+
+// Start the healthcheck server immediately so port 3000 is listening before
+// Discord/MongoDB are up (#521). It reports 503 "Starting" until isReady.
+startHealthServer();
 
 // Login to Discord (errors will be caught by global error handlers)
 client.login(env.discordToken).catch((error) => {
