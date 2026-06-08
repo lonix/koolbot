@@ -735,6 +735,13 @@ export class QuoteChannelManager {
           }
           const deleted = await channel.bulkDelete(messages, true);
           totalDeleted += deleted.size;
+          if (deleted.size === 0) {
+            // bulkDelete skips messages older than 14 days. If a full batch
+            // was fetched but nothing was deletable, every remaining message
+            // is too old to bulk-delete — stop instead of refetching the same
+            // 100 messages forever.
+            break;
+          }
           if (messages.size < 100) {
             // Fetched fewer than 100 messages, so there are no more recent messages to delete.
             break;
