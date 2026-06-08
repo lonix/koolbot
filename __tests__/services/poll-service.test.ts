@@ -1,4 +1,11 @@
-import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  jest,
+} from "@jest/globals";
 
 const mockFetch = jest.fn<typeof fetch>();
 const mockPollItemFindOne = jest.fn();
@@ -66,6 +73,13 @@ describe("PollService", () => {
     mockPollItemFindOne.mockResolvedValue(null);
     mockPollItemCreate.mockResolvedValue({});
     global.fetch = mockFetch as unknown as typeof fetch;
+    // The import host allowlist is server-controlled; allow the fixture host
+    // used throughout these tests via the configurable env var.
+    process.env.POLL_IMPORT_ALLOWED_HOSTS = "example.com";
+  });
+
+  afterEach(() => {
+    delete process.env.POLL_IMPORT_ALLOWED_HOSTS;
   });
 
   it("rejects invalid URL formats before fetching", async () => {
@@ -136,6 +150,67 @@ describe("PollService", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("rejects hosts that are not on the import allowlist", async () => {
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://evil.example.org/polls.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["URL host is not allowed for imports"],
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects look-alike hosts that only suffix an allowed host", async () => {
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com.evil.org/polls.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["URL host is not allowed for imports"],
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("allows GitHub raw hosts by default when no allowlist is configured", async () => {
+    delete process.env.POLL_IMPORT_ALLOWED_HOSTS;
+    mockFetch.mockResolvedValue(
+      makeResponse(
+        `polls:
+  - question: Default host?
+    answers:
+      - Yes
+      - No
+`,
+        "text/yaml",
+      ),
+    );
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://raw.githubusercontent.com/org/repo/main/polls.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(result.imported).toBe(1);
+    expect(result.errors).toEqual([]);
+  });
+
   it("continues importing polls from allowed https URLs", async () => {
     mockFetch.mockResolvedValue(
       makeResponse(
@@ -160,7 +235,7 @@ describe("PollService", () => {
     expect(mockFetch).toHaveBeenCalledWith(
       "https://example.com/polls.yaml",
       expect.objectContaining({
-        redirect: "follow",
+        redirect: "error",
         headers: {
           "User-Agent": "KoolBot-PollService/1.0",
         },

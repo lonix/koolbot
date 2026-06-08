@@ -96,6 +96,47 @@ async function readBodyWithLimit(
   return Buffer.concat(chunks).toString("utf-8");
 }
 
+// Server-controlled allowlist of hosts that poll libraries may be imported from.
+// Restricting outbound requests to known-good hosts is the primary defense
+// against SSRF (CodeQL js/request-forgery): without it, an admin-supplied URL
+// can target arbitrary internal endpoints. Configurable via the
+// POLL_IMPORT_ALLOWED_HOSTS env var (comma-separated) so operators can widen
+// or change the destinations without a code change; defaults to GitHub's raw
+// content hosts.
+const DEFAULT_ALLOWED_IMPORT_HOSTS = [
+  "raw.githubusercontent.com",
+  "gist.githubusercontent.com",
+];
+
+function getAllowedImportHosts(): string[] {
+  const configured = process.env.POLL_IMPORT_ALLOWED_HOSTS;
+  if (!configured) {
+    return DEFAULT_ALLOWED_IMPORT_HOSTS;
+  }
+
+  const hosts = configured
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter((host) => host.length > 0);
+
+  return hosts.length > 0 ? hosts : DEFAULT_ALLOWED_IMPORT_HOSTS;
+}
+
+/**
+ * Returns true when the hostname exactly matches an allowed host or is a
+ * subdomain of one. The leading-dot check prevents a look-alike host such as
+ * "raw.githubusercontent.com.evil.com" from slipping through a naive
+ * `endsWith` comparison.
+ */
+function isAllowedImportHost(hostname: string): boolean {
+  const normalizedHostname = hostname.toLowerCase();
+  return getAllowedImportHosts().some(
+    (allowed) =>
+      normalizedHostname === allowed ||
+      normalizedHostname.endsWith(`.${allowed}`),
+  );
+}
+
 /**
  * Block obvious local/private destinations so poll imports cannot be used for
  * direct SSRF probes against loopback, link-local, RFC1918, or unique-local
@@ -525,6 +566,14 @@ export class PollService {
       return results;
     }
 
+    // Enforce the server-controlled host allowlist before making any request.
+    // This is the primary SSRF mitigation: it confines outbound traffic to
+    // trusted destinations regardless of what URL the admin supplies.
+    if (!isAllowedImportHost(parsedUrl.hostname)) {
+      results.errors.push("URL host is not allowed for imports");
+      return results;
+    }
+
     // Reject the request if it has not completed within IMPORT_TIMEOUT_MS so a
     // slow or unresponsive server cannot hang the import indefinitely. The same
     // signal aborts an in-flight body read, not just connection setup.
@@ -536,7 +585,11 @@ export class PollService {
       // Content-Type and parse it ourselves rather than trusting the server.
       const response = await fetch(parsedUrl.toString(), {
         signal: controller.signal,
-        redirect: "follow",
+        // Do not follow redirects: an allowed host could otherwise 3xx-redirect
+        // the request to an internal or cloud-metadata endpoint, bypassing the
+        // host allowlist. A redirect rejects the fetch and is surfaced as an
+        // error instead.
+        redirect: "error",
         headers: {
           "User-Agent": "KoolBot-PollService/1.0",
         },
