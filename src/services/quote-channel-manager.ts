@@ -650,7 +650,7 @@ export class QuoteChannelManager {
     }
 
     // Create and store handler for reactions added
-    this.reactionAddHandler = async (reaction, user) => {
+    this.reactionAddHandler = async (reaction, user): Promise<void> => {
       if (user.bot) return;
 
       try {
@@ -675,7 +675,7 @@ export class QuoteChannelManager {
     };
 
     // Create and store handler for reactions removed
-    this.reactionRemoveHandler = async (reaction, user) => {
+    this.reactionRemoveHandler = async (reaction, user): Promise<void> => {
       if (user.bot) return;
 
       try {
@@ -728,7 +728,6 @@ export class QuoteChannelManager {
         // Older messages (if any) will remain in the channel.
         // If full historical clearing is required, they must be removed individually.
         // This loop focuses on respecting the bulkDelete 100-message limitation.
-        // eslint-disable-next-line no-constant-condition
         while (true) {
           const messages = await channel.messages.fetch({ limit: 100 });
           if (messages.size === 0) {

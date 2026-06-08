@@ -43,7 +43,7 @@ export class PermissionsService {
       return this.cacheInitializing;
     }
 
-    this.cacheInitializing = (async () => {
+    this.cacheInitializing = (async (): Promise<void> => {
       try {
         const guildId = await this.configService.getString("GUILD_ID");
         if (!guildId) {

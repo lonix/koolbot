@@ -35,48 +35,6 @@ function pageShell(title: string, body: string): string {
   ].join("");
 }
 
-export function renderDashboard(opts: {
-  discordUserId: string;
-  guildId: string;
-  csrfToken: string;
-}): string {
-  const body = [
-    '<nav><a href="/admin/">Dashboard</a> <a href="/admin/bootstrap">Bootstrap</a></nav>',
-    "<h1>Koolbot Admin</h1>",
-    `<p>Signed in as user <code>${escapeHtml(opts.discordUserId)}</code> in guild <code>${escapeHtml(opts.guildId)}</code>.</p>`,
-    "<p>This is a placeholder dashboard. Read views land in subsequent sub-issues.</p>",
-    '<form method="POST" action="/admin/finish">',
-    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
-    '<button type="submit">Finish &amp; sign out</button>',
-    "</form>",
-  ].join("");
-  return pageShell("Dashboard", body);
-}
-
-export function renderBootstrap(opts: {
-  rows: Array<{ key: string; present: boolean; display?: string }>;
-}): string {
-  const tableRows = opts.rows
-    .map((row) => {
-      const present = row.present
-        ? `<span style="color:#15803d;">present</span>`
-        : `<span style="color:#b91c1c;">missing</span>`;
-      const display = row.display
-        ? `<code>${escapeHtml(row.display)}</code>`
-        : "";
-      return `<tr><td>${escapeHtml(row.key)}</td><td>${present}</td><td>${display}</td></tr>`;
-    })
-    .join("");
-  const body = [
-    '<nav><a href="/admin/">Dashboard</a> <a href="/admin/bootstrap">Bootstrap</a></nav>',
-    "<h1>Bootstrap (read-only)</h1>",
-    "<p>Environment values are <strong>never</strong> writable from the WebUI. Only presence and the last 4 characters of secrets are shown.</p>",
-    "<table><thead><tr><th>Key</th><th>Status</th><th>Value</th></tr></thead>",
-    `<tbody>${tableRows}</tbody></table>`,
-  ].join("");
-  return pageShell("Bootstrap", body);
-}
-
 export function renderSignedOut(): string {
   return pageShell(
     "Signed out",

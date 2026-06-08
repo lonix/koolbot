@@ -37,10 +37,12 @@ async function validateBotRegistration(): Promise<void> {
     // Test 1: Check if bot token is valid
     logger.info("🧪 Test 1: Validating bot token...");
     try {
-      const application = await rest.get(Routes.oauth2CurrentApplication());
+      const application = (await rest.get(
+        Routes.oauth2CurrentApplication(),
+      )) as { id: string; name: string };
       logger.info(`✅ Bot token is valid`);
-      logger.info(`🤖 Bot name: ${(application as any).name}`);
-      logger.info(`🆔 Application ID: ${(application as any).id}`);
+      logger.info(`🤖 Bot name: ${application.name}`);
+      logger.info(`🆔 Application ID: ${application.id}`);
     } catch (error) {
       logger.error("❌ Bot token is invalid or bot doesn't exist");
       logger.error(error);

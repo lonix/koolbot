@@ -41,7 +41,7 @@ export class ChannelInitializer {
     return ChannelInitializer.instance;
   }
 
-  async initialize(guildId: string) {
+  async initialize(guildId: string): Promise<void> {
     try {
       const guild = await this.client.guilds.fetch(guildId);
       if (!guild) {

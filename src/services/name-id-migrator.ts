@@ -36,7 +36,7 @@ const RENAMES: RenameSpec[] = [
     oldKey: "voicetracking.announcements.channel",
     newKey: "voicetracking.announcements.channel_id",
     description: "voice-stats announcement channel",
-    resolve: (guild, name) => {
+    resolve: (guild, name): string | null => {
       // Match the downstream reader (VoiceChannelAnnouncer uses
       // `instanceof TextChannel`): in discord.js v14, NewsChannel
       // (GuildAnnouncement) extends TextChannel, so operators legitimately
@@ -55,7 +55,7 @@ const RENAMES: RenameSpec[] = [
     oldKey: "voicechannels.category.name",
     newKey: "voicechannels.category_id",
     description: "managed voice-channel category",
-    resolve: (guild, name) => {
+    resolve: (guild, name): string | null => {
       const category = guild.channels.cache.find(
         (ch) => ch.type === ChannelType.GuildCategory && ch.name === name,
       );
