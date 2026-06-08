@@ -26,7 +26,24 @@ export default [
         '__filename': 'readonly',
         'console': 'readonly',
         'module': 'readonly',
-        'require': 'readonly'
+        'require': 'readonly',
+        'global': 'readonly',
+        'Buffer': 'readonly',
+        // Web platform globals available in Node.js 22+
+        'fetch': 'readonly',
+        'Request': 'readonly',
+        'Response': 'readonly',
+        'Headers': 'readonly',
+        'AbortController': 'readonly',
+        'AbortSignal': 'readonly',
+        'ReadableStream': 'readonly',
+        'TextEncoder': 'readonly',
+        'TextDecoder': 'readonly',
+        'DOMException': 'readonly',
+        'URL': 'readonly',
+        'BodyInit': 'readonly',
+        'ResponseInit': 'readonly',
+        'RequestInit': 'readonly'
       }
     },
     plugins: {

@@ -6,7 +6,6 @@ import logger from "../utils/logger.js";
 import { PollSchedule, IPollSchedule } from "../models/poll-schedule.js";
 import { PollItem, IPollItem } from "../models/poll-item.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
-import axios from "axios";
 import yaml from "js-yaml";
 
 interface ScheduledPollJob {
@@ -48,6 +47,54 @@ const ALLOWED_IMPORT_CONTENT_TYPES = [
   "text/plain",
   "application/octet-stream",
 ];
+
+// Raised by the import body reader when a response streams more than
+// MAX_IMPORT_BYTES. fetch has no built-in equivalent of Axios's
+// maxContentLength, so we enforce the cap ourselves while consuming the body.
+class ImportSizeExceededError extends Error {
+  constructor() {
+    super("Import payload exceeded the maximum allowed size");
+    this.name = "ImportSizeExceededError";
+  }
+}
+
+// Read a response body as UTF-8 text while enforcing a hard byte cap. The
+// stream is abandoned as soon as the cap is crossed so a malicious or
+// misconfigured server cannot push an unbounded body into memory.
+async function readBodyWithLimit(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
+  const body = response.body;
+  if (!body) {
+    return "";
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        total += value.length;
+        if (total > maxBytes) {
+          throw new ImportSizeExceededError();
+        }
+        chunks.push(value);
+      }
+    }
+  } finally {
+    // Release the stream; cancel() is a no-op once the body is fully read.
+    await reader.cancel().catch(() => {});
+  }
+
+  return Buffer.concat(chunks).toString("utf-8");
+}
 
 /**
  * Block obvious local/private destinations so poll imports cannot be used for
@@ -478,23 +525,31 @@ export class PollService {
       return results;
     }
 
+    // Reject the request if it has not completed within IMPORT_TIMEOUT_MS so a
+    // slow or unresponsive server cannot hang the import indefinitely. The same
+    // signal aborts an in-flight body read, not just connection setup.
+    const controller = new globalThis.AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), IMPORT_TIMEOUT_MS);
+
     try {
-      // Fetch the content with timeout. Receive the body as raw text so we can
-      // inspect the Content-Type and parse it ourselves rather than letting
-      // Axios silently coerce a non-JSON response.
-      const response = await axios.get(parsedUrl.toString(), {
-        timeout: IMPORT_TIMEOUT_MS,
-        maxContentLength: MAX_IMPORT_BYTES,
-        maxBodyLength: MAX_IMPORT_BYTES,
-        responseType: "text",
+      // Fetch the content. The body is read as raw text so we can inspect the
+      // Content-Type and parse it ourselves rather than trusting the server.
+      const response = await fetch(parsedUrl.toString(), {
+        signal: controller.signal,
+        redirect: "follow",
         headers: {
           "User-Agent": "KoolBot-PollService/1.0",
         },
       });
 
+      if (!response.ok) {
+        results.errors.push(`HTTP ${response.status}: ${response.statusText}`);
+        return results;
+      }
+
       // Validate the Content-Type before parsing. An HTML login/redirect or
       // challenge page would otherwise surface as a cryptic parse error.
-      const contentType = String(response.headers?.["content-type"] ?? "")
+      const contentType = (response.headers.get("content-type") ?? "")
         .split(";")[0]
         .trim()
         .toLowerCase();
@@ -505,14 +560,31 @@ export class PollService {
         return results;
       }
 
+      // Reject early on an oversized declared length, then enforce the cap
+      // again while streaming in case the server lied about (or omitted) it.
+      const declaredLength = Number(
+        response.headers.get("content-length") ?? "",
+      );
+      if (
+        Number.isFinite(declaredLength) &&
+        declaredLength > MAX_IMPORT_BYTES
+      ) {
+        results.errors.push(
+          `URL response too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
+        );
+        return results;
+      }
+
+      const rawBody = await readBodyWithLimit(response, MAX_IMPORT_BYTES);
+
       let pollData: PollSource;
 
       // Try to parse as YAML first (also works for JSON)
       try {
-        pollData = yaml.load(response.data) as PollSource;
+        pollData = yaml.load(rawBody) as PollSource;
       } catch {
         // If YAML fails, try JSON
-        pollData = JSON.parse(response.data);
+        pollData = JSON.parse(rawBody);
       }
 
       // yaml.load / JSON.parse can yield null, undefined, or a scalar for an
@@ -581,32 +653,25 @@ export class PollService {
         }
       }
     } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (error.code === "ECONNABORTED") {
-          results.errors.push("Request timeout - URL took too long to respond");
-        } else if (
-          error.code === "ERR_FR_MAX_CONTENT_LENGTH_EXCEEDED" ||
-          error.code === "ERR_FR_MAX_BODY_LENGTH_EXCEEDED"
-        ) {
-          results.errors.push(
-            `URL response too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
-          );
-        } else if (error.response) {
-          results.errors.push(
-            `HTTP ${error.response.status}: ${error.response.statusText}`,
-          );
-        } else if (error.request) {
-          results.errors.push(
-            "No response from URL - check if URL is accessible",
-          );
-        } else {
-          results.errors.push(`Request error: ${error.message}`);
-        }
+      if (error instanceof DOMException && error.name === "AbortError") {
+        results.errors.push("Request timeout - URL took too long to respond");
+      } else if (error instanceof ImportSizeExceededError) {
+        results.errors.push(
+          `URL response too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
+        );
+      } else if (error instanceof TypeError) {
+        // fetch rejects with a TypeError for network-level failures (DNS,
+        // connection refused, TLS errors) where no response was received.
+        results.errors.push(
+          "No response from URL - check if URL is accessible",
+        );
       } else {
         results.errors.push(
           `Error: ${error instanceof Error ? error.message : "Unknown error"}`,
         );
       }
+    } finally {
+      clearTimeout(timeoutId);
     }
 
     return results;
