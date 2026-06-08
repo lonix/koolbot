@@ -114,33 +114,68 @@ const client = new Client({
 client.commands = new Collection();
 
 let isShuttingDown = false;
+// Flipped to true once initializeServices() completes (#521). Until then the
+// readiness endpoints (/ready, /health) report 503 instead of refusing the
+// connection, which surfaces a slow startup as an observable HTTP response.
+let isReady = false;
 let discordLogger: DiscordLogger;
 const botStatusService: BotStatusService = BotStatusService.getInstance(client);
 
-// Healthcheck endpoint for Docker (start only after bot is ready)
+// HTTP health server for Docker/Kubernetes. The server starts listening
+// immediately at process startup — before client.login() — so the port is
+// always open (#521), and exposes separate liveness and readiness probes:
+//
+//   /live   liveness  — 200 as soon as the process is up and the event loop
+//                       is responsive. Point a Kubernetes livenessProbe here
+//                       so a slow Discord/MongoDB startup never triggers a
+//                       restart.
+//   /ready  readiness — 200 only once initialization has finished and Discord
+//                       and MongoDB are connected; 503 otherwise. Point a
+//                       readinessProbe / load-balancer check here.
+//   /health           — backward-compatible alias of /ready (Docker
+//                       HEALTHCHECK and existing setups). Same semantics.
+
+// Readiness gate shared by /ready and /health. Returns true only once
+// initialization has completed and both Discord and MongoDB are connected.
+function isAppReady(): boolean {
+  if (!isReady) {
+    return false;
+  }
+  let discordReady = false;
+  let mongoReady = false;
+  try {
+    discordReady =
+      typeof client.isReady === "function" ? client.isReady() : false;
+  } catch {
+    discordReady = false;
+  }
+  try {
+    mongoReady = mongoose.connection.readyState === 1;
+  } catch {
+    mongoReady = false;
+  }
+  return discordReady && mongoReady;
+}
 
 function startHealthServer(): void {
   const healthApp = express();
-  healthApp.get("/health", (_req: Request, res: Response) => {
-    let discordReady = false;
-    let mongoReady = false;
-    try {
-      discordReady =
-        typeof client.isReady === "function" ? client.isReady() : false;
-    } catch {
-      discordReady = false;
-    }
-    try {
-      mongoReady = mongoose.connection.readyState === 1;
-    } catch {
-      mongoReady = false;
-    }
-    if (discordReady && mongoReady) {
+
+  // Liveness: the process is running. Always 200 once the server is listening.
+  healthApp.get("/live", (_req: Request, res: Response) => {
+    res.status(200).send("OK");
+  });
+
+  // Readiness: ready to serve only when fully initialized and connected.
+  const readinessHandler = (_req: Request, res: Response): void => {
+    if (isAppReady()) {
       res.status(200).send("OK");
     } else {
-      res.status(503).send("Service Unavailable");
+      res.status(503).send(isReady ? "Service Unavailable" : "Starting");
     }
-  });
+  };
+  healthApp.get("/ready", readinessHandler);
+  // /health is retained as a backward-compatible alias of /ready.
+  healthApp.get("/health", readinessHandler);
 
   // Mount the WebUI behind the feature flag. When disabled, no /admin/*
   // route is registered, so the server responds 404 for those paths
@@ -190,7 +225,6 @@ function startHealthServer(): void {
   });
 }
 
-// Add health server startup to main ready handler
 client.once(Events.ClientReady, async (readyClient) => {
   logger.info(`Ready! Logged in as ${readyClient.user.tag}`);
 
@@ -202,8 +236,10 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   await initializeServices();
 
-  // Start healthcheck server after all other initialization
-  startHealthServer();
+  // Flip the health flag so /health switches from 503 "Starting" to its
+  // normal Discord + MongoDB readiness checks (#521). The server itself is
+  // already listening — it was started before client.login() below.
+  isReady = true;
 });
 
 async function cleanupGlobalCommands(): Promise<void> {
@@ -934,6 +970,10 @@ client.on(Events.GuildMemberAdd, async (member) => {
     }
   }
 });
+
+// Start the healthcheck server immediately so port 3000 is listening before
+// Discord/MongoDB are up (#521). It reports 503 "Starting" until isReady.
+startHealthServer();
 
 // Login to Discord (errors will be caught by global error handlers)
 client.login(env.discordToken).catch((error) => {

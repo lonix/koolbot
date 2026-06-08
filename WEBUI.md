@@ -575,10 +575,15 @@ That said:
 - **Always run behind HTTPS.** The session cookie is HMAC-signed but
   cleartext, and the magic link itself is a bearer token. TLS is
   non-negotiable on the public internet.
-- **The healthcheck endpoint (`/health`) is unauthenticated.** It is
-  intentionally minimal (returns `OK` or `Service Unavailable`) but it
-  *does* report whether MongoDB and Discord are reachable. Restrict it
-  to your monitoring system if you'd rather not advertise that.
+- **The health endpoints are unauthenticated.** The server exposes
+  `/live` (liveness — always `OK` once the process is up), `/ready`
+  (readiness — `OK` only when MongoDB and Discord are reachable, `503`
+  otherwise), and `/health` (a backward-compatible alias of `/ready`).
+  They are intentionally minimal, but `/ready`/`/health` *do* report
+  whether MongoDB and Discord are reachable. Restrict them to your
+  monitoring system if you'd rather not advertise that. Kubernetes
+  deployments should use `/live` for the livenessProbe and `/ready` for
+  the readinessProbe.
 - **Mind the magic-link TTL.** A leaked link is useless after redemption
   or expiry, but if the admin who ran `/config` shares the URL before
   redeeming it, anyone with the URL becomes that admin until the TTL
