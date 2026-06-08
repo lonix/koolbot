@@ -478,6 +478,18 @@ export class PollService {
       return results;
     }
 
+    // Restrict imports to trusted hosts to prevent SSRF via arbitrary destinations.
+    // Keep this list server-controlled; users may provide only the path/query on these hosts.
+    const ALLOWED_IMPORT_HOSTS = ["raw.githubusercontent.com", "gist.githubusercontent.com"];
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const isAllowedHost = ALLOWED_IMPORT_HOSTS.some(
+      (allowed) => hostname === allowed || hostname.endsWith(`.${allowed}`),
+    );
+    if (!isAllowedHost) {
+      results.errors.push("URL host is not allowed for imports");
+      return results;
+    }
+
     try {
       // Fetch the content with timeout. Receive the body as raw text so we can
       // inspect the Content-Type and parse it ourselves rather than letting
