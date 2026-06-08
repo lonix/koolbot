@@ -23,7 +23,6 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
     jest.clearAllMocks();
 
     // Reset the singleton instance by setting it to undefined
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
 
     // Mock permission overwrites
@@ -39,13 +38,11 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
         }
         return undefined;
       }),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockNewOwner = {
       id: 'new-owner-id',
       displayName: 'NewOwner',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock channel
@@ -56,7 +53,6 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
       members: mockMembers as Collection<string, GuildMember>,
       setName: jest.fn().mockResolvedValue(undefined),
       send: jest.fn().mockResolvedValue(undefined),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock client
@@ -65,9 +61,7 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
         cache: {
           get: jest.fn().mockReturnValue(mockChannel),
         },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Create manager instance
@@ -76,7 +70,6 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
 
   afterEach(() => {
     // Clean up singleton instance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
   });
 
@@ -132,7 +125,6 @@ describe('VoiceChannelManager - Transfer Ownership', () => {
         cache: {
           get: jest.fn().mockReturnValue(undefined),
         },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
 
       await expect(

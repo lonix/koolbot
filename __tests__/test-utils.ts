@@ -1,7 +1,6 @@
 /**
  * Creates a mock Discord.js Collection with common methods
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function createMockCollection<K, V>(entries: [K, V][] = []): any {
   const map = new Map(entries);
   

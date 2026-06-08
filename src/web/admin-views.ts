@@ -300,8 +300,9 @@ export function parseCronToPickerState(cron: string): CronPickerState {
   const fields = stripped.trim().split(/\s+/);
   if (fields.length !== 5) return fallback;
   const [mStr, hStr, domStr, monStr, dowStr] = fields;
-  const isInt = (s: string) => /^\d+$/.test(s);
-  const inRange = (n: number, lo: number, hi: number) => n >= lo && n <= hi;
+  const isInt = (s: string): boolean => /^\d+$/.test(s);
+  const inRange = (n: number, lo: number, hi: number): boolean =>
+    n >= lo && n <= hi;
 
   if (!isInt(mStr) || !isInt(hStr)) return fallback;
   const minute = Number(mStr);
@@ -346,10 +347,10 @@ const WEEKDAY_NAMES = [
 
 function renderCronPicker(currentValue: string, valueName: string): string {
   const state = parseCronToPickerState(currentValue);
-  const pad = (n: number) => String(n).padStart(2, "0");
+  const pad = (n: number): string => String(n).padStart(2, "0");
   const timeAttr = `${pad(state.hour)}:${pad(state.minute)}`;
-  const sel = (cond: boolean) => (cond ? " selected" : "");
-  const hidden = (cond: boolean) => (cond ? " hidden" : "");
+  const sel = (cond: boolean): string => (cond ? " selected" : "");
+  const hidden = (cond: boolean): string => (cond ? " hidden" : "");
 
   const dowOptions = WEEKDAY_NAMES.map(
     (name, i) =>

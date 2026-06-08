@@ -56,5 +56,17 @@ export default [
       'no-unused-vars': 'off',
       'prefer-const': 'error'
     }
+  },
+  {
+    // Test files lean heavily on Discord.js fixtures and partial mocks where
+    // precise return-type annotations and fully-typed mock objects add noise
+    // without catching real bugs. Production `src/` code above is still held
+    // to the strict bar; `no-unused-vars` stays an error here so dead test
+    // helpers are still caught. See issue #392.
+    files: ['__tests__/**/*.ts'],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/no-explicit-any': 'off'
+    }
   }
 ];

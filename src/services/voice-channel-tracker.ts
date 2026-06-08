@@ -625,7 +625,7 @@ export class VoiceChannelTracker {
     }
   }
 
-  async initialize() {
+  async initialize(): Promise<void> {
     try {
       await this.ensureConnection();
       logger.info("VoiceChannelTracker initialized");

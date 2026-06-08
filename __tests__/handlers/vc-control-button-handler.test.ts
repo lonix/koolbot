@@ -50,21 +50,17 @@ describe('VCControlButtonHandler', () => {
         cache: { get: jest.fn().mockReturnValue(undefined) },
         delete: jest.fn().mockResolvedValue(undefined),
         create: jest.fn().mockResolvedValue(undefined),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       guild: {
         roles: { everyone: { id: 'everyone-role-id' } },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       parent: null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockGuild = {
       id: 'guild-id',
       channels: {
         fetch: jest.fn().mockResolvedValue(mockChannel),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       members: {
         fetch: jest.fn().mockResolvedValue({
@@ -72,9 +68,7 @@ describe('VCControlButtonHandler', () => {
           id: 'waiting-user-id',
           voice: { channelId: 'waiting-room-id', setChannel: jest.fn().mockResolvedValue(undefined) },
         }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockInteraction = {
@@ -82,24 +76,20 @@ describe('VCControlButtonHandler', () => {
       user: {
         id: 'owner-id',
         displayName: 'OwnerUser',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       reply: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
       message: {
         edit: jest.fn().mockResolvedValue(undefined),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       client: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any as Client,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
   });
 
   describe('Owner check', () => {
     it('should reject non-owner interaction', async () => {
-      mockInteraction.user = { id: 'other-user-id', displayName: 'Other' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      mockInteraction.user = { id: 'other-user-id', displayName: 'Other' } as any;
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
@@ -167,7 +157,7 @@ describe('VCControlButtonHandler', () => {
   describe('Let In action', () => {
     it('should reject non-owner let-in attempt (stale button check)', async () => {
       mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
-      mockInteraction.user = { id: 'someone-else', displayName: 'Other' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      mockInteraction.user = { id: 'someone-else', displayName: 'Other' } as any;
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
@@ -181,7 +171,7 @@ describe('VCControlButtonHandler', () => {
       mockManagerInstance.getUserChannel.mockReturnValue({ id: 'different-channel-id' });
       mockManagerInstance.getWaitingRoom.mockReturnValue('waiting-room-id');
       mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
-      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any;
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
@@ -194,7 +184,7 @@ describe('VCControlButtonHandler', () => {
       mockManagerInstance.getUserChannel.mockReturnValue({ id: 'channel-id' });
       mockManagerInstance.getWaitingRoom.mockReturnValue(undefined);
       mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
-      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any;
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 
@@ -207,7 +197,7 @@ describe('VCControlButtonHandler', () => {
       mockManagerInstance.getUserChannel.mockReturnValue({ id: 'channel-id' });
       mockManagerInstance.getWaitingRoom.mockReturnValue('waiting-room-id');
       mockInteraction.customId = 'vc_control_letin_channel-id_waiting-user-id_owner-id';
-      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+      mockInteraction.user = { id: 'owner-id', displayName: 'Owner' } as any;
 
       await handleVCControlButton(mockInteraction as ButtonInteraction);
 

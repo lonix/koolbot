@@ -44,7 +44,6 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
 
     mockConfigService.getBoolean = jest
@@ -68,14 +67,12 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
       name: "🎮 Tester's Room",
       type: ChannelType.GuildVoice,
       delete: jest.fn().mockResolvedValue(undefined),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockCategory = {
       id: "category-id",
       name: "Dynamic Voice Channels",
       type: ChannelType.GuildCategory,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockGuild = {
@@ -85,12 +82,9 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
           // stands in for the category at "category-id".
           get: jest.fn().mockReturnValue(mockCategory),
           find: jest.fn().mockReturnValue(mockCategory),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         create: jest.fn().mockResolvedValue(createdChannel),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     setChannelMock = jest.fn();
@@ -100,9 +94,7 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
       guild: mockGuild as Guild,
       voice: {
         setChannel: setChannelMock,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockClient = {} as Partial<Client>;
@@ -110,17 +102,14 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
   });
 
   afterEach(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
   });
 
   it("does not record a userChannels entry when setChannel fails, and deletes the orphan channel", async () => {
     setChannelMock.mockRejectedValueOnce(new Error("Stale voice state"));
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (manager as any).createUserChannel(mockMember as GuildMember);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const userChannels = (manager as any).userChannels as Map<
       string,
       VoiceChannel
@@ -136,7 +125,6 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
       .mockResolvedValueOnce(undefined);
 
     // First attempt fails — must not lock the user out.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (manager as any).createUserChannel(mockMember as GuildMember);
 
     // Second attempt: guild.channels.create returns a fresh channel.
@@ -145,16 +133,13 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
       name: "🎮 Tester's Room",
       type: ChannelType.GuildVoice,
       delete: jest.fn().mockResolvedValue(undefined),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
     (
       mockGuild.channels!.create as jest.Mock
     ).mockResolvedValueOnce(secondChannel);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (manager as any).createUserChannel(mockMember as GuildMember);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const userChannels = (manager as any).userChannels as Map<
       string,
       VoiceChannel

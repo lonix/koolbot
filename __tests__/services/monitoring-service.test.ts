@@ -173,7 +173,6 @@ describe('MonitoringService', () => {
       // before switching to fake timers, so we don't leak the original
       // real interval and don't mix real+fake timer state.
       service.destroy();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (MonitoringService as any).instance = undefined;
 
       jest.useFakeTimers();
@@ -184,13 +183,11 @@ describe('MonitoringService', () => {
       // Make sure each test leaves no live interval before resetting the
       // singleton, even when the test itself didn't call destroy().
       fresh.destroy();
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (MonitoringService as any).instance = undefined;
       jest.useRealTimers();
     });
 
     it('captures the periodic logging interval handle on construction', () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const handle = (fresh as any).periodicLoggingInterval;
       expect(handle).not.toBeNull();
       expect(handle).toBeDefined();
@@ -198,13 +195,11 @@ describe('MonitoringService', () => {
 
     it('clears the periodic logging interval and nulls the handle', () => {
       const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const handle = (fresh as any).periodicLoggingInterval;
 
       fresh.destroy();
 
       expect(clearIntervalSpy).toHaveBeenCalledWith(handle);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect((fresh as any).periodicLoggingInterval).toBeNull();
 
       clearIntervalSpy.mockRestore();
@@ -233,7 +228,6 @@ describe('MonitoringService', () => {
 
       // Only the first call should have anything to clear.
       expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect((fresh as any).periodicLoggingInterval).toBeNull();
 
       clearIntervalSpy.mockRestore();

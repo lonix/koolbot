@@ -32,23 +32,19 @@ describe('VoiceChannelManager - Control Panel Update', () => {
     jest.clearAllMocks();
 
     // Reset the singleton instance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
 
     // Mock everyone role
     mockEveryoneRole = {
       id: 'everyone-role-id',
       name: '@everyone',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock guild
     mockGuild = {
       roles: {
         everyone: mockEveryoneRole as Role,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock control panel message
@@ -56,16 +52,13 @@ describe('VoiceChannelManager - Control Panel Update', () => {
       id: 'control-panel-message-id',
       author: {
         id: 'bot-user-id',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       embeds: [
         {
           title: '🎮 Voice Channel Controls',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
       ],
       edit: jest.fn().mockResolvedValue(undefined),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock messages fetch
@@ -90,14 +83,12 @@ describe('VoiceChannelManager - Control Panel Update', () => {
     mockNewOwner = {
       id: 'new-owner-id',
       displayName: 'NewOwner',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock old owner
     mockOldOwner = {
       id: 'old-owner-id',
       displayName: 'OldOwner',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock members collection
@@ -112,7 +103,6 @@ describe('VoiceChannelManager - Control Panel Update', () => {
         return undefined;
       }),
       has: jest.fn((id: string) => id === 'new-owner-id' || id === 'old-owner-id'),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock permission overwrites
@@ -132,24 +122,19 @@ describe('VoiceChannelManager - Control Panel Update', () => {
       send: jest.fn().mockResolvedValue(undefined),
       messages: mockMessages,
       guild: mockGuild as Guild,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock client
     mockClient = {
       user: {
         id: 'bot-user-id',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       channels: {
         cache: {
           get: jest.fn().mockReturnValue(mockChannel),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
         fetch: jest.fn().mockResolvedValue(mockChannel),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock ConfigService
@@ -161,20 +146,17 @@ describe('VoiceChannelManager - Control Panel Update', () => {
     manager = VoiceChannelManager.getInstance(mockClient as Client);
 
     // Set up the channel ownership
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (manager as any).userChannels.set('old-owner-id', mockChannel);
   });
 
   afterEach(() => {
     // Clean up singleton instance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
   });
 
   describe('Control Panel Update on Ownership Transfer', () => {
     it('should update control panel message when transferring ownership', async () => {
       // Manually trigger ownership update (simulating automatic transfer)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (manager as any).updateChannelOwnership(
         mockChannel as VoiceChannel,
         mockNewOwner as GuildMember
@@ -199,7 +181,6 @@ describe('VoiceChannelManager - Control Panel Update', () => {
     });
 
     it('should update permissions when transferring ownership', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (manager as any).updateChannelOwnership(
         mockChannel as VoiceChannel,
         mockNewOwner as GuildMember
@@ -223,7 +204,6 @@ describe('VoiceChannelManager - Control Panel Update', () => {
     });
 
     it('should send notification message after ownership transfer', async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (manager as any).updateChannelOwnership(
         mockChannel as VoiceChannel,
         mockNewOwner as GuildMember
@@ -244,7 +224,6 @@ describe('VoiceChannelManager - Control Panel Update', () => {
       };
       mockPermissionOverwrites.cache.set('everyone-role-id', everyonePermissions);
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (manager as any).updateChannelOwnership(
         mockChannel as VoiceChannel,
         mockNewOwner as GuildMember
@@ -268,7 +247,6 @@ describe('VoiceChannelManager - Control Panel Update', () => {
       mockMessages.fetch = jest.fn().mockResolvedValue(new Map());
 
       // This should not throw
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await expect((manager as any).updateChannelOwnership(
         mockChannel as VoiceChannel,
         mockNewOwner as GuildMember

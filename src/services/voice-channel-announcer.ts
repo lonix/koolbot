@@ -57,7 +57,7 @@ export class VoiceChannelAnnouncer {
     }
 
     return new Promise((resolve) => {
-      const checkReady = () => {
+      const checkReady = (): void => {
         if (this.client.isReady()) {
           resolve();
         } else {

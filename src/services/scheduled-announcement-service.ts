@@ -97,7 +97,7 @@ export class ScheduledAnnouncementService {
       let resolved = false;
       let elapsed = 0;
 
-      const cleanup = () => {
+      const cleanup = (): void => {
         if (resolved) {
           return;
         }
@@ -106,7 +106,7 @@ export class ScheduledAnnouncementService {
         clearInterval(intervalId);
       };
 
-      const onReady = () => {
+      const onReady = (): void => {
         cleanup();
         resolve();
       };

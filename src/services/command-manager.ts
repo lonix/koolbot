@@ -60,7 +60,7 @@ export class CommandManager {
 
   async initialize(): Promise<unknown[]> {
     try {
-      // Load commands dynamically from commands/index.ts
+      // Load commands dynamically from the individual command modules.
       const commands = await this.loadCommandsDynamically();
 
       logger.info(`Loaded ${commands.length} commands`);

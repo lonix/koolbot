@@ -34,7 +34,6 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       name: 'Old Channel Name',
       type: ChannelType.GuildVoice,
       setName: jest.fn().mockResolvedValue(undefined),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockGuild = {
@@ -42,9 +41,7 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       name: 'Test Guild',
       channels: {
         fetch: jest.fn().mockResolvedValue(mockChannel),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockInteraction = {
@@ -52,18 +49,14 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       user: {
         id: 'test-user-id',
         displayName: 'TestUser',
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       fields: {
         getTextInputValue: jest.fn().mockReturnValue('New Custom Name'),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       reply: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
       client: {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any as Client,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
   });
 
@@ -98,7 +91,6 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       const longName = 'a'.repeat(101);
       mockInteraction.fields = {
         getTextInputValue: jest.fn().mockReturnValue(longName),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
 
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
@@ -114,7 +106,6 @@ describe('VCModalHandler - Custom Name Tracking', () => {
     it('should reject empty names', async () => {
       mockInteraction.fields = {
         getTextInputValue: jest.fn().mockReturnValue(''),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
 
       await handleVCModal(mockInteraction as ModalSubmitInteraction);

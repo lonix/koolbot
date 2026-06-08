@@ -40,7 +40,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
     jest.clearAllMocks();
 
     // Reset the singleton instance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
 
     // Setup mock config service
@@ -58,9 +57,7 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       displayName: "ChannelOwner",
       voice: {
         setChannel: jest.fn().mockResolvedValue(undefined),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockSecondUser = {
@@ -68,9 +65,7 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       displayName: "SecondUser",
       voice: {
         setChannel: jest.fn().mockResolvedValue(undefined),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Initialize members map with owner
@@ -89,9 +84,7 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       send: jest.fn().mockResolvedValue(undefined),
       permissionOverwrites: {
         create: jest.fn().mockResolvedValue(undefined),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Mock client
@@ -99,11 +92,8 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       channels: {
         cache: {
           get: jest.fn().mockReturnValue(mockChannel),
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     // Create manager instance
@@ -112,7 +102,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
 
   afterEach(() => {
     // Clean up singleton instance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
   });
 
@@ -122,7 +111,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       manager.setCustomChannelName("channel-id", "Custom Channel Name");
 
       // Simulate channel in userChannels map
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).userChannels.set("owner-id", mockChannel);
 
       // Simulate the last user leaving (channel becomes empty)
@@ -155,7 +143,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
     it("should delete channel without custom name when last user leaves", async () => {
       // Setup: Channel has no custom name and is owned by owner
       // Simulate channel in userChannels map
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).userChannels.set("owner-id", mockChannel);
 
       // Simulate the last user leaving (channel becomes empty)
@@ -199,7 +186,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       manager.setCustomChannelName("channel-id", "Custom Channel Name");
 
       // Simulate channel in userChannels map
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).userChannels.set("owner-id", mockChannel);
 
       // Channel still has members
@@ -233,7 +219,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       manager.setCustomChannelName("channel-id", "Custom Channel Name");
 
       // Simulate channel in userChannels map
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).userChannels.set("owner-id", mockChannel);
 
       // Simulate the channel is empty
@@ -293,7 +278,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
     it("removes the userChannels entry when channel.delete throws 10003 (Unknown Channel)", async () => {
       // Setup: owner has a channel entry whose remote channel has already
       // been deleted on Discord's side.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).userChannels.set("owner-id", mockChannel);
       mockMembers.clear();
       Object.defineProperty(mockChannel, "members", {
@@ -307,19 +291,16 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       // Drive cleanupUserChannel directly: handleVoiceStateUpdate also
       // invokes cleanupEmptyChannel afterwards, which would muddy the
       // assertion we care about here.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (manager as any).cleanupUserChannel("owner-id");
 
       // The userChannels entry must be cleared so subsequent lobby joins
       // aren't silently skipped with "already has a channel".
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const userChannels: Map<string, VoiceChannel> = (manager as any)
         .userChannels;
       expect(userChannels.has("owner-id")).toBe(false);
     });
 
     it("keeps the userChannels entry when channel.delete throws a non-10003 error", async () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).userChannels.set("owner-id", mockChannel);
       mockMembers.clear();
       Object.defineProperty(mockChannel, "members", {
@@ -330,12 +311,10 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
         new Error("transient network failure"),
       );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (manager as any).cleanupUserChannel("owner-id");
 
       // Non-10003 failures are transient: leave the entry so the periodic
       // cleanup can retry, instead of dropping ownership tracking on the floor.
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const userChannels: Map<string, VoiceChannel> = (manager as any)
         .userChannels;
       expect(userChannels.has("owner-id")).toBe(true);
@@ -349,7 +328,6 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
       expect(manager.hasCustomName("channel-id")).toBe(true);
 
       // Simulate channel in userChannels map
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (manager as any).userChannels.set("owner-id", mockChannel);
 
       // Simulate the last user leaving (channel becomes empty)

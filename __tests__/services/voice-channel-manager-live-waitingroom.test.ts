@@ -22,7 +22,6 @@ describe('VoiceChannelManager - Live & Waiting Room', () => {
     jest.clearAllMocks();
 
     // Reset the singleton instance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (VoiceChannelManager as any).instance = undefined;
 
     (mockConfigService.getInstance as unknown as jest.Mock) = jest.fn(() => ({
@@ -35,7 +34,6 @@ describe('VoiceChannelManager - Live & Waiting Room', () => {
       id: 'guild-id',
       roles: {
         everyone: { id: 'everyone-role-id' },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       channels: {
         create: jest.fn().mockResolvedValue({
@@ -45,9 +43,7 @@ describe('VoiceChannelManager - Live & Waiting Room', () => {
           delete: jest.fn().mockResolvedValue(undefined),
           members: { size: 0, values: jest.fn().mockReturnValue([]) },
         }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockChannel = {
@@ -62,16 +58,13 @@ describe('VoiceChannelManager - Live & Waiting Room', () => {
         create: jest.fn().mockResolvedValue(undefined),
       },
       guild: mockGuild as Guild,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     mockClient = {
-      user: { id: 'bot-user-id' } as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+      user: { id: 'bot-user-id' } as any,
       channels: {
         cache: new Map<string, GuildChannel>(),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any;
 
     manager = VoiceChannelManager.getInstance(mockClient as Client);
@@ -109,7 +102,7 @@ describe('VoiceChannelManager - Live & Waiting Room', () => {
     it('should toggle from live to offline and remove suffix', async () => {
       // Pre-mark as live and give it the suffix name
       manager.setLiveStatus('channel-id', true);
-      (mockChannel as any).name = '🎮 Test Channel 🔴'; // eslint-disable-line @typescript-eslint/no-explicit-any
+      (mockChannel as any).name = '🎮 Test Channel 🔴';
 
       const result = await manager.toggleLive(mockChannel as VoiceChannel);
 
@@ -139,7 +132,7 @@ describe('VoiceChannelManager - Live & Waiting Room', () => {
 
     it('should post an offline announcement message when going offline', async () => {
       manager.setLiveStatus('channel-id', true);
-      (mockChannel as any).name = '🎮 Test Channel 🔴'; // eslint-disable-line @typescript-eslint/no-explicit-any
+      (mockChannel as any).name = '🎮 Test Channel 🔴';
 
       await manager.toggleLive(mockChannel as VoiceChannel);
       expect(mockChannel.send).toHaveBeenCalledWith(
@@ -193,9 +186,7 @@ describe('VoiceChannelManager - Live & Waiting Room', () => {
         type: ChannelType.GuildVoice,
         members: { size: 0, values: jest.fn().mockReturnValue([]) },
         delete: jest.fn().mockResolvedValue(undefined),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (mockClient.channels!.cache as any).set(waitingRoomId, mockWaitingRoom);
 
       await manager.removeWaitingRoom('channel-id');
