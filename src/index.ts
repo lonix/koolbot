@@ -346,13 +346,19 @@ async function gracefulShutdown(signal: string): Promise<void> {
     // 1. Switch lobby to offline mode (priority 1) - 5 second timeout
     await runWithTimeout(
       async () => {
-        const guildId = await configService.getString("GUILD_ID", "");
+        // GUILD_ID is a bootstrap value read directly from the environment
+        // (see env.ts), so we don't depend on configService here — that
+        // keeps this path working even if a signal arrives before the
+        // ConfigService singleton has been wired up.
+        const guildId = env.guildId ?? "";
         if (guildId) {
           const guild = await client.guilds.fetch(guildId);
-          const offlineLobbyName = await configService.getString(
-            "voicechannels.lobby.offlinename",
-            "🔴 Lobby",
-          );
+          const offlineLobbyName = configService
+            ? await configService.getString(
+                "voicechannels.lobby.offlinename",
+                "🔴 Lobby",
+              )
+            : "🔴 Lobby";
 
           // Find the lobby channel and rename it
           const lobbyChannel = guild.channels.cache.find(
@@ -385,7 +391,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
     // 3. Deregister commands (no wait needed) - 5 second timeout
     await runWithTimeout(
       async () => {
-        const guildId = await configService.getString("GUILD_ID", "");
+        const guildId = env.guildId ?? "";
         if (guildId) {
           const rest = new REST({ version: "10" }).setToken(env.discordToken!);
           await rest.put(
@@ -482,10 +488,6 @@ async function gracefulShutdown(signal: string): Promise<void> {
   }
 }
 
-// Handle process termination
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
-
 // Service instances (declared outside try-catch for proper scoping)
 let configService: ConfigService;
 let commandManager: CommandManager;
@@ -533,6 +535,14 @@ try {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
 }
+
+// Handle process termination. Registered AFTER service instantiation so the
+// singletons gracefulShutdown() relies on (e.g. configService, the timer-owning
+// services) are guaranteed to exist by the time a SIGINT/SIGTERM can invoke it.
+// Service instantiation above is synchronous, so this does not widen any
+// meaningful window during which signals would go unhandled.
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 
 // Bot status service is already initialized above
 
