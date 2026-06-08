@@ -1,19 +1,11 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 
-const mockAxiosGet = jest.fn();
-const mockAxiosIsAxiosError = jest.fn();
+const mockFetch = jest.fn<typeof fetch>();
 const mockPollItemFindOne = jest.fn();
 const mockPollItemCreate = jest.fn();
 const mockRegisterReloadCallback = jest.fn();
 const mockConfigGetBoolean = jest.fn();
 const mockConfigGetNumber = jest.fn();
-
-jest.unstable_mockModule("axios", () => ({
-  default: {
-    get: mockAxiosGet,
-    isAxiosError: mockAxiosIsAxiosError,
-  },
-}));
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -47,15 +39,33 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const { PollService } = await import("../../src/services/poll-service.js");
 
+// Build a real fetch Response so the service exercises the genuine
+// Headers/ReadableStream plumbing it relies on at runtime (Node 22+).
+function makeResponse(
+  body: string | ReadableStream<Uint8Array> | null,
+  contentType: string,
+  init: {
+    status?: number;
+    statusText?: string;
+    headers?: Record<string, string>;
+  } = {},
+): Response {
+  const headers = new Headers(init.headers);
+  if (contentType) {
+    headers.set("content-type", contentType);
+  }
+  return new Response(body, { status: 200, ...init, headers });
+}
+
 describe("PollService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     (PollService as unknown as { instance: unknown }).instance = undefined;
-    mockAxiosIsAxiosError.mockReturnValue(false);
     mockConfigGetBoolean.mockResolvedValue(false);
     mockConfigGetNumber.mockResolvedValue(7);
     mockPollItemFindOne.mockResolvedValue(null);
     mockPollItemCreate.mockResolvedValue({});
+    global.fetch = mockFetch as unknown as typeof fetch;
   });
 
   it("rejects invalid URL formats before fetching", async () => {
@@ -72,7 +82,7 @@ describe("PollService", () => {
       skipped: 0,
       errors: ["Invalid URL format. Please provide a valid HTTP or HTTPS URL."],
     });
-    expect(mockAxiosGet).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("rejects non-http protocols before fetching", async () => {
@@ -89,7 +99,7 @@ describe("PollService", () => {
       skipped: 0,
       errors: ["URL must use the http or https protocol"],
     });
-    expect(mockAxiosGet).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("rejects private and local destinations before fetching", async () => {
@@ -123,19 +133,21 @@ describe("PollService", () => {
         errors: ["URL must not point to a private or local address"],
       });
     }
-    expect(mockAxiosGet).not.toHaveBeenCalled();
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it("continues importing polls from allowed https URLs", async () => {
-    mockAxiosGet.mockResolvedValue({
-      data: `polls:
+    mockFetch.mockResolvedValue(
+      makeResponse(
+        `polls:
   - question: Favorite color?
     answers:
       - Blue
       - Green
 `,
-      headers: { "content-type": "text/yaml; charset=utf-8" },
-    });
+        "text/yaml; charset=utf-8",
+      ),
+    );
 
     const service = PollService.getInstance({} as never);
 
@@ -145,17 +157,15 @@ describe("PollService", () => {
       "user-1",
     );
 
-    expect(mockAxiosGet).toHaveBeenCalledWith(
+    expect(mockFetch).toHaveBeenCalledWith(
       "https://example.com/polls.yaml",
-      {
-        timeout: 10000,
-        maxContentLength: 2 * 1024 * 1024,
-        maxBodyLength: 2 * 1024 * 1024,
-        responseType: "text",
+      expect.objectContaining({
+        redirect: "follow",
         headers: {
           "User-Agent": "KoolBot-PollService/1.0",
         },
-      },
+        signal: expect.any(AbortSignal),
+      }),
     );
     expect(mockPollItemFindOne).toHaveBeenCalledWith({
       guildId: "guild-1",
@@ -177,11 +187,37 @@ describe("PollService", () => {
     });
   });
 
-  it("rejects responses with a non-JSON/YAML Content-Type", async () => {
-    mockAxiosGet.mockResolvedValue({
-      data: "<!DOCTYPE html><html><body>Login required</body></html>",
-      headers: { "content-type": "text/html; charset=utf-8" },
+  it("reports an HTTP error for a non-2xx response", async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse("Not found", "text/plain", {
+        status: 404,
+        statusText: "Not Found",
+      }),
+    );
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com/missing.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["HTTP 404: Not Found"],
     });
+    expect(mockPollItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("rejects responses with a non-JSON/YAML Content-Type", async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse(
+        "<!DOCTYPE html><html><body>Login required</body></html>",
+        "text/html; charset=utf-8",
+      ),
+    );
 
     const service = PollService.getInstance({} as never);
 
@@ -202,10 +238,7 @@ describe("PollService", () => {
   });
 
   it("reports an invalid-format error for an empty or non-object body", async () => {
-    mockAxiosGet.mockResolvedValue({
-      data: "",
-      headers: { "content-type": "text/plain" },
-    });
+    mockFetch.mockResolvedValue(makeResponse("", "text/plain"));
 
     const service = PollService.getInstance({} as never);
 
@@ -223,12 +256,12 @@ describe("PollService", () => {
     expect(mockPollItemCreate).not.toHaveBeenCalled();
   });
 
-  it("reports a clear error when the payload exceeds the size cap", async () => {
-    mockAxiosIsAxiosError.mockReturnValue(true);
-    mockAxiosGet.mockRejectedValue({
-      code: "ERR_FR_MAX_BODY_LENGTH_EXCEEDED",
-      message: "maxBodyLength size of 2097152 exceeded",
-    });
+  it("reports a clear error when a declared Content-Length exceeds the cap", async () => {
+    mockFetch.mockResolvedValue(
+      makeResponse("", "text/yaml", {
+        headers: { "content-length": String(2 * 1024 * 1024 + 1) },
+      }),
+    );
 
     const service = PollService.getInstance({} as never);
 
@@ -246,12 +279,34 @@ describe("PollService", () => {
     expect(mockPollItemCreate).not.toHaveBeenCalled();
   });
 
-  it("reports a clear error when the request times out", async () => {
-    mockAxiosIsAxiosError.mockReturnValue(true);
-    mockAxiosGet.mockRejectedValue({
-      code: "ECONNABORTED",
-      message: "timeout of 10000ms exceeded",
+  it("enforces the size cap while streaming a body with no Content-Length", async () => {
+    const oversized = "x".repeat(2 * 1024 * 1024 + 10);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(oversized));
+        controller.close();
+      },
     });
+    mockFetch.mockResolvedValue(makeResponse(stream, "text/yaml"));
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com/streamed.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["URL response too large (max 2 MB)"],
+    });
+    expect(mockPollItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports a clear error when the request times out", async () => {
+    mockFetch.mockRejectedValue(new DOMException("The operation was aborted", "AbortError"));
 
     const service = PollService.getInstance({} as never);
 
@@ -265,6 +320,25 @@ describe("PollService", () => {
       imported: 0,
       skipped: 0,
       errors: ["Request timeout - URL took too long to respond"],
+    });
+    expect(mockPollItemCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports a network error when fetch fails to connect", async () => {
+    mockFetch.mockRejectedValue(new TypeError("fetch failed"));
+
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://example.com/unreachable.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["No response from URL - check if URL is accessible"],
     });
     expect(mockPollItemCreate).not.toHaveBeenCalled();
   });

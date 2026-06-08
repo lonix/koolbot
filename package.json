@@ -29,7 +29,6 @@
   },
   "dependencies": {
     "@discordjs/builders": "^1.14.1",
-    "axios": "^1.16.1",
     "cron": "^4.4.0",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
