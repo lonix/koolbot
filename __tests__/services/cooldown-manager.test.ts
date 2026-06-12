@@ -5,11 +5,12 @@ describe('CooldownManager', () => {
   let cooldownManager: CooldownManager;
 
   beforeEach(() => {
-    cooldownManager = new CooldownManager();
     jest.useFakeTimers();
+    cooldownManager = new CooldownManager();
   });
 
   afterEach(() => {
+    cooldownManager.destroy();
     jest.useRealTimers();
   });
 
@@ -262,9 +263,113 @@ describe('CooldownManager', () => {
     it('should handle very short time intervals', () => {
       cooldownManager.setCooldown('user1', 'command1');
       jest.advanceTimersByTime(1); // 1ms
-      
+
       const result = cooldownManager.getRemainingCooldown('user1', 'command1', 1);
       expect(result).toBeGreaterThanOrEqual(0);
+    });
+  });
+
+  describe('memory management', () => {
+    const cooldownsOf = (m: CooldownManager): Map<string, Map<string, number>> =>
+      (m as unknown as { cooldowns: Map<string, Map<string, number>> }).cooldowns;
+    const rateLimitsOf = (m: CooldownManager): Map<string, number[]> =>
+      (m as unknown as { rateLimits: Map<string, number[]> }).rateLimits;
+
+    it('evicts an expired cooldown entry when read via isOnCooldown', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      expect(cooldownsOf(cooldownManager).has('user1')).toBe(true);
+
+      jest.advanceTimersByTime(61000);
+      expect(cooldownManager.isOnCooldown('user1', 'command1', 60)).toBe(false);
+      expect(cooldownsOf(cooldownManager).has('user1')).toBe(false);
+    });
+
+    it('evicts an expired cooldown entry when read via getRemainingCooldown', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+
+      jest.advanceTimersByTime(61000);
+      expect(cooldownManager.getRemainingCooldown('user1', 'command1', 60)).toBe(0);
+      expect(cooldownsOf(cooldownManager).has('user1')).toBe(false);
+    });
+
+    it('keeps the user bucket while another command is still active', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      cooldownManager.setCooldown('user1', 'command2');
+
+      jest.advanceTimersByTime(61000);
+      cooldownManager.setCooldown('user1', 'command2'); // refresh command2
+
+      expect(cooldownManager.isOnCooldown('user1', 'command1', 60)).toBe(false);
+      const bucket = cooldownsOf(cooldownManager).get('user1');
+      expect(bucket?.has('command1')).toBe(false);
+      expect(bucket?.has('command2')).toBe(true);
+    });
+
+    it('evicts the rate-limit key on read once the window has fully expired', () => {
+      cooldownManager.trackCommandExecution('user1', 60);
+      expect(rateLimitsOf(cooldownManager).has('user1')).toBe(true);
+
+      jest.advanceTimersByTime(61000);
+      expect(cooldownManager.isRateLimited('user1', 3, 60)).toBe(false);
+      expect(rateLimitsOf(cooldownManager).has('user1')).toBe(false);
+    });
+
+    it('prunes expired timestamps in-place on isRateLimited without trackCommandExecution', () => {
+      cooldownManager.trackCommandExecution('user1', 60); // t=0
+      jest.advanceTimersByTime(40000);
+      cooldownManager.trackCommandExecution('user1', 60); // t=40s
+      expect(rateLimitsOf(cooldownManager).get('user1')).toHaveLength(2);
+
+      // Advance so only the second timestamp remains in the window.
+      jest.advanceTimersByTime(30000); // t=70s, window cutoff = 10s
+      expect(cooldownManager.isRateLimited('user1', 5, 60)).toBe(false);
+
+      // The expired first timestamp must have been written back out.
+      expect(rateLimitsOf(cooldownManager).get('user1')).toHaveLength(1);
+    });
+
+    it('periodically sweeps cooldown entries for inactive users', () => {
+      cooldownManager.setCooldown('user1', 'command1');
+      // Observe the cooldown window so the sweep knows the cutoff.
+      cooldownManager.isOnCooldown('user1', 'command1', 60);
+      expect(cooldownsOf(cooldownManager).has('user1')).toBe(true);
+
+      // Advance past the 5-minute sweep interval without further reads.
+      jest.advanceTimersByTime(5 * 60 * 1000 + 1);
+      expect(cooldownsOf(cooldownManager).has('user1')).toBe(false);
+    });
+
+    it('periodically sweeps rate-limit entries for inactive users', () => {
+      cooldownManager.trackCommandExecution('user1', 60);
+      expect(rateLimitsOf(cooldownManager).has('user1')).toBe(true);
+
+      jest.advanceTimersByTime(5 * 60 * 1000 + 1);
+      expect(rateLimitsOf(cooldownManager).has('user1')).toBe(false);
+    });
+
+    it('does not sweep entries whose window is still active', () => {
+      cooldownManager.trackCommandExecution('user1', 3600); // 1 hour window
+      jest.advanceTimersByTime(5 * 60 * 1000 + 1);
+      expect(rateLimitsOf(cooldownManager).has('user1')).toBe(true);
+    });
+
+    it('destroy clears the cleanup interval and is idempotent', () => {
+      const clearIntervalSpy = jest.spyOn(globalThis, 'clearInterval');
+      const handle = (
+        cooldownManager as unknown as {
+          cleanupInterval: ReturnType<typeof setInterval> | null;
+        }
+      ).cleanupInterval;
+      expect(handle).not.toBeNull();
+
+      cooldownManager.destroy();
+      expect(clearIntervalSpy).toHaveBeenCalledWith(handle);
+      expect(
+        (cooldownManager as unknown as { cleanupInterval: unknown }).cleanupInterval,
+      ).toBeNull();
+      expect(() => cooldownManager.destroy()).not.toThrow();
+
+      clearIntervalSpy.mockRestore();
     });
   });
 });
