@@ -787,10 +787,21 @@ log and PRG-redirects back to the page.
 The **Rewind** page defaults to the current calendar year (UTC);
 `/me/rewind/:year` lets you browse past years. A small year picker at
 the top of the page only offers years for which you have data (voice
-sessions, text-message activity, or badges). Years with no data render
-a friendly empty state.
+sessions, text-message activity, or badges), plus any year that has been
+snapshotted (see below). Years with no data render a friendly empty state.
 Aggregation is on-demand and not cached in v1 — see [`SETTINGS.md`](SETTINGS.md#-rewind-year-in-review)
 for the `rewind.*` keys that control the end-of-year DM nudge.
+
+The in-progress current year is always computed live from raw activity.
+**Completed years are frozen into an immutable snapshot at year rollover**
+(`#574`): alongside the end-of-year nudge cron, `RewindNudgeService`
+writes one `RewindSnapshot` per qualifying user for the just-completed
+year. Once frozen, that year's recap renders verbatim from the snapshot
+forever — unaffected by the voice-session / message-detail truncation
+that later prunes the source data. Snapshot creation is idempotent
+(re-running the cron never duplicates or mutates an existing record) and
+gated by `rewind.enabled`. A `schemaVersion` is stored so the view can
+render older snapshots even after the summary shape gains new fields.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

@@ -7,8 +7,15 @@ const mockConfigGetString = jest.fn();
 const mockConfigGetNumber = jest.fn();
 
 const mockGetPrefs = jest.fn();
+const mockGetTimezone = jest.fn();
 const mockPrefsGetInstance = jest.fn(() => ({
   getPrefs: mockGetPrefs,
+  getTimezone: mockGetTimezone,
+}));
+
+const mockSnapshotYear = jest.fn();
+const mockRewindGetInstance = jest.fn(() => ({
+  snapshotYear: mockSnapshotYear,
 }));
 
 const mockLoggerIsReady = jest.fn(() => false);
@@ -59,6 +66,10 @@ jest.unstable_mockModule("../../src/models/rewind-nudge-state.js", () => ({
     findOne: mockNudgeStateFindOne,
     findOneAndUpdate: mockNudgeStateFindOneAndUpdate,
   },
+}));
+
+jest.unstable_mockModule("../../src/services/rewind-service.js", () => ({
+  RewindService: { getInstance: mockRewindGetInstance },
 }));
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -113,6 +124,8 @@ describe("RewindNudgeService", () => {
       digest: true,
       rewind: true,
     });
+    mockGetTimezone.mockResolvedValue(null);
+    mockSnapshotYear.mockResolvedValue("created");
     mockUsersFetch.mockImplementation(async (userId: unknown) => ({
       id: userId as string,
       username: `user-${userId as string}`,
@@ -262,6 +275,81 @@ describe("RewindNudgeService", () => {
 
       expect(result!.sent).toBe(0);
       expect(result!.failed).toBe(1);
+    });
+  });
+
+  describe("completed-year snapshots (#574)", () => {
+    it("snapshots each qualifying user for the year and tallies outcomes", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+        { _id: "u2", username: "u2", totalTime: 60 * 60 * 3 },
+      ]);
+      mockSnapshotYear
+        .mockResolvedValueOnce("created")
+        .mockResolvedValueOnce("exists");
+
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      const year = new Date().getUTCFullYear();
+      expect(mockSnapshotYear).toHaveBeenCalledTimes(2);
+      expect(mockSnapshotYear).toHaveBeenCalledWith("u1", "guild-1", year, null);
+      expect(result!.snapshotsCreated).toBe(1);
+      expect(result!.snapshotsExisting).toBe(1);
+    });
+
+    it("snapshots users even when they opted out of the DM", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+      mockGetPrefs.mockResolvedValue({
+        achievements: true,
+        digest: true,
+        rewind: false,
+      });
+
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.skippedOptOut).toBe(1);
+      expect(result!.sent).toBe(0);
+      // The snapshot is independent of DM delivery — the year is still frozen.
+      expect(mockSnapshotYear).toHaveBeenCalledTimes(1);
+      expect(result!.snapshotsCreated).toBe(1);
+    });
+
+    it("passes the user's timezone through to the snapshot", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+      mockGetTimezone.mockResolvedValue("America/New_York");
+
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      await svc.runNow();
+
+      const year = new Date().getUTCFullYear();
+      expect(mockSnapshotYear).toHaveBeenCalledWith(
+        "u1",
+        "guild-1",
+        year,
+        "America/New_York",
+      );
+    });
+
+    it("isolates a snapshot failure without aborting the rest", async () => {
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+        { _id: "u2", username: "u2", totalTime: 60 * 60 * 3 },
+      ]);
+      mockSnapshotYear
+        .mockRejectedValueOnce(new Error("mongo exploded"))
+        .mockResolvedValueOnce("created");
+
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.snapshotsFailed).toBe(1);
+      expect(result!.snapshotsCreated).toBe(1);
     });
   });
 });

@@ -2,6 +2,7 @@ import { Client } from "discord.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { UserAchievements } from "../models/user-achievements.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
+import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { ConfigService } from "./config-service.js";
 import { ACCOLADE_METADATA } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
@@ -87,7 +88,19 @@ export interface RewindSummary {
   // activity, or achievements). Used by the page to render a small year
   // picker.
   availableYears: number[];
+  // How this summary was produced (#574): "live" recomputes from raw
+  // activity, "snapshot" is served verbatim from a frozen completed-year
+  // record. Optional so older serialised summaries (and tests) omit it.
+  source?: "live" | "snapshot";
 }
+
+/**
+ * Schema version stamped on every snapshot we write (#574). Bump when the
+ * `RewindSummary` shape changes in a way worth recording; old snapshots
+ * keep their stored version and are rendered tolerantly by
+ * `normalizeSnapshotSummary`.
+ */
+export const SNAPSHOT_SCHEMA_VERSION = 1;
 
 interface RawSession {
   startTime: Date;
@@ -334,6 +347,45 @@ function lookupAchievement(type: string): {
     : null;
 }
 
+/**
+ * Coerce a stored snapshot summary into a complete `RewindSummary` for
+ * rendering (#574). Snapshots are frozen as-generated, so a snapshot
+ * written under an older schema may be missing fields the current view
+ * expects. We fill every field with a safe default and stamp the identity
+ * from the request so a partial / corrupt stored payload still renders the
+ * empty-state branch rather than throwing in the view layer.
+ */
+export function normalizeSnapshotSummary(
+  stored: Partial<RewindSummary> | null | undefined,
+  identity: { userId: string; guildId: string; year: number },
+): RewindSummary {
+  const s = stored ?? {};
+  return {
+    userId: s.userId ?? identity.userId,
+    guildId: s.guildId ?? identity.guildId,
+    year: s.year ?? identity.year,
+    hasData: s.hasData ?? false,
+    totalSeconds: s.totalSeconds ?? 0,
+    sessionCount: s.sessionCount ?? 0,
+    daysActive: s.daysActive ?? 0,
+    topChannels: s.topChannels ?? [],
+    peakDay: s.peakDay ?? null,
+    messagesSent: s.messagesSent ?? 0,
+    topTextChannels: s.topTextChannels ?? [],
+    peakMessageDay: s.peakMessageDay ?? null,
+    longestStreakDays: s.longestStreakDays ?? 0,
+    longestStreakRange: s.longestStreakRange ?? null,
+    accolades: s.accolades ?? [],
+    achievements: s.achievements ?? [],
+    annualRank: s.annualRank ?? null,
+    annualGuildMembers: s.annualGuildMembers ?? 0,
+    percentAboveMedian: s.percentAboveMedian ?? null,
+    weeklyJourney: s.weeklyJourney ?? { first: null, last: null, best: null },
+    availableYears: s.availableYears ?? [],
+    source: "snapshot",
+  };
+}
+
 // --------------------------------------------------------------------
 // Service
 // --------------------------------------------------------------------
@@ -377,6 +429,17 @@ export class RewindService {
     timeZone?: string | null,
   ): Promise<RewindSummary | null> {
     try {
+      // Completed years are served from their immutable snapshot when one
+      // exists, so the recap is unaffected by later voice-session /
+      // message-detail truncation (#574). The in-progress current year
+      // always recomputes live. A past year predating the snapshot
+      // feature has no record and falls through to the live path below.
+      const currentYear = new Date().getUTCFullYear();
+      if (year < currentYear) {
+        const snapshot = await this.loadSnapshot(userId, guildId, year);
+        if (snapshot) return snapshot;
+      }
+
       const { start, end } = yearBounds(year);
 
       // Only bucket days in a user zone when one is actually set and
@@ -434,22 +497,26 @@ export class RewindService {
         })
         .filter((a): a is RewindAchievement => a !== null);
 
-      // These three reads are independent — run them concurrently so the
+      // These reads are independent — run them concurrently so the
       // on-demand /me/rewind render doesn't pay their latency in series.
       const [
         { annualRank, annualGuildMembers, percentAboveMedian },
         weeklyJourney,
         text,
+        snapshotYears,
       ] = await Promise.all([
         this.computeAnnualRank(userId, start, end, totalSeconds),
         this.computeWeeklyJourney(userId, start, end),
         this.computeTextActivity(userId, guildId, start, end, dayZone),
+        this.collectSnapshotYears(userId, guildId),
       ]);
 
-      // The picker should offer any year the user has either kind of data.
-      const mergedYears = [...new Set([...availableYears, ...text.years])].sort(
-        (a, b) => b - a,
-      );
+      // The picker should offer any year the user has either kind of data,
+      // plus any snapshotted year — those must stay navigable even after
+      // their raw sessions/messages have been truncated away (#574).
+      const mergedYears = [
+        ...new Set([...availableYears, ...text.years, ...snapshotYears]),
+      ].sort((a, b) => b - a);
 
       const hasData =
         totalSeconds > 0 ||
@@ -482,6 +549,7 @@ export class RewindService {
         percentAboveMedian,
         weeklyJourney,
         availableYears: mergedYears,
+        source: "live",
       };
     } catch (error) {
       logger.error(
@@ -489,6 +557,127 @@ export class RewindService {
         error,
       );
       return null;
+    }
+  }
+
+  /**
+   * Freeze a user's completed-year recap into an immutable `RewindSnapshot`
+   * (#574). Called by the end-of-year cron once the year has wrapped up.
+   *
+   * Idempotent: an existing snapshot is never duplicated or mutated, so a
+   * re-run (or a manual replay) is a no-op. We compute the summary live —
+   * at snapshot time the year is the just-completing current year, so
+   * `getSummary` recomputes from raw data rather than short-circuiting.
+   * Users with nothing worth freezing are skipped instead of storing an
+   * empty record.
+   *
+   * Returns the outcome so the caller can roll it into a run summary.
+   */
+  public async snapshotYear(
+    userId: string,
+    guildId: string,
+    year: number,
+    timeZone?: string | null,
+  ): Promise<"created" | "exists" | "skipped" | "failed"> {
+    try {
+      const existing = await RewindSnapshot.findOne({
+        userId,
+        guildId,
+        year,
+      }).lean();
+      if (existing) return "exists";
+
+      const summary = await this.getSummary(userId, guildId, year, timeZone);
+      if (!summary) return "failed";
+      if (!summary.hasData) return "skipped";
+
+      await RewindSnapshot.create({
+        guildId,
+        userId,
+        year,
+        summary,
+        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+        generatedAt: new Date(),
+      });
+      return "created";
+    } catch (error) {
+      // A concurrent run may have inserted the row between our existence
+      // check and the create — treat the unique-index violation as a
+      // benign "already exists" rather than a failure.
+      if ((error as { code?: number }).code === 11000) return "exists";
+      logger.error(
+        `RewindService.snapshotYear failed for user=${userId} year=${year}:`,
+        error,
+      );
+      return "failed";
+    }
+  }
+
+  /**
+   * Load and normalise the frozen snapshot for a completed year, or return
+   * `null` when none exists (so the caller falls back to live compute).
+   *
+   * The stored summary carries the `availableYears` it had at freeze time;
+   * we union in the full set of snapshotted years so every preserved year
+   * stays reachable from the picker even after the source data is gone.
+   * A lookup failure is swallowed to `null` — better to compute live than
+   * to error the page.
+   */
+  private async loadSnapshot(
+    userId: string,
+    guildId: string,
+    year: number,
+  ): Promise<RewindSummary | null> {
+    try {
+      const doc = await RewindSnapshot.findOne({
+        userId,
+        guildId,
+        year,
+      }).lean<{ summary?: Partial<RewindSummary> }>();
+      if (!doc) return null;
+
+      const summary = normalizeSnapshotSummary(doc.summary, {
+        userId,
+        guildId,
+        year,
+      });
+      const snapshotYears = await this.collectSnapshotYears(userId, guildId);
+      summary.availableYears = [
+        ...new Set([...summary.availableYears, ...snapshotYears]),
+      ].sort((a, b) => b - a);
+      return summary;
+    } catch (error) {
+      logger.warn(
+        `RewindService.loadSnapshot failed for user=${userId} year=${year}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Distinct years for which this user has a frozen snapshot. Used to keep
+   * the year picker offering preserved years after their raw data is
+   * truncated (#574). A failure degrades to an empty list.
+   */
+  private async collectSnapshotYears(
+    userId: string,
+    guildId: string,
+  ): Promise<number[]> {
+    try {
+      const rows = await RewindSnapshot.find(
+        { userId, guildId },
+        { year: 1 },
+      ).lean<Array<{ year: number }>>();
+      return rows
+        .map((r) => r.year)
+        .filter((y): y is number => typeof y === "number");
+    } catch (error) {
+      logger.warn(
+        `RewindService.collectSnapshotYears failed for ${userId}:`,
+        error,
+      );
+      return [];
     }
   }
 
