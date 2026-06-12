@@ -1255,13 +1255,14 @@ export class VoiceChannelManager {
   /**
    * Reconcile all in-memory tracking for a channel that has been deleted.
    *
-   * The various cleanup paths (cleanupUserChannel, cleanupEmptyChannel and the
-   * periodic cleanupEmptyChannels scanner) all need to drop the same per-channel
-   * state once a channel is gone, otherwise maps such as waitingRoomToMain or
-   * ownershipTransferTimers are orphaned — e.g. a leftover waiting room would be
-   * skipped forever by the unmanaged-channel loop. This clears ownership,
-   * custom-name, ownership-queue, live-status and pending-transfer state, and
-   * removes any associated waiting room.
+   * Used by the periodic cleanupEmptyChannels() scanner after it deletes a
+   * channel: the same per-channel state must be dropped once a channel is gone,
+   * otherwise maps such as waitingRoomToMain or ownershipTransferTimers are
+   * orphaned — e.g. a leftover waiting room would be skipped forever by the
+   * unmanaged-channel loop. This clears ownership, custom-name, ownership-queue,
+   * live-status and pending-transfer state, and removes any associated waiting
+   * room. (cleanupUserChannel/cleanupEmptyChannel perform their own equivalent
+   * reconciliation inline.)
    */
   private async reconcileDeletedChannelState(channelId: string): Promise<void> {
     // Drop ownership entry (userChannels is keyed by ownerId -> channel)
@@ -1285,7 +1286,8 @@ export class VoiceChannelManager {
       this.waitingRoomToMain.delete(waitingRoomId);
       try {
         const waitingRoom = this.client.channels.cache.get(waitingRoomId);
-        if (waitingRoom) await waitingRoom.delete();
+        if (waitingRoom)
+          await waitingRoom.delete("Bot cleanup - parent channel removed");
       } catch {
         // Ignore errors cleaning up waiting room
       }
