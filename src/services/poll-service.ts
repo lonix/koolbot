@@ -284,7 +284,10 @@ export class PollService {
       new CronTime(cleanExpression);
       return true;
     } catch (error) {
-      logger.error(`Invalid cron expression: ${expression}`, error);
+      logger.error(
+        `Invalid cron expression: ${sanitizeForLog(expression)}`,
+        error,
+      );
       return false;
     }
   }

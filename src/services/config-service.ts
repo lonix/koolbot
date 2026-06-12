@@ -4,6 +4,7 @@ import logger from "../utils/logger.js";
 import { Client } from "discord.js";
 import mongoose from "mongoose";
 import { defaultConfig } from "./config-schema.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 export class ConfigService {
   private static instance: ConfigService;
@@ -324,7 +325,7 @@ export class ConfigService {
         const oldConfig = await Config.findOne({ key: oldKey });
         if (oldConfig) {
           logger.info(
-            `⚠️  Found old gamification config key: ${oldKey}, migrating to ${key}`,
+            `⚠️  Found old gamification config key: ${sanitizeForLog(oldKey)}, migrating to ${sanitizeForLog(key)}`,
           );
           // Migrate the old key to new key
           await this.set(
@@ -360,7 +361,10 @@ export class ConfigService {
       // Return null if not found anywhere
       return null;
     } catch (error) {
-      logger.error(`Error getting configuration for key ${key}:`, error);
+      logger.error(
+        `Error getting configuration for key ${sanitizeForLog(key)}:`,
+        error,
+      );
       return null;
     }
   }
@@ -434,11 +438,16 @@ export class ConfigService {
       );
 
       this.cache.set(key, value);
-      logger.info(`Configuration updated: ${key} = ${value}`);
+      logger.info(
+        `Configuration updated: ${sanitizeForLog(key)} = ${sanitizeForLog(value)}`,
+      );
 
       // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {
-      logger.error(`Error updating configuration ${key}:`, error);
+      logger.error(
+        `Error updating configuration ${sanitizeForLog(key)}:`,
+        error,
+      );
       throw error;
     }
   }
