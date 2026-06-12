@@ -1188,7 +1188,7 @@ describe("renderWizardPage", () => {
     expect(html).toContain('action="/admin/wizard/start"');
   });
 
-  it('shows "currently ON/OFF" indicator next to each feature label', () => {
+  it("shows ON/OFF indicator next to each feature label", () => {
     const html = renderWizardPage({
       ...COMMON,
       featureOrder: ["voicechannels", "polls"],
@@ -1196,11 +1196,11 @@ describe("renderWizardPage", () => {
     });
     // voicechannels is currently enabled → tag-on.
     expect(html).toMatch(
-      /Voice Channels\s*<span class="fc-current">currently <span class="tag tag-on">ON<\/span><\/span>/,
+      /Voice Channels\s*<span class="fc-current"><span class="tag tag-on">ON<\/span><\/span>/,
     );
     // polls is currently disabled → tag-off.
     expect(html).toMatch(
-      /Polls\s*<span class="fc-current">currently <span class="tag tag-off">OFF<\/span><\/span>/,
+      /Polls\s*<span class="fc-current"><span class="tag tag-off">OFF<\/span><\/span>/,
     );
   });
 });

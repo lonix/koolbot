@@ -906,7 +906,7 @@ export function renderWizardPage(props: WizardPageProps): string {
     .map((fk) => {
       const info = WIZARD_FEATURE_LABELS[fk] ?? { name: fk, desc: "" };
       const currentlyOn = Boolean(props.featureStatus[fk]);
-      const indicator = `<span class="fc-current">currently ${tagOnOff(currentlyOn)}</span>`;
+      const indicator = `<span class="fc-current">${tagOnOff(currentlyOn)}</span>`;
       const id = `feat-${fk}`;
       return `<div class="feature-card">
   <input type="checkbox" name="features" value="${escapeHtml(fk)}" id="${escapeHtml(id)}">
