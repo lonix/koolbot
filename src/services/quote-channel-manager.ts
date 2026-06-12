@@ -18,6 +18,17 @@ import { quoteService } from "./quote-service.js";
 // detail of the channel-cleanup loop.
 const CLEANUP_INTERVAL_MINUTES = 5;
 
+// Reaction bursts (many users voting at once) would otherwise trigger a DB
+// write per reaction event. Coalesce writes per message into a single update
+// after this quiet window so a popular quote can't hammer Mongo.
+const VOTE_PERSIST_DEBOUNCE_MS = 2000;
+
+// Identifiers used to recognise an existing bot-authored header embed when the
+// stored message ID has been lost (e.g. after a reinstall wiped the config
+// row). Matching on these prevents the welcome post from being duplicated.
+const HEADER_TITLE = "📝 Welcome to the Quote Channel!";
+const HEADER_FOOTER = "KoolBot Quote System";
+
 /**
  * Normalize a Discord user ID from various formats to a clean numeric ID
  * Handles: <@123>, <@!123>, @username, or plain 123
@@ -48,6 +59,9 @@ export class QuoteChannelManager {
   private configService: ConfigService;
   private isInitialized: boolean = false;
   private cleanupJob: CronJob | null = null;
+  // Pending debounced vote-count writes, keyed by Discord message ID.
+  private voteWriteTimers: Map<string, ReturnType<typeof setTimeout>> =
+    new Map();
   private reactionAddHandler:
     | ((
         reaction: MessageReaction | PartialMessageReaction,
@@ -263,7 +277,6 @@ export class QuoteChannelManager {
       );
 
       // Try to fetch existing header message
-      let headerExists = false;
       if (storedHeaderId) {
         try {
           const existingMessage = await channel.messages.fetch(storedHeaderId);
@@ -271,7 +284,6 @@ export class QuoteChannelManager {
             existingMessage &&
             existingMessage.author.id === this.client.user?.id
           ) {
-            headerExists = true;
             logger.debug("Quote channel header post already exists");
             return;
           }
@@ -280,13 +292,72 @@ export class QuoteChannelManager {
         }
       }
 
-      // Create header post if it doesn't exist
-      if (!headerExists) {
-        await this.createHeaderPost(channel);
+      // The stored ID is missing or stale (common after a reinstall, which
+      // wipes the config row). Before creating a new header, scan the channel
+      // for an existing bot-authored header so we don't post a duplicate
+      // welcome message. If one is found, adopt its ID instead.
+      const existingHeader = await this.findExistingHeader(channel);
+      if (existingHeader) {
+        logger.info(
+          `Adopting existing quote channel header post: ${existingHeader.id}`,
+        );
+        await this.configService.set(
+          "quotes.header_message_id",
+          existingHeader.id,
+          "Message ID of the quote channel header post",
+          "quotes",
+        );
+        return;
       }
+
+      // No header anywhere — create one.
+      await this.createHeaderPost(channel);
     } catch (error) {
       logger.error("Error ensuring header post:", error);
     }
+  }
+
+  /**
+   * Locate an existing bot-authored header embed in the channel by matching
+   * the known title/footer, so a lost `quotes.header_message_id` doesn't cause
+   * a duplicate welcome post. Pinned messages are checked first (the header is
+   * pinned by default) before falling back to a recent-message scan.
+   */
+  private async findExistingHeader(
+    channel: TextChannel,
+  ): Promise<{ id: string } | null> {
+    const botId = this.client.user?.id;
+    if (!botId) return null;
+
+    const isHeader = (msg: {
+      author: { id: string };
+      embeds: { title?: string | null; footer?: { text?: string } | null }[];
+    }): boolean => {
+      if (msg.author.id !== botId) return false;
+      return msg.embeds.some(
+        (e) => e.title === HEADER_TITLE || e.footer?.text === HEADER_FOOTER,
+      );
+    };
+
+    try {
+      const pinned = await channel.messages.fetchPinned();
+      const pinnedHeader = pinned.find((m) => isHeader(m));
+      if (pinnedHeader) return { id: pinnedHeader.id };
+    } catch (error) {
+      logger.debug("Could not fetch pinned messages while scanning for header");
+      logger.debug(String(error));
+    }
+
+    try {
+      const recent = await channel.messages.fetch({ limit: 100 });
+      const recentHeader = recent.find((m) => isHeader(m));
+      if (recentHeader) return { id: recentHeader.id };
+    } catch (error) {
+      logger.debug("Could not fetch recent messages while scanning for header");
+      logger.debug(String(error));
+    }
+
+    return null;
   }
 
   /**
@@ -459,6 +530,13 @@ export class QuoteChannelManager {
       logger.info("Stopped quote channel cleanup job");
     }
 
+    // Flush/cancel any pending debounced vote writes so they don't fire after
+    // the manager has been torn down.
+    for (const timer of this.voteWriteTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.voteWriteTimers.clear();
+
     // Remove reaction handlers
     if (this.reactionAddHandler) {
       this.client.removeListener("messageReactionAdd", this.reactionAddHandler);
@@ -504,6 +582,7 @@ export class QuoteChannelManager {
     content: string,
     authorId: string,
     addedById: string,
+    votes?: { likes: number; dislikes: number },
   ): Promise<string | null> {
     try {
       const channel = await this.getQuoteChannel();
@@ -515,17 +594,29 @@ export class QuoteChannelManager {
       const normalizedAuthorId = normalizeUserId(authorId);
       const normalizedAddedById = normalizeUserId(addedById);
 
+      const fields = [
+        { name: "Author", value: `<@${normalizedAuthorId}>`, inline: true },
+        {
+          name: "Added by",
+          value: `<@${normalizedAddedById}>`,
+          inline: true,
+        },
+      ];
+      // When restoring from a backup the actual user reactions can't be
+      // recreated (a bot can't react on a user's behalf), so surface the
+      // historical tally in the embed itself instead of losing it.
+      if (votes && votes.likes + votes.dislikes > 0) {
+        fields.push({
+          name: "Votes",
+          value: `👍 ${votes.likes} · 👎 ${votes.dislikes}`,
+          inline: true,
+        });
+      }
+
       const embed = new EmbedBuilder()
         .setColor(0x0099ff)
         .setDescription(`"${content}"`)
-        .addFields(
-          { name: "Author", value: `<@${normalizedAuthorId}>`, inline: true },
-          {
-            name: "Added by",
-            value: `<@${normalizedAddedById}>`,
-            inline: true,
-          },
-        )
+        .addFields(fields)
         .setFooter({ text: `ID: ${quoteId}` })
         .setTimestamp();
 
@@ -626,15 +717,51 @@ export class QuoteChannelManager {
       const thumbsUp = message.reactions.cache.get("👍");
       const thumbsDown = message.reactions.cache.get("👎");
 
-      const likes = thumbsUp ? thumbsUp.count - 1 : 0; // -1 to exclude bot's reaction
-      const dislikes = thumbsDown ? thumbsDown.count - 1 : 0;
+      const likes = Math.max(0, thumbsUp ? thumbsUp.count - 1 : 0); // -1 to exclude bot's seed reaction
+      const dislikes = Math.max(0, thumbsDown ? thumbsDown.count - 1 : 0);
 
       logger.debug(
         `Quote message ${messageId}: ${likes} likes, ${dislikes} dislikes`,
       );
+
+      // Persist the tally so it survives a channel re-sync / reinstall.
+      this.scheduleVotePersist(messageId, likes, dislikes);
     } catch (error) {
       logger.error(`Error updating quote reactions for ${messageId}:`, error);
     }
+  }
+
+  /**
+   * Debounce vote-count writes per message so a burst of reactions collapses
+   * into a single DB update once the activity settles.
+   */
+  private scheduleVotePersist(
+    messageId: string,
+    likes: number,
+    dislikes: number,
+  ): void {
+    const existing = this.voteWriteTimers.get(messageId);
+    if (existing) {
+      clearTimeout(existing);
+    }
+
+    const timer = setTimeout(() => {
+      this.voteWriteTimers.delete(messageId);
+      quoteService
+        .setVoteCountsByMessageId(messageId, likes, dislikes)
+        .catch((error) =>
+          logger.error(
+            `Failed to persist vote counts for message ${messageId}:`,
+            error,
+          ),
+        );
+    }, VOTE_PERSIST_DEBOUNCE_MS);
+
+    // Don't keep the event loop alive solely for a pending vote write.
+    if (typeof timer.unref === "function") {
+      timer.unref();
+    }
+    this.voteWriteTimers.set(messageId, timer);
   }
 
   private setupReactionHandlers(): void {
@@ -704,54 +831,97 @@ export class QuoteChannelManager {
     this.client.on("messageReactionRemove", this.reactionRemoveHandler);
   }
 
-  private async syncExistingQuotes(): Promise<void> {
+  /**
+   * Delete every message in the channel. Discord's bulkDelete is capped at 100
+   * messages per call and refuses messages older than 14 days, so anything it
+   * skips is removed individually — otherwise a rebuild would re-post quotes on
+   * top of surviving old messages and create duplicates. Returns the number of
+   * messages deleted.
+   */
+  private async clearChannel(channel: TextChannel): Promise<number> {
+    let totalDeleted = 0;
+    // See: https://discord.js.org/#/docs/main/stable/class/TextChannel?scrollTo=bulkDelete
+    while (true) {
+      const messages = await channel.messages.fetch({ limit: 100 });
+      if (messages.size === 0) {
+        break;
+      }
+
+      let deletedThisRound = 0;
+      let bulkDeletedIds: { has: (id: string) => boolean } = {
+        has: () => false,
+      };
+      try {
+        // The `true` flag tells bulkDelete to skip (rather than error on)
+        // messages older than 14 days.
+        const deleted = await channel.bulkDelete(messages, true);
+        deletedThisRound += deleted.size;
+        bulkDeletedIds = deleted;
+      } catch (error) {
+        logger.error("Error bulk-deleting quote channel messages:", error);
+      }
+
+      // Anything bulkDelete skipped (too old) must be removed individually so
+      // the channel is genuinely emptied before quotes are re-posted.
+      const remaining = messages.filter((m) => !bulkDeletedIds.has(m.id));
+      for (const message of remaining.values()) {
+        try {
+          await message.delete();
+          deletedThisRound++;
+        } catch (error) {
+          logger.error(
+            `Error deleting old quote channel message ${message.id}:`,
+            error,
+          );
+        }
+      }
+
+      totalDeleted += deletedThisRound;
+      if (deletedThisRound === 0) {
+        // Nothing in this batch could be deleted (e.g. missing permissions) —
+        // stop instead of refetching the same messages forever.
+        break;
+      }
+    }
+    logger.info(`Cleared ${totalDeleted} messages from quote channel`);
+    return totalDeleted;
+  }
+
+  /**
+   * Re-post every stored quote to the channel, restoring each quote's saved
+   * vote tally into its embed, and update the stored message IDs. When
+   * `clearFirst` is true the channel is wiped and the header re-created first —
+   * this is the "rebuild the channel from the database" path.
+   */
+  private async syncExistingQuotes(clearFirst = false): Promise<number> {
     try {
       logger.info("Syncing existing quotes to channel...");
 
       const channel = await this.getQuoteChannel();
       if (!channel) {
         logger.warn("Cannot sync quotes: channel not found");
-        return;
+        return 0;
       }
 
-      // Clear channel first (optional)
-      const clearChannel = await this.configService.getBoolean(
-        "quotes.clear_on_sync",
-        false,
-      );
-      if (clearChannel) {
-        let totalDeleted = 0;
-        // Discord bulkDelete is limited to 100 messages per call; loop until the channel is cleared.
-        // The `true` flag skips messages older than 14 days to avoid API errors.
-        // See: https://discord.js.org/#/docs/main/stable/class/TextChannel?scrollTo=bulkDelete
-        // Note: this will only delete messages that are not older than 14 days.
-        // Older messages (if any) will remain in the channel.
-        // If full historical clearing is required, they must be removed individually.
-        // This loop focuses on respecting the bulkDelete 100-message limitation.
-        while (true) {
-          const messages = await channel.messages.fetch({ limit: 100 });
-          if (messages.size === 0) {
-            break;
-          }
-          const deleted = await channel.bulkDelete(messages, true);
-          totalDeleted += deleted.size;
-          if (deleted.size === 0) {
-            // bulkDelete skips messages older than 14 days. If a full batch
-            // was fetched but nothing was deletable, every remaining message
-            // is too old to bulk-delete — stop instead of refetching the same
-            // 100 messages forever.
-            break;
-          }
-          if (messages.size < 100) {
-            // Fetched fewer than 100 messages, so there are no more recent messages to delete.
-            break;
-          }
-        }
-        logger.info(`Cleared ${totalDeleted} messages from quote channel`);
+      const shouldClear =
+        clearFirst ||
+        (await this.configService.getBoolean("quotes.clear_on_sync", false));
+      if (shouldClear) {
+        await this.clearChannel(channel);
+        // The header was just deleted; drop the stale stored ID so exactly one
+        // fresh header is created rather than a search turning up nothing.
+        await this.configService.set(
+          "quotes.header_message_id",
+          "",
+          "Message ID of the quote channel header post",
+          "quotes",
+        );
+        await this.ensureHeaderPost(channel);
       }
 
-      // Get all quotes from database
-      const { quotes } = await quoteService.listQuotes(1, 1000);
+      // Get every stored quote (unbounded): a rebuild must include all quotes,
+      // not just the first page.
+      const quotes = await quoteService.getAllQuotes();
 
       for (const quote of quotes) {
         const messageId = await this.postQuote(
@@ -759,6 +929,7 @@ export class QuoteChannelManager {
           quote.content,
           quote.authorId,
           quote.addedById,
+          { likes: quote.likes ?? 0, dislikes: quote.dislikes ?? 0 },
         );
 
         if (messageId) {
@@ -771,8 +942,25 @@ export class QuoteChannelManager {
       }
 
       logger.info(`Synced ${quotes.length} quotes to channel`);
+      return quotes.length;
     } catch (error) {
       logger.error("Error syncing quotes:", error);
+      return 0;
     }
+  }
+
+  /**
+   * Purge the quote channel and rebuild it from the database: clear all
+   * messages, re-create a single header post, and re-post every stored quote
+   * with its saved vote tally restored. Used by the admin `/quote reset`
+   * command to recover a channel left in a bad state (e.g. after a reinstall).
+   */
+  public async resetChannel(): Promise<{ reposted: number }> {
+    const channel = await this.getQuoteChannel();
+    if (!channel) {
+      throw new Error("Quote channel not configured or not found");
+    }
+    const reposted = await this.syncExistingQuotes(true);
+    return { reposted };
   }
 }

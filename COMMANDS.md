@@ -362,13 +362,59 @@ Edit an existing quote that you added.
 - You can only edit quotes that you added
 - At least one of `text` or `author` must be provided
 
+#### `/quote export` (admin)
+
+Download a JSON backup of every quote, including each quote's 👍/👎 vote
+tally. Requires the **Administrator** permission. The reply is ephemeral and
+includes the backup as a file attachment.
+
+```text
+/quote export
+```
+
+Keep the file safe — it is the durable source of truth for your quotes and
+can be restored with `/quote import`.
+
+#### `/quote import` (admin)
+
+Restore quotes from a backup file produced by `/quote export`. Requires the
+**Administrator** permission.
+
+```text
+/quote import file:<backup.json>
+/quote import file:<backup.json> rebuild:true
+```
+
+**Parameters:**
+
+- `file` (required) — A JSON backup from `/quote export`
+- `rebuild` (optional) — Also purge and rebuild the quote channel after
+  importing, restoring each quote's saved vote tally into its embed
+
+Entries whose original ID (or identical text + author) already exist are
+skipped, so a restore is idempotent and safe to re-run.
+
+#### `/quote reset` (admin)
+
+Purge the quote channel and rebuild it from the database: clears all
+messages, recreates a single header post, and re-posts every stored quote
+with its saved vote tally restored. Requires the **Administrator**
+permission. Useful for recovering a channel left in a bad state (for example
+after a bot reinstall duplicated the header or reset the vote counts).
+
+```text
+/quote reset
+```
+
 **How it works:**
 
 1. User submits a quote via `/quote add`
 2. Bot posts it as an embed in the configured quote channel
 3. Bot adds 👍 / 👎 reactions
 4. Users browse by scrolling the channel and vote with reactions
-5. Bot cleans up unauthorized messages every few minutes
+5. Vote tallies are saved to the database, so they survive a channel
+   re-sync or a bot reinstall (and are restored by `/quote reset`)
+6. Bot cleans up unauthorized messages every few minutes
 
 **Security:**
 
