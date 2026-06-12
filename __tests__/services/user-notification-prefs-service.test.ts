@@ -136,6 +136,108 @@ describe('UserNotificationPrefsService', () => {
     });
   });
 
+  describe('getPrefsWithTimezone', () => {
+    it('returns prefs and timezone from a single read', async () => {
+      findOne.mockResolvedValueOnce({
+        achievements: false,
+        digest: true,
+        rewind: true,
+        timezone: 'Europe/Berlin',
+      });
+      const out = await UserNotificationPrefsService.getInstance().getPrefsWithTimezone('u1', 'g1');
+      expect(out).toEqual({
+        prefs: { achievements: false, digest: true, rewind: true },
+        timezone: 'Europe/Berlin',
+      });
+      expect(findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns defaults + null timezone when no row exists', async () => {
+      findOne.mockResolvedValueOnce(null);
+      const out = await UserNotificationPrefsService.getInstance().getPrefsWithTimezone('u1', 'g1');
+      expect(out).toEqual({ prefs: DEFAULT_PREFS, timezone: null });
+    });
+
+    it('collapses to defaults + null timezone on DB error', async () => {
+      findOne.mockRejectedValueOnce(new Error('mongo down'));
+      const out = await UserNotificationPrefsService.getInstance().getPrefsWithTimezone('u1', 'g1');
+      expect(out).toEqual({ prefs: DEFAULT_PREFS, timezone: null });
+    });
+  });
+
+  describe('getTimezone', () => {
+    it('returns the stored zone when present', async () => {
+      findOne.mockResolvedValueOnce({ timezone: 'Europe/Berlin' });
+      const tz = await UserNotificationPrefsService.getInstance().getTimezone('u1', 'g1');
+      expect(tz).toBe('Europe/Berlin');
+    });
+
+    it('returns null when unset or row missing', async () => {
+      findOne.mockResolvedValueOnce(null);
+      expect(await UserNotificationPrefsService.getInstance().getTimezone('u1', 'g1')).toBeNull();
+      findOne.mockResolvedValueOnce({ timezone: '' });
+      expect(await UserNotificationPrefsService.getInstance().getTimezone('u1', 'g1')).toBeNull();
+    });
+
+    it('returns null on DB error', async () => {
+      findOne.mockRejectedValueOnce(new Error('mongo down'));
+      expect(await UserNotificationPrefsService.getInstance().getTimezone('u1', 'g1')).toBeNull();
+    });
+
+    it('returns null for empty userId/guildId without touching the DB', async () => {
+      const svc = UserNotificationPrefsService.getInstance();
+      expect(await svc.getTimezone('', 'g1')).toBeNull();
+      expect(await svc.getTimezone('u1', '')).toBeNull();
+      expect(findOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('setTimezone', () => {
+    it('validates and stores a recognized zone', async () => {
+      findOneAndUpdate.mockResolvedValueOnce({ timezone: 'America/New_York' });
+      const result = await UserNotificationPrefsService.getInstance().setTimezone(
+        'u1',
+        'g1',
+        'America/New_York',
+      );
+      expect(result).toBe('America/New_York');
+      const [filter, update] = findOneAndUpdate.mock.calls[0] as [
+        Record<string, unknown>,
+        { $set: Record<string, unknown> },
+      ];
+      expect(filter).toEqual({ userId: 'u1', guildId: 'g1' });
+      expect(update.$set).toHaveProperty('timezone', 'America/New_York');
+    });
+
+    it('rejects an invalid zone before hitting the DB', async () => {
+      await expect(
+        UserNotificationPrefsService.getInstance().setTimezone('u1', 'g1', 'Mars/Phobos'),
+      ).rejects.toThrow(/not a recognized IANA timezone/);
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('clears the preference with $unset when passed null', async () => {
+      findOneAndUpdate.mockResolvedValueOnce({});
+      const result = await UserNotificationPrefsService.getInstance().setTimezone(
+        'u1',
+        'g1',
+        null,
+      );
+      expect(result).toBeNull();
+      const update = findOneAndUpdate.mock.calls[0][1] as {
+        $unset?: Record<string, unknown>;
+      };
+      expect(update.$unset).toHaveProperty('timezone');
+    });
+
+    it('throws on empty userId/guildId', async () => {
+      const svc = UserNotificationPrefsService.getInstance();
+      await expect(svc.setTimezone('', 'g1', 'UTC')).rejects.toThrow();
+      await expect(svc.setTimezone('u1', '', 'UTC')).rejects.toThrow();
+      expect(findOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
   it('exposes a stable list of known pref keys', () => {
     expect(NOTIFICATION_PREF_KEYS).toEqual(['achievements', 'digest', 'rewind']);
   });

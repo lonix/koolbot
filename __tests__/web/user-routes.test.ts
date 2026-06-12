@@ -607,6 +607,12 @@ describe("/me/rewind", () => {
       checkCommandPermission: async () => true,
     } as never);
 
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getTimezone: async () => null,
+    } as never);
+
     const { RewindService } =
       await import("../../src/services/rewind-service.js");
     const getSummary = jest.fn().mockResolvedValue(opts.summary as never);
@@ -761,5 +767,236 @@ describe("/me/rewind", () => {
     });
     expect(out.statusCode).toBe(500);
     expect(out.body).toContain("Could not load your year-in-review");
+  });
+});
+
+describe("/me/timezone (#524)", () => {
+  beforeEach(() => {
+    process.env.WEBUI_SESSION_SECRET = SECRET;
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "30";
+    (WebSessionService as unknown as { instance: unknown }).instance = null;
+  });
+
+  async function dispatch(opts: {
+    method: "GET" | "POST";
+    body?: Record<string, unknown>;
+    csrfHeader?: string;
+    stored?: string | null;
+    setTimezoneImpl?: jest.Mock;
+  }): Promise<{
+    statusCode: number;
+    body: string;
+    redirectedTo?: string;
+    audit?: Record<string, unknown>;
+  }> {
+    const now = Date.now();
+    const payload: CookiePayload = {
+      sid: "session-id",
+      uid: "user-1",
+      gid: "guild-1",
+      rol: "user",
+      iat: now - 60_000,
+      act: now - 60_000,
+    };
+    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+
+    const svc = WebSessionService.getInstance();
+    jest.spyOn(svc, "findById").mockResolvedValue({
+      discordUserId: "user-1",
+      guildId: "guild-1",
+      role: "user",
+      scopes: [],
+      revokedAt: null,
+      expiresAt: new Date(now + 60 * 60 * 1000),
+    } as never);
+
+    const { PermissionsService } = await import(
+      "../../src/services/permissions-service.js"
+    );
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      checkCommandPermission: async () => true,
+    } as never);
+
+    const { UserNotificationPrefsService } = await import(
+      "../../src/services/user-notification-prefs-service.js"
+    );
+    const getTimezone = jest
+      .fn<() => Promise<string | null>>()
+      .mockResolvedValue(opts.stored ?? null);
+    const setTimezone =
+      opts.setTimezoneImpl ??
+      jest
+        .fn<
+          (
+            userId: string,
+            guildId: string,
+            tz: string | null,
+          ) => Promise<string | null>
+        >()
+        .mockImplementation(async (_u, _g, tz) => tz);
+    jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
+      getTimezone,
+      setTimezone,
+    } as never);
+
+    const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+    const createSpy = jest
+      .spyOn(WebAuditLog, "create")
+      .mockResolvedValue({} as never);
+
+    const mockClient = {} as never;
+    const { createSessionMiddleware } = await import("../../src/web/session.js");
+    const requireSession = createSessionMiddleware(mockClient);
+    const router = createUserRouter(mockClient, requireSession);
+
+    const headers: Record<string, unknown> = { cookie };
+    if (opts.method === "POST" && opts.csrfHeader) {
+      headers["x-csrf-token"] = opts.csrfHeader;
+    }
+
+    const captured: {
+      statusCode: number;
+      body: string;
+      redirectedTo?: string;
+    } = { statusCode: 200, body: "" };
+    const res = makeRes() as ReturnType<typeof makeRes> & {
+      redirect: jest.Mock;
+      header: jest.Mock;
+    };
+    res.status.mockImplementation((code: number) => {
+      captured.statusCode = code;
+      res.statusCode = code;
+      return res;
+    });
+    res.send.mockImplementation((body: unknown) => {
+      captured.body = typeof body === "string" ? body : String(body);
+      res.body = captured.body;
+      return res;
+    });
+    res.redirect = jest.fn((code: unknown, url?: unknown) => {
+      if (typeof code === "number") {
+        captured.statusCode = code;
+        captured.redirectedTo = String(url);
+      } else {
+        captured.statusCode = 302;
+        captured.redirectedTo = String(code);
+      }
+      return res;
+    });
+    res.header = jest.fn(() => res);
+
+    const req = {
+      method: opts.method,
+      url: "/timezone",
+      originalUrl: "/me/timezone",
+      path: "/timezone",
+      baseUrl: "/me",
+      headers,
+      body: opts.body ?? {},
+      query: {},
+      csrfToken: "csrf-1",
+      header: (name: string) => headers[name.toLowerCase()],
+    } as never as Parameters<typeof router>[0];
+
+    await new Promise<void>((resolve) => {
+      router(
+        req as never,
+        res as never,
+        (() => {
+          resolve();
+        }) as never,
+      );
+      setTimeout(resolve, 0);
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Spies accumulate across the suite, so read the most recent create
+    // call — the one this dispatch produced.
+    const auditCall = createSpy.mock.calls.at(-1)?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    return { ...captured, audit: auditCall };
+  }
+
+  it("renders the timezone selector with the server default option", async () => {
+    const out = await dispatch({ method: "GET" });
+    expect(out.body).toContain("Timezone");
+    expect(out.body).toContain('action="/me/timezone"');
+    expect(out.body).toContain('name="timezone"');
+    expect(out.body).toContain("Server default");
+    expect(out.body).toContain("America/New_York");
+  });
+
+  it("pre-selects the stored zone", async () => {
+    const out = await dispatch({ method: "GET", stored: "Europe/Berlin" });
+    expect(out.body).toContain(
+      '<option value="Europe/Berlin" selected>Europe/Berlin</option>',
+    );
+  });
+
+  it("saves a chosen timezone and redirects with a success flash", async () => {
+    const out = await dispatch({
+      method: "POST",
+      body: { _csrf: "csrf-1", timezone: "America/New_York" },
+      csrfHeader: "csrf-1",
+    });
+    expect(out.statusCode).toBe(303);
+    expect(out.redirectedTo).toMatch(/^\/me\/timezone\?/);
+    expect(out.audit).toMatchObject({
+      action: "user.timezone.set",
+      result: "success",
+    });
+  });
+
+  it("clears the timezone when an empty value is submitted", async () => {
+    let captured: { tz: string | null } | null = null;
+    const setTimezone = jest
+      .fn<
+        (u: string, g: string, tz: string | null) => Promise<string | null>
+      >()
+      .mockImplementation(async (_u, _g, tz) => {
+        captured = { tz };
+        return tz;
+      });
+    const out = await dispatch({
+      method: "POST",
+      body: { _csrf: "csrf-1", timezone: "" },
+      csrfHeader: "csrf-1",
+      stored: "Europe/Berlin",
+      setTimezoneImpl: setTimezone,
+    });
+    expect(out.statusCode).toBe(303);
+    expect(captured).not.toBeNull();
+    expect(captured!.tz).toBeNull();
+  });
+
+  it("surfaces a descriptive error when the service rejects an invalid zone", async () => {
+    const setTimezone = jest
+      .fn<
+        (u: string, g: string, tz: string | null) => Promise<string | null>
+      >()
+      .mockRejectedValue(
+        new Error('"Mars/Phobos" is not a recognized IANA timezone identifier'),
+      );
+    const out = await dispatch({
+      method: "POST",
+      body: { _csrf: "csrf-1", timezone: "Mars/Phobos" },
+      csrfHeader: "csrf-1",
+      setTimezoneImpl: setTimezone,
+    });
+    expect(out.statusCode).toBe(303);
+    expect(out.redirectedTo).toContain("flash=err");
+    expect(out.audit).toMatchObject({
+      action: "user.timezone.set",
+      result: "failure",
+    });
+  });
+
+  it("rejects POST without a CSRF token", async () => {
+    const out = await dispatch({
+      method: "POST",
+      body: { timezone: "UTC" },
+    });
+    expect(out.statusCode).toBe(403);
   });
 });

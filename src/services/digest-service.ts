@@ -9,6 +9,7 @@ import { DigestState } from "../models/digest-state.js";
 import { UserAchievements } from "../models/user-achievements.js";
 import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
+import { formatInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 
 interface QualifyingUser {
@@ -284,7 +285,13 @@ export class DigestService {
 
       for (const user of qualifying) {
         try {
-          const prefs = await prefsService.getPrefs(user.userId, guildId);
+          // One read for both the opt-out flag and the display timezone
+          // (used for the week range), so the cron loop stays at a single
+          // prefs query per user even for large guilds (#524).
+          const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
+            user.userId,
+            guildId,
+          );
           if (!prefs.digest) {
             summary.skippedOptOut += 1;
             continue;
@@ -321,6 +328,8 @@ export class DigestService {
             streakWeeks,
             includeAchievements,
             weeklyAchievements,
+            ranAt: summary.ranAt,
+            timezone,
           });
 
           const delivered = await this.sendDigestDM(user.userId, embed);
@@ -447,6 +456,8 @@ export class DigestService {
       name: string;
       description: string;
     }>;
+    ranAt: Date;
+    timezone: string | null;
   }): EmbedBuilder {
     const {
       user,
@@ -454,6 +465,8 @@ export class DigestService {
       streakWeeks,
       includeAchievements,
       weeklyAchievements,
+      ranAt,
+      timezone,
     } = args;
     const previousTime = previousState?.lastWeekTotalTime ?? 0;
     const previousRank = previousState?.lastWeekRank ?? null;
@@ -504,11 +517,16 @@ export class DigestService {
 
     const footer = pickMotivationalFooter(user.userId.length + user.totalTime);
 
+    // "Week of <start> – <end>" in the user's timezone (server tz when
+    // unset) so the 7-day window reads in their local time (#524).
+    const weekStart = new Date(ranAt.getTime() - SECONDS_PER_WEEK * 1000);
+    const weekRange = `${formatInZone(weekStart, timezone, "MMM d")} – ${formatInZone(ranAt, timezone, "MMM d")}`;
+
     return new EmbedBuilder()
       .setTitle("📊 Your weekly voice digest")
       .setColor(EMBED_COLOR)
       .setDescription(
-        `Here's a snapshot of your last 7 days in voice, ${user.username}.`,
+        `Here's a snapshot of your last 7 days in voice (${weekRange}), ${user.username}.`,
       )
       .addFields(fields)
       .setFooter({

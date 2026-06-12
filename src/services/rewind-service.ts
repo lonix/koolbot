@@ -5,6 +5,7 @@ import { MessageActivityTracking } from "../models/message-activity-tracking.js"
 import { ConfigService } from "./config-service.js";
 import { ACCOLADE_METADATA } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
+import { isValidTimezone, isoDateInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -119,6 +120,16 @@ export function toIsoDate(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * The calendar-day key for a timestamp (#524). Defaults to UTC so unset
+ * users keep the existing grouping; when a valid IANA `timeZone` is
+ * supplied, days are bucketed in that zone instead so "peak day" and
+ * streaks reflect the user's local midnight.
+ */
+function dayKey(date: Date, timeZone?: string): string {
+  return timeZone ? isoDateInZone(date, timeZone) : toIsoDate(date);
+}
+
 export function sessionSeconds(session: RawSession): number {
   if (typeof session.duration === "number" && session.duration > 0) {
     return Math.floor(session.duration);
@@ -166,12 +177,13 @@ export function computeTopChannels(
 
 export function computePeakDay(
   sessions: RawSession[],
+  timeZone?: string,
 ): { date: string; totalSeconds: number } | null {
   const byDay = new Map<string, number>();
   for (const s of sessions) {
     const seconds = sessionSeconds(s);
     if (seconds <= 0) continue;
-    const key = toIsoDate(s.startTime);
+    const key = dayKey(s.startTime, timeZone);
     byDay.set(key, (byDay.get(key) ?? 0) + seconds);
   }
   if (byDay.size === 0) return null;
@@ -219,13 +231,18 @@ export function computeTopTextChannels(
     .slice(0, limit);
 }
 
-/** The UTC day with the most messages, or null when there are none. */
+/**
+ * The day with the most messages, or null when there are none. Days are
+ * bucketed in UTC by default; passing a valid IANA `timeZone` buckets
+ * them in that zone instead (#524).
+ */
 export function computePeakMessageDay(
   messages: RawTextMessage[],
+  timeZone?: string,
 ): { date: string; count: number } | null {
   const byDay = new Map<string, number>();
   for (const m of messages) {
-    const key = toIsoDate(m.sentAt);
+    const key = dayKey(m.sentAt, timeZone);
     byDay.set(key, (byDay.get(key) ?? 0) + 1);
   }
   if (byDay.size === 0) return null;
@@ -241,11 +258,16 @@ export function computePeakMessageDay(
 }
 
 /**
- * Longest run of consecutive UTC days that contain ≥1 session. Returns
- * the day count and the start/end ISO dates of the winning run. A single
- * day of activity counts as a streak of 1.
+ * Longest run of consecutive days that contain ≥1 session. Returns the
+ * day count and the start/end ISO dates of the winning run. A single day
+ * of activity counts as a streak of 1. Days are bucketed in UTC by
+ * default; passing a valid IANA `timeZone` buckets them in that zone
+ * instead, so the run reflects the user's local midnight (#524).
  */
-export function computeLongestStreak(sessions: RawSession[]): {
+export function computeLongestStreak(
+  sessions: RawSession[],
+  timeZone?: string,
+): {
   days: number;
   startDate: string | null;
   endDate: string | null;
@@ -253,7 +275,7 @@ export function computeLongestStreak(sessions: RawSession[]): {
   const days = new Set<string>();
   for (const s of sessions) {
     if (sessionSeconds(s) <= 0) continue;
-    days.add(toIsoDate(s.startTime));
+    days.add(dayKey(s.startTime, timeZone));
   }
   if (days.size === 0) return { days: 0, startDate: null, endDate: null };
   const sorted = [...days].sort();
@@ -352,9 +374,16 @@ export class RewindService {
     userId: string,
     guildId: string,
     year: number,
+    timeZone?: string | null,
   ): Promise<RewindSummary | null> {
     try {
       const { start, end } = yearBounds(year);
+
+      // Only bucket days in a user zone when one is actually set and
+      // valid; otherwise keep the existing UTC grouping so unconfigured
+      // users see no change (#524).
+      const dayZone =
+        timeZone && isValidTimezone(timeZone) ? timeZone : undefined;
 
       const [userDoc, achievementsDoc] = await Promise.all([
         VoiceChannelTracking.findOne({ userId }).lean<{
@@ -382,12 +411,12 @@ export class RewindService {
       const daysActive = new Set(
         sessions
           .filter((s) => sessionSeconds(s) > 0)
-          .map((s) => toIsoDate(s.startTime)),
+          .map((s) => dayKey(s.startTime, dayZone)),
       ).size;
 
       const topChannels = computeTopChannels(sessions, 3);
-      const peakDay = computePeakDay(sessions);
-      const streak = computeLongestStreak(sessions);
+      const peakDay = computePeakDay(sessions, dayZone);
+      const streak = computeLongestStreak(sessions, dayZone);
 
       const accolades = (achievementsDoc?.accolades ?? [])
         .filter((a) => a.earnedAt >= start && a.earnedAt < end)
@@ -414,7 +443,7 @@ export class RewindService {
       ] = await Promise.all([
         this.computeAnnualRank(userId, start, end, totalSeconds),
         this.computeWeeklyJourney(userId, start, end),
-        this.computeTextActivity(userId, guildId, start, end),
+        this.computeTextActivity(userId, guildId, start, end, dayZone),
       ]);
 
       // The picker should offer any year the user has either kind of data.
@@ -519,6 +548,7 @@ export class RewindService {
     guildId: string,
     start: Date,
     end: Date,
+    timeZone?: string,
   ): Promise<{
     messagesSent: number;
     topTextChannels: RewindTextChannel[];
@@ -561,7 +591,7 @@ export class RewindService {
       return {
         messagesSent: inYear.length,
         topTextChannels,
-        peakMessageDay: computePeakMessageDay(inYear),
+        peakMessageDay: computePeakMessageDay(inYear, timeZone),
         years,
       };
     } catch (error) {

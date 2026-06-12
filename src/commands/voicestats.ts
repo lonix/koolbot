@@ -4,6 +4,8 @@ import {
   TimePeriod,
 } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "../services/config-service.js";
+import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
+import { formatDateTimeInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 
 // Helper function to format time in hours and minutes
@@ -174,10 +176,23 @@ async function executeUser(
       return;
     }
 
+    // Render the timestamp in the requesting user's stored timezone when
+    // set. When unset we keep the previous `toLocaleString()` output so
+    // users who never configured a zone see no change in behaviour (#524).
+    const viewerTimezone = interaction.guildId
+      ? await UserNotificationPrefsService.getInstance().getTimezone(
+          interaction.user.id,
+          interaction.guildId,
+        )
+      : null;
+    const lastSeen = viewerTimezone
+      ? formatDateTimeInZone(stats.lastSeen, viewerTimezone)
+      : stats.lastSeen.toLocaleString();
+
     const response = [
       `**Voice Channel Statistics for ${user.username} (${period})**`,
       `Total Time: ${formatTime(stats.totalTime)}`,
-      `Last Seen: ${stats.lastSeen.toLocaleString()}`,
+      `Last Seen: ${lastSeen}`,
       "",
       "**Recent Sessions:**",
       ...stats.sessions.slice(0, 5).map((session) => {

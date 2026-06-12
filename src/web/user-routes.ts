@@ -37,8 +37,13 @@ import {
   renderUserNotificationsBody,
   renderUserPage,
   renderUserRewindBody,
+  renderUserTimezoneBody,
   type UserFlashMessage,
 } from "./user-layout.js";
+import {
+  getServerTimezone,
+  listSupportedTimezones,
+} from "../utils/timezone.js";
 import {
   RewindService,
   formatFunComparison,
@@ -349,6 +354,113 @@ export function createUserRouter(
     }),
   );
 
+  // ---------- Timezone (#524) ----------
+  router.get(
+    "/timezone",
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      const { userId, guildId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+      const selected =
+        await UserNotificationPrefsService.getInstance().getTimezone(
+          userId,
+          guildId,
+        );
+      const flash = readFlashFromQuery(req);
+      res.type("text/html").send(
+        renderUserPage({
+          title: "Timezone",
+          active: "/me/timezone",
+          body: renderUserTimezoneBody({
+            csrfToken: getCsrfToken(req),
+            zones: listSupportedTimezones(),
+            selected,
+            serverTimezone: getServerTimezone(),
+          }),
+          csrfToken: getCsrfToken(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          flash,
+        }),
+      );
+    }),
+  );
+
+  router.post(
+    "/timezone",
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      const { userId, guildId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      // Strip line breaks before the value reaches the service: it gets
+      // echoed back in `setTimezone`'s validation error (and from there
+      // into our logs), and a CR/LF could forge a log line. No valid IANA
+      // identifier contains a newline, so this never rejects a real zone.
+      const raw =
+        typeof body.timezone === "string"
+          ? body.timezone.replace(/[\r\n]+/g, "").trim()
+          : "";
+      const service = UserNotificationPrefsService.getInstance();
+      const before = await service.getTimezone(userId, guildId);
+
+      let result: "success" | "failure" = "success";
+      let errorMessage: string | null = null;
+      let after: string | null = before;
+      try {
+        after = await service.setTimezone(
+          userId,
+          guildId,
+          raw === "" ? null : raw,
+        );
+      } catch (err) {
+        result = "failure";
+        errorMessage = err instanceof Error ? err.message : String(err);
+        logger.error("Failed to save user timezone", err);
+      }
+
+      await recordAudit(session, {
+        action: "user.timezone.set",
+        targetId: userId,
+        details: result === "success" ? { before, after } : { attempted: raw },
+        result,
+        errorMessage,
+      });
+
+      let flash: UserFlashMessage;
+      if (result === "failure") {
+        flash = {
+          type: "err",
+          text: `Could not save your timezone: ${errorMessage ?? "unknown error"}.`,
+        };
+      } else if (before === after) {
+        flash = { type: "ok", text: "No change — timezone already set." };
+      } else if (after === null) {
+        flash = {
+          type: "ok",
+          text: "Cleared your timezone — Koolbot will use the server timezone.",
+        };
+      } else {
+        flash = { type: "ok", text: `Saved your timezone as ${after}.` };
+      }
+      res.redirect(303, flashUrl("/me/timezone", flash));
+    }),
+  );
+
   // ---------- Rewind (#484) ----------
   // `/me/rewind` defaults to the current calendar year (UTC); the
   // `/:year` variant lets users browse past years. Both gate on
@@ -366,10 +478,16 @@ export function createUserRouter(
     const currentYear = new Date().getUTCFullYear();
     const year = parseYearParam(req.params.year, currentYear);
 
+    const timezone =
+      await UserNotificationPrefsService.getInstance().getTimezone(
+        userId,
+        guildId,
+      );
     const summary = await RewindService.getInstance(client).getSummary(
       userId,
       guildId,
       year,
+      timezone,
     );
 
     if (!summary) {
