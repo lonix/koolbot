@@ -900,7 +900,7 @@ export function renderWizardPage(props: WizardPageProps): string {
   // Checkboxes always render unchecked, regardless of `featureStatus`. The
   // wizard treats each run as a fresh declaration of which features should be
   // on — admins re-tick what they want, untick what they don't. `featureStatus`
-  // only feeds the "currently: ON/OFF" indicator so the admin can see what
+  // only feeds the ON/OFF indicator so the admin can see what
   // state they're about to override.
   const cards = props.featureOrder
     .map((fk) => {
