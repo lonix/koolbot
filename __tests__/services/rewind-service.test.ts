@@ -584,6 +584,86 @@ describe("RewindService.getSummary", () => {
   });
 });
 
+describe("RewindService.getDefaultRewindYear (#573)", () => {
+  function lean<T>(value: T): { lean: () => Promise<T> } {
+    return { lean: jest.fn(async () => value) };
+  }
+
+  function makeSvc() {
+    return RewindService.getInstance(
+      makeClient() as Parameters<typeof RewindService.getInstance>[0],
+    );
+  }
+
+  const currentYear = new Date().getUTCFullYear();
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetSingleton();
+    // `clearAllMocks` does NOT drain queued `mockResolvedValueOnce`
+    // implementations left over from earlier describe blocks, so reset the
+    // shared aggregate mock outright before installing the default.
+    mockAggregateVc.mockReset();
+    mockFindOneAch.mockReturnValue(lean(null));
+    mockAggregateVc.mockResolvedValue([]);
+    mockSnapFind.mockReturnValue(lean([]));
+  });
+
+  it("lands on the prior year when the current year has no data", async () => {
+    // collectAvailableYears aggregate — only the prior year has sessions.
+    mockAggregateVc.mockResolvedValueOnce([{ _id: currentYear - 1 }]);
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(year).toBe(currentYear - 1);
+  });
+
+  it("lands on the current year when it already has data", async () => {
+    mockAggregateVc.mockResolvedValueOnce([
+      { _id: currentYear },
+      { _id: currentYear - 1 },
+    ]);
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(year).toBe(currentYear);
+  });
+
+  it("falls back to the current year when the user has no data anywhere", async () => {
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(year).toBe(currentYear);
+  });
+
+  it("considers snapshotted years that have outlived their raw data", async () => {
+    // No live sessions/achievements, but a frozen snapshot remains.
+    mockSnapFind.mockReturnValueOnce(lean([{ year: currentYear - 2 }]));
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(year).toBe(currentYear - 2);
+  });
+
+  it("degrades to the current year if a lookup throws", async () => {
+    mockFindOneAch.mockReturnValueOnce({
+      lean: jest.fn(async () => {
+        throw new Error("mongo exploded");
+      }),
+    });
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(year).toBe(currentYear);
+  });
+
+  it("ignores non-finite years from corrupt data instead of returning NaN", async () => {
+    // A snapshot row whose `year` is NaN passes a `typeof === number`
+    // check; it must be filtered out before Math.max so the route fallback
+    // never sees NaN.
+    mockSnapFind.mockReturnValueOnce(lean([{ year: Number.NaN }]));
+    mockAggregateVc.mockResolvedValueOnce([{ _id: currentYear - 1 }]);
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(Number.isFinite(year)).toBe(true);
+    expect(year).toBe(currentYear - 1);
+  });
+});
+
 describe("RewindService snapshots (#574)", () => {
   function lean<T>(value: T): { lean: () => Promise<T> } {
     return { lean: jest.fn(async () => value) };

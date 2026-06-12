@@ -586,6 +586,60 @@ export class RewindService {
   }
 
   /**
+   * Resolve the year the bare `/me/rewind` route should land on (#573): the
+   * most recent year the user actually has data for, falling back to the
+   * current UTC year for brand-new users with nothing to recap (so they
+   * still see today's empty state).
+   *
+   * Reuses the same lightweight year-collection queries that back
+   * `availableYears` so we never pay for a full summary build just to pick
+   * the landing year. The explicit `/rewind/:year` route bypasses this and
+   * honours the requested year, empty or not.
+   */
+  public async getDefaultRewindYear(
+    userId: string,
+    guildId: string,
+  ): Promise<number> {
+    const currentYear = new Date().getUTCFullYear();
+    try {
+      const achievementsDoc = await UserAchievements.findOne({
+        userId,
+      }).lean<{
+        accolades?: Array<{ earnedAt: Date }>;
+        achievements?: Array<{ earnedAt: Date }>;
+      }>();
+
+      const [sessionAndAchievementYears, textYears, snapshotYears] =
+        await Promise.all([
+          this.collectAvailableYears(userId, achievementsDoc),
+          this.collectTextActivityYears(userId, guildId),
+          this.collectSnapshotYears(userId, guildId),
+        ]);
+
+      // Guard against a non-finite year slipping through any collector
+      // (e.g. a corrupt `sentAt`/`earnedAt` yielding `NaN` — which passes a
+      // `typeof === "number"` check). An unfiltered `NaN` would make
+      // `Math.max` return `NaN` and, for the bare route, flow straight
+      // through `parseYearParam` into `getSummary` as "Rewind NaN".
+      const years = [
+        ...sessionAndAchievementYears,
+        ...textYears,
+        ...snapshotYears,
+      ].filter((y) => Number.isFinite(y));
+      // No data anywhere → land on the (empty) current year, preserving
+      // the brand-new-user experience. Otherwise pick the newest year with
+      // data, which is the current year when it already has activity.
+      return years.length === 0 ? currentYear : Math.max(...years);
+    } catch (error) {
+      logger.warn(
+        `RewindService.getDefaultRewindYear failed for ${userId}, defaulting to current year:`,
+        error,
+      );
+      return currentYear;
+    }
+  }
+
+  /**
    * Freeze a user's completed-year recap into an immutable `RewindSnapshot`
    * (#574). Called by the end-of-year cron once the year has wrapped up.
    *
@@ -700,6 +754,45 @@ export class RewindService {
     } catch (error) {
       logger.warn(
         `RewindService.collectSnapshotYears failed for ${userId}:`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Distinct years present in the user's retained message detail (#573). A
+   * lighter cousin of `computeTextActivity` used purely for landing-year
+   * resolution — it skips channel resolution and the in-window aggregation,
+   * and respects the same `messagetracking.enabled` gate. A failure (or a
+   * disabled feature) degrades to an empty list.
+   */
+  private async collectTextActivityYears(
+    userId: string,
+    guildId: string,
+  ): Promise<number[]> {
+    try {
+      const enabled = await this.configService.getBoolean(
+        "messagetracking.enabled",
+        false,
+      );
+      if (!enabled) return [];
+
+      const doc = await MessageActivityTracking.findOne(
+        { userId, guildId },
+        { recentMessages: 1 },
+      ).lean<{ recentMessages?: RawTextMessage[] }>();
+      const all = doc?.recentMessages ?? [];
+      return [
+        ...new Set(
+          all
+            .map((m) => m.sentAt.getUTCFullYear())
+            .filter((y) => Number.isFinite(y)),
+        ),
+      ];
+    } catch (error) {
+      logger.warn(
+        `RewindService.collectTextActivityYears failed for ${userId}:`,
         error,
       );
       return [];

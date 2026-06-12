@@ -579,7 +579,13 @@ describe("/me/rewind", () => {
   async function dispatchRewind(opts: {
     pathSuffix: string; // "" for "/rewind", "/2024" for "/rewind/2024"
     summary: unknown; // What RewindService.getInstance(...).getSummary should resolve to
-  }): Promise<{ statusCode: number; body: string }> {
+    defaultYear?: number; // What getDefaultRewindYear resolves to (bare route only)
+  }): Promise<{
+    statusCode: number;
+    body: string;
+    getSummary: jest.Mock;
+    getDefaultRewindYear: jest.Mock;
+  }> {
     const now = Date.now();
     const payload: CookiePayload = {
       sid: "session-id",
@@ -616,8 +622,14 @@ describe("/me/rewind", () => {
     const { RewindService } =
       await import("../../src/services/rewind-service.js");
     const getSummary = jest.fn().mockResolvedValue(opts.summary as never);
+    const getDefaultRewindYear = jest
+      .fn()
+      .mockResolvedValue(
+        (opts.defaultYear ?? new Date().getUTCFullYear()) as never,
+      );
     jest.spyOn(RewindService, "getInstance").mockReturnValue({
       getSummary,
+      getDefaultRewindYear,
     } as never);
 
     const mockClient = {} as never;
@@ -644,7 +656,12 @@ describe("/me/rewind", () => {
       setTimeout(resolve, 0);
     });
     await new Promise((r) => setTimeout(r, 10));
-    return { statusCode: res.statusCode, body: res.body };
+    return {
+      statusCode: res.statusCode,
+      body: res.body,
+      getSummary,
+      getDefaultRewindYear,
+    };
   }
 
   function makeSummary(
@@ -700,6 +717,42 @@ describe("/me/rewind", () => {
     });
     expect(out.statusCode).toBe(200);
     expect(out.body).toContain("Rewind 2024");
+  });
+
+  it("defaults the bare route to the most recent year with data (#573)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      defaultYear: 2025,
+      summary: makeSummary({ year: 2025 }),
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("Rewind 2025");
+    // The resolved default year drives the summary build, not the
+    // (possibly empty) current year.
+    expect(out.getDefaultRewindYear).toHaveBeenCalledWith("user-1", "guild-1");
+    expect(out.getSummary).toHaveBeenCalledWith(
+      "user-1",
+      "guild-1",
+      2025,
+      null,
+    );
+  });
+
+  it("does not resolve a default year for the explicit :year route (#573)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "/2024",
+      summary: makeSummary({ year: 2024 }),
+    });
+    expect(out.statusCode).toBe(200);
+    // The deep-link honours the requested year directly — the default
+    // resolver is never consulted.
+    expect(out.getDefaultRewindYear).not.toHaveBeenCalled();
+    expect(out.getSummary).toHaveBeenCalledWith(
+      "user-1",
+      "guild-1",
+      2024,
+      null,
+    );
   });
 
   it("renders the text-activity card when text data exists (#496)", async () => {
