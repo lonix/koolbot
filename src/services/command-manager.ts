@@ -8,7 +8,6 @@ import {
   DiscordAPIError,
   HTTPError,
 } from "discord.js";
-import { config as dotenvConfig } from "dotenv";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
@@ -17,8 +16,6 @@ import { MonitoringService } from "./monitoring-service.js";
 import { recordCommandInvocation } from "../web/metrics.js";
 import { CooldownManager } from "./cooldown-manager.js";
 import { PermissionsService } from "./permissions-service.js";
-
-dotenvConfig();
 
 interface CommandModule {
   data: SlashCommandBuilder;
