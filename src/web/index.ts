@@ -4,6 +4,7 @@ import logger from "../utils/logger.js";
 import { env, getEnv } from "../config/env.js";
 import { WebSessionService } from "../services/web-session-service.js";
 import { ensureCsrfCookie, requireCsrf } from "./csrf.js";
+import { respondFlashError } from "./http-flash.js";
 import { createRateLimiter } from "./rate-limit.js";
 import {
   AuthenticatedRequest,
@@ -140,17 +141,49 @@ export function createWebRouter(client: Client): Router {
   router.use(createReadOnlyRouter(client, requireSession));
 
   router.use(
-    (err: unknown, _req: Request, res: Response, next: NextFunction): void => {
+    (err: unknown, req: Request, res: Response, next: NextFunction): void => {
       logger.error("WebUI router error", err);
       if (res.headersSent) {
         next(err);
         return;
       }
-      res.status(500).type("text/plain").send("Internal Server Error");
+      // Surface a sanitized, status-aware error so AJAX callers (e.g. the
+      // Settings per-section save) get a JSON `{type:'err',text}` instead of
+      // an HTML 500 the client can't parse (issue #612). We deliberately do
+      // not echo `err.message` — only a friendly reason keyed off the HTTP
+      // status — so DB/validation/internal details never leak to the admin.
+      const status = webErrorStatus(err);
+      respondFlashError(req, res, status, webErrorText(status));
     },
   );
 
   return router;
+}
+
+/**
+ * Best-effort HTTP status for a thrown WebUI error. Body-parser failures
+ * (e.g. payload-too-large) carry `status`/`statusCode`; anything else is an
+ * unhandled server error → 500.
+ */
+export function webErrorStatus(err: unknown): number {
+  const e = err as { status?: unknown; statusCode?: unknown } | null;
+  const raw = e?.statusCode ?? e?.status;
+  if (typeof raw === "number" && raw >= 400 && raw <= 599) return raw;
+  return 500;
+}
+
+/** Sanitized, user-facing reason keyed off the HTTP status (no internals). */
+export function webErrorText(status: number): string {
+  if (status === 413) {
+    return "Save failed — the submitted data was too large.";
+  }
+  if (status === 400) {
+    return "Save failed — the request was malformed.";
+  }
+  if (status >= 400 && status < 500) {
+    return `Save failed — request rejected (${status}).`;
+  }
+  return "Save failed — an unexpected server error occurred. Please try again.";
 }
 
 /**

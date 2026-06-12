@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { respondFlashError } from "./http-flash.js";
 
 interface Bucket {
   hits: number;
@@ -67,7 +68,14 @@ export function createRateLimiter(opts: {
     if (bucket.hits > opts.max) {
       const retryAfter = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
       res.setHeader("Retry-After", retryAfter);
-      res.status(429).type("text/plain").send("Too Many Requests");
+      // AJAX callers get a JSON error so the client can show a real message
+      // (issue #612); plain requests still get the text/plain body.
+      respondFlashError(
+        req,
+        res,
+        429,
+        `Too many requests — slow down and retry in ${retryAfter}s.`,
+      );
       return;
     }
     next();

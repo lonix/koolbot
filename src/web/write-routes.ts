@@ -47,6 +47,10 @@ import {
   type BotStatusPool,
 } from "../content/statuses.js";
 import { requireCsrf } from "./csrf.js";
+import { FLASH_MAX, truncateFlash, wantsJson } from "./http-flash.js";
+// Re-exported so existing callers/tests can keep importing these from the
+// write router; the canonical home is `./http-flash.js` (issue #612).
+export { truncateFlash, wantsJson };
 import { PROTECTED_KEYS } from "./bootstrap-vars.js";
 import {
   requireAdminRoleMiddleware,
@@ -71,8 +75,6 @@ import {
 } from "./admin-views.js";
 
 type Flash = { type: "ok" | "warn" | "err"; text: string };
-
-const FLASH_MAX = 500;
 
 /**
  * Maximum lengths for user-supplied free text (issue #508). Each cap is
@@ -120,10 +122,6 @@ export function firstLengthError(
   return null;
 }
 
-export function truncateFlash(text: string): string {
-  return text.length > FLASH_MAX ? `${text.slice(0, FLASH_MAX - 1)}…` : text;
-}
-
 function flashRedirect(res: Response, path: string, flash: Flash): void {
   // Mirror the renderer's 500-char cap on the way out so the redirect
   // URL itself can't balloon to header/URI limits on a noisy failure.
@@ -132,30 +130,6 @@ function flashRedirect(res: Response, path: string, flash: Flash): void {
     msg: truncateFlash(flash.text),
   }).toString();
   res.redirect(303, `${path}?${qs}`);
-}
-
-/**
- * Whether the client wants a JSON reply instead of the usual 303 flash
- * redirect. The Settings page's per-section Save is progressively enhanced to
- * submit via `fetch()` (issue #555) so the page no longer reloads and jumps to
- * the top; that request advertises itself with `X-Requested-With: fetch` (and
- * `Accept: application/json`). A plain form POST — the no-JS fallback — sends
- * neither and keeps the redirect path.
- */
-export function wantsJson(req: {
-  get(name: string): string | string[] | undefined;
-}): boolean {
-  // Header values are compared case-insensitively: media types (RFC 9110)
-  // and our `fetch` sentinel are both case-insensitive, so a client sending
-  // `Accept: Application/JSON` must still get the JSON reply.
-  const header = (name: string): string => {
-    const raw = req.get(name);
-    return (Array.isArray(raw) ? raw.join(",") : (raw ?? "")).toLowerCase();
-  };
-  if (header("X-Requested-With") === "fetch") {
-    return true;
-  }
-  return header("Accept").includes("application/json");
 }
 
 /**
