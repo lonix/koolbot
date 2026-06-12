@@ -51,6 +51,7 @@ import {
 } from "../services/rewind-service.js";
 import { recordAudit } from "./audit.js";
 import { renderSignedOut } from "./views.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 function asyncHandler(
   fn: (req: AuthenticatedRequest, res: Response) => Promise<void>,
@@ -430,7 +431,9 @@ export function createUserRouter(
       } catch (err) {
         result = "failure";
         errorMessage = err instanceof Error ? err.message : String(err);
-        logger.error("Failed to save user timezone", err);
+        logger.error(
+          `Failed to save user timezone: ${sanitizeForLog(errorMessage)}`,
+        );
       }
 
       await recordAudit(session, {
