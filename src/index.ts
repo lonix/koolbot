@@ -27,6 +27,8 @@ import { VoiceChannelAnnouncer } from "./services/voice-channel-announcer.js";
 import { VoiceChannelTruncationService } from "./services/voice-channel-truncation.js";
 import { MessageActivityTracker } from "./services/message-activity-tracker.js";
 import { MessageActivityCleanupService } from "./services/message-activity-cleanup.js";
+import { ReactionActivityTracker } from "./services/reaction-activity-tracker.js";
+import { PollParticipationTracker } from "./services/poll-participation-tracker.js";
 import { CommandAuditCleanupService } from "./services/command-audit-cleanup.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
@@ -103,6 +105,9 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
+    // Required to receive messagePollVoteAdd events for poll-participation
+    // tracking (#570). The events still only fire for guild polls.
+    GatewayIntentBits.GuildMessagePolls,
   ],
   partials: [Partials.Message, Partials.Reaction],
 });
@@ -539,6 +544,8 @@ let voiceChannelAnnouncer: VoiceChannelAnnouncer;
 let voiceChannelTruncation: VoiceChannelTruncationService;
 let messageActivityTracker: MessageActivityTracker;
 let messageActivityCleanup: MessageActivityCleanupService;
+let reactionActivityTracker: ReactionActivityTracker;
+let pollParticipationTracker: PollParticipationTracker;
 let scheduledAnnouncementService: ScheduledAnnouncementService;
 let channelInitializer: ChannelInitializer;
 let startupMigrator: StartupMigrator;
@@ -562,6 +569,8 @@ try {
   voiceChannelTruncation = VoiceChannelTruncationService.getInstance(client);
   messageActivityTracker = MessageActivityTracker.getInstance(client);
   messageActivityCleanup = MessageActivityCleanupService.getInstance(client);
+  reactionActivityTracker = ReactionActivityTracker.getInstance(client);
+  pollParticipationTracker = PollParticipationTracker.getInstance(client);
   scheduledAnnouncementService =
     ScheduledAnnouncementService.getInstance(client);
   channelInitializer = ChannelInitializer.getInstance(client);
@@ -649,6 +658,8 @@ async function initializeServices(): Promise<void> {
     await voiceChannelTruncation.initialize();
     await messageActivityTracker.initialize();
     await messageActivityCleanup.initialize();
+    await reactionActivityTracker.initialize();
+    await pollParticipationTracker.initialize();
     await voiceChannelAnnouncer.start();
     await scheduledAnnouncementService.start();
     await channelInitializer.initializeChannels(
@@ -896,6 +907,28 @@ client.on(Events.MessageCreate, async (message) => {
     await messageActivityTracker.handleMessageCreate(message);
   } catch (error) {
     logger.error("Error handling messageCreate:", error);
+  }
+});
+
+// Handle reactions for per-user given/received activity tracking (#570).
+// Gating (enabled, bot/DM, excluded channels) lives in the tracker.
+client.on(Events.MessageReactionAdd, async (reaction, user) => {
+  recordDiscordEvent("messageReactionAdd");
+  try {
+    await reactionActivityTracker.handleReactionAdd(reaction, user);
+  } catch (error) {
+    logger.error("Error handling messageReactionAdd:", error);
+  }
+});
+
+// Handle native-poll votes for per-user participation tracking (#570).
+// Gating (enabled, DM/bot) lives in the tracker.
+client.on(Events.MessagePollVoteAdd, async (pollAnswer, userId) => {
+  recordDiscordEvent("messagePollVoteAdd");
+  try {
+    await pollParticipationTracker.handlePollVoteAdd(pollAnswer, userId);
+  } catch (error) {
+    logger.error("Error handling messagePollVoteAdd:", error);
   }
 });
 

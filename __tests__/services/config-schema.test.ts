@@ -193,15 +193,18 @@ describe('Config Schema', () => {
       'polls.enabled': false,
       'leaderboard_roles.enabled': false,
       'messagetracking.enabled': false,
+      'reactiontracking.enabled': false,
 
       // ─── Sub-features that default off (auxiliary opt-ins) ──────────
       'voicechannels.presets.enabled': false,
       'voicetracking.stats.top.enabled': false,
       'voicetracking.stats.user.enabled': false,
       'voicetracking.seen.enabled': false,
+      'voicetracking.companions.enabled': false,
       'voicetracking.announcements.enabled': false,
       'voicetracking.cleanup.enabled': false,
       'messagetracking.cleanup.enabled': false,
+      'polls.participation.enabled': false,
 
       // ─── Sub-features that default on (rule 2: parent-gated) ────────
       'voicechannels.controlpanel.enabled': true,

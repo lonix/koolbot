@@ -12,6 +12,17 @@ export interface IVoiceChannelTracking extends Document {
     channelId: string;
     channelName: string;
     otherUsers?: string[]; // Array of other user IDs who were in the channel during this session
+    // Precise per-companion co-presence in seconds — the overlapping interval
+    // between this user and each other user, not the session-level union that
+    // `otherUsers` records. Captured only when `voicetracking.companions.enabled`
+    // is true; omitted otherwise so existing documents are unaffected. (#570)
+    companions?: Array<{ userId: string; seconds: number }>;
+    // Voice "firsts": whether the channel was empty when this user joined
+    // (they were the first occupant), and the set of users already present at
+    // their join (enables "who you most often joined right after"). Captured
+    // only when `voicetracking.companions.enabled` is true. (#570)
+    wasFirst?: boolean;
+    joinedExisting?: string[];
   }>;
   excludedChannels: string[]; // Array of voice channel IDs to exclude from tracking
   // Cleanup-related fields for future use
@@ -45,6 +56,14 @@ const VoiceChannelTrackingSchema = new Schema({
       channelId: { type: String, required: true },
       channelName: { type: String, required: true },
       otherUsers: { type: [String], default: [] },
+      // Optional companion/firsts capture (#570). `default: undefined` keeps
+      // the fields off existing and companion-disabled sessions entirely.
+      companions: {
+        type: [{ userId: String, seconds: Number }],
+        default: undefined,
+      },
+      wasFirst: { type: Boolean },
+      joinedExisting: { type: [String], default: undefined },
     },
   ],
   excludedChannels: { type: [String], default: [] },

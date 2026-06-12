@@ -44,6 +44,7 @@ const ConfigSchema = new Schema<IConfig>(
         "quotes",
         "ratelimit",
         "reactionroles",
+        "reactiontracking",
         "rewind",
         "voicechannels",
         "voicetracking",
