@@ -5,6 +5,7 @@ import { UserNotificationPrefsService } from "./user-notification-prefs-service.
 import { DiscordLogger } from "./discord-logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
+import { RewindService } from "./rewind-service.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -33,6 +34,14 @@ export interface RewindNudgeRunSummary {
   /** Already nudged for this year — duplicate-delivery guard. */
   skippedAlreadySent: number;
   failed: number;
+  /** Immutable completed-year snapshots written this run (#574). */
+  snapshotsCreated: number;
+  /** Snapshots that already existed — idempotent re-run, left untouched. */
+  snapshotsExisting: number;
+  /** Qualifying users with no data worth freezing. */
+  snapshotsSkipped: number;
+  /** Snapshots that failed to write. */
+  snapshotsFailed: number;
 }
 
 function sanitizeCronExpression(expression: string): string {
@@ -208,6 +217,10 @@ export class RewindNudgeService {
         skippedDmsClosed: 0,
         skippedAlreadySent: 0,
         failed: 0,
+        snapshotsCreated: 0,
+        snapshotsExisting: 0,
+        snapshotsSkipped: 0,
+        snapshotsFailed: 0,
       };
 
       const prefsService = UserNotificationPrefsService.getInstance();
@@ -297,17 +310,80 @@ export class RewindNudgeService {
         }
       }
 
+      // Freeze each qualifying user's recap for the wrapping-up year into
+      // an immutable snapshot (#574). The end-of-year cron runs in late
+      // December, so `year` is the current UTC year that's essentially
+      // done; once it rolls over, `getSummary` serves this frozen copy.
+      // This runs independently of DM delivery — opted-out / DM-closed
+      // users still get their year preserved — and is idempotent, so a
+      // re-run leaves existing snapshots untouched.
+      await this.snapshotQualifyingUsers(qualifying, guildId, year, summary);
+
       logger.info(
         `Rewind nudge complete: year=${summary.year} qualifying=${summary.qualifying} ` +
           `sent=${summary.sent} opted_out=${summary.skippedOptOut} ` +
           `already_sent=${summary.skippedAlreadySent} ` +
-          `dms_closed=${summary.skippedDmsClosed} failed=${summary.failed}`,
+          `dms_closed=${summary.skippedDmsClosed} failed=${summary.failed} ` +
+          `snapshots_created=${summary.snapshotsCreated} ` +
+          `snapshots_existing=${summary.snapshotsExisting} ` +
+          `snapshots_skipped=${summary.snapshotsSkipped} ` +
+          `snapshots_failed=${summary.snapshotsFailed}`,
       );
 
       await this.logSummary(summary);
       return summary;
     } finally {
       this.isRunning = false;
+    }
+  }
+
+  /**
+   * Persist a frozen `RewindSnapshot` for each qualifying user for `year`
+   * (#574). This runs inside the end-of-year cron (default Dec 30), so
+   * `year` is the current UTC year that is wrapping up — `getSummary`
+   * recomputes it live rather than serving an earlier snapshot. Errors are
+   * isolated per user — one bad snapshot must not abort the rest or crash
+   * the cron. Each user's timezone is applied so the frozen recap matches
+   * what they'd see live.
+   */
+  private async snapshotQualifyingUsers(
+    qualifying: Array<{ userId: string; username: string; totalTime: number }>,
+    guildId: string,
+    year: number,
+    summary: RewindNudgeRunSummary,
+  ): Promise<void> {
+    const rewindService = RewindService.getInstance(this.client);
+    const prefsService = UserNotificationPrefsService.getInstance();
+
+    for (const user of qualifying) {
+      try {
+        const timezone = await prefsService.getTimezone(user.userId, guildId);
+        const outcome = await rewindService.snapshotYear(
+          user.userId,
+          guildId,
+          year,
+          timezone,
+        );
+        switch (outcome) {
+          case "created":
+            summary.snapshotsCreated += 1;
+            break;
+          case "exists":
+            summary.snapshotsExisting += 1;
+            break;
+          case "skipped":
+            summary.snapshotsSkipped += 1;
+            break;
+          default:
+            summary.snapshotsFailed += 1;
+        }
+      } catch (error) {
+        summary.snapshotsFailed += 1;
+        logger.error(
+          `Error snapshotting rewind for user ${user.userId}:`,
+          error,
+        );
+      }
     }
   }
 
@@ -354,7 +430,9 @@ export class RewindNudgeService {
         `Year ${summary.year} · qualifying: ${summary.qualifying} · ` +
         `sent: ${summary.sent} · opted out: ${summary.skippedOptOut} · ` +
         `already sent: ${summary.skippedAlreadySent} · ` +
-        `DMs closed: ${summary.skippedDmsClosed} · failed: ${summary.failed}`;
+        `DMs closed: ${summary.skippedDmsClosed} · failed: ${summary.failed} · ` +
+        `snapshots: ${summary.snapshotsCreated} new / ` +
+        `${summary.snapshotsExisting} kept / ${summary.snapshotsFailed} failed`;
       await discordLogger.logCronSuccess("Rewind Nudge", message);
     } catch (error) {
       logger.error(
