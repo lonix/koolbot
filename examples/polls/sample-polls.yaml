@@ -1,0 +1,67 @@
+# =============================================================================
+# KoolBot — Sample Poll Library
+# =============================================================================
+#
+# This is a starting point for server admins who want to seed their poll
+# question bank via the "Import from URL" feature.
+#
+# HOW TO USE IT
+#   1. Host this file somewhere on the import allowlist. By default KoolBot
+#      only fetches from:
+#        - raw.githubusercontent.com
+#        - gist.githubusercontent.com
+#      (Operators can widen this with the POLL_IMPORT_ALLOWED_HOSTS env var.)
+#      The easiest path: commit it to a GitHub repo or gist and copy the
+#      "Raw" URL.
+#   2. In the Web UI go to Polls -> Import from URL (or use /poll import-url)
+#      and paste the raw URL.
+#   3. KoolBot validates every entry, skips duplicates (matched by question
+#      text), and copies the rest into your local library.
+#
+# THE RULES (enforced on import — invalid entries are skipped, not fatal)
+#   - question:    required, max 300 characters
+#   - answers:     required, 2 to 10 options, each option max 55 characters
+#   - multiselect: optional, defaults to false (lets voters pick >1 answer)
+#   - tags:        optional, free-form labels for your own organization
+#
+# Once imported, a Schedule decides WHEN and WHERE these get posted, and the
+# bot rotates through them while avoiding anything used within the cooldown
+# window (polls.cooldown_days, default 7).
+# =============================================================================
+
+polls:
+  # --- Classic icebreakers --------------------------------------------------
+  - question: "What's your favorite programming language?"
+    answers: ["JavaScript", "Python", "Go", "Rust", "I only write YAML"]
+    multiselect: false
+    tags: ["tech", "icebreaker"]
+
+  - question: "What's your favorite season?"
+    answers: ["Spring", "Summer", "Fall", "Winter"]
+    multiselect: false
+    tags: ["general", "icebreaker"]
+
+  - question: "Best meal of the day?"
+    answers: ["Breakfast", "Lunch", "Dinner", "The 2am one"]
+    multiselect: false
+    tags: ["food", "icebreaker"]
+
+  # --- A multi-select example -----------------------------------------------
+  # Set multiselect: true when more than one answer can be true at once.
+  - question: "Which of these do you actually enjoy? (pick all that apply)"
+    answers: ["Mondays", "Meetings", "Group projects", "None of these"]
+    multiselect: true
+    tags: ["general", "multiselect-demo"]
+
+  # --- A this-or-that dilemma example ---------------------------------------
+  # Keep answers short — they must fit inside Discord's 55-char option cap.
+  - question: "Would you rather have unlimited coffee or unlimited sleep?"
+    answers: ["Unlimited coffee", "Unlimited sleep"]
+    multiselect: false
+    tags: ["dilemma", "this-or-that"]
+
+  # --- A nerdy one ----------------------------------------------------------
+  - question: "Tabs or spaces?"
+    answers: ["Tabs", "Spaces", "Tabs that insert spaces", "I use an IDE, idc"]
+    multiselect: false
+    tags: ["tech", "holy-war"]
