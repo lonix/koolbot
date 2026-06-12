@@ -12,7 +12,10 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not cancel in-progress runs on main: a cancelled analyze uploads no
+  # results, so the default branch never receives the "finding is gone" signal
+  # and fixed alerts stay open. PR/branch runs can still be superseded.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
