@@ -1,0 +1,335 @@
+# =============================================================================
+# Two Maidens One Chalice — House Dilemma Compendium
+# =============================================================================
+#
+# A curated bag of cursed, absurd, and unapologetically nerdy "would you
+# rather" dilemmas for the Two Maidens One Chalice server.
+#
+# House rules baked into every entry:
+#   - Exactly two horns to every dilemma. No fence-sitting.
+#   - multiselect: false, always. You pick ONE. Choose your fighter.
+#   - Each answer kept under Discord's 55-character cap.
+#
+# Import via Polls -> Import from URL (host it on a raw GitHub URL).
+# Re-importing is safe: duplicates (matched by question text) are skipped.
+# =============================================================================
+
+polls:
+  # --- The classics (body horror division) ----------------------------------
+  - question: "Would you rather lose an arm or lose a leg?"
+    answers: ["Lose an arm", "Lose a leg"]
+    multiselect: false
+    tags: ["dilemma", "classic"]
+
+  - question: "Would you rather have fingers for toes or toes for fingers?"
+    answers: ["Fingers for toes", "Toes for fingers"]
+    multiselect: false
+    tags: ["dilemma", "cursed"]
+
+  - question: "Would you rather sweat mayonnaise or cry chunky milk?"
+    answers: ["Sweat mayonnaise", "Cry chunky milk"]
+    multiselect: false
+    tags: ["dilemma", "degenerate", "cursed"]
+
+  - question: "Would you rather have teeth that regrow as toenails or hair that grows as spaghetti?"
+    answers: ["Toenail teeth", "Spaghetti hair"]
+    multiselect: false
+    tags: ["dilemma", "cursed"]
+
+  - question: "Would you rather have one giant hand or two tiny T-rex arms?"
+    answers: ["One giant hand", "Two tiny T-rex arms"]
+    multiselect: false
+    tags: ["dilemma", "absurd"]
+
+  - question: "Would you rather have nostrils that whistle when you breathe or knees that creak in Morse code?"
+    answers: ["Whistling nostrils", "Morse-code knees"]
+    multiselect: false
+    tags: ["dilemma", "absurd"]
+
+  - question: "Would you rather permanently smell burnt toast or permanently taste pennies?"
+    answers: ["Smell burnt toast", "Taste pennies"]
+    multiselect: false
+    tags: ["dilemma", "cursed"]
+
+  - question: "Would you rather have a belly button that dispenses lint or one that dispenses warm cheese?"
+    answers: ["Lint dispenser", "Warm cheese dispenser"]
+    multiselect: false
+    tags: ["dilemma", "degenerate", "cursed"]
+
+  # --- Nerd division: programming --------------------------------------------
+  - question: "Would you rather debug someone else's regex forever or write Java without an IDE forever?"
+    answers: ["Eternal regex hell", "Java in Notepad forever"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "programming"]
+
+  - question: "Would you rather every bug be a race condition or every bug be off-by-one?"
+    answers: ["Only race conditions", "Only off-by-one"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "programming"]
+
+  - question: "Would you rather merge to main on Friday at 5pm or rebase a 200-commit branch by hand?"
+    answers: ["Friday 5pm deploy", "Manual 200-commit rebase"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "programming"]
+
+  - question: "Would you rather inherit code with zero comments or code with confidently wrong comments?"
+    answers: ["No comments at all", "Confidently wrong ones"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "programming"]
+
+  - question: "Would you rather code only in production or only review your own PRs?"
+    answers: ["Live in production", "Approve my own PRs"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "programming"]
+
+  - question: "Would you rather have semicolons be mandatory everywhere or banned everywhere?"
+    answers: ["Semicolons mandatory", "Semicolons banned"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "holy-war"]
+
+  - question: "Would you rather your only IDE be vim with no exit or emacs with no save?"
+    answers: ["Vim, can't quit", "Emacs, can't save"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "holy-war"]
+
+  - question: "Would you rather all your floats be slightly wrong or all your timezones be UTC-7 lies?"
+    answers: ["Cursed floats", "Lying timezones"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "programming"]
+
+  # --- Nerd division: sci-fi / fantasy / gaming ------------------------------
+  - question: "Would you rather take the One Ring on a 6-month walk or sit the Iron Throne for one day?"
+    answers: ["Carry the One Ring", "Sit the Iron Throne"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "fantasy"]
+
+  - question: "Would you rather pilot a Gundam with no manual or a Star Destroyer with no crew?"
+    answers: ["Solo Gundam", "Empty Star Destroyer"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "scifi"]
+
+  - question: "Would you rather be a level 1 character in a level 99 world or level 99 in a level 1 world?"
+    answers: ["Lvl 1 in a hard world", "Lvl 99 in a baby world"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "gaming"]
+
+  - question: "Would you rather permanently respawn at the last save or never be able to save at all?"
+    answers: ["Always respawn", "No saves ever"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "gaming"]
+
+  - question: "Would you rather fight one Balrog or one hundred angry Ewoks?"
+    answers: ["One Balrog", "100 angry Ewoks"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "fantasy"]
+
+  - question: "Would you rather know the exact day you die or the exact cause but not when?"
+    answers: ["Know the day", "Know the cause"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "philosophy"]
+
+  - question: "Would you rather have a lightsaber that only cuts butter or a wand that only casts 'mild inconvenience'?"
+    answers: ["Butter lightsaber", "Inconvenience wand"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "absurd"]
+
+  - question: "Would you rather be stuck in a roguelike with permadeath or an MMO with permanent lag?"
+    answers: ["Permadeath roguelike", "Permanent-lag MMO"]
+    multiselect: false
+    tags: ["dilemma", "nerd", "gaming"]
+
+  # --- Degenerate division ---------------------------------------------------
+  - question: "Would you rather always be 4 minutes late or always be 20 minutes early for everything?"
+    answers: ["Always 4 min late", "Always 20 min early"]
+    multiselect: false
+    tags: ["dilemma", "degenerate"]
+
+  - question: "Would you rather your search history be public or your group chat be read aloud at a funeral?"
+    answers: ["Public search history", "Group chat at a funeral"]
+    multiselect: false
+    tags: ["dilemma", "degenerate"]
+
+  - question: "Would you rather sneeze every time you lie or hiccup every time you think about it?"
+    answers: ["Sneeze when lying", "Hiccup when thinking it"]
+    multiselect: false
+    tags: ["dilemma", "degenerate"]
+
+  - question: "Would you rather only communicate in voice notes or only in reaction GIFs forever?"
+    answers: ["Voice notes only", "Reaction GIFs only"]
+    multiselect: false
+    tags: ["dilemma", "degenerate"]
+
+  - question: "Would you rather have autocorrect that swaps in your ex's name or one that adds 'lol' to everything?"
+    answers: ["Ex's name everywhere", "'lol' on everything"]
+    multiselect: false
+    tags: ["dilemma", "degenerate"]
+
+  - question: "Would you rather fart glitter silently or burp confetti loudly?"
+    answers: ["Silent glitter farts", "Loud confetti burps"]
+    multiselect: false
+    tags: ["dilemma", "degenerate", "absurd"]
+
+  - question: "Would you rather everyone hear your inner monologue or you hear everyone else's?"
+    answers: ["They hear mine", "I hear everyone's"]
+    multiselect: false
+    tags: ["dilemma", "degenerate", "philosophy"]
+
+  - question: "Would you rather have a phone at 1% that never dies or 100% that dies in an hour?"
+    answers: ["1% forever", "100% then dead"]
+    multiselect: false
+    tags: ["dilemma", "degenerate"]
+
+  - question: "Would you rather be ruthlessly roasted by your best friend or quietly disappointed by your mom?"
+    answers: ["Roasted by best friend", "Mom is disappointed"]
+    multiselect: false
+    tags: ["dilemma", "degenerate"]
+
+  # --- Absurd division -------------------------------------------------------
+  - question: "Would you rather fight one horse-sized duck or one hundred duck-sized horses?"
+    answers: ["One horse-sized duck", "100 duck-sized horses"]
+    multiselect: false
+    tags: ["dilemma", "absurd", "classic"]
+
+  - question: "Would you rather have a pet that's a cat with human hands or a dog that maintains eye contact 24/7?"
+    answers: ["Cat with human hands", "Always-staring dog"]
+    multiselect: false
+    tags: ["dilemma", "absurd", "cursed"]
+
+  - question: "Would you rather every door you open creak like a haunted house or slam like a sitcom exit?"
+    answers: ["Haunted-house creak", "Sitcom slam"]
+    multiselect: false
+    tags: ["dilemma", "absurd"]
+
+  - question: "Would you rather have a tiny orchestra play whenever you're sad or a kazoo solo whenever you're proud?"
+    answers: ["Sad tiny orchestra", "Proud kazoo solo"]
+    multiselect: false
+    tags: ["dilemma", "absurd"]
+
+  - question: "Would you rather have legs as long as your arms or arms as long as your legs?"
+    answers: ["Short arm-legs", "Long leg-arms"]
+    multiselect: false
+    tags: ["dilemma", "absurd", "cursed"]
+
+  - question: "Would you rather be followed by a polite seagull narrating your life or a rude pigeon judging it?"
+    answers: ["Polite narrating seagull", "Rude judging pigeon"]
+    multiselect: false
+    tags: ["dilemma", "absurd"]
+
+  - question: "Would you rather everything you touch turn slightly damp or slightly sticky?"
+    answers: ["Slightly damp", "Slightly sticky"]
+    multiselect: false
+    tags: ["dilemma", "absurd", "cursed"]
+
+  - question: "Would you rather speak only in rhymes or sing every third sentence?"
+    answers: ["Only rhymes", "Sing every 3rd line"]
+    multiselect: false
+    tags: ["dilemma", "absurd"]
+
+  - question: "Would you rather have a microwave that screams or a fridge that whispers your sins?"
+    answers: ["Screaming microwave", "Whispering sin fridge"]
+    multiselect: false
+    tags: ["dilemma", "absurd", "cursed"]
+
+  - question: "Would you rather summon a single pizza slice on command or refill any cup with lukewarm soup?"
+    answers: ["One pizza slice on call", "Infinite lukewarm soup"]
+    multiselect: false
+    tags: ["dilemma", "absurd", "food"]
+
+  # --- Philosophy / brain-melt division --------------------------------------
+  - question: "Would you rather know how everyone secretly sees you or never know what anyone thinks again?"
+    answers: ["Know how they see me", "Never know again"]
+    multiselect: false
+    tags: ["dilemma", "philosophy"]
+
+  - question: "Would you rather relive your best day on loop or never remember it happened?"
+    answers: ["Loop the best day", "Forget it forever"]
+    multiselect: false
+    tags: ["dilemma", "philosophy"]
+
+  - question: "Would you rather be the smartest person in a dumb world or the dumbest in a genius world?"
+    answers: ["Smartest, dumb world", "Dumbest, genius world"]
+    multiselect: false
+    tags: ["dilemma", "philosophy", "nerd"]
+
+  - question: "Would you rather have unlimited money but no friends or amazing friends but constant debt?"
+    answers: ["Rich and alone", "Broke but beloved"]
+    multiselect: false
+    tags: ["dilemma", "philosophy"]
+
+  - question: "Would you rather always say exactly what you think or never be able to speak first?"
+    answers: ["Always brutally honest", "Never speak first"]
+    multiselect: false
+    tags: ["dilemma", "philosophy"]
+
+  - question: "Would you rather be famous for something embarrassing or invisible despite doing something great?"
+    answers: ["Famous, embarrassing", "Invisible, great"]
+    multiselect: false
+    tags: ["dilemma", "philosophy"]
+
+  # --- Food crimes division --------------------------------------------------
+  - question: "Would you rather every drink be room temperature or every meal be exactly one bite too small?"
+    answers: ["Room-temp drinks", "One bite too small"]
+    multiselect: false
+    tags: ["dilemma", "food", "degenerate"]
+
+  - question: "Would you rather only eat foods that start with the letter S or never eat anything crunchy again?"
+    answers: ["Only 'S' foods", "No crunch ever"]
+    multiselect: false
+    tags: ["dilemma", "food"]
+
+  - question: "Would you rather pineapple be mandatory on all pizza or ketchup mandatory on all pasta?"
+    answers: ["Pineapple on all pizza", "Ketchup on all pasta"]
+    multiselect: false
+    tags: ["dilemma", "food", "cursed"]
+
+  - question: "Would you rather have cereal that's always soggy or coffee that's always slightly too cold?"
+    answers: ["Forever-soggy cereal", "Always-cold coffee"]
+    multiselect: false
+    tags: ["dilemma", "food", "degenerate"]
+
+  - question: "Would you rather every snack be the last chip in the bag or every drink be backwash?"
+    answers: ["Only the last chip", "Only backwash"]
+    multiselect: false
+    tags: ["dilemma", "food", "degenerate", "cursed"]
+
+  # --- Internet / very online division ---------------------------------------
+  - question: "Would you rather lose every password monthly or get tagged in every cringe photo ever taken?"
+    answers: ["Lose all passwords", "Tagged in every cringe pic"]
+    multiselect: false
+    tags: ["dilemma", "degenerate", "online"]
+
+  - question: "Would you rather have read receipts always on or typing indicators that never turn off?"
+    answers: ["Read receipts forced on", "Eternal typing dots"]
+    multiselect: false
+    tags: ["dilemma", "online"]
+
+  - question: "Would you rather every meme you post be 3 years late or every hot take be 3 years too early?"
+    answers: ["Always late memes", "Always early takes"]
+    multiselect: false
+    tags: ["dilemma", "online", "nerd"]
+
+  - question: "Would you rather your camera turn on at the worst moment or your mic unmute at the worst moment?"
+    answers: ["Camera betrays you", "Mic betrays you"]
+    multiselect: false
+    tags: ["dilemma", "online", "degenerate"]
+
+  - question: "Would you rather only browse with 47 pop-ups or only with a 2-second delay on every click?"
+    answers: ["47 pop-ups forever", "2s delay on everything"]
+    multiselect: false
+    tags: ["dilemma", "online", "nerd"]
+
+  # --- Final boss division ---------------------------------------------------
+  - question: "Would you rather know one secret about everyone or have everyone know one secret about you?"
+    answers: ["Know one of theirs", "They know one of mine"]
+    multiselect: false
+    tags: ["dilemma", "philosophy", "final-boss"]
+
+  - question: "Would you rather fight the version of you from 5 years ago or the one from 5 years ahead?"
+    answers: ["Past me", "Future me"]
+    multiselect: false
+    tags: ["dilemma", "philosophy", "final-boss"]
+
+  - question: "Would you rather restart this exact life with all memories or start a random new one blank?"
+    answers: ["Replay this with memory", "Random blank restart"]
+    multiselect: false
+    tags: ["dilemma", "philosophy", "final-boss"]
