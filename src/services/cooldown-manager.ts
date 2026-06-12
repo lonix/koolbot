@@ -189,6 +189,13 @@ export class CooldownManager {
       return false;
     }
 
+    // Persist the pruned array when some timestamps expired so a user who
+    // keeps hitting the limit (and never calls trackCommandExecution) doesn't
+    // accumulate stale timestamps until the periodic sweep runs.
+    if (recentCommands.length !== userCommands.length) {
+      this.rateLimits.set(userId, recentCommands);
+    }
+
     return recentCommands.length >= maxCommands;
   }
 

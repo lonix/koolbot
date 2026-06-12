@@ -314,6 +314,20 @@ describe('CooldownManager', () => {
       expect(rateLimitsOf(cooldownManager).has('user1')).toBe(false);
     });
 
+    it('prunes expired timestamps in-place on isRateLimited without trackCommandExecution', () => {
+      cooldownManager.trackCommandExecution('user1', 60); // t=0
+      jest.advanceTimersByTime(40000);
+      cooldownManager.trackCommandExecution('user1', 60); // t=40s
+      expect(rateLimitsOf(cooldownManager).get('user1')).toHaveLength(2);
+
+      // Advance so only the second timestamp remains in the window.
+      jest.advanceTimersByTime(30000); // t=70s, window cutoff = 10s
+      expect(cooldownManager.isRateLimited('user1', 5, 60)).toBe(false);
+
+      // The expired first timestamp must have been written back out.
+      expect(rateLimitsOf(cooldownManager).get('user1')).toHaveLength(1);
+    });
+
     it('periodically sweeps cooldown entries for inactive users', () => {
       cooldownManager.setCooldown('user1', 'command1');
       // Observe the cooldown window so the sweep knows the cutoff.
