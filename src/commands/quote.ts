@@ -1,7 +1,17 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  GuildMember,
+  PermissionFlagsBits,
+  AttachmentBuilder,
+} from "discord.js";
 import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
 import logger from "../utils/logger.js";
+
+// Hard cap on a restore upload. A quote backup is small text; this stops a
+// misclicked giant attachment from being streamed into memory.
+const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 
 /**
  * Normalize a Discord user ID from various formats to a clean numeric ID
@@ -69,7 +79,62 @@ export const data = new SlashCommandBuilder()
           .setDescription("The new author of the quote")
           .setRequired(false),
       ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("export")
+      .setDescription("Admin: download a backup of all quotes (incl. votes)"),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("import")
+      .setDescription("Admin: restore quotes from a backup file")
+      .addAttachmentOption((option) =>
+        option
+          .setName("file")
+          .setDescription("A backup file produced by /quote export")
+          .setRequired(true),
+      )
+      .addBooleanOption((option) =>
+        option
+          .setName("rebuild")
+          .setDescription(
+            "Also purge and rebuild the quote channel after importing",
+          )
+          .setRequired(false),
+      ),
+  )
+  .addSubcommand((subcommand) =>
+    subcommand
+      .setName("reset")
+      .setDescription(
+        "Admin: purge the quote channel and rebuild it from the database",
+      ),
   );
+
+/**
+ * Whether the invoking guild member has the Administrator permission.
+ * Mirrors the gating used by `/config`; returns false defensively when the
+ * member object or permission bitfield is unavailable.
+ */
+function invokerIsAdmin(
+  member: ChatInputCommandInteraction["member"],
+): boolean {
+  if (!member) return false;
+  if (member instanceof GuildMember) {
+    return member.permissions.has(PermissionFlagsBits.Administrator);
+  }
+  const raw = (member as { permissions?: unknown }).permissions;
+  if (typeof raw !== "string") return false;
+  try {
+    return (
+      (BigInt(raw) & PermissionFlagsBits.Administrator) ===
+      PermissionFlagsBits.Administrator
+    );
+  } catch {
+    return false;
+  }
+}
 
 export async function execute(
   interaction: ChatInputCommandInteraction,
@@ -81,6 +146,12 @@ export async function execute(
       await handleAdd(interaction);
     } else if (subcommand === "edit") {
       await handleEdit(interaction);
+    } else if (subcommand === "export") {
+      await handleExport(interaction);
+    } else if (subcommand === "import") {
+      await handleImport(interaction);
+    } else if (subcommand === "reset") {
+      await handleReset(interaction);
     }
   } catch (error) {
     logger.error("Error executing quote command:", error);
@@ -223,4 +294,124 @@ async function handleEdit(
     content: "✅ Quote updated successfully!",
     ephemeral: true,
   });
+}
+
+async function handleExport(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (!invokerIsAdmin(interaction.member)) {
+    await interaction.reply({
+      content: "❌ This command requires the Administrator permission.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const backup = await quoteService.exportQuotes();
+  const json = JSON.stringify(backup, null, 2);
+  const file = new AttachmentBuilder(Buffer.from(json, "utf-8"), {
+    name: `quotes-backup-${new Date().toISOString().slice(0, 10)}.json`,
+  });
+
+  await interaction.editReply({
+    content: `✅ Exported ${backup.quotes.length} quote${
+      backup.quotes.length === 1 ? "" : "s"
+    }. Keep this file safe — you can restore it with \`/quote import\`.`,
+    files: [file],
+  });
+}
+
+async function handleImport(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (!invokerIsAdmin(interaction.member)) {
+    await interaction.reply({
+      content: "❌ This command requires the Administrator permission.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const attachment = interaction.options.getAttachment("file", true);
+  const rebuild = interaction.options.getBoolean("rebuild") ?? false;
+
+  if (attachment.size > MAX_IMPORT_BYTES) {
+    await interaction.reply({
+      content: `❌ Backup file is too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB).`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  let payload: unknown;
+  try {
+    const response = await fetch(attachment.url);
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    payload = JSON.parse(await response.text());
+  } catch (error) {
+    logger.error("Failed to read quote backup attachment:", error);
+    await interaction.editReply({
+      content:
+        "❌ Could not read the backup file. Make sure it's a valid JSON file produced by `/quote export`.",
+    });
+    return;
+  }
+
+  const result = await quoteService.importQuotes(payload);
+
+  let summary = `✅ Imported ${result.imported}, skipped ${result.skipped}.`;
+  if (result.errors.length > 0) {
+    summary += ` First error: ${result.errors[0]}`;
+  }
+
+  if (rebuild && result.imported > 0) {
+    try {
+      const manager = QuoteChannelManager.getInstance(interaction.client);
+      const { reposted } = await manager.resetChannel();
+      summary += ` Rebuilt the quote channel (${reposted} quotes re-posted).`;
+    } catch (error) {
+      logger.error("Failed to rebuild quote channel after import:", error);
+      summary +=
+        " Import succeeded but the channel rebuild failed — run `/quote reset` to retry.";
+    }
+  }
+
+  await interaction.editReply({ content: summary });
+}
+
+async function handleReset(
+  interaction: ChatInputCommandInteraction,
+): Promise<void> {
+  if (!invokerIsAdmin(interaction.member)) {
+    await interaction.reply({
+      content: "❌ This command requires the Administrator permission.",
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    const manager = QuoteChannelManager.getInstance(interaction.client);
+    const { reposted } = await manager.resetChannel();
+    await interaction.editReply({
+      content: `✅ Quote channel rebuilt: ${reposted} quote${
+        reposted === 1 ? "" : "s"
+      } re-posted with their saved vote tallies.`,
+    });
+  } catch (error) {
+    logger.error("Failed to reset quote channel:", error);
+    await interaction.editReply({
+      content: `❌ Failed to rebuild the quote channel: ${
+        error instanceof Error ? error.message : "Unknown error"
+      }`,
+    });
+  }
 }

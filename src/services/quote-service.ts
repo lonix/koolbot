@@ -1,4 +1,11 @@
 import { Model, Document, model } from "mongoose";
+import logger from "../utils/logger.js";
+
+/** A Mongo ObjectId is a 24-character hex string. Matching with a regex avoids
+ * importing `mongoose.Types` (which the test suite's mongoose mock omits). */
+function isValidObjectId(id: string): boolean {
+  return /^[a-f\d]{24}$/i.test(id);
+}
 import { quoteSchema } from "../database/schema.js";
 import { ConfigService } from "./config-service.js";
 import { CooldownManager } from "./cooldown-manager.js";
@@ -39,6 +46,36 @@ export interface IQuote extends Document {
   addedAt: Date;
   likes: number;
   dislikes: number;
+}
+
+/** Bumped if the export shape ever changes in a backwards-incompatible way. */
+export const QUOTE_EXPORT_VERSION = 1;
+
+/** One quote in a backup file. `id` is the original Mongo `_id` so it can be
+ * preserved across a reinstall (it is what the quote embed footer shows). */
+export interface QuoteExportEntry {
+  id?: string;
+  content: string;
+  authorId: string;
+  addedById: string;
+  channelId: string;
+  messageId: string;
+  likes: number;
+  dislikes: number;
+  createdAt?: string;
+  addedAt?: string;
+}
+
+export interface QuoteExport {
+  version: number;
+  exportedAt: string;
+  quotes: QuoteExportEntry[];
+}
+
+export interface QuoteImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
 }
 
 export class QuoteService {
@@ -180,6 +217,121 @@ export class QuoteService {
     messageId: string,
   ): Promise<void> {
     await this.model.findByIdAndUpdate(quoteId, { messageId });
+  }
+
+  /**
+   * Persist the live 👍/👎 tallies for the quote posted as `messageId`.
+   *
+   * The reaction handlers only ever know the Discord message ID, so the
+   * lookup is by `messageId` rather than `_id`. This is what makes votes
+   * "stick": without it the counts live only on the Discord message and are
+   * lost the moment the channel is re-synced (e.g. after a reinstall).
+   */
+  async setVoteCountsByMessageId(
+    messageId: string,
+    likes: number,
+    dislikes: number,
+  ): Promise<void> {
+    if (!messageId) return;
+    await this.model.findOneAndUpdate(
+      { messageId },
+      { likes: Math.max(0, likes), dislikes: Math.max(0, dislikes) },
+    );
+  }
+
+  /**
+   * Serialise every quote (including its vote tallies) into a backup
+   * structure suitable for JSON export. The original `_id` is preserved as
+   * `id` so a restore can reproduce the same quote IDs shown in embed footers.
+   */
+  async exportQuotes(): Promise<QuoteExport> {
+    const quotes = await this.model.find().sort({ createdAt: 1 });
+    return {
+      version: QUOTE_EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      quotes: quotes.map((q) => ({
+        id: q._id.toString(),
+        content: q.content,
+        authorId: q.authorId,
+        addedById: q.addedById,
+        channelId: q.channelId,
+        messageId: q.messageId,
+        likes: q.likes ?? 0,
+        dislikes: q.dislikes ?? 0,
+        createdAt: q.createdAt?.toISOString(),
+        addedAt: q.addedAt?.toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Ingest a backup produced by {@link exportQuotes}. Entries whose original
+   * `id` (or identical content+author) already exist are skipped, so a
+   * restore is idempotent and safe to re-run. Vote tallies are restored as-is.
+   */
+  async importQuotes(payload: unknown): Promise<QuoteImportResult> {
+    const result: QuoteImportResult = { imported: 0, skipped: 0, errors: [] };
+
+    const source = payload as Partial<QuoteExport> | null | undefined;
+    if (!source || !Array.isArray(source.quotes)) {
+      result.errors.push("Invalid backup: expected { quotes: [...] }");
+      return result;
+    }
+
+    for (let i = 0; i < source.quotes.length; i++) {
+      const entry = source.quotes[i];
+      if (!entry || typeof entry.content !== "string" || !entry.content) {
+        result.errors.push(`Quote ${i + 1}: missing content`);
+        result.skipped++;
+        continue;
+      }
+      if (!entry.authorId || !entry.addedById) {
+        result.errors.push(`Quote ${i + 1}: missing author or addedBy`);
+        result.skipped++;
+        continue;
+      }
+
+      try {
+        // Skip if the original id already exists (re-running a restore) or an
+        // identical quote (same text + author) is already stored.
+        const validId = Boolean(entry.id) && isValidObjectId(entry.id as string);
+        const duplicate = await this.model.findOne(
+          validId
+            ? { _id: entry.id }
+            : { content: entry.content, authorId: entry.authorId },
+        );
+        if (duplicate) {
+          result.skipped++;
+          continue;
+        }
+
+        await this.model.create({
+          // Preserve the original _id when valid so footer IDs survive a
+          // reinstall; otherwise let Mongo assign a fresh one.
+          ...(validId ? { _id: entry.id } : {}),
+          content: entry.content,
+          authorId: entry.authorId,
+          addedById: entry.addedById,
+          channelId: entry.channelId || "imported",
+          // messageId is required by the schema; the channel re-sync overwrites
+          // it with the real message ID once the quote is re-posted.
+          messageId: entry.messageId || `imported-${entry.id ?? i}`,
+          createdAt: entry.createdAt ? new Date(entry.createdAt) : new Date(),
+          addedAt: entry.addedAt ? new Date(entry.addedAt) : new Date(),
+          likes: Math.max(0, entry.likes ?? 0),
+          dislikes: Math.max(0, entry.dislikes ?? 0),
+        });
+        result.imported++;
+      } catch (error) {
+        logger.error(`Error importing quote ${i + 1}:`, error);
+        result.errors.push(
+          `Quote ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        );
+        result.skipped++;
+      }
+    }
+
+    return result;
   }
 
   async editQuote(

@@ -56,8 +56,10 @@ describe('QuoteChannelManager', () => {
       expect(manager.initialize.length).toBe(0);
     });
 
-    it('postQuote should accept 4 parameters', () => {
-      expect(manager.postQuote.length).toBe(4);
+    it('postQuote should accept 4 required parameters (plus an optional votes arg)', () => {
+      // quoteId, content, authorId, addedById are required; the 5th `votes`
+      // param is optional and used when restoring tallies on re-sync.
+      expect(manager.postQuote.length).toBe(5);
     });
 
     it('deleteQuoteMessage should accept message ID', () => {
