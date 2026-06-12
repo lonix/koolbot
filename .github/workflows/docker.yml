@@ -85,6 +85,12 @@ jobs:
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v6
+        env:
+          # Emit OCI annotations on both the per-platform manifests and the
+          # image index. GHCR reads the package description from the index
+          # annotation for multi-arch images, so "index" is required for the
+          # description to show up on the GitHub Packages page.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -100,6 +106,15 @@ jobs:
             org.opencontainers.image.description=A Discord bot with various features
             maintainer=lonix
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          # metadata-action builds the annotations output from the
+          # `annotations` input (not `labels`), so the custom description must
+          # be repeated here to land in steps.meta.outputs.annotations — which
+          # is what gets attached to the manifest index and read by GHCR.
+          annotations: |
+            org.opencontainers.image.title=koolbot
+            org.opencontainers.image.description=A Discord bot with various features
+            maintainer=lonix
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Build and push Docker image
         id: build
@@ -110,6 +125,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: mode=max
