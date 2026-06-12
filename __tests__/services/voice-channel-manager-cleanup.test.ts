@@ -321,6 +321,64 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
     });
   });
 
+  describe("pending ownership-transfer cleanup (issue #540)", () => {
+    function seedPendingTransfer(channelId: string): jest.Mock {
+      // Seed a pending ownership-transfer timer for the channel and return a
+      // spy standing in for the real timer handle so we can assert it's cleared.
+      const timer = setTimeout(() => {}, 60_000) as unknown as ReturnType<
+        typeof setTimeout
+      >;
+      (manager as any).ownershipTransferTimers.set(channelId, {
+        timer,
+        originalOwnerId: "owner-id",
+      });
+      return jest.fn();
+    }
+
+    it("cancels a pending ownership transfer when cleanupEmptyChannel deletes the channel", async () => {
+      manager.setCustomChannelName("channel-id", "Custom Channel Name");
+      (manager as any).userChannels.set("owner-id", mockChannel);
+      mockMembers.clear();
+      Object.defineProperty(mockChannel, "members", {
+        value: mockMembers as Collection<string, GuildMember>,
+        writable: true,
+      });
+
+      seedPendingTransfer("channel-id");
+      const clearSpy = jest.spyOn(global, "clearTimeout");
+
+      await (manager as any).cleanupEmptyChannel(mockChannel as VoiceChannel);
+
+      // The timer must be cancelled and dropped so it never fires on the
+      // now-deleted channel (DiscordAPIError 10003).
+      expect(clearSpy).toHaveBeenCalled();
+      expect((manager as any).ownershipTransferTimers.has("channel-id")).toBe(
+        false,
+      );
+      clearSpy.mockRestore();
+    });
+
+    it("cancels a pending ownership transfer when cleanupUserChannel deletes the channel", async () => {
+      (manager as any).userChannels.set("owner-id", mockChannel);
+      mockMembers.clear();
+      Object.defineProperty(mockChannel, "members", {
+        value: mockMembers as Collection<string, GuildMember>,
+        writable: true,
+      });
+
+      seedPendingTransfer("channel-id");
+      const clearSpy = jest.spyOn(global, "clearTimeout");
+
+      await (manager as any).cleanupUserChannel("owner-id");
+
+      expect(clearSpy).toHaveBeenCalled();
+      expect((manager as any).ownershipTransferTimers.has("channel-id")).toBe(
+        false,
+      );
+      clearSpy.mockRestore();
+    });
+  });
+
   describe("Custom name tracking cleanup", () => {
     it("should clean up custom name tracking when channel is deleted", async () => {
       // Setup: Channel has custom name
