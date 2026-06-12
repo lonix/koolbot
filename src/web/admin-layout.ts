@@ -7,6 +7,7 @@
 
 import type { ConfigSchema } from "../services/config-schema.js";
 import { getInactivityWindowMs } from "./session.js";
+import { THEME } from "./theme.js";
 
 // Re-exported from session.ts so the renderer and the cookie middleware
 // share a single source of truth for the inactivity sliding window.
@@ -143,8 +144,9 @@ export interface AdminPageOptions {
 
 const STYLE = [
   "*,*::before,*::after{box-sizing:border-box}",
-  "body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#0f1115;color:#e4e6eb}",
-  "a{color:#6ea8fe;text-decoration:none}",
+  // Core palette is shared with the pre-auth pages via THEME (issue #569).
+  `body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:${THEME.bg};color:${THEME.text}}`,
+  `a{color:${THEME.link};text-decoration:none}`,
   "a:hover{text-decoration:underline}",
   ".banner{background:#1f2937;border-bottom:1px solid #2d3748;padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem}",
   ".banner .left{display:flex;gap:.75rem;align-items:center}",
