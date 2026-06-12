@@ -13,7 +13,6 @@ import {
   Partials,
   AuditLogEvent,
 } from "discord.js";
-import { config as dotenvConfig } from "dotenv";
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
 import { ConfigService } from "./services/config-service.js";
@@ -57,8 +56,6 @@ import {
   setVoiceSessionsProvider,
 } from "./web/metrics.js";
 import mongoose from "mongoose";
-
-dotenvConfig();
 
 // Validate critical environment variables
 const missingVars = getMissingRequiredEnv();
