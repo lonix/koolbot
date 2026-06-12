@@ -121,6 +121,17 @@ export interface RewindSummary {
  */
 export const SNAPSHOT_SCHEMA_VERSION = 1;
 
+/** How many voice companions the Rewind card renders (#567). */
+export const TOP_COMPANIONS_SHOWN = 5;
+
+/**
+ * Pull this many times `TOP_COMPANIONS_SHOWN` candidates before resolving
+ * names, so companions whose id can't be named anywhere (#606) can be
+ * dropped and backfilled from the next-ranked companion instead of leaving
+ * a gap in the card.
+ */
+const COMPANION_CANDIDATE_MULTIPLIER = 4;
+
 interface RawSession {
   startTime: Date;
   endTime?: Date;
@@ -549,15 +560,14 @@ export class RewindService {
 
       // Top voice companions (#567) replace the old "Top channels" card:
       // with dynamic VCs the ephemeral per-session room names are noise, so
-      // we surface *who* the user spent time with instead.
-      const topCompanions: RewindCompanion[] = computeTopCompanions(
+      // we surface *who* the user spent time with instead. We pull a few
+      // extra candidates beyond the 5 shown so that any id we can't name at
+      // all gets skipped (#606) and backfilled from the next-ranked
+      // companion, rather than leaving a "Unknown user" hole in the card.
+      const companionCandidates = computeTopCompanions(
         sessions,
-        5,
-      ).map((c) => ({
-        userId: c.userId,
-        displayName: this.resolveUserName(guildId, c.userId),
-        totalSeconds: c.totalSeconds,
-      }));
+        TOP_COMPANIONS_SHOWN * COMPANION_CANDIDATE_MULTIPLIER,
+      );
       const peakDay = computePeakDay(sessions, dayZone);
       const longestSession = computeLongestSession(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
@@ -585,12 +595,33 @@ export class RewindService {
         weeklyJourney,
         text,
         snapshotYears,
+        storedCompanionNames,
       ] = await Promise.all([
         this.computeAnnualRank(userId, start, end, totalSeconds),
         this.computeWeeklyJourney(userId, start, end),
         this.computeTextActivity(userId, guildId, start, end, dayZone),
         this.collectSnapshotYears(userId, guildId),
+        this.fetchStoredUsernames(companionCandidates.map((c) => c.userId)),
       ]);
+
+      // Resolve companion ids → names now that the stored-username fallback
+      // is loaded. Skip any id we still can't name and take the first
+      // TOP_COMPANIONS_SHOWN that resolve (#606).
+      const topCompanions: RewindCompanion[] = [];
+      for (const c of companionCandidates) {
+        if (topCompanions.length >= TOP_COMPANIONS_SHOWN) break;
+        const displayName = this.resolveUserName(
+          guildId,
+          c.userId,
+          storedCompanionNames,
+        );
+        if (!displayName) continue;
+        topCompanions.push({
+          userId: c.userId,
+          displayName,
+          totalSeconds: c.totalSeconds,
+        });
+      }
 
       // The picker should offer any year the user has either kind of data,
       // plus any snapshotted year — those must stay navigable even after
@@ -980,21 +1011,62 @@ export class RewindService {
   }
 
   /**
-   * Resolve a companion's user id to a display name (#567), preferring the
-   * guild nickname, then the global username, both read from the client
-   * cache like `resolveChannelName`. A cache miss can mean the user left
-   * the guild, but also simply that partial member caching (gateway
-   * intents / cache limits) never populated them — so we fall back to a
-   * neutral placeholder rather than asserting they've gone.
+   * Resolve a companion's user id to a display name (#567, #606), trying in
+   * order: live guild nickname → cached global username → the username we
+   * already persist on the companion's `VoiceChannelTracking` doc. The
+   * stored-username fallback (passed in via `storedUsernames`) is what
+   * rescues the common cases the client caches miss — a companion who has
+   * left the guild, or one partial member caching (gateway intents / cache
+   * limits) never populated.
+   *
+   * Returns `null` when no name can be found anywhere; the caller drops
+   * those ids rather than rendering a useless "Unknown user" row (#606).
    */
-  private resolveUserName(guildId: string, userId: string): string {
+  private resolveUserName(
+    guildId: string,
+    userId: string,
+    storedUsernames?: Map<string, string>,
+  ): string | null {
     const member = this.client.guilds?.cache
       ?.get(guildId)
       ?.members?.cache?.get(userId);
     if (member?.displayName) return member.displayName;
     const user = this.client.users?.cache?.get(userId);
     if (user?.username) return user.username;
-    return "Unknown user";
+    const stored = storedUsernames?.get(userId);
+    if (stored) return stored;
+    return null;
+  }
+
+  /**
+   * Look up the last-known stored username for each id from its
+   * `VoiceChannelTracking` doc (#606). Used as the companion-name fallback
+   * when the client caches don't have the user. Only the two needed fields
+   * are projected so we don't drag each companion's full session history
+   * into memory. A query failure degrades to an empty map (companions then
+   * fall through to "skip") rather than failing the whole recap.
+   */
+  private async fetchStoredUsernames(
+    userIds: string[],
+  ): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    if (userIds.length === 0) return names;
+    try {
+      const docs = await VoiceChannelTracking.find({
+        userId: { $in: userIds },
+      })
+        .select("userId username")
+        .lean<Array<{ userId: string; username?: string }>>();
+      for (const doc of docs) {
+        if (doc.username) names.set(doc.userId, doc.username);
+      }
+    } catch (error) {
+      logger.warn(
+        "RewindService.fetchStoredUsernames failed; companions without a cached name will be skipped:",
+        error,
+      );
+    }
+    return names;
   }
 
   /**
