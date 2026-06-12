@@ -245,6 +245,88 @@ describe("renderSettingsPage", () => {
     expect(html).not.toContain('<td style="white-space:nowrap">');
   });
 
+  it("shows the warnBelow warning when a value is below the threshold (#575)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.cleanup.retention.detailed_sessions_days",
+              current: 30,
+              defaultValue: 400,
+              type: "number",
+              description: "",
+              category: "voicetracking",
+              warnBelow: {
+                value: 366,
+                message: "Rewind needs 366 days of detailed data.",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain('class="settings-warn"');
+    expect(html).toContain("Rewind needs 366 days of detailed data.");
+  });
+
+  it("hides the warnBelow warning at or above the threshold (#575)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.cleanup.retention.detailed_sessions_days",
+              current: 400,
+              defaultValue: 400,
+              type: "number",
+              description: "",
+              category: "voicetracking",
+              warnBelow: {
+                value: 366,
+                message: "Rewind needs 366 days of detailed data.",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).not.toContain('class="settings-warn"');
+    expect(html).not.toContain("Rewind needs 366 days of detailed data.");
+  });
+
+  it("does not warn on an unset (empty/null) value despite a warnBelow hint (#575)", () => {
+    for (const current of ["", null, undefined] as const) {
+      const html = renderSettingsPage({
+        ...COMMON,
+        groups: [
+          {
+            category: "voicetracking",
+            rows: [
+              {
+                key: "voicetracking.cleanup.retention.detailed_sessions_days",
+                current,
+                defaultValue: 400,
+                type: "number",
+                description: "",
+                category: "voicetracking",
+                warnBelow: {
+                  value: 366,
+                  message: "Rewind needs 366 days of detailed data.",
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(html).not.toContain('class="settings-warn"');
+    }
+  });
+
   it("renders the action bar and import textarea", () => {
     const html = renderSettingsPage({ ...COMMON, groups: [] });
     expect(html).toContain('action="/admin/settings/reload"');

@@ -3,6 +3,7 @@ import {
   defaultConfig,
   settingsMetadata,
   categoryMetadata,
+  REWIND_RETENTION_MIN_DAYS,
 } from '../../src/services/config-schema.js';
 
 describe('Config Schema', () => {
@@ -24,6 +25,17 @@ describe('Config Schema', () => {
       expect(defaultConfig['voicetracking.cleanup.retention.detailed_sessions_days']).toBeGreaterThan(0);
       expect(defaultConfig['voicetracking.cleanup.retention.monthly_summaries_months']).toBeGreaterThan(0);
       expect(defaultConfig['voicetracking.cleanup.retention.yearly_summaries_years']).toBeGreaterThan(0);
+    });
+
+    it('keeps Rewind-relevant retention defaults at or above a full year (#575)', () => {
+      // Rewind is built live from detailed voice sessions and per-message
+      // detail; out-of-the-box defaults must cover a full year-in-review.
+      expect(
+        defaultConfig['voicetracking.cleanup.retention.detailed_sessions_days'],
+      ).toBeGreaterThanOrEqual(REWIND_RETENTION_MIN_DAYS);
+      expect(
+        defaultConfig['messagetracking.cleanup.retention.detailed_days'],
+      ).toBeGreaterThanOrEqual(REWIND_RETENTION_MIN_DAYS);
     });
 
     it('should have reasonable default values for quote system', () => {
@@ -113,6 +125,20 @@ describe('Config Schema', () => {
           mismatches.push(key);
       }
       expect(mismatches).toEqual([]);
+    });
+
+    it('attaches a warnBelow hint at the Rewind threshold to both detailed-retention keys (#575)', () => {
+      const voice =
+        settingsMetadata[
+          'voicetracking.cleanup.retention.detailed_sessions_days'
+        ];
+      const message =
+        settingsMetadata['messagetracking.cleanup.retention.detailed_days'];
+      for (const meta of [voice, message]) {
+        expect(meta.warnBelow).toBeDefined();
+        expect(meta.warnBelow?.value).toBe(REWIND_RETENTION_MIN_DAYS);
+        expect(meta.warnBelow?.message.trim()).not.toBe('');
+      }
     });
 
     it('does not have stale entries for keys that no longer exist in defaultConfig', () => {
