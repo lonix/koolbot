@@ -1,6 +1,29 @@
 # Changelog
 
-## [1.0.1](https://github.com/lonix/koolbot/compare/v1.0.0...v1.0.1) (2026-06-12)
+## [1.1.0](https://github.com/lonix/koolbot/compare/v1.0.0...v1.1.0) (2026-06-12)
+
+
+### 🚀 Features
+
+* per-user display timezone preference ([#549](https://github.com/lonix/koolbot/issues/549)) ([97c2f50](https://github.com/lonix/koolbot/commit/97c2f50629dfba9921765852a0d0a4503ce81529))
+
+
+### 🐛 Bug Fixes
+
+* cancel pending ownership transfer when channel is cleaned up ([#547](https://github.com/lonix/koolbot/issues/547)) ([254580a](https://github.com/lonix/koolbot/commit/254580a1bc5008d7a1aad144239f68ed84970eff))
+* enforce minimum entropy for WEBUI_SESSION_SECRET at startup ([#548](https://github.com/lonix/koolbot/issues/548)) ([2ff71ec](https://github.com/lonix/koolbot/commit/2ff71eccd662a28cf429ee8e51ab645c989cdb86))
+* memory leak in CooldownManager by evicting expired entries ([#544](https://github.com/lonix/koolbot/issues/544)) ([90291c0](https://github.com/lonix/koolbot/commit/90291c03cf1d74fd75e0f3b528b54220a82063b1))
+* unmanaged-channel scanner deleting renamed channels after ownership transfer ([#543](https://github.com/lonix/koolbot/issues/543)) ([9535f2b](https://github.com/lonix/koolbot/commit/9535f2b7070ce39607f9b6e95fb8db9581b9fd10))
+
+
+### ♻️ Refactoring
+
+* remove redundant dotenvConfig() calls ([#546](https://github.com/lonix/koolbot/issues/546)) ([c786f60](https://github.com/lonix/koolbot/commit/c786f607142b66124fe9823f1d822f2b2b47bf15))
+
+
+### 📚 Documentation
+
+* add example poll libraries (starter + Two Maidens dilemmas) ([#550](https://github.com/lonix/koolbot/issues/550)) ([e0f28cc](https://github.com/lonix/koolbot/commit/e0f28cc2b56177ead7b7977767047fe5d947f0fd))
 
 
 ### ⚙️ CI/CD
