@@ -542,7 +542,17 @@ export class VoiceChannelManager {
           // Clear the timer from the map
           this.ownershipTransferTimers.delete(channel.id);
         } catch (error) {
-          logger.error("Error during scheduled ownership transfer:", error);
+          // The channel may have been deleted during the grace period (e.g. the
+          // remaining members all left and cleanup removed it). channels.fetch
+          // throws DiscordAPIError 10003 rather than returning null, so handle
+          // that case as a no-op instead of an error (issue #540).
+          if (isUnknownChannelError(error)) {
+            logger.warn(
+              `Channel ${channel.id} no longer exists, skipping ownership transfer`,
+            );
+          } else {
+            logger.error("Error during scheduled ownership transfer:", error);
+          }
           this.ownershipTransferTimers.delete(channel.id);
         }
       }, OWNERSHIP_TRANSFER_GRACE_SECONDS * 1000);
@@ -1164,6 +1174,9 @@ export class VoiceChannelManager {
     this.userChannels.delete(userId);
     this.customChannelNames.delete(channelId);
     this.ownershipQueue.delete(channelId);
+    // Cancel any pending ownership-transfer timer so it doesn't fire on the
+    // now-deleted channel (issue #540).
+    this.cancelOwnershipTransfer(channelId);
   }
 
   /**
@@ -1229,6 +1242,10 @@ export class VoiceChannelManager {
 
       // Clean up live status
       this.liveChannels.delete(channel.id);
+
+      // Cancel any pending ownership-transfer timer so it doesn't fire on the
+      // now-deleted channel (issue #540).
+      this.cancelOwnershipTransfer(channel.id);
 
       // Clean up waiting room (fire-and-forget after channel deleted to avoid race conditions)
       const waitingRoomId = this.waitingRooms.get(channel.id);

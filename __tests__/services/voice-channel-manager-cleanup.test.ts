@@ -321,6 +321,69 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
     });
   });
 
+  describe("pending ownership-transfer cleanup (issue #540)", () => {
+    function seedPendingTransfer(
+      channelId: string,
+    ): ReturnType<typeof setTimeout> {
+      // Seed a pending ownership-transfer timer for the channel using a
+      // deterministic sentinel handle (no real setTimeout, so no open handle is
+      // left if a test fails early) and return it for assertions.
+      const timer = {
+        __sentinel: channelId,
+      } as unknown as ReturnType<typeof setTimeout>;
+      (manager as any).ownershipTransferTimers.set(channelId, {
+        timer,
+        originalOwnerId: "owner-id",
+      });
+      return timer;
+    }
+
+    it("cancels a pending ownership transfer when cleanupEmptyChannel deletes the channel", async () => {
+      manager.setCustomChannelName("channel-id", "Custom Channel Name");
+      (manager as any).userChannels.set("owner-id", mockChannel);
+      mockMembers.clear();
+      Object.defineProperty(mockChannel, "members", {
+        value: mockMembers as Collection<string, GuildMember>,
+        writable: true,
+      });
+
+      const timer = seedPendingTransfer("channel-id");
+      const clearSpy = jest.spyOn(global, "clearTimeout");
+
+      await (manager as any).cleanupEmptyChannel(mockChannel as VoiceChannel);
+
+      // The specific seeded timer must be cancelled and dropped so it never
+      // fires on the now-deleted channel (DiscordAPIError 10003).
+      expect(clearSpy).toHaveBeenCalledTimes(1);
+      expect(clearSpy).toHaveBeenCalledWith(timer);
+      expect((manager as any).ownershipTransferTimers.has("channel-id")).toBe(
+        false,
+      );
+      clearSpy.mockRestore();
+    });
+
+    it("cancels a pending ownership transfer when cleanupUserChannel deletes the channel", async () => {
+      (manager as any).userChannels.set("owner-id", mockChannel);
+      mockMembers.clear();
+      Object.defineProperty(mockChannel, "members", {
+        value: mockMembers as Collection<string, GuildMember>,
+        writable: true,
+      });
+
+      const timer = seedPendingTransfer("channel-id");
+      const clearSpy = jest.spyOn(global, "clearTimeout");
+
+      await (manager as any).cleanupUserChannel("owner-id");
+
+      expect(clearSpy).toHaveBeenCalledTimes(1);
+      expect(clearSpy).toHaveBeenCalledWith(timer);
+      expect((manager as any).ownershipTransferTimers.has("channel-id")).toBe(
+        false,
+      );
+      clearSpy.mockRestore();
+    });
+  });
+
   describe("Custom name tracking cleanup", () => {
     it("should clean up custom name tracking when channel is deleted", async () => {
       // Setup: Channel has custom name
