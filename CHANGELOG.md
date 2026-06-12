@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/lonix/koolbot/compare/v1.0.0...v1.0.1) (2026-06-12)
+
+
+### ⚙️ CI/CD
+
+* surface OCI description on GHCR and fix release-triggered image builds ([#541](https://github.com/lonix/koolbot/issues/541)) ([4c37477](https://github.com/lonix/koolbot/commit/4c37477ff9535800e8c197812aa16c8d2a81493b))
+
 ## [1.0.0](https://github.com/lonix/koolbot/compare/v0.9.0...v1.0.0) (2026-06-08)
 
 
