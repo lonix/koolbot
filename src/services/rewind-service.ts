@@ -75,6 +75,17 @@ export interface RewindSummary {
   // per-session room names are noise; companions replace it.)
   topCompanions: RewindCompanion[];
   peakDay: { date: string; totalSeconds: number } | null; // ISO date (YYYY-MM-DD)
+  // Single longest contiguous voice session of the year (#568). `date` is
+  // the ISO day the session started, bucketed in the user's timezone like
+  // `peakDay`. `channelName` is the session's stored room name (often
+  // ephemeral under dynamic VCs), null when unknown. Null when the user had
+  // no qualifying session that year.
+  longestSession: {
+    totalSeconds: number;
+    date: string;
+    channelId: string;
+    channelName: string | null;
+  } | null;
   // Text-message activity (#496). Mirrors the voice aggregates above and
   // reads as zero / empty when message tracking is disabled or absent.
   messagesSent: number;
@@ -222,6 +233,48 @@ export function computePeakDay(
     }
   }
   return bestDate ? { date: bestDate, totalSeconds: bestSeconds } : null;
+}
+
+/**
+ * The single longest contiguous voice session of the set (#568). Returns
+ * its duration, the ISO day it started on (bucketed in UTC by default, or
+ * the supplied IANA `timeZone` like `computePeakDay`), and the session's
+ * channel. Returns null when there is no session with positive duration.
+ *
+ * Tie-break: when two sessions are exactly as long, the earliest by
+ * `startTime` wins, so the surfaced date is deterministic.
+ */
+export function computeLongestSession(
+  sessions: RawSession[],
+  timeZone?: string,
+): {
+  totalSeconds: number;
+  date: string;
+  channelId: string;
+  channelName: string | null;
+} | null {
+  let best: RawSession | null = null;
+  let bestSeconds = 0;
+  for (const s of sessions) {
+    const seconds = sessionSeconds(s);
+    if (seconds <= 0) continue;
+    if (
+      seconds > bestSeconds ||
+      (seconds === bestSeconds &&
+        best !== null &&
+        s.startTime.getTime() < best.startTime.getTime())
+    ) {
+      best = s;
+      bestSeconds = seconds;
+    }
+  }
+  if (!best) return null;
+  return {
+    totalSeconds: bestSeconds,
+    date: dayKey(best.startTime, timeZone),
+    channelId: best.channelId,
+    channelName: best.channelName ?? null,
+  };
 }
 
 /**
@@ -385,6 +438,8 @@ export function normalizeSnapshotSummary(
     // since-removed topChannels are simply dropped here.
     topCompanions: s.topCompanions ?? [],
     peakDay: s.peakDay ?? null,
+    // Older snapshots predate the longest-session card (#568).
+    longestSession: s.longestSession ?? null,
     messagesSent: s.messagesSent ?? 0,
     topTextChannels: s.topTextChannels ?? [],
     peakMessageDay: s.peakMessageDay ?? null,
@@ -504,6 +559,7 @@ export class RewindService {
         totalSeconds: c.totalSeconds,
       }));
       const peakDay = computePeakDay(sessions, dayZone);
+      const longestSession = computeLongestSession(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
 
       const accolades = (achievementsDoc?.accolades ?? [])
@@ -559,6 +615,7 @@ export class RewindService {
         daysActive,
         topCompanions,
         peakDay,
+        longestSession,
         messagesSent: text.messagesSent,
         topTextChannels: text.topTextChannels,
         peakMessageDay: text.peakMessageDay,

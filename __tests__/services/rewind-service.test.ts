@@ -67,6 +67,7 @@ const {
   RewindService,
   normalizeSnapshotSummary,
   SNAPSHOT_SCHEMA_VERSION,
+  computeLongestSession,
   computeLongestStreak,
   computePeakDay,
   computeTopCompanions,
@@ -251,6 +252,124 @@ describe("RewindService pure helpers", () => {
       });
       // Without a zone, the two sessions land on separate UTC days.
       expect(computePeakDay(sessions)?.totalSeconds).toBe(3600);
+    });
+  });
+
+  describe("computeLongestSession", () => {
+    it("returns null when there are no sessions", () => {
+      expect(computeLongestSession([])).toBeNull();
+    });
+
+    it("returns null when no session has a positive duration", () => {
+      expect(
+        computeLongestSession([
+          {
+            startTime: new Date("2026-03-15T10:00:00Z"),
+            duration: 0,
+            channelId: "a",
+          },
+        ]),
+      ).toBeNull();
+    });
+
+    it("returns the single session's duration, date and channel", () => {
+      expect(
+        computeLongestSession([
+          {
+            startTime: new Date("2026-03-14T08:00:00Z"),
+            duration: 3600 * 6,
+            channelId: "a",
+            channelName: "General",
+          },
+        ]),
+      ).toEqual({
+        totalSeconds: 3600 * 6,
+        date: "2026-03-14",
+        channelId: "a",
+        channelName: "General",
+      });
+    });
+
+    it("picks the longest of several sessions with its own date", () => {
+      const result = computeLongestSession([
+        {
+          startTime: new Date("2026-01-02T10:00:00Z"),
+          duration: 1800,
+          channelId: "a",
+          channelName: "alpha",
+        },
+        {
+          startTime: new Date("2026-03-14T09:00:00Z"),
+          duration: 3600 * 6,
+          channelId: "b",
+          channelName: "beta",
+        },
+        {
+          startTime: new Date("2026-05-20T10:00:00Z"),
+          duration: 3600 * 2,
+          channelId: "c",
+          channelName: "gamma",
+        },
+      ]);
+      expect(result).toEqual({
+        totalSeconds: 3600 * 6,
+        date: "2026-03-14",
+        channelId: "b",
+        channelName: "beta",
+      });
+    });
+
+    it("falls back to endTime - startTime when duration is absent", () => {
+      const result = computeLongestSession([
+        {
+          startTime: new Date("2026-03-14T09:00:00Z"),
+          endTime: new Date("2026-03-14T12:00:00Z"),
+          channelId: "b",
+        },
+        {
+          startTime: new Date("2026-03-15T09:00:00Z"),
+          duration: 1800,
+          channelId: "a",
+        },
+      ]);
+      expect(result).toEqual({
+        totalSeconds: 3600 * 3,
+        date: "2026-03-14",
+        channelId: "b",
+        channelName: null,
+      });
+    });
+
+    it("keeps the earliest session on a duration tie", () => {
+      const result = computeLongestSession([
+        {
+          startTime: new Date("2026-04-02T10:00:00Z"),
+          duration: 3600,
+          channelId: "late",
+        },
+        {
+          startTime: new Date("2026-04-01T10:00:00Z"),
+          duration: 3600,
+          channelId: "early",
+        },
+      ]);
+      expect(result?.channelId).toBe("early");
+      expect(result?.date).toBe("2026-04-01");
+    });
+
+    it("buckets the date in the supplied timezone (#524)", () => {
+      const result = computeLongestSession(
+        [
+          {
+            startTime: new Date("2026-03-16T02:00:00Z"),
+            duration: 3600 * 4,
+            channelId: "a",
+          },
+        ],
+        "America/New_York",
+      );
+      // 02:00 UTC on the 16th is still the 15th in New York.
+      expect(result?.date).toBe("2026-03-15");
     });
   });
 
@@ -456,6 +575,12 @@ describe("RewindService.getSummary", () => {
     expect(summary!.peakDay).toEqual({
       date: "2026-01-15",
       totalSeconds: 5400,
+    });
+    expect(summary!.longestSession).toEqual({
+      totalSeconds: 3600,
+      date: "2026-01-15",
+      channelId: "general",
+      channelName: "general-vc",
     });
     expect(summary!.longestStreakDays).toBe(2);
     expect(summary!.annualRank).toBe(2);
