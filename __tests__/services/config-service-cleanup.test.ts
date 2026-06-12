@@ -199,5 +199,37 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
       // The genuinely unknown key is still purged.
       expect(deletedKeys).toContain("bogus.setting");
     });
+
+    // Legacy categories that still have an active normalization mapping must
+    // continue to be remapped rather than left in their legacy form.
+    it("should still normalize legacy gamification category to achievements", async () => {
+      mockFind.mockResolvedValue([
+        {
+          // A known legacy key (in knownOldKeys) carrying the legacy category.
+          key: "gamification.enabled",
+          value: true,
+          category: "gamification",
+          description: "Legacy",
+        },
+      ]);
+
+      const service = ConfigService.getInstance();
+      await service.initialize();
+
+      // It should be category-fixed, not deleted.
+      const deletedKeys = mockDeleteOne.mock.calls.map(
+        (call) => (call[0] as { key: string }).key,
+      );
+      expect(deletedKeys).not.toContain("gamification.enabled");
+
+      const updates = mockUpdateOne.mock.calls.map((call) => ({
+        key: (call[0] as { key: string }).key,
+        set: (call[1] as { $set: { category: string } }).$set,
+      }));
+      expect(updates).toContainEqual({
+        key: "gamification.enabled",
+        set: { category: "achievements" },
+      });
+    });
   });
 });

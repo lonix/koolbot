@@ -204,16 +204,22 @@ export class ConfigService {
         correctCategory: string;
       }> = [];
 
-      // Valid categories, derived from the single source of truth shared with
-      // the Config model's schema enum so the two cannot drift apart (#609).
-      const validCategories = new Set<string>(CONFIG_CATEGORIES);
-
       // Category mapping for old to new categories
       const categoryMapping: Record<string, string> = {
         voice_channel: "voicechannels",
         tracking: "voicetracking",
         gamification: "achievements",
       };
+
+      // Valid categories, derived from the single source of truth shared with
+      // the Config model's schema enum so the two cannot drift apart (#609).
+      // Categories that still have an active normalization mapping (e.g. the
+      // legacy `gamification` → `achievements`) are excluded so those rows are
+      // routed through the fix-up below instead of being treated as final.
+      const validCategories = new Set<string>(CONFIG_CATEGORIES);
+      for (const legacyCategory of Object.keys(categoryMapping)) {
+        validCategories.delete(legacyCategory);
+      }
 
       // Find unknown settings and settings with invalid categories
       for (const setting of allSettings) {
