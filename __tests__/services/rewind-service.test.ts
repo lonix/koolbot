@@ -617,7 +617,7 @@ describe("RewindService snapshots (#574)", () => {
       expect(norm.guildId).toBe("g");
       expect(norm.year).toBe(2021);
       expect(norm.totalSeconds).toBe(5);
-      expect(norm.topChannels).toEqual([]);
+      expect(norm.topCompanions).toEqual([]);
       expect(norm.weeklyJourney).toEqual({
         first: null,
         last: null,

@@ -381,7 +381,9 @@ export function normalizeSnapshotSummary(
     totalSeconds: s.totalSeconds ?? 0,
     sessionCount: s.sessionCount ?? 0,
     daysActive: s.daysActive ?? 0,
-    topChannels: s.topChannels ?? [],
+    // Older snapshots predate companions (#567) and any that recorded the
+    // since-removed topChannels are simply dropped here.
+    topCompanions: s.topCompanions ?? [],
     peakDay: s.peakDay ?? null,
     messagesSent: s.messagesSent ?? 0,
     topTextChannels: s.topTextChannels ?? [],
