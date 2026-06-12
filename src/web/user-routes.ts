@@ -476,7 +476,19 @@ export function createUserRouter(
       guildId: session.guildId,
     });
     const currentYear = new Date().getUTCFullYear();
-    const year = parseYearParam(req.params.year, currentYear);
+    // The explicit `/rewind/:year` deep-link must always honour the
+    // requested year (even an empty one), so it falls back to the current
+    // year only when the param is junk. The bare `/rewind` route instead
+    // lands on the most recent year the user actually has data for, so a
+    // visit right after the year rolls over shows a finished recap rather
+    // than the empty new year (#573).
+    const fallbackYear = req.params.year
+      ? currentYear
+      : await RewindService.getInstance(client).getDefaultRewindYear(
+          userId,
+          guildId,
+        );
+    const year = parseYearParam(req.params.year, fallbackYear);
 
     const timezone =
       await UserNotificationPrefsService.getInstance().getTimezone(

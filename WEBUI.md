@@ -784,11 +784,16 @@ lists every notification type with the current state and a checkbox;
 toggling one row is a single POST that records the diff in the audit
 log and PRG-redirects back to the page.
 
-The **Rewind** page defaults to the current calendar year (UTC);
-`/me/rewind/:year` lets you browse past years. A small year picker at
-the top of the page only offers years for which you have data (voice
-sessions, text-message activity, or badges), plus any year that has been
-snapshotted (see below). Years with no data render a friendly empty state.
+The bare **Rewind** page (`/me/rewind`) lands on the most recent year you
+actually have data for, so visiting right after the year rolls over shows
+a finished recap rather than the empty new year (`#573`); a brand-new user
+with no activity anywhere still sees the current year's empty state.
+`/me/rewind/:year` is an exact deep link — it always renders the requested
+year, including the empty state for a year with no data. A small year
+picker at the top of the page only offers years for which you have data
+(voice sessions, text-message activity, or badges), plus any year that has
+been snapshotted (see below), and highlights the year actually shown.
+Years with no data render a friendly empty state.
 Aggregation is on-demand and not cached in v1 — see [`SETTINGS.md`](SETTINGS.md#-rewind-year-in-review)
 for the `rewind.*` keys that control the end-of-year DM nudge.
 
