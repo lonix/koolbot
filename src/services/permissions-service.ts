@@ -5,6 +5,7 @@ import {
 } from "../models/command-permissions.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 export class PermissionsService {
   private static instance: PermissionsService;
@@ -163,7 +164,7 @@ export class PermissionsService {
       this.permissionsCache.set(cacheKey, roleIds);
 
       logger.info(
-        `Set permissions for command ${commandName}: ${roleIds.length} role(s)`,
+        `Set permissions for command ${sanitizeForLog(commandName)}: ${roleIds.length} role(s)`, // codeql[js/log-injection]
       );
     } catch (error) {
       logger.error("Error setting command permissions:", error);
@@ -274,7 +275,9 @@ export class PermissionsService {
     try {
       await CommandPermission.deleteOne({ guildId, commandName });
       this.permissionsCache.delete(`${guildId}:${commandName}`);
-      logger.info(`Cleared all permissions for command ${commandName}`);
+      logger.info(
+        `Cleared all permissions for command ${sanitizeForLog(commandName)}`, // codeql[js/log-injection]
+      );
     } catch (error) {
       logger.error("Error clearing command permissions:", error);
       throw error;

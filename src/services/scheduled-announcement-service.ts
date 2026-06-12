@@ -81,7 +81,10 @@ export class ScheduledAnnouncementService {
       new CronTime(cleanExpression);
       return true;
     } catch (error) {
-      logger.error(`Invalid cron expression: ${expression}`, error);
+      logger.error(
+        `Invalid cron expression: ${sanitizeForLog(expression)}`, // codeql[js/log-injection]
+        error,
+      );
       return false;
     }
   }
@@ -455,7 +458,7 @@ export class ScheduledAnnouncementService {
     // If guildId is provided, verify it matches
     if (guildId && announcement.guildId !== guildId) {
       logger.warn(
-        `Attempted to delete announcement ${announcementId} from wrong guild. Expected: ${announcement.guildId}, Got: ${guildId}`,
+        `Attempted to delete announcement ${sanitizeForLog(announcementId)} from wrong guild. Expected: ${sanitizeForLog(announcement.guildId)}, Got: ${sanitizeForLog(guildId)}`, // codeql[js/log-injection]
       );
       return false;
     }
@@ -469,7 +472,7 @@ export class ScheduledAnnouncementService {
 
     // Delete from database
     await ScheduledAnnouncement.findByIdAndDelete(announcementId);
-    logger.info(`Deleted announcement: ${announcementId}`);
+    logger.info(`Deleted announcement: ${sanitizeForLog(announcementId)}`); // codeql[js/log-injection]
     return true;
   }
 

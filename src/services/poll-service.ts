@@ -284,7 +284,10 @@ export class PollService {
       new CronTime(cleanExpression);
       return true;
     } catch (error) {
-      logger.error(`Invalid cron expression: ${expression}`, error);
+      logger.error(
+        `Invalid cron expression: ${sanitizeForLog(expression)}`, // codeql[js/log-injection]
+        error,
+      );
       return false;
     }
   }
@@ -386,7 +389,7 @@ export class PollService {
       const guild = await this.client.guilds.fetch(schedule.guildId);
       if (!guild) {
         logger.error(
-          `Guild not found with ID: ${schedule.guildId} for schedule ${schedule._id}`,
+          `Guild not found with ID: ${sanitizeForLog(schedule.guildId)} for schedule ${sanitizeForLog(schedule._id)}`,
         );
         return;
       }
@@ -394,7 +397,7 @@ export class PollService {
       const channel = await guild.channels.fetch(schedule.channelId);
       if (!channel || !(channel instanceof TextChannel)) {
         logger.error(
-          `Channel not found or not a text channel: ${schedule.channelId} for schedule ${schedule._id}`,
+          `Channel not found or not a text channel: ${sanitizeForLog(schedule.channelId)} for schedule ${sanitizeForLog(schedule._id)}`, // codeql[js/log-injection]
         );
         return;
       }
@@ -402,7 +405,9 @@ export class PollService {
       // Select a poll item
       const pollItem = await this.selectPollItem(schedule.guildId);
       if (!pollItem) {
-        logger.warn(`No poll items available for guild ${schedule.guildId}`);
+        logger.warn(
+          `No poll items available for guild ${sanitizeForLog(schedule.guildId)}`,
+        );
         return;
       }
 
@@ -439,17 +444,20 @@ export class PollService {
       await schedule.save();
 
       logger.info(
-        `Posted poll "${pollItem.question}" to channel ${schedule.channelId} (schedule ${schedule._id})`,
+        `Posted poll "${sanitizeForLog(pollItem.question)}" to channel ${sanitizeForLog(schedule.channelId)} (schedule ${sanitizeForLog(schedule._id)})`, // codeql[js/log-injection]
       );
     } catch (error) {
-      logger.error(`Error posting poll for schedule ${schedule._id}:`, error);
+      logger.error(
+        `Error posting poll for schedule ${sanitizeForLog(schedule._id)}:`,
+        error,
+      );
     }
   }
 
   private schedulePoll(schedule: IPollSchedule): CronJob | null {
     if (!this.validateCronExpression(schedule.cronSchedule)) {
       logger.error(
-        `Invalid cron schedule for poll ${schedule._id}: ${schedule.cronSchedule}`,
+        `Invalid cron schedule for poll ${sanitizeForLog(schedule._id)}: ${sanitizeForLog(schedule.cronSchedule)}`, // codeql[js/log-injection]
       );
       return null;
     }
@@ -468,7 +476,7 @@ export class PollService {
 
       job.start();
       logger.info(
-        `Scheduled poll ${schedule._id} with cron: ${schedule.cronSchedule}`,
+        `Scheduled poll ${sanitizeForLog(schedule._id)} with cron: ${sanitizeForLog(schedule.cronSchedule)}`, // codeql[js/log-injection]
       );
 
       const nextRun = job.nextDate();
@@ -991,7 +999,7 @@ export class PollService {
 
     if (guildId && schedule.guildId !== guildId) {
       logger.warn(
-        `Attempted to delete schedule ${scheduleId} from wrong guild`,
+        `Attempted to delete schedule ${sanitizeForLog(scheduleId)} from wrong guild`, // codeql[js/log-injection]
       );
       return false;
     }
@@ -1004,7 +1012,7 @@ export class PollService {
     }
 
     await PollSchedule.findByIdAndDelete(scheduleId);
-    logger.info(`Deleted poll schedule: ${scheduleId}`);
+    logger.info(`Deleted poll schedule: ${sanitizeForLog(scheduleId)}`); // codeql[js/log-injection]
     return true;
   }
 
@@ -1096,12 +1104,14 @@ export class PollService {
     }
 
     if (guildId && item.guildId !== guildId) {
-      logger.warn(`Attempted to delete poll item ${itemId} from wrong guild`);
+      logger.warn(
+        `Attempted to delete poll item ${sanitizeForLog(itemId)} from wrong guild`, // codeql[js/log-injection]
+      );
       return false;
     }
 
     await PollItem.findByIdAndDelete(itemId);
-    logger.info(`Deleted poll item: ${itemId}`);
+    logger.info(`Deleted poll item: ${sanitizeForLog(itemId)}`); // codeql[js/log-injection]
     return true;
   }
 
