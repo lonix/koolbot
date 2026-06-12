@@ -582,6 +582,18 @@ describe("RewindService.getDefaultRewindYear (#573)", () => {
     const year = await makeSvc().getDefaultRewindYear("u1", "g1");
     expect(year).toBe(currentYear);
   });
+
+  it("ignores non-finite years from corrupt data instead of returning NaN", async () => {
+    // A snapshot row whose `year` is NaN passes a `typeof === number`
+    // check; it must be filtered out before Math.max so the route fallback
+    // never sees NaN.
+    mockSnapFind.mockReturnValueOnce(lean([{ year: Number.NaN }]));
+    mockAggregateVc.mockResolvedValueOnce([{ _id: currentYear - 1 }]);
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(Number.isFinite(year)).toBe(true);
+    expect(year).toBe(currentYear - 1);
+  });
 });
 
 describe("RewindService snapshots (#574)", () => {

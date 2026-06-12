@@ -591,11 +591,16 @@ export class RewindService {
           this.collectSnapshotYears(userId, guildId),
         ]);
 
+      // Guard against a non-finite year slipping through any collector
+      // (e.g. a corrupt `sentAt`/`earnedAt` yielding `NaN` — which passes a
+      // `typeof === "number"` check). An unfiltered `NaN` would make
+      // `Math.max` return `NaN` and, for the bare route, flow straight
+      // through `parseYearParam` into `getSummary` as "Rewind NaN".
       const years = [
         ...sessionAndAchievementYears,
         ...textYears,
         ...snapshotYears,
-      ];
+      ].filter((y) => Number.isFinite(y));
       // No data anywhere → land on the (empty) current year, preserving
       // the brand-new-user experience. Otherwise pick the newest year with
       // data, which is the current year when it already has activity.
@@ -753,7 +758,13 @@ export class RewindService {
         { recentMessages: 1 },
       ).lean<{ recentMessages?: RawTextMessage[] }>();
       const all = doc?.recentMessages ?? [];
-      return [...new Set(all.map((m) => m.sentAt.getUTCFullYear()))];
+      return [
+        ...new Set(
+          all
+            .map((m) => m.sentAt.getUTCFullYear())
+            .filter((y) => Number.isFinite(y)),
+        ),
+      ];
     } catch (error) {
       logger.warn(
         `RewindService.collectTextActivityYears failed for ${userId}:`,
