@@ -489,24 +489,30 @@ export class RewindService {
       // Top channels: on a guild using dynamic VCs the ephemeral
       // per-session rooms dominate and tell the user nothing, so filter
       // them out and let companions lead (#567). The filter follows the
-      // configured prefix / suffix rather than a hardcoded name.
-      const dynamicVcEnabled = await this.configService.getBoolean(
-        "voicechannels.enabled",
-        false,
-      );
+      // configured prefix / suffix rather than a hardcoded name. Mirror
+      // the feature gate used by ChannelInitializer / VoiceChannelManager,
+      // including the legacy keys, so deployments on older config still
+      // get the filter.
+      const dynamicVcEnabled =
+        (await this.configService.getBoolean("voicechannels.enabled", false)) ||
+        (await this.configService.getBoolean("voice_channel.enabled", false)) ||
+        (await this.configService.getBoolean("ENABLE_VC_MANAGEMENT", false));
       let channelSessions = sessions;
       if (dynamicVcEnabled) {
         const prefix = await this.configService.getString(
           "voicechannels.channel.prefix",
           "🎮",
         );
-        // Mirror VoiceChannelManager's fallback so an unset suffix still
-        // matches the default "'s Room" rooms.
+        // Mirror VoiceChannelManager's suffix resolution (current key,
+        // legacy key, then the default "'s Room") so an unset suffix still
+        // matches the default dynamic rooms.
         const suffix =
           (await this.configService.getString(
             "voicechannels.channel.suffix",
             "",
-          )) || "'s Room";
+          )) ||
+          (await this.configService.getString("voice_channel.suffix", "")) ||
+          "'s Room";
         channelSessions = sessions.filter(
           (s) => !isManagedChannelName(s.channelName, prefix, suffix),
         );
