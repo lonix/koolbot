@@ -172,18 +172,23 @@ export function webErrorStatus(err: unknown): number {
   return 500;
 }
 
-/** Sanitized, user-facing reason keyed off the HTTP status (no internals). */
+/**
+ * Sanitized, user-facing reason keyed off the HTTP status (no internals).
+ * The text is intentionally generic ("request"/"action") rather than
+ * save-specific: this handler covers every WebUI route — GET pages and POST
+ * actions alike — not just the Settings save.
+ */
 export function webErrorText(status: number): string {
   if (status === 413) {
-    return "Save failed — the submitted data was too large.";
+    return "The submitted data was too large.";
   }
   if (status === 400) {
-    return "Save failed — the request was malformed.";
+    return "The request was malformed.";
   }
   if (status >= 400 && status < 500) {
-    return `Save failed — request rejected (${status}).`;
+    return `Request rejected (${status}).`;
   }
-  return "Save failed — an unexpected server error occurred. Please try again.";
+  return "An unexpected server error occurred. Please try again.";
 }
 
 /**

@@ -244,6 +244,27 @@ describe("wantsJson / truncateFlash (re-homed in http-flash, issue #612)", () =>
     expect(wantsJson(makeReq({}))).toBe(false);
   });
 
+  it("falls back to the `header` alias when `get` is absent", () => {
+    // Some Express-like stubs (and our own /me route test mocks) expose only
+    // `.header`, not `.get`. wantsJson must still negotiate correctly.
+    const headerOnly = {
+      header: (name: string) =>
+        name.toLowerCase() === "x-requested-with" ? "fetch" : undefined,
+    };
+    expect(wantsJson(headerOnly)).toBe(true);
+
+    const headerOnlyAccept = {
+      header: (name: string) =>
+        name.toLowerCase() === "accept" ? "application/json" : undefined,
+    };
+    expect(wantsJson(headerOnlyAccept)).toBe(true);
+
+    const headerOnlyPlain = {
+      header: (): string | undefined => undefined,
+    };
+    expect(wantsJson(headerOnlyPlain)).toBe(false);
+  });
+
   it("truncates only when over the cap", () => {
     expect(truncateFlash("short")).toBe("short");
     expect(truncateFlash("y".repeat(600)).length).toBe(500);

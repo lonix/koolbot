@@ -421,8 +421,15 @@ const SETTINGS_SAVE_SCRIPT =
   "return{status:status,json:d,text:t}})})" +
   ".then(function(r){if(save)save.disabled=false;" +
   "if(!r)return;" +
-  "if(r.json&&typeof r.json==='object'){show(form,r.json.type||'ok',r.json.text||'Saved.');return}" +
-  // No JSON body: surface the status plus any readable (tag-stripped) text.
+  // A structured flash (server's happy path AND its error paths) carries a
+  // non-empty `text`; show it, letting the HTTP status decide ok/err when the
+  // server omits an explicit `type`. JSON without usable text (e.g. a proxy's
+  // own envelope) must NOT be mistaken for a successful save, so fall through.
+  "var jt=r.json&&typeof r.json==='object'?r.json.text:null;" +
+  "var okStatus=r.status>=200&&r.status<300;" +
+  "if(typeof jt==='string'&&jt){show(form,(r.json.type)||(okStatus?'ok':'err'),jt);return}" +
+  "if(okStatus){show(form,'ok','Saved.');return}" +
+  // Non-2xx with no usable JSON: surface the status plus any readable text.
   "var detail=(r.text||'').replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim();" +
   "var msg='Save failed ('+r.status+').';" +
   "if(detail)msg+=' '+(detail.length>200?detail.slice(0,199)+'…':detail);" +
