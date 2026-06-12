@@ -381,7 +381,9 @@ describe("PollService", () => {
   });
 
   it("reports a clear error when the request times out", async () => {
-    mockFetch.mockRejectedValue(new DOMException("The operation was aborted", "AbortError"));
+    mockFetch.mockRejectedValue(
+      new DOMException("The operation was aborted", "AbortError"),
+    );
 
     const service = PollService.getInstance({} as never);
 
@@ -497,9 +499,26 @@ describe("PollService", () => {
 
       expect(result.imported).toBe(0);
       expect(result.skipped).toBe(1);
-      expect(result.errors).toEqual([
-        "Poll 1: Answer too long (max 55 chars)",
-      ]);
+      expect(result.errors).toEqual(["Poll 1: Answer too long (max 55 chars)"]);
+      expect(mockPollItemCreate).not.toHaveBeenCalled();
+    });
+
+    it("rejects a non-string question instead of querying with it (NoSQL injection guard)", async () => {
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.importFromString(
+        JSON.stringify({
+          polls: [{ question: { $ne: null }, answers: ["A", "B"] }],
+        }),
+        "guild-1",
+        "user-1",
+      );
+
+      expect(result.imported).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(result.errors).toEqual(["Poll 1: Missing question or answers"]);
+      // The operator object must never reach the duplicate-check query.
+      expect(mockPollItemFindOne).not.toHaveBeenCalled();
       expect(mockPollItemCreate).not.toHaveBeenCalled();
     });
 

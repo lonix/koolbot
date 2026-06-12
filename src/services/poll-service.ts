@@ -723,8 +723,18 @@ export class PollService {
     for (let i = 0; i < pollData.polls.length; i++) {
       const poll = pollData.polls[i];
 
-      // Validate poll data
-      if (!poll.question || !poll.answers || !Array.isArray(poll.answers)) {
+      // Validate poll data. The question and every answer must be plain
+      // strings: the parsed body is untrusted, and a non-string question (e.g.
+      // a YAML/JSON object like `{ $ne: null }`) would otherwise flow into the
+      // `PollItem.findOne` duplicate check as a query operator — a NoSQL
+      // injection sink (CodeQL js/sql-injection). The typeof guards confine it
+      // to primitive strings before it ever reaches the query.
+      if (
+        typeof poll.question !== "string" ||
+        !poll.question ||
+        !Array.isArray(poll.answers) ||
+        !poll.answers.every((a) => typeof a === "string")
+      ) {
         results.errors.push(`Poll ${i + 1}: Missing question or answers`);
         results.skipped++;
         continue;
