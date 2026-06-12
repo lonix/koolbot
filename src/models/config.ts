@@ -1,5 +1,37 @@
 import mongoose, { Document, Schema } from "mongoose";
 
+/**
+ * The complete set of category values a config row may use. This is the single
+ * source of truth for valid categories: it backs the Mongoose enum below and is
+ * reused by ConfigService's cleanup sweep so the two can never drift apart (a
+ * past drift caused valid `polls.*` / `notices.*` settings to be purged as
+ * "unknown" — see issue #609). Some entries are retained purely for backward
+ * compatibility with legacy database rows.
+ */
+export const CONFIG_CATEGORIES = [
+  "achievements",
+  "amikool", // Kept for backward compatibility; key removed but legacy rows may exist
+  "announcements",
+  "core",
+  "digest",
+  "fun", // Kept for backward compatibility; key removed but legacy rows may exist
+  "gamification", // Kept for backward compatibility during migration
+  "help",
+  "leaderboard_roles",
+  "messagetracking",
+  "notices",
+  "ping",
+  "polls",
+  "quotes",
+  "ratelimit",
+  "reactionroles",
+  "reactiontracking",
+  "rewind",
+  "voicechannels",
+  "voicetracking",
+  "wizard", // Kept for backward compatibility; key removed but legacy rows may exist
+] as const;
+
 export interface IConfig extends Document {
   key: string;
   value: string | number | boolean;
@@ -27,29 +59,7 @@ const ConfigSchema = new Schema<IConfig>(
     category: {
       type: String,
       required: true,
-      enum: [
-        "achievements",
-        "amikool", // Kept for backward compatibility; key removed but legacy rows may exist
-        "announcements",
-        "core",
-        "digest",
-        "fun", // Kept for backward compatibility; key removed but legacy rows may exist
-        "gamification", // Kept for backward compatibility during migration
-        "help",
-        "leaderboard_roles",
-        "messagetracking",
-        "notices",
-        "ping",
-        "polls",
-        "quotes",
-        "ratelimit",
-        "reactionroles",
-        "reactiontracking",
-        "rewind",
-        "voicechannels",
-        "voicetracking",
-        "wizard", // Kept for backward compatibility; key removed but legacy rows may exist
-      ],
+      enum: CONFIG_CATEGORIES,
     },
     updatedAt: {
       type: Date,
