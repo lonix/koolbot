@@ -231,7 +231,11 @@ export function computeTopTextChannels(
     .slice(0, limit);
 }
 
-/** The UTC day with the most messages, or null when there are none. */
+/**
+ * The day with the most messages, or null when there are none. Days are
+ * bucketed in UTC by default; passing a valid IANA `timeZone` buckets
+ * them in that zone instead (#524).
+ */
 export function computePeakMessageDay(
   messages: RawTextMessage[],
   timeZone?: string,
@@ -254,9 +258,11 @@ export function computePeakMessageDay(
 }
 
 /**
- * Longest run of consecutive UTC days that contain ≥1 session. Returns
- * the day count and the start/end ISO dates of the winning run. A single
- * day of activity counts as a streak of 1.
+ * Longest run of consecutive days that contain ≥1 session. Returns the
+ * day count and the start/end ISO dates of the winning run. A single day
+ * of activity counts as a streak of 1. Days are bucketed in UTC by
+ * default; passing a valid IANA `timeZone` buckets them in that zone
+ * instead, so the run reflects the user's local midnight (#524).
  */
 export function computeLongestStreak(
   sessions: RawSession[],

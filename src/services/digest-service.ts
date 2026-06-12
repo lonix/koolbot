@@ -285,15 +285,17 @@ export class DigestService {
 
       for (const user of qualifying) {
         try {
-          const prefs = await prefsService.getPrefs(user.userId, guildId);
+          // One read for both the opt-out flag and the display timezone
+          // (used for the week range), so the cron loop stays at a single
+          // prefs query per user even for large guilds (#524).
+          const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
+            user.userId,
+            guildId,
+          );
           if (!prefs.digest) {
             summary.skippedOptOut += 1;
             continue;
           }
-
-          // Render the week range in the user's preferred timezone, or
-          // the server timezone when unset (#524).
-          const timezone = await prefsService.getTimezone(user.userId, guildId);
 
           const previousState = await DigestState.findOne({
             userId: user.userId,

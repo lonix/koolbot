@@ -136,6 +136,35 @@ describe('UserNotificationPrefsService', () => {
     });
   });
 
+  describe('getPrefsWithTimezone', () => {
+    it('returns prefs and timezone from a single read', async () => {
+      findOne.mockResolvedValueOnce({
+        achievements: false,
+        digest: true,
+        rewind: true,
+        timezone: 'Europe/Berlin',
+      });
+      const out = await UserNotificationPrefsService.getInstance().getPrefsWithTimezone('u1', 'g1');
+      expect(out).toEqual({
+        prefs: { achievements: false, digest: true, rewind: true },
+        timezone: 'Europe/Berlin',
+      });
+      expect(findOne).toHaveBeenCalledTimes(1);
+    });
+
+    it('returns defaults + null timezone when no row exists', async () => {
+      findOne.mockResolvedValueOnce(null);
+      const out = await UserNotificationPrefsService.getInstance().getPrefsWithTimezone('u1', 'g1');
+      expect(out).toEqual({ prefs: DEFAULT_PREFS, timezone: null });
+    });
+
+    it('collapses to defaults + null timezone on DB error', async () => {
+      findOne.mockRejectedValueOnce(new Error('mongo down'));
+      const out = await UserNotificationPrefsService.getInstance().getPrefsWithTimezone('u1', 'g1');
+      expect(out).toEqual({ prefs: DEFAULT_PREFS, timezone: null });
+    });
+  });
+
   describe('getTimezone', () => {
     it('returns the stored zone when present', async () => {
       findOne.mockResolvedValueOnce({ timezone: 'Europe/Berlin' });

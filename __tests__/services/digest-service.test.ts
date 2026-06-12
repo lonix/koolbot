@@ -13,9 +13,11 @@ const mockTrackerGetInstance = jest.fn(() => ({
 
 const mockGetPrefs = jest.fn();
 const mockGetTimezone = jest.fn();
+const mockGetPrefsWithTimezone = jest.fn();
 const mockPrefsGetInstance = jest.fn(() => ({
   getPrefs: mockGetPrefs,
   getTimezone: mockGetTimezone,
+  getPrefsWithTimezone: mockGetPrefsWithTimezone,
 }));
 
 const mockAchievementsGetInstance = jest.fn(() => ({}));
@@ -129,6 +131,10 @@ describe("DigestService", () => {
       rewind: true,
     });
     mockGetTimezone.mockResolvedValue(null);
+    mockGetPrefsWithTimezone.mockResolvedValue({
+      prefs: { achievements: true, digest: true, rewind: true },
+      timezone: null,
+    });
     mockDigestStateFindOne.mockResolvedValue(null);
     mockDigestStateFindOneAndUpdate.mockResolvedValue({});
     mockUserAchievementsFindOne.mockResolvedValue(null);
@@ -188,10 +194,9 @@ describe("DigestService", () => {
         // 60 minutes — clears min_active_minutes=30
         { userId: "u1", username: "u1", totalTime: 60 * 60 },
       ]);
-      mockGetPrefs.mockResolvedValue({
-        achievements: true,
-        digest: false,
-        rewind: true,
+      mockGetPrefsWithTimezone.mockResolvedValue({
+        prefs: { achievements: true, digest: false, rewind: true },
+        timezone: null,
       });
 
       const svc: ServiceInstance = DigestService.getInstance(makeClient());
@@ -259,8 +264,8 @@ describe("DigestService", () => {
 
       expect(result!.qualifying).toBe(1);
       expect(result!.sent).toBe(1);
-      expect(mockGetPrefs).toHaveBeenCalledTimes(1);
-      expect(mockGetPrefs).toHaveBeenCalledWith("u1", "guild-1");
+      expect(mockGetPrefsWithTimezone).toHaveBeenCalledTimes(1);
+      expect(mockGetPrefsWithTimezone).toHaveBeenCalledWith("u1", "guild-1");
     });
   });
 });

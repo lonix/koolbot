@@ -72,6 +72,34 @@ export class UserNotificationPrefsService {
   }
 
   /**
+   * Read prefs and timezone in a single query. Callers that need both —
+   * notably the weekly digest cron, which renders the week range in the
+   * user's zone — use this to avoid a second `findOne` per user. Same
+   * defaulting rules as `getPrefs`/`getTimezone` (missing row / error →
+   * all-defaults + null zone).
+   */
+  public async getPrefsWithTimezone(
+    userId: string,
+    guildId: string,
+  ): Promise<{ prefs: NotificationPrefs; timezone: string | null }> {
+    if (!userId || !guildId) {
+      return { prefs: { ...DEFAULT_PREFS }, timezone: null };
+    }
+    try {
+      const row = await UserNotificationPrefs.findOne({ userId, guildId });
+      if (!row) return { prefs: { ...DEFAULT_PREFS }, timezone: null };
+      const tz =
+        typeof row.timezone === "string" && row.timezone.length > 0
+          ? row.timezone
+          : null;
+      return { prefs: rowToPrefs(row), timezone: tz };
+    } catch (err) {
+      logger.error("Failed to load notification prefs + timezone", err);
+      return { prefs: { ...DEFAULT_PREFS }, timezone: null };
+    }
+  }
+
+  /**
    * Apply a partial update. Only keys present in `patch` are written;
    * absent keys keep their prior stored value (or default if no row
    * existed). The merged result is returned so callers can render the
