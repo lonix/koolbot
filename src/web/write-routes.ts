@@ -130,11 +130,14 @@ function flashRedirect(res: Response, path: string, flash: Flash): void {
 export function wantsJson(req: {
   get(name: string): string | string[] | undefined;
 }): boolean {
+  // Header values are compared case-insensitively: media types (RFC 9110)
+  // and our `fetch` sentinel are both case-insensitive, so a client sending
+  // `Accept: Application/JSON` must still get the JSON reply.
   const header = (name: string): string => {
     const raw = req.get(name);
-    return Array.isArray(raw) ? raw.join(",") : (raw ?? "");
+    return (Array.isArray(raw) ? raw.join(",") : (raw ?? "")).toLowerCase();
   };
-  if (header("X-Requested-With").toLowerCase() === "fetch") {
+  if (header("X-Requested-With") === "fetch") {
     return true;
   }
   return header("Accept").includes("application/json");

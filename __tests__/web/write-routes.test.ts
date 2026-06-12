@@ -106,6 +106,10 @@ describe("wantsJson (issue #555)", () => {
     ).toBe(true);
   });
 
+  it("matches application/json case-insensitively (media types per RFC 9110)", () => {
+    expect(wantsJson(fakeReq({ Accept: "Application/JSON" }))).toBe(true);
+  });
+
   it("returns false for a plain form POST (the no-JS fallback)", () => {
     expect(
       wantsJson(
