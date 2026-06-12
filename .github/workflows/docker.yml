@@ -106,6 +106,15 @@ jobs:
             org.opencontainers.image.description=A Discord bot with various features
             maintainer=lonix
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          # metadata-action builds the annotations output from the
+          # `annotations` input (not `labels`), so the custom description must
+          # be repeated here to land in steps.meta.outputs.annotations — which
+          # is what gets attached to the manifest index and read by GHCR.
+          annotations: |
+            org.opencontainers.image.title=koolbot
+            org.opencontainers.image.description=A Discord bot with various features
+            maintainer=lonix
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
       - name: Build and push Docker image
         id: build
