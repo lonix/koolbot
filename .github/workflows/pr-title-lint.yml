@@ -1,0 +1,62 @@
+name: PR Title Lint
+
+# This repository squash-merges pull requests, using the PR title as the
+# resulting commit subject. release-please only counts commits whose subject
+# follows Conventional Commits, so a non-conforming PR title becomes a commit
+# that is silently dropped from the changelog and version bump. This workflow
+# rejects PR titles that are not valid Conventional Commits, keeping the
+# squashed history machine-readable for release-please.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-title:
+    name: Conventional Commit title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate PR title
+        env:
+          # Passed via env (never interpolated into the script) to avoid
+          # template/script injection from untrusted PR titles.
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+
+          # Types kept in sync with changelog-sections in release-please-config.json.
+          types='feat|fix|perf|revert|refactor|docs|deps|test|build|ci|chore'
+
+          # Conventional Commit subject: type, optional scope(s), optional '!', ': ', subject.
+          # The scope group is repeated ('*') so dependabot's double scopes
+          # (e.g. "chore(deps)(deps): ...") are also accepted.
+          pattern="^(${types})(\([a-z0-9 ,./_-]+\))*!?: .+"
+
+          if printf '%s' "$PR_TITLE" | grep -Eq "$pattern"; then
+            echo "✅ Valid Conventional Commit title: $PR_TITLE"
+            exit 0
+          fi
+
+          echo "::error title=Invalid PR title::PR title must follow Conventional Commits."
+          {
+            echo "## ❌ PR title is not a valid Conventional Commit"
+            echo
+            echo "This repo squash-merges using the PR title as the commit subject, and"
+            echo "release-please drops any commit that does not parse as a Conventional"
+            echo "Commit — so a bad title means your change vanishes from the changelog."
+            echo
+            echo "**Got:** \`$PR_TITLE\`"
+            echo
+            echo "**Expected:** \`<type>(<optional scope>): <subject>\`, e.g. \`fix: …\` or \`feat(webui): …\`"
+            echo
+            echo "**Allowed types:** ${types//|/, }"
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

@@ -420,6 +420,15 @@ Add detailed section on writing tests and test coverage expectations.
 - **Reference issues** - Use `Closes #123`, `Fixes #456`, or `Refs #789`
 - **Keep commits focused** - Don't mix refactoring with bug fixes
 
+### PR titles must be conventional commits too
+
+This project **squash-merges** pull requests, so the **PR title** becomes the
+commit subject on `main`. release-please reads those subjects to build the
+changelog and pick the next version — and it silently ignores any subject that
+is not a valid conventional commit. A title like `Fix memory leak` is dropped
+from the release entirely; `fix: prevent memory leak in CooldownManager` is
+not. The `PR Title Lint` workflow enforces this on every PR.
+
 ## Pull Request Process
 
 ### Before Submitting
