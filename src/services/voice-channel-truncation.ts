@@ -414,7 +414,7 @@ export class VoiceChannelTruncationService {
     try {
       const detailedSessionsDays = await this.configService.getNumber(
         "voicetracking.cleanup.retention.detailed_sessions_days",
-        30,
+        400,
       );
       const monthlySummariesMonths = await this.configService.getNumber(
         "voicetracking.cleanup.retention.monthly_summaries_months",
@@ -433,7 +433,7 @@ export class VoiceChannelTruncationService {
     } catch (error) {
       logger.warn("Failed to load retention config, using defaults:", error);
       return {
-        detailedSessionsDays: 30,
+        detailedSessionsDays: 400,
         monthlySummariesMonths: 6,
         yearlySummariesYears: 1,
       };

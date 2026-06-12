@@ -188,6 +188,12 @@ export interface SettingRow {
    * `SettingMetadata.options`.
    */
   options?: SettingOption[];
+  /**
+   * Soft "minimum recommended value" hint. When `current` is a number below
+   * `warnBelow.value`, the settings page renders `warnBelow.message` as a
+   * non-blocking inline warning. Sourced from `SettingMetadata.warnBelow`.
+   */
+  warnBelow?: { value: number; message: string };
 }
 
 export interface SettingsProps extends CommonProps {
@@ -541,6 +547,20 @@ function renderResetButton(key: string): string {
   );
 }
 
+/**
+ * Render the soft "minimum recommended value" warning when a numeric setting
+ * is below its `warnBelow` threshold. Returns an empty string when there's no
+ * hint or the value clears the threshold, so it adds nothing to rows that
+ * don't need it. Shown unconditionally (not gated on a feature toggle) so the
+ * degraded state is visible without editing — and it re-renders after a save.
+ */
+export function renderWarnBelow(r: SettingRow): string {
+  if (!r.warnBelow) return "";
+  const value = typeof r.current === "number" ? r.current : Number(r.current);
+  if (!Number.isFinite(value) || value >= r.warnBelow.value) return "";
+  return `<div class="settings-warn" role="alert" style="margin-top:.4rem;color:#b45309;font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
+}
+
 export function renderSettingsPage(props: SettingsProps): string {
   const csrf = escapeHtml(props.csrfToken);
 
@@ -581,7 +601,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}</td>
+<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}${renderWarnBelow(r)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td class="settings-default">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
