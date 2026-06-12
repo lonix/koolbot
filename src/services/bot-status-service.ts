@@ -58,29 +58,33 @@ export class BotStatusService {
     try {
       const guildId = await this.configService.getString("GUILD_ID", "");
       if (!guildId) {
-        // No guild bound yet (e.g. early startup / tests): keep defaults.
+        // No guild bound (e.g. early startup / tests): reset to defaults.
         this.statusPools = defaultStatusPools();
-        return;
-      }
-      const rows = await BotStatusMessage.find({ guildId })
-        .sort({ pool: 1, order: 1 })
-        .lean();
+      } else {
+        const rows = await BotStatusMessage.find({ guildId })
+          .sort({ pool: 1, order: 1 })
+          .lean();
 
-      const next = defaultStatusPools();
-      const stored: Partial<Record<BotStatusPool, string[]>> = {};
-      for (const row of rows) {
-        const pool = row.pool as BotStatusPool;
-        (stored[pool] ??= []).push(row.text);
-      }
-      for (const pool of BOT_STATUS_POOLS) {
-        const list = stored[pool];
-        // Empty store for a pool → keep that pool's built-in defaults.
-        if (list && list.length > 0) {
-          next[pool] = list;
+        const next = defaultStatusPools();
+        const stored: Partial<Record<BotStatusPool, string[]>> = {};
+        for (const row of rows) {
+          const pool = row.pool;
+          (stored[pool] ??= []).push(row.text);
         }
+        for (const pool of BOT_STATUS_POOLS) {
+          const list = stored[pool];
+          // Empty store for a pool → keep that pool's built-in defaults.
+          if (list && list.length > 0) {
+            next[pool] = list;
+          }
+        }
+        this.statusPools = next;
+        logger.debug("Bot status pools refreshed from store");
       }
-      this.statusPools = next;
-      logger.debug("Bot status pools refreshed from store");
+      // Re-render the presence now so a WebUI edit or `/config reload`
+      // takes effect immediately instead of waiting for the next VC
+      // count change. No-op until the service is operational.
+      this.updateActivityBasedOnVcUsers();
     } catch (error) {
       logger.error("Failed to refresh bot status pools:", error);
     }
@@ -137,13 +141,11 @@ export class BotStatusService {
   public setOperationalStatus(): void {
     try {
       this.isInitialized = true;
-      // Load the live pools from the store in the background; the cache is
-      // already seeded with defaults so presence works immediately, and a
-      // later refresh swaps in any operator-curated lists.
-      void this.refreshStatusPools().then(() =>
-        this.updateActivityBasedOnVcUsers(),
-      );
+      // Render immediately from the seeded defaults so presence works at
+      // once, then load the live pools from the store in the background
+      // (refreshStatusPools re-renders once the curated lists arrive).
       this.updateActivityBasedOnVcUsers();
+      void this.refreshStatusPools();
       logger.info("Bot status set to: Fully Operational (Green)");
     } catch (error) {
       logger.error("Failed to set operational status:", error);

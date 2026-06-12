@@ -116,7 +116,7 @@ describe("BotStatusService status pools", () => {
     expect(STATUS_POOL_DEFAULTS.lonely).toContain(presenceName());
   });
 
-  it("keeps the previous cache when GUILD_ID is unbound", async () => {
+  it("resets to defaults when GUILD_ID is unbound", async () => {
     // Populate the cache from a real guild first.
     setStoredRows([{ pool: "single", text: "BOUND STATUS", order: 0 }]);
     await service.refreshStatusPools();

@@ -3003,12 +3003,19 @@ export function createWriteRouter(
   };
 
   // Resolve and guild-check a stored entry; flashes + returns null on miss.
+  // A malformed (non-ObjectId) `:id` makes Mongoose throw a CastError — catch
+  // it and treat it as a clean "not found" rather than a 500.
   const findOwnedEntry = async (
     res: Response,
     guildId: string,
     id: string,
   ): Promise<HydratedDocument<IBotStatusMessage> | null> => {
-    const entry = await BotStatusMessage.findById(id);
+    let entry: HydratedDocument<IBotStatusMessage> | null = null;
+    try {
+      entry = await BotStatusMessage.findById(id);
+    } catch {
+      entry = null;
+    }
     if (!entry || entry.guildId !== guildId) {
       flashRedirect(res, "/admin/bot-status", {
         type: "err",
@@ -3146,20 +3153,35 @@ export function createWriteRouter(
       }
       const entry = await findOwnedEntry(res, session.guildId, id);
       if (!entry) return;
-      const previous = entry.order;
-      entry.order = order;
-      await entry.save();
-      await reloadBotStatusPools();
-      await recordAudit(session, {
-        action: "bot-status.reorder",
-        targetId: id,
-        details: { pool: entry.pool, from: previous, to: order },
-        result: "success",
-      });
-      flashRedirect(res, "/admin/bot-status", {
-        type: "ok",
-        text: `Reordered status entry ${id}: ${previous} → ${order}.`,
-      });
+      try {
+        const previous = entry.order;
+        entry.order = order;
+        await entry.save();
+        await reloadBotStatusPools();
+        await recordAudit(session, {
+          action: "bot-status.reorder",
+          targetId: id,
+          details: { pool: entry.pool, from: previous, to: order },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/bot-status", {
+          type: "ok",
+          text: `Reordered status entry ${id}: ${previous} → ${order}.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Reorder bot status failed", err);
+        await recordAudit(session, {
+          action: "bot-status.reorder",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/bot-status", {
+          type: "err",
+          text: `Failed to reorder status: ${text}`,
+        });
+      }
     }),
   );
 
@@ -3171,18 +3193,33 @@ export function createWriteRouter(
       const entry = await findOwnedEntry(res, session.guildId, id);
       if (!entry) return;
       const pool = entry.pool;
-      await BotStatusMessage.findByIdAndDelete(id);
-      await reloadBotStatusPools();
-      await recordAudit(session, {
-        action: "bot-status.delete",
-        targetId: id,
-        details: { pool, text: entry.text },
-        result: "success",
-      });
-      flashRedirect(res, "/admin/bot-status", {
-        type: "ok",
-        text: `Deleted status entry ${id} from the ${pool} pool.`,
-      });
+      try {
+        await BotStatusMessage.findByIdAndDelete(id);
+        await reloadBotStatusPools();
+        await recordAudit(session, {
+          action: "bot-status.delete",
+          targetId: id,
+          details: { pool, text: entry.text },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/bot-status", {
+          type: "ok",
+          text: `Deleted status entry ${id} from the ${pool} pool.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Delete bot status failed", err);
+        await recordAudit(session, {
+          action: "bot-status.delete",
+          targetId: id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/bot-status", {
+          type: "err",
+          text: `Failed to delete status: ${text}`,
+        });
+      }
     }),
   );
 
@@ -3282,37 +3319,52 @@ export function createWriteRouter(
         });
         return;
       }
-      const existing = await BotStatusMessage.countDocuments({
-        guildId: session.guildId,
-        pool,
-      });
-      if (existing > 0) {
-        flashRedirect(res, "/admin/bot-status", {
-          type: "warn",
-          text: `The ${pool} pool already has entries — nothing seeded.`,
-        });
-        return;
-      }
-      const defaults = STATUS_POOL_DEFAULTS[pool];
-      await BotStatusMessage.insertMany(
-        defaults.map((text, i) => ({
+      try {
+        const existing = await BotStatusMessage.countDocuments({
           guildId: session.guildId,
           pool,
-          text,
-          order: i,
-          createdBy: session.discordUserId,
-        })),
-      );
-      await reloadBotStatusPools();
-      await recordAudit(session, {
-        action: "bot-status.seed",
-        details: { pool, count: defaults.length },
-        result: "success",
-      });
-      flashRedirect(res, "/admin/bot-status", {
-        type: "ok",
-        text: `Seeded ${defaults.length} default ${pool} entries into the store.`,
-      });
+        });
+        if (existing > 0) {
+          flashRedirect(res, "/admin/bot-status", {
+            type: "warn",
+            text: `The ${pool} pool already has entries — nothing seeded.`,
+          });
+          return;
+        }
+        const defaults = STATUS_POOL_DEFAULTS[pool];
+        await BotStatusMessage.insertMany(
+          defaults.map((text, i) => ({
+            guildId: session.guildId,
+            pool,
+            text,
+            order: i,
+            createdBy: session.discordUserId,
+          })),
+        );
+        await reloadBotStatusPools();
+        await recordAudit(session, {
+          action: "bot-status.seed",
+          details: { pool, count: defaults.length },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/bot-status", {
+          type: "ok",
+          text: `Seeded ${defaults.length} default ${pool} entries into the store.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Seed bot status failed", err);
+        await recordAudit(session, {
+          action: "bot-status.seed",
+          details: { pool },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/bot-status", {
+          type: "err",
+          text: `Failed to seed defaults: ${text}`,
+        });
+      }
     }),
   );
 
