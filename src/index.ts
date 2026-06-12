@@ -46,8 +46,8 @@ import { MonitoringService } from "./services/monitoring-service.js";
 import {
   createUserWebRouter,
   createWebRouter,
-  getMissingWebUIEnvVars,
   isWebUIEnabled,
+  validateWebUIEnvVars,
 } from "./web/index.js";
 import {
   createMetricsRouter,
@@ -178,10 +178,10 @@ function startHealthServer(): void {
   // route is registered, so the server responds 404 for those paths
   // exactly as it did before this scaffold landed.
   if (isWebUIEnabled()) {
-    const missing = getMissingWebUIEnvVars();
-    if (missing.length > 0) {
+    const errors = validateWebUIEnvVars();
+    if (errors.length > 0) {
       logger.error(
-        `WEBUI_ENABLED=true but missing required env vars: ${missing.join(", ")}. WebUI will not be mounted.`,
+        `WEBUI_ENABLED=true but its configuration is invalid: ${errors.join("; ")}. WebUI will not be mounted.`,
       );
     } else {
       // Default to NOT trusting any X-Forwarded-* headers so an attacker

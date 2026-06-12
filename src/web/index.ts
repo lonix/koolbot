@@ -230,10 +230,45 @@ export function isWebUIEnabled(): boolean {
 }
 
 /**
- * Validate that all WEBUI_* env vars required for an enabled WebUI are
- * present. Returns the list of missing keys (empty when satisfied).
+ * Minimum entropy we accept for WEBUI_SESSION_SECRET, in bytes. 32 bytes
+ * (256 bits) matches the documented `openssl rand -base64 32`, which is
+ * also the HMAC-SHA256 block-equivalent key size used by
+ * WebSessionService.hashToken().
  */
-export function getMissingWebUIEnvVars(): string[] {
+export const MIN_SESSION_SECRET_BYTES = 32;
+
+/**
+ * Validate the WEBUI_* env vars required for an enabled WebUI. Returns a
+ * list of human-readable error strings (empty when satisfied) covering
+ * both missing keys and a too-weak session secret.
+ *
+ * The session-secret strength check accepts the secret if EITHER its
+ * base64-decoded length OR its raw byte length meets the minimum, so both
+ * `openssl rand -base64 32` (44 base64 chars → 32 bytes) and a long
+ * arbitrary passphrase are honoured. Only a value that is short under both
+ * interpretations is rejected.
+ */
+export function validateWebUIEnvVars(): string[] {
+  const errors: string[] = [];
   const required = ["WEBUI_BASE_URL", "WEBUI_SESSION_SECRET"];
-  return required.filter((k) => !getEnv(k));
+  for (const k of required) {
+    if (!getEnv(k)) errors.push(`${k} is missing`);
+  }
+
+  const secret = getEnv("WEBUI_SESSION_SECRET") ?? "";
+  if (secret) {
+    const decodedBytes = Buffer.from(secret, "base64").length;
+    const rawBytes = Buffer.byteLength(secret);
+    if (
+      decodedBytes < MIN_SESSION_SECRET_BYTES &&
+      rawBytes < MIN_SESSION_SECRET_BYTES
+    ) {
+      errors.push(
+        `WEBUI_SESSION_SECRET must be at least ${MIN_SESSION_SECRET_BYTES} bytes ` +
+          `(generate with: openssl rand -base64 32)`,
+      );
+    }
+  }
+
+  return errors;
 }
