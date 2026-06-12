@@ -521,9 +521,9 @@ export function createUserRouter(
           funComparison: formatFunComparison(summary.totalSeconds),
           sessionCount: summary.sessionCount,
           daysActive: summary.daysActive,
-          topChannels: summary.topChannels.map((c) => ({
-            channelId: c.channelId,
-            channelName: c.channelName,
+          topCompanions: (summary.topCompanions ?? []).map((c) => ({
+            userId: c.userId,
+            displayName: c.displayName,
             duration: formatHoursMinutes(c.totalSeconds),
           })),
           peakDay: summary.peakDay

@@ -252,7 +252,7 @@ export function renderUserIndexBody(opts: {
     '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
       '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
     '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
-      '<span class="feature-desc">Your personal year-in-review of voice activity, top channels, peak day, and badges earned.</span></li>',
+      '<span class="feature-desc">Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.</span></li>',
     "</ul>",
     "</div>",
     '<div class="card">',
@@ -274,16 +274,16 @@ export interface RewindBadgeView {
   earnedAt: string; // ISO date already formatted by the route
 }
 
-export interface RewindChannelView {
-  channelId: string;
-  channelName: string;
-  duration: string; // pre-formatted
-}
-
 export interface RewindTextChannelView {
   channelId: string;
   channelName: string;
   count: number;
+}
+
+export interface RewindCompanionView {
+  userId: string;
+  displayName: string;
+  duration: string; // pre-formatted
 }
 
 export interface RewindBodyOptions {
@@ -294,7 +294,9 @@ export interface RewindBodyOptions {
   funComparison: string | null;
   sessionCount: number;
   daysActive: number;
-  topChannels: RewindChannelView[];
+  // People the user shared voice channels with most this year (#567).
+  // Replaces the old Top channels card, which was noise under dynamic VCs.
+  topCompanions: RewindCompanionView[];
   peakDay: { date: string; duration: string } | null;
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
@@ -473,15 +475,17 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
         : `<div class="value">${opts.percentAboveMedian}%</div><div class="detail">vs. the guild median</div>`
       : '<div class="value">—</div>';
 
-  const channels =
-    opts.topChannels.length === 0
-      ? '<div class="empty">No tracked channels this year.</div>'
+  // Top voice companions (#567) — with dynamic VCs *who* you sat with
+  // matters more than the throwaway room, so this replaces Top channels.
+  const companions =
+    opts.topCompanions.length === 0
+      ? '<div class="empty">No voice companions yet — hop in a channel with someone!</div>'
       : '<ul class="rw-channels">' +
-        opts.topChannels
+        opts.topCompanions
           .map(
             (c) =>
               "<li>" +
-              `<span class="name">${escapeHtml(c.channelName)}</span>` +
+              `<span class="name">${escapeHtml(c.displayName)}</span>` +
               `<span class="dur">${escapeHtml(c.duration)}</span>` +
               "</li>",
           )
@@ -505,7 +509,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       medianStat +
       "</div>",
     "</div>",
-    '<div class="card"><h2>Top channels</h2>' + channels + "</div>",
+    '<div class="card"><h2>Top voice companions</h2>' + companions + "</div>",
     renderTextActivity(opts),
     '<div class="card"><h2>Rank journey</h2>' +
       renderJourney(opts.weeklyJourney) +

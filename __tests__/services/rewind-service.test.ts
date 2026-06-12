@@ -69,7 +69,7 @@ const {
   SNAPSHOT_SCHEMA_VERSION,
   computeLongestStreak,
   computePeakDay,
-  computeTopChannels,
+  computeTopCompanions,
   computePeakMessageDay,
   computeTopTextChannels,
   messagesInWindow,
@@ -135,61 +135,72 @@ describe("RewindService pure helpers", () => {
     });
   });
 
-  describe("computeTopChannels", () => {
-    it("sums duration per channel and ranks by total", () => {
+  describe("computeTopCompanions", () => {
+    it("returns an empty array for no sessions", () => {
+      expect(computeTopCompanions([], 5)).toEqual([]);
+    });
+
+    it("returns an empty array when no session has otherUsers", () => {
       const sessions = [
         {
           startTime: new Date("2026-01-01T10:00:00Z"),
           duration: 600,
           channelId: "a",
           channelName: "alpha",
+        },
+        {
+          startTime: new Date("2026-01-02T10:00:00Z"),
+          duration: 600,
+          channelId: "a",
+          channelName: "alpha",
+          otherUsers: [],
+        },
+      ];
+      expect(computeTopCompanions(sessions, 5)).toEqual([]);
+    });
+
+    it("sums co-present seconds per companion and ranks by total", () => {
+      const sessions = [
+        {
+          startTime: new Date("2026-01-01T10:00:00Z"),
+          duration: 600,
+          channelId: "a",
+          channelName: "alpha",
+          otherUsers: ["bob", "carol"],
         },
         {
           startTime: new Date("2026-01-02T10:00:00Z"),
           duration: 1200,
-          channelId: "b",
-          channelName: "beta",
-        },
-        {
-          startTime: new Date("2026-01-03T10:00:00Z"),
-          duration: 300,
           channelId: "a",
           channelName: "alpha",
+          otherUsers: ["bob"],
+        },
+        // Zero-duration sessions are ignored.
+        {
+          startTime: new Date("2026-01-03T10:00:00Z"),
+          duration: 0,
+          channelId: "a",
+          channelName: "alpha",
+          otherUsers: ["carol"],
         },
       ];
-      const top = computeTopChannels(sessions, 3);
-      expect(top).toHaveLength(2);
-      expect(top[0]).toMatchObject({ channelId: "b", totalSeconds: 1200 });
-      expect(top[1]).toMatchObject({ channelId: "a", totalSeconds: 900 });
+      const top = computeTopCompanions(sessions, 5);
+      expect(top).toEqual([
+        { userId: "bob", totalSeconds: 1800 },
+        { userId: "carol", totalSeconds: 600 },
+      ]);
     });
 
-    it("uses the most recent non-empty channel name for renames", () => {
+    it("honours the limit", () => {
       const sessions = [
         {
           startTime: new Date("2026-01-01T10:00:00Z"),
           duration: 600,
           channelId: "a",
-          channelName: "old-name",
-        },
-        {
-          startTime: new Date("2026-01-02T10:00:00Z"),
-          duration: 600,
-          channelId: "a",
-          channelName: "new-name",
+          otherUsers: ["b", "c", "d", "e"],
         },
       ];
-      const [first] = computeTopChannels(sessions, 3);
-      expect(first.channelName).toBe("new-name");
-    });
-
-    it("honours the limit", () => {
-      const sessions = [
-        { startTime: new Date(), duration: 1, channelId: "a" },
-        { startTime: new Date(), duration: 2, channelId: "b" },
-        { startTime: new Date(), duration: 3, channelId: "c" },
-        { startTime: new Date(), duration: 4, channelId: "d" },
-      ];
-      expect(computeTopChannels(sessions, 2)).toHaveLength(2);
+      expect(computeTopCompanions(sessions, 2)).toHaveLength(2);
     });
   });
 
@@ -370,7 +381,7 @@ describe("RewindService.getSummary", () => {
     expect(summary!.hasData).toBe(false);
     expect(summary!.totalSeconds).toBe(0);
     expect(summary!.annualRank).toBeNull();
-    expect(summary!.topChannels).toEqual([]);
+    expect(summary!.topCompanions).toEqual([]);
   });
 
   it("aggregates a full summary when the user has voice data", async () => {
@@ -442,10 +453,6 @@ describe("RewindService.getSummary", () => {
     expect(summary!.totalSeconds).toBe(7200); // 3600 + 1800 + 1800
     expect(summary!.sessionCount).toBe(3);
     expect(summary!.daysActive).toBe(2);
-    expect(summary!.topChannels.map((c) => c.channelId)).toEqual([
-      "general",
-      "gaming",
-    ]);
     expect(summary!.peakDay).toEqual({
       date: "2026-01-15",
       totalSeconds: 5400,
@@ -458,6 +465,67 @@ describe("RewindService.getSummary", () => {
     expect(summary!.weeklyJourney.last?.isoWeek).toBe(5);
     expect(summary!.weeklyJourney.best?.isoWeek).toBe(4);
     expect(summary!.availableYears).toEqual([2026, 2025]);
+  });
+
+  it("aggregates and resolves top voice companions (#567)", async () => {
+    const year = 2026;
+    const sessions = [
+      {
+        startTime: new Date(`${year}-02-01T10:00:00Z`),
+        duration: 3600,
+        channelId: "general",
+        channelName: "general-vc",
+        otherUsers: ["bob", "carol"],
+      },
+      {
+        startTime: new Date(`${year}-02-02T10:00:00Z`),
+        duration: 1800,
+        channelId: "general",
+        channelName: "general-vc",
+        otherUsers: ["bob"],
+      },
+    ];
+    mockFindOneVc.mockReturnValueOnce(lean({ sessions }));
+    mockFindOneAch.mockReturnValueOnce(lean(null));
+    mockAggregateVc
+      .mockResolvedValueOnce([{ _id: 2026 }])
+      .mockResolvedValueOnce([{ _id: "u1", totalTime: 5400 }])
+      .mockResolvedValueOnce([]);
+
+    // Client cache resolves bob (guild nickname) and carol (global
+    // username); a left member would simply miss both caches.
+    const client = {
+      guilds: {
+        cache: {
+          get: (id: string) =>
+            id === "g1"
+              ? {
+                  members: {
+                    cache: {
+                      get: (uid: string) =>
+                        uid === "bob" ? { displayName: "Bob the Builder" } : undefined,
+                    },
+                  },
+                }
+              : undefined,
+        },
+      },
+      users: {
+        cache: {
+          get: (uid: string) =>
+            uid === "carol" ? { username: "carol123" } : undefined,
+        },
+      },
+    };
+
+    const svc = RewindService.getInstance(
+      client as Parameters<typeof RewindService.getInstance>[0],
+    );
+    const summary = await svc.getSummary("u1", "g1", year);
+    expect(summary!.topCompanions).toEqual([
+      { userId: "bob", displayName: "Bob the Builder", totalSeconds: 5400 },
+      { userId: "carol", displayName: "carol123", totalSeconds: 3600 },
+    ]);
   });
 
   it("filters achievements and accolades by year and ignores unknown types", async () => {
@@ -549,7 +617,7 @@ describe("RewindService snapshots (#574)", () => {
       expect(norm.guildId).toBe("g");
       expect(norm.year).toBe(2021);
       expect(norm.totalSeconds).toBe(5);
-      expect(norm.topChannels).toEqual([]);
+      expect(norm.topCompanions).toEqual([]);
       expect(norm.weeklyJourney).toEqual({
         first: null,
         last: null,

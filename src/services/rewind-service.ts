@@ -26,16 +26,21 @@ const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_HOUR = 60 * 60;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-export interface RewindChannel {
-  channelId: string;
-  channelName: string;
+/**
+ * A voice "companion" for the Rewind summary (#567) — another user the
+ * requesting user shared a voice channel with, ranked by co-present
+ * seconds. With this server's dynamic VCs the meaningful unit is *who*
+ * you spent time with rather than *which* ephemeral room you sat in.
+ */
+export interface RewindCompanion {
+  userId: string;
+  displayName: string;
   totalSeconds: number;
 }
 
 /**
- * Top text channel for the Rewind summary (#496). Mirrors `RewindChannel`
- * but ranked by message count rather than seconds, since text activity is
- * counted per message.
+ * Top text channel for the Rewind summary (#496). Ranked by message count
+ * rather than seconds, since text activity is counted per message.
  */
 export interface RewindTextChannel {
   channelId: string;
@@ -65,7 +70,10 @@ export interface RewindSummary {
   totalSeconds: number;
   sessionCount: number;
   daysActive: number;
-  topChannels: RewindChannel[];
+  // People the user spent the most voice time with this year (#567).
+  // (Top channels was removed from Rewind — with dynamic VCs the ephemeral
+  // per-session room names are noise; companions replace it.)
+  topCompanions: RewindCompanion[];
   peakDay: { date: string; totalSeconds: number } | null; // ISO date (YYYY-MM-DD)
   // Text-message activity (#496). Mirrors the voice aggregates above and
   // reads as zero / empty when message tracking is disabled or absent.
@@ -108,6 +116,8 @@ interface RawSession {
   duration?: number;
   channelId: string;
   channelName?: string;
+  // Union of other user ids encountered during the session (#567).
+  otherUsers?: string[];
 }
 
 interface RawTextMessage {
@@ -158,32 +168,35 @@ export function sessionSeconds(session: RawSession): number {
   return 0;
 }
 
-export function computeTopChannels(
+/**
+ * Aggregate co-present voice seconds per other user (#567) and return the
+ * top `limit` ranked desc. For each session, every id in `otherUsers[]` is
+ * credited the *whole* session's duration.
+ *
+ * Caveat: `otherUsers[]` is the union of everyone encountered during the
+ * session, not a per-moment overlap, so a companion who only dropped in
+ * for a minute is still credited the full session. That over-counts, but
+ * it's an acceptable approximation for a fun year-in-review stat; precise
+ * overlap would need interval tracking (out of scope here).
+ *
+ * Returns ids + seconds; the service resolves ids → display names, mirroring
+ * how `computeTopTextChannels` defers name resolution.
+ */
+export function computeTopCompanions(
   sessions: RawSession[],
-  limit = 3,
-): RewindChannel[] {
-  const totals = new Map<
-    string,
-    { channelId: string; channelName: string; totalSeconds: number }
-  >();
+  limit = 5,
+): Array<{ userId: string; totalSeconds: number }> {
+  const totals = new Map<string, number>();
   for (const s of sessions) {
-    const key = s.channelId;
     const seconds = sessionSeconds(s);
     if (seconds <= 0) continue;
-    const existing = totals.get(key);
-    if (existing) {
-      existing.totalSeconds += seconds;
-      // Prefer the most recent non-empty name (handles renames).
-      if (s.channelName) existing.channelName = s.channelName;
-    } else {
-      totals.set(key, {
-        channelId: key,
-        channelName: s.channelName ?? "Unknown channel",
-        totalSeconds: seconds,
-      });
+    for (const userId of s.otherUsers ?? []) {
+      if (!userId) continue;
+      totals.set(userId, (totals.get(userId) ?? 0) + seconds);
     }
   }
-  return [...totals.values()]
+  return [...totals.entries()]
+    .map(([userId, totalSeconds]) => ({ userId, totalSeconds }))
     .sort((a, b) => b.totalSeconds - a.totalSeconds)
     .slice(0, limit);
 }
@@ -368,7 +381,9 @@ export function normalizeSnapshotSummary(
     totalSeconds: s.totalSeconds ?? 0,
     sessionCount: s.sessionCount ?? 0,
     daysActive: s.daysActive ?? 0,
-    topChannels: s.topChannels ?? [],
+    // Older snapshots predate companions (#567) and any that recorded the
+    // since-removed topChannels are simply dropped here.
+    topCompanions: s.topCompanions ?? [],
     peakDay: s.peakDay ?? null,
     messagesSent: s.messagesSent ?? 0,
     topTextChannels: s.topTextChannels ?? [],
@@ -477,7 +492,17 @@ export class RewindService {
           .map((s) => dayKey(s.startTime, dayZone)),
       ).size;
 
-      const topChannels = computeTopChannels(sessions, 3);
+      // Top voice companions (#567) replace the old "Top channels" card:
+      // with dynamic VCs the ephemeral per-session room names are noise, so
+      // we surface *who* the user spent time with instead.
+      const topCompanions: RewindCompanion[] = computeTopCompanions(
+        sessions,
+        5,
+      ).map((c) => ({
+        userId: c.userId,
+        displayName: this.resolveUserName(guildId, c.userId),
+        totalSeconds: c.totalSeconds,
+      }));
       const peakDay = computePeakDay(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
 
@@ -532,7 +557,7 @@ export class RewindService {
         totalSeconds,
         sessionCount: sessions.filter((s) => sessionSeconds(s) > 0).length,
         daysActive,
-        topChannels,
+        topCompanions,
         peakDay,
         messagesSent: text.messagesSent,
         topTextChannels: text.topTextChannels,
@@ -802,6 +827,24 @@ export class RewindService {
       return channel.name;
     }
     return "Unknown channel";
+  }
+
+  /**
+   * Resolve a companion's user id to a display name (#567), preferring the
+   * guild nickname, then the global username, both read from the client
+   * cache like `resolveChannelName`. A cache miss can mean the user left
+   * the guild, but also simply that partial member caching (gateway
+   * intents / cache limits) never populated them — so we fall back to a
+   * neutral placeholder rather than asserting they've gone.
+   */
+  private resolveUserName(guildId: string, userId: string): string {
+    const member = this.client.guilds?.cache
+      ?.get(guildId)
+      ?.members?.cache?.get(userId);
+    if (member?.displayName) return member.displayName;
+    const user = this.client.users?.cache?.get(userId);
+    if (user?.username) return user.username;
+    return "Unknown user";
   }
 
   /**
