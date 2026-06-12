@@ -883,6 +883,36 @@ describe("renderPollsPage", () => {
     expect(html).toContain('name="multiSelect" value="1" checked');
   });
 
+  it("preserves a deleted channel/role id in the edit form instead of defaulting", () => {
+    const html = renderPollsPage({
+      ...COMMON,
+      enabled: true,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      schedules: [
+        {
+          id: "s1",
+          channelId: "gone-chan",
+          channelName: "gone-chan",
+          cron: "0 12 * * 1",
+          durationHours: 12,
+          pingRoleId: "gone-role",
+          pingRoleName: "gone-role",
+          enabled: true,
+          lastRun: "—",
+        },
+      ],
+      items: [],
+      textChannels: [{ id: "c1", name: "polls" }],
+      roles: [{ id: "r1", name: "Members" }],
+    });
+    // The saved-but-missing ids stay selected so a cron-only edit can't
+    // silently reassign the channel or clear the ping role.
+    expect(html).toContain('value="gone-chan" selected');
+    expect(html).toContain('value="gone-role" selected');
+    expect(html).toContain("(unavailable)");
+  });
+
   it("renders write forms for schedules, items and bulk import", () => {
     const html = renderPollsPage({
       ...COMMON,

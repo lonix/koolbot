@@ -677,6 +677,7 @@ describe("PollService", () => {
       const service = PollService.getInstance({} as never);
       // Simulate a running service with an existing job for this schedule.
       const oldStop = jest.fn();
+      const oldJob = { stop: oldStop };
       const internals = service as unknown as {
         isInitialized: boolean;
         jobs: Map<string, { schedule: unknown; job: { stop: () => void } }>;
@@ -684,7 +685,7 @@ describe("PollService", () => {
       internals.isInitialized = true;
       internals.jobs.set("sched-1", {
         schedule,
-        job: { stop: oldStop },
+        job: oldJob,
       });
 
       const result = await service.updateSchedule(
@@ -704,11 +705,11 @@ describe("PollService", () => {
       expect(schedule.cronSchedule).toBe("0 12 * * 1");
       expect(schedule.pollDuration).toBe(6);
       expect(schedule.roleIdToPing).toBe("role-9");
-      // Old job stopped, a fresh job armed in its place.
+      // Old job stopped, a fresh job armed in its place (a different object).
       expect(oldStop).toHaveBeenCalledTimes(1);
       const rearmed = internals.jobs.get("sched-1");
       expect(rearmed).toBeDefined();
-      expect(rearmed?.job).not.toBe(oldStop);
+      expect(rearmed?.job).not.toBe(oldJob);
 
       // Stop the real CronJob so it does not leak a live timer.
       service.destroy();

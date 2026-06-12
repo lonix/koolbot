@@ -1151,25 +1151,44 @@ function channelOptionsHtml(
   options: ChannelOption[],
   selectedId?: string,
 ): string {
-  if (options.length === 0) {
+  const rendered = options.map(
+    (c) =>
+      `<option value="${escapeHtml(c.id)}"${c.id === selectedId ? " selected" : ""}>#${escapeHtml(c.name)}</option>`,
+  );
+  // Preserve a selected channel that's no longer in the list (deleted, or the
+  // bot lost access). Without a matching <option> the browser would default to
+  // the first channel, so editing only the cron/duration would silently
+  // reassign the schedule's channel on submit. Keep the saved id selectable.
+  if (selectedId && !options.some((c) => c.id === selectedId)) {
+    rendered.unshift(
+      `<option value="${escapeHtml(selectedId)}" selected>#${escapeHtml(selectedId)} (unavailable)</option>`,
+    );
+  }
+  if (rendered.length === 0) {
     return `<option value="">(no text channels available)</option>`;
   }
-  return options
-    .map(
-      (c) =>
-        `<option value="${escapeHtml(c.id)}"${c.id === selectedId ? " selected" : ""}>#${escapeHtml(c.name)}</option>`,
-    )
-    .join("");
+  return rendered.join("");
 }
 
 function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
-  return [
+  const out = [
     `<option value=""${!selectedId ? " selected" : ""}>(none)</option>`,
+  ];
+  // Same guard as channels: if the saved ping role is no longer in the list,
+  // keep it as a selected option so a cron/duration-only edit doesn't silently
+  // clear the role by defaulting the select back to "(none)".
+  if (selectedId && !options.some((r) => r.id === selectedId)) {
+    out.push(
+      `<option value="${escapeHtml(selectedId)}" selected>@${escapeHtml(selectedId)} (unavailable)</option>`,
+    );
+  }
+  out.push(
     ...options.map(
       (r) =>
         `<option value="${escapeHtml(r.id)}"${r.id === selectedId ? " selected" : ""}>@${escapeHtml(r.name)}</option>`,
     ),
-  ].join("");
+  );
+  return out.join("");
 }
 
 const CRON_EXAMPLES_HTML = `

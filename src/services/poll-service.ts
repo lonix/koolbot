@@ -877,22 +877,24 @@ export class PollService {
     // Re-arm the cron job in place: stop the old job and start a fresh one from
     // the saved row so a changed cron/channel takes effect now, not on the next
     // service restart. Mirrors the stop/restart lockstep in setScheduleEnabled.
-    const existing = this.jobs.get(scheduleId);
+    // Key off the canonical `_id` (not the raw `scheduleId` argument) for both
+    // the lookup and the re-insert so a non-canonical id can't leave the old
+    // job running while a second one is scheduled for the same row.
+    const canonicalId = schedule._id.toString();
+    const existing = this.jobs.get(canonicalId);
     if (existing) {
       existing.job.stop();
-      this.jobs.delete(scheduleId);
+      this.jobs.delete(canonicalId);
     }
 
     if (this.isInitialized && schedule.enabled) {
       const job = this.schedulePoll(schedule);
       if (job) {
-        this.jobs.set(schedule._id.toString(), { schedule, job });
+        this.jobs.set(canonicalId, { schedule, job });
       }
     }
 
-    logger.info(
-      `Updated poll schedule: ${sanitizeForLog(schedule._id.toString())}`,
-    );
+    logger.info(`Updated poll schedule: ${sanitizeForLog(canonicalId)}`);
     return schedule;
   }
 

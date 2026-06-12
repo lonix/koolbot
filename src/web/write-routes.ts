@@ -1995,7 +1995,6 @@ export function createWriteRouter(
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
-        logger.error("Edit poll schedule failed", err);
         await recordAudit(session, {
           action: "poll-schedule.edit",
           targetId: id,
@@ -2322,7 +2321,6 @@ export function createWriteRouter(
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
-        logger.error("Edit poll item failed", err);
         await recordAudit(session, {
           action: "poll-item.edit",
           targetId: id,
