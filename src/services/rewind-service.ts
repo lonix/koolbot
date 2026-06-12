@@ -832,9 +832,10 @@ export class RewindService {
   /**
    * Resolve a companion's user id to a display name (#567), preferring the
    * guild nickname, then the global username, both read from the client
-   * cache like `resolveChannelName`. Users who have since left the guild
-   * simply miss the cache and fall back to a neutral placeholder rather
-   * than breaking the page.
+   * cache like `resolveChannelName`. A cache miss can mean the user left
+   * the guild, but also simply that partial member caching (gateway
+   * intents / cache limits) never populated them — so we fall back to a
+   * neutral placeholder rather than asserting they've gone.
    */
   private resolveUserName(guildId: string, userId: string): string {
     const member = this.client.guilds?.cache
@@ -843,7 +844,7 @@ export class RewindService {
     if (member?.displayName) return member.displayName;
     const user = this.client.users?.cache?.get(userId);
     if (user?.username) return user.username;
-    return "Former member";
+    return "Unknown user";
   }
 
   /**
