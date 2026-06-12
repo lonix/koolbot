@@ -2246,6 +2246,75 @@ export function createWriteRouter(
     }),
   );
 
+  // Paste-a-blob import (#552). Unlike /polls/items/import this makes no
+  // outbound request — the YAML/JSON comes straight from the authenticated
+  // admin's browser, so the SSRF allowlist/redirect/private-IP guards that the
+  // URL path needs do not apply here. The parse/validate/dedup loop is shared
+  // via PollService.importFromString.
+  router.post(
+    "/polls/items/import-text",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const content = getString(req, "content");
+      if (!content) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: "Paste some YAML or JSON poll content to import.",
+        });
+        return;
+      }
+      const service = PollService.getInstance(client);
+      try {
+        const results = await service.importFromString(
+          content,
+          session.guildId,
+          session.discordUserId,
+          "paste",
+        );
+        const errCount = results.errors.length;
+        const type: Flash["type"] =
+          results.imported > 0 && errCount === 0
+            ? "ok"
+            : results.imported > 0
+              ? "warn"
+              : "err";
+        const summary = `Imported ${results.imported}, skipped ${results.skipped}, errors ${errCount}.`;
+        const firstError =
+          errCount > 0 ? ` First error: ${results.errors[0]}` : "";
+        await recordAudit(session, {
+          action: "poll-item.import",
+          details: {
+            source: "paste",
+            imported: results.imported,
+            skipped: results.skipped,
+            errors: errCount,
+          },
+          result:
+            errCount > 0 && results.imported === 0 ? "failure" : "success",
+          errorMessage:
+            errCount > 0 ? results.errors.slice(0, 5).join("; ") : null,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type,
+          text: `${summary}${firstError}`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Poll paste import failed", err);
+        await recordAudit(session, {
+          action: "poll-item.import",
+          details: { source: "paste" },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Import failed: ${text}`,
+        });
+      }
+    }),
+  );
+
   // ============================================================
   // Reaction Roles (issue #384)
   // ============================================================

@@ -417,4 +417,106 @@ describe("PollService", () => {
     });
     expect(mockPollItemCreate).not.toHaveBeenCalled();
   });
+
+  describe("importFromString (paste path)", () => {
+    it("imports a valid pasted YAML library without any network call", async () => {
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.importFromString(
+        `polls:
+  - question: Favorite color?
+    answers:
+      - Blue
+      - Green
+    tags: [fun]
+`,
+        "guild-1",
+        "user-1",
+      );
+
+      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockPollItemFindOne).toHaveBeenCalledWith({
+        guildId: "guild-1",
+        question: "Favorite color?",
+      });
+      expect(mockPollItemCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          guildId: "guild-1",
+          question: "Favorite color?",
+          answers: ["Blue", "Green"],
+          tags: ["fun"],
+          createdBy: "user-1",
+          source: "paste",
+        }),
+      );
+      expect(result).toEqual({ imported: 1, skipped: 0, errors: [] });
+    });
+
+    it("imports a valid pasted JSON library", async () => {
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.importFromString(
+        JSON.stringify({
+          polls: [{ question: "Tea or coffee?", answers: ["Tea", "Coffee"] }],
+        }),
+        "guild-1",
+        "user-1",
+      );
+
+      expect(mockPollItemCreate).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ imported: 1, skipped: 0, errors: [] });
+    });
+
+    it("reports an invalid-format error for malformed YAML", async () => {
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.importFromString(
+        "polls:\n  - question: 'unterminated\n",
+        "guild-1",
+        "user-1",
+      );
+
+      expect(result.imported).toBe(0);
+      expect(result.errors).toEqual([
+        "Invalid format: could not parse content as YAML or JSON",
+      ]);
+      expect(mockPollItemCreate).not.toHaveBeenCalled();
+    });
+
+    it("skips a poll whose answer exceeds the 55-character cap", async () => {
+      const service = PollService.getInstance({} as never);
+      const longAnswer = "a".repeat(56);
+
+      const result = await service.importFromString(
+        JSON.stringify({
+          polls: [{ question: "Too long?", answers: ["Yes", longAnswer] }],
+        }),
+        "guild-1",
+        "user-1",
+      );
+
+      expect(result.imported).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(result.errors).toEqual([
+        "Poll 1: Answer too long (max 55 chars)",
+      ]);
+      expect(mockPollItemCreate).not.toHaveBeenCalled();
+    });
+
+    it("skips a duplicate question that already exists", async () => {
+      mockPollItemFindOne.mockResolvedValue({ _id: "existing" });
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.importFromString(
+        JSON.stringify({
+          polls: [{ question: "Existing?", answers: ["A", "B"] }],
+        }),
+        "guild-1",
+        "user-1",
+      );
+
+      expect(result).toEqual({ imported: 0, skipped: 1, errors: [] });
+      expect(mockPollItemCreate).not.toHaveBeenCalled();
+    });
+  });
 });
