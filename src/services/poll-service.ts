@@ -694,6 +694,17 @@ export class PollService {
       errors: [] as string[],
     };
 
+    // Apply the same size cap the URL path enforces while streaming. The paste
+    // route is already bounded by the WebUI's body-parser limit, but guarding
+    // here keeps importFromString safe for any caller (and future limit
+    // changes) rather than parsing an unbounded string into memory.
+    if (raw.length > MAX_IMPORT_BYTES) {
+      results.errors.push(
+        `Content too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
+      );
+      return results;
+    }
+
     let pollData: PollSource;
 
     // Try to parse as YAML first (also accepts JSON). yaml.load is permissive,

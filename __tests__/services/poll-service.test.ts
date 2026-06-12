@@ -469,6 +469,24 @@ describe("PollService", () => {
       expect(result).toEqual({ imported: 1, skipped: 0, errors: [] });
     });
 
+    it("rejects content larger than the import size cap before parsing", async () => {
+      const service = PollService.getInstance({} as never);
+      const oversized = "x".repeat(2 * 1024 * 1024 + 1);
+
+      const result = await service.importFromString(
+        oversized,
+        "guild-1",
+        "user-1",
+      );
+
+      expect(result).toEqual({
+        imported: 0,
+        skipped: 0,
+        errors: ["Content too large (max 2 MB)"],
+      });
+      expect(mockPollItemCreate).not.toHaveBeenCalled();
+    });
+
     it("reports an invalid-format error for malformed YAML", async () => {
       const service = PollService.getInstance({} as never);
 

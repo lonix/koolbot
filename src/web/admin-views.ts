@@ -1447,7 +1447,7 @@ ${renderFlash(props.flash)}
   <form method="POST" action="/admin/polls/items/import-text" class="stack">
     ${csrfInput}
     <label>Poll library (YAML or JSON)
-      <textarea name="content" rows="10" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
+      <textarea name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
     </label>
     <button type="submit" class="btn btn-primary">Import</button>
   </form>
