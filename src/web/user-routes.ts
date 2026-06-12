@@ -432,7 +432,7 @@ export function createUserRouter(
         result = "failure";
         errorMessage = err instanceof Error ? err.message : String(err);
         logger.error(
-          `Failed to save user timezone: ${sanitizeForLog(errorMessage)}`, // codeql[js/log-injection]
+          `Failed to save user timezone: ${sanitizeForLog(errorMessage)}`,
         );
       }
 

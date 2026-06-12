@@ -82,7 +82,7 @@ export class ScheduledAnnouncementService {
       return true;
     } catch (error) {
       logger.error(
-        `Invalid cron expression: ${sanitizeForLog(expression)}`, // codeql[js/log-injection]
+        `Invalid cron expression: ${sanitizeForLog(expression)}`,
         error,
       );
       return false;
@@ -458,7 +458,7 @@ export class ScheduledAnnouncementService {
     // If guildId is provided, verify it matches
     if (guildId && announcement.guildId !== guildId) {
       logger.warn(
-        `Attempted to delete announcement ${sanitizeForLog(announcementId)} from wrong guild. Expected: ${sanitizeForLog(announcement.guildId)}, Got: ${sanitizeForLog(guildId)}`, // codeql[js/log-injection]
+        `Attempted to delete announcement ${sanitizeForLog(announcementId)} from wrong guild. Expected: ${sanitizeForLog(announcement.guildId)}, Got: ${sanitizeForLog(guildId)}`,
       );
       return false;
     }
@@ -472,7 +472,7 @@ export class ScheduledAnnouncementService {
 
     // Delete from database
     await ScheduledAnnouncement.findByIdAndDelete(announcementId);
-    logger.info(`Deleted announcement: ${sanitizeForLog(announcementId)}`); // codeql[js/log-injection]
+    logger.info(`Deleted announcement: ${sanitizeForLog(announcementId)}`);
     return true;
   }
 

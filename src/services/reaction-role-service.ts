@@ -431,7 +431,7 @@ export class ReactionRoleService {
         throw new Error("Failed to save configuration to database.");
       }
 
-      logger.info(`Saved reaction role config for ${sanitizeForLog(roleName)}`); // codeql[js/log-injection]
+      logger.info(`Saved reaction role config for ${sanitizeForLog(roleName)}`);
 
       return {
         success: true,
@@ -527,7 +527,7 @@ export class ReactionRoleService {
           if (message) {
             await message.delete();
             logger.info(
-              `Deleted reaction message ${config.messageId} for archived role ${sanitizeForLog(roleName)}`, // codeql[js/log-injection]
+              `Deleted reaction message ${config.messageId} for archived role ${sanitizeForLog(roleName)}`,
             );
           }
         }
@@ -535,7 +535,7 @@ export class ReactionRoleService {
         logger.error("Error deleting reaction message:", error);
       }
 
-      logger.info(`Archived reaction role: ${sanitizeForLog(roleName)}`); // codeql[js/log-injection]
+      logger.info(`Archived reaction role: ${sanitizeForLog(roleName)}`);
 
       return {
         success: true,
@@ -636,7 +636,7 @@ export class ReactionRoleService {
       }
 
       logger.info(
-        `Created new reaction role message ${message.id} for unarchived role ${sanitizeForLog(roleName)}`, // codeql[js/log-injection]
+        `Created new reaction role message ${message.id} for unarchived role ${sanitizeForLog(roleName)}`,
       );
 
       // Update database with error handling
@@ -662,7 +662,7 @@ export class ReactionRoleService {
         };
       }
 
-      logger.info(`Unarchived reaction role: ${sanitizeForLog(roleName)}`); // codeql[js/log-injection]
+      logger.info(`Unarchived reaction role: ${sanitizeForLog(roleName)}`);
 
       return {
         success: true,
@@ -753,7 +753,7 @@ export class ReactionRoleService {
       // Delete from database
       await ReactionRoleConfig.deleteOne({ _id: config._id });
 
-      logger.info(`Fully deleted reaction role: ${sanitizeForLog(roleName)}`); // codeql[js/log-injection]
+      logger.info(`Fully deleted reaction role: ${sanitizeForLog(roleName)}`);
 
       return {
         success: true,
