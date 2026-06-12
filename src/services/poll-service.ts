@@ -29,6 +29,13 @@ interface PollSource {
 // unbounded body into memory before parsing fails.
 const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 
+// Discord caps each poll answer (option) at 55 characters and a poll question at
+// 300. Imported libraries are validated against the same limits so an oversized
+// entry fails cleanly at import time rather than when Discord rejects the poll
+// payload (#508).
+const MAX_POLL_ANSWER_LENGTH = 55;
+const MAX_POLL_QUESTION_LENGTH = 300;
+
 // Reject the request if it has not completed within this window so a slow or
 // unresponsive server cannot hang the import indefinitely.
 const IMPORT_TIMEOUT_MS = 10_000;
@@ -635,81 +642,13 @@ export class PollService {
 
       const rawBody = await readBodyWithLimit(response, MAX_IMPORT_BYTES);
 
-      let pollData: PollSource;
-
-      // Try to parse as YAML first (also works for JSON)
-      try {
-        pollData = yaml.load(rawBody) as PollSource;
-      } catch {
-        // If YAML fails, try JSON
-        pollData = JSON.parse(rawBody);
-      }
-
-      // yaml.load / JSON.parse can yield null, undefined, or a scalar for an
-      // empty or non-object body, so guard before dereferencing.
-      if (!pollData?.polls || !Array.isArray(pollData.polls)) {
-        results.errors.push("Invalid format: expected { polls: [...] }");
-        return results;
-      }
-
-      // Process each poll
-      for (let i = 0; i < pollData.polls.length; i++) {
-        const poll = pollData.polls[i];
-
-        // Validate poll data
-        if (!poll.question || !poll.answers || !Array.isArray(poll.answers)) {
-          results.errors.push(`Poll ${i + 1}: Missing question or answers`);
-          results.skipped++;
-          continue;
-        }
-
-        if (poll.answers.length < 2 || poll.answers.length > 10) {
-          results.errors.push(`Poll ${i + 1}: Must have 2-10 answers`);
-          results.skipped++;
-          continue;
-        }
-
-        if (poll.question.length > 300) {
-          results.errors.push(
-            `Poll ${i + 1}: Question too long (max 300 chars)`,
-          );
-          results.skipped++;
-          continue;
-        }
-
-        // Check if this poll already exists (by question)
-        const existing = await PollItem.findOne({
-          guildId,
-          question: poll.question,
-        });
-
-        if (existing) {
-          results.skipped++;
-          continue;
-        }
-
-        // Create new poll item
-        try {
-          await PollItem.create({
-            guildId,
-            question: poll.question,
-            answers: poll.answers,
-            multiSelect: poll.multiselect ?? false,
-            tags: poll.tags ?? [],
-            usageCount: 0,
-            lastUsed: null,
-            enabled: true,
-            createdBy: userId,
-            source: url,
-          });
-          results.imported++;
-        } catch (error) {
-          results.errors.push(
-            `Poll ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`,
-          );
-          results.skipped++;
-        }
-      }
+      // The fetch + SSRF guards above are the only part that is URL-specific.
+      // Parsing, validation, dedup and persistence are shared with the paste
+      // path, so delegate to importFromString and fold its counts in.
+      const parsed = await this.importFromString(rawBody, guildId, userId, url);
+      results.imported += parsed.imported;
+      results.skipped += parsed.skipped;
+      results.errors.push(...parsed.errors);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         results.errors.push("Request timeout - URL took too long to respond");
@@ -730,6 +669,142 @@ export class PollService {
       }
     } finally {
       clearTimeout(timeoutId);
+    }
+
+    return results;
+  }
+
+  /**
+   * Parse, validate, dedup and persist a poll library from a raw YAML/JSON
+   * string. This is the shared core of both the import-by-URL flow (after the
+   * SSRF-guarded fetch) and the admin paste/upload flow, where the bytes come
+   * straight from the authenticated admin's browser and there is no outbound
+   * request to forge. Callers that fetch a URL pass that URL as `source`; the
+   * paste path passes "paste".
+   */
+  public async importFromString(
+    raw: string,
+    guildId: string,
+    userId: string,
+    source = "paste",
+  ): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    const results = {
+      imported: 0,
+      skipped: 0,
+      errors: [] as string[],
+    };
+
+    // Apply the same size cap the URL path enforces while streaming. The paste
+    // route is already bounded by the WebUI's body-parser limit, but guarding
+    // here keeps importFromString safe for any caller (and future limit
+    // changes) rather than parsing an unbounded string into memory.
+    if (raw.length > MAX_IMPORT_BYTES) {
+      results.errors.push(
+        `Content too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB)`,
+      );
+      return results;
+    }
+
+    let pollData: PollSource;
+
+    // Try to parse as YAML first (also accepts JSON). yaml.load is permissive,
+    // so a JSON.parse fallback only matters for the rare body it rejects; both
+    // failing surfaces a clean error rather than throwing to the caller.
+    try {
+      pollData = yaml.load(raw) as PollSource;
+    } catch {
+      try {
+        pollData = JSON.parse(raw);
+      } catch {
+        results.errors.push(
+          "Invalid format: could not parse content as YAML or JSON",
+        );
+        return results;
+      }
+    }
+
+    // yaml.load / JSON.parse can yield null, undefined, or a scalar for an
+    // empty or non-object body, so guard before dereferencing.
+    if (!pollData?.polls || !Array.isArray(pollData.polls)) {
+      results.errors.push("Invalid format: expected { polls: [...] }");
+      return results;
+    }
+
+    // Process each poll
+    for (let i = 0; i < pollData.polls.length; i++) {
+      const poll = pollData.polls[i];
+
+      // Validate poll data. The question and every answer must be plain
+      // strings: the parsed body is untrusted, and a non-string question (e.g.
+      // a YAML/JSON object like `{ $ne: null }`) would otherwise flow into the
+      // `PollItem.findOne` duplicate check as a query operator — a NoSQL
+      // injection sink (CodeQL js/sql-injection). The typeof guards confine it
+      // to primitive strings before it ever reaches the query.
+      if (
+        typeof poll.question !== "string" ||
+        !poll.question ||
+        !Array.isArray(poll.answers) ||
+        !poll.answers.every((a) => typeof a === "string")
+      ) {
+        results.errors.push(`Poll ${i + 1}: Missing question or answers`);
+        results.skipped++;
+        continue;
+      }
+
+      if (poll.answers.length < 2 || poll.answers.length > 10) {
+        results.errors.push(`Poll ${i + 1}: Must have 2-10 answers`);
+        results.skipped++;
+        continue;
+      }
+
+      if (poll.question.length > MAX_POLL_QUESTION_LENGTH) {
+        results.errors.push(
+          `Poll ${i + 1}: Question too long (max ${MAX_POLL_QUESTION_LENGTH} chars)`,
+        );
+        results.skipped++;
+        continue;
+      }
+
+      if (poll.answers.some((a) => a.length > MAX_POLL_ANSWER_LENGTH)) {
+        results.errors.push(
+          `Poll ${i + 1}: Answer too long (max ${MAX_POLL_ANSWER_LENGTH} chars)`,
+        );
+        results.skipped++;
+        continue;
+      }
+
+      // Check if this poll already exists (by question)
+      const existing = await PollItem.findOne({
+        guildId,
+        question: poll.question,
+      });
+
+      if (existing) {
+        results.skipped++;
+        continue;
+      }
+
+      // Create new poll item
+      try {
+        await PollItem.create({
+          guildId,
+          question: poll.question,
+          answers: poll.answers,
+          multiSelect: poll.multiselect ?? false,
+          tags: poll.tags ?? [],
+          usageCount: 0,
+          lastUsed: null,
+          enabled: true,
+          createdBy: userId,
+          source,
+        });
+        results.imported++;
+      } catch (error) {
+        results.errors.push(
+          `Poll ${i + 1}: ${error instanceof Error ? error.message : "Unknown error"}`,
+        );
+        results.skipped++;
+      }
     }
 
     return results;

@@ -1441,6 +1441,17 @@ ${renderFlash(props.flash)}
     <button type="submit" class="btn btn-primary">Import</button>
   </form>
 </div>
+<div class="card">
+  <h2>Paste import</h2>
+  <p class="muted">Paste a YAML or JSON document shaped as <code>{ polls: [{ question, answers, multiselect?, tags? }] }</code> directly — no hosting required. Same validation and duplicate-skipping as the URL import; nothing is fetched from the network.</p>
+  <form method="POST" action="/admin/polls/items/import-text" class="stack">
+    ${csrfInput}
+    <label>Poll library (YAML or JSON)
+      <textarea name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
+    </label>
+    <button type="submit" class="btn btn-primary">Import</button>
+  </form>
+</div>
 `;
   return renderAdminPage({
     title: "Polls",
