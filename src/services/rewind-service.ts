@@ -446,8 +446,14 @@ export function normalizeSnapshotSummary(
     sessionCount: s.sessionCount ?? 0,
     daysActive: s.daysActive ?? 0,
     // Older snapshots predate companions (#567) and any that recorded the
-    // since-removed topChannels are simply dropped here.
-    topCompanions: s.topCompanions ?? [],
+    // since-removed topChannels are simply dropped here. Snapshots frozen
+    // before #606 may carry baked-in "Unknown user" rows; drop them so the
+    // "skip rather than show Unknown user" guarantee also holds for the
+    // snapshot path (we can't re-resolve names here — this is a pure
+    // function with no client/DB access).
+    topCompanions: (s.topCompanions ?? []).filter(
+      (c) => c.displayName !== "Unknown user",
+    ),
     peakDay: s.peakDay ?? null,
     // Older snapshots predate the longest-session card (#568).
     longestSession: s.longestSession ?? null,

@@ -909,6 +909,23 @@ describe("RewindService snapshots (#574)", () => {
       });
     });
 
+    it("drops baked-in 'Unknown user' companion rows from legacy snapshots (#606)", () => {
+      const norm = normalizeSnapshotSummary(
+        {
+          topCompanions: [
+            { userId: "a", displayName: "Alice", totalSeconds: 100 },
+            { userId: "b", displayName: "Unknown user", totalSeconds: 50 },
+            { userId: "c", displayName: "Carol", totalSeconds: 25 },
+          ],
+        },
+        { userId: "u", guildId: "g", year: 2021 },
+      );
+      expect(norm.topCompanions).toEqual([
+        { userId: "a", displayName: "Alice", totalSeconds: 100 },
+        { userId: "c", displayName: "Carol", totalSeconds: 25 },
+      ]);
+    });
+
     it("tolerates a null stored payload (empty state)", () => {
       const empty = normalizeSnapshotSummary(null, {
         userId: "u",
