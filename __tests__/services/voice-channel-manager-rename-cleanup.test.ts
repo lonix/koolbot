@@ -151,4 +151,39 @@ describe("VoiceChannelManager - rename-safe unmanaged cleanup (issue #542)", () 
     expect(renamedChannel.delete).toHaveBeenCalled();
     expect((manager as any).userChannels.has("lonix-id")).toBe(false);
   });
+
+  it("reconciles all per-channel state when an empty owned channel is cleaned up", async () => {
+    // Empty owned channel that also has a waiting room, live status, an
+    // ownership queue entry and a pending transfer timer. Deleting it must not
+    // orphan any of that in-memory state (see Copilot review on #543).
+    Object.defineProperty(renamedChannel, "members", {
+      value: new Collection(),
+      writable: true,
+    });
+    const channelId = renamedChannel.id as string;
+    (manager as any).userChannels.set("lonix-id", renamedChannel);
+    (manager as any).waitingRooms.set(channelId, "waiting-room-id");
+    (manager as any).waitingRoomToMain.set("waiting-room-id", channelId);
+    (manager as any).liveChannels.add(channelId);
+    (manager as any).ownershipQueue.set(channelId, ["someone-id"]);
+    const timer = setTimeout(() => {}, 60_000);
+    (manager as any).ownershipTransferTimers.set(channelId, {
+      timer,
+      originalOwnerId: "lonix-id",
+    });
+
+    await manager.cleanupEmptyChannels();
+
+    expect(renamedChannel.delete).toHaveBeenCalled();
+    expect((manager as any).userChannels.has("lonix-id")).toBe(false);
+    expect((manager as any).waitingRooms.has(channelId)).toBe(false);
+    expect((manager as any).waitingRoomToMain.has("waiting-room-id")).toBe(
+      false,
+    );
+    expect((manager as any).liveChannels.has(channelId)).toBe(false);
+    expect((manager as any).ownershipQueue.has(channelId)).toBe(false);
+    expect((manager as any).ownershipTransferTimers.has(channelId)).toBe(false);
+
+    clearTimeout(timer);
+  });
 });

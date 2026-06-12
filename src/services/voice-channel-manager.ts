@@ -1253,6 +1253,46 @@ export class VoiceChannelManager {
   }
 
   /**
+   * Reconcile all in-memory tracking for a channel that has been deleted.
+   *
+   * The various cleanup paths (cleanupUserChannel, cleanupEmptyChannel and the
+   * periodic cleanupEmptyChannels scanner) all need to drop the same per-channel
+   * state once a channel is gone, otherwise maps such as waitingRoomToMain or
+   * ownershipTransferTimers are orphaned — e.g. a leftover waiting room would be
+   * skipped forever by the unmanaged-channel loop. This clears ownership,
+   * custom-name, ownership-queue, live-status and pending-transfer state, and
+   * removes any associated waiting room.
+   */
+  private async reconcileDeletedChannelState(channelId: string): Promise<void> {
+    // Drop ownership entry (userChannels is keyed by ownerId -> channel)
+    for (const [ownerId, userChannel] of this.userChannels.entries()) {
+      if (userChannel.id === channelId) {
+        this.userChannels.delete(ownerId);
+        break;
+      }
+    }
+
+    this.customChannelNames.delete(channelId);
+    this.ownershipQueue.delete(channelId);
+    this.liveChannels.delete(channelId);
+    // Cancel and drop any pending ownership-transfer timer for this channel
+    this.cancelOwnershipTransfer(channelId);
+
+    // Remove the associated waiting room, if any
+    const waitingRoomId = this.waitingRooms.get(channelId);
+    if (waitingRoomId) {
+      this.waitingRooms.delete(channelId);
+      this.waitingRoomToMain.delete(waitingRoomId);
+      try {
+        const waitingRoom = this.client.channels.cache.get(waitingRoomId);
+        if (waitingRoom) await waitingRoom.delete();
+      } catch {
+        // Ignore errors cleaning up waiting room
+      }
+    }
+  }
+
+  /**
    * Handle when a user joins a lobby channel - create a dynamic channel for them
    */
   public async handleLobbyJoin(
@@ -1771,8 +1811,8 @@ export class VoiceChannelManager {
 
           // Delete unmanaged channels (empty or not)
           await channel.delete("Bot cleanup - unmanaged channel");
-          // Clean up custom name tracking
-          this.customChannelNames.delete(channel.id);
+          // Reconcile any leftover in-memory tracking for this channel
+          await this.reconcileDeletedChannelState(channel.id);
           logger.info(`Deleted unmanaged channel: ${channel.name}`);
         } catch (error) {
           logger.error(`Error deleting channel ${channel.name}:`, error);
@@ -1794,14 +1834,8 @@ export class VoiceChannelManager {
       for (const channel of emptyManagedChannels.values()) {
         try {
           await channel.delete("Bot cleanup - empty managed channel");
-          // Clean up custom name tracking
-          this.customChannelNames.delete(channel.id);
-          // Clean up ownership tracking for the deleted channel
-          for (const [ownerId, userChannel] of this.userChannels.entries()) {
-            if (userChannel.id === channel.id) {
-              this.userChannels.delete(ownerId);
-            }
-          }
+          // Reconcile all in-memory tracking so no per-channel state is orphaned
+          await this.reconcileDeletedChannelState(channel.id);
           logger.info(`Deleted empty managed channel: ${channel.name}`);
         } catch (error) {
           logger.error(`Error deleting channel ${channel.name}:`, error);
