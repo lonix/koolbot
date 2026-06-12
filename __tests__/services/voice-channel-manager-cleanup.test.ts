@@ -322,17 +322,20 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
   });
 
   describe("pending ownership-transfer cleanup (issue #540)", () => {
-    function seedPendingTransfer(channelId: string): jest.Mock {
-      // Seed a pending ownership-transfer timer for the channel and return a
-      // spy standing in for the real timer handle so we can assert it's cleared.
-      const timer = setTimeout(() => {}, 60_000) as unknown as ReturnType<
-        typeof setTimeout
-      >;
+    function seedPendingTransfer(
+      channelId: string,
+    ): ReturnType<typeof setTimeout> {
+      // Seed a pending ownership-transfer timer for the channel using a
+      // deterministic sentinel handle (no real setTimeout, so no open handle is
+      // left if a test fails early) and return it for assertions.
+      const timer = {
+        __sentinel: channelId,
+      } as unknown as ReturnType<typeof setTimeout>;
       (manager as any).ownershipTransferTimers.set(channelId, {
         timer,
         originalOwnerId: "owner-id",
       });
-      return jest.fn();
+      return timer;
     }
 
     it("cancels a pending ownership transfer when cleanupEmptyChannel deletes the channel", async () => {
@@ -344,14 +347,15 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
         writable: true,
       });
 
-      seedPendingTransfer("channel-id");
+      const timer = seedPendingTransfer("channel-id");
       const clearSpy = jest.spyOn(global, "clearTimeout");
 
       await (manager as any).cleanupEmptyChannel(mockChannel as VoiceChannel);
 
-      // The timer must be cancelled and dropped so it never fires on the
-      // now-deleted channel (DiscordAPIError 10003).
-      expect(clearSpy).toHaveBeenCalled();
+      // The specific seeded timer must be cancelled and dropped so it never
+      // fires on the now-deleted channel (DiscordAPIError 10003).
+      expect(clearSpy).toHaveBeenCalledTimes(1);
+      expect(clearSpy).toHaveBeenCalledWith(timer);
       expect((manager as any).ownershipTransferTimers.has("channel-id")).toBe(
         false,
       );
@@ -366,12 +370,13 @@ describe("VoiceChannelManager - Channel Cleanup with Custom Names", () => {
         writable: true,
       });
 
-      seedPendingTransfer("channel-id");
+      const timer = seedPendingTransfer("channel-id");
       const clearSpy = jest.spyOn(global, "clearTimeout");
 
       await (manager as any).cleanupUserChannel("owner-id");
 
-      expect(clearSpy).toHaveBeenCalled();
+      expect(clearSpy).toHaveBeenCalledTimes(1);
+      expect(clearSpy).toHaveBeenCalledWith(timer);
       expect((manager as any).ownershipTransferTimers.has("channel-id")).toBe(
         false,
       );
