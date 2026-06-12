@@ -751,10 +751,25 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Polls**          | `/poll create`, `list`, `add-item`, `import-url`, `delete`, `delete-item`, `test`, `list-items`     |
 | **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
+| **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels** | `/vc force-reload` (single **Force VC cleanup** button)                                             |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
+
+The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
+presence message pools the bot rotates through, picked by how many users
+are in voice: the *empty*, *one user*, and *multiple users* pools. Each
+pool has an add / edit / remove / reorder list plus a paste-a-list
+import/export box (newline- or JSON-encoded), built on a reusable
+string-array editor. Entries are stored per-guild in MongoDB and take
+effect immediately — no redeploy or `/config reload` needed. A pool with
+no stored rows falls back to the built-in defaults in
+`src/content/statuses.ts`, so behaviour is unchanged on a fresh install;
+use **Seed defaults into store** to start editing from those defaults.
+Entries in the *multiple users* pool must contain the `{count}`
+placeholder (replaced with the live user count); the editor rejects saves
+that omit it.
 
 ### User self-service (`/me/*`, both admin and user roles)
 

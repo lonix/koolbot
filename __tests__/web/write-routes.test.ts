@@ -9,6 +9,7 @@ import {
   coerceConfigValue,
   findSectionMasterKey,
   firstLengthError,
+  parseStringListImport,
   resetConfigToDefaults,
   TEXT_LIMITS,
   type ResetConfigStore,
@@ -18,6 +19,42 @@ import {
   PROTECTED_KEYS,
 } from "../../src/web/bootstrap-vars.js";
 import { defaultConfig } from "../../src/services/config-schema.js";
+
+describe("parseStringListImport", () => {
+  it("splits a newline-separated list, trimming and dropping blanks", () => {
+    expect(parseStringListImport("a\n  b  \n\n c \n")).toEqual(["a", "b", "c"]);
+  });
+
+  it("handles CRLF line endings", () => {
+    expect(parseStringListImport("x\r\ny\r\n")).toEqual(["x", "y"]);
+  });
+
+  it("parses a JSON array of strings", () => {
+    expect(parseStringListImport('["{count} nerds", "  spaced  "]')).toEqual([
+      "{count} nerds",
+      "spaced",
+    ]);
+  });
+
+  it("drops non-string and empty members of a JSON array", () => {
+    expect(parseStringListImport('["a", 1, "", null, "b"]')).toEqual([
+      "a",
+      "b",
+    ]);
+  });
+
+  it("falls back to newline parsing on malformed JSON", () => {
+    // Opening bracket but not valid JSON → treat as plain text lines.
+    expect(parseStringListImport("[not json\nstill a line")).toEqual([
+      "[not json",
+      "still a line",
+    ]);
+  });
+
+  it("returns an empty array for blank input", () => {
+    expect(parseStringListImport("   \n  \n")).toEqual([]);
+  });
+});
 
 /**
  * In-memory `ResetConfigStore` seeded from `initial` rows. Records every

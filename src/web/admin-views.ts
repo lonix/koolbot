@@ -14,6 +14,7 @@ import {
   categoryMetadata,
   type SettingOption,
 } from "../services/config-schema.js";
+import type { BotStatusPool } from "../content/statuses.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -1780,6 +1781,172 @@ ${renderFlash(props.flash)}
   return renderAdminPage({
     title: "Database",
     active: "/admin/database",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
+// ---------- Reusable string-array editor (issue #557) ----------
+
+export interface StringArrayEditorItem {
+  id: string;
+  order: number;
+  text: string;
+}
+
+/**
+ * Options driving the reusable add / edit / remove / reorder / import /
+ * export editor for an arbitrary array of strings. Kept free of any
+ * bot-status-specific knowledge so the same partial can be dropped onto
+ * accolades / notice-categories / etc. later (the "array of data"
+ * generalisation in #557). The route handlers own validation; this only
+ * renders the controls.
+ */
+export interface StringArrayEditorOptions {
+  csrfToken: string;
+  /** Section heading. */
+  title: string;
+  /** Optional one-line explanation under the heading. */
+  description?: string;
+  /**
+   * Path prefix the CRUD/import forms post to, e.g. `/admin/bot-status`.
+   * Per-entry routes use `${basePath}/entry/:id/...`; collection routes
+   * use `${basePath}/pool/:collectionId/...`.
+   */
+  basePath: string;
+  /** Identifier of this array within `basePath` (e.g. the pool name). */
+  collectionId: string;
+  /** Current stored entries, already in display order. */
+  items: StringArrayEditorItem[];
+  /** Maximum length accepted for a single entry (drives `maxlength`). */
+  maxLength: number;
+  /** Optional hint shown beside the add input (e.g. the `{count}` rule). */
+  inputHint?: string;
+  /** Newline-joined effective list, shown in the export/import textarea. */
+  exportText: string;
+  /**
+   * When set, a banner explains the store is empty and the built-in
+   * defaults are in use, alongside a "seed defaults" button.
+   */
+  defaultsNotice?: string;
+}
+
+export function renderStringArrayEditor(
+  opts: StringArrayEditorOptions,
+): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`;
+  const poolPath = `${opts.basePath}/pool/${encodeURIComponent(opts.collectionId)}`;
+  const entryPath = (id: string): string =>
+    `${opts.basePath}/entry/${encodeURIComponent(id)}`;
+
+  const rows =
+    opts.items.length === 0
+      ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
+      : opts.items
+          .map(
+            (item) => `<tr>
+<td><form method="POST" action="${entryPath(item.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" value="${item.order}" min="-1000" max="10000" required><button type="submit" class="btn">Save</button></form></td>
+<td>
+  <details class="helper edit-details"><summary>${escapeHtml(item.text)}</summary>
+    <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
+      <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(item.text)}" required></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
+  <div class="muted mono">id: ${escapeHtml(item.id)}</div>
+</td>
+<td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" onsubmit="return confirm('Delete this entry?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
+</tr>`,
+          )
+          .join("");
+
+  const defaultsBanner = opts.defaultsNotice
+    ? `<div class="notice warn">${escapeHtml(opts.defaultsNotice)}
+  <form method="POST" action="${poolPath}/seed" class="inline-form">${csrfInput}<button type="submit" class="btn">Seed defaults into store</button></form>
+</div>`
+    : "";
+
+  const hint = opts.inputHint
+    ? `<span class="muted">${escapeHtml(opts.inputHint)}</span>`
+    : "";
+
+  return `<div class="card">
+  <h2>${escapeHtml(opts.title)} <span class="muted">(${opts.items.length})</span></h2>
+  ${opts.description ? `<p class="subtitle">${escapeHtml(opts.description)}</p>` : ""}
+  ${defaultsBanner}
+  <table><thead><tr><th>Order</th><th>Text</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <form method="POST" action="${poolPath}/add" class="stack">
+    ${csrfInput}
+    <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required></label>
+    ${hint}
+    <label>Order<input type="number" name="order" min="-1000" max="10000" value="0" required></label>
+    <button type="submit" class="btn btn-primary">Add</button>
+  </form>
+  <details class="helper">
+    <summary>Import / export</summary>
+    <form method="POST" action="${poolPath}/import" class="stack">
+      ${csrfInput}
+      <p class="muted">Paste one entry per line, or a JSON array of strings. Exporting: the textarea below shows the current effective list — copy it to back up.</p>
+      <label>Entries<textarea name="items" rows="8">${escapeHtml(opts.exportText)}</textarea></label>
+      <label class="inline-form"><input type="radio" name="mode" value="replace" checked> Replace pool</label>
+      <label class="inline-form"><input type="radio" name="mode" value="append"> Append to pool</label>
+      <button type="submit" class="btn btn-primary">Import</button>
+    </form>
+  </details>
+</div>`;
+}
+
+// ---------- Bot Status (issue #557) ----------
+
+export interface BotStatusPoolView {
+  pool: BotStatusPool;
+  label: string;
+  description: string;
+  requiresCount: boolean;
+  items: StringArrayEditorItem[];
+  usingDefaults: boolean;
+  exportText: string;
+}
+
+export interface BotStatusProps extends CommonProps {
+  maxLength: number;
+  pools: BotStatusPoolView[];
+  flash?: FlashMessage | null;
+}
+
+export function renderBotStatusPage(props: BotStatusProps): string {
+  const editors = props.pools
+    .map((p) =>
+      renderStringArrayEditor({
+        csrfToken: props.csrfToken,
+        title: p.label,
+        description: p.description,
+        basePath: "/admin/bot-status",
+        collectionId: p.pool,
+        items: p.items,
+        maxLength: props.maxLength,
+        inputHint: p.requiresCount
+          ? "Must contain the {count} placeholder."
+          : undefined,
+        exportText: p.exportText,
+        defaultsNotice: p.usingDefaults
+          ? "This pool has no stored entries — the bot is using its built-in defaults. Add, import, or seed below to customise."
+          : undefined,
+      }),
+    )
+    .join("");
+
+  const body = `
+<h1>Bot Status</h1>
+<p class="subtitle">The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.</p>
+${renderFlash(props.flash)}
+${editors}
+`;
+  return renderAdminPage({
+    title: "Bot Status",
+    active: "/admin/bot-status",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

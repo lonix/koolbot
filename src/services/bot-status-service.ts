@@ -1,11 +1,23 @@
 import { Client, ActivityType } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { BotStatusMessage } from "../models/bot-status-message.js";
 import {
-  lonelyStatuses,
-  singleUserStatuses,
-  multipleUsersStatuses,
+  STATUS_POOL_DEFAULTS,
+  BOT_STATUS_POOLS,
+  type BotStatusPool,
 } from "../content/statuses.js";
+
+type StatusPools = Record<BotStatusPool, string[]>;
+
+/** Fresh, mutable copy of the hardcoded defaults for every pool. */
+function defaultStatusPools(): StatusPools {
+  return {
+    lonely: [...STATUS_POOL_DEFAULTS.lonely],
+    single: [...STATUS_POOL_DEFAULTS.single],
+    multiple: [...STATUS_POOL_DEFAULTS.multiple],
+  };
+}
 
 export class BotStatusService {
   private static instance: BotStatusService;
@@ -15,10 +27,63 @@ export class BotStatusService {
   private currentVcUserCount = 0;
   // Username tracking removed for simplified status logic (field deleted)
   private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
+  /**
+   * In-memory copy of the live status pools, seeded with the hardcoded
+   * defaults so `getRandomStatusMessage()` (which is synchronous, called
+   * from presence updates) always has something to pick from — even
+   * before the first DB read or when the store is empty. Refreshed from
+   * the DB at startup, on `/config reload`, and after every WebUI edit.
+   */
+  private statusPools: StatusPools = defaultStatusPools();
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+
+    // Re-read the pools when configuration is reloaded so a `/config
+    // reload` picks up store changes without a redeploy, mirroring the
+    // reload-callback pattern used by the other services.
+    this.configService.registerReloadCallback(async () => {
+      await this.refreshStatusPools();
+    });
+  }
+
+  /**
+   * Reload the status pools from the DB store, falling back to the
+   * hardcoded defaults for any pool with no stored rows. Safe to call
+   * repeatedly; never throws — on error the existing cached pools are
+   * kept so presence updates keep working.
+   */
+  public async refreshStatusPools(): Promise<void> {
+    try {
+      const guildId = await this.configService.getString("GUILD_ID", "");
+      if (!guildId) {
+        // No guild bound yet (e.g. early startup / tests): keep defaults.
+        this.statusPools = defaultStatusPools();
+        return;
+      }
+      const rows = await BotStatusMessage.find({ guildId })
+        .sort({ pool: 1, order: 1 })
+        .lean();
+
+      const next = defaultStatusPools();
+      const stored: Partial<Record<BotStatusPool, string[]>> = {};
+      for (const row of rows) {
+        const pool = row.pool as BotStatusPool;
+        (stored[pool] ??= []).push(row.text);
+      }
+      for (const pool of BOT_STATUS_POOLS) {
+        const list = stored[pool];
+        // Empty store for a pool → keep that pool's built-in defaults.
+        if (list && list.length > 0) {
+          next[pool] = list;
+        }
+      }
+      this.statusPools = next;
+      logger.debug("Bot status pools refreshed from store");
+    } catch (error) {
+      logger.error("Failed to refresh bot status pools:", error);
+    }
   }
 
   /**
@@ -26,18 +91,16 @@ export class BotStatusService {
    */
   private getRandomStatusMessage(): string {
     // Simplified: only differentiate between 0, 1, and many users; no name interpolation
+    const pickFrom = (list: string[]): string =>
+      list[Math.floor(Math.random() * list.length)];
+
     if (this.currentVcUserCount <= 0) {
-      return lonelyStatuses[Math.floor(Math.random() * lonelyStatuses.length)];
+      return pickFrom(this.statusPools.lonely);
     }
     if (this.currentVcUserCount === 1) {
-      return singleUserStatuses[
-        Math.floor(Math.random() * singleUserStatuses.length)
-      ];
+      return pickFrom(this.statusPools.single);
     }
-    const template =
-      multipleUsersStatuses[
-        Math.floor(Math.random() * multipleUsersStatuses.length)
-      ];
+    const template = pickFrom(this.statusPools.multiple);
     return template.replace("{count}", this.currentVcUserCount.toString());
   }
 
@@ -74,6 +137,12 @@ export class BotStatusService {
   public setOperationalStatus(): void {
     try {
       this.isInitialized = true;
+      // Load the live pools from the store in the background; the cache is
+      // already seeded with defaults so presence works immediately, and a
+      // later refresh swaps in any operator-curated lists.
+      void this.refreshStatusPools().then(() =>
+        this.updateActivityBasedOnVcUsers(),
+      );
       this.updateActivityBasedOnVcUsers();
       logger.info("Bot status set to: Fully Operational (Green)");
     } catch (error) {
