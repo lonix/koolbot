@@ -407,7 +407,14 @@ export function createUserRouter(
       });
 
       const body = (req.body as Record<string, unknown> | undefined) ?? {};
-      const raw = typeof body.timezone === "string" ? body.timezone.trim() : "";
+      // Strip line breaks before the value reaches the service: it gets
+      // echoed back in `setTimezone`'s validation error (and from there
+      // into our logs), and a CR/LF could forge a log line. No valid IANA
+      // identifier contains a newline, so this never rejects a real zone.
+      const raw =
+        typeof body.timezone === "string"
+          ? body.timezone.replace(/[\r\n]+/g, "").trim()
+          : "";
       const service = UserNotificationPrefsService.getInstance();
       const before = await service.getTimezone(userId, guildId);
 
