@@ -140,6 +140,23 @@ export const EMOJI_SHORTCODES: Readonly<Record<string, string>> = {
 const SHORTCODE_RE = /:([a-z0-9_+-]+):/gi;
 
 /**
+ * Look up a shortcode name (case-insensitive) in the map, returning its
+ * Unicode emoji or `undefined` when the name isn't a recognised shortcode.
+ *
+ * Uses an *own-property* check rather than a bare index/`in`, so inherited
+ * `Object.prototype` members can't masquerade as known shortcodes: without
+ * it, `:constructor:`, `:toString:`, `:__proto__:` etc. would hit the
+ * prototype chain and resolve to a function's source (or `[object Object]`)
+ * instead of being treated as unknown and left as typed.
+ */
+function lookupShortcode(name: string): string | undefined {
+  const key = name.toLowerCase();
+  return Object.prototype.hasOwnProperty.call(EMOJI_SHORTCODES, key)
+    ? EMOJI_SHORTCODES[key]
+    : undefined;
+}
+
+/**
  * Replace every recognised `:shortcode:` in `input` with its Unicode emoji.
  * Unknown shortcodes are returned untouched (no data loss). Lookup is
  * case-insensitive on the shortcode name. A non-string input is coerced to
@@ -149,8 +166,7 @@ export function resolveEmojiShortcodes(input: unknown): string {
   const str = typeof input === "string" ? input : String(input ?? "");
   if (!str.includes(":")) return str;
   return str.replace(SHORTCODE_RE, (match, name: string) => {
-    const unicode = EMOJI_SHORTCODES[name.toLowerCase()];
-    return unicode ?? match;
+    return lookupShortcode(name) ?? match;
   });
 }
 
@@ -169,8 +185,7 @@ export function findUnknownShortcodes(input: unknown): string[] {
   const seen = new Set<string>();
   for (const m of str.matchAll(SHORTCODE_RE)) {
     const token = m[0];
-    const name = m[1].toLowerCase();
-    if (name in EMOJI_SHORTCODES) continue;
+    if (lookupShortcode(m[1]) !== undefined) continue;
     if (seen.has(token)) continue;
     seen.add(token);
     unknown.push(token);

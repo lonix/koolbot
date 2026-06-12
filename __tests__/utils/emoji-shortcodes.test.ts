@@ -53,6 +53,21 @@ describe("resolveEmojiShortcodes (#558)", () => {
     expect(resolveEmojiShortcodes("a :: b")).toBe("a :: b");
   });
 
+  it("treats inherited Object.prototype names as unknown (no prototype-chain collision)", () => {
+    // Without an own-property check these would resolve to a function's
+    // source / [object Object] instead of being left as typed.
+    for (const token of [
+      ":constructor:",
+      ":toString:",
+      ":hasOwnProperty:",
+      ":valueOf:",
+      ":__proto__:",
+      ":__defineGetter__:",
+    ]) {
+      expect(resolveEmojiShortcodes(token)).toBe(token);
+    }
+  });
+
   it("matches shortcode names case-insensitively", () => {
     expect(resolveEmojiShortcodes(":GREEN_CIRCLE:")).toBe("🟢");
     expect(resolveEmojiShortcodes(":Green_Circle:")).toBe("🟢");
@@ -91,5 +106,12 @@ describe("findUnknownShortcodes (#558)", () => {
 
   it("preserves the original token casing in the result", () => {
     expect(findUnknownShortcodes(":Bogus:")).toEqual([":Bogus:"]);
+  });
+
+  it("reports inherited Object.prototype names as unknown", () => {
+    expect(findUnknownShortcodes(":constructor: :toString:")).toEqual([
+      ":constructor:",
+      ":toString:",
+    ]);
   });
 });
