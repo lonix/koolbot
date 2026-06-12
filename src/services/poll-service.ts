@@ -836,6 +836,67 @@ export class PollService {
   }
 
   /**
+   * Edit an existing poll schedule's channel, cron, duration, and ping role.
+   * Re-validates the cron expression and re-arms the running `CronJob` in
+   * place — stopping the old job and starting a fresh one from the saved row —
+   * so the live schedule reflects the edit immediately, exactly as
+   * `setScheduleEnabled` does for the toggle path (#556). Other fields
+   * (`enabled`, `createdBy`, `lastRun`) are preserved.
+   */
+  public async updateSchedule(
+    scheduleId: string,
+    data: {
+      channelId: string;
+      cronSchedule: string;
+      pollDuration: number;
+      roleIdToPing: string | null;
+    },
+    guildId?: string,
+  ): Promise<IPollSchedule | null> {
+    if (!this.validateCronExpression(data.cronSchedule)) {
+      throw new Error(`Invalid cron expression: ${data.cronSchedule}`);
+    }
+
+    const schedule = await PollSchedule.findById(scheduleId);
+    if (!schedule) {
+      return null;
+    }
+    if (guildId && schedule.guildId !== guildId) {
+      logger.warn(
+        `Attempted to edit schedule ${sanitizeForLog(schedule._id.toString())} from wrong guild (got ${sanitizeForLog(guildId)})`,
+      );
+      return null;
+    }
+
+    schedule.channelId = data.channelId;
+    schedule.cronSchedule = data.cronSchedule;
+    schedule.pollDuration = data.pollDuration;
+    schedule.roleIdToPing = data.roleIdToPing;
+    await schedule.save();
+
+    // Re-arm the cron job in place: stop the old job and start a fresh one from
+    // the saved row so a changed cron/channel takes effect now, not on the next
+    // service restart. Mirrors the stop/restart lockstep in setScheduleEnabled.
+    const existing = this.jobs.get(scheduleId);
+    if (existing) {
+      existing.job.stop();
+      this.jobs.delete(scheduleId);
+    }
+
+    if (this.isInitialized && schedule.enabled) {
+      const job = this.schedulePoll(schedule);
+      if (job) {
+        this.jobs.set(schedule._id.toString(), { schedule, job });
+      }
+    }
+
+    logger.info(
+      `Updated poll schedule: ${sanitizeForLog(schedule._id.toString())}`,
+    );
+    return schedule;
+  }
+
+  /**
    * Flip a poll schedule's `enabled` flag. Restarts or stops the cron
    * job in lockstep so the toggle reflects in scheduling, not just the
    * database row. Used by the WebUI write surface (#383).
@@ -972,6 +1033,45 @@ export class PollService {
     await pollItem.save();
     logger.info(`Created new poll item: ${pollItem._id}`);
     return pollItem;
+  }
+
+  /**
+   * Edit an existing poll item's question, answers, tags, and multiSelect.
+   * Usage statistics and provenance (`usageCount`, `lastUsed`, `createdBy`,
+   * `source`) are deliberately left untouched so editing a question does not
+   * reset its rotation history (#556). Schema validation on `save()` enforces
+   * the 2–10 answers / 55-char caps as defence-in-depth behind the route-layer
+   * checks.
+   */
+  public async updatePollItem(
+    itemId: string,
+    data: {
+      question: string;
+      answers: string[];
+      multiSelect: boolean;
+      tags: string[];
+    },
+    guildId?: string,
+  ): Promise<IPollItem | null> {
+    const item = await PollItem.findById(itemId);
+    if (!item) {
+      return null;
+    }
+    if (guildId && item.guildId !== guildId) {
+      logger.warn(
+        `Attempted to edit poll item ${sanitizeForLog(item._id.toString())} from wrong guild (got ${sanitizeForLog(guildId)})`,
+      );
+      return null;
+    }
+
+    item.question = data.question;
+    item.answers = data.answers;
+    item.multiSelect = data.multiSelect;
+    item.tags = data.tags;
+    await item.save();
+
+    logger.info(`Updated poll item: ${sanitizeForLog(item._id.toString())}`);
+    return item;
   }
 
   /**

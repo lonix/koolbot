@@ -555,9 +555,11 @@ export function createReadOnlyRouter(
           flash: readFlash(req),
           schedules: schedules.map((s) => ({
             id: String(s._id),
+            channelId: s.channelId,
             channelName: channelData.names.get(s.channelId) ?? s.channelId,
             cron: s.cronSchedule,
             durationHours: s.pollDuration,
+            pingRoleId: s.roleIdToPing ?? null,
             pingRoleName: s.roleIdToPing
               ? (roleData.names.get(s.roleIdToPing) ?? s.roleIdToPing)
               : null,
@@ -569,6 +571,7 @@ export function createReadOnlyRouter(
             question: it.question,
             answers: it.answers ?? [],
             tags: it.tags ?? [],
+            multiSelect: it.multiSelect,
             usageCount: it.usageCount,
             lastUsed: it.lastUsed ? new Date(it.lastUsed).toISOString() : "—",
             enabled: it.enabled,
