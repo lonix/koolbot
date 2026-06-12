@@ -27,7 +27,8 @@ function pageShell(title: string, body: string): string {
     // pre-auth sign-in / sign-out / invalid-link pages don't flash light mode.
     `body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:48rem;margin:0 auto;padding:2rem;background:${THEME.bg};color:${THEME.text};}`,
     "h1{margin-top:0;}",
-    `a{color:${THEME.link};}`,
+    `a{color:${THEME.link};text-decoration:none;}`,
+    "a:hover{text-decoration:underline;}",
     "table{border-collapse:collapse;width:100%;}",
     `th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid ${THEME.border};font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;}`,
     `th{background:${THEME.surfaceAlt};}`,
