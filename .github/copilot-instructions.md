@@ -270,32 +270,21 @@ Add to `commandConfigs`: `{ name: 'echo', configKey: 'echo.enabled', file: 'echo
 
 ## CI/CD & GitHub Workflows
 
-The repository uses GitHub Actions for automated quality checks. All PRs must pass:
+The repository uses GitHub Actions for automated quality checks. Workflows live in `.github/workflows/`:
 
-- **Test Workflow** (`.github/workflows/test.yml`):
-  - TypeScript compilation
-  - ESLint checks
-  - Prettier formatting verification
-  - Jest test suite with coverage
-  - Runs on: push to main, PRs, manual trigger
-  - Includes concurrency control to cancel duplicate runs
-
-- **Markdown Lint Workflow** (`.github/workflows/markdown-lint.yml`):
-  - Validates all markdown files
-  - Runs on: markdown file changes, manual trigger
-  - Includes concurrency control
-
-- **Docker Workflow** (`.github/workflows/docker.yml`):
-  - Builds and validates Docker images
-  - Pushes to GitHub Container Registry
-  - Uses Docker layer caching for faster builds
-  - Concurrency control prevents duplicate builds (except on tags)
-
-- **Release Drafter Workflow** (`.github/workflows/release-drafter.yml`):
-  - Automatically drafts release notes from merged PRs
-  - Auto-labels PRs based on changed files
-  - Groups changes by category in release notes
-  - Runs on: push to main, PR label changes
+- **CI** (`ci.yml`): the core gate on PRs to `main` and pushes to `main`. Parallel jobs `lint`
+  (ESLint + Prettier), `typecheck` (`npm run build`), and `test` (matrix Node 22 & 24, `npm run test:ci`
+  with coverage thresholds). The `ci-success` aggregator is the single required status check — it fails if
+  any job fails or is cancelled.
+- **Markdown Lint** (`markdown-lint.yml`): validates markdown on `**/*.md` changes.
+- **Workflow Lint** (`actionlint.yml`) + zizmor (`.github/zizmor.yml`): lint and security-audit workflow
+  YAML when `.github/workflows/**` changes.
+- **CodeQL** (`codeql.yml`): code scanning on PRs, pushes, and a weekly cron.
+- **Dependency Review** (`dependency-review.yml`): flags risky dependency changes on PRs.
+- **Docker** (`docker.yml`): on push to `main` and `v*.*.*` tags, runs hadolint then
+  builds/scans (Trivy)/signs (cosign)/pushes the image to GHCR.
+- **PR Title Lint** (`pr-title-lint.yml`): enforces Conventional Commit PR titles (see below).
+- **Release Please** (`release-please.yml`): release automation on push to `main`.
 
 **Local Pre-Push Validation:**
 
@@ -305,32 +294,19 @@ npm run check:all  # Build + Lint + Format + Tests
 npx markdownlint "**/*.md" --ignore node_modules --ignore dist
 ```
 
-### PR Labeling Guidelines
+### Conventional Commits & Releases
 
-The Release Drafter automatically labels PRs based on file patterns, but you can also manually apply labels:
+This repo **squash-merges** PRs and uses the **PR title** as the commit subject. Releases are automated by
+release-please, which only counts commits whose subject parses as a Conventional Commit — a non-conforming
+title is silently dropped from the changelog and version bump, so `pr-title-lint.yml` rejects bad titles.
 
-- **Version Labels** (affect semantic versioning):
-  - `major` or `breaking` - Breaking changes (v1.0.0 → v2.0.0)
-  - `minor`, `feature`, `enhancement` - New features (v1.0.0 → v1.1.0)
-  - `patch`, `bug`, `fix` - Bug fixes (v1.0.0 → v1.0.1)
-
-- **Category Labels** (organize release notes):
-  - `feature`, `enhancement` - New features
-  - `bug`, `fix` - Bug fixes
-  - `documentation` - Documentation changes
-  - `dependencies` - Dependency updates
-  - `test` - Test changes
-  - `docker` - Docker-related changes
-  - `github-actions` - CI/CD workflow changes
-  - `chore`, `refactor` - Maintenance work
-
-**Auto-labeling rules** (from `.github/release-drafter.yml`):
-
-- Markdown files → `documentation`
-- package.json changes → `dependencies`
-- .github/workflows → `github-actions`
-- `__tests__` directory → `test`
-- Dockerfile → `docker`
+- **Format:** `<type>(<optional scope>): <subject>` (append `!` or a `BREAKING CHANGE` footer for breaking
+  changes).
+- **Allowed types** (synced with `release-please-config.json` changelog sections):
+  `feat, fix, perf, revert, refactor, docs, deps, test, build, ci, chore`.
+- **Version impact:** `feat` → minor, `fix`/`perf` → patch, breaking (`!`) → major.
+- release-please maintains a `chore(main): release x.y.z` PR; merging it tags the release and updates
+  `CHANGELOG.md` and `.release-please-manifest.json`.
 
 ## Task Completion Workflow
 
