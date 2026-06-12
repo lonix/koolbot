@@ -371,6 +371,56 @@ const CASCADE_DISABLE_SCRIPT =
   "master.addEventListener('change',apply);apply()}" +
   "document.querySelectorAll('[data-cascade-master]').forEach(wire)})();";
 
+// AJAX section save (#555). Each Settings category is its own
+// `POST /admin/settings/save-section` form. A plain submit 303-redirects
+// back to /admin/settings, reloading the page and dropping the admin at the
+// top — annoying when you just saved a section near the bottom. This
+// progressively enhances the Save button: submit via fetch(), show the
+// server's flash inline inside the same card, and leave scroll position
+// untouched. The server returns JSON for these requests (Accept:
+// application/json) and keeps the redirect for the no-JS path, so browsers
+// without fetch/FormData fall back to the original full-page behaviour.
+//
+// Per-row Reset buttons retarget /admin/settings/reset via `formaction`;
+// those are left to submit natively (full reload). We track the clicked
+// submitter manually as well as via `SubmitEvent.submitter` so a Reset on an
+// older browser without `submitter` isn't mistakenly AJAX-posted to the
+// save-section route.
+const SETTINGS_SAVE_SCRIPT =
+  "(function(){" +
+  "var forms=document.querySelectorAll('form[action=\"/admin/settings/save-section\"]');" +
+  "if(!forms.length)return;" +
+  "function flashEl(form){var card=form.closest('.card');if(!card)return null;" +
+  "var n=card.querySelector('.section-flash');" +
+  "if(!n){n=document.createElement('div');n.className='notice section-flash';" +
+  "form.parentNode.insertBefore(n,form)}return n}" +
+  "function show(form,type,text){var n=flashEl(form);if(!n)return;" +
+  "var cls=type==='ok'?'ok':type==='warn'?'warn':'err';" +
+  "n.className='notice section-flash '+cls;n.textContent=text}" +
+  "function submit(e,submitter){var form=e.currentTarget;" +
+  // Reset buttons retarget via formaction — let those submit natively.
+  "if(submitter&&submitter.getAttribute('formaction'))return;" +
+  "if(typeof fetch!=='function'||typeof FormData!=='function')return;" +
+  "e.preventDefault();" +
+  "var save=form.querySelector('button[type=submit]:not([formaction])');" +
+  "if(save)save.disabled=true;" +
+  "fetch(form.action,{method:'POST',credentials:'same-origin',cache:'no-store'," +
+  "headers:{'Accept':'application/json','X-Requested-With':'fetch'}," +
+  "body:new FormData(form)})" +
+  ".then(function(res){if(res.status===401){window.location.href='/admin/';return null}" +
+  "return res.json().catch(function(){return null})})" +
+  ".then(function(d){if(save)save.disabled=false;" +
+  "if(!d){show(form,'err','Save failed — unexpected server response.');return}" +
+  "show(form,d.type||'ok',d.text||'Saved.')})" +
+  ".catch(function(){if(save)save.disabled=false;" +
+  "show(form,'err','Save failed — network error. Your changes were not saved.')})}" +
+  "function wire(form){var last=null;" +
+  "form.addEventListener('click',function(ev){var t=ev.target;" +
+  "if(t&&t.closest){var b=t.closest('button,input[type=submit]');" +
+  "if(b&&form.contains(b))last=b}});" +
+  "form.addEventListener('submit',function(e){submit(e,e.submitter||last);last=null})}" +
+  "forms.forEach(wire)})();";
+
 function renderNav(
   active: string,
   navFeatureStatus?: NavFeatureStatus,
@@ -423,6 +473,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<script>${SCRIPT}</script>`,
     `<script>${CRON_PICKER_SCRIPT}</script>`,
     `<script>${CASCADE_DISABLE_SCRIPT}</script>`,
+    `<script>${SETTINGS_SAVE_SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }

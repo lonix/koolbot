@@ -97,6 +97,25 @@ describe("renderAdminPage", () => {
     expect(html).toContain("keydown");
   });
 
+  it("ships the AJAX section-save script that posts via fetch (issue #555)", () => {
+    const html = renderAdminPage({
+      title: "Settings",
+      active: "/admin/settings",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // Progressive enhancement: the per-section Save submits via fetch() so the
+    // page no longer reloads and jumps to the top. The script targets the
+    // save-section form, advertises a JSON response, and renders an inline
+    // flash instead of redirecting.
+    expect(html).toContain('form[action="/admin/settings/save-section"]');
+    expect(html).toContain("'X-Requested-With':'fetch'");
+    expect(html).toContain("section-flash");
+    // Reset buttons (formaction) must still submit natively.
+    expect(html).toContain("getAttribute('formaction')");
+  });
+
   it("escapes the title", () => {
     const html = renderAdminPage({
       title: "<bad>",
