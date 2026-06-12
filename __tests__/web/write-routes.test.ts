@@ -262,6 +262,58 @@ describe("coerceConfigValue", () => {
         expect(String(r.value).length).toBeGreaterThan(TEXT_LIMITS.configValue);
     });
   });
+
+  describe("emoji shortcode resolution (#558)", () => {
+    it("resolves a known shortcode to Unicode for name-style keys", () => {
+      expect(
+        coerceConfigValue("voicechannels.channel.prefix", ":green_circle:"),
+      ).toEqual({ ok: true, value: "🟢" });
+      expect(
+        coerceConfigValue("voicechannels.lobby.name", ":green_circle: Lobby"),
+      ).toEqual({ ok: true, value: "🟢 Lobby" });
+      expect(
+        coerceConfigValue(
+          "voicechannels.lobby.offlinename",
+          ":red_circle: Lobby",
+        ),
+      ).toEqual({ ok: true, value: "🔴 Lobby" });
+      expect(
+        coerceConfigValue("voicechannels.channel.suffix", ":sparkles:"),
+      ).toEqual({ ok: true, value: "✨" });
+    });
+
+    it("passes unknown shortcodes through untouched (no data loss)", () => {
+      expect(
+        coerceConfigValue("voicechannels.lobby.name", ":myserveremoji: Lobby"),
+      ).toEqual({ ok: true, value: ":myserveremoji: Lobby" });
+    });
+
+    it("leaves a name value with no shortcode unchanged", () => {
+      expect(
+        coerceConfigValue("voicechannels.lobby.name", "Lobby"),
+      ).toEqual({ ok: true, value: "Lobby" });
+      // Raw Unicode the admin pasted directly must survive verbatim.
+      expect(
+        coerceConfigValue("voicechannels.channel.prefix", "🎮"),
+      ).toEqual({ ok: true, value: "🎮" });
+    });
+
+    it("does not resolve shortcodes for non-name string keys", () => {
+      // Only the channel-name keys opt in; other free-text keys are verbatim
+      // so a stray `:colon:` elsewhere isn't reinterpreted as an emoji.
+      const nameResult = coerceConfigValue(
+        "voicechannels.lobby.name",
+        ":green_circle:",
+      );
+      expect(nameResult.ok && nameResult.value).toBe("🟢");
+      // A non-name string key is left as-typed.
+      const r = coerceConfigValue(
+        "leaderboard_roles.tiers",
+        ":green_circle:",
+      );
+      expect(r).toEqual({ ok: true, value: ":green_circle:" });
+    });
+  });
 });
 
 describe("firstLengthError (#508)", () => {

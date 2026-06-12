@@ -412,26 +412,28 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "voicechannels.lobby.name": {
     label: "Lobby channel display name",
     description:
-      "Display name of the lobby channel users join to spawn a personal channel. Cosmetic; the bot sets this on the managed channel rather than looking it up by name.",
+      "Display name of the lobby channel users join to spawn a personal channel. Cosmetic; the bot sets this on the managed channel rather than looking it up by name. Emoji shortcodes like :green_circle: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
   },
   "voicechannels.lobby.offlinename": {
     label: "Lobby display name (bot offline)",
     description:
-      "Display name shown on the lobby channel while the bot is offline. Cosmetic.",
+      "Display name shown on the lobby channel while the bot is offline. Cosmetic. Emoji shortcodes like :red_circle: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
   },
   "voicechannels.channel.prefix": {
     label: "Per-user channel name prefix",
-    description: "Prefix prepended to dynamically created voice channel names.",
+    description:
+      "Prefix prepended to dynamically created voice channel names. Emoji shortcodes like :video_game: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
   },
   "voicechannels.channel.suffix": {
     label: "Per-user channel name suffix",
-    description: "Suffix appended to dynamically created voice channel names.",
+    description:
+      "Suffix appended to dynamically created voice channel names. Emoji shortcodes like :sparkles: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
   },
