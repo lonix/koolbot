@@ -6,6 +6,25 @@ import {
 import { AchievementsService } from "../services/achievements-service.js";
 import logger from "../utils/logger.js";
 
+interface AchievementMetadata {
+  value?: number;
+  description?: string;
+  unit?: string;
+}
+
+/**
+ * Format the optional metadata of an accolade/achievement into the
+ * trailing " - <value> <unit>" suffix shown next to its name. Returns an
+ * empty string when there is no value to display.
+ */
+export function formatMetadata(metadata?: AchievementMetadata): string {
+  if (!metadata?.value) {
+    return "";
+  }
+  const unit = metadata.unit ?? "";
+  return ` - ${metadata.value}${unit ? ` ${unit}` : ""}`;
+}
+
 export const data = new SlashCommandBuilder()
   .setName("achievements")
   .setDescription("View earned badges and achievements")
@@ -58,10 +77,7 @@ export async function execute(
           if (!definition) return null;
 
           const earnedDate = accolade.earnedAt.toLocaleDateString();
-          const metadataUnit = accolade.metadata?.unit ?? "";
-          const metadataText = accolade.metadata?.value
-            ? ` - ${accolade.metadata.value}${metadataUnit ? ` ${metadataUnit}` : ""}`
-            : "";
+          const metadataText = formatMetadata(accolade.metadata);
 
           const accoladeText = `${definition.emoji} **${definition.name}**${metadataText}\n*${definition.description}*\nEarned: ${earnedDate}`;
 
@@ -127,10 +143,7 @@ export async function execute(
 
           const earnedDate = achievement.earnedAt.toLocaleDateString();
           const period = achievement.period || "N/A";
-          const metadataUnit = achievement.metadata?.unit ?? "";
-          const metadataText = achievement.metadata?.value
-            ? ` - ${achievement.metadata.value}${metadataUnit ? ` ${metadataUnit}` : ""}`
-            : "";
+          const metadataText = formatMetadata(achievement.metadata);
 
           return `${definition.emoji} **${definition.name}**${metadataText}\n*${definition.description}* (${period})\nEarned: ${earnedDate}`;
         })

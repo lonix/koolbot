@@ -1,5 +1,5 @@
 import { describe, it, expect, jest } from '@jest/globals';
-import { data } from '../../src/commands/achievements.js';
+import { data, formatMetadata } from '../../src/commands/achievements.js';
 
 jest.mock('../../src/services/achievements-service.js');
 jest.mock('../../src/utils/logger.js');
@@ -114,53 +114,36 @@ describe('Achievements Command', () => {
 
   describe('metadata formatting', () => {
     it('should use unit field when available', () => {
-      const metadata = {
+      const metadataText = formatMetadata({
         value: 100,
         description: '100 hours milestone',
         unit: 'hrs',
-      };
-
-      const metadataText = metadata.value
-        ? ` - ${metadata.value}${metadata.unit ? ` ${metadata.unit}` : ''}`
-        : '';
+      });
 
       expect(metadataText).toBe(' - 100 hrs');
     });
 
     it('should handle missing unit field gracefully', () => {
-      const metadata = {
+      const metadataText = formatMetadata({
         value: 100,
         description: '100 hours milestone',
-      };
-
-      const metadataUnit = (metadata as any).unit ?? '';
-      const metadataText = metadata.value
-        ? ` - ${metadata.value}${metadataUnit ? ` ${metadataUnit}` : ''}`
-        : '';
+      });
 
       expect(metadataText).toBe(' - 100');
     });
 
     it('should handle user count with users unit', () => {
-      const metadata = {
+      const metadataText = formatMetadata({
         value: 25,
         description: '25+ unique users',
         unit: 'users',
-      };
-
-      const metadataText = metadata.value
-        ? ` - ${metadata.value}${metadata.unit ? ` ${metadata.unit}` : ''}`
-        : '';
+      });
 
       expect(metadataText).toBe(' - 25 users');
     });
 
     it('should handle missing metadata', () => {
-      const metadata = undefined;
-
-      const metadataText = metadata?.value
-        ? ` - ${metadata.value}${metadata.unit ? ` ${metadata.unit}` : ''}`
-        : '';
+      const metadataText = formatMetadata(undefined);
 
       expect(metadataText).toBe('');
     });
