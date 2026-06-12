@@ -325,7 +325,7 @@ export class ConfigService {
         const oldConfig = await Config.findOne({ key: oldKey });
         if (oldConfig) {
           logger.info(
-            `⚠️  Found old gamification config key: ${sanitizeForLog(oldKey)}, migrating to ${sanitizeForLog(key)}`,
+            `⚠️  Found old gamification config key: ${sanitizeForLog(oldKey)}, migrating to ${sanitizeForLog(key)}`, // codeql[js/log-injection]
           );
           // Migrate the old key to new key
           await this.set(
@@ -362,7 +362,7 @@ export class ConfigService {
       return null;
     } catch (error) {
       logger.error(
-        `Error getting configuration for key ${sanitizeForLog(key)}:`,
+        `Error getting configuration for key ${sanitizeForLog(key)}:`, // codeql[js/log-injection]
         error,
       );
       return null;
@@ -439,13 +439,13 @@ export class ConfigService {
 
       this.cache.set(key, value);
       logger.info(
-        `Configuration updated: ${sanitizeForLog(key)} = ${sanitizeForLog(value)}`,
+        `Configuration updated: ${sanitizeForLog(key)} = ${sanitizeForLog(value)}`, // codeql[js/log-injection]
       );
 
       // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {
       logger.error(
-        `Error updating configuration ${sanitizeForLog(key)}:`,
+        `Error updating configuration ${sanitizeForLog(key)}:`, // codeql[js/log-injection]
         error,
       );
       throw error;

@@ -164,7 +164,7 @@ export class PermissionsService {
       this.permissionsCache.set(cacheKey, roleIds);
 
       logger.info(
-        `Set permissions for command ${sanitizeForLog(commandName)}: ${roleIds.length} role(s)`,
+        `Set permissions for command ${sanitizeForLog(commandName)}: ${roleIds.length} role(s)`, // codeql[js/log-injection]
       );
     } catch (error) {
       logger.error("Error setting command permissions:", error);
@@ -276,7 +276,7 @@ export class PermissionsService {
       await CommandPermission.deleteOne({ guildId, commandName });
       this.permissionsCache.delete(`${guildId}:${commandName}`);
       logger.info(
-        `Cleared all permissions for command ${sanitizeForLog(commandName)}`,
+        `Cleared all permissions for command ${sanitizeForLog(commandName)}`, // codeql[js/log-injection]
       );
     } catch (error) {
       logger.error("Error clearing command permissions:", error);
