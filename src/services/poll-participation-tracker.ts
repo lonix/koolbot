@@ -102,7 +102,11 @@ export class PollParticipationTracker {
       }
 
       // Resolve the voter so we can store a friendly username and skip bots.
-      const user = await this.client.users.fetch(userId);
+      // Prefer the in-memory cache to avoid an API round-trip on every vote;
+      // only hit the REST API when the user isn't cached.
+      const user =
+        this.client.users.cache.get(userId) ??
+        (await this.client.users.fetch(userId));
       if (user.bot) {
         return;
       }

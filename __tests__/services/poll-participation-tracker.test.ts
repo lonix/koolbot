@@ -26,7 +26,9 @@ function createTracker(voter: { username: string; bot: boolean } | null) {
         ? { id: "voter1", username: voter.username, bot: voter.bot }
         : { id: "voter1", username: "Voter", bot: false }) as User,
     );
-  const mockClient = { users: { fetch: usersFetch } } as unknown as Client;
+  const mockClient = {
+    users: { fetch: usersFetch, cache: new Map<string, User>() },
+  } as unknown as Client;
   const tracker = PollParticipationTracker.getInstance(mockClient);
 
   const mockConfigService = {

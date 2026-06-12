@@ -188,21 +188,29 @@ export class VoiceChannelTracker {
       }
 
       // Track users joining/leaving channels where we have active sessions
-      // This ensures we capture all interactions even if users leave before the session ends
+      // This ensures we capture all interactions even if users leave before the session ends.
+      // Companion overlap accounting is extra per-update work, so only run it when
+      // the feature is enabled (read the gate once for this update).
+      const companionsEnabled = await this.configService.getBoolean(
+        "voicetracking.companions.enabled",
+        false,
+      );
       if (oldChannel && !newChannel) {
         // User left a channel - record interaction for all active sessions in that channel
         this.recordUserInteraction(oldChannel.id, member.id);
-        this.companionLeft(oldChannel.id, member.id);
+        if (companionsEnabled) this.companionLeft(oldChannel.id, member.id);
       } else if (!oldChannel && newChannel) {
         // User joined a channel - record interaction for all active sessions in that channel
         this.recordUserInteraction(newChannel.id, member.id);
-        this.companionJoined(newChannel.id, member.id);
+        if (companionsEnabled) this.companionJoined(newChannel.id, member.id);
       } else if (oldChannel && newChannel && oldChannel.id !== newChannel.id) {
         // User switched channels - record for both
         this.recordUserInteraction(oldChannel.id, member.id);
         this.recordUserInteraction(newChannel.id, member.id);
-        this.companionLeft(oldChannel.id, member.id);
-        this.companionJoined(newChannel.id, member.id);
+        if (companionsEnabled) {
+          this.companionLeft(oldChannel.id, member.id);
+          this.companionJoined(newChannel.id, member.id);
+        }
       }
     } catch (error) {
       logger.error("Error handling voice state update in tracker:", error);
@@ -416,17 +424,9 @@ export class VoiceChannelTracker {
         ? Array.from(encounteredSet)
         : [];
 
-      // Close any still-open companion intervals so the final session reflects
-      // everyone who was co-present right up to the disconnect.
-      const stillOpen = this.companionSince.get(userId);
-      if (stillOpen) {
-        for (const companionId of Array.from(stillOpen.keys())) {
-          this.accumulateCompanion(userId, companionId);
-        }
-      }
-
       // Build the optional companion/firsts payload only when the feature is
-      // enabled, so disabled deployments persist exactly the legacy shape.
+      // enabled, so disabled deployments persist exactly the legacy shape and
+      // skip the interval-closing / map churn entirely.
       const companionsEnabled = await this.configService.getBoolean(
         "voicetracking.companions.enabled",
         false,
@@ -440,6 +440,14 @@ export class VoiceChannelTracker {
         otherUsers,
       };
       if (companionsEnabled) {
+        // Close any still-open companion intervals so the final session reflects
+        // everyone who was co-present right up to the disconnect.
+        const stillOpen = this.companionSince.get(userId);
+        if (stillOpen) {
+          for (const companionId of Array.from(stillOpen.keys())) {
+            this.accumulateCompanion(userId, companionId);
+          }
+        }
         const seconds = this.companionSeconds.get(userId);
         sessionDoc.companions = seconds
           ? Array.from(seconds.entries()).map(([id, secs]) => ({
