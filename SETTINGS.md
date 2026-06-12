@@ -33,6 +33,7 @@ Complete configuration reference for all KoolBot settings.
 - [Voice Activity Tracking](#-voice-activity-tracking)
 - [Voice Channel Cleanup](#-voice-channel-cleanup)
 - [Message Tracking](#-message-tracking)
+- [Reaction Tracking](#-reaction-tracking)
 - [Announcements](#-announcements)
 - [Achievements System](#-achievements-system)
 - [Weekly Digest](#-weekly-digest)
@@ -256,6 +257,7 @@ on the Web UI's **Polls** page; the settings below are global defaults.
 | `polls.enabled` | `false` | Enable/disable the poll system |
 | `polls.default_duration_hours` | `24` | Default poll duration (1-768, max 32 days) |
 | `polls.cooldown_days` | `7` | Minimum days before reusing the same poll question |
+| `polls.participation.enabled` | `false` | Capture per-user "votes cast" (lifetime + per-year) when users vote on any guild poll. Data-capture foundation for a future Rewind stat (#570) |
 
 **Features:**
 
@@ -339,6 +341,7 @@ Track user voice channel activity and generate statistics.
 | `voicetracking.stats.top.enabled` | `false` | Enable `/voicestats top` subcommand |
 | `voicetracking.stats.user.enabled` | `false` | Enable `/voicestats user` subcommand |
 | `voicetracking.seen.enabled` | `false` | Enable `/seen` command for last-seen tracking |
+| `voicetracking.companions.enabled` | `false` | Persist precise per-companion co-presence seconds and join-order metadata (was-first, who you joined) on each voice session. Data-capture foundation for future Rewind companion stats (#570) |
 | `voicetracking.excluded_channels` | `""` | Channel IDs to exclude from tracking (comma-separated) |
 | `voicetracking.admin_roles` | `""` | Role names with tracking admin powers (comma-separated) |
 
@@ -678,6 +681,33 @@ The cleanup job only trims the per-message detail (`recentMessages`)
 beyond the retention window. The all-time per-channel totals and
 `totalCount` are **never** pruned — they're cheap to keep and feed
 all-time leaderboards.
+
+---
+
+## 😀 Reaction Tracking
+
+Track how many reactions each user **gives** (adds to other people's
+messages) and **receives** (others add to theirs) via a
+`messageReactionAdd` listener. Like message tracking, this is the
+**data-capture foundation only** — nothing is surfaced on Rewind or the
+Web UI yet (that lives in a follow-up). No slash command is introduced.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `reactiontracking.enabled` | `false` | Master switch — turning this off stops the listener entirely |
+| `reactiontracking.excluded_channels` | `""` | Channel IDs to skip (comma-separated; mirrors `messagetracking.excluded_channels`) |
+
+**What's tracked:**
+
+- Reactions from bots and on DM messages are ignored; only guild
+  reactions count. Reactions in excluded channels are skipped.
+- The reactor's `totalGiven` counter is bumped; the message author's
+  `totalReceived` counter is bumped (skipped when the author is a bot or
+  the reactor themselves, to avoid self-inflation).
+- Counts are stored as a lifetime total plus per-year buckets keyed by
+  `"YYYY"`, so a future Rewind can read a single year's count in one
+  lookup. **No per-reaction detail is retained**, so reactions stay cheap
+  even at high volume and **no cleanup job is needed**.
 
 ---
 

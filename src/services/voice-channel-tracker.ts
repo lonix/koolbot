@@ -45,6 +45,19 @@ export class VoiceChannelTracker {
   private activeSessions: Map<string, VoiceSession> = new Map();
   private userChannels: Map<string, VoiceChannel> = new Map();
   private encounteredUsers: Map<string, Set<string>> = new Map(); // Track all users encountered during each session
+  // Precise per-companion co-presence accounting (#570). For each tracked
+  // session: `companionSince` holds the epoch-ms start of the *current* open
+  // overlap interval with each presently-co-located user, and
+  // `companionSeconds` accumulates closed intervals. A companion's interval
+  // opens when both are in the channel and closes when either leaves (or the
+  // session ends). `sessionFirsts` records the channel's emptiness and the
+  // users already present at the tracked user's join.
+  private companionSince: Map<string, Map<string, number>> = new Map();
+  private companionSeconds: Map<string, Map<string, number>> = new Map();
+  private sessionFirsts: Map<
+    string,
+    { wasFirst: boolean; joinedExisting: string[] }
+  > = new Map();
   private client: Client;
   private isConnected: boolean = false;
   private configService: ConfigService;
@@ -179,13 +192,17 @@ export class VoiceChannelTracker {
       if (oldChannel && !newChannel) {
         // User left a channel - record interaction for all active sessions in that channel
         this.recordUserInteraction(oldChannel.id, member.id);
+        this.companionLeft(oldChannel.id, member.id);
       } else if (!oldChannel && newChannel) {
         // User joined a channel - record interaction for all active sessions in that channel
         this.recordUserInteraction(newChannel.id, member.id);
+        this.companionJoined(newChannel.id, member.id);
       } else if (oldChannel && newChannel && oldChannel.id !== newChannel.id) {
         // User switched channels - record for both
         this.recordUserInteraction(oldChannel.id, member.id);
         this.recordUserInteraction(newChannel.id, member.id);
+        this.companionLeft(oldChannel.id, member.id);
+        this.companionJoined(newChannel.id, member.id);
       }
     } catch (error) {
       logger.error("Error handling voice state update in tracker:", error);
@@ -206,6 +223,57 @@ export class VoiceChannelTracker {
         }
       }
     }
+  }
+
+  /**
+   * Opens a co-presence interval between `companionId` and every tracked
+   * session currently in `channelId`. Called when a user joins a channel.
+   * In-memory only — persistence is gated separately in `endTracking`.
+   */
+  private companionJoined(channelId: string, companionId: string): void {
+    const now = Date.now();
+    for (const [sessionUserId, session] of this.activeSessions.entries()) {
+      if (session.channelId !== channelId || sessionUserId === companionId) {
+        continue;
+      }
+      const since = this.companionSince.get(sessionUserId);
+      if (since && !since.has(companionId)) {
+        since.set(companionId, now);
+      }
+    }
+  }
+
+  /**
+   * Closes the open co-presence interval between `companionId` and every
+   * tracked session in `channelId`, accumulating the elapsed seconds. Called
+   * when a user leaves a channel.
+   */
+  private companionLeft(channelId: string, companionId: string): void {
+    for (const [sessionUserId, session] of this.activeSessions.entries()) {
+      if (session.channelId !== channelId || sessionUserId === companionId) {
+        continue;
+      }
+      this.accumulateCompanion(sessionUserId, companionId);
+    }
+  }
+
+  /**
+   * Folds the currently-open interval for `(sessionUserId, companionId)` into
+   * the accumulated total and clears it. Safe to call when no interval is
+   * open (no-op).
+   */
+  private accumulateCompanion(
+    sessionUserId: string,
+    companionId: string,
+  ): void {
+    const since = this.companionSince.get(sessionUserId);
+    const seconds = this.companionSeconds.get(sessionUserId);
+    if (!since || !seconds) return;
+    const start = since.get(companionId);
+    if (start === undefined) return;
+    const elapsed = Math.max(0, Math.floor((Date.now() - start) / 1000));
+    seconds.set(companionId, (seconds.get(companionId) ?? 0) + elapsed);
+    since.delete(companionId);
   }
 
   private async isChannelExcluded(channelId: string): Promise<boolean> {
@@ -268,6 +336,12 @@ export class VoiceChannelTracker {
 
       // Initialize encountered users Set with current channel members
       const encounteredSet = new Set<string>();
+      // Companion overlap (#570): open an interval for every user already in
+      // the channel at the moment this user joins, and snapshot that set for
+      // the "firsts" capture.
+      const now = Date.now();
+      const since = new Map<string, number>();
+      const presentAtJoin: string[] = [];
       const guild = member.guild;
       if (guild) {
         const channel = guild.channels.cache.get(channelId) as VoiceChannel;
@@ -278,12 +352,20 @@ export class VoiceChannelTracker {
             channel.members.forEach((m) => {
               if (m.id !== member.id) {
                 encounteredSet.add(m.id);
+                since.set(m.id, now);
+                presentAtJoin.push(m.id);
               }
             });
           }
         }
       }
       this.encounteredUsers.set(member.id, encounteredSet);
+      this.companionSince.set(member.id, since);
+      this.companionSeconds.set(member.id, new Map());
+      this.sessionFirsts.set(member.id, {
+        wasFirst: presentAtJoin.length === 0,
+        joinedExisting: presentAtJoin,
+      });
 
       if (debugModeEnabled) {
         logger.info(
@@ -334,6 +416,44 @@ export class VoiceChannelTracker {
         ? Array.from(encounteredSet)
         : [];
 
+      // Close any still-open companion intervals so the final session reflects
+      // everyone who was co-present right up to the disconnect.
+      const stillOpen = this.companionSince.get(userId);
+      if (stillOpen) {
+        for (const companionId of Array.from(stillOpen.keys())) {
+          this.accumulateCompanion(userId, companionId);
+        }
+      }
+
+      // Build the optional companion/firsts payload only when the feature is
+      // enabled, so disabled deployments persist exactly the legacy shape.
+      const companionsEnabled = await this.configService.getBoolean(
+        "voicetracking.companions.enabled",
+        false,
+      );
+      const sessionDoc: Record<string, unknown> = {
+        startTime: session.startTime,
+        endTime,
+        duration,
+        channelId: session.channelId,
+        channelName: session.channelName,
+        otherUsers,
+      };
+      if (companionsEnabled) {
+        const seconds = this.companionSeconds.get(userId);
+        sessionDoc.companions = seconds
+          ? Array.from(seconds.entries()).map(([id, secs]) => ({
+              userId: id,
+              seconds: secs,
+            }))
+          : [];
+        const firsts = this.sessionFirsts.get(userId);
+        sessionDoc.wasFirst = firsts
+          ? firsts.wasFirst
+          : otherUsers.length === 0;
+        sessionDoc.joinedExisting = firsts ? firsts.joinedExisting : [];
+      }
+
       // Update or create user tracking record
       await VoiceChannelTracking.findOneAndUpdate(
         { userId },
@@ -344,14 +464,7 @@ export class VoiceChannelTracker {
           },
           $inc: { totalTime: duration },
           $push: {
-            sessions: {
-              startTime: session.startTime,
-              endTime,
-              duration,
-              channelId: session.channelId,
-              channelName: session.channelName,
-              otherUsers,
-            },
+            sessions: sessionDoc,
           },
         },
         { upsert: true, new: true },
@@ -360,6 +473,9 @@ export class VoiceChannelTracker {
       this.activeSessions.delete(userId);
       this.userChannels.delete(userId);
       this.encounteredUsers.delete(userId);
+      this.companionSince.delete(userId);
+      this.companionSeconds.delete(userId);
+      this.sessionFirsts.delete(userId);
 
       if (debugModeEnabled) {
         logger.info(

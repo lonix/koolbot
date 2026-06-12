@@ -16,6 +16,7 @@ export interface ConfigSchema {
   "voicetracking.stats.user.enabled": boolean; // Enable /voicestats user subcommand
   "voicetracking.stats.leaderboard_max_results": number; // Server-side cap on /voicestats top rows
   "voicetracking.seen.enabled": boolean;
+  "voicetracking.companions.enabled": boolean; // Capture precise per-companion overlap + voice "firsts" (#570)
   "voicetracking.excluded_channels": string; // Comma-separated channel IDs
   "voicetracking.announcements.enabled": boolean;
   "voicetracking.announcements.schedule": string; // Cron schedule
@@ -34,6 +35,10 @@ export interface ConfigSchema {
   "messagetracking.cleanup.enabled": boolean; // Master switch for the cleanup job
   "messagetracking.cleanup.schedule": string; // Cron schedule for the cleanup job
   "messagetracking.cleanup.retention.detailed_days": number; // Drop recentMessages older than N days
+
+  // Reaction Activity Tracking (#570)
+  "reactiontracking.enabled": boolean; // Master switch — turning this off stops the listener entirely
+  "reactiontracking.excluded_channels": string; // Comma-separated channel IDs to skip
 
   // Individual Features
   "ping.enabled": boolean;
@@ -89,6 +94,7 @@ export interface ConfigSchema {
   "polls.enabled": boolean;
   "polls.default_duration_hours": number; // Default poll duration in hours (1-768)
   "polls.cooldown_days": number; // Minimum days between reusing same poll
+  "polls.participation.enabled": boolean; // Capture per-user votes cast for a future Rewind (#570)
 
   // Leaderboard Role Rewards
   "leaderboard_roles.enabled": boolean;
@@ -150,6 +156,11 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.stats.user.enabled": false,
   "voicetracking.stats.leaderboard_max_results": 50,
   "voicetracking.seen.enabled": false,
+  // Companion overlap + voice "firsts" capture (#570). Off by default
+  // (rule 1): turning it on makes voice sessions persist precise
+  // per-companion co-presence seconds and join-order metadata. The base
+  // session shape is unchanged while this is off.
+  "voicetracking.companions.enabled": false,
   "voicetracking.excluded_channels": "",
   "voicetracking.announcements.enabled": false,
   "voicetracking.announcements.schedule": "0 16 * * 5", // Every Friday at 16:00
@@ -171,6 +182,13 @@ export const defaultConfig: ConfigSchema = {
   "messagetracking.cleanup.enabled": false,
   "messagetracking.cleanup.schedule": "0 3 * * *", // Daily at 03:00 host timezone
   "messagetracking.cleanup.retention.detailed_days": 400, // Full Rewind year + buffer
+
+  // Reaction Activity Tracking defaults (#570). Master gate off, follows
+  // rule 1 — the messageReactionAdd listener does nothing until an operator
+  // opts in. Data-capture foundation only; only lifetime + per-year counts
+  // are stored, so no cleanup job is needed.
+  "reactiontracking.enabled": false,
+  "reactiontracking.excluded_channels": "",
 
   // Individual Features
   "ping.enabled": false,
@@ -231,6 +249,10 @@ export const defaultConfig: ConfigSchema = {
   "polls.enabled": false,
   "polls.default_duration_hours": 24, // Default 24 hours
   "polls.cooldown_days": 7, // Minimum 7 days between reusing same poll
+  // Poll-participation capture (#570). Off by default (rule 1): when on, a
+  // messagePollVoteAdd listener records per-user "votes cast" for a future
+  // Rewind. Independent of whether the bot created the poll.
+  "polls.participation.enabled": false,
 
   // Leaderboard Role Rewards defaults
   "leaderboard_roles.enabled": false,
@@ -329,6 +351,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Message Tracking",
     description:
       "Per-user, per-channel text-message activity tracking with a retention-trimmed detail log. Data-capture foundation for text stats; surfacing lives in the Rewind follow-up.",
+  },
+  reactiontracking: {
+    title: "Reaction Tracking",
+    description:
+      "Per-user counts of reactions given and received, stored as lifetime + per-year totals. Data-capture foundation for a future Rewind stat; surfacing lives in a follow-up.",
   },
   ping: {
     title: "Ping",
@@ -490,6 +517,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicetracking",
     type: "boolean",
   },
+  "voicetracking.companions.enabled": {
+    label: "Companion overlap & voice firsts capture",
+    description:
+      "Persist precise per-companion co-presence seconds and join-order metadata (was-first, who you joined) on each voice session. Data-capture foundation for future Rewind companion stats; off by default. Requires voice tracking to be enabled.",
+    category: "voicetracking",
+    type: "boolean",
+  },
   "voicetracking.excluded_channels": {
     label: "Excluded channel IDs",
     description:
@@ -584,6 +618,22 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Days to keep per-message detail (recentMessages) before it is pruned. All-time per-channel totals are never pruned.",
     category: "messagetracking",
     type: "number",
+  },
+
+  // Reaction Activity Tracking (#570)
+  "reactiontracking.enabled": {
+    label: "Reaction Tracking enabled",
+    description:
+      "Enable per-user reaction tracking (given + received counts). Turning this off stops the messageReactionAdd listener entirely.",
+    category: "reactiontracking",
+    type: "boolean",
+  },
+  "reactiontracking.excluded_channels": {
+    label: "Excluded channel IDs",
+    description:
+      "Comma-separated channel IDs to exclude from reaction tracking (mirrors messagetracking.excluded_channels).",
+    category: "reactiontracking",
+    type: "channel_list",
   },
 
   // Individual Features
@@ -826,6 +876,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Minimum days before a question from the library can be reused.",
     category: "polls",
     type: "number",
+  },
+  "polls.participation.enabled": {
+    label: "Poll participation tracking enabled",
+    description:
+      "Record per-user 'votes cast' (lifetime + per-year) whenever a user votes on any guild poll. Data-capture foundation for a future Rewind stat; off by default.",
+    category: "polls",
+    type: "boolean",
   },
 
   // Leaderboard Role Rewards

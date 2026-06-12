@@ -185,6 +185,120 @@ describe('VoiceChannelTracker', () => {
     });
   });
 
+  describe('companion overlap & voice firsts (#570)', () => {
+    // Builds a member whose guild channel cache returns a channel populated
+    // with `presentIds` so startTracking can snapshot co-present users.
+    function memberInChannel(
+      id: string,
+      channelId: string,
+      channelName: string,
+      presentIds: string[],
+    ): GuildMember {
+      const members = new Map(presentIds.map((p) => [p, { id: p }]));
+      const channel = { id: channelId, name: channelName, members };
+      return {
+        id,
+        displayName: id,
+        guild: { channels: { cache: { get: jest.fn().mockReturnValue(channel) } } },
+      } as unknown as GuildMember;
+    }
+
+    function gate(companionsEnabled: boolean) {
+      return (key: string) =>
+        Promise.resolve(
+          key === 'voicetracking.enabled' ||
+            (companionsEnabled && key === 'voicetracking.companions.enabled'),
+        );
+    }
+
+    async function joinThenLeave(
+      tracker: VoiceChannelTracker,
+      member: GuildMember,
+      channelId: string,
+      channelName: string,
+    ) {
+      const channelState = { id: channelId, name: channelName } as unknown as VoiceChannel;
+      // The global findOneAndUpdate mock accumulates calls across tests; clear
+      // it so the assertion can read this scenario's session as calls[0].
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      await tracker.handleVoiceStateUpdate(
+        { member, channel: null } as unknown as VoiceState,
+        { member, channel: channelState } as unknown as VoiceState,
+      );
+      await tracker.handleVoiceStateUpdate(
+        { member, channel: channelState } as unknown as VoiceState,
+        { member, channel: null } as unknown as VoiceState,
+      );
+    }
+
+    it('omits companion/firsts fields when the feature is disabled', async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockImplementation(gate(false));
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: 'u1', id: 'u1' });
+
+      await joinThenLeave(
+        tracker,
+        memberInChannel('u1', 'c1', 'C1', ['other1']),
+        'c1',
+        'C1',
+      );
+
+      const pushed = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+        .calls[0][1].$push.sessions;
+      expect(pushed.companions).toBeUndefined();
+      expect(pushed.wasFirst).toBeUndefined();
+      expect(pushed.joinedExisting).toBeUndefined();
+      // The legacy union set is still captured.
+      expect(pushed.otherUsers).toEqual(['other1']);
+    });
+
+    it('captures companions, joinedExisting, and wasFirst=false when present at join', async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockImplementation(gate(true));
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: 'u1', id: 'u1' });
+
+      await joinThenLeave(
+        tracker,
+        memberInChannel('u1', 'c1', 'C1', ['other1']),
+        'c1',
+        'C1',
+      );
+
+      const pushed = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+        .calls[0][1].$push.sessions;
+      expect(pushed.wasFirst).toBe(false);
+      expect(pushed.joinedExisting).toEqual(['other1']);
+      expect(pushed.companions).toEqual([
+        { userId: 'other1', seconds: expect.any(Number) },
+      ]);
+    });
+
+    it('marks wasFirst=true when the channel was empty at join', async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockImplementation(gate(true));
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: 'u1', id: 'u1' });
+
+      await joinThenLeave(
+        tracker,
+        memberInChannel('u1', 'c1', 'C1', []),
+        'c1',
+        'C1',
+      );
+
+      const pushed = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+        .calls[0][1].$push.sessions;
+      expect(pushed.wasFirst).toBe(true);
+      expect(pushed.joinedExisting).toEqual([]);
+      expect(pushed.companions).toEqual([]);
+    });
+  });
+
   describe('getUserStats', () => {
     it('should return null when user not found', async () => {
       const { tracker } = createTracker(mockClient);

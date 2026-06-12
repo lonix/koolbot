@@ -54,6 +54,7 @@ describe("settingsMetadata", () => {
       "polls",
       "leaderboard_roles",
       "messagetracking",
+      "reactiontracking",
     ]);
     const violations: string[] = [];
     for (const [key, meta] of Object.entries(settingsMetadata)) {
