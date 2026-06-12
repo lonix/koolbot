@@ -137,6 +137,18 @@ describe("VoiceChannelManager - rename-safe unmanaged cleanup (issue #542)", () 
     expect(renamedChannel.delete).toHaveBeenCalled();
   });
 
+  it("protects a custom-named, occupied channel even without an ownership entry", async () => {
+    // Ownership tracking is missing but the channel still has a tracked custom
+    // name and a member inside. It must be treated as managed (consistent with
+    // cleanupEmptyChannel) and not deleted as unmanaged.
+    manager.setCustomChannelName(renamedChannel.id as string, "My Cool Room");
+
+    await manager.cleanupEmptyChannels();
+
+    expect(renamedChannel.delete).not.toHaveBeenCalled();
+    expect(foreignChannel.delete).toHaveBeenCalled();
+  });
+
   it("removes the ownership entry when an empty owned channel is cleaned up", async () => {
     // Owned but empty renamed channel: it should be deleted as an empty
     // managed channel and its ownership entry cleared.

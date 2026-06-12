@@ -1786,9 +1786,19 @@ export class VoiceChannelManager {
       // the prefix. Matching owned channels by ID keeps renamed channels
       // protected from the unmanaged-channel scanner so members are not
       // kicked out. See issue #542.
+      //
+      // Also include channels with a tracked custom name so the predicate
+      // matches cleanupEmptyChannel()'s definition of "managed": if the
+      // ownership entry is ever missing while customChannelNames still holds
+      // the channel, it must not be misclassified as unmanaged and deleted.
       const managedChannelIds = new Set<string>();
       for (const userChannel of this.userChannels.values()) {
         managedChannelIds.add(userChannel.id);
+      }
+      for (const channel of allChannels.values()) {
+        if (this.hasCustomName(channel.id)) {
+          managedChannelIds.add(channel.id);
+        }
       }
 
       // Clean up channels the bot doesn't manage
