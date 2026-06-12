@@ -1740,11 +1740,25 @@ export class VoiceChannelManager {
         }
       }
 
+      // Build a set of managed channel IDs from the ownership registry.
+      // Channel IDs are stable across renames, whereas names are not: an
+      // ownership transfer renames "🎮 X's Room" -> "Y's Channel", dropping
+      // the prefix. Matching owned channels by ID keeps renamed channels
+      // protected from the unmanaged-channel scanner so members are not
+      // kicked out. See issue #542.
+      const managedChannelIds = new Set<string>();
+      for (const userChannel of this.userChannels.values()) {
+        managedChannelIds.add(userChannel.id);
+      }
+
       // Clean up channels the bot doesn't manage
       for (const channel of allChannels.values()) {
         try {
-          // Skip if it's a managed channel
-          if (managedChannelNames.has(channel.name)) {
+          // Skip if it's a managed channel (by name pattern or owned channel ID)
+          if (
+            managedChannelNames.has(channel.name) ||
+            managedChannelIds.has(channel.id)
+          ) {
             logger.debug(`Skipping managed channel: ${channel.name}`);
             continue;
           }
@@ -1765,10 +1779,13 @@ export class VoiceChannelManager {
         }
       }
 
-      // Also clean up empty managed channels (except lobby)
+      // Also clean up empty managed channels (except lobby). Match by name
+      // pattern or owned channel ID so renamed channels are cleaned up once
+      // they become empty.
       const emptyManagedChannels = allChannels.filter(
         (channel) =>
-          managedChannelNames.has(channel.name) &&
+          (managedChannelNames.has(channel.name) ||
+            managedChannelIds.has(channel.id)) &&
           channel.name !== lobbyChannelName &&
           channel.name !== offlineLobbyName &&
           channel.members.size === 0,
@@ -1779,6 +1796,12 @@ export class VoiceChannelManager {
           await channel.delete("Bot cleanup - empty managed channel");
           // Clean up custom name tracking
           this.customChannelNames.delete(channel.id);
+          // Clean up ownership tracking for the deleted channel
+          for (const [ownerId, userChannel] of this.userChannels.entries()) {
+            if (userChannel.id === channel.id) {
+              this.userChannels.delete(ownerId);
+            }
+          }
           logger.info(`Deleted empty managed channel: ${channel.name}`);
         } catch (error) {
           logger.error(`Error deleting channel ${channel.name}:`, error);
