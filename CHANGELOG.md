@@ -1,5 +1,55 @@
 # Changelog
 
+## [1.2.0](https://github.com/lonix/koolbot/compare/v1.1.0...v1.2.0) (2026-06-12)
+
+
+### 🚀 Features
+
+* **quotes:** backup/restore, channel reset, and persistent vote tallies ([#561](https://github.com/lonix/koolbot/issues/561)) ([ced5e95](https://github.com/lonix/koolbot/commit/ced5e95cf213a251d0e439873dc0d47dbc31b80d))
+* resolve emoji shortcodes in VC name config values ([#558](https://github.com/lonix/koolbot/issues/558)) ([#563](https://github.com/lonix/koolbot/issues/563)) ([6858878](https://github.com/lonix/koolbot/commit/6858878bf81df758d2fea39b43807f1bf8ffa110))
+* **rewind:** add longest single voice session to year-in-review ([#589](https://github.com/lonix/koolbot/issues/589)) ([d275779](https://github.com/lonix/koolbot/commit/d27577965901aa86a2ea2d0b711a56c1fe6809e8)), closes [#568](https://github.com/lonix/koolbot/issues/568)
+* **rewind:** cover a full year by default and warn on low retention ([#579](https://github.com/lonix/koolbot/issues/579)) ([6f69818](https://github.com/lonix/koolbot/commit/6f69818508017d46edff324cd85e68728071b0eb))
+* **rewind:** default bare /me/rewind to the most recent year with data ([#581](https://github.com/lonix/koolbot/issues/581)) ([be9f44a](https://github.com/lonix/koolbot/commit/be9f44a226d4ae40cc1b34a50933c4ccd080f5f9))
+* **rewind:** replace Top channels with a Top voice companions card ([#578](https://github.com/lonix/koolbot/issues/578)) ([0565778](https://github.com/lonix/koolbot/commit/0565778eef728646fbeb4c4f29105a6881539f29))
+* **rewind:** snapshot completed-year recaps at rollover (retention-proof) ([#580](https://github.com/lonix/koolbot/issues/580)) ([a1ab66d](https://github.com/lonix/koolbot/commit/a1ab66dad666247f451d172db10a5c7b9cb0ccee))
+* **tracking:** capture reactions, poll votes, and voice companion overlap when enabled ([#582](https://github.com/lonix/koolbot/issues/582)) ([bd93eb7](https://github.com/lonix/koolbot/commit/bd93eb7c929b051d7956d344558b26d66b1c37c2))
+* **web:** let admins paste a poll library to import without hosting it ([#565](https://github.com/lonix/koolbot/issues/565)) ([c98cc01](https://github.com/lonix/koolbot/commit/c98cc0122a3a6af92b2d68e2d83be537b9ec3626))
+* **webui:** DB-backed, editable bot status message pools ([#557](https://github.com/lonix/koolbot/issues/557)) ([#566](https://github.com/lonix/koolbot/issues/566)) ([a441845](https://github.com/lonix/koolbot/commit/a4418457fb1d51f76561b637322425381f807104))
+* **webui:** edit existing poll questions and schedules in place ([#572](https://github.com/lonix/koolbot/issues/572)) ([622eba2](https://github.com/lonix/koolbot/commit/622eba22160d0087187050cae3dccb25af28cd92))
+* **webui:** keep scroll position when saving a settings section ([#564](https://github.com/lonix/koolbot/issues/564)) ([4bb05d6](https://github.com/lonix/koolbot/commit/4bb05d61dcd417e0af8b206e3be81e1aeb7bc8de))
+
+
+### 🐛 Bug Fixes
+
+* **deps:** bump undici to 7.27.2 to resolve DoS and request smuggling advisories ([#599](https://github.com/lonix/koolbot/issues/599)) ([1ca160e](https://github.com/lonix/koolbot/commit/1ca160e8cf22c380493bac5b396ed9b98bd23833))
+* **docker:** upgrade OpenSSL libs in runtime image to clear Trivy CVEs ([#593](https://github.com/lonix/koolbot/issues/593)) ([89dfb65](https://github.com/lonix/koolbot/commit/89dfb65f1f090f1cdd7c49fb90b9b3937e6fc3b0)), closes [#590](https://github.com/lonix/koolbot/issues/590)
+* route user-controlled values through sanitizeForLog to clear CodeQL log-injection alerts ([#583](https://github.com/lonix/koolbot/issues/583)) ([89edcd4](https://github.com/lonix/koolbot/commit/89edcd46211c19949b177a956e56c09dfa0a6e1d))
+* **webui:** darken pre-auth pages to match admin theme ([#571](https://github.com/lonix/koolbot/issues/571)) ([e8d67f3](https://github.com/lonix/koolbot/commit/e8d67f3989526057f02936af4b7cadde5b190ecd))
+* **webui:** drop "currently" prefix from wizard ON/OFF indicator ([#560](https://github.com/lonix/koolbot/issues/560)) ([0943e15](https://github.com/lonix/koolbot/commit/0943e15e3d9001622712dc7beab894e10fa4a880))
+
+
+### ♻️ Refactoring
+
+* **achievements:** extract formatMetadata helper to fix CodeQL alert ([#596](https://github.com/lonix/koolbot/issues/596)) ([56b3a10](https://github.com/lonix/koolbot/commit/56b3a108c5af605865b2433bb9ef2814a2ab8902))
+
+
+### 📚 Documentation
+
+* add CLAUDE.md and refresh CI/CD guidance for AI agents ([#562](https://github.com/lonix/koolbot/issues/562)) ([2894efc](https://github.com/lonix/koolbot/commit/2894efc5ea264dce9326170277f2c06b1886a154))
+
+
+### 📦 Dependencies
+
+* dedupe picomatch to 4.0.4 to clear dev-only ReDoS/method-injection CVEs ([#595](https://github.com/lonix/koolbot/issues/595)) ([a3b824e](https://github.com/lonix/koolbot/commit/a3b824ef61789cdcae2a8a165375a865a9a75328)), closes [#585](https://github.com/lonix/koolbot/issues/585)
+
+
+### ⚙️ CI/CD
+
+* **docker:** pull fresh base image so rebuilds absorb patched OpenSSL ([#597](https://github.com/lonix/koolbot/issues/597)) ([c44f1ef](https://github.com/lonix/koolbot/commit/c44f1ef6f711c07f75c951be85096c7fdbf95064)), closes [#588](https://github.com/lonix/koolbot/issues/588)
+* enforce conventional-commit PR titles so release-please sees every change ([#551](https://github.com/lonix/koolbot/issues/551)) ([3ef7520](https://github.com/lonix/koolbot/commit/3ef7520b651a3b6649817a85dba5805180ff2ce0))
+* exclude js/log-injection from CodeQL and drop dead suppressions ([#600](https://github.com/lonix/koolbot/issues/600)) ([5e0a25c](https://github.com/lonix/koolbot/commit/5e0a25c4b32b6312e2d4c58f172010d5e6db1b7e))
+* keep CodeQL runs on main from being cancelled ([#598](https://github.com/lonix/koolbot/issues/598)) ([3ee206f](https://github.com/lonix/koolbot/commit/3ee206fc3a8072b8f895bb07533648d3da712da0))
+
 ## [1.1.0](https://github.com/lonix/koolbot/compare/v1.0.0...v1.1.0) (2026-06-12)
 
 
