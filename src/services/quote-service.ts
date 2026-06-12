@@ -294,7 +294,8 @@ export class QuoteService {
       try {
         // Skip if the original id already exists (re-running a restore) or an
         // identical quote (same text + author) is already stored.
-        const validId = Boolean(entry.id) && isValidObjectId(entry.id as string);
+        const validId =
+          Boolean(entry.id) && isValidObjectId(entry.id as string);
         const duplicate = await this.model.findOne(
           validId
             ? { _id: entry.id }
