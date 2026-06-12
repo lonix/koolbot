@@ -43,6 +43,10 @@ import {
 } from "./session.js";
 import { recordAudit } from "./audit.js";
 import {
+  resolveEmojiShortcodes,
+  findUnknownShortcodes,
+} from "../utils/emoji-shortcodes.js";
+import {
   getDisplayedRemainingMs,
   resolveNavFeatureStatus,
 } from "./admin-layout.js";
@@ -235,6 +239,21 @@ const WIZARD_FEATURE_ORDER = [
 ];
 
 /**
+ * Config keys whose string value is set directly as a Discord channel name
+ * (or part of one). For these, `:shortcode:` emoji are resolved to Unicode at
+ * the write boundary (issue #558) so admins can type `:green_circle:` and get
+ * 🟢 in the channel name. Other free-text keys (headers, message templates,
+ * etc.) are left verbatim — a stray `:colon:` there is not necessarily an
+ * emoji, and Discord renders shortcodes itself inside message content.
+ */
+export const EMOJI_NAME_KEYS: ReadonlySet<string> = new Set([
+  "voicechannels.lobby.name",
+  "voicechannels.lobby.offlinename",
+  "voicechannels.channel.prefix",
+  "voicechannels.channel.suffix",
+]);
+
+/**
  * Coerce a raw form value to match the expected type of `key` in
  * `defaultConfig`. Returns the coerced value on success, or a typed
  * failure describing why coercion was refused.
@@ -282,7 +301,17 @@ export function coerceConfigValue(
     if (!Number.isFinite(n)) return { ok: false, reason: "invalid number" };
     return { ok: true, value: n };
   }
-  const value = String(raw ?? "");
+  let value = String(raw ?? "");
+  // Emoji shortcode resolution (#558). For the name-style keys that feed
+  // Discord channel names, convert any recognised `:shortcode:` (e.g.
+  // `:green_circle:`) to its Unicode codepoint at the write boundary, so the
+  // DB stores 🟢 and every downstream name-construction site "just works"
+  // without a per-call-site transform. Unknown shortcodes pass through
+  // untouched. Done before the length cap so the resolved (shorter) form is
+  // what gets measured and stored.
+  if (EMOJI_NAME_KEYS.has(key)) {
+    value = resolveEmojiShortcodes(value);
+  }
   // Cap free-text setting values so an oversized string can't be stored and
   // then overflow the Settings display or a downstream Discord payload (#508).
   // List keys are handled in the array branch above and are bounded by their
@@ -473,9 +502,20 @@ export function createWriteRouter(
           details: { before, after: coerced.value },
           result: "success",
         });
+        // For the channel-name keys, surface any `:shortcode:` that wasn't
+        // recognised so the admin learns it stayed as literal text rather
+        // than silently wondering why their emoji didn't appear (#558). The
+        // resolved value is already echoed back in the message above.
+        const unknown = EMOJI_NAME_KEYS.has(key)
+          ? findUnknownShortcodes(coerced.value)
+          : [];
+        const hint =
+          unknown.length > 0
+            ? ` Note: ${unknown.join(", ")} ${unknown.length === 1 ? "is not a" : "are not"} recognised emoji shortcode${unknown.length === 1 ? "" : "s"} (kept as typed; custom server emoji can't appear in channel names).`
+            : "";
         flashRedirect(res, "/admin/settings", {
-          type: "ok",
-          text: `Set ${key} = ${String(coerced.value)}.`,
+          type: unknown.length > 0 ? "warn" : "ok",
+          text: `Set ${key} = ${String(coerced.value)}.${hint}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";

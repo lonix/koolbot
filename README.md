@@ -270,6 +270,13 @@ The lobby automatically renames based on bot status:
 - **"🟢 Lobby"** — Bot online and ready
 - **"🔴 Lobby"** — Bot offline
 
+> **Emoji in channel names:** these name fields accept emoji shortcodes such
+> as `:green_circle:` or `:video_game:` — they're converted to the actual
+> emoji (🟢, 🎮) when you save. You can also paste the emoji directly.
+> Unrecognised shortcodes are kept as typed. Custom/server emoji
+> (`:myserveremoji:`) **can't** appear in channel names — that's a Discord
+> limitation, not the bot's, so they'll show as literal text.
+
 ### Voice activity tracking
 
 Track how much time users spend in voice channels:
