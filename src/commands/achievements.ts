@@ -4,20 +4,15 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import { AchievementsService } from "../services/achievements-service.js";
+import type { IAccolade } from "../models/user-achievements.js";
 import logger from "../utils/logger.js";
-
-interface AchievementMetadata {
-  value?: number;
-  description?: string;
-  unit?: string;
-}
 
 /**
  * Format the optional metadata of an accolade/achievement into the
  * trailing " - <value> <unit>" suffix shown next to its name. Returns an
  * empty string when there is no value to display.
  */
-export function formatMetadata(metadata?: AchievementMetadata): string {
+export function formatMetadata(metadata?: IAccolade["metadata"]): string {
   if (!metadata?.value) {
     return "";
   }
