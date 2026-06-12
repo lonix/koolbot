@@ -146,9 +146,13 @@ export class VoiceChannelManager {
   ): Promise<void> {
     if (!this.isDbReady() || !guildId) return;
     try {
+      // Use explicit operators rather than a replacement document: a plain
+      // (operator-less) update would overwrite the whole row and silently drop
+      // a previously-persisted customName when ownership transfers. $set only
+      // touches ownerId; guildId/channelId are fixed for the life of the row.
       await VoiceChannelOwnership.findOneAndUpdate(
         { channelId },
-        { guildId, channelId, ownerId },
+        { $set: { ownerId }, $setOnInsert: { guildId, channelId } },
         { upsert: true },
       );
     } catch (error) {

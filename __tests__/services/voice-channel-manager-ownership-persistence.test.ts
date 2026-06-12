@@ -229,7 +229,10 @@ describe("VoiceChannelManager - ownership persistence (issue #615)", () => {
 
     expect(mockOwnershipModel.findOneAndUpdate).toHaveBeenCalledWith(
       { channelId: "new-channel-id" },
-      expect.objectContaining({ ownerId: "lonix-id" }),
+      expect.objectContaining({
+        $set: { ownerId: "lonix-id" },
+        $setOnInsert: { guildId: "guild-id", channelId: "new-channel-id" },
+      }),
       expect.objectContaining({ upsert: true }),
     );
   });
