@@ -27,6 +27,13 @@ import { ReactionRoleService } from "../services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import Notice from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
+import { BotStatusMessage } from "../models/bot-status-message.js";
+import {
+  BOT_STATUS_POOLS,
+  BOT_STATUS_POOL_META,
+  STATUS_POOL_DEFAULTS,
+  STATUS_TEXT_MAX,
+} from "../content/statuses.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 import {
   VoiceChannelManager,
@@ -49,6 +56,7 @@ import {
 import {
   renderAnnouncementsPage,
   renderBootstrapPage,
+  renderBotStatusPage,
   renderCommandAuditPage,
   renderDashboardPage,
   renderDatabasePage,
@@ -695,6 +703,52 @@ export function createReadOnlyRouter(
           total: notices.length,
           groups,
           categoryOptions,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Bot Status (issue #557) ----------
+  router.get(
+    "/bot-status",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const rows = await BotStatusMessage.find({ guildId: common.guildId })
+        .sort({ pool: 1, order: 1 })
+        .lean();
+
+      const pools = BOT_STATUS_POOLS.map((pool) => {
+        const meta = BOT_STATUS_POOL_META[pool];
+        const items = rows
+          .filter((r) => r.pool === pool)
+          .map((r) => ({
+            id: String(r._id),
+            order: r.order,
+            text: r.text,
+          }));
+        const usingDefaults = items.length === 0;
+        // The export textarea shows the effective list: stored entries when
+        // present, otherwise the built-in defaults the bot is actually using.
+        const effective = usingDefaults
+          ? [...STATUS_POOL_DEFAULTS[pool]]
+          : items.map((i) => i.text);
+        return {
+          pool,
+          label: meta.label,
+          description: meta.description,
+          requiresCount: meta.requiresCount,
+          items,
+          usingDefaults,
+          exportText: effective.join("\n"),
+        };
+      });
+
+      res.type("text/html").send(
+        renderBotStatusPage({
+          ...common,
+          maxLength: STATUS_TEXT_MAX,
+          pools,
           flash: readFlash(req),
         }),
       );

@@ -98,6 +98,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Voice Channels",
     featureKey: "voicechannels.enabled",
   },
+  { href: "/admin/bot-status", label: "Bot Status" },
   { href: "/admin/database", label: "Database" },
   { href: "/admin/audit/commands", label: "Command Audit" },
   { href: "/admin/bootstrap", label: "Bootstrap" },
