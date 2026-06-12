@@ -13,7 +13,7 @@ const mockGetInstance = jest.fn(() => ({
   create: mockCreateSession,
 }));
 const mockIsWebUIEnabled = jest.fn();
-const mockGetMissingWebUIEnvVars = jest.fn();
+const mockValidateWebUIEnvVars = jest.fn();
 
 jest.unstable_mockModule("../../src/services/web-session-service.js", () => ({
   WebSessionService: { getInstance: mockGetInstance },
@@ -21,7 +21,7 @@ jest.unstable_mockModule("../../src/services/web-session-service.js", () => ({
 
 jest.unstable_mockModule("../../src/web/index.js", () => ({
   isWebUIEnabled: mockIsWebUIEnabled,
-  getMissingWebUIEnvVars: mockGetMissingWebUIEnvVars,
+  validateWebUIEnvVars: mockValidateWebUIEnvVars,
 }));
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -131,7 +131,7 @@ describe("Config Command — execute", () => {
     process.env = { ...ORIGINAL_ENV };
     mockGetInstance.mockReturnValue({ create: mockCreateSession });
     mockIsWebUIEnabled.mockReturnValue(true);
-    mockGetMissingWebUIEnvVars.mockReturnValue([]);
+    mockValidateWebUIEnvVars.mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -164,9 +164,9 @@ describe("Config Command — execute", () => {
   });
 
   it("rejects when required env vars are missing", async () => {
-    mockGetMissingWebUIEnvVars.mockReturnValue([
-      "WEBUI_BASE_URL",
-      "WEBUI_SESSION_SECRET",
+    mockValidateWebUIEnvVars.mockReturnValue([
+      "WEBUI_BASE_URL is missing",
+      "WEBUI_SESSION_SECRET is missing",
     ]);
     const interaction = buildInteraction();
 
@@ -174,6 +174,20 @@ describe("Config Command — execute", () => {
 
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining("WEBUI_BASE_URL"),
+    });
+    expect(mockCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the session secret is too weak", async () => {
+    mockValidateWebUIEnvVars.mockReturnValue([
+      "WEBUI_SESSION_SECRET must be at least 32 bytes (generate with: openssl rand -base64 32)",
+    ]);
+    const interaction = buildInteraction();
+
+    await execute(interaction);
+
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("at least 32 bytes"),
     });
     expect(mockCreateSession).not.toHaveBeenCalled();
   });

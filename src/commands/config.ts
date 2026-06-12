@@ -7,7 +7,7 @@ import {
 import logger from "../utils/logger.js";
 import { WebSessionService } from "../services/web-session-service.js";
 import type { WebSessionRole } from "../models/web-session.js";
-import { getMissingWebUIEnvVars, isWebUIEnabled } from "../web/index.js";
+import { isWebUIEnabled, validateWebUIEnvVars } from "../web/index.js";
 
 export const data = new SlashCommandBuilder()
   .setName("config")
@@ -37,13 +37,13 @@ export async function execute(
     return;
   }
 
-  const missing = getMissingWebUIEnvVars();
-  if (missing.length > 0) {
+  const configErrors = validateWebUIEnvVars();
+  if (configErrors.length > 0) {
     logger.warn(
-      `/config rejected for user=${userId}: missing env vars: ${missing.join(", ")}`,
+      `/config rejected for user=${userId}: invalid WebUI config: ${configErrors.join("; ")}`,
     );
     await interaction.editReply({
-      content: `❌ Web UI is enabled but missing env vars: ${missing.join(", ")}`,
+      content: `❌ Web UI is enabled but its configuration is invalid: ${configErrors.join("; ")}`,
     });
     return;
   }

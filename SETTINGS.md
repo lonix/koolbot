@@ -78,7 +78,11 @@ WEBUI_ENABLED=true
 # Public URL the DM'd sign-in link points at (no trailing slash needed)
 WEBUI_BASE_URL=https://bot.example.com
 
-# HMAC key for tokens and cookies — generate with `openssl rand -base64 32`
+# HMAC key for tokens and cookies — generate with `openssl rand -base64 32`.
+# Must be at least 32 bytes long: the bot validates this length at startup
+# and refuses to mount the WebUI (and /config refuses to issue links) when
+# the secret is shorter, so a weak placeholder like `replace-me` is rejected.
+# This is a length check only — always use a randomly generated value.
 WEBUI_SESSION_SECRET=replace-me
 
 # Optional tuning (defaults shown)
