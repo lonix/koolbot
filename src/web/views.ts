@@ -4,6 +4,8 @@
  * later sub-issues.
  */
 
+import { THEME } from "./theme.js";
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -21,14 +23,19 @@ function pageShell(title: string, body: string): string {
     `<title>${escapeHtml(title)} — Koolbot Admin</title>`,
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     "<style>",
-    "body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:48rem;margin:0 auto;padding:2rem;color:#1f2937;}",
+    // Dark palette shared with the authenticated admin UI (issue #569) so the
+    // pre-auth sign-in / sign-out / invalid-link pages don't flash light mode.
+    `body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;max-width:48rem;margin:0 auto;padding:2rem;background:${THEME.bg};color:${THEME.text};}`,
     "h1{margin-top:0;}",
+    `a{color:${THEME.link};}`,
     "table{border-collapse:collapse;width:100%;}",
-    "th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid #e5e7eb;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;}",
-    "th{background:#f3f4f6;}",
-    "code{background:#f3f4f6;padding:.1rem .3rem;border-radius:.25rem;}",
+    `th,td{text-align:left;padding:.4rem .6rem;border-bottom:1px solid ${THEME.border};font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9rem;}`,
+    `th{background:${THEME.surfaceAlt};}`,
+    `code{background:${THEME.surface};padding:.1rem .3rem;border-radius:.25rem;}`,
     "nav a{margin-right:.75rem;}",
     "form{margin-top:1rem;}",
+    `button{background:${THEME.primary};color:${THEME.onPrimary};border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font:inherit;font-weight:600;}`,
+    `button:hover{background:${THEME.primaryHover};}`,
     "</style></head><body>",
     body,
     "</body></html>",
