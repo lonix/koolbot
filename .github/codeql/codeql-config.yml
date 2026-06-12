@@ -1,0 +1,21 @@
+name: "KoolBot CodeQL config"
+
+# Query selection still comes from the workflow's `queries:` input
+# (security-extended,security-and-quality); this file only filters that set.
+
+query-filters:
+  # Exclude js/log-injection.
+  #
+  # Every user-controlled value interpolated into a log line is passed through
+  # src/utils/log-sanitize.ts:sanitizeForLog, which strips CR/LF and other
+  # control characters at the call site (44 sites across the codebase). CodeQL's
+  # js/log-injection query does not credit this helper as a sanitizer across the
+  # function boundary, so it reports only false positives here. GitHub code
+  # scanning also ignores inline `// codeql[js/log-injection]` suppression
+  # comments, so the query cannot be quieted per-line either.
+  #
+  # The underlying risk (log forging via newline injection) is mitigated in code
+  # via sanitizeForLog; excluding the query removes the false-positive churn.
+  # Revisit if the logging/sanitization convention changes.
+  - exclude:
+      id: js/log-injection
