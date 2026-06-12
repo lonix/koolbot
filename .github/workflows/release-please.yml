@@ -16,6 +16,14 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v5
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Use a PAT / GitHub App token (not the default GITHUB_TOKEN) so the
+          # tag and release this action creates can trigger downstream
+          # workflows — notably docker.yml's `on: push: tags`, which publishes
+          # the semver-tagged container image. Tags pushed with the default
+          # GITHUB_TOKEN are deliberately blocked from triggering other
+          # workflows, which is why v1.0.0 shipped without a 1.0.0 image.
+          # Falls back to GITHUB_TOKEN if the secret is unset (release still
+          # works, but won't auto-build the image).
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
