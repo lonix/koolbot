@@ -27,6 +27,7 @@ interface UserNavItem {
 export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/", label: "Overview" },
   { href: "/me/notifications", label: "Notifications" },
+  { href: "/me/timezone", label: "Timezone" },
   { href: "/me/rewind", label: "Rewind" },
 ];
 
@@ -95,6 +96,9 @@ const STYLE = [
   ".prefs-table .toggle{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:#94a3b8}",
   ".prefs-table .pref-desc{color:#94a3b8;font-size:.85rem;margin-top:.15rem}",
   ".prefs-table .pref-soon{display:block;color:#f59e0b;font-size:.75rem;font-style:italic;margin-top:.15rem}",
+  "select.tz-select{width:100%;max-width:28rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:4px;padding:.45rem .5rem;font-size:.9rem}",
+  ".tz-preview{margin-top:.75rem;font-size:.9rem;color:#cbd5e1}",
+  ".tz-preview .now{font-weight:600;color:#e4e6eb}",
   ".btn{background:#2563eb;color:#fff;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
   ".btn:hover{background:#1d4ed8}",
   ".form-actions{margin-top:1rem;display:flex;gap:.5rem;align-items:center}",
@@ -245,6 +249,8 @@ export function renderUserIndexBody(opts: {
     '<ul class="feature-list">',
     '<li><span class="feature-name"><a href="/me/notifications">Notifications</a></span>' +
       '<span class="feature-desc">Opt in or out of DM nudges from Koolbot.</span></li>',
+    '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
+      '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
     '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
       '<span class="feature-desc">Your personal year-in-review of voice activity, top channels, peak day, and badges earned.</span></li>',
     "</ul>",
@@ -507,6 +513,88 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     '<div class="card"><h2>Badges earned this year</h2>' +
       renderBadges([...opts.accolades, ...opts.achievements]) +
       "</div>",
+  ].join("");
+}
+
+// --------------------------------------------------------------------
+// Timezone page (#524)
+// --------------------------------------------------------------------
+
+export interface TimezonePageBodyOptions {
+  csrfToken: string;
+  /** Sorted IANA zone identifiers (from `Intl.supportedValuesOf`). */
+  zones: string[];
+  /** Currently stored zone, or null when unset (server default). */
+  selected: string | null;
+  /** Host/server timezone shown as the fallback in the preview. */
+  serverTimezone: string;
+}
+
+function renderTimezoneOptions(
+  zones: string[],
+  selected: string | null,
+): string {
+  // Group by the region prefix ("Europe/Berlin" → "Europe"); zones with
+  // no "/" (e.g. "UTC") land under "Other".
+  const groups = new Map<string, string[]>();
+  for (const zone of zones) {
+    const slash = zone.indexOf("/");
+    const region = slash === -1 ? "Other" : zone.slice(0, slash);
+    const list = groups.get(region) ?? [];
+    list.push(zone);
+    groups.set(region, list);
+  }
+  const regions = [...groups.keys()].sort();
+  const optgroups = regions
+    .map((region) => {
+      const opts = (groups.get(region) ?? [])
+        .map((zone) => {
+          const sel = zone === selected ? " selected" : "";
+          return `<option value="${escapeHtml(zone)}"${sel}>${escapeHtml(zone)}</option>`;
+        })
+        .join("");
+      return `<optgroup label="${escapeHtml(region)}">${opts}</optgroup>`;
+    })
+    .join("");
+  const serverSelected = selected === null ? " selected" : "";
+  return (
+    `<option value=""${serverSelected}>— Server default —</option>` + optgroups
+  );
+}
+
+// Live client-side preview: shows the current time in the selected zone
+// (or the server default when unset) so the user can confirm the right
+// zone before saving. No third-party date picker — just `Intl`.
+const TZ_PREVIEW_SCRIPT =
+  "(function(){var sel=document.getElementById('tz-select');" +
+  "var out=document.getElementById('tz-now');if(!sel||!out)return;" +
+  "var serverTz=out.getAttribute('data-server-tz')||'UTC';" +
+  "function render(){var tz=sel.value||serverTz;try{" +
+  "var s=new Intl.DateTimeFormat('en-GB',{timeZone:tz,dateStyle:'medium',timeStyle:'medium'}).format(new Date());" +
+  "out.textContent=s+' ('+tz+')'}catch(e){out.textContent='— invalid zone —'}}" +
+  "sel.addEventListener('change',render);render();setInterval(render,1000)})();";
+
+/**
+ * Inner HTML for `GET /me/timezone` (#524). One `<select>`, one POST.
+ * Choosing "Server default" and saving clears the stored preference.
+ */
+export function renderUserTimezoneBody(opts: TimezonePageBodyOptions): string {
+  return [
+    "<h1>Timezone</h1>",
+    `<p class="subtitle">Koolbot renders the times in your weekly digest, Rewind, and <code>/voicestats</code> in this zone. Leave it on <em>Server default</em> to use the server's timezone (<span class="mono">${escapeHtml(opts.serverTimezone)}</span>).</p>`,
+    '<form method="POST" action="/me/timezone">',
+    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
+    '<div class="card">',
+    '<label for="tz-select"><strong>Your timezone</strong></label>',
+    `<div style="margin-top:.5rem"><select id="tz-select" name="timezone" class="tz-select">${renderTimezoneOptions(opts.zones, opts.selected)}</select></div>`,
+    `<div class="tz-preview">Current time: <span id="tz-now" class="now" data-server-tz="${escapeHtml(opts.serverTimezone)}">—</span></div>`,
+    '<div class="form-actions">',
+    '<button class="btn" type="submit">Save timezone</button>',
+    '<span class="muted">Pick <em>Server default</em> and save to clear your preference.</span>',
+    "</div>",
+    "</div>",
+    "</form>",
+    `<script>${TZ_PREVIEW_SCRIPT}</script>`,
   ].join("");
 }
 

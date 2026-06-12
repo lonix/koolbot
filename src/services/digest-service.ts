@@ -9,6 +9,7 @@ import { DigestState } from "../models/digest-state.js";
 import { UserAchievements } from "../models/user-achievements.js";
 import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
+import { formatInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 
 interface QualifyingUser {
@@ -290,6 +291,10 @@ export class DigestService {
             continue;
           }
 
+          // Render the week range in the user's preferred timezone, or
+          // the server timezone when unset (#524).
+          const timezone = await prefsService.getTimezone(user.userId, guildId);
+
           const previousState = await DigestState.findOne({
             userId: user.userId,
             guildId,
@@ -321,6 +326,8 @@ export class DigestService {
             streakWeeks,
             includeAchievements,
             weeklyAchievements,
+            ranAt: summary.ranAt,
+            timezone,
           });
 
           const delivered = await this.sendDigestDM(user.userId, embed);
@@ -447,6 +454,8 @@ export class DigestService {
       name: string;
       description: string;
     }>;
+    ranAt: Date;
+    timezone: string | null;
   }): EmbedBuilder {
     const {
       user,
@@ -454,6 +463,8 @@ export class DigestService {
       streakWeeks,
       includeAchievements,
       weeklyAchievements,
+      ranAt,
+      timezone,
     } = args;
     const previousTime = previousState?.lastWeekTotalTime ?? 0;
     const previousRank = previousState?.lastWeekRank ?? null;
@@ -504,11 +515,16 @@ export class DigestService {
 
     const footer = pickMotivationalFooter(user.userId.length + user.totalTime);
 
+    // "Week of <start> – <end>" in the user's timezone (server tz when
+    // unset) so the 7-day window reads in their local time (#524).
+    const weekStart = new Date(ranAt.getTime() - SECONDS_PER_WEEK * 1000);
+    const weekRange = `${formatInZone(weekStart, timezone, "MMM d")} – ${formatInZone(ranAt, timezone, "MMM d")}`;
+
     return new EmbedBuilder()
       .setTitle("📊 Your weekly voice digest")
       .setColor(EMBED_COLOR)
       .setDescription(
-        `Here's a snapshot of your last 7 days in voice, ${user.username}.`,
+        `Here's a snapshot of your last 7 days in voice (${weekRange}), ${user.username}.`,
       )
       .addFields(fields)
       .setFooter({

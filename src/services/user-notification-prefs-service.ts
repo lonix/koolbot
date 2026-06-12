@@ -1,4 +1,5 @@
 import logger from "../utils/logger.js";
+import { isValidTimezone } from "../utils/timezone.js";
 import {
   UserNotificationPrefs,
   type IUserNotificationPrefs,
@@ -94,6 +95,66 @@ export class UserNotificationPrefsService {
       { new: true, upsert: true, setDefaultsOnInsert: true },
     );
     return row ? rowToPrefs(row) : { ...DEFAULT_PREFS, ...cleaned };
+  }
+
+  /**
+   * Read the user's preferred display timezone (#524). Returns the stored
+   * IANA identifier, or `null` when unset (or on any read error) so
+   * callers fall back to the server timezone without special-casing.
+   */
+  public async getTimezone(
+    userId: string,
+    guildId: string,
+  ): Promise<string | null> {
+    if (!userId || !guildId) return null;
+    try {
+      const row = await UserNotificationPrefs.findOne({ userId, guildId });
+      const tz = row?.timezone;
+      return typeof tz === "string" && tz.length > 0 ? tz : null;
+    } catch (err) {
+      logger.error("Failed to load user timezone", err);
+      return null;
+    }
+  }
+
+  /**
+   * Set or clear the user's preferred display timezone (#524).
+   *
+   * Passing `null`/empty clears the preference ($unset) so the user falls
+   * back to the server timezone. A non-empty value is validated against
+   * the runtime's IANA database BEFORE hitting MongoDB; an unrecognized
+   * zone throws a descriptive error. Returns the stored value (or `null`
+   * when cleared).
+   */
+  public async setTimezone(
+    userId: string,
+    guildId: string,
+    timezone: string | null,
+  ): Promise<string | null> {
+    if (!userId) throw new Error("userId required");
+    if (!guildId) throw new Error("guildId required");
+
+    if (timezone === null || timezone === "") {
+      await UserNotificationPrefs.findOneAndUpdate(
+        { userId, guildId },
+        { $set: { updatedAt: new Date() }, $unset: { timezone: "" } },
+        { new: true, upsert: true, setDefaultsOnInsert: true },
+      );
+      return null;
+    }
+
+    if (!isValidTimezone(timezone)) {
+      throw new Error(
+        `"${timezone}" is not a recognized IANA timezone identifier`,
+      );
+    }
+
+    const row = await UserNotificationPrefs.findOneAndUpdate(
+      { userId, guildId },
+      { $set: { timezone, updatedAt: new Date() } },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+    return row?.timezone ?? timezone;
   }
 }
 

@@ -12,8 +12,10 @@ const mockTrackerGetInstance = jest.fn(() => ({
 }));
 
 const mockGetPrefs = jest.fn();
+const mockGetTimezone = jest.fn();
 const mockPrefsGetInstance = jest.fn(() => ({
   getPrefs: mockGetPrefs,
+  getTimezone: mockGetTimezone,
 }));
 
 const mockAchievementsGetInstance = jest.fn(() => ({}));
@@ -126,6 +128,7 @@ describe("DigestService", () => {
       digest: true,
       rewind: true,
     });
+    mockGetTimezone.mockResolvedValue(null);
     mockDigestStateFindOne.mockResolvedValue(null);
     mockDigestStateFindOneAndUpdate.mockResolvedValue({});
     mockUserAchievementsFindOne.mockResolvedValue(null);

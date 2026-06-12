@@ -205,6 +205,29 @@ describe("RewindService pure helpers", () => {
     it("returns null on empty input", () => {
       expect(computePeakDay([])).toBeNull();
     });
+
+    it("buckets days in the supplied timezone (#524)", () => {
+      // 02:00 UTC on the 16th is still the 15th in New York, so both
+      // sessions fall on the same local day there but on different UTC days.
+      const sessions = [
+        {
+          startTime: new Date("2026-03-15T20:00:00Z"),
+          duration: 3600,
+          channelId: "a",
+        },
+        {
+          startTime: new Date("2026-03-16T02:00:00Z"),
+          duration: 3600,
+          channelId: "a",
+        },
+      ];
+      expect(computePeakDay(sessions, "America/New_York")).toEqual({
+        date: "2026-03-15",
+        totalSeconds: 7200,
+      });
+      // Without a zone, the two sessions land on separate UTC days.
+      expect(computePeakDay(sessions)?.totalSeconds).toBe(3600);
+    });
   });
 
   describe("computeLongestStreak", () => {

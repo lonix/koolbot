@@ -4,6 +4,8 @@ import {
   TimePeriod,
 } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "../services/config-service.js";
+import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
+import { formatDateTimeInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 
 // Helper function to format time in hours and minutes
@@ -174,10 +176,19 @@ async function executeUser(
       return;
     }
 
+    // Render timestamps in the requesting user's stored timezone when set,
+    // falling back to the server timezone (#524).
+    const viewerTimezone = interaction.guildId
+      ? await UserNotificationPrefsService.getInstance().getTimezone(
+          interaction.user.id,
+          interaction.guildId,
+        )
+      : null;
+
     const response = [
       `**Voice Channel Statistics for ${user.username} (${period})**`,
       `Total Time: ${formatTime(stats.totalTime)}`,
-      `Last Seen: ${stats.lastSeen.toLocaleString()}`,
+      `Last Seen: ${formatDateTimeInZone(stats.lastSeen, viewerTimezone)}`,
       "",
       "**Recent Sessions:**",
       ...stats.sessions.slice(0, 5).map((session) => {
