@@ -679,6 +679,12 @@ describe("/me/rewind", () => {
         { userId: "u2", displayName: "Companion One", totalSeconds: 3600 * 5 },
       ],
       peakDay: { date: "2026-03-15", totalSeconds: 3600 * 3 },
+      longestSession: {
+        totalSeconds: 3600 * 6,
+        date: "2026-03-14",
+        channelId: "c1",
+        channelName: "General",
+      },
       messagesSent: 0,
       topTextChannels: [],
       peakMessageDay: null,
@@ -708,6 +714,8 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("Top voice companions"); // #567 card
     expect(out.body).toContain("Companion One");
     expect(out.body).not.toContain("Top channels"); // removed from Rewind
+    expect(out.body).toContain("Longest session"); // #568 card
+    expect(out.body).toContain("on 2026-03-14 in General"); // date + channel
   });
 
   it("renders a specific past year when the route param is present", async () => {

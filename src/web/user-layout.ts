@@ -298,6 +298,14 @@ export interface RewindBodyOptions {
   // Replaces the old Top channels card, which was noise under dynamic VCs.
   topCompanions: RewindCompanionView[];
   peakDay: { date: string; duration: string } | null;
+  // Longest single voice session of the year (#568): pre-formatted duration,
+  // the ISO date it started, and the (often ephemeral) channel name. Null
+  // when the user had no qualifying session that year.
+  longestSession: {
+    duration: string;
+    date: string;
+    channelName: string | null;
+  } | null;
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
   accolades: RewindBadgeView[];
@@ -456,6 +464,17 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     ? `<div class="value">${escapeHtml(opts.peakDay.date)}</div><div class="detail">${escapeHtml(opts.peakDay.duration)} that day</div>`
     : '<div class="value">—</div>';
 
+  // Longest single session (#568): show its duration, then the date (and
+  // channel when known) as the supporting detail.
+  const longestSession = opts.longestSession
+    ? `<div class="value">${escapeHtml(opts.longestSession.duration)}</div>` +
+      `<div class="detail">on ${escapeHtml(opts.longestSession.date)}` +
+      (opts.longestSession.channelName
+        ? ` in ${escapeHtml(opts.longestSession.channelName)}`
+        : "") +
+      "</div>"
+    : '<div class="value">—</div>';
+
   const streak = opts.longestStreakDays
     ? `<div class="value">${opts.longestStreakDays} day${opts.longestStreakDays === 1 ? "" : "s"}</div>` +
       (opts.longestStreakRange
@@ -499,6 +518,9 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     hero,
     '<div class="rw-grid">',
     '<div class="rw-stat"><div class="label">Peak day</div>' + peak + "</div>",
+    '<div class="rw-stat"><div class="label">Longest session</div>' +
+      longestSession +
+      "</div>",
     '<div class="rw-stat"><div class="label">Longest streak</div>' +
       streak +
       "</div>",

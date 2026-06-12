@@ -544,6 +544,15 @@ export function createUserRouter(
                 duration: formatHoursMinutes(summary.peakDay.totalSeconds),
               }
             : null,
+          longestSession: summary.longestSession
+            ? {
+                duration: formatHoursMinutes(
+                  summary.longestSession.totalSeconds,
+                ),
+                date: summary.longestSession.date,
+                channelName: summary.longestSession.channelName,
+              }
+            : null,
           longestStreakDays: summary.longestStreakDays,
           longestStreakRange: summary.longestStreakRange,
           accolades: summary.accolades.map((a) => ({

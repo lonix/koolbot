@@ -773,11 +773,11 @@ that omit it.
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                                    | What it's for                                                                                                                             |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                      |
-| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements, weekly digest, Rewind nudge). Each toggle records a `WebAuditLog` row.             |
-| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, streak, badges, annual rank, weekly-rank journey, and text activity. |
+| Page                                    | What it's for                                                                                                                                              |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                       |
+| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements, weekly digest, Rewind nudge). Each toggle records a `WebAuditLog` row.                              |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, annual rank, weekly-rank journey, and text activity. |
 
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;
