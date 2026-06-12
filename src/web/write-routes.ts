@@ -1960,6 +1960,96 @@ export function createWriteRouter(
   );
 
   router.post(
+    "/polls/schedules/:id/edit",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const channelId = getString(req, "channelId");
+      const cron = normalizeCron(getString(req, "cron"));
+      const durationRaw = getString(req, "durationHours");
+      const pingRoleId = getString(req, "pingRoleId");
+
+      if (!channelId || !cron) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: "Channel and cron are required.",
+        });
+        return;
+      }
+      const duration = Number.parseInt(durationRaw, 10);
+      if (!Number.isFinite(duration) || duration < 1 || duration > 768) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: "Duration must be an integer between 1 and 768 hours.",
+        });
+        return;
+      }
+      if (!validCron(cron)) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Invalid cron expression: ${cron}`,
+        });
+        return;
+      }
+
+      const service = PollService.getInstance(client);
+      try {
+        const schedule = await service.updateSchedule(
+          id,
+          {
+            channelId,
+            cronSchedule: cron,
+            pollDuration: duration,
+            roleIdToPing: pingRoleId || null,
+          },
+          session.guildId,
+        );
+        if (!schedule) {
+          await recordAudit(session, {
+            action: "poll-schedule.edit",
+            targetId: id,
+            result: "failure",
+            errorMessage: "not found or wrong guild",
+          });
+          flashRedirect(res, "/admin/polls", {
+            type: "err",
+            text: `Schedule ${id} not found.`,
+          });
+          return;
+        }
+        await recordAudit(session, {
+          action: "poll-schedule.edit",
+          targetId: id,
+          details: {
+            channelId,
+            cron,
+            durationHours: duration,
+            pingRoleId: pingRoleId || null,
+          },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "ok",
+          text: `Updated poll schedule ${id}.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        await recordAudit(session, {
+          action: "poll-schedule.edit",
+          targetId: id,
+          details: { channelId, cron },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Failed to update schedule ${id}: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
     "/polls/schedules/:id/delete",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
@@ -2179,6 +2269,107 @@ export function createWriteRouter(
         flashRedirect(res, "/admin/polls", {
           type: "err",
           text: `Failed to add question: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/polls/items/:id/edit",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const question = getString(req, "question");
+      const answersStr = getString(req, "answers");
+      const tagsStr = getString(req, "tags");
+      const multiSelect = getCheckbox(req, "multiSelect");
+
+      if (!question) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: "Question is required.",
+        });
+        return;
+      }
+      if (question.length > TEXT_LIMITS.pollQuestion) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Question must be ${TEXT_LIMITS.pollQuestion} characters or fewer.`,
+        });
+        return;
+      }
+      const answers = answersStr
+        .split(",")
+        .map((a) => a.trim())
+        .filter((a) => a.length > 0);
+      if (answers.length < 2 || answers.length > 10) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: "Provide 2–10 comma-separated answers.",
+        });
+        return;
+      }
+      // Same 55-char poll-option cap the create route enforces (#508).
+      if (answers.some((a) => a.length > TEXT_LIMITS.pollAnswer)) {
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Each answer must be ${TEXT_LIMITS.pollAnswer} characters or fewer.`,
+        });
+        return;
+      }
+      const tags = tagsStr
+        ? tagsStr
+            .split(",")
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0)
+        : [];
+
+      const service = PollService.getInstance(client);
+      try {
+        const item = await service.updatePollItem(
+          id,
+          { question, answers, multiSelect, tags },
+          session.guildId,
+        );
+        if (!item) {
+          await recordAudit(session, {
+            action: "poll-item.edit",
+            targetId: id,
+            result: "failure",
+            errorMessage: "not found or wrong guild",
+          });
+          flashRedirect(res, "/admin/polls", {
+            type: "err",
+            text: `Question ${id} not found.`,
+          });
+          return;
+        }
+        await recordAudit(session, {
+          action: "poll-item.edit",
+          targetId: id,
+          details: {
+            answerCount: answers.length,
+            multiSelect,
+            tagCount: tags.length,
+          },
+          result: "success",
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "ok",
+          text: `Updated poll question ${id}.`,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        await recordAudit(session, {
+          action: "poll-item.edit",
+          targetId: id,
+          details: { answerCount: answers.length },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/polls", {
+          type: "err",
+          text: `Failed to update question ${id}: ${text}`,
         });
       }
     }),

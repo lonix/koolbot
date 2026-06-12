@@ -1148,26 +1148,48 @@ function renderFlash(flash?: FlashMessage | null): string {
   return `<div class="notice ${cls}">${escapeHtml(flash.text)}</div>`;
 }
 
-function channelOptionsHtml(options: ChannelOption[]): string {
-  if (options.length === 0) {
+function channelOptionsHtml(
+  options: ChannelOption[],
+  selectedId?: string,
+): string {
+  const rendered = options.map(
+    (c) =>
+      `<option value="${escapeHtml(c.id)}"${c.id === selectedId ? " selected" : ""}>#${escapeHtml(c.name)}</option>`,
+  );
+  // Preserve a selected channel that's no longer in the list (deleted, or the
+  // bot lost access). Without a matching <option> the browser would default to
+  // the first channel, so editing only the cron/duration would silently
+  // reassign the schedule's channel on submit. Keep the saved id selectable.
+  if (selectedId && !options.some((c) => c.id === selectedId)) {
+    rendered.unshift(
+      `<option value="${escapeHtml(selectedId)}" selected>#${escapeHtml(selectedId)} (unavailable)</option>`,
+    );
+  }
+  if (rendered.length === 0) {
     return `<option value="">(no text channels available)</option>`;
   }
-  return options
-    .map(
-      (c) =>
-        `<option value="${escapeHtml(c.id)}">#${escapeHtml(c.name)}</option>`,
-    )
-    .join("");
+  return rendered.join("");
 }
 
-function roleOptionsHtml(options: RoleOption[]): string {
-  return [
-    `<option value="">(none)</option>`,
+function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
+  const out = [
+    `<option value=""${!selectedId ? " selected" : ""}>(none)</option>`,
+  ];
+  // Same guard as channels: if the saved ping role is no longer in the list,
+  // keep it as a selected option so a cron/duration-only edit doesn't silently
+  // clear the role by defaulting the select back to "(none)".
+  if (selectedId && !options.some((r) => r.id === selectedId)) {
+    out.push(
+      `<option value="${escapeHtml(selectedId)}" selected>@${escapeHtml(selectedId)} (unavailable)</option>`,
+    );
+  }
+  out.push(
     ...options.map(
       (r) =>
-        `<option value="${escapeHtml(r.id)}">@${escapeHtml(r.name)}</option>`,
+        `<option value="${escapeHtml(r.id)}"${r.id === selectedId ? " selected" : ""}>@${escapeHtml(r.name)}</option>`,
     ),
-  ].join("");
+  );
+  return out.join("");
 }
 
 const CRON_EXAMPLES_HTML = `
@@ -1292,9 +1314,11 @@ ${renderFlash(props.flash)}
 
 export interface PollScheduleRow {
   id: string;
+  channelId: string;
   channelName: string;
   cron: string;
   durationHours: number;
+  pingRoleId: string | null;
   pingRoleName: string | null;
   enabled: boolean;
   lastRun: string;
@@ -1305,6 +1329,7 @@ export interface PollItemRow {
   question: string;
   answers: string[];
   tags: string[];
+  multiSelect: boolean;
   usageCount: number;
   lastUsed: string;
   enabled: boolean;
@@ -1336,6 +1361,15 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${tagOnOff(s.enabled)}</td>
 <td class="muted">${escapeHtml(s.lastRun)}</td>
 <td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/edit" class="stack">${csrfInput}
+      <label>Channel<select name="channelId" required>${channelOptionsHtml(props.textChannels, s.channelId)}</select></label>
+      <label>Cron schedule<input type="text" name="cron" value="${escapeHtml(s.cron)}" required></label>
+      <label>Duration (hours, 1–768)<input type="number" name="durationHours" min="1" max="768" value="${s.durationHours}" required></label>
+      <label>Ping role<select name="pingRoleId">${roleOptionsHtml(props.roles, s.pingRoleId ?? undefined)}</select></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/toggle">${csrfInput}<button type="submit" class="btn">${s.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/test">${csrfInput}<button type="submit" class="btn">Test</button></form>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/delete" onsubmit="return confirm('Delete schedule ${escapeHtml(s.id)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
@@ -1354,6 +1388,15 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${tagOnOff(it.enabled)}</td>
 <td class="muted">${escapeHtml(it.source)}</td>
 <td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/edit" class="stack">${csrfInput}
+      <label>Question<input type="text" name="question" maxlength="300" value="${escapeHtml(it.question)}" required></label>
+      <label>Answers (comma-separated, 2–10 options, ≤55 chars each)<input type="text" name="answers" maxlength="600" value="${escapeHtml(it.answers.join(", "))}" required></label>
+      <label>Tags (comma-separated, optional)<input type="text" name="tags" value="${escapeHtml(it.tags.join(", "))}"></label>
+      <label class="checkbox"><input type="checkbox" name="multiSelect" value="1"${it.multiSelect ? " checked" : ""}> Allow multiple answer selections</label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/toggle">${csrfInput}<button type="submit" class="btn">${it.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/delete" onsubmit="return confirm('Delete poll question?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
