@@ -191,6 +191,23 @@ describe("PollService", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it("rejects subdomains of an allowed host (exact match only)", async () => {
+    const service = PollService.getInstance({} as never);
+
+    const result = await service.importFromUrl(
+      "https://cdn.example.com/polls.yaml",
+      "guild-1",
+      "user-1",
+    );
+
+    expect(result).toEqual({
+      imported: 0,
+      skipped: 0,
+      errors: ["URL host is not allowed for imports"],
+    });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it("allows GitHub raw hosts by default when no allowlist is configured", async () => {
     delete process.env.POLL_IMPORT_ALLOWED_HOSTS;
     mockFetch.mockResolvedValue(

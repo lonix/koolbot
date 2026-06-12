@@ -130,17 +130,22 @@ function getAllowedImportHosts(): string[] {
 }
 
 /**
- * Returns true when the hostname exactly matches an allowed host or is a
- * subdomain of one. The leading-dot check prevents a look-alike host such as
- * "raw.githubusercontent.com.evil.com" from slipping through a naive
- * `endsWith` comparison.
+ * Resolves the allowlist entry that matches the given hostname, or undefined
+ * when the host is not allowed. Matching is intentionally exact: the import
+ * path rebuilds the outgoing request URL from the returned value, so a
+ * look-alike host such as "raw.githubusercontent.com.evil.com" never matches
+ * and the request origin is always one the operator configured.
+ *
+ * Returning the allowlist entry (rather than a boolean) is deliberate — it is
+ * a server-controlled value sourced from code/env, never from the admin-
+ * supplied URL, which lets the caller anchor the request to a non-attacker-
+ * controlled host. See `importFromUrl` for why that matters (SSRF /
+ * CodeQL js/request-forgery).
  */
-function isAllowedImportHost(hostname: string): boolean {
+function resolveAllowedImportHost(hostname: string): string | undefined {
   const normalizedHostname = hostname.toLowerCase();
-  return getAllowedImportHosts().some(
-    (allowed) =>
-      normalizedHostname === allowed ||
-      normalizedHostname.endsWith(`.${allowed}`),
+  return getAllowedImportHosts().find(
+    (allowed) => allowed === normalizedHostname,
   );
 }
 
@@ -573,13 +578,29 @@ export class PollService {
       return results;
     }
 
-    // Enforce the server-controlled host allowlist before making any request.
-    // This is the primary SSRF mitigation: it confines outbound traffic to
-    // trusted destinations regardless of what URL the admin supplies.
-    if (!isAllowedImportHost(parsedUrl.hostname)) {
+    // Enforce the server-controlled host allowlist before making any request
+    // and resolve the matching entry. This is the primary SSRF mitigation: it
+    // confines outbound traffic to trusted destinations regardless of what URL
+    // the admin supplies.
+    const allowedHost = resolveAllowedImportHost(parsedUrl.hostname);
+    if (!allowedHost) {
       results.errors.push("URL host is not allowed for imports");
       return results;
     }
+
+    // Rebuild the request URL from allowlisted components rather than reusing
+    // the admin-supplied string verbatim. The origin (scheme + host) is taken
+    // entirely from server-controlled values — a fixed scheme literal and the
+    // resolved allowlist host — and only the path and query are carried over.
+    // Anchoring the origin to a value the caller cannot influence is what
+    // actually confines the request, and it gives CodeQL's js/request-forgery
+    // taint tracker a barrier it recognizes: the host no longer flows from
+    // request input. (The earlier protocol check guarantees http/https here.)
+    const scheme = parsedUrl.protocol === "https:" ? "https" : "http";
+    const safeUrl = new globalThis.URL(
+      `${parsedUrl.pathname}${parsedUrl.search}`,
+      `${scheme}://${allowedHost}`,
+    );
 
     // Reject the request if it has not completed within IMPORT_TIMEOUT_MS so a
     // slow or unresponsive server cannot hang the import indefinitely. The same
@@ -590,7 +611,7 @@ export class PollService {
     try {
       // Fetch the content. The body is read as raw text so we can inspect the
       // Content-Type and parse it ourselves rather than trusting the server.
-      const response = await fetch(parsedUrl.toString(), {
+      const response = await fetch(safeUrl.toString(), {
         signal: controller.signal,
         // Do not follow redirects: an allowed host could otherwise 3xx-redirect
         // the request to an internal or cloud-metadata endpoint, bypassing the
