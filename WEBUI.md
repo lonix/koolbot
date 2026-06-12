@@ -793,12 +793,15 @@ Aggregation is on-demand and not cached in v1 — see [`SETTINGS.md`](SETTINGS.m
 for the `rewind.*` keys that control the end-of-year DM nudge.
 
 The in-progress current year is always computed live from raw activity.
-**Completed years are frozen into an immutable snapshot at year rollover**
-(`#574`): alongside the end-of-year nudge cron, `RewindNudgeService`
-writes one `RewindSnapshot` per qualifying user for the just-completed
-year. Once frozen, that year's recap renders verbatim from the snapshot
-forever — unaffected by the voice-session / message-detail truncation
-that later prunes the source data. Snapshot creation is idempotent
+**Completed years are served from an immutable snapshot** (`#574`): the
+end-of-year nudge cron (default Dec 30) runs while the current year is
+wrapping up, and alongside the nudge `RewindNudgeService` writes one
+`RewindSnapshot` per qualifying user for that year. The page keeps
+computing the year live until it rolls over; from the next year onward,
+that frozen copy is served verbatim — unaffected by the voice-session /
+message-detail truncation that later prunes the source data. Because the
+snapshot is taken on the cron's December run, activity in the final day
+or two of the year isn't captured. Snapshot creation is idempotent
 (re-running the cron never duplicates or mutates an existing record) and
 gated by `rewind.enabled`. A `schemaVersion` is stored so the view can
 render older snapshots even after the summary shape gains new fields.

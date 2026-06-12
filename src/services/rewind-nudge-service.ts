@@ -310,10 +310,13 @@ export class RewindNudgeService {
         }
       }
 
-      // Freeze each qualifying user's completed-year recap into an
-      // immutable snapshot (#574). This runs independently of DM delivery
-      // — opted-out / DM-closed users still get their year preserved — and
-      // is idempotent, so a re-run leaves existing snapshots untouched.
+      // Freeze each qualifying user's recap for the wrapping-up year into
+      // an immutable snapshot (#574). The end-of-year cron runs in late
+      // December, so `year` is the current UTC year that's essentially
+      // done; once it rolls over, `getSummary` serves this frozen copy.
+      // This runs independently of DM delivery — opted-out / DM-closed
+      // users still get their year preserved — and is idempotent, so a
+      // re-run leaves existing snapshots untouched.
       await this.snapshotQualifyingUsers(qualifying, guildId, year, summary);
 
       logger.info(
@@ -335,10 +338,13 @@ export class RewindNudgeService {
   }
 
   /**
-   * Persist a frozen `RewindSnapshot` for each qualifying user for the
-   * just-completed `year` (#574). Errors are isolated per user — one bad
-   * snapshot must not abort the rest or crash the cron. Each user's
-   * timezone is applied so the frozen recap matches what they'd see live.
+   * Persist a frozen `RewindSnapshot` for each qualifying user for `year`
+   * (#574). This runs inside the end-of-year cron (default Dec 30), so
+   * `year` is the current UTC year that is wrapping up — `getSummary`
+   * recomputes it live rather than serving an earlier snapshot. Errors are
+   * isolated per user — one bad snapshot must not abort the rest or crash
+   * the cron. Each user's timezone is applied so the frozen recap matches
+   * what they'd see live.
    */
   private async snapshotQualifyingUsers(
     qualifying: Array<{ userId: string; username: string; totalTime: number }>,
