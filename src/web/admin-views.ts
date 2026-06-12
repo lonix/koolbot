@@ -556,9 +556,17 @@ function renderResetButton(key: string): string {
  */
 export function renderWarnBelow(r: SettingRow): string {
   if (!r.warnBelow) return "";
+  // Only warn on a value that's genuinely a number below the threshold.
+  // An unset key (null/undefined/empty string) renders as a blank input via
+  // coerceToDisplayValue, so coercing it to 0 here would flash a misleading
+  // warning — guard those out rather than letting Number("") become 0.
+  if (r.current === null || r.current === undefined || r.current === "")
+    return "";
   const value = typeof r.current === "number" ? r.current : Number(r.current);
   if (!Number.isFinite(value) || value >= r.warnBelow.value) return "";
-  return `<div class="settings-warn" role="alert" style="margin-top:.4rem;color:#b45309;font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
+  // role="status" (implicit aria-live=polite) keeps this persistent advisory
+  // from being announced assertively on every page load like role="alert".
+  return `<div class="settings-warn" role="status" style="margin-top:.4rem;color:#b45309;font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
 }
 
 export function renderSettingsPage(props: SettingsProps): string {

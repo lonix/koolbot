@@ -774,7 +774,7 @@ export function createReadOnlyRouter(
           truncation.getSchedule(),
           config.getNumber(
             "voicetracking.cleanup.retention.detailed_sessions_days",
-            30,
+            400,
           ),
           config.getNumber(
             "voicetracking.cleanup.retention.monthly_summaries_months",
