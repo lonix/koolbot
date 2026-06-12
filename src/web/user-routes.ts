@@ -526,6 +526,11 @@ export function createUserRouter(
             channelName: c.channelName,
             duration: formatHoursMinutes(c.totalSeconds),
           })),
+          topCompanions: (summary.topCompanions ?? []).map((c) => ({
+            userId: c.userId,
+            displayName: c.displayName,
+            duration: formatHoursMinutes(c.totalSeconds),
+          })),
           peakDay: summary.peakDay
             ? {
                 date: summary.peakDay.date,

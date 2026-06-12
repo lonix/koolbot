@@ -57,6 +57,8 @@ const {
   computeLongestStreak,
   computePeakDay,
   computeTopChannels,
+  computeTopCompanions,
+  isManagedChannelName,
   computePeakMessageDay,
   computeTopTextChannels,
   messagesInWindow,
@@ -177,6 +179,94 @@ describe("RewindService pure helpers", () => {
         { startTime: new Date(), duration: 4, channelId: "d" },
       ];
       expect(computeTopChannels(sessions, 2)).toHaveLength(2);
+    });
+  });
+
+  describe("computeTopCompanions", () => {
+    it("returns an empty array for no sessions", () => {
+      expect(computeTopCompanions([], 5)).toEqual([]);
+    });
+
+    it("returns an empty array when no session has otherUsers", () => {
+      const sessions = [
+        {
+          startTime: new Date("2026-01-01T10:00:00Z"),
+          duration: 600,
+          channelId: "a",
+          channelName: "alpha",
+        },
+        {
+          startTime: new Date("2026-01-02T10:00:00Z"),
+          duration: 600,
+          channelId: "a",
+          channelName: "alpha",
+          otherUsers: [],
+        },
+      ];
+      expect(computeTopCompanions(sessions, 5)).toEqual([]);
+    });
+
+    it("sums co-present seconds per companion and ranks by total", () => {
+      const sessions = [
+        {
+          startTime: new Date("2026-01-01T10:00:00Z"),
+          duration: 600,
+          channelId: "a",
+          channelName: "alpha",
+          otherUsers: ["bob", "carol"],
+        },
+        {
+          startTime: new Date("2026-01-02T10:00:00Z"),
+          duration: 1200,
+          channelId: "a",
+          channelName: "alpha",
+          otherUsers: ["bob"],
+        },
+        // Zero-duration sessions are ignored.
+        {
+          startTime: new Date("2026-01-03T10:00:00Z"),
+          duration: 0,
+          channelId: "a",
+          channelName: "alpha",
+          otherUsers: ["carol"],
+        },
+      ];
+      const top = computeTopCompanions(sessions, 5);
+      expect(top).toEqual([
+        { userId: "bob", totalSeconds: 1800 },
+        { userId: "carol", totalSeconds: 600 },
+      ]);
+    });
+
+    it("honours the limit", () => {
+      const sessions = [
+        {
+          startTime: new Date("2026-01-01T10:00:00Z"),
+          duration: 600,
+          channelId: "a",
+          otherUsers: ["b", "c", "d", "e"],
+        },
+      ];
+      expect(computeTopCompanions(sessions, 2)).toHaveLength(2);
+    });
+  });
+
+  describe("isManagedChannelName", () => {
+    it("matches the configured prefix", () => {
+      expect(isManagedChannelName("🎮 Alice's Room", "🎮", "")).toBe(true);
+    });
+
+    it("matches the configured suffix", () => {
+      expect(isManagedChannelName("Alice's Room", "", "'s Room")).toBe(true);
+    });
+
+    it("does not match a standing channel", () => {
+      expect(isManagedChannelName("general-vc", "🎮", "'s Room")).toBe(false);
+    });
+
+    it("ignores empty prefix/suffix and missing names", () => {
+      expect(isManagedChannelName("anything", "", "")).toBe(false);
+      expect(isManagedChannelName(undefined, "🎮", "'s Room")).toBe(false);
     });
   });
 
@@ -441,6 +531,67 @@ describe("RewindService.getSummary", () => {
     expect(summary!.weeklyJourney.last?.isoWeek).toBe(5);
     expect(summary!.weeklyJourney.best?.isoWeek).toBe(4);
     expect(summary!.availableYears).toEqual([2026, 2025]);
+  });
+
+  it("aggregates and resolves top voice companions (#567)", async () => {
+    const year = 2026;
+    const sessions = [
+      {
+        startTime: new Date(`${year}-02-01T10:00:00Z`),
+        duration: 3600,
+        channelId: "general",
+        channelName: "general-vc",
+        otherUsers: ["bob", "carol"],
+      },
+      {
+        startTime: new Date(`${year}-02-02T10:00:00Z`),
+        duration: 1800,
+        channelId: "general",
+        channelName: "general-vc",
+        otherUsers: ["bob"],
+      },
+    ];
+    mockFindOneVc.mockReturnValueOnce(lean({ sessions }));
+    mockFindOneAch.mockReturnValueOnce(lean(null));
+    mockAggregateVc
+      .mockResolvedValueOnce([{ _id: 2026 }])
+      .mockResolvedValueOnce([{ _id: "u1", totalTime: 5400 }])
+      .mockResolvedValueOnce([]);
+
+    // Client cache resolves bob (guild nickname) and carol (global
+    // username); a left member would simply miss both caches.
+    const client = {
+      guilds: {
+        cache: {
+          get: (id: string) =>
+            id === "g1"
+              ? {
+                  members: {
+                    cache: {
+                      get: (uid: string) =>
+                        uid === "bob" ? { displayName: "Bob the Builder" } : undefined,
+                    },
+                  },
+                }
+              : undefined,
+        },
+      },
+      users: {
+        cache: {
+          get: (uid: string) =>
+            uid === "carol" ? { username: "carol123" } : undefined,
+        },
+      },
+    };
+
+    const svc = RewindService.getInstance(
+      client as Parameters<typeof RewindService.getInstance>[0],
+    );
+    const summary = await svc.getSummary("u1", "g1", year);
+    expect(summary!.topCompanions).toEqual([
+      { userId: "bob", displayName: "Bob the Builder", totalSeconds: 5400 },
+      { userId: "carol", displayName: "carol123", totalSeconds: 3600 },
+    ]);
   });
 
   it("filters achievements and accolades by year and ignores unknown types", async () => {

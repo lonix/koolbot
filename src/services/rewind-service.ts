@@ -32,6 +32,18 @@ export interface RewindChannel {
 }
 
 /**
+ * A voice "companion" for the Rewind summary (#567) — another user the
+ * requesting user shared a voice channel with, ranked by co-present
+ * seconds. With this server's dynamic VCs the meaningful unit is *who*
+ * you spent time with rather than *which* ephemeral room you sat in.
+ */
+export interface RewindCompanion {
+  userId: string;
+  displayName: string;
+  totalSeconds: number;
+}
+
+/**
  * Top text channel for the Rewind summary (#496). Mirrors `RewindChannel`
  * but ranked by message count rather than seconds, since text activity is
  * counted per message.
@@ -65,6 +77,8 @@ export interface RewindSummary {
   sessionCount: number;
   daysActive: number;
   topChannels: RewindChannel[];
+  // People the user spent the most voice time with this year (#567).
+  topCompanions: RewindCompanion[];
   peakDay: { date: string; totalSeconds: number } | null; // ISO date (YYYY-MM-DD)
   // Text-message activity (#496). Mirrors the voice aggregates above and
   // reads as zero / empty when message tracking is disabled or absent.
@@ -95,6 +109,8 @@ interface RawSession {
   duration?: number;
   channelId: string;
   channelName?: string;
+  // Union of other user ids encountered during the session (#567).
+  otherUsers?: string[];
 }
 
 interface RawTextMessage {
@@ -173,6 +189,62 @@ export function computeTopChannels(
   return [...totals.values()]
     .sort((a, b) => b.totalSeconds - a.totalSeconds)
     .slice(0, limit);
+}
+
+/**
+ * Aggregate co-present voice seconds per other user (#567) and return the
+ * top `limit` ranked desc. For each session, every id in `otherUsers[]` is
+ * credited the *whole* session's duration.
+ *
+ * Caveat: `otherUsers[]` is the union of everyone encountered during the
+ * session, not a per-moment overlap, so a companion who only dropped in
+ * for a minute is still credited the full session. That over-counts, but
+ * it's an acceptable approximation for a fun year-in-review stat; precise
+ * overlap would need interval tracking (out of scope here).
+ *
+ * Returns ids + seconds; the service resolves ids → display names, mirroring
+ * how `computeTopTextChannels` defers name resolution.
+ */
+export function computeTopCompanions(
+  sessions: RawSession[],
+  limit = 5,
+): Array<{ userId: string; totalSeconds: number }> {
+  const totals = new Map<string, number>();
+  for (const s of sessions) {
+    const seconds = sessionSeconds(s);
+    if (seconds <= 0) continue;
+    for (const userId of s.otherUsers ?? []) {
+      if (!userId) continue;
+      totals.set(userId, (totals.get(userId) ?? 0) + seconds);
+    }
+  }
+  return [...totals.entries()]
+    .map(([userId, totalSeconds]) => ({ userId, totalSeconds }))
+    .sort((a, b) => b.totalSeconds - a.totalSeconds)
+    .slice(0, limit);
+}
+
+/**
+ * Whether a stored session `channelName` looks like a bot-managed,
+ * ephemeral dynamic VC (#567) rather than a standing channel.
+ * `VoiceChannelManager` creates dynamic rooms as
+ * `${prefix} ${displayName}${suffix}` (e.g. "🎮 Alice's Room"), so a name
+ * carrying the configured prefix or suffix is treated as managed. Matching
+ * follows config rather than a hardcoded name, so renaming the prefix /
+ * suffix keeps the filter accurate. Empty prefix / suffix are ignored so we
+ * never accidentally match every channel.
+ */
+export function isManagedChannelName(
+  channelName: string | undefined,
+  prefix: string,
+  suffix: string,
+): boolean {
+  if (!channelName) return false;
+  const trimmedPrefix = prefix.trim();
+  const trimmedSuffix = suffix.trim();
+  if (trimmedPrefix && channelName.startsWith(trimmedPrefix)) return true;
+  if (trimmedSuffix && channelName.endsWith(trimmedSuffix)) return true;
+  return false;
 }
 
 export function computePeakDay(
@@ -414,7 +486,41 @@ export class RewindService {
           .map((s) => dayKey(s.startTime, dayZone)),
       ).size;
 
-      const topChannels = computeTopChannels(sessions, 3);
+      // Top channels: on a guild using dynamic VCs the ephemeral
+      // per-session rooms dominate and tell the user nothing, so filter
+      // them out and let companions lead (#567). The filter follows the
+      // configured prefix / suffix rather than a hardcoded name.
+      const dynamicVcEnabled = await this.configService.getBoolean(
+        "voicechannels.enabled",
+        false,
+      );
+      let channelSessions = sessions;
+      if (dynamicVcEnabled) {
+        const prefix = await this.configService.getString(
+          "voicechannels.channel.prefix",
+          "🎮",
+        );
+        // Mirror VoiceChannelManager's fallback so an unset suffix still
+        // matches the default "'s Room" rooms.
+        const suffix =
+          (await this.configService.getString(
+            "voicechannels.channel.suffix",
+            "",
+          )) || "'s Room";
+        channelSessions = sessions.filter(
+          (s) => !isManagedChannelName(s.channelName, prefix, suffix),
+        );
+      }
+
+      const topChannels = computeTopChannels(channelSessions, 3);
+      const topCompanions: RewindCompanion[] = computeTopCompanions(
+        sessions,
+        5,
+      ).map((c) => ({
+        userId: c.userId,
+        displayName: this.resolveUserName(guildId, c.userId),
+        totalSeconds: c.totalSeconds,
+      }));
       const peakDay = computePeakDay(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
 
@@ -466,6 +572,7 @@ export class RewindService {
         sessionCount: sessions.filter((s) => sessionSeconds(s) > 0).length,
         daysActive,
         topChannels,
+        topCompanions,
         peakDay,
         messagesSent: text.messagesSent,
         topTextChannels: text.topTextChannels,
@@ -613,6 +720,23 @@ export class RewindService {
       return channel.name;
     }
     return "Unknown channel";
+  }
+
+  /**
+   * Resolve a companion's user id to a display name (#567), preferring the
+   * guild nickname, then the global username, both read from the client
+   * cache like `resolveChannelName`. Users who have since left the guild
+   * simply miss the cache and fall back to a neutral placeholder rather
+   * than breaking the page.
+   */
+  private resolveUserName(guildId: string, userId: string): string {
+    const member = this.client.guilds?.cache
+      ?.get(guildId)
+      ?.members?.cache?.get(userId);
+    if (member?.displayName) return member.displayName;
+    const user = this.client.users?.cache?.get(userId);
+    if (user?.username) return user.username;
+    return "Former member";
   }
 
   /**

@@ -252,7 +252,7 @@ export function renderUserIndexBody(opts: {
     '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
       '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
     '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
-      '<span class="feature-desc">Your personal year-in-review of voice activity, top channels, peak day, and badges earned.</span></li>',
+      '<span class="feature-desc">Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.</span></li>',
     "</ul>",
     "</div>",
     '<div class="card">',
@@ -286,6 +286,12 @@ export interface RewindTextChannelView {
   count: number;
 }
 
+export interface RewindCompanionView {
+  userId: string;
+  displayName: string;
+  duration: string; // pre-formatted
+}
+
 export interface RewindBodyOptions {
   year: number;
   availableYears: number[]; // includes `year` for the current selection
@@ -295,6 +301,8 @@ export interface RewindBodyOptions {
   sessionCount: number;
   daysActive: number;
   topChannels: RewindChannelView[];
+  // People the user shared voice channels with most this year (#567).
+  topCompanions: RewindCompanionView[];
   peakDay: { date: string; duration: string } | null;
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
@@ -488,6 +496,23 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
           .join("") +
         "</ul>";
 
+  // Top voice companions (#567) — ranked ahead of channels because with
+  // dynamic VCs *who* you sat with matters more than the throwaway room.
+  const companions =
+    opts.topCompanions.length === 0
+      ? '<div class="empty">No voice companions yet — hop in a channel with someone!</div>'
+      : '<ul class="rw-channels">' +
+        opts.topCompanions
+          .map(
+            (c) =>
+              "<li>" +
+              `<span class="name">${escapeHtml(c.displayName)}</span>` +
+              `<span class="dur">${escapeHtml(c.duration)}</span>` +
+              "</li>",
+          )
+          .join("") +
+        "</ul>";
+
   return [
     `<h1>Rewind ${opts.year}</h1>`,
     '<p class="subtitle">Your personal year-in-review.</p>',
@@ -505,6 +530,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       medianStat +
       "</div>",
     "</div>",
+    '<div class="card"><h2>Top voice companions</h2>' + companions + "</div>",
     '<div class="card"><h2>Top channels</h2>' + channels + "</div>",
     renderTextActivity(opts),
     '<div class="card"><h2>Rank journey</h2>' +

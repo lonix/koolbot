@@ -663,6 +663,9 @@ describe("/me/rewind", () => {
         { channelId: "c2", channelName: "gaming", totalSeconds: 3600 * 4 },
         { channelId: "c3", channelName: "afk", totalSeconds: 3600 * 2 },
       ],
+      topCompanions: [
+        { userId: "u2", displayName: "Companion One", totalSeconds: 3600 * 5 },
+      ],
       peakDay: { date: "2026-03-15", totalSeconds: 3600 * 3 },
       messagesSent: 0,
       topTextChannels: [],
@@ -691,6 +694,8 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("12 hr"); // formatHoursMinutes(3600 * 12)
     expect(out.body).toContain("#7"); // annual rank
     expect(out.body).toContain("+30%"); // median delta
+    expect(out.body).toContain("Top voice companions"); // #567 card
+    expect(out.body).toContain("Companion One");
   });
 
   it("renders a specific past year when the route param is present", async () => {
