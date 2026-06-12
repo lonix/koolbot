@@ -60,6 +60,7 @@
   },
   "overrides": {
     "undici": "^7.18.2",
-    "diff": "^8.0.3"
+    "diff": "^8.0.3",
+    "picomatch": "^4.0.4"
   }
 }
