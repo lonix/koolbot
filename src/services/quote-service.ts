@@ -293,13 +293,17 @@ export class QuoteService {
 
       try {
         // Skip if the original id already exists (re-running a restore) or an
-        // identical quote (same text + author) is already stored.
+        // identical quote (same text + author) is already stored. When the id
+        // is valid we still also match on content+author so a re-import under a
+        // new id cannot duplicate an existing quote (the idempotency contract).
         const validId =
           Boolean(entry.id) && isValidObjectId(entry.id as string);
+        const contentMatch = {
+          content: entry.content,
+          authorId: entry.authorId,
+        };
         const duplicate = await this.model.findOne(
-          validId
-            ? { _id: entry.id }
-            : { content: entry.content, authorId: entry.authorId },
+          validId ? { $or: [{ _id: entry.id }, contentMatch] } : contentMatch,
         );
         if (duplicate) {
           result.skipped++;

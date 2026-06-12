@@ -158,6 +158,24 @@ describe('QuoteService backup & vote persistence', () => {
       expect(model.create).not.toHaveBeenCalled();
     });
 
+    it('dedups on content+author even when the entry has a valid id', async () => {
+      // A matching content+author already exists under a different id.
+      model.findOne.mockResolvedValue({ _id: 'someOtherId' });
+
+      const res = await service.importQuotes({
+        quotes: [
+          { id: VALID_ID, content: 'dup', authorId: 'a', addedById: 'b' },
+        ],
+      });
+
+      expect(res.skipped).toBe(1);
+      expect(model.create).not.toHaveBeenCalled();
+      // The dedup query must consider both the id AND content+author.
+      expect(model.findOne).toHaveBeenCalledWith({
+        $or: [{ _id: VALID_ID }, { content: 'dup', authorId: 'a' }],
+      });
+    });
+
     it('rejects a structurally invalid payload', async () => {
       const res = await service.importQuotes(null);
       expect(res.imported).toBe(0);

@@ -6,6 +6,7 @@ import {
   beforeEach,
   afterEach,
 } from '@jest/globals';
+import { Collection } from 'discord.js';
 
 const mockRegisterReloadCallback = jest.fn();
 const mockGetBoolean = jest.fn();
@@ -147,6 +148,37 @@ describe('QuoteChannelManager - header idempotency & vote persistence', () => {
         expect.any(String),
         'quotes',
       );
+    });
+  });
+
+  describe('clearChannel', () => {
+    it('deletes messages bulkDelete skips (older than 14 days) individually', async () => {
+      const manager = await loadManager();
+
+      const m1: any = { id: 'm1', delete: jest.fn().mockResolvedValue(undefined) };
+      const m2: any = { id: 'm2', delete: jest.fn().mockResolvedValue(undefined) };
+      const firstBatch = new Collection<string, any>([
+        ['m1', m1],
+        ['m2', m2],
+      ]);
+      const empty = new Collection<string, any>();
+
+      const channel: any = {
+        messages: {
+          fetch: jest
+            .fn()
+            .mockResolvedValueOnce(firstBatch)
+            .mockResolvedValueOnce(empty),
+        },
+        // Both messages are >14 days old, so bulkDelete removes nothing.
+        bulkDelete: jest.fn().mockResolvedValue(new Collection<string, any>()),
+      };
+
+      const total = await (manager as any).clearChannel(channel);
+
+      expect(total).toBe(2);
+      expect(m1.delete).toHaveBeenCalledTimes(1);
+      expect(m2.delete).toHaveBeenCalledTimes(1);
     });
   });
 

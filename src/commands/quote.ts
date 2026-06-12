@@ -370,15 +370,17 @@ async function handleImport(
     summary += ` First error: ${result.errors[0]}`;
   }
 
-  if (rebuild && result.imported > 0) {
+  // Rebuild whenever the admin asked for it — not just when something was
+  // imported. Imports are idempotent, so a valid re-run can legitimately report
+  // 0 imported + N skipped while the admin still wants the channel rebuilt.
+  if (rebuild) {
     try {
       const manager = QuoteChannelManager.getInstance(interaction.client);
       const { reposted } = await manager.resetChannel();
       summary += ` Rebuilt the quote channel (${reposted} quotes re-posted).`;
     } catch (error) {
       logger.error("Failed to rebuild quote channel after import:", error);
-      summary +=
-        " Import succeeded but the channel rebuild failed — run `/quote reset` to retry.";
+      summary += " The channel rebuild failed — run `/quote reset` to retry.";
     }
   }
 

@@ -832,36 +832,54 @@ export class QuoteChannelManager {
   }
 
   /**
-   * Bulk-delete every (recent) message in the channel. Discord's bulkDelete is
-   * capped at 100 messages per call and won't touch messages older than 14
-   * days, so we loop until the channel stops shrinking. Returns the number of
+   * Delete every message in the channel. Discord's bulkDelete is capped at 100
+   * messages per call and refuses messages older than 14 days, so anything it
+   * skips is removed individually — otherwise a rebuild would re-post quotes on
+   * top of surviving old messages and create duplicates. Returns the number of
    * messages deleted.
    */
   private async clearChannel(channel: TextChannel): Promise<number> {
     let totalDeleted = 0;
-    // Discord bulkDelete is limited to 100 messages per call; loop until the channel is cleared.
-    // The `true` flag skips messages older than 14 days to avoid API errors.
     // See: https://discord.js.org/#/docs/main/stable/class/TextChannel?scrollTo=bulkDelete
-    // Note: this will only delete messages that are not older than 14 days.
-    // Older messages (if any) will remain in the channel.
-    // If full historical clearing is required, they must be removed individually.
-    // This loop focuses on respecting the bulkDelete 100-message limitation.
     while (true) {
       const messages = await channel.messages.fetch({ limit: 100 });
       if (messages.size === 0) {
         break;
       }
-      const deleted = await channel.bulkDelete(messages, true);
-      totalDeleted += deleted.size;
-      if (deleted.size === 0) {
-        // bulkDelete skips messages older than 14 days. If a full batch
-        // was fetched but nothing was deletable, every remaining message
-        // is too old to bulk-delete — stop instead of refetching the same
-        // 100 messages forever.
-        break;
+
+      let deletedThisRound = 0;
+      let bulkDeletedIds: { has: (id: string) => boolean } = {
+        has: () => false,
+      };
+      try {
+        // The `true` flag tells bulkDelete to skip (rather than error on)
+        // messages older than 14 days.
+        const deleted = await channel.bulkDelete(messages, true);
+        deletedThisRound += deleted.size;
+        bulkDeletedIds = deleted;
+      } catch (error) {
+        logger.error("Error bulk-deleting quote channel messages:", error);
       }
-      if (messages.size < 100) {
-        // Fetched fewer than 100 messages, so there are no more recent messages to delete.
+
+      // Anything bulkDelete skipped (too old) must be removed individually so
+      // the channel is genuinely emptied before quotes are re-posted.
+      const remaining = messages.filter((m) => !bulkDeletedIds.has(m.id));
+      for (const message of remaining.values()) {
+        try {
+          await message.delete();
+          deletedThisRound++;
+        } catch (error) {
+          logger.error(
+            `Error deleting old quote channel message ${message.id}:`,
+            error,
+          );
+        }
+      }
+
+      totalDeleted += deletedThisRound;
+      if (deletedThisRound === 0) {
+        // Nothing in this batch could be deleted (e.g. missing permissions) —
+        // stop instead of refetching the same messages forever.
         break;
       }
     }
@@ -901,8 +919,9 @@ export class QuoteChannelManager {
         await this.ensureHeaderPost(channel);
       }
 
-      // Get all quotes from database
-      const { quotes } = await quoteService.listQuotes(1, 1000);
+      // Get every stored quote (unbounded): a rebuild must include all quotes,
+      // not just the first page.
+      const quotes = await quoteService.getAllQuotes();
 
       for (const quote of quotes) {
         const messageId = await this.postQuote(
