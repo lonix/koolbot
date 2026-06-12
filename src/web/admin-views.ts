@@ -14,6 +14,7 @@ import {
   categoryMetadata,
   type SettingOption,
 } from "../services/config-schema.js";
+import type { BotStatusPool } from "../content/statuses.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -187,6 +188,12 @@ export interface SettingRow {
    * `SettingMetadata.options`.
    */
   options?: SettingOption[];
+  /**
+   * Soft "minimum recommended value" hint. When `current` is a number below
+   * `warnBelow.value`, the settings page renders `warnBelow.message` as a
+   * non-blocking inline warning. Sourced from `SettingMetadata.warnBelow`.
+   */
+  warnBelow?: { value: number; message: string };
 }
 
 export interface SettingsProps extends CommonProps {
@@ -540,6 +547,28 @@ function renderResetButton(key: string): string {
   );
 }
 
+/**
+ * Render the soft "minimum recommended value" warning when a numeric setting
+ * is below its `warnBelow` threshold. Returns an empty string when there's no
+ * hint or the value clears the threshold, so it adds nothing to rows that
+ * don't need it. Shown unconditionally (not gated on a feature toggle) so the
+ * degraded state is visible without editing — and it re-renders after a save.
+ */
+export function renderWarnBelow(r: SettingRow): string {
+  if (!r.warnBelow) return "";
+  // Only warn on a value that's genuinely a number below the threshold.
+  // An unset key (null/undefined/empty string) renders as a blank input via
+  // coerceToDisplayValue, so coercing it to 0 here would flash a misleading
+  // warning — guard those out rather than letting Number("") become 0.
+  if (r.current === null || r.current === undefined || r.current === "")
+    return "";
+  const value = typeof r.current === "number" ? r.current : Number(r.current);
+  if (!Number.isFinite(value) || value >= r.warnBelow.value) return "";
+  // role="status" (implicit aria-live=polite) keeps this persistent advisory
+  // from being announced assertively on every page load like role="alert".
+  return `<div class="settings-warn" role="status" style="margin-top:.4rem;color:#b45309;font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
+}
+
 export function renderSettingsPage(props: SettingsProps): string {
   const csrf = escapeHtml(props.csrfToken);
 
@@ -580,7 +609,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}</td>
+<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}${renderWarnBelow(r)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td class="settings-default">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
@@ -1147,26 +1176,48 @@ function renderFlash(flash?: FlashMessage | null): string {
   return `<div class="notice ${cls}">${escapeHtml(flash.text)}</div>`;
 }
 
-function channelOptionsHtml(options: ChannelOption[]): string {
-  if (options.length === 0) {
+function channelOptionsHtml(
+  options: ChannelOption[],
+  selectedId?: string,
+): string {
+  const rendered = options.map(
+    (c) =>
+      `<option value="${escapeHtml(c.id)}"${c.id === selectedId ? " selected" : ""}>#${escapeHtml(c.name)}</option>`,
+  );
+  // Preserve a selected channel that's no longer in the list (deleted, or the
+  // bot lost access). Without a matching <option> the browser would default to
+  // the first channel, so editing only the cron/duration would silently
+  // reassign the schedule's channel on submit. Keep the saved id selectable.
+  if (selectedId && !options.some((c) => c.id === selectedId)) {
+    rendered.unshift(
+      `<option value="${escapeHtml(selectedId)}" selected>#${escapeHtml(selectedId)} (unavailable)</option>`,
+    );
+  }
+  if (rendered.length === 0) {
     return `<option value="">(no text channels available)</option>`;
   }
-  return options
-    .map(
-      (c) =>
-        `<option value="${escapeHtml(c.id)}">#${escapeHtml(c.name)}</option>`,
-    )
-    .join("");
+  return rendered.join("");
 }
 
-function roleOptionsHtml(options: RoleOption[]): string {
-  return [
-    `<option value="">(none)</option>`,
+function roleOptionsHtml(options: RoleOption[], selectedId?: string): string {
+  const out = [
+    `<option value=""${!selectedId ? " selected" : ""}>(none)</option>`,
+  ];
+  // Same guard as channels: if the saved ping role is no longer in the list,
+  // keep it as a selected option so a cron/duration-only edit doesn't silently
+  // clear the role by defaulting the select back to "(none)".
+  if (selectedId && !options.some((r) => r.id === selectedId)) {
+    out.push(
+      `<option value="${escapeHtml(selectedId)}" selected>@${escapeHtml(selectedId)} (unavailable)</option>`,
+    );
+  }
+  out.push(
     ...options.map(
       (r) =>
-        `<option value="${escapeHtml(r.id)}">@${escapeHtml(r.name)}</option>`,
+        `<option value="${escapeHtml(r.id)}"${r.id === selectedId ? " selected" : ""}>@${escapeHtml(r.name)}</option>`,
     ),
-  ].join("");
+  );
+  return out.join("");
 }
 
 const CRON_EXAMPLES_HTML = `
@@ -1291,9 +1342,11 @@ ${renderFlash(props.flash)}
 
 export interface PollScheduleRow {
   id: string;
+  channelId: string;
   channelName: string;
   cron: string;
   durationHours: number;
+  pingRoleId: string | null;
   pingRoleName: string | null;
   enabled: boolean;
   lastRun: string;
@@ -1304,6 +1357,7 @@ export interface PollItemRow {
   question: string;
   answers: string[];
   tags: string[];
+  multiSelect: boolean;
   usageCount: number;
   lastUsed: string;
   enabled: boolean;
@@ -1335,6 +1389,15 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${tagOnOff(s.enabled)}</td>
 <td class="muted">${escapeHtml(s.lastRun)}</td>
 <td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/edit" class="stack">${csrfInput}
+      <label>Channel<select name="channelId" required>${channelOptionsHtml(props.textChannels, s.channelId)}</select></label>
+      <label>Cron schedule<input type="text" name="cron" value="${escapeHtml(s.cron)}" required></label>
+      <label>Duration (hours, 1–768)<input type="number" name="durationHours" min="1" max="768" value="${s.durationHours}" required></label>
+      <label>Ping role<select name="pingRoleId">${roleOptionsHtml(props.roles, s.pingRoleId ?? undefined)}</select></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/toggle">${csrfInput}<button type="submit" class="btn">${s.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/test">${csrfInput}<button type="submit" class="btn">Test</button></form>
   <form method="POST" action="/admin/polls/schedules/${escapeHtml(s.id)}/delete" onsubmit="return confirm('Delete schedule ${escapeHtml(s.id)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
@@ -1353,6 +1416,15 @@ export function renderPollsPage(props: PollsProps): string {
 <td>${tagOnOff(it.enabled)}</td>
 <td class="muted">${escapeHtml(it.source)}</td>
 <td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/edit" class="stack">${csrfInput}
+      <label>Question<input type="text" name="question" maxlength="300" value="${escapeHtml(it.question)}" required></label>
+      <label>Answers (comma-separated, 2–10 options, ≤55 chars each)<input type="text" name="answers" maxlength="600" value="${escapeHtml(it.answers.join(", "))}" required></label>
+      <label>Tags (comma-separated, optional)<input type="text" name="tags" value="${escapeHtml(it.tags.join(", "))}"></label>
+      <label class="checkbox"><input type="checkbox" name="multiSelect" value="1"${it.multiSelect ? " checked" : ""}> Allow multiple answer selections</label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/toggle">${csrfInput}<button type="submit" class="btn">${it.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/polls/items/${escapeHtml(it.id)}/delete" onsubmit="return confirm('Delete poll question?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
@@ -1791,6 +1863,172 @@ ${renderFlash(props.flash)}
   return renderAdminPage({
     title: "Database",
     active: "/admin/database",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
+// ---------- Reusable string-array editor (issue #557) ----------
+
+export interface StringArrayEditorItem {
+  id: string;
+  order: number;
+  text: string;
+}
+
+/**
+ * Options driving the reusable add / edit / remove / reorder / import /
+ * export editor for an arbitrary array of strings. Kept free of any
+ * bot-status-specific knowledge so the same partial can be dropped onto
+ * accolades / notice-categories / etc. later (the "array of data"
+ * generalisation in #557). The route handlers own validation; this only
+ * renders the controls.
+ */
+export interface StringArrayEditorOptions {
+  csrfToken: string;
+  /** Section heading. */
+  title: string;
+  /** Optional one-line explanation under the heading. */
+  description?: string;
+  /**
+   * Path prefix the CRUD/import forms post to, e.g. `/admin/bot-status`.
+   * Per-entry routes use `${basePath}/entry/:id/...`; collection routes
+   * use `${basePath}/pool/:collectionId/...`.
+   */
+  basePath: string;
+  /** Identifier of this array within `basePath` (e.g. the pool name). */
+  collectionId: string;
+  /** Current stored entries, already in display order. */
+  items: StringArrayEditorItem[];
+  /** Maximum length accepted for a single entry (drives `maxlength`). */
+  maxLength: number;
+  /** Optional hint shown beside the add input (e.g. the `{count}` rule). */
+  inputHint?: string;
+  /** Newline-joined effective list, shown in the export/import textarea. */
+  exportText: string;
+  /**
+   * When set, a banner explains the store is empty and the built-in
+   * defaults are in use, alongside a "seed defaults" button.
+   */
+  defaultsNotice?: string;
+}
+
+export function renderStringArrayEditor(
+  opts: StringArrayEditorOptions,
+): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`;
+  const poolPath = `${opts.basePath}/pool/${encodeURIComponent(opts.collectionId)}`;
+  const entryPath = (id: string): string =>
+    `${opts.basePath}/entry/${encodeURIComponent(id)}`;
+
+  const rows =
+    opts.items.length === 0
+      ? `<tr><td colspan="3"><span class="muted">No entries stored.</span></td></tr>`
+      : opts.items
+          .map(
+            (item) => `<tr>
+<td><form method="POST" action="${entryPath(item.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" value="${item.order}" min="-1000" max="10000" required><button type="submit" class="btn">Save</button></form></td>
+<td>
+  <details class="helper edit-details"><summary>${escapeHtml(item.text)}</summary>
+    <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
+      <label>Text<input type="text" name="text" maxlength="${opts.maxLength}" value="${escapeHtml(item.text)}" required></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
+  <div class="muted mono">id: ${escapeHtml(item.id)}</div>
+</td>
+<td class="actions"><form method="POST" action="${entryPath(item.id)}/delete" onsubmit="return confirm('Delete this entry?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form></td>
+</tr>`,
+          )
+          .join("");
+
+  const defaultsBanner = opts.defaultsNotice
+    ? `<div class="notice warn">${escapeHtml(opts.defaultsNotice)}
+  <form method="POST" action="${poolPath}/seed" class="inline-form">${csrfInput}<button type="submit" class="btn">Seed defaults into store</button></form>
+</div>`
+    : "";
+
+  const hint = opts.inputHint
+    ? `<span class="muted">${escapeHtml(opts.inputHint)}</span>`
+    : "";
+
+  return `<div class="card">
+  <h2>${escapeHtml(opts.title)} <span class="muted">(${opts.items.length})</span></h2>
+  ${opts.description ? `<p class="subtitle">${escapeHtml(opts.description)}</p>` : ""}
+  ${defaultsBanner}
+  <table><thead><tr><th>Order</th><th>Text</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <form method="POST" action="${poolPath}/add" class="stack">
+    ${csrfInput}
+    <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required></label>
+    ${hint}
+    <label>Order<input type="number" name="order" min="-1000" max="10000" value="0" required></label>
+    <button type="submit" class="btn btn-primary">Add</button>
+  </form>
+  <details class="helper">
+    <summary>Import / export</summary>
+    <form method="POST" action="${poolPath}/import" class="stack">
+      ${csrfInput}
+      <p class="muted">Paste one entry per line, or a JSON array of strings. Exporting: the textarea below shows the current effective list — copy it to back up.</p>
+      <label>Entries<textarea name="items" rows="8">${escapeHtml(opts.exportText)}</textarea></label>
+      <label class="inline-form"><input type="radio" name="mode" value="replace" checked> Replace pool</label>
+      <label class="inline-form"><input type="radio" name="mode" value="append"> Append to pool</label>
+      <button type="submit" class="btn btn-primary">Import</button>
+    </form>
+  </details>
+</div>`;
+}
+
+// ---------- Bot Status (issue #557) ----------
+
+export interface BotStatusPoolView {
+  pool: BotStatusPool;
+  label: string;
+  description: string;
+  requiresCount: boolean;
+  items: StringArrayEditorItem[];
+  usingDefaults: boolean;
+  exportText: string;
+}
+
+export interface BotStatusProps extends CommonProps {
+  maxLength: number;
+  pools: BotStatusPoolView[];
+  flash?: FlashMessage | null;
+}
+
+export function renderBotStatusPage(props: BotStatusProps): string {
+  const editors = props.pools
+    .map((p) =>
+      renderStringArrayEditor({
+        csrfToken: props.csrfToken,
+        title: p.label,
+        description: p.description,
+        basePath: "/admin/bot-status",
+        collectionId: p.pool,
+        items: p.items,
+        maxLength: props.maxLength,
+        inputHint: p.requiresCount
+          ? "Must contain the {count} placeholder."
+          : undefined,
+        exportText: p.exportText,
+        defaultsNotice: p.usingDefaults
+          ? "This pool has no stored entries — the bot is using its built-in defaults. Add, import, or seed below to customise."
+          : undefined,
+      }),
+    )
+    .join("");
+
+  const body = `
+<h1>Bot Status</h1>
+<p class="subtitle">The "Watching …" presence messages the bot rotates through, picked by how many users are in voice. Edit, import, or export each pool below — changes take effect without a redeploy. Empty pools fall back to the built-in defaults.</p>
+${renderFlash(props.flash)}
+${editors}
+`;
+  return renderAdminPage({
+    title: "Bot Status",
+    active: "/admin/bot-status",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

@@ -10,6 +10,8 @@ import {
 const mockFetch = jest.fn<typeof fetch>();
 const mockPollItemFindOne = jest.fn();
 const mockPollItemCreate = jest.fn();
+const mockPollItemFindById = jest.fn();
+const mockPollScheduleFindById = jest.fn();
 const mockRegisterReloadCallback = jest.fn();
 const mockConfigGetBoolean = jest.fn();
 const mockConfigGetNumber = jest.fn();
@@ -28,11 +30,14 @@ jest.unstable_mockModule("../../src/models/poll-item.js", () => ({
   PollItem: {
     findOne: mockPollItemFindOne,
     create: mockPollItemCreate,
+    findById: mockPollItemFindById,
   },
 }));
 
 jest.unstable_mockModule("../../src/models/poll-schedule.js", () => ({
-  PollSchedule: {},
+  PollSchedule: {
+    findById: mockPollScheduleFindById,
+  },
 }));
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -72,6 +77,8 @@ describe("PollService", () => {
     mockConfigGetNumber.mockResolvedValue(7);
     mockPollItemFindOne.mockResolvedValue(null);
     mockPollItemCreate.mockResolvedValue({});
+    mockPollItemFindById.mockResolvedValue(null);
+    mockPollScheduleFindById.mockResolvedValue(null);
     global.fetch = mockFetch as unknown as typeof fetch;
     // The import host allowlist is server-controlled; allow the fixture host
     // used throughout these tests via the configurable env var.
@@ -554,6 +561,182 @@ describe("PollService", () => {
 
       expect(result).toEqual({ imported: 0, skipped: 1, errors: [] });
       expect(mockPollItemCreate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("updatePollItem", () => {
+    it("changes only the editable fields and preserves usage stats/provenance", async () => {
+      const save = jest.fn<() => Promise<void>>().mockResolvedValue();
+      const item = {
+        _id: { toString: () => "item-1" },
+        guildId: "guild-1",
+        question: "Old question?",
+        answers: ["A", "B"],
+        multiSelect: false,
+        tags: ["old"],
+        usageCount: 7,
+        lastUsed: new Date("2026-01-01T00:00:00Z"),
+        createdBy: "creator-1",
+        source: "manual",
+        save,
+      };
+      mockPollItemFindById.mockResolvedValue(item);
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.updatePollItem(
+        "item-1",
+        {
+          question: "New question?",
+          answers: ["Yes", "No", "Maybe"],
+          multiSelect: true,
+          tags: ["new", "fun"],
+        },
+        "guild-1",
+      );
+
+      expect(result).toBe(item);
+      expect(save).toHaveBeenCalledTimes(1);
+      // Editable fields changed.
+      expect(item.question).toBe("New question?");
+      expect(item.answers).toEqual(["Yes", "No", "Maybe"]);
+      expect(item.multiSelect).toBe(true);
+      expect(item.tags).toEqual(["new", "fun"]);
+      // Stats and provenance are untouched.
+      expect(item.usageCount).toBe(7);
+      expect(item.lastUsed).toEqual(new Date("2026-01-01T00:00:00Z"));
+      expect(item.createdBy).toBe("creator-1");
+      expect(item.source).toBe("manual");
+    });
+
+    it("refuses to edit an item belonging to another guild", async () => {
+      const save = jest.fn<() => Promise<void>>().mockResolvedValue();
+      mockPollItemFindById.mockResolvedValue({
+        _id: { toString: () => "item-1" },
+        guildId: "other-guild",
+        save,
+      });
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.updatePollItem(
+        "item-1",
+        { question: "Q?", answers: ["A", "B"], multiSelect: false, tags: [] },
+        "guild-1",
+      );
+
+      expect(result).toBeNull();
+      expect(save).not.toHaveBeenCalled();
+    });
+
+    it("returns null when the item does not exist", async () => {
+      mockPollItemFindById.mockResolvedValue(null);
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.updatePollItem(
+        "missing",
+        { question: "Q?", answers: ["A", "B"], multiSelect: false, tags: [] },
+        "guild-1",
+      );
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("updateSchedule", () => {
+    it("rejects an invalid cron expression before touching the database", async () => {
+      const service = PollService.getInstance({} as never);
+
+      await expect(
+        service.updateSchedule(
+          "sched-1",
+          {
+            channelId: "chan-1",
+            cronSchedule: "not a cron",
+            pollDuration: 12,
+            roleIdToPing: null,
+          },
+          "guild-1",
+        ),
+      ).rejects.toThrow("Invalid cron expression");
+      expect(mockPollScheduleFindById).not.toHaveBeenCalled();
+    });
+
+    it("saves the new fields and re-arms the running cron job in place", async () => {
+      const save = jest.fn<() => Promise<void>>().mockResolvedValue();
+      const schedule = {
+        _id: { toString: () => "sched-1" },
+        guildId: "guild-1",
+        channelId: "old-chan",
+        cronSchedule: "0 9 * * *",
+        pollDuration: 24,
+        roleIdToPing: null as string | null,
+        enabled: true,
+        save,
+      };
+      mockPollScheduleFindById.mockResolvedValue(schedule);
+
+      const service = PollService.getInstance({} as never);
+      // Simulate a running service with an existing job for this schedule.
+      const oldStop = jest.fn();
+      const oldJob = { stop: oldStop };
+      const internals = service as unknown as {
+        isInitialized: boolean;
+        jobs: Map<string, { schedule: unknown; job: { stop: () => void } }>;
+      };
+      internals.isInitialized = true;
+      internals.jobs.set("sched-1", {
+        schedule,
+        job: oldJob,
+      });
+
+      const result = await service.updateSchedule(
+        "sched-1",
+        {
+          channelId: "new-chan",
+          cronSchedule: "0 12 * * 1",
+          pollDuration: 6,
+          roleIdToPing: "role-9",
+        },
+        "guild-1",
+      );
+
+      expect(result).toBe(schedule);
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(schedule.channelId).toBe("new-chan");
+      expect(schedule.cronSchedule).toBe("0 12 * * 1");
+      expect(schedule.pollDuration).toBe(6);
+      expect(schedule.roleIdToPing).toBe("role-9");
+      // Old job stopped, a fresh job armed in its place (a different object).
+      expect(oldStop).toHaveBeenCalledTimes(1);
+      const rearmed = internals.jobs.get("sched-1");
+      expect(rearmed).toBeDefined();
+      expect(rearmed?.job).not.toBe(oldJob);
+
+      // Stop the real CronJob so it does not leak a live timer.
+      service.destroy();
+    });
+
+    it("refuses to edit a schedule belonging to another guild", async () => {
+      const save = jest.fn<() => Promise<void>>().mockResolvedValue();
+      mockPollScheduleFindById.mockResolvedValue({
+        _id: { toString: () => "sched-1" },
+        guildId: "other-guild",
+        save,
+      });
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.updateSchedule(
+        "sched-1",
+        {
+          channelId: "chan-1",
+          cronSchedule: "0 12 * * 1",
+          pollDuration: 12,
+          roleIdToPing: null,
+        },
+        "guild-1",
+      );
+
+      expect(result).toBeNull();
+      expect(save).not.toHaveBeenCalled();
     });
   });
 });

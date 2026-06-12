@@ -158,7 +158,7 @@ export const defaultConfig: ConfigSchema = {
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": false,
   "voicetracking.cleanup.schedule": "0 0 * * *", // Every day at midnight
-  "voicetracking.cleanup.retention.detailed_sessions_days": 30,
+  "voicetracking.cleanup.retention.detailed_sessions_days": 400, // Full Rewind year + buffer (mirrors messagetracking.cleanup.retention.detailed_days)
   "voicetracking.cleanup.retention.monthly_summaries_months": 6,
   "voicetracking.cleanup.retention.yearly_summaries_years": 1,
 
@@ -289,6 +289,28 @@ export interface SettingOption {
   label: string;
 }
 
+/**
+ * Minimum days of *detailed* data a full Rewind / year-in-review needs to
+ * render a complete recap. The in-progress year is built live from detailed
+ * voice sessions and per-message detail, so any retention shorter than this
+ * silently degrades Rewind. Defined once here and referenced by the retention
+ * defaults' `warnBelow` hints, the WebUI warning, and the docs so the
+ * threshold can't drift. 366 covers a full leap year.
+ */
+export const REWIND_RETENTION_MIN_DAYS = 366;
+
+/**
+ * Soft "minimum recommended value" hint for a numeric setting. When the
+ * current value is below `value`, the WebUI surfaces `message` as a
+ * non-blocking inline warning — both on save and on first load — so operators
+ * notice a degraded feature without having to edit anything. Purely advisory:
+ * it never blocks the save (operators may legitimately want a lower value).
+ */
+export interface SettingWarnBelow {
+  value: number;
+  message: string;
+}
+
 export interface SettingMetadata {
   label: string;
   description: string;
@@ -302,7 +324,24 @@ export interface SettingMetadata {
    * valid values (e.g. `leaderboard_roles.period`).
    */
   options?: SettingOption[];
+  /**
+   * Optional "minimum recommended value" hint for `number`-typed keys. The
+   * WebUI shows the warning when the current value drops below the threshold.
+   * Reusable across settings; today it guards the Rewind-relevant retention
+   * keys (see `REWIND_RETENTION_MIN_DAYS`).
+   */
+  warnBelow?: SettingWarnBelow;
 }
+
+/**
+ * Shared warning shown when a Rewind-relevant retention is below the year
+ * threshold. Built from `REWIND_RETENTION_MIN_DAYS` so the number stays in
+ * one place.
+ */
+const rewindRetentionWarning: SettingWarnBelow = {
+  value: REWIND_RETENTION_MIN_DAYS,
+  message: `⚠️ Rewind / year-in-review needs ≥ ${REWIND_RETENTION_MIN_DAYS} days of detailed data. At this value, recaps that reach further back will be incomplete. Lower it only if you don't need a full year-in-review.`,
+};
 
 /**
  * Per-category metadata for the WebUI Settings page section headers and
@@ -533,9 +572,10 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "voicetracking.cleanup.retention.detailed_sessions_days": {
     label: "Detailed-session retention (days)",
     description:
-      "Days to keep detailed session rows before they are summarised away.",
+      "Days to keep detailed session rows before they are summarised away. Rewind reads these detailed sessions, so keep this at or above a full year.",
     category: "voicetracking",
     type: "number",
+    warnBelow: rewindRetentionWarning,
   },
   "voicetracking.cleanup.retention.monthly_summaries_months": {
     label: "Monthly-summary retention (months)",
@@ -581,9 +621,10 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "messagetracking.cleanup.retention.detailed_days": {
     label: "Message-detail retention (days)",
     description:
-      "Days to keep per-message detail (recentMessages) before it is pruned. All-time per-channel totals are never pruned.",
+      "Days to keep per-message detail (recentMessages) before it is pruned. All-time per-channel totals are never pruned. Rewind reads this detail, so keep it at or above a full year.",
     category: "messagetracking",
     type: "number",
+    warnBelow: rewindRetentionWarning,
   },
 
   // Individual Features

@@ -620,7 +620,7 @@ Automatic cleanup of old tracking data with data aggregation.
 | --- | --- | --- |
 | `voicetracking.cleanup.enabled` | `false` | Enable automatic data cleanup |
 | `voicetracking.cleanup.schedule` | `"0 0 * * *"` | Cron schedule (default: daily at midnight) |
-| `voicetracking.cleanup.retention.detailed_sessions_days` | `30` | Days to keep detailed session data |
+| `voicetracking.cleanup.retention.detailed_sessions_days` | `400` | Days to keep detailed session data (full Rewind year + buffer) |
 | `voicetracking.cleanup.retention.monthly_summaries_months` | `6` | Months to keep monthly summaries |
 | `voicetracking.cleanup.retention.yearly_summaries_years` | `1` | Years to keep yearly summaries |
 
@@ -632,15 +632,25 @@ Automatic cleanup of old tracking data with data aggregation.
 4. Manual cleanup runs from the Web UI's **Database** page (replaces
    the old `/dbtrunk run`)
 
+⚠️ **Important for Rewind (year-in-review):**
+
+Rewind is built live from the **detailed** voice sessions that this job
+prunes. To render a full year-in-review, keep
+`detailed_sessions_days` at or above a full year — **366 days** (the
+default of `400` leaves a buffer). Below that threshold, recaps that
+reach further back than the retention window are incomplete. The WebUI
+shows a soft, non-blocking warning when this (or
+`messagetracking.cleanup.retention.detailed_days`) is set below 366
+days. Lower it only if you don't need a full year-in-review.
+
 ⚠️ **Important for consecutive-days accolades:**
 
 The cleanup job deletes session history older than
 `detailed_sessions_days`. This affects consecutive-day streak
 calculations:
 
-- **Default retention (30 days):** supports streaks up to ~25 days
-- **For 30-day "No-Lifer" accolade:** raise retention to at least **60
-  days**
+- **Default retention (400 days):** comfortably supports the streaks and
+  the full Rewind year
 - **Formula:** retention ≥ longest streak × 2
 
 ---
@@ -915,7 +925,7 @@ above).
 
 - `voicetracking.cleanup.enabled` (bool, default: false)
 - `voicetracking.cleanup.schedule` (string, default: `"0 0 * * *"`)
-- `voicetracking.cleanup.retention.detailed_sessions_days` (number, default: 30)
+- `voicetracking.cleanup.retention.detailed_sessions_days` (number, default: 400)
 - `voicetracking.cleanup.retention.monthly_summaries_months` (number, default: 6)
 - `voicetracking.cleanup.retention.yearly_summaries_years` (number, default: 1)
 

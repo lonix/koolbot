@@ -751,10 +751,25 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Polls**          | `/poll create`, `list`, `add-item`, `import-url`, `delete`, `delete-item`, `test`, `list-items`     |
 | **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
+| **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels** | `/vc force-reload` (single **Force VC cleanup** button)                                             |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
+
+The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
+presence message pools the bot rotates through, picked by how many users
+are in voice: the *empty*, *one user*, and *multiple users* pools. Each
+pool has an add / edit / remove / reorder list plus a paste-a-list
+import/export box (newline- or JSON-encoded), built on a reusable
+string-array editor. Entries are stored per-guild in MongoDB and take
+effect immediately — no redeploy or `/config reload` needed. A pool with
+no stored rows falls back to the built-in defaults in
+`src/content/statuses.ts`, so behaviour is unchanged on a fresh install;
+use **Seed defaults into store** to start editing from those defaults.
+Entries in the *multiple users* pool must contain the `{count}`
+placeholder (replaced with the live user count); the editor rejects saves
+that omit it.
 
 ### User self-service (`/me/*`, both admin and user roles)
 
@@ -772,10 +787,24 @@ log and PRG-redirects back to the page.
 The **Rewind** page defaults to the current calendar year (UTC);
 `/me/rewind/:year` lets you browse past years. A small year picker at
 the top of the page only offers years for which you have data (voice
-sessions, text-message activity, or badges). Years with no data render
-a friendly empty state.
+sessions, text-message activity, or badges), plus any year that has been
+snapshotted (see below). Years with no data render a friendly empty state.
 Aggregation is on-demand and not cached in v1 — see [`SETTINGS.md`](SETTINGS.md#-rewind-year-in-review)
 for the `rewind.*` keys that control the end-of-year DM nudge.
+
+The in-progress current year is always computed live from raw activity.
+**Completed years are served from an immutable snapshot** (`#574`): the
+end-of-year nudge cron (default Dec 30) runs while the current year is
+wrapping up, and alongside the nudge `RewindNudgeService` writes one
+`RewindSnapshot` per qualifying user for that year. The page keeps
+computing the year live until it rolls over; from the next year onward,
+that frozen copy is served verbatim — unaffected by the voice-session /
+message-detail truncation that later prunes the source data. Because the
+snapshot is taken on the cron's December run, activity in the final day
+or two of the year isn't captured. Snapshot creation is idempotent
+(re-running the cron never duplicates or mutates an existing record) and
+gated by `rewind.enabled`. A `schemaVersion` is stored so the view can
+render older snapshots even after the summary shape gains new fields.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

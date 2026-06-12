@@ -9,11 +9,22 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 const mockFindOneVc = jest.fn();
 const mockAggregateVc = jest.fn();
 const mockFindOneAch = jest.fn();
+const mockSnapFindOne = jest.fn();
+const mockSnapFind = jest.fn();
+const mockSnapCreate = jest.fn();
 
 jest.unstable_mockModule("../../src/models/voice-channel-tracking.js", () => ({
   VoiceChannelTracking: {
     findOne: mockFindOneVc,
     aggregate: mockAggregateVc,
+  },
+}));
+
+jest.unstable_mockModule("../../src/models/rewind-snapshot.js", () => ({
+  RewindSnapshot: {
+    findOne: mockSnapFindOne,
+    find: mockSnapFind,
+    create: mockSnapCreate,
   },
 }));
 
@@ -54,6 +65,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const {
   RewindService,
+  normalizeSnapshotSummary,
+  SNAPSHOT_SCHEMA_VERSION,
   computeLongestStreak,
   computePeakDay,
   computeTopCompanions,
@@ -344,6 +357,10 @@ describe("RewindService.getSummary", () => {
     mockFindOneVc.mockReturnValue(lean({ sessions: [] }));
     mockFindOneAch.mockReturnValue(lean(null));
     mockAggregateVc.mockResolvedValue([]);
+    // By default no snapshots exist, so getSummary takes the live path.
+    mockSnapFindOne.mockReturnValue(lean(null));
+    mockSnapFind.mockReturnValue(lean([]));
+    mockSnapCreate.mockResolvedValue({});
   });
 
   it("returns hasData=false when the user has no sessions or achievements", async () => {
@@ -564,6 +581,175 @@ describe("RewindService.getSummary", () => {
     );
     const summary = await svc.getSummary("u1", "g1", 2026);
     expect(summary).toBeNull();
+  });
+});
+
+describe("RewindService snapshots (#574)", () => {
+  function lean<T>(value: T): { lean: () => Promise<T> } {
+    return { lean: jest.fn(async () => value) };
+  }
+
+  function makeSvc() {
+    return RewindService.getInstance(
+      makeClient() as Parameters<typeof RewindService.getInstance>[0],
+    );
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetSingleton();
+    mockFindOneVc.mockReturnValue(lean({ sessions: [] }));
+    mockFindOneAch.mockReturnValue(lean(null));
+    mockAggregateVc.mockResolvedValue([]);
+    mockSnapFindOne.mockReturnValue(lean(null));
+    mockSnapFind.mockReturnValue(lean([]));
+    mockSnapCreate.mockResolvedValue({});
+  });
+
+  describe("normalizeSnapshotSummary", () => {
+    it("fills defaults and stamps the snapshot source + identity", () => {
+      const norm = normalizeSnapshotSummary(
+        { totalSeconds: 5, hasData: true },
+        { userId: "u", guildId: "g", year: 2021 },
+      );
+      expect(norm.source).toBe("snapshot");
+      expect(norm.userId).toBe("u");
+      expect(norm.guildId).toBe("g");
+      expect(norm.year).toBe(2021);
+      expect(norm.totalSeconds).toBe(5);
+      expect(norm.topChannels).toEqual([]);
+      expect(norm.weeklyJourney).toEqual({
+        first: null,
+        last: null,
+        best: null,
+      });
+    });
+
+    it("tolerates a null stored payload (empty state)", () => {
+      const empty = normalizeSnapshotSummary(null, {
+        userId: "u",
+        guildId: "g",
+        year: 2021,
+      });
+      expect(empty.hasData).toBe(false);
+      expect(empty.availableYears).toEqual([]);
+    });
+  });
+
+  describe("getSummary serving", () => {
+    it("serves a completed year from its snapshot without recomputing live", async () => {
+      mockSnapFindOne.mockReturnValueOnce(
+        lean({
+          summary: {
+            userId: "u1",
+            guildId: "g1",
+            year: 2020,
+            hasData: true,
+            totalSeconds: 12345,
+            availableYears: [2020],
+          },
+        }),
+      );
+      mockSnapFind.mockReturnValueOnce(lean([{ year: 2020 }, { year: 2019 }]));
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2020);
+
+      expect(summary!.source).toBe("snapshot");
+      expect(summary!.totalSeconds).toBe(12345);
+      // Snapshotted years are merged in so they stay navigable.
+      expect(summary!.availableYears).toEqual([2020, 2019]);
+      // No live aggregation happened — the recap came straight from storage.
+      expect(mockFindOneVc).not.toHaveBeenCalled();
+    });
+
+    it("computes the in-progress current year live even if a snapshot exists", async () => {
+      const currentYear = new Date().getUTCFullYear();
+      // Persistent (not `Once`) so an unconsumed queued value can't leak
+      // into the next test — the current year never consults the snapshot.
+      mockSnapFindOne.mockReturnValue(
+        lean({ summary: { hasData: true, totalSeconds: 999 } }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", currentYear);
+
+      expect(summary!.source).toBe("live");
+      // The snapshot lookup is never consulted for the current year.
+      expect(mockSnapFindOne).not.toHaveBeenCalled();
+    });
+
+    it("computes a past year live when no snapshot exists", async () => {
+      const summary = await makeSvc().getSummary("u1", "g1", 2020);
+      expect(summary!.source).toBe("live");
+      expect(mockFindOneVc).toHaveBeenCalled();
+    });
+
+    it("merges snapshot years into availableYears on the live path", async () => {
+      const currentYear = new Date().getUTCFullYear();
+      mockAggregateVc
+        .mockResolvedValueOnce([{ _id: currentYear }]) // collectAvailableYears
+        .mockResolvedValueOnce([]); // weekly journey
+      mockSnapFind.mockReturnValueOnce(lean([{ year: 2019 }]));
+
+      const summary = await makeSvc().getSummary("u1", "g1", currentYear);
+      expect(summary!.availableYears).toEqual([currentYear, 2019]);
+    });
+  });
+
+  describe("snapshotYear", () => {
+    const session2020 = {
+      startTime: new Date("2020-03-01T10:00:00Z"),
+      duration: 3600,
+      channelId: "a",
+      channelName: "x",
+    };
+
+    it("creates a snapshot when none exists and the user has data", async () => {
+      mockFindOneVc.mockReturnValue(lean({ sessions: [session2020] }));
+
+      const outcome = await makeSvc().snapshotYear("u1", "g1", 2020, null);
+
+      expect(outcome).toBe("created");
+      expect(mockSnapCreate).toHaveBeenCalledTimes(1);
+      const arg = mockSnapCreate.mock.calls[0][0] as {
+        userId: string;
+        guildId: string;
+        year: number;
+        schemaVersion: number;
+        summary: { hasData: boolean };
+      };
+      expect(arg).toMatchObject({
+        userId: "u1",
+        guildId: "g1",
+        year: 2020,
+        schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+      });
+      expect(arg.summary.hasData).toBe(true);
+    });
+
+    it("is idempotent — skips when a snapshot already exists", async () => {
+      mockSnapFindOne.mockReturnValueOnce(lean({ _id: "existing" }));
+
+      const outcome = await makeSvc().snapshotYear("u1", "g1", 2020, null);
+
+      expect(outcome).toBe("exists");
+      expect(mockSnapCreate).not.toHaveBeenCalled();
+    });
+
+    it("skips users with no data worth freezing", async () => {
+      const outcome = await makeSvc().snapshotYear("u1", "g1", 2020, null);
+      expect(outcome).toBe("skipped");
+      expect(mockSnapCreate).not.toHaveBeenCalled();
+    });
+
+    it("treats a duplicate-key race as an existing snapshot", async () => {
+      mockFindOneVc.mockReturnValue(lean({ sessions: [session2020] }));
+      mockSnapCreate.mockRejectedValueOnce(
+        Object.assign(new Error("dup"), { code: 11000 }),
+      );
+
+      const outcome = await makeSvc().snapshotYear("u1", "g1", 2020, null);
+      expect(outcome).toBe("exists");
+    });
   });
 });
 

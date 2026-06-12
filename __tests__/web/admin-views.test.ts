@@ -245,6 +245,88 @@ describe("renderSettingsPage", () => {
     expect(html).not.toContain('<td style="white-space:nowrap">');
   });
 
+  it("shows the warnBelow warning when a value is below the threshold (#575)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.cleanup.retention.detailed_sessions_days",
+              current: 30,
+              defaultValue: 400,
+              type: "number",
+              description: "",
+              category: "voicetracking",
+              warnBelow: {
+                value: 366,
+                message: "Rewind needs 366 days of detailed data.",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain('class="settings-warn"');
+    expect(html).toContain("Rewind needs 366 days of detailed data.");
+  });
+
+  it("hides the warnBelow warning at or above the threshold (#575)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.cleanup.retention.detailed_sessions_days",
+              current: 400,
+              defaultValue: 400,
+              type: "number",
+              description: "",
+              category: "voicetracking",
+              warnBelow: {
+                value: 366,
+                message: "Rewind needs 366 days of detailed data.",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).not.toContain('class="settings-warn"');
+    expect(html).not.toContain("Rewind needs 366 days of detailed data.");
+  });
+
+  it("does not warn on an unset (empty/null) value despite a warnBelow hint (#575)", () => {
+    for (const current of ["", null, undefined] as const) {
+      const html = renderSettingsPage({
+        ...COMMON,
+        groups: [
+          {
+            category: "voicetracking",
+            rows: [
+              {
+                key: "voicetracking.cleanup.retention.detailed_sessions_days",
+                current,
+                defaultValue: 400,
+                type: "number",
+                description: "",
+                category: "voicetracking",
+                warnBelow: {
+                  value: 366,
+                  message: "Rewind needs 366 days of detailed data.",
+                },
+              },
+            ],
+          },
+        ],
+      });
+      expect(html).not.toContain('class="settings-warn"');
+    }
+  });
+
   it("renders the action bar and import textarea", () => {
     const html = renderSettingsPage({ ...COMMON, groups: [] });
     expect(html).toContain('action="/admin/settings/reload"');
@@ -802,9 +884,11 @@ describe("renderPollsPage", () => {
       schedules: [
         {
           id: "s1",
+          channelId: "c1",
           channelName: "polls",
           cron: "0 12 * * 1",
           durationHours: 12,
+          pingRoleId: "r1",
           pingRoleName: "Members",
           enabled: true,
           lastRun: "—",
@@ -816,6 +900,7 @@ describe("renderPollsPage", () => {
           question: "Pineapple on pizza?",
           answers: ["Yes", "No"],
           tags: ["food"],
+          multiSelect: false,
           usageCount: 0,
           lastUsed: "—",
           enabled: true,
@@ -830,6 +915,84 @@ describe("renderPollsPage", () => {
     expect(html).toContain("Yes • No");
     expect(html).toContain("/admin/polls/schedules/s1/test");
     expect(html).toContain("/admin/polls/items/i1/delete");
+  });
+
+  it("renders pre-filled edit forms for each schedule and item row", () => {
+    const html = renderPollsPage({
+      ...COMMON,
+      enabled: true,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      schedules: [
+        {
+          id: "s1",
+          channelId: "c1",
+          channelName: "polls",
+          cron: "0 12 * * 1",
+          durationHours: 12,
+          pingRoleId: "r1",
+          pingRoleName: "Members",
+          enabled: true,
+          lastRun: "—",
+        },
+      ],
+      items: [
+        {
+          id: "i1",
+          question: "Pineapple on pizza?",
+          answers: ["Yes", "No"],
+          tags: ["food"],
+          multiSelect: true,
+          usageCount: 3,
+          lastUsed: "—",
+          enabled: true,
+          source: "manual",
+        },
+      ],
+      textChannels: [{ id: "c1", name: "polls" }],
+      roles: [{ id: "r1", name: "Members" }],
+    });
+    // Edit routes are present per row.
+    expect(html).toContain("/admin/polls/schedules/s1/edit");
+    expect(html).toContain("/admin/polls/items/i1/edit");
+    // Edit forms are pre-filled with the row's current values.
+    expect(html).toContain('value="0 12 * * 1"');
+    expect(html).toContain('value="Yes, No"');
+    expect(html).toContain('value="food"');
+    // The selected channel/role and multiSelect state are reflected.
+    expect(html).toContain('value="c1" selected');
+    expect(html).toContain('value="r1" selected');
+    expect(html).toContain('name="multiSelect" value="1" checked');
+  });
+
+  it("preserves a deleted channel/role id in the edit form instead of defaulting", () => {
+    const html = renderPollsPage({
+      ...COMMON,
+      enabled: true,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      schedules: [
+        {
+          id: "s1",
+          channelId: "gone-chan",
+          channelName: "gone-chan",
+          cron: "0 12 * * 1",
+          durationHours: 12,
+          pingRoleId: "gone-role",
+          pingRoleName: "gone-role",
+          enabled: true,
+          lastRun: "—",
+        },
+      ],
+      items: [],
+      textChannels: [{ id: "c1", name: "polls" }],
+      roles: [{ id: "r1", name: "Members" }],
+    });
+    // The saved-but-missing ids stay selected so a cron-only edit can't
+    // silently reassign the channel or clear the ping role.
+    expect(html).toContain('value="gone-chan" selected');
+    expect(html).toContain('value="gone-role" selected');
+    expect(html).toContain("(unavailable)");
   });
 
   it("renders write forms for schedules, items and bulk import", () => {
