@@ -105,18 +105,56 @@ export function firstLengthError(
   return null;
 }
 
+export function truncateFlash(text: string): string {
+  return text.length > FLASH_MAX ? `${text.slice(0, FLASH_MAX - 1)}…` : text;
+}
+
 function flashRedirect(res: Response, path: string, flash: Flash): void {
   // Mirror the renderer's 500-char cap on the way out so the redirect
   // URL itself can't balloon to header/URI limits on a noisy failure.
-  const truncated =
-    flash.text.length > FLASH_MAX
-      ? `${flash.text.slice(0, FLASH_MAX - 1)}…`
-      : flash.text;
   const qs = new globalThis.URLSearchParams({
     flash: flash.type,
-    msg: truncated,
+    msg: truncateFlash(flash.text),
   }).toString();
   res.redirect(303, `${path}?${qs}`);
+}
+
+/**
+ * Whether the client wants a JSON reply instead of the usual 303 flash
+ * redirect. The Settings page's per-section Save is progressively enhanced to
+ * submit via `fetch()` (issue #555) so the page no longer reloads and jumps to
+ * the top; that request advertises itself with `X-Requested-With: fetch` (and
+ * `Accept: application/json`). A plain form POST — the no-JS fallback — sends
+ * neither and keeps the redirect path.
+ */
+export function wantsJson(req: {
+  get(name: string): string | string[] | undefined;
+}): boolean {
+  const header = (name: string): string => {
+    const raw = req.get(name);
+    return Array.isArray(raw) ? raw.join(",") : (raw ?? "");
+  };
+  if (header("X-Requested-With").toLowerCase() === "fetch") {
+    return true;
+  }
+  return header("Accept").includes("application/json");
+}
+
+/**
+ * Reply to a section-save with either an inline JSON flash (AJAX) or the
+ * legacy 303 redirect (no-JS). Always returns the same 500-char-capped flash
+ * the renderer would show, so both paths surface identical messages.
+ */
+function respondSectionFlash(
+  req: AuthenticatedRequest,
+  res: Response,
+  flash: Flash,
+): void {
+  if (wantsJson(req)) {
+    res.status(200).json({ type: flash.type, text: truncateFlash(flash.text) });
+    return;
+  }
+  flashRedirect(res, "/admin/settings", flash);
 }
 
 function getString(req: AuthenticatedRequest, name: string): string {
@@ -698,7 +736,7 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: "no keys submitted",
         });
-        flashRedirect(res, "/admin/settings", {
+        respondSectionFlash(req, res, {
           type: "err",
           text: `No settings submitted for section ${category || "(unknown)"}.`,
         });
@@ -752,7 +790,7 @@ export function createWriteRouter(
           errorMessage: rejected.map((r) => `${r.key}: ${r.reason}`).join("; "),
         });
         const detail = rejected.map((r) => `${r.key} (${r.reason})`).join(", ");
-        flashRedirect(res, "/admin/settings", {
+        respondSectionFlash(req, res, {
           type: "err",
           text: `No changes saved — ${rejected.length} invalid value${rejected.length === 1 ? "" : "s"} in ${category || "section"}: ${detail}.`,
         });
@@ -817,14 +855,14 @@ export function createWriteRouter(
 
       const label = category || "section";
       if (failed.length === 0) {
-        flashRedirect(res, "/admin/settings", {
+        respondSectionFlash(req, res, {
           type: "ok",
           text: `Saved ${applied.length} setting${applied.length === 1 ? "" : "s"} in ${label}.`,
         });
         return;
       }
       const firstError = failed[0];
-      flashRedirect(res, "/admin/settings", {
+      respondSectionFlash(req, res, {
         type: applied.length > 0 ? "warn" : "err",
         text: `Saved ${applied.length}/${applied.length + failed.length} in ${label}. Failed: ${firstError.key} (${firstError.reason})${failed.length > 1 ? ` and ${failed.length - 1} more` : ""}.`,
       });

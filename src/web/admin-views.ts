@@ -595,7 +595,7 @@ export function renderSettingsPage(props: SettingsProps): string {
       // to retarget /admin/settings/reset for a single key (issue #433).
       const scopeAttr = cascadeMasterKey ? " data-cascade-scope" : "";
       return `
-<div class="card">
+<div class="card" id="section-${escapeHtml(g.category)}">
   <h2>${escapeHtml(meta.title)}</h2>
   ${descHtml}
   <form method="POST" action="/admin/settings/save-section"${scopeAttr}>

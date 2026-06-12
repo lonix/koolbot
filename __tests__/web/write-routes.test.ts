@@ -10,6 +10,8 @@ import {
   findSectionMasterKey,
   firstLengthError,
   resetConfigToDefaults,
+  truncateFlash,
+  wantsJson,
   TEXT_LIMITS,
   type ResetConfigStore,
 } from "../../src/web/write-routes.js";
@@ -85,6 +87,50 @@ describe("PROTECTED_KEYS", () => {
   it("excludes regular config keys", () => {
     expect(PROTECTED_KEYS.has("voicechannels.enabled")).toBe(false);
     expect(PROTECTED_KEYS.has("quotes.max_length")).toBe(false);
+  });
+});
+
+describe("wantsJson (issue #555)", () => {
+  const fakeReq = (headers: Record<string, string | string[]>) => ({
+    get: (name: string) => headers[name],
+  });
+
+  it("returns true when X-Requested-With is fetch (case-insensitive)", () => {
+    expect(wantsJson(fakeReq({ "X-Requested-With": "fetch" }))).toBe(true);
+    expect(wantsJson(fakeReq({ "X-Requested-With": "FETCH" }))).toBe(true);
+  });
+
+  it("returns true when Accept advertises application/json", () => {
+    expect(
+      wantsJson(fakeReq({ Accept: "application/json, text/plain, */*" })),
+    ).toBe(true);
+  });
+
+  it("returns false for a plain form POST (the no-JS fallback)", () => {
+    expect(
+      wantsJson(
+        fakeReq({ Accept: "text/html,application/xhtml+xml,application/xml" }),
+      ),
+    ).toBe(false);
+    expect(wantsJson(fakeReq({}))).toBe(false);
+  });
+
+  it("tolerates a header returned as an array", () => {
+    expect(wantsJson(fakeReq({ "X-Requested-With": ["fetch"] }))).toBe(true);
+  });
+});
+
+describe("truncateFlash (issue #555)", () => {
+  it("leaves short text untouched", () => {
+    expect(truncateFlash("Saved 3 settings in Polls.")).toBe(
+      "Saved 3 settings in Polls.",
+    );
+  });
+
+  it("caps overlong text at 500 chars with an ellipsis", () => {
+    const out = truncateFlash("x".repeat(600));
+    expect(out.length).toBe(500);
+    expect(out.endsWith("…")).toBe(true);
   });
 });
 
