@@ -274,12 +274,6 @@ export interface RewindBadgeView {
   earnedAt: string; // ISO date already formatted by the route
 }
 
-export interface RewindChannelView {
-  channelId: string;
-  channelName: string;
-  duration: string; // pre-formatted
-}
-
 export interface RewindTextChannelView {
   channelId: string;
   channelName: string;
@@ -300,8 +294,8 @@ export interface RewindBodyOptions {
   funComparison: string | null;
   sessionCount: number;
   daysActive: number;
-  topChannels: RewindChannelView[];
   // People the user shared voice channels with most this year (#567).
+  // Replaces the old Top channels card, which was noise under dynamic VCs.
   topCompanions: RewindCompanionView[];
   peakDay: { date: string; duration: string } | null;
   longestStreakDays: number;
@@ -481,23 +475,8 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
         : `<div class="value">${opts.percentAboveMedian}%</div><div class="detail">vs. the guild median</div>`
       : '<div class="value">—</div>';
 
-  const channels =
-    opts.topChannels.length === 0
-      ? '<div class="empty">No tracked channels this year.</div>'
-      : '<ul class="rw-channels">' +
-        opts.topChannels
-          .map(
-            (c) =>
-              "<li>" +
-              `<span class="name">${escapeHtml(c.channelName)}</span>` +
-              `<span class="dur">${escapeHtml(c.duration)}</span>` +
-              "</li>",
-          )
-          .join("") +
-        "</ul>";
-
-  // Top voice companions (#567) — ranked ahead of channels because with
-  // dynamic VCs *who* you sat with matters more than the throwaway room.
+  // Top voice companions (#567) — with dynamic VCs *who* you sat with
+  // matters more than the throwaway room, so this replaces Top channels.
   const companions =
     opts.topCompanions.length === 0
       ? '<div class="empty">No voice companions yet — hop in a channel with someone!</div>'
@@ -531,7 +510,6 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
       "</div>",
     "</div>",
     '<div class="card"><h2>Top voice companions</h2>' + companions + "</div>",
-    '<div class="card"><h2>Top channels</h2>' + channels + "</div>",
     renderTextActivity(opts),
     '<div class="card"><h2>Rank journey</h2>' +
       renderJourney(opts.weeklyJourney) +

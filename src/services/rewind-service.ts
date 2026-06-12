@@ -25,12 +25,6 @@ const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_HOUR = 60 * 60;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-export interface RewindChannel {
-  channelId: string;
-  channelName: string;
-  totalSeconds: number;
-}
-
 /**
  * A voice "companion" for the Rewind summary (#567) — another user the
  * requesting user shared a voice channel with, ranked by co-present
@@ -44,9 +38,8 @@ export interface RewindCompanion {
 }
 
 /**
- * Top text channel for the Rewind summary (#496). Mirrors `RewindChannel`
- * but ranked by message count rather than seconds, since text activity is
- * counted per message.
+ * Top text channel for the Rewind summary (#496). Ranked by message count
+ * rather than seconds, since text activity is counted per message.
  */
 export interface RewindTextChannel {
   channelId: string;
@@ -76,8 +69,9 @@ export interface RewindSummary {
   totalSeconds: number;
   sessionCount: number;
   daysActive: number;
-  topChannels: RewindChannel[];
   // People the user spent the most voice time with this year (#567).
+  // (Top channels was removed from Rewind — with dynamic VCs the ephemeral
+  // per-session room names are noise; companions replace it.)
   topCompanions: RewindCompanion[];
   peakDay: { date: string; totalSeconds: number } | null; // ISO date (YYYY-MM-DD)
   // Text-message activity (#496). Mirrors the voice aggregates above and
@@ -161,36 +155,6 @@ export function sessionSeconds(session: RawSession): number {
   return 0;
 }
 
-export function computeTopChannels(
-  sessions: RawSession[],
-  limit = 3,
-): RewindChannel[] {
-  const totals = new Map<
-    string,
-    { channelId: string; channelName: string; totalSeconds: number }
-  >();
-  for (const s of sessions) {
-    const key = s.channelId;
-    const seconds = sessionSeconds(s);
-    if (seconds <= 0) continue;
-    const existing = totals.get(key);
-    if (existing) {
-      existing.totalSeconds += seconds;
-      // Prefer the most recent non-empty name (handles renames).
-      if (s.channelName) existing.channelName = s.channelName;
-    } else {
-      totals.set(key, {
-        channelId: key,
-        channelName: s.channelName ?? "Unknown channel",
-        totalSeconds: seconds,
-      });
-    }
-  }
-  return [...totals.values()]
-    .sort((a, b) => b.totalSeconds - a.totalSeconds)
-    .slice(0, limit);
-}
-
 /**
  * Aggregate co-present voice seconds per other user (#567) and return the
  * top `limit` ranked desc. For each session, every id in `otherUsers[]` is
@@ -222,29 +186,6 @@ export function computeTopCompanions(
     .map(([userId, totalSeconds]) => ({ userId, totalSeconds }))
     .sort((a, b) => b.totalSeconds - a.totalSeconds)
     .slice(0, limit);
-}
-
-/**
- * Whether a stored session `channelName` looks like a bot-managed,
- * ephemeral dynamic VC (#567) rather than a standing channel.
- * `VoiceChannelManager` creates dynamic rooms as
- * `${prefix} ${displayName}${suffix}` (e.g. "🎮 Alice's Room"), so a name
- * carrying the configured prefix or suffix is treated as managed. Matching
- * follows config rather than a hardcoded name, so renaming the prefix /
- * suffix keeps the filter accurate. Empty prefix / suffix are ignored so we
- * never accidentally match every channel.
- */
-export function isManagedChannelName(
-  channelName: string | undefined,
-  prefix: string,
-  suffix: string,
-): boolean {
-  if (!channelName) return false;
-  const trimmedPrefix = prefix.trim();
-  const trimmedSuffix = suffix.trim();
-  if (trimmedPrefix && channelName.startsWith(trimmedPrefix)) return true;
-  if (trimmedSuffix && channelName.endsWith(trimmedSuffix)) return true;
-  return false;
 }
 
 export function computePeakDay(
@@ -486,39 +427,9 @@ export class RewindService {
           .map((s) => dayKey(s.startTime, dayZone)),
       ).size;
 
-      // Top channels: on a guild using dynamic VCs the ephemeral
-      // per-session rooms dominate and tell the user nothing, so filter
-      // them out and let companions lead (#567). The filter follows the
-      // configured prefix / suffix rather than a hardcoded name. Mirror
-      // the feature gate used by ChannelInitializer / VoiceChannelManager,
-      // including the legacy keys, so deployments on older config still
-      // get the filter.
-      const dynamicVcEnabled =
-        (await this.configService.getBoolean("voicechannels.enabled", false)) ||
-        (await this.configService.getBoolean("voice_channel.enabled", false)) ||
-        (await this.configService.getBoolean("ENABLE_VC_MANAGEMENT", false));
-      let channelSessions = sessions;
-      if (dynamicVcEnabled) {
-        const prefix = await this.configService.getString(
-          "voicechannels.channel.prefix",
-          "🎮",
-        );
-        // Mirror VoiceChannelManager's suffix resolution (current key,
-        // legacy key, then the default "'s Room") so an unset suffix still
-        // matches the default dynamic rooms.
-        const suffix =
-          (await this.configService.getString(
-            "voicechannels.channel.suffix",
-            "",
-          )) ||
-          (await this.configService.getString("voice_channel.suffix", "")) ||
-          "'s Room";
-        channelSessions = sessions.filter(
-          (s) => !isManagedChannelName(s.channelName, prefix, suffix),
-        );
-      }
-
-      const topChannels = computeTopChannels(channelSessions, 3);
+      // Top voice companions (#567) replace the old "Top channels" card:
+      // with dynamic VCs the ephemeral per-session room names are noise, so
+      // we surface *who* the user spent time with instead.
       const topCompanions: RewindCompanion[] = computeTopCompanions(
         sessions,
         5,
@@ -577,7 +488,6 @@ export class RewindService {
         totalSeconds,
         sessionCount: sessions.filter((s) => sessionSeconds(s) > 0).length,
         daysActive,
-        topChannels,
         topCompanions,
         peakDay,
         messagesSent: text.messagesSent,

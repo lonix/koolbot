@@ -56,9 +56,7 @@ const {
   RewindService,
   computeLongestStreak,
   computePeakDay,
-  computeTopChannels,
   computeTopCompanions,
-  isManagedChannelName,
   computePeakMessageDay,
   computeTopTextChannels,
   messagesInWindow,
@@ -121,64 +119,6 @@ describe("RewindService pure helpers", () => {
           channelId: "c",
         }),
       ).toBe(0);
-    });
-  });
-
-  describe("computeTopChannels", () => {
-    it("sums duration per channel and ranks by total", () => {
-      const sessions = [
-        {
-          startTime: new Date("2026-01-01T10:00:00Z"),
-          duration: 600,
-          channelId: "a",
-          channelName: "alpha",
-        },
-        {
-          startTime: new Date("2026-01-02T10:00:00Z"),
-          duration: 1200,
-          channelId: "b",
-          channelName: "beta",
-        },
-        {
-          startTime: new Date("2026-01-03T10:00:00Z"),
-          duration: 300,
-          channelId: "a",
-          channelName: "alpha",
-        },
-      ];
-      const top = computeTopChannels(sessions, 3);
-      expect(top).toHaveLength(2);
-      expect(top[0]).toMatchObject({ channelId: "b", totalSeconds: 1200 });
-      expect(top[1]).toMatchObject({ channelId: "a", totalSeconds: 900 });
-    });
-
-    it("uses the most recent non-empty channel name for renames", () => {
-      const sessions = [
-        {
-          startTime: new Date("2026-01-01T10:00:00Z"),
-          duration: 600,
-          channelId: "a",
-          channelName: "old-name",
-        },
-        {
-          startTime: new Date("2026-01-02T10:00:00Z"),
-          duration: 600,
-          channelId: "a",
-          channelName: "new-name",
-        },
-      ];
-      const [first] = computeTopChannels(sessions, 3);
-      expect(first.channelName).toBe("new-name");
-    });
-
-    it("honours the limit", () => {
-      const sessions = [
-        { startTime: new Date(), duration: 1, channelId: "a" },
-        { startTime: new Date(), duration: 2, channelId: "b" },
-        { startTime: new Date(), duration: 3, channelId: "c" },
-        { startTime: new Date(), duration: 4, channelId: "d" },
-      ];
-      expect(computeTopChannels(sessions, 2)).toHaveLength(2);
     });
   });
 
@@ -248,25 +188,6 @@ describe("RewindService pure helpers", () => {
         },
       ];
       expect(computeTopCompanions(sessions, 2)).toHaveLength(2);
-    });
-  });
-
-  describe("isManagedChannelName", () => {
-    it("matches the configured prefix", () => {
-      expect(isManagedChannelName("🎮 Alice's Room", "🎮", "")).toBe(true);
-    });
-
-    it("matches the configured suffix", () => {
-      expect(isManagedChannelName("Alice's Room", "", "'s Room")).toBe(true);
-    });
-
-    it("does not match a standing channel", () => {
-      expect(isManagedChannelName("general-vc", "🎮", "'s Room")).toBe(false);
-    });
-
-    it("ignores empty prefix/suffix and missing names", () => {
-      expect(isManagedChannelName("anything", "", "")).toBe(false);
-      expect(isManagedChannelName(undefined, "🎮", "'s Room")).toBe(false);
     });
   });
 
@@ -443,7 +364,7 @@ describe("RewindService.getSummary", () => {
     expect(summary!.hasData).toBe(false);
     expect(summary!.totalSeconds).toBe(0);
     expect(summary!.annualRank).toBeNull();
-    expect(summary!.topChannels).toEqual([]);
+    expect(summary!.topCompanions).toEqual([]);
   });
 
   it("aggregates a full summary when the user has voice data", async () => {
@@ -515,10 +436,6 @@ describe("RewindService.getSummary", () => {
     expect(summary!.totalSeconds).toBe(7200); // 3600 + 1800 + 1800
     expect(summary!.sessionCount).toBe(3);
     expect(summary!.daysActive).toBe(2);
-    expect(summary!.topChannels.map((c) => c.channelId)).toEqual([
-      "general",
-      "gaming",
-    ]);
     expect(summary!.peakDay).toEqual({
       date: "2026-01-15",
       totalSeconds: 5400,
