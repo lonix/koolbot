@@ -79,10 +79,10 @@ WEBUI_ENABLED=true
 WEBUI_BASE_URL=https://bot.example.com
 
 # HMAC key for tokens and cookies — generate with `openssl rand -base64 32`.
-# Must carry at least 32 bytes of entropy: the bot validates this at startup
-# and refuses to mount the WebUI (and /config refuses to issue links) if the
-# secret is shorter under both its base64-decoded and raw-byte length, so a
-# weak placeholder like `replace-me` is rejected.
+# Must be at least 32 bytes long: the bot validates this length at startup
+# and refuses to mount the WebUI (and /config refuses to issue links) when
+# the secret is shorter, so a weak placeholder like `replace-me` is rejected.
+# This is a length check only — always use a randomly generated value.
 WEBUI_SESSION_SECRET=replace-me
 
 # Optional tuning (defaults shown)

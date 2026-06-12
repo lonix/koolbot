@@ -10,7 +10,7 @@ const ORIGINAL_ENV = { ...process.env };
 /**
  * Covers the startup/`/config` validation path for an enabled WebUI
  * (issue #538): required vars must be present AND the session secret must
- * carry enough entropy to be a sound HMAC key.
+ * be at least MIN_SESSION_SECRET_BYTES bytes long so it is a usable HMAC key.
  */
 describe("validateWebUIEnvVars", () => {
   beforeEach(() => {
@@ -71,8 +71,7 @@ describe("validateWebUIEnvVars", () => {
 
   it("accepts a long arbitrary passphrase of 32+ raw bytes", () => {
     process.env.WEBUI_BASE_URL = "https://bot.example.com";
-    // 40 ASCII chars = 40 raw bytes, comfortably over the floor even
-    // though its base64 decode is shorter.
+    // 40 ASCII chars = 40 raw bytes, comfortably over the floor.
     process.env.WEBUI_SESSION_SECRET = "x".repeat(40);
 
     expect(validateWebUIEnvVars()).toEqual([]);

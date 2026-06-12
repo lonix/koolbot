@@ -230,23 +230,23 @@ export function isWebUIEnabled(): boolean {
 }
 
 /**
- * Minimum entropy we accept for WEBUI_SESSION_SECRET, in bytes. 32 bytes
- * (256 bits) matches the documented `openssl rand -base64 32`, which is
- * also the HMAC-SHA256 block-equivalent key size used by
- * WebSessionService.hashToken().
+ * Minimum length we accept for WEBUI_SESSION_SECRET, in bytes. 32 bytes
+ * (256 bits) matches the documented `openssl rand -base64 32` and the
+ * HMAC-SHA256 key size used by WebSessionService.hashToken(). This is a
+ * length floor only — it cannot measure how random the value is, so
+ * operators are still expected to generate it from a CSPRNG.
  */
 export const MIN_SESSION_SECRET_BYTES = 32;
 
 /**
  * Validate the WEBUI_* env vars required for an enabled WebUI. Returns a
  * list of human-readable error strings (empty when satisfied) covering
- * both missing keys and a too-weak session secret.
+ * both missing keys and a too-short session secret.
  *
- * The session-secret strength check accepts the secret if EITHER its
- * base64-decoded length OR its raw byte length meets the minimum, so both
- * `openssl rand -base64 32` (44 base64 chars → 32 bytes) and a long
- * arbitrary passphrase are honoured. Only a value that is short under both
- * interpretations is rejected.
+ * The session-secret check requires at least MIN_SESSION_SECRET_BYTES raw
+ * bytes, which a `openssl rand -base64 32` value (44 chars) or any long
+ * passphrase clears. It is a length guard only and makes no claim about
+ * the value's randomness.
  */
 export function validateWebUIEnvVars(): string[] {
   const errors: string[] = [];
@@ -256,18 +256,11 @@ export function validateWebUIEnvVars(): string[] {
   }
 
   const secret = getEnv("WEBUI_SESSION_SECRET") ?? "";
-  if (secret) {
-    const decodedBytes = Buffer.from(secret, "base64").length;
-    const rawBytes = Buffer.byteLength(secret);
-    if (
-      decodedBytes < MIN_SESSION_SECRET_BYTES &&
-      rawBytes < MIN_SESSION_SECRET_BYTES
-    ) {
-      errors.push(
-        `WEBUI_SESSION_SECRET must be at least ${MIN_SESSION_SECRET_BYTES} bytes ` +
-          `(generate with: openssl rand -base64 32)`,
-      );
-    }
+  if (secret && Buffer.byteLength(secret) < MIN_SESSION_SECRET_BYTES) {
+    errors.push(
+      `WEBUI_SESSION_SECRET must be at least ${MIN_SESSION_SECRET_BYTES} bytes ` +
+        `(generate with: openssl rand -base64 32)`,
+    );
   }
 
   return errors;
