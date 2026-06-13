@@ -7,18 +7,43 @@ const mockUpdateOne = jest.fn();
 const mockLoggerInfo = jest.fn();
 const mockLoggerError = jest.fn();
 
-// Mock the Config model before importing anything
-jest.mock("../../src/models/config.js", () => ({
+// Mock the Config model before importing anything. CONFIG_CATEGORIES mirrors
+// the real exported list so the cleanup sweep validates categories against the
+// same set of categories the production schema accepts (see #609).
+jest.unstable_mockModule("../../src/models/config.js", () => ({
   Config: {
     find: mockFind,
     deleteOne: mockDeleteOne,
     updateOne: mockUpdateOne,
     findOne: jest.fn(),
   },
+  CONFIG_CATEGORIES: [
+    "achievements",
+    "amikool",
+    "announcements",
+    "core",
+    "digest",
+    "fun",
+    "gamification",
+    "help",
+    "leaderboard_roles",
+    "messagetracking",
+    "notices",
+    "ping",
+    "polls",
+    "quotes",
+    "ratelimit",
+    "reactionroles",
+    "reactiontracking",
+    "rewind",
+    "voicechannels",
+    "voicetracking",
+    "wizard",
+  ],
 }));
 
 // Mock logger before importing anything
-jest.mock("../../src/utils/logger.js", () => ({
+jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: mockLoggerInfo,
     error: mockLoggerError,
@@ -28,15 +53,22 @@ jest.mock("../../src/utils/logger.js", () => ({
 }));
 
 // Mock mongoose
-jest.mock("mongoose", () => ({
+const mongooseMock = {
   connection: {
     readyState: 1,
+    on: jest.fn(),
   },
   connect: jest.fn(),
+};
+jest.unstable_mockModule("mongoose", () => ({
+  ...mongooseMock,
+  default: mongooseMock,
 }));
 
 // Import after mocking
-import { ConfigService } from "../../src/services/config-service.js";
+const { ConfigService } = await import(
+  "../../src/services/config-service.js"
+);
 
 describe("ConfigService - Cleanup Unknown Settings", () => {
   beforeEach(() => {
@@ -44,10 +76,9 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
     mockFind.mockResolvedValue([]);
     mockDeleteOne.mockResolvedValue({ deletedCount: 1 });
     mockUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    // Reset the singleton so each test gets a fresh, uninitialized instance.
+    (ConfigService as unknown as { instance: unknown }).instance = undefined;
   });
-
-  // Note: ConfigService is a singleton. The initialize() method only runs once per instance.
-  // These tests verify that cleanup logic handles various scenarios correctly.
 
   describe("cleanupUnknownSettings", () => {
     it("should handle various setting types during cleanup", async () => {
@@ -98,12 +129,107 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
       await expect(service.initialize()).resolves.not.toThrow();
     });
 
-    it("should handle database errors gracefully", async () => {
-      mockFind.mockRejectedValue(new Error("Database error"));
+    it("should handle delete errors gracefully during cleanup", async () => {
+      // An unknown setting is found but the delete fails; cleanup should catch
+      // the per-key error and let initialization complete.
+      mockFind.mockResolvedValue([
+        {
+          key: "bogus.setting",
+          value: "x",
+          category: "bogus",
+          description: "Bogus",
+        },
+      ]);
+      mockDeleteOne.mockRejectedValue(new Error("Database error"));
       const service = ConfigService.getInstance();
 
       // Should not throw
       await expect(service.initialize()).resolves.not.toThrow();
+    });
+
+    // Regression test for #609: wizard-saved polls.* / notices.* settings were
+    // purged as "unknown" because their categories were missing from the
+    // cleanup allowlist even though the keys are valid schema entries.
+    it("should not delete valid polls.* and notices.* settings (#609)", async () => {
+      const mockSettings = [
+        {
+          key: "polls.enabled",
+          value: true,
+          category: "polls",
+          description: "Polls",
+        },
+        {
+          key: "polls.default_duration_hours",
+          value: 6,
+          category: "polls",
+          description: "Polls",
+        },
+        {
+          key: "polls.cooldown_days",
+          value: 2,
+          category: "polls",
+          description: "Polls",
+        },
+        {
+          key: "notices.enabled",
+          value: false,
+          category: "notices",
+          description: "Notices",
+        },
+        // A genuinely unknown key that should still be removed.
+        {
+          key: "bogus.setting",
+          value: "x",
+          category: "bogus",
+          description: "Bogus",
+        },
+      ];
+      mockFind.mockResolvedValue(mockSettings);
+
+      const service = ConfigService.getInstance();
+      await service.initialize();
+
+      const deletedKeys = mockDeleteOne.mock.calls.map(
+        (call) => (call[0] as { key: string }).key,
+      );
+      expect(deletedKeys).not.toContain("polls.enabled");
+      expect(deletedKeys).not.toContain("polls.default_duration_hours");
+      expect(deletedKeys).not.toContain("polls.cooldown_days");
+      expect(deletedKeys).not.toContain("notices.enabled");
+      // The genuinely unknown key is still purged.
+      expect(deletedKeys).toContain("bogus.setting");
+    });
+
+    // Legacy categories that still have an active normalization mapping must
+    // continue to be remapped rather than left in their legacy form.
+    it("should still normalize legacy gamification category to achievements", async () => {
+      mockFind.mockResolvedValue([
+        {
+          // A known legacy key (in knownOldKeys) carrying the legacy category.
+          key: "gamification.enabled",
+          value: true,
+          category: "gamification",
+          description: "Legacy",
+        },
+      ]);
+
+      const service = ConfigService.getInstance();
+      await service.initialize();
+
+      // It should be category-fixed, not deleted.
+      const deletedKeys = mockDeleteOne.mock.calls.map(
+        (call) => (call[0] as { key: string }).key,
+      );
+      expect(deletedKeys).not.toContain("gamification.enabled");
+
+      const updates = mockUpdateOne.mock.calls.map((call) => ({
+        key: (call[0] as { key: string }).key,
+        set: (call[1] as { $set: { category: string } }).$set,
+      }));
+      expect(updates).toContainEqual({
+        key: "gamification.enabled",
+        set: { category: "achievements" },
+      });
     });
   });
 });
