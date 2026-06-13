@@ -15,9 +15,11 @@ import {
   PermissionFlagsBits,
   Message,
 } from "discord.js";
+import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
+import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
 
 const configService = ConfigService.getInstance();
 
@@ -124,10 +126,126 @@ export class VoiceChannelManager {
   }
 
   /**
+   * Whether the Mongo connection is ready for ownership persistence. When it
+   * isn't (e.g. unit tests, or a transient disconnect) the persistence helpers
+   * become no-ops so in-memory behaviour is unaffected.
+   */
+  private isDbReady(): boolean {
+    return mongoose.connection?.readyState === 1;
+  }
+
+  /**
+   * Upsert the persisted ownership row for a managed channel. Called whenever a
+   * dynamic channel is created or its ownership transfers, so the in-memory
+   * `userChannels` registry can be rebuilt after a restart (issue #615).
+   */
+  private async persistOwnership(
+    guildId: string | undefined,
+    channelId: string,
+    ownerId: string,
+  ): Promise<void> {
+    if (!this.isDbReady() || !guildId) return;
+    try {
+      // Use explicit operators rather than a replacement document: a plain
+      // (operator-less) update would overwrite the whole row and silently drop
+      // a previously-persisted customName when ownership transfers. $set only
+      // touches ownerId; guildId/channelId are fixed for the life of the row.
+      await VoiceChannelOwnership.findOneAndUpdate(
+        { channelId },
+        { $set: { ownerId }, $setOnInsert: { guildId, channelId } },
+        { upsert: true },
+      );
+    } catch (error) {
+      logger.error("Error persisting voice channel ownership:", error);
+    }
+  }
+
+  /**
+   * Mirror a tracked custom rename into the persisted ownership row so the
+   * managed-channel classification survives a restart (issue #615).
+   */
+  private async persistCustomName(
+    channelId: string,
+    name: string,
+  ): Promise<void> {
+    if (!this.isDbReady()) return;
+    try {
+      await VoiceChannelOwnership.updateOne(
+        { channelId },
+        { $set: { customName: name } },
+      );
+    } catch (error) {
+      logger.error("Error persisting voice channel custom name:", error);
+    }
+  }
+
+  /**
+   * Drop the persisted ownership row for a channel that has been deleted, so a
+   * future restart doesn't try to re-adopt a channel that no longer exists.
+   */
+  private async removeOwnershipRecord(channelId: string): Promise<void> {
+    if (!this.isDbReady()) return;
+    try {
+      await VoiceChannelOwnership.deleteOne({ channelId });
+    } catch (error) {
+      logger.error("Error removing voice channel ownership record:", error);
+    }
+  }
+
+  /**
+   * Re-establish managed ownership state from the persisted store on startup.
+   *
+   * Ownership otherwise lives only in memory, so a restart orphans every
+   * dynamic channel the bot created beforehand. We reload the persisted rows,
+   * reconcile against the channels that still exist in the guild (pruning rows
+   * for channels deleted while the bot was down), and repopulate `userChannels`
+   * / `customChannelNames` so owner controls, renaming, lifecycle handling and
+   * the periodic cleanup all recognise pre-restart channels as managed again.
+   * (issue #615)
+   */
+  private async restoreOwnership(guild: Guild): Promise<void> {
+    if (!this.isDbReady()) {
+      logger.warn(
+        "Database not ready; skipping voice channel ownership restore",
+      );
+      return;
+    }
+
+    try {
+      const records = await VoiceChannelOwnership.find({ guildId: guild.id });
+      let restored = 0;
+      let pruned = 0;
+
+      for (const record of records) {
+        const channel = guild.channels.cache.get(record.channelId);
+        if (!channel || channel.type !== ChannelType.GuildVoice) {
+          // Channel was deleted while the bot was down — drop the stale row.
+          await this.removeOwnershipRecord(record.channelId);
+          pruned++;
+          continue;
+        }
+
+        this.userChannels.set(record.ownerId, channel as VoiceChannel);
+        if (record.customName) {
+          this.customChannelNames.set(record.channelId, record.customName);
+        }
+        restored++;
+      }
+
+      logger.info(
+        `Restored ${restored} managed voice channel(s) from persistence; pruned ${pruned} stale record(s)`,
+      );
+    } catch (error) {
+      logger.error("Error restoring voice channel ownership:", error);
+    }
+  }
+
+  /**
    * Mark a channel as having a custom name
    */
   public setCustomChannelName(channelId: string, name: string): void {
     this.customChannelNames.set(channelId, name);
+    void this.persistCustomName(channelId, name);
   }
 
   /**
@@ -434,6 +552,11 @@ export class VoiceChannelManager {
         }
       }
 
+      // Rebuild managed ownership from persistence. Run after the empty-channel
+      // sweep above so only channels that survive (i.e. still have members) are
+      // re-adopted, and rows for channels deleted during downtime are pruned.
+      await this.restoreOwnership(guild);
+
       logger.info("Voice channel manager initialization completed");
     } catch (error) {
       logger.error("Error during voice channel manager initialization:", error);
@@ -675,6 +798,7 @@ export class VoiceChannelManager {
       // Update ownership tracking
       this.userChannels.delete(currentOwnerId);
       this.userChannels.set(newOwnerId, channel);
+      await this.persistOwnership(channel.guild?.id, channel.id, newOwnerId);
       logger.info(`[Manual Transfer] Updated ownership tracking map`);
 
       // Clear the ownership queue for this channel
@@ -980,6 +1104,7 @@ export class VoiceChannelManager {
       }
 
       this.userChannels.set(member.id, channel);
+      await this.persistOwnership(member.guild?.id, channel.id, member.id);
       logger.info(
         `Created voice channel ${channelName} for ${member.displayName}`,
       );
@@ -1177,6 +1302,8 @@ export class VoiceChannelManager {
     // Cancel any pending ownership-transfer timer so it doesn't fire on the
     // now-deleted channel (issue #540).
     this.cancelOwnershipTransfer(channelId);
+    // Drop the persisted ownership row so a restart doesn't re-adopt it (#615).
+    await this.removeOwnershipRecord(channelId);
   }
 
   /**
@@ -1247,6 +1374,9 @@ export class VoiceChannelManager {
       // now-deleted channel (issue #540).
       this.cancelOwnershipTransfer(channel.id);
 
+      // Drop the persisted ownership row so a restart doesn't re-adopt it (#615).
+      await this.removeOwnershipRecord(channel.id);
+
       // Clean up waiting room (fire-and-forget after channel deleted to avoid race conditions)
       const waitingRoomId = this.waitingRooms.get(channel.id);
       if (waitingRoomId) {
@@ -1295,6 +1425,8 @@ export class VoiceChannelManager {
     this.liveChannels.delete(channelId);
     // Cancel and drop any pending ownership-transfer timer for this channel
     this.cancelOwnershipTransfer(channelId);
+    // Drop the persisted ownership row so a restart doesn't re-adopt it (#615).
+    await this.removeOwnershipRecord(channelId);
 
     // Remove the associated waiting room, if any
     const waitingRoomId = this.waitingRooms.get(channelId);
@@ -1411,6 +1543,7 @@ export class VoiceChannelManager {
 
       // Store ownership
       this.userChannels.set(userId, newChannel);
+      await this.persistOwnership(guild.id, newChannel.id, userId);
 
       // Auto-apply the user's default preset (if presets are enabled)
       const presetsEnabled = await configService.getBoolean(
@@ -2044,6 +2177,7 @@ export class VoiceChannelManager {
         this.userChannels.delete(currentOwnerId);
       }
       this.userChannels.set(newOwner.id, channel);
+      await this.persistOwnership(channel.guild?.id, channel.id, newOwner.id);
       logger.info(`[Ownership Transfer] Updated ownership tracking map`);
 
       // Update control panel message with new owner
