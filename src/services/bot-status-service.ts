@@ -10,6 +10,13 @@ import {
 
 type StatusPools = Record<BotStatusPool, string[]>;
 
+/**
+ * How often the status monitor re-syncs the VC user count from the
+ * provider as a defensive self-heal (in case a `voiceStateUpdate` event
+ * is ever missed). It's a cheap cache walk, no Discord API call.
+ */
+const VC_COUNT_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 /** Fresh, mutable copy of the hardcoded defaults for every pool. */
 function defaultStatusPools(): StatusPools {
   return {
@@ -27,6 +34,13 @@ export class BotStatusService {
   private currentVcUserCount = 0;
   // Username tracking removed for simplified status logic (field deleted)
   private statusUpdateInterval: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Pulls the current total VC user count on demand (a cache walk over the
+   * managed category's voice channels). Registered at startup so the count
+   * can be primed once the client is ready and re-synced on the monitor
+   * interval, instead of relying solely on `voiceStateUpdate` events.
+   */
+  private vcUserCountProvider: (() => Promise<number>) | null = null;
   /**
    * In-memory copy of the live status pools, seeded with the hardcoded
    * defaults so `getRandomStatusMessage()` (which is synchronous, called
@@ -233,6 +247,29 @@ export class BotStatusService {
   }
 
   /**
+   * Register a function that reports the live total VC user count. Used to
+   * prime the count at startup and to self-heal it on the monitor interval.
+   */
+  public setVcUserCountProvider(provider: () => Promise<number>): void {
+    this.vcUserCountProvider = provider;
+  }
+
+  /**
+   * Pull the current VC user count from the registered provider and apply
+   * it. No-op (and never throws) when no provider is registered or the
+   * lookup fails, so it's safe to call from startup and interval ticks.
+   */
+  public async refreshVcUserCount(): Promise<void> {
+    if (!this.vcUserCountProvider) return;
+    try {
+      const count = await this.vcUserCountProvider();
+      this.updateVcUserCount(count);
+    } catch (error) {
+      logger.error("Failed to refresh VC user count:", error);
+    }
+  }
+
+  /**
    * Update the VC user count and refresh activity
    */
   public updateVcUserCount(count: number): void {
@@ -253,8 +290,16 @@ export class BotStatusService {
       clearInterval(this.statusUpdateInterval);
     }
 
-    // No periodic updates - only update when user count actually changes
-    this.statusUpdateInterval = null;
+    // Periodically re-sync the count from the provider so the presence
+    // self-heals if a `voiceStateUpdate` event is ever missed (e.g. a
+    // gateway hiccup), not only when voice state changes. The provider is
+    // a cheap cache walk, so this stays inexpensive.
+    this.statusUpdateInterval = setInterval(() => {
+      void this.refreshVcUserCount();
+    }, VC_COUNT_REFRESH_INTERVAL_MS);
+    // Don't let this background self-heal timer keep the process alive on
+    // shutdown (and avoid leaking an open handle in tests).
+    this.statusUpdateInterval.unref?.();
 
     logger.info("Started VC user monitoring for bot status updates");
   }
