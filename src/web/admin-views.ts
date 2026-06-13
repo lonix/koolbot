@@ -194,11 +194,18 @@ export interface SettingRow {
    * non-blocking inline warning. Sourced from `SettingMetadata.warnBelow`.
    */
   warnBelow?: { value: number; message: string };
+  /**
+   * Which channel picker a `channel` / `channel_list` control draws from:
+   * `"voice"` uses the voice (+ stage) list, anything else (the default) uses
+   * the text-channel list. Sourced from `SettingMetadata.channelKind`.
+   */
+  channelKind?: "text" | "voice";
 }
 
 export interface SettingsProps extends CommonProps {
   groups: Array<{ category: string; rows: SettingRow[] }>;
   textChannels: ChannelOption[];
+  voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
   roles: RoleOption[];
   /** Guild id of the session, used as the reset-confirmation fallback. */
@@ -459,10 +466,54 @@ function renderOptionsSelect(
   return `<select name="${valueName}">${opts}${placeholder}</select>`;
 }
 
+/**
+ * Pick the channel option list backing a `channel` / `channel_list` control.
+ * Voice-oriented keys (`channelKind: "voice"`, e.g.
+ * `voicetracking.excluded_channels`) draw from the voice + stage list; every
+ * other channel field keeps the text-channel list. Centralised so both the
+ * single- and multi-select branches stay in sync (issue #611).
+ */
+function channelOptionsFor(
+  r: SettingRow,
+  pickers: { textChannels: ChannelOption[]; voiceChannels: ChannelOption[] },
+): ChannelOption[] {
+  return r.channelKind === "voice"
+    ? pickers.voiceChannels
+    : pickers.textChannels;
+}
+
+/**
+ * Render a compact, readable summary of the currently-selected entries below a
+ * multi-select. A `<select multiple>` buries its picks among unselected rows,
+ * and a long voice-exclusion list otherwise reads as an unseparated blob
+ * (issue #611); this surfaces them as a clean, comma-separated `#name` /
+ * `@name` list. Ids no longer in the live option set render as `(missing)
+ * <id>` so a stale selection is visible rather than silently dropped. Returns
+ * an empty string when nothing is selected.
+ */
+function renderSelectionSummary(
+  options: ChannelOption[] | RoleOption[],
+  selected: Set<string>,
+  prefix: string,
+): string {
+  if (selected.size === 0) return "";
+  const byId = new Map(options.map((o) => [o.id, o.name]));
+  const tokens = Array.from(selected).map((id) => {
+    const name = byId.get(id);
+    return name ? `${prefix}${name}` : `(missing) ${id}`;
+  });
+  return (
+    `<div class="settings-selected muted" style="margin-top:.4rem;font-size:.85em">` +
+    `Selected: ${escapeHtml(tokens.join(", "))}` +
+    `</div>`
+  );
+}
+
 function renderSettingControl(
   r: SettingRow,
   pickers: {
     textChannels: ChannelOption[];
+    voiceChannels: ChannelOption[];
     categoryChannels: ChannelOption[];
     roles: RoleOption[];
   },
@@ -494,7 +545,7 @@ function renderSettingControl(
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
       r.type === "channel"
-        ? pickers.textChannels
+        ? channelOptionsFor(r, pickers)
         : r.type === "category"
           ? pickers.categoryChannels
           : pickers.roles;
@@ -508,7 +559,7 @@ function renderSettingControl(
   }
   if (r.type === "channel_list" || r.type === "role_list") {
     const options =
-      r.type === "channel_list" ? pickers.textChannels : pickers.roles;
+      r.type === "channel_list" ? channelOptionsFor(r, pickers) : pickers.roles;
     const prefix = r.type === "role_list" ? "@" : "#";
     const selected = new Set(
       currentStr
@@ -519,7 +570,8 @@ function renderSettingControl(
     return (
       `<select name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}">` +
       buildOptionsHtml(options, selected, prefix, false) +
-      `</select>`
+      `</select>` +
+      renderSelectionSummary(options, selected, prefix)
     );
   }
   if (r.type === "cron") {
@@ -585,6 +637,7 @@ export function renderSettingsPage(props: SettingsProps): string {
 
   const pickers = {
     textChannels: props.textChannels,
+    voiceChannels: props.voiceChannels,
     categoryChannels: props.categoryChannels,
     roles: props.roles,
   };

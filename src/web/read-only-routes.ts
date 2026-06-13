@@ -119,6 +119,7 @@ async function commonFromReq(req: AuthenticatedRequest): Promise<{
 interface ChannelData {
   names: Map<string, string>;
   textChannels: ChannelOption[];
+  voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
 }
 
@@ -129,16 +130,20 @@ interface RoleData {
 
 /**
  * Fetch the guild's channel cache once and derive the id→name map plus
- * the option lists used to populate picker dropdowns (text channels for
- * normal channel pickers, category channels for the voicechannels
- * managed-category picker). One Discord API roundtrip per request.
+ * the option lists used to populate picker dropdowns: text channels for
+ * normal channel pickers, voice (+ stage) channels for voice-oriented
+ * pickers (e.g. `voicetracking.excluded_channels`, which excludes voice
+ * channels a session could be tracked in), and category channels for the
+ * voicechannels managed-category picker. One Discord API roundtrip per
+ * request.
  */
-async function fetchChannelData(
+export async function fetchChannelData(
   client: Client,
   guildId: string,
 ): Promise<ChannelData> {
   const names = new Map<string, string>();
   const textChannels: ChannelOption[] = [];
+  const voiceChannels: ChannelOption[] = [];
   const categoryChannels: ChannelOption[] = [];
   try {
     const guild = await client.guilds.fetch(guildId);
@@ -152,16 +157,22 @@ async function fetchChannelData(
         ch.type === ChannelType.GuildAnnouncement
       ) {
         textChannels.push({ id: ch.id, name });
+      } else if (
+        ch.type === ChannelType.GuildVoice ||
+        ch.type === ChannelType.GuildStageVoice
+      ) {
+        voiceChannels.push({ id: ch.id, name });
       } else if (ch.type === ChannelType.GuildCategory) {
         categoryChannels.push({ id: ch.id, name });
       }
     }
     textChannels.sort((a, b) => a.name.localeCompare(b.name));
+    voiceChannels.sort((a, b) => a.name.localeCompare(b.name));
     categoryChannels.sort((a, b) => a.name.localeCompare(b.name));
   } catch (err) {
     logger.debug("fetchChannelData failed", err);
   }
-  return { names, textChannels, categoryChannels };
+  return { names, textChannels, voiceChannels, categoryChannels };
 }
 
 /**
@@ -385,6 +396,7 @@ export function createReadOnlyRouter(
               dbEntry?.category ?? meta?.category ?? deriveCategory(key),
             options: meta?.options,
             warnBelow: meta?.warnBelow,
+            channelKind: meta?.channelKind,
           };
         },
       );
@@ -418,15 +430,17 @@ export function createReadOnlyRouter(
         rows: rs,
       }));
 
-      // Guild cache for the new dropdown selectors. One fetch, three lists.
-      const { textChannels, categoryChannels, roles } = await Promise.all([
-        fetchChannelData(client, common.guildId),
-        fetchRoleData(client, common.guildId),
-      ]).then(([chData, roleData]) => ({
-        textChannels: chData.textChannels,
-        categoryChannels: chData.categoryChannels,
-        roles: roleData.roles,
-      }));
+      // Guild cache for the dropdown selectors. One fetch, four lists.
+      const { textChannels, voiceChannels, categoryChannels, roles } =
+        await Promise.all([
+          fetchChannelData(client, common.guildId),
+          fetchRoleData(client, common.guildId),
+        ]).then(([chData, roleData]) => ({
+          textChannels: chData.textChannels,
+          voiceChannels: chData.voiceChannels,
+          categoryChannels: chData.categoryChannels,
+          roles: roleData.roles,
+        }));
 
       // Guild name backs the "type to confirm" step of the danger-zone
       // reset. Best-effort: when the fetch fails the renderer falls back to
@@ -444,6 +458,7 @@ export function createReadOnlyRouter(
           ...common,
           groups,
           textChannels,
+          voiceChannels,
           categoryChannels,
           roles,
           guildId: common.guildId,

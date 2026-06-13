@@ -342,14 +342,15 @@ Track user voice channel activity and generate statistics.
 | `voicetracking.stats.user.enabled` | `false` | Enable `/voicestats user` subcommand |
 | `voicetracking.seen.enabled` | `false` | Enable `/seen` command for last-seen tracking |
 | `voicetracking.companions.enabled` | `false` | Persist precise per-companion co-presence seconds and join-order metadata (was-first, who you joined) on each voice session. Data-capture foundation for future Rewind companion stats (#570) |
-| `voicetracking.excluded_channels` | `""` | Channel IDs to exclude from tracking (comma-separated) |
+| `voicetracking.excluded_channels` | `""` | Voice channel IDs to exclude from tracking (comma-separated; the Web UI picker lists voice + stage channels) |
 | `voicetracking.admin_roles` | `""` | Role names with tracking admin powers (comma-separated) |
 
 ### Managing excluded channels
 
-Right-click each channel in Discord and **Copy ID** (with Developer Mode
-enabled), then set `voicetracking.excluded_channels` on the Web UI's
-Settings page as a comma-separated list:
+Right-click each **voice** channel in Discord and **Copy ID** (with Developer
+Mode enabled), then set `voicetracking.excluded_channels` on the Web UI's
+Settings page — the picker lists voice and stage channels — as a
+comma-separated list:
 
 ```text
 123456789012345678,987654321098765432
