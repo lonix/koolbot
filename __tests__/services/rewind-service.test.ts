@@ -7,6 +7,7 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 // once mocks are in place.
 
 const mockFindOneVc = jest.fn();
+const mockFindVc = jest.fn();
 const mockAggregateVc = jest.fn();
 const mockFindOneAch = jest.fn();
 const mockSnapFindOne = jest.fn();
@@ -16,6 +17,7 @@ const mockSnapCreate = jest.fn();
 jest.unstable_mockModule("../../src/models/voice-channel-tracking.js", () => ({
   VoiceChannelTracking: {
     findOne: mockFindOneVc,
+    find: mockFindVc,
     aggregate: mockAggregateVc,
   },
 }));
@@ -468,12 +470,21 @@ describe("RewindService.getSummary", () => {
     return { lean: jest.fn(async () => value) };
   }
 
+  // The companion-username fallback query chains `.find().select().lean()`.
+  function selectLean<T>(value: T): {
+    select: () => { lean: () => Promise<T> };
+  } {
+    return { select: jest.fn(() => lean(value)) };
+  }
+
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
     // Default chainable returns so tests that don't override the
     // `findOne` calls still chain through `.lean()` without crashing.
     mockFindOneVc.mockReturnValue(lean({ sessions: [] }));
+    // Stored-username fallback (#606): no tracking docs by default.
+    mockFindVc.mockReturnValue(selectLean([]));
     mockFindOneAch.mockReturnValue(lean(null));
     mockAggregateVc.mockResolvedValue([]);
     // By default no snapshots exist, so getSummary takes the live path.
@@ -653,6 +664,74 @@ describe("RewindService.getSummary", () => {
     ]);
   });
 
+  it("falls back to the stored tracking username when a companion is not cached (#606)", async () => {
+    const year = 2026;
+    const sessions = [
+      {
+        startTime: new Date(`${year}-02-01T10:00:00Z`),
+        duration: 3600,
+        channelId: "general",
+        channelName: "general-vc",
+        // "left" is in neither the guild member nor the user cache.
+        otherUsers: ["left"],
+      },
+    ];
+    mockFindOneVc.mockReturnValueOnce(lean({ sessions }));
+    mockFindOneAch.mockReturnValueOnce(lean(null));
+    // The companion query returns the last-known username we persisted.
+    mockFindVc.mockReturnValueOnce(
+      selectLean([{ userId: "left", username: "DeparturedDan" }]),
+    );
+    mockAggregateVc
+      .mockResolvedValueOnce([{ _id: 2026 }])
+      .mockResolvedValueOnce([{ _id: "u1", totalTime: 3600 }])
+      .mockResolvedValueOnce([]);
+
+    // Empty client caches — nothing resolves live.
+    const svc = RewindService.getInstance(
+      makeClient() as Parameters<typeof RewindService.getInstance>[0],
+    );
+    const summary = await svc.getSummary("u1", "g1", year);
+    expect(summary!.topCompanions).toEqual([
+      { userId: "left", displayName: "DeparturedDan", totalSeconds: 3600 },
+    ]);
+  });
+
+  it("skips companions with no name anywhere instead of showing 'Unknown user' (#606)", async () => {
+    const year = 2026;
+    const sessions = [
+      {
+        startTime: new Date(`${year}-02-01T10:00:00Z`),
+        duration: 3600,
+        channelId: "general",
+        channelName: "general-vc",
+        otherUsers: ["ghost", "carol"],
+      },
+    ];
+    mockFindOneVc.mockReturnValueOnce(lean({ sessions }));
+    mockFindOneAch.mockReturnValueOnce(lean(null));
+    // Only carol has a stored username; "ghost" is nameless everywhere.
+    mockFindVc.mockReturnValueOnce(
+      selectLean([{ userId: "carol", username: "carol123" }]),
+    );
+    mockAggregateVc
+      .mockResolvedValueOnce([{ _id: 2026 }])
+      .mockResolvedValueOnce([{ _id: "u1", totalTime: 3600 }])
+      .mockResolvedValueOnce([]);
+
+    const svc = RewindService.getInstance(
+      makeClient() as Parameters<typeof RewindService.getInstance>[0],
+    );
+    const summary = await svc.getSummary("u1", "g1", year);
+    // "ghost" is dropped entirely; only the named companion survives.
+    expect(summary!.topCompanions).toEqual([
+      { userId: "carol", displayName: "carol123", totalSeconds: 3600 },
+    ]);
+    expect(
+      summary!.topCompanions.some((c) => c.displayName === "Unknown user"),
+    ).toBe(false);
+  });
+
   it("filters achievements and accolades by year and ignores unknown types", async () => {
     const year = 2026;
     mockFindOneVc.mockReturnValueOnce(lean({ sessions: [] }));
@@ -828,6 +907,23 @@ describe("RewindService snapshots (#574)", () => {
         last: null,
         best: null,
       });
+    });
+
+    it("drops baked-in 'Unknown user' companion rows from legacy snapshots (#606)", () => {
+      const norm = normalizeSnapshotSummary(
+        {
+          topCompanions: [
+            { userId: "a", displayName: "Alice", totalSeconds: 100 },
+            { userId: "b", displayName: "Unknown user", totalSeconds: 50 },
+            { userId: "c", displayName: "Carol", totalSeconds: 25 },
+          ],
+        },
+        { userId: "u", guildId: "g", year: 2021 },
+      );
+      expect(norm.topCompanions).toEqual([
+        { userId: "a", displayName: "Alice", totalSeconds: 100 },
+        { userId: "c", displayName: "Carol", totalSeconds: 25 },
+      ]);
     });
 
     it("tolerates a null stored payload (empty state)", () => {
