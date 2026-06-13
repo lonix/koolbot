@@ -114,7 +114,7 @@ const STYLE = [
   ".rw-hero .total{font-size:2.5rem;font-weight:700;color:#fff;line-height:1.1}",
   ".rw-hero .compare{margin-top:.4rem;color:#c7d2fe;font-size:1rem}",
   ".rw-hero .sub{margin-top:.6rem;color:#a5b4fc;font-size:.85rem}",
-  ".rw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem;margin:0 0 1rem}",
+  ".rw-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem;margin:0 0 1rem}",
   ".rw-stat{background:#161a22;border:1px solid #2d3748;border-radius:8px;padding:.85rem 1rem}",
   ".rw-stat .label{font-size:.7rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em}",
   ".rw-stat .value{font-size:1.2rem;color:#e4e6eb;font-weight:600;margin-top:.2rem}",
