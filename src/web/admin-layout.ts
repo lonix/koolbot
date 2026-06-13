@@ -411,10 +411,29 @@ const SETTINGS_SAVE_SCRIPT =
   "headers:{'Accept':'application/json','X-Requested-With':'fetch'}," +
   "body:new FormData(form)})" +
   ".then(function(res){if(res.status===401){window.location.href='/admin/';return null}" +
-  "return res.json().catch(function(){return null})})" +
-  ".then(function(d){if(save)save.disabled=false;" +
-  "if(!d){show(form,'err','Save failed — unexpected server response.');return}" +
-  "show(form,d.type||'ok',d.text||'Saved.')})" +
+  // Read the body once as text and try to parse it as JSON. The server's
+  // happy path and its error paths (CSRF/rate-limit/payload/unhandled) all
+  // speak JSON now (issue #612); if something still returns non-JSON we keep
+  // the HTTP status and the readable body so the toast says what went wrong
+  // instead of a flat 'unexpected server response'.
+  "var status=res.status;" +
+  "return res.text().then(function(t){var d=null;try{d=JSON.parse(t)}catch(e){}" +
+  "return{status:status,json:d,text:t}})})" +
+  ".then(function(r){if(save)save.disabled=false;" +
+  "if(!r)return;" +
+  // A structured flash (server's happy path AND its error paths) carries a
+  // non-empty `text`; show it, letting the HTTP status decide ok/err when the
+  // server omits an explicit `type`. JSON without usable text (e.g. a proxy's
+  // own envelope) must NOT be mistaken for a successful save, so fall through.
+  "var jt=r.json&&typeof r.json==='object'?r.json.text:null;" +
+  "var okStatus=r.status>=200&&r.status<300;" +
+  "if(typeof jt==='string'&&jt){show(form,(r.json.type)||(okStatus?'ok':'err'),jt);return}" +
+  "if(okStatus){show(form,'ok','Saved.');return}" +
+  // Non-2xx with no usable JSON: surface the status plus any readable text.
+  "var detail=(r.text||'').replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim();" +
+  "var msg='Save failed ('+r.status+').';" +
+  "if(detail)msg+=' '+(detail.length>200?detail.slice(0,199)+'…':detail);" +
+  "show(form,'err',msg)})" +
   ".catch(function(){if(save)save.disabled=false;" +
   "show(form,'err','Save failed — network error. Your changes were not saved.')})}" +
   "function wire(form){var last=null;" +

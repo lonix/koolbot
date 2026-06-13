@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { Buffer } from "buffer";
 import { Request, Response, NextFunction } from "express";
 import { parseCookies, setCookie } from "./cookies.js";
+import { respondFlashError } from "./http-flash.js";
 import { env } from "../config/env.js";
 
 export const CSRF_COOKIE = "koolbot_csrf";
@@ -59,14 +60,27 @@ export function requireCsrf(
   const cookies = parseCookies(req);
   const cookieToken = cookies.get(CSRF_COOKIE);
   const headerToken = req.header(CSRF_HEADER) || (req.body && req.body._csrf);
+  // AJAX callers (e.g. the Settings per-section save) get a JSON error so the
+  // client can surface a real message instead of a generic toast (issue #612);
+  // plain form POSTs still get the text/plain body via `respondFlashError`.
   if (!cookieToken || !headerToken) {
-    res.status(403).type("text/plain").send("CSRF token missing");
+    respondFlashError(
+      req,
+      res,
+      403,
+      "Security check failed (CSRF token missing). Reload the page and try again.",
+    );
     return;
   }
   const a = Buffer.from(String(cookieToken));
   const b = Buffer.from(String(headerToken));
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    res.status(403).type("text/plain").send("CSRF token mismatch");
+    respondFlashError(
+      req,
+      res,
+      403,
+      "Security check failed (CSRF token mismatch). Reload the page and try again.",
+    );
     return;
   }
   next();
