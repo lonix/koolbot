@@ -580,6 +580,7 @@ describe("/me/rewind", () => {
     pathSuffix: string; // "" for "/rewind", "/2024" for "/rewind/2024"
     summary: unknown; // What RewindService.getInstance(...).getSummary should resolve to
     defaultYear?: number; // What getDefaultRewindYear resolves to (bare route only)
+    rewindEnabled?: boolean; // Feature gate `rewind.enabled` (#608); defaults to enabled
   }): Promise<{
     statusCode: number;
     body: string;
@@ -617,6 +618,14 @@ describe("/me/rewind", () => {
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
       getTimezone: async () => null,
+    } as never);
+
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    const rewindEnabled = opts.rewindEnabled ?? true;
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getBoolean: async (key: string) =>
+        key === "rewind.enabled" ? rewindEnabled : false,
     } as never);
 
     const { RewindService } =
@@ -828,6 +837,31 @@ describe("/me/rewind", () => {
     });
     expect(out.statusCode).toBe(500);
     expect(out.body).toContain("Could not load your year-in-review");
+  });
+
+  it("returns a 404 disabled state and does not query data when rewind.enabled is off (#608)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary(),
+      rewindEnabled: false,
+    });
+    expect(out.statusCode).toBe(404);
+    expect(out.body).toContain("Rewind) feature is currently disabled");
+    // The gate short-circuits before any data work.
+    expect(out.getSummary).not.toHaveBeenCalled();
+    expect(out.getDefaultRewindYear).not.toHaveBeenCalled();
+    // And the disabled feature drops out of the page nav.
+    expect(out.body).not.toContain('href="/me/rewind"');
+  });
+
+  it("gates the explicit :year deep-link too when disabled (#608)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "/2024",
+      summary: makeSummary({ year: 2024 }),
+      rewindEnabled: false,
+    });
+    expect(out.statusCode).toBe(404);
+    expect(out.getSummary).not.toHaveBeenCalled();
   });
 });
 

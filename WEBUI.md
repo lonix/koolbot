@@ -784,6 +784,11 @@ lists every notification type with the current state and a checkbox;
 toggling one row is a single POST that records the diff in the audit
 log and PRG-redirects back to the page.
 
+The whole feature is gated by `rewind.enabled` (`#608`). When it is off
+the route returns a 404 "feature disabled" state and the nav link is
+suppressed on every `/me/*` page; the end-of-year DM nudge is a separate
+toggle (`rewind.nudge.enabled`).
+
 The bare **Rewind** page (`/me/rewind`) lands on the most recent year you
 actually have data for, so visiting right after the year rolls over shows
 a finished recap rather than the empty new year (`#573`); a brand-new user
@@ -795,7 +800,7 @@ picker at the top of the page only offers years for which you have data
 been snapshotted (see below), and highlights the year actually shown.
 Years with no data render a friendly empty state.
 Aggregation is on-demand and not cached in v1 — see [`SETTINGS.md`](SETTINGS.md#-rewind-year-in-review)
-for the `rewind.*` keys that control the end-of-year DM nudge.
+for the `rewind.*` keys that gate the feature and the end-of-year DM nudge.
 
 The in-progress current year is always computed live from raw activity.
 **Completed years are served from an immutable snapshot** (`#574`): the
@@ -808,7 +813,8 @@ message-detail truncation that later prunes the source data. Because the
 snapshot is taken on the cron's December run, activity in the final day
 or two of the year isn't captured. Snapshot creation is idempotent
 (re-running the cron never duplicates or mutates an existing record) and
-gated by `rewind.enabled`. A `schemaVersion` is stored so the view can
+runs as part of the nudge cron, so it follows `rewind.nudge.enabled`
+(with the legacy `rewind.enabled` fallback). A `schemaVersion` is stored so the view can
 render older snapshots even after the summary shape gains new fields.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
