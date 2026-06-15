@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.1](https://github.com/lonix/koolbot/compare/v1.2.0...v1.2.1) (2026-06-15)
+
+
+### 🐛 Bug Fixes
+
+* prime VC user count at startup so presence reflects voice occupancy ([#622](https://github.com/lonix/koolbot/issues/622)) ([949bcc5](https://github.com/lonix/koolbot/commit/949bcc56a8688a0f3c6e1b5f9ce475b1719f5b03))
+* **rewind:** resolve voice companions to stored username, skip nameless ids ([#619](https://github.com/lonix/koolbot/issues/619)) ([86e6f52](https://github.com/lonix/koolbot/commit/86e6f525a9a99232bb4f1ece0ad97910a86c501b))
+* stop cleanup sweep from purging valid polls/notices settings ([#616](https://github.com/lonix/koolbot/issues/616)) ([ddced25](https://github.com/lonix/koolbot/commit/ddced2568a0db08bbb190504b24d0ede0f378b90))
+* **voice:** persist and restore dynamic channel ownership across restarts ([#620](https://github.com/lonix/koolbot/issues/620)) ([78c51bc](https://github.com/lonix/koolbot/commit/78c51bcc8862e0caaa6493bfef44af7bf5bcaed8))
+* **web:** even out Rewind stat card grid wrap ([#617](https://github.com/lonix/koolbot/issues/617)) ([9c686ee](https://github.com/lonix/koolbot/commit/9c686eedab3124d2e8f4b50e924225b67530f922)), closes [#607](https://github.com/lonix/koolbot/issues/607)
+* **web:** surface real error detail on settings save failures ([#618](https://github.com/lonix/koolbot/issues/618)) ([6a6f80a](https://github.com/lonix/koolbot/commit/6a6f80addfc165641d39aa91ae7d486d2030bea0))
+* **webui:** excluded-voice picker lists voice channels, not text ([#623](https://github.com/lonix/koolbot/issues/623)) ([a801bad](https://github.com/lonix/koolbot/commit/a801badff9dad90bba6704ce369e72f5da62d17b))
+
 ## [1.2.0](https://github.com/lonix/koolbot/compare/v1.1.0...v1.2.0) (2026-06-12)
 
 
