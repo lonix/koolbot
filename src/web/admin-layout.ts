@@ -382,7 +382,9 @@ const CASCADE_DISABLE_SCRIPT =
 // server's flash inline inside the same card, and leave scroll position
 // untouched. The server returns JSON for these requests (Accept:
 // application/json) and keeps the redirect for the no-JS path, so browsers
-// without fetch/FormData fall back to the original full-page behaviour.
+// without fetch/FormData/URLSearchParams fall back to the original
+// full-page behaviour. The body is urlencoded (not multipart) so the
+// router's express.urlencoded parser can read `_csrf` — see the body line.
 //
 // Per-row Reset buttons retarget /admin/settings/reset via `formaction`;
 // those are left to submit natively (full reload). We track the clicked
@@ -403,13 +405,19 @@ const SETTINGS_SAVE_SCRIPT =
   "function submit(e,submitter){var form=e.currentTarget;" +
   // Reset buttons retarget via formaction — let those submit natively.
   "if(submitter&&submitter.getAttribute('formaction'))return;" +
-  "if(typeof fetch!=='function'||typeof FormData!=='function')return;" +
+  "if(typeof fetch!=='function'||typeof FormData!=='function'||typeof URLSearchParams!=='function')return;" +
   "e.preventDefault();" +
   "var save=form.querySelector('button[type=submit]:not([formaction])');" +
   "if(save)save.disabled=true;" +
+  // Send as application/x-www-form-urlencoded, NOT multipart. The router
+  // only mounts express.urlencoded (no multipart parser), so a multipart
+  // FormData body would arrive empty server-side — losing `_csrf` and
+  // tripping requireCsrf with "CSRF token missing" (issue #628). Wrapping
+  // the FormData in URLSearchParams makes fetch send urlencoded, so the
+  // CSRF token and every value_*/keys field round-trip through the parser.
   "fetch(form.action,{method:'POST',credentials:'same-origin',cache:'no-store'," +
   "headers:{'Accept':'application/json','X-Requested-With':'fetch'}," +
-  "body:new FormData(form)})" +
+  "body:new URLSearchParams(new FormData(form))})" +
   ".then(function(res){if(res.status===401){window.location.href='/admin/';return null}" +
   // Read the body once as text and try to parse it as JSON. The server's
   // happy path and its error paths (CSRF/rate-limit/payload/unhandled) all

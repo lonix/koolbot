@@ -114,6 +114,12 @@ describe("renderAdminPage", () => {
     expect(html).toContain("section-flash");
     // Reset buttons (formaction) must still submit natively.
     expect(html).toContain("getAttribute('formaction')");
+    // The body must be urlencoded, not raw multipart FormData: the router
+    // only mounts express.urlencoded, so a multipart body arrives empty and
+    // `_csrf` is lost, failing requireCsrf with "CSRF token missing"
+    // (issue #628). Wrapping FormData in URLSearchParams keeps it urlencoded.
+    expect(html).toContain("body:new URLSearchParams(new FormData(form))");
+    expect(html).not.toContain("body:new FormData(form)");
   });
 
   it("escapes the title", () => {
