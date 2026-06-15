@@ -134,8 +134,9 @@ interface RoleData {
  * normal channel pickers, voice (+ stage) channels for voice-oriented
  * pickers (e.g. `voicetracking.excluded_channels`, which excludes voice
  * channels a session could be tracked in), and category channels for the
- * voicechannels managed-category picker. One Discord API roundtrip per
- * request.
+ * voicechannels managed-category picker. At most two Discord API calls per
+ * request (the guild fetch, then its channel fetch — both no-ops when already
+ * cached).
  */
 export async function fetchChannelData(
   client: Client,

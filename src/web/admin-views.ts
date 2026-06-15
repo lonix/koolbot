@@ -487,9 +487,10 @@ function channelOptionsFor(
  * multi-select. A `<select multiple>` buries its picks among unselected rows,
  * and a long voice-exclusion list otherwise reads as an unseparated blob
  * (issue #611); this surfaces them as a clean, comma-separated `#name` /
- * `@name` list. Ids no longer in the live option set render as `(missing)
- * <id>` so a stale selection is visible rather than silently dropped. Returns
- * an empty string when nothing is selected.
+ * `@name` list. Ids no longer in the live option set render as a `(missing)`
+ * entry followed by the raw id, so a stale selection is visible rather than
+ * silently dropped (mirroring the `(missing)` option label `buildOptionsHtml`
+ * emits). Returns an empty string when nothing is selected.
  */
 function renderSelectionSummary(
   options: ChannelOption[] | RoleOption[],
