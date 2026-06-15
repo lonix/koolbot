@@ -24,6 +24,7 @@ import {
   type NotificationPrefKey,
   type NotificationPrefs,
 } from "../services/user-notification-prefs-service.js";
+import { ConfigService } from "../services/config-service.js";
 import { requireCsrf } from "./csrf.js";
 import {
   AuthenticatedRequest,
@@ -183,6 +184,16 @@ export class SelfScopeError extends Error {
   }
 }
 
+/**
+ * Whether the Rewind feature (the `/me/rewind` page + its nav entry) is
+ * enabled (#608). Distinct from the end-of-year DM nudge, which has its
+ * own `rewind.nudge.enabled` toggle handled by `RewindNudgeService`.
+ * Defaults to `false`, following the repo's opt-in feature-gate convention.
+ */
+async function isRewindFeatureEnabled(): Promise<boolean> {
+  return ConfigService.getInstance().getBoolean("rewind.enabled", false);
+}
+
 function parseYearParam(raw: unknown, fallback: number): number {
   if (typeof raw !== "string" || raw.length === 0) return fallback;
   const n = Number.parseInt(raw, 10);
@@ -221,6 +232,7 @@ export function createUserRouter(
         res.status(500).type("text/plain").send("session missing");
         return;
       }
+      const rewindEnabled = await isRewindFeatureEnabled();
       res.type("text/html").send(
         renderUserPage({
           title: "Overview",
@@ -229,10 +241,12 @@ export function createUserRouter(
             discordUserId: session.discordUserId,
             guildId: session.guildId,
             isAdmin: session.role === "admin",
+            rewindEnabled,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
+          rewindEnabled,
         }),
       );
     }),
@@ -268,6 +282,7 @@ export function createUserRouter(
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           flash,
+          rewindEnabled: await isRewindFeatureEnabled(),
         }),
       );
     }),
@@ -388,6 +403,7 @@ export function createUserRouter(
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           flash,
+          rewindEnabled: await isRewindFeatureEnabled(),
         }),
       );
     }),
@@ -478,6 +494,31 @@ export function createUserRouter(
       userId: session.discordUserId,
       guildId: session.guildId,
     });
+
+    // Feature gate (#608): when Rewind is disabled the page is not served
+    // (and the nav link is already suppressed). Return a friendly disabled
+    // state with 404 so the route can't be used to reach the recap while
+    // off, mirroring how the nav advertisement is hidden.
+    if (!(await isRewindFeatureEnabled())) {
+      res
+        .status(404)
+        .type("text/html")
+        .send(
+          renderUserPage({
+            title: "Rewind",
+            active: "/me/rewind",
+            body:
+              "<h1>Rewind</h1>" +
+              '<div class="notice info">The year-in-review (Rewind) feature is currently disabled on this server.</div>',
+            csrfToken: getCsrfToken(req),
+            remainingMs: getDisplayedRemainingMs(session),
+            isAdmin: session.role === "admin",
+            rewindEnabled: false,
+          }),
+        );
+      return;
+    }
+
     const currentYear = new Date().getUTCFullYear();
     // The explicit `/rewind/:year` deep-link must always honour the
     // requested year (even an empty one), so it falls back to the current
@@ -519,6 +560,7 @@ export function createUserRouter(
             csrfToken: getCsrfToken(req),
             remainingMs: getDisplayedRemainingMs(session),
             isAdmin: session.role === "admin",
+            rewindEnabled: true,
           }),
         );
       return;
@@ -585,6 +627,7 @@ export function createUserRouter(
         csrfToken: getCsrfToken(req),
         remainingMs: getDisplayedRemainingMs(session),
         isAdmin: session.role === "admin",
+        rewindEnabled: true,
       }),
     );
   });

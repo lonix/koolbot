@@ -205,6 +205,9 @@ describe('Config Schema', () => {
       'voicetracking.cleanup.enabled': false,
       'messagetracking.cleanup.enabled': false,
       'polls.participation.enabled': false,
+      // Rewind end-of-year DM nudge — auxiliary opt-in under the rewind
+      // feature gate, independent of `rewind.enabled` (#608).
+      'rewind.nudge.enabled': false,
 
       // ─── Sub-features that default on (rule 2: parent-gated) ────────
       'voicechannels.controlpanel.enabled': true,

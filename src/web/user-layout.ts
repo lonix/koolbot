@@ -16,6 +16,13 @@ export { escapeHtml };
 interface UserNavItem {
   href: string;
   label: string;
+  /**
+   * When set, the item is only advertised in the nav while the named
+   * feature is enabled. Mirrors the admin layout's `featureKey` gate
+   * (#608): a disabled feature drops out of the nav but the URL stays
+   * reachable by direct navigation (the route itself enforces the gate).
+   */
+  feature?: "rewind";
 }
 
 /**
@@ -28,7 +35,7 @@ export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/", label: "Overview" },
   { href: "/me/notifications", label: "Notifications" },
   { href: "/me/timezone", label: "Timezone" },
-  { href: "/me/rewind", label: "Rewind" },
+  { href: "/me/rewind", label: "Rewind", feature: "rewind" },
 ];
 
 export interface UserFlashMessage {
@@ -55,6 +62,13 @@ export interface UserPageOptions {
    * surface the outcome.
    */
   flash?: UserFlashMessage | null;
+  /**
+   * Enabled-state of the feature-gated Rewind page (#608). When `false`,
+   * the Rewind nav link is suppressed. Omitted/`undefined` keeps the link
+   * visible, so direct callers and tests that don't care about gating work
+   * unchanged.
+   */
+  rewindEnabled?: boolean;
 }
 
 const STYLE = [
@@ -203,20 +217,27 @@ export function renderUserPage(opts: UserPageOptions): string {
     '<button type="submit">Finish</button>',
     "</form></div></div>",
     '<div class="shell">',
-    `<main>${renderPageNav(opts.active)}${renderFlash(opts.flash)}${opts.body}</main></div>`,
+    `<main>${renderPageNav(opts.active, opts.rewindEnabled)}${renderFlash(opts.flash)}${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }
 
-function renderPageNav(active: string): string {
-  const items = USER_NAV_ITEMS.map((item) => {
-    const isActive =
-      item.href === active ||
-      (item.href === "/me/" && (active === "/me" || active === "/me/"));
-    const cls = isActive ? ' class="active"' : "";
-    return `<a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a>`;
-  }).join("");
+function renderPageNav(active: string, rewindEnabled?: boolean): string {
+  const items = USER_NAV_ITEMS.filter(
+    // A feature-gated item only shows while its feature is enabled.
+    // `undefined` is treated as enabled so non-gating callers are
+    // unaffected (#608).
+    (item) => item.feature !== "rewind" || rewindEnabled !== false,
+  )
+    .map((item) => {
+      const isActive =
+        item.href === active ||
+        (item.href === "/me/" && (active === "/me" || active === "/me/"));
+      const cls = isActive ? ' class="active"' : "";
+      return `<a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a>`;
+    })
+    .join("");
   return `<nav class="page-nav">${items}</nav>`;
 }
 
@@ -236,10 +257,18 @@ export function renderUserIndexBody(opts: {
   discordUserId: string;
   guildId: string;
   isAdmin: boolean;
+  // Whether the feature-gated Rewind page is enabled (#608). When false,
+  // its card is omitted so the overview never links to a disabled page.
+  rewindEnabled?: boolean;
 }): string {
   const greeting = opts.isAdmin
     ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Back to admin panel</em> link above to manage the server.</p>`
     : `<p class="subtitle">These pages are scoped to <strong>you</strong> — what you see and change here only affects your own data on this server.</p>`;
+  const rewindCard =
+    opts.rewindEnabled === false
+      ? ""
+      : '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
+        '<span class="feature-desc">Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.</span></li>';
   return [
     "<h1>My preferences</h1>",
     greeting,
@@ -251,8 +280,7 @@ export function renderUserIndexBody(opts: {
       '<span class="feature-desc">Opt in or out of DM nudges from Koolbot.</span></li>',
     '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
       '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
-    '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
-      '<span class="feature-desc">Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.</span></li>',
+    rewindCard,
     "</ul>",
     "</div>",
     '<div class="card">',

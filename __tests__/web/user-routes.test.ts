@@ -9,7 +9,14 @@
  *  - The CSRF-protected `/me/finish` revokes the session and clears the cookie.
  */
 
-import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  describe,
+  it,
+  expect,
+  jest,
+  beforeEach,
+  afterEach,
+} from "@jest/globals";
 import { Buffer } from "buffer";
 import {
   assertSelfScope,
@@ -576,10 +583,20 @@ describe("/me/rewind", () => {
     (WebSessionService as unknown as { instance: unknown }).instance = null;
   });
 
+  // `dispatchRewind` installs spies (notably on `ConfigService.getInstance`)
+  // that would otherwise persist into later describe blocks — e.g.
+  // `/me/timezone`, which also reads `rewind.enabled` — and make test order
+  // matter. Restore after each test so every override is scoped to its own
+  // dispatch.
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   async function dispatchRewind(opts: {
     pathSuffix: string; // "" for "/rewind", "/2024" for "/rewind/2024"
     summary: unknown; // What RewindService.getInstance(...).getSummary should resolve to
     defaultYear?: number; // What getDefaultRewindYear resolves to (bare route only)
+    rewindEnabled?: boolean; // Feature gate `rewind.enabled` (#608); defaults to enabled
   }): Promise<{
     statusCode: number;
     body: string;
@@ -617,6 +634,14 @@ describe("/me/rewind", () => {
       await import("../../src/services/user-notification-prefs-service.js");
     jest.spyOn(UserNotificationPrefsService, "getInstance").mockReturnValue({
       getTimezone: async () => null,
+    } as never);
+
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    const rewindEnabled = opts.rewindEnabled ?? true;
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getBoolean: async (key: string) =>
+        key === "rewind.enabled" ? rewindEnabled : false,
     } as never);
 
     const { RewindService } =
@@ -829,6 +854,31 @@ describe("/me/rewind", () => {
     expect(out.statusCode).toBe(500);
     expect(out.body).toContain("Could not load your year-in-review");
   });
+
+  it("returns a 404 disabled state and does not query data when rewind.enabled is off (#608)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary(),
+      rewindEnabled: false,
+    });
+    expect(out.statusCode).toBe(404);
+    expect(out.body).toContain("Rewind) feature is currently disabled");
+    // The gate short-circuits before any data work.
+    expect(out.getSummary).not.toHaveBeenCalled();
+    expect(out.getDefaultRewindYear).not.toHaveBeenCalled();
+    // And the disabled feature drops out of the page nav.
+    expect(out.body).not.toContain('href="/me/rewind"');
+  });
+
+  it("gates the explicit :year deep-link too when disabled (#608)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "/2024",
+      summary: makeSummary({ year: 2024 }),
+      rewindEnabled: false,
+    });
+    expect(out.statusCode).toBe(404);
+    expect(out.getSummary).not.toHaveBeenCalled();
+  });
 });
 
 describe("/me/timezone (#524)", () => {
@@ -871,16 +921,14 @@ describe("/me/timezone (#524)", () => {
       expiresAt: new Date(now + 60 * 60 * 1000),
     } as never);
 
-    const { PermissionsService } = await import(
-      "../../src/services/permissions-service.js"
-    );
+    const { PermissionsService } =
+      await import("../../src/services/permissions-service.js");
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
     } as never);
 
-    const { UserNotificationPrefsService } = await import(
-      "../../src/services/user-notification-prefs-service.js"
-    );
+    const { UserNotificationPrefsService } =
+      await import("../../src/services/user-notification-prefs-service.js");
     const getTimezone = jest
       .fn<() => Promise<string | null>>()
       .mockResolvedValue(opts.stored ?? null);
@@ -906,7 +954,8 @@ describe("/me/timezone (#524)", () => {
       .mockResolvedValue({} as never);
 
     const mockClient = {} as never;
-    const { createSessionMiddleware } = await import("../../src/web/session.js");
+    const { createSessionMiddleware } =
+      await import("../../src/web/session.js");
     const requireSession = createSessionMiddleware(mockClient);
     const router = createUserRouter(mockClient, requireSession);
 
@@ -1012,9 +1061,7 @@ describe("/me/timezone (#524)", () => {
   it("clears the timezone when an empty value is submitted", async () => {
     let captured: { tz: string | null } | null = null;
     const setTimezone = jest
-      .fn<
-        (u: string, g: string, tz: string | null) => Promise<string | null>
-      >()
+      .fn<(u: string, g: string, tz: string | null) => Promise<string | null>>()
       .mockImplementation(async (_u, _g, tz) => {
         captured = { tz };
         return tz;
@@ -1033,9 +1080,7 @@ describe("/me/timezone (#524)", () => {
 
   it("surfaces a descriptive error when the service rejects an invalid zone", async () => {
     const setTimezone = jest
-      .fn<
-        (u: string, g: string, tz: string | null) => Promise<string | null>
-      >()
+      .fn<(u: string, g: string, tz: string | null) => Promise<string | null>>()
       .mockRejectedValue(
         new Error('"Mars/Phobos" is not a recognized IANA timezone identifier'),
       );

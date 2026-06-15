@@ -101,11 +101,16 @@ describe("RewindNudgeService", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     resetSingleton();
-    mockConfigGetBoolean.mockImplementation(async (key: unknown) => {
-      const k = key as string;
-      if (k === "rewind.enabled") return true;
-      return false;
-    });
+    mockConfigGetBoolean.mockImplementation(
+      async (key: unknown, def: unknown) => {
+        const k = key as string;
+        // Post-#608 the nudge keys off its own toggle; the feature gate
+        // (`rewind.enabled`) is only consulted as a backward-compat default.
+        if (k === "rewind.nudge.enabled") return true;
+        if (k === "rewind.enabled") return true;
+        return (def as boolean) ?? false;
+      },
+    );
     mockConfigGetString.mockImplementation(async (key: unknown) => {
       const k = key as string;
       if (k === "GUILD_ID") return "guild-1";
@@ -160,8 +165,62 @@ describe("RewindNudgeService", () => {
   });
 
   describe("runNow guards", () => {
-    it("returns null when the feature is disabled", async () => {
+    it("returns null when the nudge is disabled", async () => {
       mockConfigGetBoolean.mockResolvedValue(false);
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+      expect(result).toBeNull();
+      expect(mockTrackingAggregate).not.toHaveBeenCalled();
+    });
+
+    it("runs off the dedicated rewind.nudge.enabled toggle (#608)", async () => {
+      // Nudge on, feature gate off — the nudge is independent of the page
+      // feature, so it must still run.
+      mockConfigGetBoolean.mockImplementation(
+        async (key: unknown, def: unknown) => {
+          const k = key as string;
+          if (k === "rewind.nudge.enabled") return true;
+          if (k === "rewind.enabled") return false;
+          return (def as boolean) ?? false;
+        },
+      );
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+      expect(result).not.toBeNull();
+      expect(result!.sent).toBe(1);
+    });
+
+    it("falls back to the legacy rewind.enabled value when rewind.nudge.enabled is unset (#608)", async () => {
+      // Simulate an install that set the old key before the split: only
+      // `rewind.enabled` exists (true), `rewind.nudge.enabled` is unset so
+      // `getBoolean` returns the passed default (the legacy value).
+      mockConfigGetBoolean.mockImplementation(
+        async (key: unknown, def: unknown) => {
+          const k = key as string;
+          if (k === "rewind.enabled") return true; // legacy nudge opt-in
+          if (k === "rewind.nudge.enabled") return def as boolean; // unset
+          return (def as boolean) ?? false;
+        },
+      );
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+      expect(result).not.toBeNull();
+      expect(result!.sent).toBe(1);
+    });
+
+    it("an explicit rewind.nudge.enabled=false wins over a legacy rewind.enabled=true (#608)", async () => {
+      mockConfigGetBoolean.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "rewind.enabled") return true; // legacy value present
+        if (k === "rewind.nudge.enabled") return false; // explicit opt-out
+        return false;
+      });
       const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
       const result = await svc.runNow();
       expect(result).toBeNull();

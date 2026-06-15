@@ -63,10 +63,7 @@ export class RewindNudgeService {
 
     this.configService.registerReloadCallback(async () => {
       try {
-        const enabled = await this.configService.getBoolean(
-          "rewind.enabled",
-          false,
-        );
+        const enabled = await this.isNudgeEnabled();
         if (!enabled && this.isInitialized) {
           logger.info("Rewind nudge disabled, stopping cron job...");
           this.destroy();
@@ -100,6 +97,24 @@ export class RewindNudgeService {
     RewindNudgeService.instance = undefined as unknown as RewindNudgeService;
   }
 
+  /**
+   * Whether the end-of-year nudge should run. Keys off the dedicated
+   * `rewind.nudge.enabled` toggle (#608), falling back to the legacy
+   * `rewind.enabled` value for installs that opted into the nudge before
+   * the key was split into feature (page) vs nudge. Passing the legacy
+   * value as the default means an explicitly-stored `rewind.nudge.enabled`
+   * always wins, while installs that never set it inherit their old
+   * `rewind.enabled` behaviour — no manual migration required.
+   *
+   * This is deliberately independent of the `rewind.enabled` feature
+   * gate: an admin can keep the page on with no DMs (today's behaviour),
+   * or run the nudge without other coupling.
+   */
+  private async isNudgeEnabled(): Promise<boolean> {
+    const legacy = await this.configService.getBoolean("rewind.enabled", false);
+    return this.configService.getBoolean("rewind.nudge.enabled", legacy);
+  }
+
   private validateCronExpression(expression: string): boolean {
     try {
       new CronTime(expression);
@@ -120,10 +135,7 @@ export class RewindNudgeService {
     }
 
     try {
-      const enabled = await this.configService.getBoolean(
-        "rewind.enabled",
-        false,
-      );
+      const enabled = await this.isNudgeEnabled();
       if (!enabled) {
         logger.info("Rewind nudge is disabled");
         this.isInitialized = true;
@@ -186,12 +198,9 @@ export class RewindNudgeService {
     }
     this.isRunning = true;
     try {
-      const enabled = await this.configService.getBoolean(
-        "rewind.enabled",
-        false,
-      );
+      const enabled = await this.isNudgeEnabled();
       if (!enabled) {
-        logger.info("Rewind nudge aborted: feature disabled");
+        logger.info("Rewind nudge aborted: nudge disabled");
         return null;
       }
 

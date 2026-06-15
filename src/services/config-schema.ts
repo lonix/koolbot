@@ -75,7 +75,8 @@ export interface ConfigSchema {
   "digest.include_achievements": boolean;
 
   // Annual Personal Year-in-Review (Rewind) (#484)
-  "rewind.enabled": boolean;
+  "rewind.enabled": boolean; // Gates the /me/rewind feature (page + nav)
+  "rewind.nudge.enabled": boolean; // Gates the end-of-year DM nudge only (#608)
   "rewind.cron": string; // Cron schedule for the end-of-year DM nudge
   "rewind.min_minutes": number; // Min annual minutes to qualify for the nudge
 
@@ -227,10 +228,12 @@ export const defaultConfig: ConfigSchema = {
   "digest.streak_min_minutes": 30,
   "digest.include_achievements": true,
 
-  // Rewind year-in-review defaults (#484). Master gate off, follows
-  // rule 1. The page works whenever the data exists; this gate only
-  // controls the end-of-year DM nudge.
+  // Rewind year-in-review defaults (#484, #608). Master gate off,
+  // follows rule 1 — the /me/rewind page, its data aggregation, and the
+  // nav link are all gated by `rewind.enabled`. The end-of-year DM nudge
+  // has its own independent toggle (`rewind.nudge.enabled`).
   "rewind.enabled": false,
+  "rewind.nudge.enabled": false,
   "rewind.cron": "0 10 30 12 *", // Dec 30 at 10:00 in the host timezone
   "rewind.min_minutes": 60,
 
@@ -839,11 +842,18 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "boolean",
   },
 
-  // Rewind year-in-review (#484)
+  // Rewind year-in-review (#484, #608)
   "rewind.enabled": {
+    label: "Rewind enabled",
+    description:
+      "Enable the personal year-in-review feature: the /me/rewind page, its data aggregation, and the nav link. When off, the page returns a disabled state and isn't linked. The end-of-year DM nudge has its own toggle below.",
+    category: "rewind",
+    type: "boolean",
+  },
+  "rewind.nudge.enabled": {
     label: "Rewind end-of-year nudge enabled",
     description:
-      "Send a one-shot end-of-year DM linking eligible users to their personal year-in-review at /me/rewind. The page itself is always available.",
+      "Send a one-shot end-of-year DM linking eligible users to their personal year-in-review at /me/rewind. Independent of the Rewind feature toggle above. Existing installs that set the old `rewind.enabled` key keep their nudge behaviour via a backward-compat fallback.",
     category: "rewind",
     type: "boolean",
   },

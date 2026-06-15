@@ -483,16 +483,29 @@ Per-user year-in-review page at **`/me/rewind`** (also `/me/rewind/:year`
 for past years). Renders total voice time, top channels, peak day,
 longest streak, badges earned, annual rank, and a first/best/last
 weekly-rank journey. Year picker bottom-anchored to years with data.
-The page is always available; the cron job below only sends a one-shot
-end-of-year DM nudge.
+
+The feature and the end-of-year DM nudge have **separate** switches
+(#608). `rewind.enabled` gates the page itself; `rewind.nudge.enabled`
+gates the December DM independently. Following the repo's opt-in
+convention, both default to `false` — set `rewind.enabled = true` to
+expose the page.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `rewind.enabled` | `false` | Master switch for the end-of-year DM nudge (the WebUI page is unaffected) |
+| `rewind.enabled` | `false` | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, the page returns a 404 disabled state and is not linked |
+| `rewind.nudge.enabled` | `false` | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled` |
 | `rewind.cron` | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone) |
 | `rewind.min_minutes` | `60` | Minimum annual voice minutes a user needs to receive the nudge |
 
 **Notes:**
+
+- **Upgrade note (#608):** before this change, the single `rewind.enabled`
+  key only controlled the nudge and the page was always live. The key now
+  gates the *feature*; the nudge moved to `rewind.nudge.enabled`. Installs
+  that had set `rewind.enabled = true` keep both the page and the nudge on
+  (the nudge reads `rewind.nudge.enabled`, falling back to the old
+  `rewind.enabled` value when unset). Installs that never enabled it now
+  have the page off by default, in line with every other feature gate.
 
 - Requires `voicetracking.enabled = true` so the underlying session
   data exists; the page renders an empty state otherwise.
@@ -949,6 +962,7 @@ above).
 #### Rewind (Year-in-Review)
 
 - `rewind.enabled` (bool, default: false)
+- `rewind.nudge.enabled` (bool, default: false)
 - `rewind.cron` (string, default: `"0 10 30 12 *"`)
 - `rewind.min_minutes` (number, default: 60)
 
