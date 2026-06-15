@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { BotStatusService } from '../../src/services/bot-status-service.js';
+import { lonelyStatuses } from '../../src/content/statuses.js';
 
 // Mock dependencies
 jest.mock('../../src/services/config-service.js');
@@ -78,6 +79,72 @@ describe('BotStatusService', () => {
       service.setShutdownStatus();
       // Method should execute without errors
       expect(true).toBe(true);
+    });
+  });
+
+  describe('VC user count priming (#614)', () => {
+    let service: BotStatusService;
+    let mockClient: any;
+
+    const lastActivityName = (): string => {
+      const calls = mockClient.user.setPresence.mock.calls;
+      return calls[calls.length - 1][0].activities[0].name as string;
+    };
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      // Reset the singleton so each test gets a fresh instance bound to its
+      // own mock client (getInstance keeps the first client otherwise).
+      (BotStatusService as any).instance = undefined;
+      mockClient = { user: { setPresence: jest.fn() } };
+      service = BotStatusService.getInstance(mockClient);
+    });
+
+    afterEach(() => {
+      service.stopVcMonitoring();
+    });
+
+    it('reflects users already in voice when primed at startup', async () => {
+      // Simulates a restart with 4 users already sitting in voice: the
+      // provider reports the live count and priming applies it before the
+      // operational status is rendered.
+      service.setVcUserCountProvider(async () => 4);
+      await service.refreshVcUserCount();
+      service.setOperationalStatus();
+
+      expect(service.getStatusInfo().currentVcUserCount).toBe(4);
+      expect(lastActivityName()).toContain('4');
+      expect(lonelyStatuses).not.toContain(lastActivityName());
+    });
+
+    it('still shows the lonely status when no users are in voice', async () => {
+      service.setVcUserCountProvider(async () => 0);
+      await service.refreshVcUserCount();
+      service.setOperationalStatus();
+
+      expect(service.getStatusInfo().currentVcUserCount).toBe(0);
+      expect(lonelyStatuses).toContain(lastActivityName());
+    });
+
+    it('is a no-op when no provider is registered', async () => {
+      // Explicitly clearing the provider should neither throw nor change
+      // the count (a fresh service also starts with no provider).
+      service.setVcUserCountProvider(null);
+      await expect(service.refreshVcUserCount()).resolves.toBeUndefined();
+    });
+
+    it('swallows provider errors without throwing', async () => {
+      service.setVcUserCountProvider(async () => {
+        throw new Error('cache walk failed');
+      });
+      await expect(service.refreshVcUserCount()).resolves.toBeUndefined();
+    });
+
+    it('starts a self-healing monitor interval', () => {
+      service.startVcMonitoring();
+      expect(service.getStatusInfo().isMonitoring).toBe(true);
+      service.stopVcMonitoring();
+      expect(service.getStatusInfo().isMonitoring).toBe(false);
     });
   });
 });

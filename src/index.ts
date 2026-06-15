@@ -704,6 +704,15 @@ async function initializeServices(): Promise<void> {
       logger.error("❌ Error switching lobby to online mode:", error);
     }
 
+    // Prime the VC user count from the live channel cache so the presence
+    // reflects users already sitting in voice at startup, instead of showing
+    // the "lonely" status until the next voiceStateUpdate (#614). Registering
+    // the provider also lets the status monitor self-heal the count later.
+    botStatusService.setVcUserCountProvider(() =>
+      voiceChannelManager.getTotalVcUserCount(),
+    );
+    await botStatusService.refreshVcUserCount();
+
     // Set bot to fully operational status (green) and start VC monitoring
     botStatusService.setOperationalStatus();
     botStatusService.startVcMonitoring();
