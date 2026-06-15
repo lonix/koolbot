@@ -485,13 +485,50 @@ describe("renderSettingsPage", () => {
     expect(html).toContain('<option value="r2">@Member</option>');
   });
 
-  it("renders a channel_list-type setting as a multi-select with CSV pre-selection", () => {
+  it("renders a text channel_list-type setting as a multi-select with CSV pre-selection", () => {
     const html = renderSettingsPage({
       ...COMMON,
       textChannels: [
         { id: "111", name: "general" },
         { id: "222", name: "afk" },
         { id: "333", name: "other" },
+      ],
+      voiceChannels: [],
+      categoryChannels: [],
+      roles: [],
+      groups: [
+        {
+          category: "messagetracking",
+          rows: [
+            {
+              key: "messagetracking.excluded_channels",
+              label: "Excluded channels",
+              current: "111,333",
+              defaultValue: "",
+              type: "channel_list",
+              description: "",
+              category: "messagetracking",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toMatch(
+      /<select name="value_messagetracking\.excluded_channels" multiple/,
+    );
+    expect(html).toContain('<option value="111" selected>#general</option>');
+    expect(html).toContain('<option value="222">#afk</option>');
+    expect(html).toContain('<option value="333" selected>#other</option>');
+  });
+
+  it("renders a voice channel_list (channelKind: voice) from voiceChannels, not textChannels (#611)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      textChannels: [{ id: "t1", name: "general-text" }],
+      voiceChannels: [
+        { id: "v1", name: "Lounge" },
+        { id: "v2", name: "Gaming" },
+        { id: "v3", name: "AFK" },
       ],
       categoryChannels: [],
       roles: [],
@@ -502,22 +539,25 @@ describe("renderSettingsPage", () => {
             {
               key: "voicetracking.excluded_channels",
               label: "Excluded channels",
-              current: "111,333",
+              current: "v1,v3",
               defaultValue: "",
               type: "channel_list",
               description: "",
               category: "voicetracking",
+              channelKind: "voice",
             },
           ],
         },
       ],
     });
-    expect(html).toMatch(
-      /<select name="value_voicetracking\.excluded_channels" multiple/,
-    );
-    expect(html).toContain('<option value="111" selected>#general</option>');
-    expect(html).toContain('<option value="222">#afk</option>');
-    expect(html).toContain('<option value="333" selected>#other</option>');
+    // Voice channels are offered…
+    expect(html).toContain('<option value="v1" selected>#Lounge</option>');
+    expect(html).toContain('<option value="v2">#Gaming</option>');
+    expect(html).toContain('<option value="v3" selected>#AFK</option>');
+    // …and the text channel is NOT present in this control.
+    expect(html).not.toContain("general-text");
+    // Selected channels render as a readable, separated summary (no blob).
+    expect(html).toContain("Selected: #Lounge, #AFK");
   });
 
   it("renders a role_list-type setting as a multi-select with CSV pre-selection", () => {

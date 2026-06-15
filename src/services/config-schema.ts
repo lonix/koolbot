@@ -353,6 +353,16 @@ export interface SettingMetadata {
    * keys (see `REWIND_RETENTION_MIN_DAYS`).
    */
   warnBelow?: SettingWarnBelow;
+  /**
+   * Which kind of Discord channel a `channel` / `channel_list` picker offers.
+   * `"text"` (the default when omitted) lists text/announcement channels;
+   * `"voice"` lists voice + stage channels. Set `"voice"` on keys that
+   * exclude or target voice channels — e.g. `voicetracking.excluded_channels`,
+   * which excludes voice channels a session could be tracked in — so the
+   * picker doesn't offer text channels that can't host a voice session.
+   * Ignored for non-channel types.
+   */
+  channelKind?: "text" | "voice";
 }
 
 /**
@@ -569,6 +579,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Comma-separated channel IDs to exclude from voice activity tracking.",
     category: "voicetracking",
     type: "channel_list",
+    channelKind: "voice",
   },
   "voicetracking.announcements.enabled": {
     label: "Scheduled voice-stats announcements enabled",
