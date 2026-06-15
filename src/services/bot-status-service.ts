@@ -249,9 +249,12 @@ export class BotStatusService {
   /**
    * Register a function that reports the live total VC user count. Used to
    * prime the count at startup and to self-heal it on the monitor interval.
+   * Pass `null`/`undefined` to clear a previously registered provider.
    */
-  public setVcUserCountProvider(provider: () => Promise<number>): void {
-    this.vcUserCountProvider = provider;
+  public setVcUserCountProvider(
+    provider: (() => Promise<number>) | null | undefined,
+  ): void {
+    this.vcUserCountProvider = provider ?? null;
   }
 
   /**

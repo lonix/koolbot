@@ -127,8 +127,9 @@ describe('BotStatusService', () => {
     });
 
     it('is a no-op when no provider is registered', async () => {
-      service.setVcUserCountProvider(undefined as any);
-      // Should neither throw nor change the count.
+      // Explicitly clearing the provider should neither throw nor change
+      // the count (a fresh service also starts with no provider).
+      service.setVcUserCountProvider(null);
       await expect(service.refreshVcUserCount()).resolves.toBeUndefined();
     });
 
