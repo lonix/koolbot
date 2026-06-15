@@ -118,7 +118,7 @@ describe("renderAdminPage", () => {
     // only mounts express.urlencoded, so a multipart body arrives empty and
     // `_csrf` is lost, failing requireCsrf with "CSRF token missing"
     // (issue #628). Wrapping FormData in URLSearchParams keeps it urlencoded.
-    expect(html).toContain("body:new URLSearchParams(new FormData(form))");
+    expect(html).toContain("URLSearchParams(new FormData(form))");
     expect(html).not.toContain("body:new FormData(form)");
   });
 

@@ -406,18 +406,22 @@ const SETTINGS_SAVE_SCRIPT =
   // Reset buttons retarget via formaction — let those submit natively.
   "if(submitter&&submitter.getAttribute('formaction'))return;" +
   "if(typeof fetch!=='function'||typeof FormData!=='function'||typeof URLSearchParams!=='function')return;" +
-  "e.preventDefault();" +
-  "var save=form.querySelector('button[type=submit]:not([formaction])');" +
-  "if(save)save.disabled=true;" +
-  // Send as application/x-www-form-urlencoded, NOT multipart. The router
+  // Build the urlencoded body BEFORE preventDefault so a throw in a
+  // partially-supported browser falls back to the native (urlencoded) form
+  // POST instead of aborting a half-suppressed submit and breaking Save.
+  // Sent as application/x-www-form-urlencoded, NOT multipart: the router
   // only mounts express.urlencoded (no multipart parser), so a multipart
   // FormData body would arrive empty server-side — losing `_csrf` and
   // tripping requireCsrf with "CSRF token missing" (issue #628). Wrapping
   // the FormData in URLSearchParams makes fetch send urlencoded, so the
   // CSRF token and every value_*/keys field round-trip through the parser.
+  "var body;try{body=new URLSearchParams(new FormData(form))}catch(err){return}" +
+  "e.preventDefault();" +
+  "var save=form.querySelector('button[type=submit]:not([formaction])');" +
+  "if(save)save.disabled=true;" +
   "fetch(form.action,{method:'POST',credentials:'same-origin',cache:'no-store'," +
   "headers:{'Accept':'application/json','X-Requested-With':'fetch'}," +
-  "body:new URLSearchParams(new FormData(form))})" +
+  "body:body})" +
   ".then(function(res){if(res.status===401){window.location.href='/admin/';return null}" +
   // Read the body once as text and try to parse it as JSON. The server's
   // happy path and its error paths (CSRF/rate-limit/payload/unhandled) all
