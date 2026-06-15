@@ -1,5 +1,5 @@
 # Build stage
-FROM node:22-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -16,7 +16,7 @@ COPY . .
 RUN npm run build
 
 # Production dependencies stage
-FROM node:22-alpine AS prod-deps
+FROM node:24-alpine AS prod-deps
 
 WORKDIR /app
 
@@ -25,14 +25,14 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 # Production stage
-FROM node:22-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 
 # Stopgap: pull patched OpenSSL libraries ahead of the base image so Trivy's
-# system-package scan stays clean (OpenSSL CVEs in node:22-alpine — High
+# system-package scan stays clean (OpenSSL CVEs in node:24-alpine — High
 # #57/#72, Medium #590, Low #62-#71/#77-#86). Runs as root before dropping to
-# USER node. Remove once node:22-alpine ships the fixed libssl3/libcrypto3.
+# USER node. Remove once node:24-alpine ships the fixed libssl3/libcrypto3.
 RUN apk --no-cache upgrade libssl3 libcrypto3
 
 # Copy only runtime artifacts
