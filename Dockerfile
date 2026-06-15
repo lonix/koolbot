@@ -30,9 +30,11 @@ FROM node:24-alpine
 WORKDIR /app
 
 # Stopgap: pull patched OpenSSL libraries ahead of the base image so Trivy's
-# system-package scan stays clean (OpenSSL CVEs in node:24-alpine — High
-# #57/#72, Medium #590, Low #62-#71/#77-#86). Runs as root before dropping to
-# USER node. Remove once node:24-alpine ships the fixed libssl3/libcrypto3.
+# system-package scan stays clean whenever the Alpine base lags upstream
+# OpenSSL fixes (historically flagged against libssl3/libcrypto3 — High
+# #57/#72, Medium #590, Low #62-#71/#77-#86 on node:22-alpine). Runs as root
+# before dropping to USER node. Drop once Trivy confirms node:24-alpine ships
+# the fixed libssl3/libcrypto3 (tracked in #604).
 RUN apk --no-cache upgrade libssl3 libcrypto3
 
 # Copy only runtime artifacts
