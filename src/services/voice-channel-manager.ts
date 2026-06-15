@@ -2003,6 +2003,13 @@ export class VoiceChannelManager {
           logger.error(`Error deleting channel ${channel.name}:`, error);
         }
       }
+
+      // After cleanup, make sure a lobby channel still exists. When the lobby
+      // name is changed via /config the old channel no longer matches the
+      // configured name and is deleted above as "unmanaged"; without this the
+      // guild is left with no lobby until the next (much slower) health check
+      // happens to notice it is missing. Re-ensuring here closes that gap.
+      await this.ensureLobbyChannelExists(guild);
     } catch (error) {
       logger.error("Error during voice channel cleanup:", error);
     }
