@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.2](https://github.com/lonix/koolbot/compare/v1.2.1...v1.2.2) (2026-06-15)
+
+
+### 🐛 Bug Fixes
+
+* **webui:** send settings section save as urlencoded so CSRF token survives ([#629](https://github.com/lonix/koolbot/issues/629)) ([13a23b8](https://github.com/lonix/koolbot/commit/13a23b85dbe4031af76955781baded0d9ce7ff42))
+
 ## [1.2.1](https://github.com/lonix/koolbot/compare/v1.2.0...v1.2.1) (2026-06-15)
 
 
