@@ -1251,7 +1251,7 @@ function renderFeatureDisabledNotice(opts: {
   if (opts.enabled) return "";
   const label = escapeHtml(opts.label);
   return `<div class="notice warn feature-disabled">
-  <div class="fd-text"><strong>${label} are disabled.</strong> The settings below stay inactive until you turn the feature on. Enable it here, or from Settings.</div>
+  <div class="fd-text"><strong>${label} are disabled.</strong> You can still configure things below, but they won't take effect until you enable the feature. Enable it here, or from Settings.</div>
   <div class="fd-actions">
     <form method="POST" action="/admin/settings/set">
       <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
