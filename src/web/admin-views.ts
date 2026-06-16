@@ -1230,6 +1230,41 @@ function renderFlash(flash?: FlashMessage | null): string {
   return `<div class="notice ${cls}">${escapeHtml(flash.text)}</div>`;
 }
 
+/**
+ * Banner shown at the top of a feature page when that feature is disabled
+ * (#610). Feature pages are reachable even while off — their nav link is now
+ * greyed rather than hidden — so a disabled page must explain the state and
+ * offer a way to enable it instead of looking empty or broken. Renders a
+ * warning notice with an inline "Enable" action (flips the `<feature>.enabled`
+ * flag via the existing /admin/settings/set route and returns to this same
+ * page) plus a link to the full Settings surface.
+ *
+ * Returns "" when `enabled` is true so callers can drop it in unconditionally.
+ */
+function renderFeatureDisabledNotice(opts: {
+  enabled: boolean;
+  label: string;
+  featureKey: string;
+  returnTo: string;
+  csrfToken: string;
+}): string {
+  if (opts.enabled) return "";
+  const label = escapeHtml(opts.label);
+  return `<div class="notice warn feature-disabled">
+  <div class="fd-text"><strong>${label} are disabled.</strong> The settings below stay inactive until you turn the feature on. Enable it here, or from Settings.</div>
+  <div class="fd-actions">
+    <form method="POST" action="/admin/settings/set">
+      <input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">
+      <input type="hidden" name="key" value="${escapeHtml(opts.featureKey)}">
+      <input type="hidden" name="value" value="true">
+      <input type="hidden" name="redirect" value="${escapeHtml(opts.returnTo)}">
+      <button type="submit" class="btn btn-primary">Enable ${label}</button>
+    </form>
+    <a class="btn btn-secondary" href="/admin/settings">Open Settings</a>
+  </div>
+</div>`;
+}
+
 function channelOptionsHtml(
   options: ChannelOption[],
   selectedId?: string,
@@ -1332,6 +1367,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 <h1>Announcements</h1>
 <p class="subtitle">Scheduled announcements posted on a cron. Replaces <code>/announce</code> and <code>/announce-vc-stats</code>; the slash commands still work in parallel during migration.</p>
 ${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -1490,6 +1526,7 @@ export function renderPollsPage(props: PollsProps): string {
 <h1>Polls</h1>
 <p class="subtitle">Poll schedules and the question library. Replaces <code>/poll create|delete|test|add-item|delete-item|import-url|list|list-items</code>; the slash commands still work in parallel during migration.</p>
 ${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -1647,6 +1684,7 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
 <h1>Reaction Roles</h1>
 <p class="subtitle">Per-message reaction-role mappings. Replaces <code>/reactrole create|archive|unarchive|delete|list|status</code>; the slash commands still work in parallel during migration.</p>
 ${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles", featureKey: "reactionroles.enabled", returnTo: "/admin/reaction-roles", csrfToken: props.csrfToken })}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -1778,6 +1816,7 @@ export function renderNoticesPage(props: NoticesProps): string {
 <h1>Notices</h1>
 <p class="subtitle">Notice posts grouped by category. Replaces <code>/notice add|edit|delete|sync</code>; the slash commands still work in parallel during migration. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
 ${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
@@ -2150,6 +2189,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
 <h1>Voice Channels</h1>
 <p class="subtitle">Voice-channel category contents and live state. Replaces <code>/vc force-reload</code>; for the gentler empty-channel cleanup use <code>/vc reload</code>. The slash commands still work in parallel during migration.</p>
 ${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels", featureKey: "voicechannels.enabled", returnTo: "/admin/voice-channels", csrfToken: props.csrfToken })}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">

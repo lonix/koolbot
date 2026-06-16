@@ -178,7 +178,7 @@ describe("renderAdminPage", () => {
     }
   });
 
-  it("hides feature-gated nav items whose feature is disabled", () => {
+  it("shows feature-gated nav items even when disabled, marked off (#610)", () => {
     const html = renderAdminPage({
       title: "Dashboard",
       active: "/admin/",
@@ -193,14 +193,23 @@ describe("renderAdminPage", () => {
         "voicechannels.enabled": true,
       },
     });
-    // Disabled features are gone.
-    expect(html).not.toContain('href="/admin/announcements"');
-    expect(html).not.toContain('href="/admin/reaction-roles"');
-    expect(html).not.toContain('href="/admin/notices"');
-    // Enabled features stay.
+    // Disabled features stay advertised so the page is discoverable...
+    expect(html).toContain('href="/admin/announcements"');
+    expect(html).toContain('href="/admin/reaction-roles"');
+    expect(html).toContain('href="/admin/notices"');
+    // ...but greyed and tagged "off".
+    expect(html).toContain('href="/admin/announcements" class="nav-disabled"');
+    expect(html).toContain('href="/admin/reaction-roles" class="nav-disabled"');
+    expect(html).toContain('href="/admin/notices" class="nav-disabled"');
+    expect(html).toContain('<span class="nav-badge">off</span>');
+    // Enabled features render as plain links (no disabled marker).
     expect(html).toContain('href="/admin/polls"');
+    expect(html).not.toContain('href="/admin/polls" class="nav-disabled"');
     expect(html).toContain('href="/admin/voice-channels"');
-    // Ungated items are always present.
+    expect(html).not.toContain(
+      'href="/admin/voice-channels" class="nav-disabled"',
+    );
+    // Ungated items are always present and never marked disabled.
     expect(html).toContain('href="/admin/settings"');
     expect(html).toContain('href="/admin/database"');
     expect(html).toContain('href="/admin/bootstrap"');
@@ -261,7 +270,7 @@ describe("renderAdminPage grouped sidebar (#613)", () => {
     }
   });
 
-  it("omits a group's heading when all of its items are filtered out", () => {
+  it("keeps the Features group with items greyed when all are disabled (#610)", () => {
     // Every Features-group item is feature-gated; turn them all off.
     const html = render({
       "announcements.enabled": false,
@@ -270,14 +279,17 @@ describe("renderAdminPage grouped sidebar (#613)", () => {
       "notices.enabled": false,
       "voicechannels.enabled": false,
     });
-    // The whole Features group disappears — no dangling header.
-    expect(html).not.toContain('nav-group-heading">Features<');
+    // The Features group stays visible — every item is shown, just greyed —
+    // so a disabled feature's page is still reachable from the sidebar.
+    expect(html).toContain('nav-group-heading">Features<');
+    expect(html).toContain('href="/admin/polls" class="nav-disabled"');
+    expect(html).toContain('href="/admin/announcements" class="nav-disabled"');
     // The always-present groups remain.
     expect(html).toContain('nav-group-heading">Info<');
     expect(html).toContain('nav-group-heading">Settings<');
   });
 
-  it("keeps a group's heading when at least one item survives filtering", () => {
+  it("renders every Features item, greying only the disabled ones (#610)", () => {
     const html = render({
       "announcements.enabled": false,
       "polls.enabled": true,
@@ -286,8 +298,11 @@ describe("renderAdminPage grouped sidebar (#613)", () => {
       "voicechannels.enabled": false,
     });
     expect(html).toContain('nav-group-heading">Features<');
+    // Enabled item: plain link.
     expect(html).toContain('href="/admin/polls"');
-    expect(html).not.toContain('href="/admin/announcements"');
+    expect(html).not.toContain('href="/admin/polls" class="nav-disabled"');
+    // Disabled item: still present, greyed.
+    expect(html).toContain('href="/admin/announcements" class="nav-disabled"');
   });
 
   it("ships muted CSS for the group heading consistent with the sidebar", () => {

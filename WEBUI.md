@@ -757,6 +757,16 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
+Feature pages (Announcements, Polls, Reaction Roles, Notices, Voice
+Channels) are gated by their `<feature>.enabled` config key. When a
+feature is **off**, its sidebar link is still shown — greyed with an
+"off" badge — rather than hidden, so the page stays discoverable (#610);
+hiding it created a chicken-and-egg where the natural place to enable a
+feature was the very page you couldn't reach. Opening a disabled feature's
+page renders a banner explaining the state with an inline **Enable** button
+(flips the flag via `/admin/settings/set` and returns you to the page) plus
+an **Open Settings** link.
+
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
 are in voice: the *empty*, *one user*, and *multiple users* pools. Each

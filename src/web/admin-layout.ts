@@ -80,10 +80,12 @@ interface NavItem {
   group: NavGroup;
   /**
    * Config key (a `<feature>.enabled` boolean) that gates this page. When
-   * set and the feature resolves to `false`, the item is hidden from the
-   * sidebar. Items without a `featureKey` — Dashboard, Settings, etc. —
-   * are always shown. The page URL itself stays reachable by direct
-   * navigation; only the nav advertisement is suppressed.
+   * set and the feature resolves to `false`, the item is still shown but
+   * rendered greyed with an "off" badge (#610) — hiding it left the page
+   * undiscoverable, since the natural place to enable a feature is its own
+   * page. Items without a `featureKey` — Dashboard, Settings, etc. — render
+   * as plain links. The page URL is reachable either way; the gating only
+   * changes how the nav advertises it.
    *
    * Typed as `keyof ConfigSchema` so a typo in `NAV_ITEMS` fails at
    * compile time rather than silently never matching at runtime.
@@ -198,6 +200,12 @@ const STYLE = [
   "nav.side a{display:block;padding:.5rem .75rem;border-radius:6px;color:#cbd5e1}",
   "nav.side a:hover{background:#1f2937;text-decoration:none}",
   "nav.side a.active{background:#1d2a44;color:#fff}",
+  // Feature-gated pages whose feature is off are shown but greyed with an
+  // "off" badge so they stay discoverable (#610). The active page keeps its
+  // highlight even when disabled, so the greying only applies when inactive.
+  "nav.side a.nav-disabled:not(.active){color:#6b7280}",
+  "nav.side a.nav-disabled:not(.active):hover{color:#94a3b8}",
+  "nav.side a .nav-badge{float:right;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#cbd5e1;background:#374151;border-radius:4px;padding:.05rem .3rem;margin-top:.1rem}",
   "main{flex:1;padding:1.5rem 2rem;max-width:1100px}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
   "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:#cbd5e1}",
@@ -232,6 +240,12 @@ const STYLE = [
   ".notice.ok{background:#14532d;color:#bbf7d0}",
   ".notice.warn{background:#4a3a0d;color:#fde68a}",
   ".notice.err{background:#4b1e1e;color:#fecaca}",
+  // Disabled-feature banner (#610): explanatory text on the left, inline
+  // enable action + Settings link on the right; wraps on narrow screens.
+  ".notice.feature-disabled{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between}",
+  ".notice.feature-disabled .fd-text{flex:1 1 280px}",
+  ".notice.feature-disabled .fd-actions{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
+  ".notice.feature-disabled form{margin:0}",
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
   "form.stack label{display:flex;flex-direction:column;gap:.25rem;font-size:.85rem;color:#cbd5e1}",
   "form.stack label.checkbox{flex-direction:row;align-items:center;gap:.5rem}",
@@ -494,26 +508,34 @@ function renderNav(
   active: string,
   navFeatureStatus?: NavFeatureStatus,
 ): string {
-  // No status map → show everything. Otherwise hide items whose gating
-  // feature resolves to false. An unknown featureKey (missing from the
-  // map) is treated as enabled so a wiring gap never blanks the nav.
-  const isVisible = (item: NavItem): boolean => {
-    if (!navFeatureStatus || !item.featureKey) return true;
-    return navFeatureStatus[item.featureKey] !== false;
+  // Feature-gated items are shown even when their feature is off (#610) so
+  // the page stays discoverable; a disabled item is greyed and tagged "off"
+  // but the link still works, and the page itself renders an "enable here"
+  // prompt. An unknown featureKey (missing from the map) and items without a
+  // featureKey render as plain links — a wiring gap fails open, not greyed.
+  const isDisabled = (item: NavItem): boolean => {
+    if (!navFeatureStatus || !item.featureKey) return false;
+    return navFeatureStatus[item.featureKey] === false;
   };
   const renderItem = (item: NavItem): string => {
     const isActive =
       item.href === active || (item.href === "/admin/" && active === "/admin");
-    const cls = isActive ? ' class="active"' : "";
-    return `<li><a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a></li>`;
+    const disabled = isDisabled(item);
+    const classes = [isActive ? "active" : "", disabled ? "nav-disabled" : ""]
+      .filter(Boolean)
+      .join(" ");
+    const cls = classes ? ` class="${classes}"` : "";
+    const title = disabled
+      ? ' title="This feature is disabled — open it to enable it"'
+      : "";
+    const badge = disabled ? '<span class="nav-badge">off</span>' : "";
+    return `<li><a href="${escapeHtml(item.href)}"${cls}${title}>${escapeHtml(item.label)}${badge}</a></li>`;
   };
-  // One <ul> per group, preceded by a small heading. A group whose items
-  // are all filtered out by feature gating renders nothing at all — no
-  // dangling header (#613).
+  // One <ul> per group, preceded by a small heading. Feature items are now
+  // always shown, so a group only renders empty if it genuinely has no items
+  // — no dangling header (#613).
   return NAV_GROUP_ORDER.map((group) => {
-    const items = NAV_ITEMS.filter(
-      (item) => item.group === group && isVisible(item),
-    );
+    const items = NAV_ITEMS.filter((item) => item.group === group);
     if (items.length === 0) return "";
     return (
       `<div class="nav-group">` +

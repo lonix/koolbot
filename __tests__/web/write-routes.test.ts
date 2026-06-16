@@ -11,6 +11,7 @@ import {
   firstLengthError,
   parseStringListImport,
   resetConfigToDefaults,
+  safeAdminRedirect,
   truncateFlash,
   wantsJson,
   TEXT_LIMITS,
@@ -457,6 +458,26 @@ describe("findSectionMasterKey", () => {
 
   it("returns null for an unknown key that merely ends with .enabled", () => {
     expect(findSectionMasterKey(["bogus.feature.enabled"])).toBeNull();
+  });
+});
+
+describe("safeAdminRedirect (#610)", () => {
+  it("allows a known feature-page nav target", () => {
+    expect(safeAdminRedirect("/admin/polls")).toBe("/admin/polls");
+    expect(safeAdminRedirect("/admin/voice-channels")).toBe(
+      "/admin/voice-channels",
+    );
+  });
+
+  it("falls back to /admin/settings for unknown or empty targets", () => {
+    expect(safeAdminRedirect("")).toBe("/admin/settings");
+    expect(safeAdminRedirect("/admin/unknown")).toBe("/admin/settings");
+  });
+
+  it("rejects off-site and protocol-relative targets (no open redirect)", () => {
+    expect(safeAdminRedirect("https://evil.example/")).toBe("/admin/settings");
+    expect(safeAdminRedirect("//evil.example")).toBe("/admin/settings");
+    expect(safeAdminRedirect("/etc/passwd")).toBe("/admin/settings");
   });
 });
 
