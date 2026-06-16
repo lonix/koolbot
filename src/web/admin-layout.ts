@@ -194,7 +194,7 @@ const STYLE = [
   // Grouped sidebar sections (#613): a muted, small uppercase heading sits
   // above each group's <ul>, consistent with the dark sidebar palette.
   "nav.side .nav-group+.nav-group{margin-top:1rem}",
-  "nav.side .nav-group-heading{padding:.25rem .75rem;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#64748b}",
+  "nav.side .nav-group-heading{padding:.25rem .75rem;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8}",
   "nav.side a{display:block;padding:.5rem .75rem;border-radius:6px;color:#cbd5e1}",
   "nav.side a:hover{background:#1f2937;text-decoration:none}",
   "nav.side a.active{background:#1d2a44;color:#fff}",
