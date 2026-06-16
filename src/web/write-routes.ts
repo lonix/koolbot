@@ -64,6 +64,7 @@ import {
 import {
   getDisplayedRemainingMs,
   resolveNavFeatureStatus,
+  NAV_ITEMS,
 } from "./admin-layout.js";
 import {
   renderImportDiffPage,
@@ -153,6 +154,22 @@ function getString(req: AuthenticatedRequest, name: string): string {
   const raw = (req.body as Record<string, unknown> | undefined)?.[name];
   if (typeof raw !== "string") return "";
   return raw.trim();
+}
+
+/**
+ * Allowlisted post-action redirect targets (#610). The feature pages render an
+ * inline "Enable <feature>" form that POSTs to /admin/settings/set with a
+ * `redirect` field so the operator lands back on the page they enabled rather
+ * than on /admin/settings. Restricting the target to known nav hrefs closes
+ * the open-redirect door — an unrecognised value falls back to the Settings
+ * page that this route has always returned to.
+ */
+const ADMIN_REDIRECT_ALLOWLIST = new Set<string>(
+  NAV_ITEMS.map((item) => item.href),
+);
+
+export function safeAdminRedirect(raw: string): string {
+  return ADMIN_REDIRECT_ALLOWLIST.has(raw) ? raw : "/admin/settings";
 }
 
 function getCheckbox(req: AuthenticatedRequest, name: string): boolean {
@@ -518,6 +535,10 @@ export function createWriteRouter(
       const session = requireSessionContext(req);
       const key = getString(req, "key");
       const raw = (req.body as Record<string, unknown> | undefined)?.value;
+      // Where to land after the write. Defaults to /admin/settings (this
+      // route's historical target); the feature pages' inline "Enable"
+      // action passes their own page so the operator returns there (#610).
+      const redirectTo = safeAdminRedirect(getString(req, "redirect"));
 
       const coerced = coerceConfigValue(key, raw);
       if (!coerced.ok) {
@@ -528,7 +549,7 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: coerced.reason,
         });
-        flashRedirect(res, "/admin/settings", {
+        flashRedirect(res, redirectTo, {
           type: "err",
           text: `Cannot set ${key || "(empty key)"}: ${coerced.reason}.`,
         });
@@ -567,7 +588,7 @@ export function createWriteRouter(
           unknown.length > 0
             ? ` Note: ${unknown.join(", ")} ${unknown.length === 1 ? "is not a" : "are not"} recognised emoji shortcode${unknown.length === 1 ? "" : "s"} (kept as typed; custom server emoji can't appear in channel names).`
             : "";
-        flashRedirect(res, "/admin/settings", {
+        flashRedirect(res, redirectTo, {
           type: unknown.length > 0 ? "warn" : "ok",
           text: `Set ${key} = ${String(coerced.value)}.${hint}`,
         });
@@ -581,7 +602,7 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: text,
         });
-        flashRedirect(res, "/admin/settings", {
+        flashRedirect(res, redirectTo, {
           type: "err",
           text: `Failed to set ${key}: ${text}`,
         });

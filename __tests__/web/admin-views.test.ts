@@ -915,6 +915,44 @@ describe("renderPollsPage", () => {
     expect(html).toContain("No poll questions");
   });
 
+  it("renders an enable banner with an inline action when disabled (#610)", () => {
+    const html = renderPollsPage({
+      ...COMMON,
+      enabled: false,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      schedules: [],
+      items: [],
+      textChannels: [],
+      roles: [],
+    });
+    // The disabled page explains the state instead of looking blank...
+    expect(html).toContain('class="notice warn feature-disabled"');
+    expect(html).toContain("Polls are disabled");
+    // ...and offers an inline enable that flips polls.enabled and returns here.
+    expect(html).toContain('action="/admin/settings/set"');
+    expect(html).toContain('name="key" value="polls.enabled"');
+    expect(html).toContain('name="value" value="true"');
+    expect(html).toContain('name="redirect" value="/admin/polls"');
+    expect(html).toContain("Open Settings");
+  });
+
+  it("omits the enable banner when polls are enabled (#610)", () => {
+    const html = renderPollsPage({
+      ...COMMON,
+      enabled: true,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      schedules: [],
+      items: [],
+      textChannels: [],
+      roles: [],
+    });
+    // The CSS rule for the banner is always present; assert on the rendered
+    // notice element rather than the bare class name.
+    expect(html).not.toContain('class="notice warn feature-disabled"');
+  });
+
   it("renders schedules and items with channel + role mentions", () => {
     const html = renderPollsPage({
       ...COMMON,
