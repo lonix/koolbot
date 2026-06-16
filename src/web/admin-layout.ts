@@ -56,9 +56,28 @@ export function escapeJsInAttr(value: unknown): string {
   return escapeHtml(jsSafe);
 }
 
+/**
+ * Sidebar groups, rendered in this fixed order (#613). Splitting the
+ * formerly-flat list into a few labelled sections keeps related pages
+ * together as the page count grows:
+ *   - Info     — read-only diagnostics / status surfaces.
+ *   - Settings — configuration & setup surfaces.
+ *   - Features — the feature-gated pages (these line up with `featureKey`).
+ */
+export type NavGroup = "Info" | "Settings" | "Features";
+
+/** Fixed render order of the sidebar groups. */
+export const NAV_GROUP_ORDER: readonly NavGroup[] = [
+  "Info",
+  "Settings",
+  "Features",
+];
+
 interface NavItem {
   href: string;
   label: string;
+  /** Which sidebar section this item belongs to (#613). */
+  group: NavGroup;
   /**
    * Config key (a `<feature>.enabled` boolean) that gates this page. When
    * set and the feature resolves to `false`, the item is hidden from the
@@ -73,35 +92,47 @@ interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/admin/", label: "Dashboard" },
-  { href: "/admin/settings", label: "Settings" },
-  { href: "/admin/permissions", label: "Permissions" },
-  { href: "/admin/wizard", label: "Setup Wizard" },
+  // Info — read-only diagnostics / status surfaces.
+  { href: "/admin/", label: "Dashboard", group: "Info" },
+  { href: "/admin/bot-status", label: "Bot Status", group: "Info" },
+  { href: "/admin/database", label: "Database", group: "Info" },
+  { href: "/admin/audit/commands", label: "Command Audit", group: "Info" },
+  { href: "/admin/bootstrap", label: "Bootstrap", group: "Info" },
+  // Settings — configuration & setup surfaces.
+  { href: "/admin/settings", label: "Settings", group: "Settings" },
+  { href: "/admin/permissions", label: "Permissions", group: "Settings" },
+  { href: "/admin/wizard", label: "Setup Wizard", group: "Settings" },
+  // Features — feature-gated pages (hidden when their feature is off).
   {
     href: "/admin/announcements",
     label: "Announcements",
+    group: "Features",
     featureKey: "announcements.enabled",
   },
-  { href: "/admin/polls", label: "Polls", featureKey: "polls.enabled" },
+  {
+    href: "/admin/polls",
+    label: "Polls",
+    group: "Features",
+    featureKey: "polls.enabled",
+  },
   {
     href: "/admin/reaction-roles",
     label: "Reaction Roles",
+    group: "Features",
     featureKey: "reactionroles.enabled",
   },
   {
     href: "/admin/notices",
     label: "Notices",
+    group: "Features",
     featureKey: "notices.enabled",
   },
   {
     href: "/admin/voice-channels",
     label: "Voice Channels",
+    group: "Features",
     featureKey: "voicechannels.enabled",
   },
-  { href: "/admin/bot-status", label: "Bot Status" },
-  { href: "/admin/database", label: "Database" },
-  { href: "/admin/audit/commands", label: "Command Audit" },
-  { href: "/admin/bootstrap", label: "Bootstrap" },
 ];
 
 /**
@@ -160,6 +191,10 @@ const STYLE = [
   ".shell{display:flex;min-height:calc(100vh - 41px)}",
   "nav.side{background:#161a22;border-right:1px solid #2d3748;width:220px;padding:1rem .5rem;flex-shrink:0}",
   "nav.side ul{list-style:none;padding:0;margin:0}",
+  // Grouped sidebar sections (#613): a muted, small uppercase heading sits
+  // above each group's <ul>, consistent with the dark sidebar palette.
+  "nav.side .nav-group+.nav-group{margin-top:1rem}",
+  "nav.side .nav-group-heading{padding:.25rem .75rem;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#64748b}",
   "nav.side a{display:block;padding:.5rem .75rem;border-radius:6px;color:#cbd5e1}",
   "nav.side a:hover{background:#1f2937;text-decoration:none}",
   "nav.side a.active{background:#1d2a44;color:#fff}",
@@ -459,21 +494,34 @@ function renderNav(
   active: string,
   navFeatureStatus?: NavFeatureStatus,
 ): string {
-  return NAV_ITEMS.filter((item) => {
-    // No status map → show everything. Otherwise hide items whose gating
-    // feature resolves to false. An unknown featureKey (missing from the
-    // map) is treated as enabled so a wiring gap never blanks the nav.
+  // No status map → show everything. Otherwise hide items whose gating
+  // feature resolves to false. An unknown featureKey (missing from the
+  // map) is treated as enabled so a wiring gap never blanks the nav.
+  const isVisible = (item: NavItem): boolean => {
     if (!navFeatureStatus || !item.featureKey) return true;
     return navFeatureStatus[item.featureKey] !== false;
-  })
-    .map((item) => {
-      const isActive =
-        item.href === active ||
-        (item.href === "/admin/" && active === "/admin");
-      const cls = isActive ? ' class="active"' : "";
-      return `<li><a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a></li>`;
-    })
-    .join("");
+  };
+  const renderItem = (item: NavItem): string => {
+    const isActive =
+      item.href === active || (item.href === "/admin/" && active === "/admin");
+    const cls = isActive ? ' class="active"' : "";
+    return `<li><a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a></li>`;
+  };
+  // One <ul> per group, preceded by a small heading. A group whose items
+  // are all filtered out by feature gating renders nothing at all — no
+  // dangling header (#613).
+  return NAV_GROUP_ORDER.map((group) => {
+    const items = NAV_ITEMS.filter(
+      (item) => item.group === group && isVisible(item),
+    );
+    if (items.length === 0) return "";
+    return (
+      `<div class="nav-group">` +
+      `<div class="nav-group-heading">${escapeHtml(group)}</div>` +
+      `<ul>${items.map(renderItem).join("")}</ul>` +
+      `</div>`
+    );
+  }).join("");
 }
 
 export function renderAdminPage(opts: AdminPageOptions): string {
@@ -502,7 +550,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<button type="submit">Finish</button>',
     "</form></div></div>",
     '<div class="shell">',
-    `<nav class="side"><ul>${renderNav(opts.active, opts.navFeatureStatus)}</ul></nav>`,
+    `<nav class="side">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
     `<main>${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     `<script>${CRON_PICKER_SCRIPT}</script>`,

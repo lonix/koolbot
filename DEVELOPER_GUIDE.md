@@ -654,7 +654,8 @@ discovers settings from `defaultConfig` automatically.
 5. **Web UI surface** (if applicable)
    - [ ] Add a read-only view in `src/web/read-only-routes.ts` / `admin-views.ts`
    - [ ] Add write handlers in `src/web/write-routes.ts` (CSRF + session required)
-   - [ ] Link the page from `NAV_ITEMS` in `admin-layout.ts`
+   - [ ] Link the page from `NAV_ITEMS` in `admin-layout.ts` (set its `group`:
+     `Info`, `Settings`, or `Features`; gated pages go under `Features`)
    - [ ] Routes stay thin — no business logic outside services
 
 6. **Documentation**
