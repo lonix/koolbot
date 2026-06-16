@@ -127,8 +127,8 @@ jobs:
           # whenever Alpine ships security updates, so pulling fresh is how the
           # image absorbs patched system OpenSSL (libssl3/libcrypto3) — e.g. the
           # High PKCS7_verify use-after-free (#57/#72). Without this, the gha
-          # build cache reuses the stale base + `apk upgrade` layers and a
-          # rebuild on main never clears the CVE.
+          # build cache could reuse a stale base and a rebuild on main would
+          # never pick up the fix.
           pull: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
