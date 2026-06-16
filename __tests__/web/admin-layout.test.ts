@@ -3,6 +3,7 @@ import {
   escapeHtml,
   getDisplayedRemainingMs,
   getInactivityWindowMs,
+  NAV_GROUP_ORDER,
   NAV_ITEMS,
   renderAdminPage,
   resolveNavFeatureStatus,
@@ -217,6 +218,80 @@ describe("renderAdminPage", () => {
       navFeatureStatus: {},
     });
     expect(html).toContain('href="/admin/notices"');
+  });
+});
+
+describe("renderAdminPage grouped sidebar (#613)", () => {
+  const render = (navFeatureStatus?: Record<string, boolean>): string =>
+    renderAdminPage({
+      title: "Dashboard",
+      active: "/admin/",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+      navFeatureStatus,
+    });
+
+  it("renders every group heading in the fixed order", () => {
+    const html = render();
+    const positions = NAV_GROUP_ORDER.map((g) =>
+      html.indexOf(`nav-group-heading">${g}<`),
+    );
+    // All present...
+    for (const pos of positions) expect(pos).toBeGreaterThan(-1);
+    // ...and in ascending (fixed) order.
+    const sorted = [...positions].sort((a, b) => a - b);
+    expect(positions).toEqual(sorted);
+  });
+
+  it("groups each nav item under its declared group heading", () => {
+    const html = render();
+    // Heading order maps to the fixed group order; an item must appear after
+    // its own group's heading and before the next group's heading.
+    const headingPos = (g: string): number =>
+      html.indexOf(`nav-group-heading">${g}<`);
+    for (const item of NAV_ITEMS) {
+      const groupIdx = NAV_GROUP_ORDER.indexOf(item.group);
+      const start = headingPos(item.group);
+      const nextGroup = NAV_GROUP_ORDER[groupIdx + 1];
+      const end = nextGroup === undefined ? html.length : headingPos(nextGroup);
+      const itemPos = html.indexOf(`href="${item.href}"`);
+      expect(itemPos).toBeGreaterThan(start);
+      expect(itemPos).toBeLessThan(end);
+    }
+  });
+
+  it("omits a group's heading when all of its items are filtered out", () => {
+    // Every Features-group item is feature-gated; turn them all off.
+    const html = render({
+      "announcements.enabled": false,
+      "polls.enabled": false,
+      "reactionroles.enabled": false,
+      "notices.enabled": false,
+      "voicechannels.enabled": false,
+    });
+    // The whole Features group disappears — no dangling header.
+    expect(html).not.toContain('nav-group-heading">Features<');
+    // The always-present groups remain.
+    expect(html).toContain('nav-group-heading">Info<');
+    expect(html).toContain('nav-group-heading">Settings<');
+  });
+
+  it("keeps a group's heading when at least one item survives filtering", () => {
+    const html = render({
+      "announcements.enabled": false,
+      "polls.enabled": true,
+      "reactionroles.enabled": false,
+      "notices.enabled": false,
+      "voicechannels.enabled": false,
+    });
+    expect(html).toContain('nav-group-heading">Features<');
+    expect(html).toContain('href="/admin/polls"');
+    expect(html).not.toContain('href="/admin/announcements"');
+  });
+
+  it("ships muted CSS for the group heading consistent with the sidebar", () => {
+    expect(render()).toContain("nav.side .nav-group-heading{");
   });
 });
 

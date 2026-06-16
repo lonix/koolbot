@@ -14,6 +14,7 @@ Complete guide for developers extending or maintaining KoolBot.
 - [Adding New Features](#adding-new-features)
 - [Testing Guidelines](#testing-guidelines)
 - [Code Style](#code-style)
+- [Dependency Notes](#dependency-notes)
 
 ---
 
@@ -654,7 +655,8 @@ discovers settings from `defaultConfig` automatically.
 5. **Web UI surface** (if applicable)
    - [ ] Add a read-only view in `src/web/read-only-routes.ts` / `admin-views.ts`
    - [ ] Add write handlers in `src/web/write-routes.ts` (CSRF + session required)
-   - [ ] Link the page from `NAV_ITEMS` in `admin-layout.ts`
+   - [ ] Link the page from `NAV_ITEMS` in `admin-layout.ts` (set its `group`:
+     `Info`, `Settings`, or `Features`; gated pages go under `Features`)
    - [ ] Routes stay thin — no business logic outside services
 
 6. **Documentation**
@@ -772,6 +774,35 @@ try {
   // Don't crash the bot - degrade gracefully
 }
 ```
+
+---
+
+## Dependency Notes
+
+### Benign `glob` deprecation warning on install
+
+`npm install` (and the Docker build) prints repeated deprecation warnings such as:
+
+```text
+npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely
+publicized security vulnerabilities, which have been fixed in the current version. Please update…
+```
+
+This is **build-log noise, not an audit finding.** The offending copies (`glob@10.5.0` and `glob@7.2.3`)
+are transitive devDependencies pulled in by the Jest toolchain — `@jest/reporters`, `jest-config`,
+`jest-runtime` pin `glob@^10.5.0`, and `test-exclude` (Istanbul coverage) pulls `glob@^7.1.4`. We do not
+depend on `glob` directly. `npm audit` reports **0** glob vulnerabilities in our resolved tree; the
+warning text is the blanket deprecation message glob's author attaches to all sub-latest versions, not an
+advisory matching our pinned versions.
+
+We intentionally **do not** force a newer `glob` via the `overrides` block. Jest's internals are written
+against glob 10, and glob 11+ changed its API/defaults and raised its Node floor — overriding it risks
+breaking `npm test`. The warning will disappear for free once a future `jest` release moves to a newer
+glob; we take that via the normal dependency bump.
+
+Tracked in [issue #605](https://github.com/lonix/koolbot/issues/605). See also
+[#601](https://github.com/lonix/koolbot/issues/601) (`brace-expansion`, the actual audit finding) and
+[#602](https://github.com/lonix/koolbot/issues/602) (direct-dependency bumps).
 
 ---
 
