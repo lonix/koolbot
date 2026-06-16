@@ -122,7 +122,7 @@ jobs:
         with:
           context: .
           push: true
-          # Always pull the latest node:22-alpine base layers instead of
+          # Always pull the latest node:24-alpine base layers instead of
           # reusing a cached digest. The Node team rebuilds the Alpine base
           # whenever Alpine ships security updates, so pulling fresh is how the
           # image absorbs patched system OpenSSL (libssl3/libcrypto3) — e.g. the
