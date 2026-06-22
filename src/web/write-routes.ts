@@ -3240,16 +3240,17 @@ export function createWriteRouter(
       try {
         const summary = await service.runNow();
         if (!summary) {
-          // runNow returns null when the feature is disabled, GUILD_ID is
-          // unset, or another run is already in flight.
+          // runNow returns null only when the feature is disabled or
+          // GUILD_ID is unset. Concurrent invocations don't return null —
+          // they coalesce onto the in-flight run via `inFlight`.
           await recordAudit(session, {
             action: "digest.send-now",
             result: "failure",
-            errorMessage: "digest disabled, unconfigured, or already running",
+            errorMessage: "digest disabled or GUILD_ID unset",
           });
           flashRedirect(res, "/admin/digest", {
             type: "warn",
-            text: "Digest did not run — it is disabled, missing GUILD_ID, or a run is already in progress.",
+            text: "Digest did not run — it is disabled or GUILD_ID is not configured.",
           });
           return;
         }

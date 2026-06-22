@@ -375,5 +375,40 @@ describe("DigestService", () => {
 
       expect(preview.alreadySentAt).toBeNull();
     });
+
+    it("clamps an out-of-range limit to the documented maximum", async () => {
+      mockDigestState({});
+      mockGetTopUsers.mockResolvedValue([]);
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const tooBig = await svc.previewDigest(1000);
+      expect(tooBig.limit).toBe(25);
+
+      const tooSmall = await svc.previewDigest(0);
+      expect(tooSmall.limit).toBe(1);
+    });
+
+    it("reports the real achievements setting on the unconfigured early return", async () => {
+      // Feature on, but GUILD_ID unset → early return. include_achievements
+      // must reflect config, not a hard-coded false.
+      mockConfigGetBoolean.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "digest.enabled") return true;
+        if (k === "digest.include_achievements") return true;
+        return false;
+      });
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        if (key === "GUILD_ID") return "";
+        return "";
+      });
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const preview = await svc.previewDigest();
+
+      expect(preview.enabled).toBe(true);
+      expect(preview.includeAchievements).toBe(true);
+      expect(preview.entries).toHaveLength(0);
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+    });
   });
 });

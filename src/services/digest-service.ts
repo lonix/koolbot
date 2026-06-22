@@ -445,12 +445,21 @@ export class DigestService {
    * delivery failures to the real run.
    */
   public async previewDigest(limit = 25): Promise<DigestPreview> {
+    // Clamp to a sane window so a hand-crafted call can't materialise an
+    // unbounded set of embeds; the Web UI always uses the default.
+    const cappedLimit = Math.min(Math.max(1, Math.floor(limit)), 25);
     const generatedAt = new Date();
     const enabled = await this.configService.getBoolean(
       "digest.enabled",
       false,
     );
     const guildId = await this.configService.getString("GUILD_ID", "");
+    // Read up-front so the early-return (unconfigured) preview reports the
+    // real achievements setting rather than a hard-coded false.
+    const includeAchievements = await this.configService.getBoolean(
+      "digest.include_achievements",
+      true,
+    );
 
     const weekStart = new Date(generatedAt.getTime() - SECONDS_PER_WEEK * 1000);
     const weekRange = `${formatInZone(weekStart, null, "MMM d")} – ${formatInZone(generatedAt, null, "MMM d")}`;
@@ -463,8 +472,8 @@ export class DigestService {
       optedIn: 0,
       skippedOptOut: 0,
       alreadySentAt: null,
-      includeAchievements: false,
-      limit,
+      includeAchievements,
+      limit: cappedLimit,
       entries: [],
     };
 
@@ -479,10 +488,6 @@ export class DigestService {
     const streakMinMinutes = await this.configService.getNumber(
       "digest.streak_min_minutes",
       30,
-    );
-    const includeAchievements = await this.configService.getBoolean(
-      "digest.include_achievements",
-      true,
     );
     const minActiveSeconds = Math.max(0, minActiveMinutes) * SECONDS_PER_MINUTE;
     const streakMinSeconds = Math.max(0, streakMinMinutes) * SECONDS_PER_MINUTE;
@@ -512,7 +517,7 @@ export class DigestService {
       }
       // Cap rendered embeds but keep counting opt-outs beyond the cap so
       // the summary line stays accurate for large guilds.
-      if (entries.length >= limit) continue;
+      if (entries.length >= cappedLimit) continue;
 
       const previousState = await DigestState.findOne({
         userId: user.userId,
@@ -576,7 +581,7 @@ export class DigestService {
       skippedOptOut,
       alreadySentAt,
       includeAchievements,
-      limit,
+      limit: cappedLimit,
       entries,
     };
   }
