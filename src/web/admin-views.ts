@@ -1473,15 +1473,35 @@ export interface PollsProps extends CommonProps {
 // review or edit the loaded content before importing, and paste still works
 // with no file selected (the input is optional). Browsers without FileReader
 // simply keep the paste-only behaviour.
+//
+// A file that can't actually be submitted is rejected before it is read: the
+// cap is the textarea's own maxlength (the binding limit for what the form
+// will POST, well under the server's 2 MB importFromString cap), so an admin
+// who fat-fingers a huge file gets a clear message instead of a frozen tab or
+// silently truncated content. We compare bytes (file.size) to the char cap —
+// for ASCII YAML/JSON these are equal, and any multi-byte slack is caught by
+// the defensive slice() after the read.
 const POLL_IMPORT_UPLOAD_SCRIPT =
   "(function(){" +
   "var file=document.getElementById('poll-import-file');" +
   "var area=document.getElementById('poll-import-content');" +
+  "var msg=document.getElementById('poll-import-msg');" +
   "if(!file||!area||typeof FileReader!=='function')return;" +
+  "var cap=area.maxLength&&area.maxLength>0?area.maxLength:200000;" +
+  "function note(t){if(msg)msg.textContent=t}" +
   "file.addEventListener('change',function(){" +
   "var f=file.files&&file.files[0];if(!f)return;" +
+  "if(typeof f.size==='number'&&f.size>cap){" +
+  "file.value='';" +
+  "note('File is too large (max '+cap+' characters). Trim it or paste a smaller library.');" +
+  "return}" +
   "var reader=new FileReader();" +
-  "reader.onload=function(){area.value=String(reader.result||'')};" +
+  "reader.onerror=function(){note('Could not read that file. Try pasting its contents instead.')};" +
+  "reader.onload=function(){var t=String(reader.result||'');" +
+  "if(t.length>cap){t=t.slice(0,cap);" +
+  "note('File was truncated to '+cap+' characters. Review the box before importing.')}" +
+  "else{note('')}" +
+  "area.value=t};" +
   "reader.readAsText(f)})})();";
 
 export function renderPollsPage(props: PollsProps): string {
@@ -1620,6 +1640,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureK
     <label>Upload a file (optional)
       <input type="file" id="poll-import-file" accept=".yaml,.yml,.json,.txt,application/json,application/x-yaml,text/yaml,text/plain">
     </label>
+    <p id="poll-import-msg" class="muted" role="status" aria-live="polite"></p>
     <label>Poll library (YAML or JSON)
       <textarea id="poll-import-content" name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
     </label>
