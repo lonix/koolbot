@@ -136,6 +136,12 @@ export const NAV_ITEMS: NavItem[] = [
     group: "Features",
     featureKey: "voicechannels.enabled",
   },
+  {
+    href: "/admin/digest",
+    label: "Weekly Digest",
+    group: "Features",
+    featureKey: "digest.enabled",
+  },
 ];
 
 /**

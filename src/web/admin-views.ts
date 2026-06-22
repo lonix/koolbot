@@ -2257,6 +2257,162 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels",
   });
 }
 
+// ---------- Digest (#539) ----------
+
+export interface DigestPreviewEntryView {
+  username: string;
+  rank: number;
+  title: string;
+  description: string;
+  fields: Array<{ name: string; value: string; inline: boolean }>;
+  footer: string;
+}
+
+export interface DigestPreviewView {
+  generatedAt: string;
+  weekRange: string;
+  qualifying: number;
+  optedIn: number;
+  skippedOptOut: number;
+  alreadySentAt: string | null;
+  includeAchievements: boolean;
+  limit: number;
+  entries: DigestPreviewEntryView[];
+}
+
+export interface DigestProps extends CommonProps {
+  enabled: boolean;
+  cron: string;
+  minActiveMinutes: number;
+  streakMinMinutes: number;
+  includeAchievements: boolean;
+  /** Populated only when a preview was requested (`?preview=1`). */
+  preview: DigestPreviewView | null;
+  flash?: FlashMessage | null;
+}
+
+/**
+ * Render one dry-run digest embed as an HTML approximation of the Discord
+ * embed the user would be DM'd. We mirror the embed's structure (title,
+ * description, inline/full-width fields, footer) so an admin previewing
+ * sees the real output, not just counts.
+ */
+function renderDigestEmbedCard(entry: DigestPreviewEntryView): string {
+  const fieldsHtml = entry.fields
+    .map(
+      (f) => `<div class="digest-field${f.inline ? " inline" : ""}">
+  <div class="digest-field-name">${escapeHtml(f.name)}</div>
+  <div class="digest-field-value">${escapeHtml(f.value).replace(/\n/g, "<br>")}</div>
+</div>`,
+    )
+    .join("");
+
+  return `<div class="digest-embed">
+  <div class="digest-embed-head">
+    <span class="tag tag-info">#${entry.rank}</span>
+    <strong>${escapeHtml(entry.username)}</strong>
+  </div>
+  <div class="digest-embed-title">${escapeHtml(entry.title)}</div>
+  <div class="digest-embed-desc">${escapeHtml(entry.description)}</div>
+  <div class="digest-fields">${fieldsHtml}</div>
+  <div class="digest-embed-footer">${escapeHtml(entry.footer).replace(/\n/g, "<br>")}</div>
+</div>`;
+}
+
+export function renderDigestPage(props: DigestProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+
+  const sendDisabled = !props.enabled;
+  const sendHint = !props.enabled
+    ? "Enable <code>digest.enabled</code> first."
+    : "Fires the digest immediately — the same path the cron runs, including DM delivery. Concurrent runs coalesce, so this is safe to click during a scheduled tick.";
+
+  let previewHtml = "";
+  if (props.preview) {
+    const p = props.preview;
+    const sentLabel = p.alreadySentAt
+      ? `already sent at ${escapeHtml(p.alreadySentAt)}`
+      : "digest has not been sent yet this week";
+    const summary = `<strong>${p.qualifying}</strong> member${p.qualifying === 1 ? "" : "s"} qualify · <strong>${p.optedIn}</strong> opted in · <strong>${p.skippedOptOut}</strong> opted out (would be skipped) · ${sentLabel}`;
+
+    const achievementsNote = p.includeAchievements
+      ? ""
+      : `<p class="muted">Achievements are excluded from the digest (<code>digest.include_achievements</code> is off).</p>`;
+
+    const dmsNote = `<p class="muted">Users with DMs closed can't be detected without sending — those skips only show up on a real run.</p>`;
+
+    const capNote =
+      p.optedIn > p.entries.length
+        ? `<p class="muted">Showing the top ${p.entries.length} of ${p.optedIn} opted-in members (capped at ${p.limit}).</p>`
+        : "";
+
+    const embeds =
+      p.entries.length === 0
+        ? `<div class="empty">No opted-in members qualify for the digest this week.</div>`
+        : p.entries.map(renderDigestEmbedCard).join("");
+
+    previewHtml = `<div class="card">
+  <h2>Preview <span class="muted">(week of ${escapeHtml(p.weekRange)})</span></h2>
+  <div class="notice">${summary}</div>
+  ${achievementsNote}
+  ${dmsNote}
+  ${capNote}
+  ${embeds}
+  <p class="muted">Generated ${escapeHtml(p.generatedAt)}. No DMs were sent and nothing was written.</p>
+</div>`;
+  }
+
+  const body = `
+<style>
+.digest-embed{border-left:4px solid #5865f2;background:#1f2430;border-radius:4px;padding:.75rem 1rem;margin:.75rem 0}
+.digest-embed-head{display:flex;gap:.5rem;align-items:center;margin-bottom:.35rem;font-size:.9rem}
+.digest-embed-title{font-weight:600;margin-bottom:.25rem}
+.digest-embed-desc{color:#cbd5e1;margin-bottom:.6rem}
+.digest-fields{display:flex;flex-wrap:wrap;gap:.75rem 1.5rem}
+.digest-field{flex:1 1 100%}
+.digest-field.inline{flex:1 1 28%;min-width:120px}
+.digest-field-name{font-size:.75rem;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8}
+.digest-field-value{color:#e2e8f0}
+.digest-embed-footer{margin-top:.75rem;padding-top:.5rem;border-top:1px solid #2d3748;font-size:.78rem;color:#94a3b8}
+</style>
+<h1>Weekly Digest</h1>
+<p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent. Configure the thresholds and schedule under <a href="/admin/settings">Settings</a>.</p>
+${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Weekly Digest", featureKey: "digest.enabled", returnTo: "/admin/digest", csrfToken: props.csrfToken })}
+<div class="card">
+  <h2>Configuration</h2>
+  <dl class="kv">
+    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
+    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron || "(unset)")}</dd>
+    <dt>Minimum active time to qualify</dt><dd>${props.minActiveMinutes} min/week</dd>
+    <dt>Minimum time counting toward a streak</dt><dd>${props.streakMinMinutes} min/week</dd>
+    <dt>Include achievements</dt><dd>${tagOnOff(props.includeAchievements, "yes", "no")}</dd>
+  </dl>
+</div>
+<div class="card">
+  <h2>Actions</h2>
+  <form method="GET" action="/admin/digest" class="inline-form">
+    <button type="submit" name="preview" value="1" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Preview digest</button>
+    <span class="muted">Renders the digest for the most recent complete week without sending anything.</span>
+  </form>
+  <form method="POST" action="/admin/digest/send-now" class="inline-form" style="margin-top:.75rem" onsubmit="return confirm('Send the weekly digest to all qualifying members right now?');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-danger"${sendDisabled ? " disabled" : ""}>Send now</button>
+    <span class="muted">${sendHint}</span>
+  </form>
+</div>
+${previewHtml}
+`;
+  return renderAdminPage({
+    title: "Weekly Digest",
+    active: "/admin/digest",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
 // ---------- Command Audit Log ----------
 
 export interface CommandAuditRow {

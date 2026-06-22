@@ -753,6 +753,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
 | **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels** | `/vc force-reload` (single **Force VC cleanup** button)                                             |
+| **Weekly Digest**  | (new — **Preview** the weekly digest dry-run, plus a **Send now** button)                           |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Command Metrics**| (new — historical per-command usage / error-rate / latency dashboard)                               |
@@ -797,6 +798,22 @@ how long buckets are kept before the TTL index prunes them. This is
 complementary to the Prometheus `/metrics` endpoint, which exposes
 process-level gauges (uptime, memory) rather than historical per-command
 counters.
+
+The **Weekly Digest** page (`/admin/digest`) lets an admin **preview** the
+weekly voice digest before it sends (#539). **Preview** is a read-only dry run:
+it reuses the exact qualifying-users query and embed builder the cron job uses
+and renders an HTML approximation of the embeds for the most recent complete
+week, plus a summary line (how many members qualify, how many opted in vs.
+opted out, and whether a digest has already gone out this week) — **without
+sending any DMs or writing anything**. It's GET-driven, so it's safe to refresh.
+Users who have DMs closed can't be detected without actually sending, so those
+skips only surface on a real run. The page is gated by `digest.enabled`
+(the #610 disabled-feature pattern), and the digest thresholds/schedule
+themselves live under **Settings** (`digest.*`). A **Send now** button force-fires the
+digest immediately — the same path the cron runs, including DM delivery and
+streak/state updates; concurrent runs coalesce, so clicking it during a
+scheduled tick can't double-deliver. There is intentionally **no `/digest`
+slash command** — the Web UI is the admin surface.
 
 ### User self-service (`/me/*`, both admin and user roles)
 

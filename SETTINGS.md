@@ -474,6 +474,10 @@ the user's **/me/notifications** page (no slash command).
   every run.
 - Delta + streak math uses a per-user `DigestState` row that is updated
   after each successful delivery.
+- Admins can **preview** the digest (a dry run that sends nothing) or
+  **Send now** from the Web UI **Weekly Digest** page (`/admin/digest`)
+  — see [WEBUI.md](WEBUI.md#what-the-web-ui-lets-you-do). There is no
+  `/digest` slash command.
 
 ---
 

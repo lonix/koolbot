@@ -269,4 +269,146 @@ describe("DigestService", () => {
       expect(mockGetPrefsWithTimezone).toHaveBeenCalledWith("u1", "guild-1");
     });
   });
+
+  describe("previewDigest (#539)", () => {
+    // previewDigest issues two distinct findOne shapes: the guild-level
+    // "already sent this week?" query (chained `.sort()`) and the per-user
+    // previousState lookup (direct await). Route both through one mock.
+    function mockDigestState(opts: {
+      alreadySent?: Date | null;
+      previous?: Record<string, unknown> | null;
+    }): void {
+      mockDigestStateFindOne.mockImplementation((query: unknown) => {
+        const q = query as Record<string, unknown>;
+        if (q && "lastSentAt" in q) {
+          const doc =
+            opts.alreadySent != null ? { lastSentAt: opts.alreadySent } : null;
+          return { sort: jest.fn().mockResolvedValue(doc) };
+        }
+        return Promise.resolve(opts.previous ?? null);
+      });
+    }
+
+    it("returns a disabled, empty preview when the feature is off", async () => {
+      mockConfigGetBoolean.mockResolvedValue(false);
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const preview = await svc.previewDigest();
+
+      expect(preview.enabled).toBe(false);
+      expect(preview.qualifying).toBe(0);
+      expect(preview.entries).toHaveLength(0);
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+    });
+
+    it("reports zero qualifying when nobody clears the threshold", async () => {
+      mockDigestState({});
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 60 * 5 }, // 5 min - below 30
+      ]);
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const preview = await svc.previewDigest();
+
+      expect(preview.enabled).toBe(true);
+      expect(preview.qualifying).toBe(0);
+      expect(preview.optedIn).toBe(0);
+      expect(preview.skippedOptOut).toBe(0);
+      expect(preview.entries).toHaveLength(0);
+      // Read-only: no DM and no state write as a side effect.
+      expect(mockUserSend).not.toHaveBeenCalled();
+      expect(mockDigestStateFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("counts opted-out users separately and only renders opted-in ones", async () => {
+      mockDigestState({});
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 60 * 60 },
+        { userId: "u2", username: "u2", totalTime: 60 * 45 },
+      ]);
+      mockGetPrefsWithTimezone.mockImplementation(async (userId: unknown) => ({
+        prefs: {
+          achievements: true,
+          digest: userId !== "u2", // u2 opted out
+          rewind: true,
+        },
+        timezone: null,
+      }));
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const preview = await svc.previewDigest();
+
+      expect(preview.qualifying).toBe(2);
+      expect(preview.optedIn).toBe(1);
+      expect(preview.skippedOptOut).toBe(1);
+      expect(preview.entries).toHaveLength(1);
+      expect(preview.entries[0]).toMatchObject({ username: "u1", rank: 1 });
+      // The rendered entry carries the real embed structure (reused builder).
+      expect(preview.entries[0].title).toContain("weekly voice digest");
+      expect(preview.entries[0].fields.length).toBeGreaterThan(0);
+      // Still no side effects.
+      expect(mockUserSend).not.toHaveBeenCalled();
+      expect(mockDigestStateFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("surfaces alreadySentAt when a delivery landed this week", async () => {
+      const sentAt = new Date("2026-06-22T09:00:00Z");
+      mockDigestState({ alreadySent: sentAt });
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 60 * 60 },
+      ]);
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const preview = await svc.previewDigest();
+
+      expect(preview.alreadySentAt).toEqual(sentAt);
+      expect(preview.optedIn).toBe(1);
+    });
+
+    it("reports no prior delivery when none landed this week", async () => {
+      mockDigestState({ alreadySent: null });
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 60 * 60 },
+      ]);
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const preview = await svc.previewDigest();
+
+      expect(preview.alreadySentAt).toBeNull();
+    });
+
+    it("clamps an out-of-range limit to the documented maximum", async () => {
+      mockDigestState({});
+      mockGetTopUsers.mockResolvedValue([]);
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const tooBig = await svc.previewDigest(1000);
+      expect(tooBig.limit).toBe(25);
+
+      const tooSmall = await svc.previewDigest(0);
+      expect(tooSmall.limit).toBe(1);
+    });
+
+    it("reports the real achievements setting on the unconfigured early return", async () => {
+      // Feature on, but GUILD_ID unset → early return. include_achievements
+      // must reflect config, not a hard-coded false.
+      mockConfigGetBoolean.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "digest.enabled") return true;
+        if (k === "digest.include_achievements") return true;
+        return false;
+      });
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        if (key === "GUILD_ID") return "";
+        return "";
+      });
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const preview = await svc.previewDigest();
+
+      expect(preview.enabled).toBe(true);
+      expect(preview.includeAchievements).toBe(true);
+      expect(preview.entries).toHaveLength(0);
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -35,6 +35,7 @@ import {
   STATUS_TEXT_MAX,
 } from "../content/statuses.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
+import { DigestService } from "../services/digest-service.js";
 import {
   VoiceChannelManager,
   resolveManagedCategory,
@@ -62,6 +63,7 @@ import {
   renderCommandMetricsPage,
   renderDashboardPage,
   renderDatabasePage,
+  renderDigestPage,
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
@@ -71,6 +73,7 @@ import {
   type ChannelOption,
   type CommandAuditRow,
   type DbTrunkHistoryRow,
+  type DigestPreviewView,
   type FlashMessage,
   type NoticeCategoryOption,
   type ReactionRoleRow,
@@ -968,6 +971,75 @@ export function createReadOnlyRouter(
           totalEmpty,
           channels,
           categoryFound,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Weekly Digest (#539) ----------
+  router.get(
+    "/digest",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+
+      const [
+        enabled,
+        cron,
+        minActiveMinutes,
+        streakMinMinutes,
+        includeAchievements,
+      ] = await Promise.all([
+        config.getBoolean("digest.enabled", false),
+        config.getString("digest.cron", "0 9 * * 1"),
+        config.getNumber("digest.min_active_minutes", 30),
+        config.getNumber("digest.streak_min_minutes", 30),
+        config.getBoolean("digest.include_achievements", true),
+      ]);
+
+      // Preview is a read-only dry run, so it's GET-driven: the "Preview"
+      // button submits `?preview=1` and we render the embeds inline. Nothing
+      // is sent or written, so it's safe to refresh/bookmark.
+      let preview: DigestPreviewView | null = null;
+      if (req.query.preview === "1" && enabled) {
+        try {
+          const result =
+            await DigestService.getInstance(client).previewDigest();
+          preview = {
+            generatedAt: result.generatedAt.toISOString(),
+            weekRange: result.weekRange,
+            qualifying: result.qualifying,
+            optedIn: result.optedIn,
+            skippedOptOut: result.skippedOptOut,
+            alreadySentAt: result.alreadySentAt
+              ? result.alreadySentAt.toISOString()
+              : null,
+            includeAchievements: result.includeAchievements,
+            limit: result.limit,
+            entries: result.entries.map((e) => ({
+              username: e.username,
+              rank: e.rank,
+              title: e.title,
+              description: e.description,
+              fields: e.fields,
+              footer: e.footer,
+            })),
+          };
+        } catch (err) {
+          logger.error("digest preview failed", err);
+        }
+      }
+
+      res.type("text/html").send(
+        renderDigestPage({
+          ...common,
+          enabled,
+          cron,
+          minActiveMinutes,
+          streakMinMinutes,
+          includeAchievements,
+          preview,
           flash: readFlash(req),
         }),
       );
