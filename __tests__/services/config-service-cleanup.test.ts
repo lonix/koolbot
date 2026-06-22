@@ -66,9 +66,7 @@ jest.unstable_mockModule("mongoose", () => ({
 }));
 
 // Import after mocking
-const { ConfigService } = await import(
-  "../../src/services/config-service.js"
-);
+const { ConfigService } = await import("../../src/services/config-service.js");
 
 describe("ConfigService - Cleanup Unknown Settings", () => {
   beforeEach(() => {

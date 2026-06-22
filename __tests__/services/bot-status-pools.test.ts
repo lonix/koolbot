@@ -96,7 +96,9 @@ describe("BotStatusService status pools", () => {
   });
 
   it("substitutes {count} for the live user count in the multiple pool", async () => {
-    setStoredRows([{ pool: "multiple", text: "{count} folks online", order: 0 }]);
+    setStoredRows([
+      { pool: "multiple", text: "{count} folks online", order: 0 },
+    ]);
     await service.refreshStatusPools();
 
     service.updateVcUserCount(0);

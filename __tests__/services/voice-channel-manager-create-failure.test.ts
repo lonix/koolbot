@@ -58,7 +58,8 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
           return Promise.resolve("category-id");
         if (key === "voicechannels.channel.suffix")
           return Promise.resolve("'s Room");
-        if (key === "voicechannels.channel.prefix") return Promise.resolve("🎮");
+        if (key === "voicechannels.channel.prefix")
+          return Promise.resolve("🎮");
         return Promise.resolve(defaultValue ?? "");
       });
 
@@ -134,9 +135,9 @@ describe("VoiceChannelManager.createUserChannel - setChannel failure", () => {
       type: ChannelType.GuildVoice,
       delete: jest.fn().mockResolvedValue(undefined),
     } as any;
-    (
-      mockGuild.channels!.create as jest.Mock
-    ).mockResolvedValueOnce(secondChannel);
+    (mockGuild.channels!.create as jest.Mock).mockResolvedValueOnce(
+      secondChannel,
+    );
 
     await (manager as any).createUserChannel(mockMember as GuildMember);
 

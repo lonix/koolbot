@@ -5,9 +5,8 @@ jest.unstable_mockModule("../../src/models/command-metrics.js", () => ({
   CommandMetrics: { aggregate: mockAggregate },
 }));
 
-const { getCommandMetricsSummary, dayKeyDaysAgo } = await import(
-  "../../src/services/command-metrics-query.js"
-);
+const { getCommandMetricsSummary, dayKeyDaysAgo } =
+  await import("../../src/services/command-metrics-query.js");
 
 describe("getCommandMetricsSummary (#648)", () => {
   beforeEach(() => {

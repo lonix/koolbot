@@ -1,11 +1,11 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import type { Client } from 'discord.js';
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import type { Client } from "discord.js";
 
 // Mock dependencies
-jest.mock('../../src/services/config-service.js');
-jest.mock('../../src/utils/logger.js');
+jest.mock("../../src/services/config-service.js");
+jest.mock("../../src/utils/logger.js");
 
-describe('QuoteChannelManager Methods', () => {
+describe("QuoteChannelManager Methods", () => {
   let mockClient: Partial<Client>;
 
   beforeEach(() => {
@@ -21,26 +21,29 @@ describe('QuoteChannelManager Methods', () => {
     } as Client;
   });
 
-  it('should have getInstance method', async () => {
-    const { QuoteChannelManager } = await import('../../src/services/quote-channel-manager.js');
-    
-    expect(typeof QuoteChannelManager.getInstance).toBe('function');
+  it("should have getInstance method", async () => {
+    const { QuoteChannelManager } =
+      await import("../../src/services/quote-channel-manager.js");
+
+    expect(typeof QuoteChannelManager.getInstance).toBe("function");
   });
 
-  it('should return singleton instance', async () => {
-    const { QuoteChannelManager } = await import('../../src/services/quote-channel-manager.js');
-    
+  it("should return singleton instance", async () => {
+    const { QuoteChannelManager } =
+      await import("../../src/services/quote-channel-manager.js");
+
     const instance1 = QuoteChannelManager.getInstance(mockClient as Client);
     const instance2 = QuoteChannelManager.getInstance(mockClient as Client);
 
     expect(instance1).toBe(instance2);
   });
 
-  it('should have postQuote method', async () => {
-    const { QuoteChannelManager } = await import('../../src/services/quote-channel-manager.js');
-    
+  it("should have postQuote method", async () => {
+    const { QuoteChannelManager } =
+      await import("../../src/services/quote-channel-manager.js");
+
     const instance = QuoteChannelManager.getInstance(mockClient as Client);
 
-    expect(typeof instance.postQuote).toBe('function');
+    expect(typeof instance.postQuote).toBe("function");
   });
 });

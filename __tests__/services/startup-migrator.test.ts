@@ -1,7 +1,7 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from "@jest/globals";
 
-describe('StartupMigrator', () => {
-  it('placeholder test', () => {
+describe("StartupMigrator", () => {
+  it("placeholder test", () => {
     expect(true).toBe(true);
   });
 });

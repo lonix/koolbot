@@ -1,7 +1,7 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from "@jest/globals";
 
-describe('ScheduledAnnouncementService', () => {
-  it('placeholder test', () => {
+describe("ScheduledAnnouncementService", () => {
+  it("placeholder test", () => {
     expect(true).toBe(true);
   });
 });

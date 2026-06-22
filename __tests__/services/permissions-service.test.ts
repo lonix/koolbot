@@ -69,8 +69,7 @@ describe("PermissionsService", () => {
         roleIds: ["role1", "role2", "role3"],
       });
 
-      (CommandPermission.findOneAndUpdate as jest.Mock) =
-        mockFindOneAndUpdate;
+      (CommandPermission.findOneAndUpdate as jest.Mock) = mockFindOneAndUpdate;
 
       await service.setCommandPermissions("guild123", "quote", [
         "role1",
@@ -101,8 +100,7 @@ describe("PermissionsService", () => {
       });
 
       (CommandPermission.findOne as jest.Mock) = mockFindOne;
-      (CommandPermission.findOneAndUpdate as jest.Mock) =
-        mockFindOneAndUpdate;
+      (CommandPermission.findOneAndUpdate as jest.Mock) = mockFindOneAndUpdate;
 
       await service.addCommandPermissions("guild123", "quote", ["role2"]);
 
@@ -121,8 +119,7 @@ describe("PermissionsService", () => {
       });
 
       (CommandPermission.findOne as jest.Mock) = mockFindOne;
-      (CommandPermission.findOneAndUpdate as jest.Mock) =
-        mockFindOneAndUpdate;
+      (CommandPermission.findOneAndUpdate as jest.Mock) = mockFindOneAndUpdate;
 
       await service.addCommandPermissions("guild123", "newcmd", ["role1"]);
 
@@ -145,8 +142,7 @@ describe("PermissionsService", () => {
       });
 
       (CommandPermission.findOne as jest.Mock) = mockFindOne;
-      (CommandPermission.findOneAndUpdate as jest.Mock) =
-        mockFindOneAndUpdate;
+      (CommandPermission.findOneAndUpdate as jest.Mock) = mockFindOneAndUpdate;
 
       await service.removeCommandPermissions("guild123", "quote", ["role2"]);
 
@@ -279,8 +275,7 @@ describe("PermissionsService", () => {
 
       (CommandPermission.find as jest.Mock) = mockFind;
       (CommandPermission.deleteOne as jest.Mock) = mockDeleteOne;
-      (CommandPermission.findOneAndUpdate as jest.Mock) =
-        mockFindOneAndUpdate;
+      (CommandPermission.findOneAndUpdate as jest.Mock) = mockFindOneAndUpdate;
 
       const clearedCount = await service.clearRoleFromAllCommands(
         "guild123",
@@ -338,13 +333,12 @@ describe("PermissionsService", () => {
       const mockFindOneAndUpdate = jest.fn().mockResolvedValue({});
 
       (CommandPermission.find as jest.Mock) = mockFind;
-      (CommandPermission.findOneAndUpdate as jest.Mock) =
-        mockFindOneAndUpdate;
+      (CommandPermission.findOneAndUpdate as jest.Mock) = mockFindOneAndUpdate;
 
-      const clearedCount = await service.clearRolesFromAllCommands(
-        "guild123",
-        ["role1", "role2"],
-      );
+      const clearedCount = await service.clearRolesFromAllCommands("guild123", [
+        "role1",
+        "role2",
+      ]);
 
       expect(clearedCount).toBe(2); // quote and vcstats affected
       expect(mockFind).toHaveBeenCalledWith({ guildId: "guild123" });
@@ -365,10 +359,10 @@ describe("PermissionsService", () => {
       (CommandPermission.find as jest.Mock) = mockFind;
       (CommandPermission.deleteOne as jest.Mock) = mockDeleteOne;
 
-      const clearedCount = await service.clearRolesFromAllCommands(
-        "guild123",
-        ["role1", "role2"],
-      );
+      const clearedCount = await service.clearRolesFromAllCommands("guild123", [
+        "role1",
+        "role2",
+      ]);
 
       expect(clearedCount).toBe(1);
       expect(mockDeleteOne).toHaveBeenCalledWith({

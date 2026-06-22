@@ -40,6 +40,18 @@ const FLUSH_INTERVAL_MS = 5 * 60 * 1000;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * Hard cap on the number of distinct pending buckets held in memory. A
+ * prolonged DB outage makes `flushMetrics` keep (rather than drain) the
+ * buffer, so without a cap a busy multi-guild bot could accumulate buckets
+ * without bound and OOM during the very incident that caused the outage.
+ * At the cap, new buckets are dropped (with a one-shot warning) while
+ * already-tracked buckets keep merging. Buckets are tiny, so this still
+ * allows tens of thousands — far beyond any legitimate
+ * commands x guilds x days working set — before shedding load.
+ */
+export const MAX_PENDING_BUCKETS = 50_000;
+
 function pendingKey(guildId: string, command: string, date: string): string {
   // NUL separator can't appear in a command name or snowflake.
   return `${guildId}\u0000${command}\u0000${date}`;
@@ -68,6 +80,10 @@ export class MonitoringService {
   // Per-bucket counters awaiting a batched DB flush (issue #648).
   private pendingBuckets: Map<string, PendingBucket> = new Map();
   private flushInterval: ReturnType<typeof setInterval> | null = null;
+  // Latches true once the buffer hits MAX_PENDING_BUCKETS so the cap warning
+  // fires once per episode rather than on every dropped bucket. Cleared when
+  // the buffer next drains via a successful flush.
+  private droppingPending = false;
 
   private constructor() {
     // Start periodic memory usage logging
@@ -176,30 +192,43 @@ export class MonitoringService {
   private addPending(bucket: PendingBucket): void {
     const key = pendingKey(bucket.guildId, bucket.command, bucket.date);
     const existing = this.pendingBuckets.get(key);
-    if (!existing) {
-      this.pendingBuckets.set(key, bucket);
+    if (existing) {
+      existing.usageCount += bucket.usageCount;
+      existing.errorCount += bucket.errorCount;
+      existing.totalResponseMs += bucket.totalResponseMs;
+      if (bucket.firstUsedAt < existing.firstUsedAt) {
+        existing.firstUsedAt = bucket.firstUsedAt;
+      }
+      if (bucket.lastUsedAt > existing.lastUsedAt) {
+        existing.lastUsedAt = bucket.lastUsedAt;
+      }
       return;
     }
-    existing.usageCount += bucket.usageCount;
-    existing.errorCount += bucket.errorCount;
-    existing.totalResponseMs += bucket.totalResponseMs;
-    if (bucket.firstUsedAt < existing.firstUsedAt) {
-      existing.firstUsedAt = bucket.firstUsedAt;
+    // Merging above never adds a key; only a brand-new bucket grows the map.
+    // Shed those once at the cap so a DB outage can't drive unbounded growth.
+    if (this.pendingBuckets.size >= MAX_PENDING_BUCKETS) {
+      if (!this.droppingPending) {
+        this.droppingPending = true;
+        logger.warn(
+          `Command-metrics buffer reached its ${MAX_PENDING_BUCKETS}-bucket cap; ` +
+            "dropping new buckets until it drains (is MongoDB reachable?).",
+        );
+      }
+      return;
     }
-    if (bucket.lastUsedAt > existing.lastUsedAt) {
-      existing.lastUsedAt = bucket.lastUsedAt;
-    }
+    this.pendingBuckets.set(key, bucket);
   }
 
   /**
-   * Persist accumulated command-metric buckets to MongoDB as a single batch
-   * of upserts (issue #648). Each bucket increments the matching daily doc's
-   * counters and bumps its TTL anchor based on the configured retention.
+   * Persist accumulated command-metric buckets to MongoDB in a single
+   * `bulkWrite` of upserts (issue #648). Each op increments the matching
+   * daily doc's counters and bumps its TTL anchor based on the configured
+   * retention.
    *
    * No-op (counters kept for the next tick) when the DB isn't connected, and
-   * a guard skips the whole pass when persistence is disabled. Per-bucket
-   * write failures are logged and the bucket is re-queued so a transient blip
-   * doesn't lose counts. Never throws — safe to call from a timer.
+   * a guard skips the whole pass when persistence is disabled. A failed write
+   * re-queues the whole batch so a transient blip doesn't lose counts. Never
+   * throws — safe to call from a timer.
    */
   public async flushMetrics(): Promise<void> {
     if (this.pendingBuckets.size === 0) return;
@@ -212,6 +241,7 @@ export class MonitoringService {
     if (!enabled) {
       // Persistence is off — drop the buffer so it can't grow unbounded.
       this.pendingBuckets.clear();
+      this.droppingPending = false;
       return;
     }
     const retentionDays = await config
@@ -219,22 +249,22 @@ export class MonitoringService {
       .catch(() => 30);
 
     // Snapshot and clear up front so concurrent tracking accumulates into a
-    // fresh batch rather than racing the writes below.
+    // fresh batch rather than racing the write below.
     const batch = Array.from(this.pendingBuckets.values());
     this.pendingBuckets.clear();
 
-    for (const bucket of batch) {
-      try {
-        const expiresAt = new Date(
-          bucket.lastUsedAt.getTime() + retentionDays * DAY_MS,
-        );
-        await CommandMetricsModel.findOneAndUpdate(
-          {
+    const ops = batch.map((bucket) => {
+      const expiresAt = new Date(
+        bucket.lastUsedAt.getTime() + retentionDays * DAY_MS,
+      );
+      return {
+        updateOne: {
+          filter: {
             command: bucket.command,
             date: bucket.date,
             guildId: bucket.guildId,
           },
-          {
+          update: {
             $inc: {
               usageCount: bucket.usageCount,
               totalResponseMs: bucket.totalResponseMs,
@@ -243,14 +273,20 @@ export class MonitoringService {
             $min: { firstUsedAt: bucket.firstUsedAt },
             $max: { lastUsedAt: bucket.lastUsedAt, expiresAt },
           },
-          { upsert: true },
-        );
-      } catch (error) {
-        logger.error(
-          `Failed to flush command metrics for ${bucket.command}:`,
-          error,
-        );
-        // Re-queue so the counts survive a transient DB failure.
+          upsert: true,
+        },
+      };
+    });
+
+    try {
+      // `ordered: false` so one bad op can't block the rest of the batch.
+      await CommandMetricsModel.bulkWrite(ops, { ordered: false });
+      // A clean flush drained the buffer — clear the cap-warning latch.
+      this.droppingPending = false;
+    } catch (error) {
+      logger.error("Failed to flush command metrics batch:", error);
+      // Re-queue the whole batch so the counts survive a transient DB failure.
+      for (const bucket of batch) {
         this.addPending(bucket);
       }
     }

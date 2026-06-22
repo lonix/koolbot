@@ -25,9 +25,7 @@ describe("AchievementsService - Quote Accolades", () => {
 
       // Ensure progression makes sense for adding quotes
       expect(thresholds.quotable).toBeLessThan(thresholds.quote_master);
-      expect(thresholds.quote_master).toBeLessThan(
-        thresholds.quote_collector,
-      );
+      expect(thresholds.quote_master).toBeLessThan(thresholds.quote_collector);
       expect(thresholds.quote_collector).toBeLessThan(thresholds.quote_legend);
 
       // Ensure progression makes sense for being quoted
@@ -63,11 +61,7 @@ describe("AchievementsService - Quote Accolades", () => {
     });
 
     it("should have three accolades for being quoted", () => {
-      const beingQuotedAccolades = [
-        "quotable",
-        "widely_quoted",
-        "quote_icon",
-      ];
+      const beingQuotedAccolades = ["quotable", "widely_quoted", "quote_icon"];
       expect(beingQuotedAccolades.length).toBe(3);
     });
 

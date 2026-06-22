@@ -16,9 +16,8 @@ import { ReactionActivityTracking } from "../../src/models/reaction-activity-tra
 
 // The global mongoose mock does not provide updateOne; attach it to the
 // shared model object so the tracker can call it.
-(
-  ReactionActivityTracking as unknown as { updateOne: jest.Mock }
-).updateOne = jest.fn();
+(ReactionActivityTracking as unknown as { updateOne: jest.Mock }).updateOne =
+  jest.fn();
 
 function createTracker() {
   const mockClient = {} as Client;
@@ -80,9 +79,8 @@ describe("ReactionActivityTracker", () => {
       ReactionActivityTracking as unknown as { updateOne: jest.Mock }
     ).updateOne;
     updateOne.mockResolvedValue({ matchedCount: 1 });
-    (
-      ReactionActivityTracker as unknown as { instance: unknown }
-    ).instance = undefined;
+    (ReactionActivityTracker as unknown as { instance: unknown }).instance =
+      undefined;
   });
 
   describe("singleton pattern", () => {
@@ -177,9 +175,9 @@ describe("ReactionActivityTracker", () => {
       const fetched = makeReaction();
       const partialReaction = {
         partial: true,
-        fetch: jest.fn<() => Promise<MessageReaction>>().mockResolvedValue(
-          fetched,
-        ),
+        fetch: jest
+          .fn<() => Promise<MessageReaction>>()
+          .mockResolvedValue(fetched),
       } as unknown as MessageReaction;
       const fetchedUser = makeUser();
       const partialUser = {

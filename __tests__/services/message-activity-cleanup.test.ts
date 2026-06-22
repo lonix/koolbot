@@ -2,7 +2,12 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import type { Client } from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
-  default: { info: jest.fn(), error: jest.fn(), warn: jest.fn(), debug: jest.fn() },
+  default: {
+    info: jest.fn(),
+    error: jest.fn(),
+    warn: jest.fn(),
+    debug: jest.fn(),
+  },
   isDebugMode: jest.fn(() => false),
 }));
 
@@ -83,7 +88,10 @@ describe("MessageActivityCleanupService", () => {
 
     const now = Date.now();
     const oldEntry = { sentAt: new Date(now - 500 * DAY_MS), channelId: "c1" };
-    const recentEntry = { sentAt: new Date(now - 10 * DAY_MS), channelId: "c1" };
+    const recentEntry = {
+      sentAt: new Date(now - 10 * DAY_MS),
+      channelId: "c1",
+    };
 
     const userDoc = {
       _id: "id1",

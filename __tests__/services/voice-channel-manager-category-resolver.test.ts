@@ -18,7 +18,9 @@ import { ConfigService } from "../../src/services/config-service.js";
  * cache.
  */
 describe("resolveManagedCategory", () => {
-  let getStringSpy: jest.SpiedFunction<typeof ConfigService.prototype.getString>;
+  let getStringSpy: jest.SpiedFunction<
+    typeof ConfigService.prototype.getString
+  >;
 
   beforeEach(() => {
     getStringSpy = jest.spyOn(ConfigService.prototype, "getString");
@@ -28,7 +30,9 @@ describe("resolveManagedCategory", () => {
     getStringSpy.mockRestore();
   });
 
-  function mockGuild(channels: Record<string, { type: ChannelType; name: string }>) {
+  function mockGuild(
+    channels: Record<string, { type: ChannelType; name: string }>,
+  ) {
     return {
       channels: {
         cache: {

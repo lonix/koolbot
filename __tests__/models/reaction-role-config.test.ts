@@ -4,9 +4,8 @@ describe("ReactionRoleConfig Model Schema", () => {
   describe("schema definition", () => {
     it("should define required fields", () => {
       const schemaTest = async () => {
-        const { ReactionRoleConfig } = await import(
-          "../../src/models/reaction-role-config.js"
-        );
+        const { ReactionRoleConfig } =
+          await import("../../src/models/reaction-role-config.js");
         return ReactionRoleConfig.schema;
       };
 

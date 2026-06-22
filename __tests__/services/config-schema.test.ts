@@ -1,81 +1,97 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from "@jest/globals";
 import {
   defaultConfig,
   settingsMetadata,
   categoryMetadata,
   REWIND_RETENTION_MIN_DAYS,
-} from '../../src/services/config-schema.js';
+} from "../../src/services/config-schema.js";
 
-describe('Config Schema', () => {
-  describe('defaultConfig', () => {
-    it('should have all core features disabled by default for security', () => {
-      expect(defaultConfig['voicechannels.enabled']).toBe(false);
-      expect(defaultConfig['voicetracking.enabled']).toBe(false);
-      expect(defaultConfig['ping.enabled']).toBe(false);
-      expect(defaultConfig['quotes.enabled']).toBe(false);
+describe("Config Schema", () => {
+  describe("defaultConfig", () => {
+    it("should have all core features disabled by default for security", () => {
+      expect(defaultConfig["voicechannels.enabled"]).toBe(false);
+      expect(defaultConfig["voicetracking.enabled"]).toBe(false);
+      expect(defaultConfig["ping.enabled"]).toBe(false);
+      expect(defaultConfig["quotes.enabled"]).toBe(false);
     });
 
-    it('should have reasonable default values for voice channel settings', () => {
-      expect(defaultConfig['voicechannels.category_id']).toBe('');
-      expect(defaultConfig['voicechannels.lobby.name']).toBe('Lobby');
-      expect(defaultConfig['voicechannels.channel.prefix']).toBe('🎮');
+    it("should have reasonable default values for voice channel settings", () => {
+      expect(defaultConfig["voicechannels.category_id"]).toBe("");
+      expect(defaultConfig["voicechannels.lobby.name"]).toBe("Lobby");
+      expect(defaultConfig["voicechannels.channel.prefix"]).toBe("🎮");
     });
 
-    it('should have reasonable default values for cleanup retention', () => {
-      expect(defaultConfig['voicetracking.cleanup.retention.detailed_sessions_days']).toBeGreaterThan(0);
-      expect(defaultConfig['voicetracking.cleanup.retention.monthly_summaries_months']).toBeGreaterThan(0);
-      expect(defaultConfig['voicetracking.cleanup.retention.yearly_summaries_years']).toBeGreaterThan(0);
+    it("should have reasonable default values for cleanup retention", () => {
+      expect(
+        defaultConfig["voicetracking.cleanup.retention.detailed_sessions_days"],
+      ).toBeGreaterThan(0);
+      expect(
+        defaultConfig[
+          "voicetracking.cleanup.retention.monthly_summaries_months"
+        ],
+      ).toBeGreaterThan(0);
+      expect(
+        defaultConfig["voicetracking.cleanup.retention.yearly_summaries_years"],
+      ).toBeGreaterThan(0);
     });
 
-    it('keeps Rewind-relevant retention defaults at or above a full year (#575)', () => {
+    it("keeps Rewind-relevant retention defaults at or above a full year (#575)", () => {
       // Rewind is built live from detailed voice sessions and per-message
       // detail; out-of-the-box defaults must cover a full year-in-review.
       expect(
-        defaultConfig['voicetracking.cleanup.retention.detailed_sessions_days'],
+        defaultConfig["voicetracking.cleanup.retention.detailed_sessions_days"],
       ).toBeGreaterThanOrEqual(REWIND_RETENTION_MIN_DAYS);
       expect(
-        defaultConfig['messagetracking.cleanup.retention.detailed_days'],
+        defaultConfig["messagetracking.cleanup.retention.detailed_days"],
       ).toBeGreaterThanOrEqual(REWIND_RETENTION_MIN_DAYS);
     });
 
-    it('should have reasonable default values for quote system', () => {
-      expect(defaultConfig['quotes.max_length']).toBeGreaterThan(0);
-      expect(defaultConfig['quotes.cooldown']).toBeGreaterThanOrEqual(0);
+    it("should have reasonable default values for quote system", () => {
+      expect(defaultConfig["quotes.max_length"]).toBeGreaterThan(0);
+      expect(defaultConfig["quotes.cooldown"]).toBeGreaterThanOrEqual(0);
     });
 
-    it('should have valid cron schedule defaults', () => {
+    it("should have valid cron schedule defaults", () => {
       // Default schedules should be strings (even if empty)
-      expect(typeof defaultConfig['voicetracking.announcements.schedule']).toBe('string');
-      expect(typeof defaultConfig['voicetracking.cleanup.schedule']).toBe('string');
+      expect(typeof defaultConfig["voicetracking.announcements.schedule"]).toBe(
+        "string",
+      );
+      expect(typeof defaultConfig["voicetracking.cleanup.schedule"]).toBe(
+        "string",
+      );
     });
 
-    it('should have channel_id fields as strings', () => {
-      expect(typeof defaultConfig['quotes.channel_id']).toBe('string');
-      expect(typeof defaultConfig['reactionroles.message_channel_id']).toBe('string');
+    it("should have channel_id fields as strings", () => {
+      expect(typeof defaultConfig["quotes.channel_id"]).toBe("string");
+      expect(typeof defaultConfig["reactionroles.message_channel_id"]).toBe(
+        "string",
+      );
     });
 
-    it('should have string fields for comma-separated values', () => {
-      expect(typeof defaultConfig['voicetracking.excluded_channels']).toBe('string');
-      expect(typeof defaultConfig['quotes.delete_roles']).toBe('string');
+    it("should have string fields for comma-separated values", () => {
+      expect(typeof defaultConfig["voicetracking.excluded_channels"]).toBe(
+        "string",
+      );
+      expect(typeof defaultConfig["quotes.delete_roles"]).toBe("string");
     });
 
-    it('should have voicetracking.excluded_channels default to empty string', () => {
-      expect(defaultConfig['voicetracking.excluded_channels']).toBe('');
+    it("should have voicetracking.excluded_channels default to empty string", () => {
+      expect(defaultConfig["voicetracking.excluded_channels"]).toBe("");
     });
 
-    it('should have rate limiting disabled by default for security', () => {
-      expect(defaultConfig['ratelimit.enabled']).toBe(false);
+    it("should have rate limiting disabled by default for security", () => {
+      expect(defaultConfig["ratelimit.enabled"]).toBe(false);
     });
 
-    it('should have reasonable default values for rate limiting', () => {
-      expect(defaultConfig['ratelimit.max_commands']).toBeGreaterThan(0);
-      expect(defaultConfig['ratelimit.window_seconds']).toBeGreaterThan(0);
-      expect(typeof defaultConfig['ratelimit.bypass_admin']).toBe('boolean');
+    it("should have reasonable default values for rate limiting", () => {
+      expect(defaultConfig["ratelimit.max_commands"]).toBeGreaterThan(0);
+      expect(defaultConfig["ratelimit.window_seconds"]).toBeGreaterThan(0);
+      expect(typeof defaultConfig["ratelimit.bypass_admin"]).toBe("boolean");
     });
   });
 
-  describe('settingsMetadata', () => {
-    it('has a non-empty label, description, category, and type for every key in defaultConfig', () => {
+  describe("settingsMetadata", () => {
+    it("has a non-empty label, description, category, and type for every key in defaultConfig", () => {
       const missingLabel: string[] = [];
       const missingDescription: string[] = [];
       const missingCategory: string[] = [];
@@ -89,12 +105,12 @@ describe('Config Schema', () => {
           missingType.push(key);
           continue;
         }
-        if (!meta.label || meta.label.trim() === '') missingLabel.push(key);
-        if (!meta.description || meta.description.trim() === '')
+        if (!meta.label || meta.label.trim() === "") missingLabel.push(key);
+        if (!meta.description || meta.description.trim() === "")
           missingDescription.push(key);
-        if (!meta.category || meta.category.trim() === '')
+        if (!meta.category || meta.category.trim() === "")
           missingCategory.push(key);
-        if (!meta.type || (meta.type as string).trim() === '')
+        if (!meta.type || (meta.type as string).trim() === "")
           missingType.push(key);
       }
       expect(missingLabel).toEqual([]);
@@ -103,7 +119,7 @@ describe('Config Schema', () => {
       expect(missingType).toEqual([]);
     });
 
-    it('declares a `type` consistent with the runtime defaultConfig value shape', () => {
+    it("declares a `type` consistent with the runtime defaultConfig value shape", () => {
       // The schema-declared type must not contradict the runtime shape:
       // a `boolean`-typed key has a boolean default, a `number`-typed key
       // has a numeric default, and every other kind ("string", "cron",
@@ -115,33 +131,34 @@ describe('Config Schema', () => {
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
         if (!meta) continue;
         const dv = typeof defaultValue;
-        if (meta.type === 'boolean' && dv !== 'boolean') mismatches.push(key);
-        else if (meta.type === 'number' && dv !== 'number') mismatches.push(key);
+        if (meta.type === "boolean" && dv !== "boolean") mismatches.push(key);
+        else if (meta.type === "number" && dv !== "number")
+          mismatches.push(key);
         else if (
-          meta.type !== 'boolean' &&
-          meta.type !== 'number' &&
-          dv !== 'string'
+          meta.type !== "boolean" &&
+          meta.type !== "number" &&
+          dv !== "string"
         )
           mismatches.push(key);
       }
       expect(mismatches).toEqual([]);
     });
 
-    it('attaches a warnBelow hint at the Rewind threshold to both detailed-retention keys (#575)', () => {
+    it("attaches a warnBelow hint at the Rewind threshold to both detailed-retention keys (#575)", () => {
       const voice =
         settingsMetadata[
-          'voicetracking.cleanup.retention.detailed_sessions_days'
+          "voicetracking.cleanup.retention.detailed_sessions_days"
         ];
       const message =
-        settingsMetadata['messagetracking.cleanup.retention.detailed_days'];
+        settingsMetadata["messagetracking.cleanup.retention.detailed_days"];
       for (const meta of [voice, message]) {
         expect(meta.warnBelow).toBeDefined();
         expect(meta.warnBelow?.value).toBe(REWIND_RETENTION_MIN_DAYS);
-        expect(meta.warnBelow?.message.trim()).not.toBe('');
+        expect(meta.warnBelow?.message.trim()).not.toBe("");
       }
     });
 
-    it('does not have stale entries for keys that no longer exist in defaultConfig', () => {
+    it("does not have stale entries for keys that no longer exist in defaultConfig", () => {
       const orphans = Object.keys(settingsMetadata).filter(
         (k) => !(k in defaultConfig),
       );
@@ -149,8 +166,8 @@ describe('Config Schema', () => {
     });
   });
 
-  describe('categoryMetadata', () => {
-    it('covers every category referenced by settingsMetadata', () => {
+  describe("categoryMetadata", () => {
+    it("covers every category referenced by settingsMetadata", () => {
       const usedCategories = new Set(
         Object.values(settingsMetadata).map((m) => m.category),
       );
@@ -165,7 +182,7 @@ describe('Config Schema', () => {
     });
   });
 
-  describe('enabled-default audit (#445)', () => {
+  describe("enabled-default audit (#445)", () => {
     // The audit's principle (documented in defaultConfig's leading comment):
     //   1. Top-level feature gates default to false (opt-in).
     //   2. Sub-feature toggles may default to true if they're inert
@@ -179,72 +196,72 @@ describe('Config Schema', () => {
 
     const EXPECTED_ENABLED_DEFAULTS: Record<string, boolean> = {
       // ─── Top-level feature gates (rule 1: must be false) ────────────
-      'voicechannels.enabled': false,
-      'voicetracking.enabled': false,
-      'ping.enabled': false,
-      'quotes.enabled': false,
-      'ratelimit.enabled': false,
-      'announcements.enabled': false,
-      'achievements.enabled': false,
-      'digest.enabled': false,
-      'rewind.enabled': false,
-      'reactionroles.enabled': false,
-      'notices.enabled': false,
-      'polls.enabled': false,
-      'leaderboard_roles.enabled': false,
-      'messagetracking.enabled': false,
-      'reactiontracking.enabled': false,
+      "voicechannels.enabled": false,
+      "voicetracking.enabled": false,
+      "ping.enabled": false,
+      "quotes.enabled": false,
+      "ratelimit.enabled": false,
+      "announcements.enabled": false,
+      "achievements.enabled": false,
+      "digest.enabled": false,
+      "rewind.enabled": false,
+      "reactionroles.enabled": false,
+      "notices.enabled": false,
+      "polls.enabled": false,
+      "leaderboard_roles.enabled": false,
+      "messagetracking.enabled": false,
+      "reactiontracking.enabled": false,
 
       // ─── Sub-features that default off (auxiliary opt-ins) ──────────
-      'voicechannels.presets.enabled': false,
-      'voicetracking.stats.top.enabled': false,
-      'voicetracking.stats.user.enabled': false,
-      'voicetracking.seen.enabled': false,
-      'voicetracking.companions.enabled': false,
-      'voicetracking.announcements.enabled': false,
-      'voicetracking.cleanup.enabled': false,
-      'messagetracking.cleanup.enabled': false,
-      'polls.participation.enabled': false,
+      "voicechannels.presets.enabled": false,
+      "voicetracking.stats.top.enabled": false,
+      "voicetracking.stats.user.enabled": false,
+      "voicetracking.seen.enabled": false,
+      "voicetracking.companions.enabled": false,
+      "voicetracking.announcements.enabled": false,
+      "voicetracking.cleanup.enabled": false,
+      "messagetracking.cleanup.enabled": false,
+      "polls.participation.enabled": false,
       // Rewind end-of-year DM nudge — auxiliary opt-in under the rewind
       // feature gate, independent of `rewind.enabled` (#608).
-      'rewind.nudge.enabled': false,
+      "rewind.nudge.enabled": false,
 
       // ─── Sub-features that default on (rule 2: parent-gated) ────────
-      'voicechannels.controlpanel.enabled': true,
-      'quotes.header_enabled': true,
-      'quotes.header_pin_enabled': true,
-      'achievements.announcements.enabled': true,
-      'achievements.dm_notifications.enabled': true,
-      'digest.include_achievements': true,
-      'notices.header_enabled': true,
-      'notices.header_pin_enabled': true,
+      "voicechannels.controlpanel.enabled": true,
+      "quotes.header_enabled": true,
+      "quotes.header_pin_enabled": true,
+      "achievements.announcements.enabled": true,
+      "achievements.dm_notifications.enabled": true,
+      "digest.include_achievements": true,
+      "notices.header_enabled": true,
+      "notices.header_pin_enabled": true,
 
       // ─── Core infrastructure (always on; not feature-gated) ─────────
       // Audit logging is a cross-cutting operator-visibility feature
       // rather than a user-facing toggle, so it ships on by default —
       // analogous to how WebAuditLog records every WebUI write without
       // requiring opt-in.
-      'core.command_audit.enabled': true,
+      "core.command_audit.enabled": true,
       // Persisted command metrics (#648) — same rationale as audit logging:
       // a cross-cutting operator-visibility feature, on by default so fresh
       // installs get historical command analytics out of the box.
-      'monitoring.metrics_persistence.enabled': true,
+      "monitoring.metrics_persistence.enabled": true,
     };
 
     // Parent feature each rule-2 (default-true) sub-feature is gated by.
     // Used to prove the sub-feature is inert on a fresh install.
     const PARENT_OF_DEFAULT_TRUE: Record<string, string> = {
-      'voicechannels.controlpanel.enabled': 'voicechannels.enabled',
-      'quotes.header_enabled': 'quotes.enabled',
-      'quotes.header_pin_enabled': 'quotes.enabled',
-      'achievements.announcements.enabled': 'achievements.enabled',
-      'achievements.dm_notifications.enabled': 'achievements.enabled',
-      'digest.include_achievements': 'digest.enabled',
-      'notices.header_enabled': 'notices.enabled',
-      'notices.header_pin_enabled': 'notices.enabled',
+      "voicechannels.controlpanel.enabled": "voicechannels.enabled",
+      "quotes.header_enabled": "quotes.enabled",
+      "quotes.header_pin_enabled": "quotes.enabled",
+      "achievements.announcements.enabled": "achievements.enabled",
+      "achievements.dm_notifications.enabled": "achievements.enabled",
+      "digest.include_achievements": "digest.enabled",
+      "notices.header_enabled": "notices.enabled",
+      "notices.header_pin_enabled": "notices.enabled",
     };
 
-    it('audits every `*enabled` key in defaultConfig (no drift)', () => {
+    it("audits every `*enabled` key in defaultConfig (no drift)", () => {
       // Derive the live set so a new toggle added to defaultConfig
       // without an entry above immediately fails this test.
       const liveEnabledKeys = Object.keys(defaultConfig).filter((k) =>
@@ -259,27 +276,21 @@ describe('Config Schema', () => {
       expect(stale).toEqual([]);
     });
 
-    it('every audited `*enabled` key matches its expected default value', () => {
-      for (const [key, expected] of Object.entries(
-        EXPECTED_ENABLED_DEFAULTS,
-      )) {
-        expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(
-          expected,
-        );
+    it("every audited `*enabled` key matches its expected default value", () => {
+      for (const [key, expected] of Object.entries(EXPECTED_ENABLED_DEFAULTS)) {
+        expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(expected);
       }
     });
 
-    it('every default-true sub-feature has a parent gate that defaults to false', () => {
+    it("every default-true sub-feature has a parent gate that defaults to false", () => {
       for (const [key, parent] of Object.entries(PARENT_OF_DEFAULT_TRUE)) {
         expect(defaultConfig[key as keyof typeof defaultConfig]).toBe(true);
-        expect(defaultConfig[parent as keyof typeof defaultConfig]).toBe(
-          false,
-        );
+        expect(defaultConfig[parent as keyof typeof defaultConfig]).toBe(false);
       }
     });
 
-    it('does not declare wizard.enabled (#434 / #445 — wizard is always on)', () => {
-      expect('wizard.enabled' in defaultConfig).toBe(false);
+    it("does not declare wizard.enabled (#434 / #445 — wizard is always on)", () => {
+      expect("wizard.enabled" in defaultConfig).toBe(false);
     });
   });
 });

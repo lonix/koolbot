@@ -1,10 +1,10 @@
-import { jest } from '@jest/globals';
+import { jest } from "@jest/globals";
 
 // Mock ConfigService globally to prevent MongoDB connections and hangs
-jest.mock('../src/services/config-service.js', () => ({
+jest.mock("../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
-      getString: jest.fn().mockResolvedValue('test-value'),
+      getString: jest.fn().mockResolvedValue("test-value"),
       getNumber: jest.fn().mockResolvedValue(123),
       getBoolean: jest.fn().mockResolvedValue(true),
       getConfig: jest.fn().mockResolvedValue(new Map()),
@@ -21,8 +21,8 @@ class MockSchema {
     return this;
   }
   static Types = {
-    Mixed: 'Mixed',
-    ObjectId: 'ObjectId',
+    Mixed: "Mixed",
+    ObjectId: "ObjectId",
     String: String,
     Number: Number,
     Boolean: Boolean,
@@ -34,7 +34,7 @@ class MockSchema {
 }
 
 // Mock mongoose globally to prevent DB connections
-jest.mock('mongoose', () => ({
+jest.mock("mongoose", () => ({
   default: {
     connect: jest.fn().mockResolvedValue(undefined),
     connection: {

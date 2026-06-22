@@ -119,11 +119,7 @@ describe("createSessionPingHandler", () => {
     const req = makeReq(cookie);
     const res = makeRes();
     const next = jest.fn();
-    await createSessionPingHandler()(
-      req as never,
-      res as never,
-      next as never,
-    );
+    await createSessionPingHandler()(req as never, res as never, next as never);
 
     expect(res.statusCode).toBe(200);
     expect(next).not.toHaveBeenCalled();

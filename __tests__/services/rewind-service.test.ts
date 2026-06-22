@@ -639,7 +639,9 @@ describe("RewindService.getSummary", () => {
                   members: {
                     cache: {
                       get: (uid: string) =>
-                        uid === "bob" ? { displayName: "Bob the Builder" } : undefined,
+                        uid === "bob"
+                          ? { displayName: "Bob the Builder" }
+                          : undefined,
                     },
                   },
                 }

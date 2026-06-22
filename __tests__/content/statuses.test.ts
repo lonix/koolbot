@@ -30,7 +30,9 @@ describe("validateStatusEntry", () => {
 
   it("rejects text longer than the cap", () => {
     const tooLong = "x".repeat(STATUS_TEXT_MAX + 1);
-    expect(validateStatusEntry("lonely", tooLong)).toMatch(/characters or fewer/);
+    expect(validateStatusEntry("lonely", tooLong)).toMatch(
+      /characters or fewer/,
+    );
   });
 
   it("accepts a plain entry for non-count pools", () => {
