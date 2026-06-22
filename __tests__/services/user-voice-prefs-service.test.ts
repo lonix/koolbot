@@ -11,6 +11,7 @@ jest.mock("../../src/utils/logger.js");
 
 const mockModel = UserVoicePreferences as unknown as {
   findOne: jest.Mock;
+  findOneAndUpdate: jest.Mock;
   create: jest.Mock;
 };
 
@@ -38,10 +39,10 @@ function makeDoc(overrides: Partial<FakeDoc> = {}): FakeDoc {
   };
 }
 
-// getPrefs awaits findOne() directly; point it at our fake doc so the
-// lazy-create branch is never taken.
+// getPrefs uses an atomic upsert (findOneAndUpdate); point it at our fake
+// doc so each call resolves to the same in-memory preferences row.
 function stubGetPrefs(doc: FakeDoc): void {
-  mockModel.findOne.mockResolvedValue(doc as never);
+  mockModel.findOneAndUpdate.mockResolvedValue(doc as never);
 }
 
 describe("applyNamePattern", () => {

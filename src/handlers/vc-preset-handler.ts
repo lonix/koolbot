@@ -20,7 +20,10 @@ import {
   IChannelPreset,
   IUserVoicePreferences,
 } from "../models/user-voice-preferences.js";
-import { UserVoicePrefsService } from "../services/user-voice-prefs-service.js";
+import {
+  UserVoicePrefsService,
+  VoicePrefsValidationError,
+} from "../services/user-voice-prefs-service.js";
 
 const configService = ConfigService.getInstance();
 
@@ -488,12 +491,18 @@ async function toggleDefault(
       parsed.ownerId,
       parsed.presetIndex,
     );
-  } catch {
-    await interaction.reply({
-      content: "❌ Preset no longer exists.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
+  } catch (error) {
+    // Only the known "missing preset" validation case becomes a friendly
+    // reply here; unexpected errors (DB/Discord) propagate to the outer
+    // handler so they're logged and surfaced generically.
+    if (error instanceof VoicePrefsValidationError) {
+      await interaction.reply({
+        content: `❌ ${error.message}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    throw error;
   }
 
   await switchToManage(interaction, parsed, parsed.presetIndex);
@@ -516,12 +525,17 @@ async function deletePreset(
       parsed.ownerId,
       parsed.presetIndex,
     );
-  } catch {
-    await interaction.reply({
-      content: "❌ Preset no longer exists.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
+  } catch (error) {
+    // As in toggleDefault: translate only the known validation/missing case;
+    // rethrow unexpected errors for the outer handler to log and report.
+    if (error instanceof VoicePrefsValidationError) {
+      await interaction.reply({
+        content: `❌ ${error.message}`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+    throw error;
   }
 
   if (removed.remaining === 0) {

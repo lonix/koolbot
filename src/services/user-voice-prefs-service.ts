@@ -83,12 +83,20 @@ export class UserVoicePrefsService {
     return UserVoicePrefsService.instance;
   }
 
-  /** Load (or lazily create) the preferences document for a user. */
+  /**
+   * Load (or lazily create) the preferences document for a user. Uses an
+   * atomic upsert so two concurrent first-time requests can't race a
+   * `findOne() ?? create()` into a duplicate-key error on the unique
+   * `userId` index — both resolve to the same row.
+   */
   async getPrefs(userId: string): Promise<IUserVoicePreferences> {
-    return (
-      (await UserVoicePreferences.findOne({ userId })) ??
-      (await UserVoicePreferences.create({ userId, presets: [] }))
+    // `upsert: true, new: true` always resolves to a document (never null).
+    const prefs = await UserVoicePreferences.findOneAndUpdate(
+      { userId },
+      { $setOnInsert: { userId, presets: [] } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
     );
+    return prefs as IUserVoicePreferences;
   }
 
   // ---------- Validation helpers ----------

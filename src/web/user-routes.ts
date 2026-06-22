@@ -233,13 +233,17 @@ async function resolveDisplayName(
   }
 }
 
-/** Parse an optional numeric form field, treating blank as "unset". */
+/**
+ * Parse an optional integer form field, treating blank as "unset". A
+ * non-integer (e.g. "1.9", "abc") yields `NaN` so callers reject it rather
+ * than silently truncating — the service's bounds are integer-only.
+ */
 function parseOptionalInt(raw: unknown): number | undefined {
   if (typeof raw !== "string") return undefined;
   const trimmed = raw.trim();
   if (trimmed.length === 0) return undefined;
   const n = Number(trimmed);
-  return Number.isFinite(n) ? Math.trunc(n) : NaN;
+  return Number.isInteger(n) ? n : NaN;
 }
 
 function toPresetViews(
@@ -720,11 +724,11 @@ export function createUserRouter(
 
   // Helper shared by every voice route: 404 with a friendly disabled
   // state when the feature is off (mirrors the Rewind gate, #608).
-  const renderVoiceDisabled = (
+  const renderVoiceDisabled = async (
     req: AuthenticatedRequest,
     res: Response,
     session: WebSessionContext,
-  ): void => {
+  ): Promise<void> => {
     res
       .status(404)
       .type("text/html")
@@ -738,6 +742,7 @@ export function createUserRouter(
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
+          rewindEnabled: await isRewindFeatureEnabled(),
           presetsEnabled: false,
         }),
       );
@@ -752,7 +757,7 @@ export function createUserRouter(
         return;
       }
       if (!(await isVoicePresetsEnabled())) {
-        renderVoiceDisabled(req, res, session);
+        await renderVoiceDisabled(req, res, session);
         return;
       }
       const { userId } = assertSelfScope(session, {
@@ -805,7 +810,7 @@ export function createUserRouter(
         return;
       }
       if (!(await isVoicePresetsEnabled())) {
-        renderVoiceDisabled(req, res, session);
+        await renderVoiceDisabled(req, res, session);
         return;
       }
       const { userId } = assertSelfScope(session, {
@@ -878,7 +883,7 @@ export function createUserRouter(
         return;
       }
       if (!(await isVoicePresetsEnabled())) {
-        renderVoiceDisabled(req, res, session);
+        await renderVoiceDisabled(req, res, session);
         return;
       }
       const { userId } = assertSelfScope(session, {
