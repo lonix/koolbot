@@ -400,7 +400,9 @@ export interface SettingMetadata {
 export function getDependencies(
   key: keyof ConfigSchema,
 ): (keyof ConfigSchema)[] {
-  return settingsMetadata[key]?.dependsOn ?? [];
+  // Return a fresh copy so callers can't mutate the array stored in
+  // settingsMetadata and silently corrupt the shared dependency graph.
+  return [...(settingsMetadata[key]?.dependsOn ?? [])];
 }
 
 /**

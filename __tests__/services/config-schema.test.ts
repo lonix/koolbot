@@ -174,13 +174,16 @@ describe("Config Schema", () => {
     // truth consumed by write-time enforcement (#663) and the Settings
     // "requires X" hint (#666). Rewind is deliberately absent — it is a
     // graceful aggregator that must never be blocked on enable.
-    const EXPECTED_DEPENDENCIES: Record<string, (keyof ConfigSchema)[]> = {
+    // `satisfies` checks every key/value against `keyof ConfigSchema` at
+    // compile time, so a typo in a config key fails the build instead of
+    // being hidden by a runtime cast.
+    const EXPECTED_DEPENDENCIES = {
       "leaderboard_roles.enabled": ["voicetracking.enabled"],
       "digest.enabled": ["voicetracking.enabled"],
       "digest.include_achievements": ["achievements.enabled"],
       "achievements.enabled": ["voicetracking.enabled"],
       "voicetracking.announcements.enabled": ["voicetracking.enabled"],
-    };
+    } satisfies Partial<Record<keyof ConfigSchema, (keyof ConfigSchema)[]>>;
 
     it("declares exactly the #659 hard-dependency table", () => {
       const declared: Record<string, (keyof ConfigSchema)[]> = {};
