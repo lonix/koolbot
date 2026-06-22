@@ -216,6 +216,9 @@ export class MonitoringService {
       },
       60 * 60 * 1000,
     ); // Every hour
+
+    // Don't keep the event loop alive solely for this background logging.
+    this.periodicLoggingInterval.unref?.();
   }
 
   /**
