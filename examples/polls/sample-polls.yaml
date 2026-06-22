@@ -3,18 +3,14 @@
 # =============================================================================
 #
 # This is a starting point for server admins who want to seed their poll
-# question bank via the "Import from URL" feature.
+# question bank via the Web UI's "Import questions" feature.
 #
 # HOW TO USE IT
-#   1. Host this file somewhere on the import allowlist. By default KoolBot
-#      only fetches from:
-#        - raw.githubusercontent.com
-#        - gist.githubusercontent.com
-#      (Operators can widen this with the POLL_IMPORT_ALLOWED_HOSTS env var.)
-#      The easiest path: commit it to a GitHub repo or gist and copy the
-#      "Raw" URL.
-#   2. In the Web UI go to Polls -> Import from URL (or use /poll import-url)
-#      and paste the raw URL.
+#   1. In the Web UI go to Polls -> Import questions.
+#   2. Either choose this file with the file picker (its contents load into the
+#      text box, where you can review or edit them first) or paste them in.
+#      Nothing is fetched from the network — the content comes straight from
+#      your browser, so there is no URL to host and no allowlist to configure.
 #   3. KoolBot validates every entry, skips duplicates (matched by question
 #      text), and copies the rest into your local library.
 #

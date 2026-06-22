@@ -748,7 +748,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
 | **Setup Wizard**   | `/setup wizard`                                                                                     |
 | **Announcements**  | `/announce create`, `list`, `delete`                                                                |
-| **Polls**          | `/poll create`, `list`, `add-item`, `import-url`, `delete`, `delete-item`, `test`, `list-items`     |
+| **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items`                   |
 | **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
 | **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |

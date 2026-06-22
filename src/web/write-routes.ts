@@ -2449,74 +2449,11 @@ export function createWriteRouter(
     }),
   );
 
-  router.post(
-    "/polls/items/import",
-    asyncHandler(async (req, res) => {
-      const session = requireSessionContext(req);
-      const url = getString(req, "url");
-      if (!url) {
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: "URL is required.",
-        });
-        return;
-      }
-      const service = PollService.getInstance(client);
-      try {
-        const results = await service.importFromUrl(
-          url,
-          session.guildId,
-          session.discordUserId,
-        );
-        const errCount = results.errors.length;
-        const type: Flash["type"] =
-          results.imported > 0 && errCount === 0
-            ? "ok"
-            : results.imported > 0
-              ? "warn"
-              : "err";
-        const summary = `Imported ${results.imported}, skipped ${results.skipped}, errors ${errCount}.`;
-        const firstError =
-          errCount > 0 ? ` First error: ${results.errors[0]}` : "";
-        await recordAudit(session, {
-          action: "poll-item.import",
-          details: {
-            url,
-            imported: results.imported,
-            skipped: results.skipped,
-            errors: errCount,
-          },
-          result:
-            errCount > 0 && results.imported === 0 ? "failure" : "success",
-          errorMessage:
-            errCount > 0 ? results.errors.slice(0, 5).join("; ") : null,
-        });
-        flashRedirect(res, "/admin/polls", {
-          type,
-          text: `${summary}${firstError}`,
-        });
-      } catch (err) {
-        const text = err instanceof Error ? err.message : "Unknown error";
-        logger.error("Poll import failed", err);
-        await recordAudit(session, {
-          action: "poll-item.import",
-          details: { url },
-          result: "failure",
-          errorMessage: text,
-        });
-        flashRedirect(res, "/admin/polls", {
-          type: "err",
-          text: `Import failed: ${text}`,
-        });
-      }
-    }),
-  );
-
-  // Paste-a-blob import (#552). Unlike /polls/items/import this makes no
-  // outbound request — the YAML/JSON comes straight from the authenticated
-  // admin's browser, so the SSRF allowlist/redirect/private-IP guards that the
-  // URL path needs do not apply here. The parse/validate/dedup loop is shared
-  // via PollService.importFromString.
+  // Import a poll library from content the admin pastes into the textarea or
+  // loads from a local file in the browser (#646). There is no URL/fetch path:
+  // the YAML/JSON arrives straight from the authenticated admin's browser, so
+  // there is no outbound request to forge and no host allowlist to maintain.
+  // The parse/validate/dedup loop lives in PollService.importFromString.
   router.post(
     "/polls/items/import-text",
     asyncHandler(async (req, res) => {

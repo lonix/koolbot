@@ -9,15 +9,14 @@ Ready-to-import poll question banks for KoolBot's [poll feature](../../SETTINGS.
 
 ## How to import
 
-1. **Host the file on an allowlisted host.** By default KoolBot only fetches
-   poll imports from `raw.githubusercontent.com` and
-   `gist.githubusercontent.com`. The simplest route is to commit the file to a
-   GitHub repo or gist and grab its **Raw** URL. (Operators can widen the
-   allowlist with the `POLL_IMPORT_ALLOWED_HOSTS` env var.)
-2. **Import it.** Web UI → **Polls → Import from URL**, or the
-   `/poll import-url` command. Paste the raw URL.
-3. KoolBot validates each entry, **skips duplicates** (matched by question
-   text), and copies the rest into your guild's local poll library.
+1. **Open the importer.** Web UI → **Polls → Import questions**.
+2. **Provide the content.** Either pick the `.yaml`/`.json` file with the file
+   chooser (it loads into the text box, where you can review or edit it first)
+   or paste the document directly. KoolBot never fetches from the network — the
+   content comes straight from your browser, so there is no URL to host and no
+   host allowlist to configure.
+3. **Import.** KoolBot validates each entry, **skips duplicates** (matched by
+   question text), and copies the rest into your guild's local poll library.
 
 Re-importing the same file later is safe — only new questions get added.
 
