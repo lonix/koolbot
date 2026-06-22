@@ -548,9 +548,12 @@ export class BirthdayService {
     now: Date,
   ): Promise<number> {
     let removed = 0;
+    // Only rows with a stored grant timestamp can have a role to revoke.
+    // (`$ne: null` already excludes missing fields in MongoDB; `$exists`
+    // makes that intent explicit.)
     const expiredRows = await UserBirthday.find({
       guildId,
-      roleAssignedAt: { $ne: null },
+      roleAssignedAt: { $exists: true, $ne: null },
     });
     for (const row of expiredRows) {
       if (!row.roleAssignedAt) continue;

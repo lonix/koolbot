@@ -634,14 +634,13 @@ export function createUserRouter(
       const service = BirthdayService.getInstance(client);
       const before = await service.getBirthday(userId, guildId);
 
-      // A "Remove" submit (its button posts `clear`) or an empty month
-      // field clears the stored date.
+      // Clearing is only ever the explicit "Remove" button (which posts
+      // `clear`). A plain "Save" with no month/day is a validation error,
+      // not a silent delete of an existing birthday.
       const month = parseIntField(body.month);
       const day = parseIntField(body.day);
       const year = parseIntField(body.year);
-      const clearing =
-        (typeof body.clear === "string" && body.clear.length > 0) ||
-        month === null;
+      const clearing = typeof body.clear === "string" && body.clear.length > 0;
 
       let result: "success" | "failure" = "success";
       let errorMessage: string | null = null;
@@ -649,10 +648,12 @@ export function createUserRouter(
       try {
         if (clearing) {
           after = await service.setBirthday(userId, guildId, null);
+        } else if (month === null || day === null) {
+          throw new Error("Please choose a month and enter a day.");
         } else {
           after = await service.setBirthday(userId, guildId, {
-            month: month as number,
-            day: day ?? Number.NaN,
+            month,
+            day,
             year,
           });
         }
