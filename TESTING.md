@@ -26,8 +26,29 @@ Tests are located in the `__tests__` directory, organized by module:
 __tests__/
 ├── commands/       # Tests for Discord slash commands
 ├── services/       # Tests for business logic services
+├── scripts/        # Tests for operational scripts (src/scripts/)
 └── utils/          # Tests for utility functions
 ```
+
+### Generating sample data for manual testing
+
+To exercise the data-heavy surfaces (Rewind, leaderboards, digests,
+achievements, `/stats`, the WebUI stats pages) without waiting for real
+activity, seed a **dev/test** database:
+
+```bash
+npm run build
+npm run seed-sample-data -- --yes
+# tidy up afterwards (removes only seeded rows):
+npm run seed-sample-data -- --clean --yes
+```
+
+The seeder refuses to run without `--yes`, namespaces everything behind a
+`seed-` id prefix, and is deterministic given a fixed `--seed`. See
+[Operational Scripts](DEVELOPER_GUIDE.md#operational-scripts) for the full
+option list and the Docker recipe. Its pure data-generation helpers are
+covered by `__tests__/scripts/seed-sample-data.test.ts` (the global mongoose
+mock keeps the DB out of the unit tests).
 
 ## Writing Tests
 

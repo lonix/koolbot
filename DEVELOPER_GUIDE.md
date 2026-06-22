@@ -12,6 +12,7 @@ Complete guide for developers extending or maintaining KoolBot.
   - [Service Singleton Pattern](#service-singleton-pattern)
   - [Configuration Management](#configuration-management)
 - [Adding New Features](#adding-new-features)
+- [Operational Scripts](#operational-scripts)
 - [Testing Guidelines](#testing-guidelines)
 - [Code Style](#code-style)
 - [Dependency Notes](#dependency-notes)
@@ -665,6 +666,81 @@ discovers settings from `defaultConfig` automatically.
    - [ ] Update `WEBUI.md` if you added a new page or env var
    - [ ] Update `.env.example` if you added a bootstrap env var
    - [ ] Add to `DEVELOPER_GUIDE.md` if you established a reusable pattern
+
+---
+
+## Operational Scripts
+
+These are one-shot maintenance tools in `src/scripts/`, not runtime services or
+Discord commands. They run against **compiled** output, so build first:
+
+```bash
+npm run build
+npm run validate-config        # check required config is present
+npm run migrate-config         # migrate legacy config keys
+npm run seed-sample-data -- --yes   # populate a dev DB with fake activity
+```
+
+### Sample-data seeder (`seed-sample-data`)
+
+`src/scripts/seed-sample-data.ts` populates a **non-production** MongoDB with
+realistic, deterministic fake users and a year's worth of activity so the
+data-heavy surfaces — Rewind / year-in-review, leaderboards, weekly digests,
+achievements, `/stats`, and the WebUI stats pages — can be exercised locally
+without waiting for a real server to accumulate history (#667).
+
+It writes to `VoiceChannelTracking`, `MessageActivityTracking`,
+`UserAchievements`, `ReactionActivityTracking`, `PollParticipationTracking`,
+`UserNotificationPrefs` (carries the timezone for #524) and
+`UserVoicePreferences`.
+
+**Safety model:**
+
+- Every seeded document uses a fake `userId` under a fixed prefix (`seed-`), so
+  `--clean` removes **only** seeded rows and never touches real records.
+- The script **refuses to run without `--yes`** and loudly logs the target URI
+  (password redacted) and database name before any write.
+- Re-runs are **idempotent** (upsert by the deterministic fake ids) and
+  **reproducible** given a fixed `--seed`.
+
+**Options** (all optional; flags take precedence over env vars):
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--yes` | *required* | Explicit opt-in; nothing is written without it. |
+| `--users <n>` | `10` | Number of fake users to generate. |
+| `--seed <n>` | `1337` | RNG seed for reproducible runs. |
+| `--years <n>` | — | Span the history over the last *n* years. |
+| `--from <ISO>` / `--to <ISO>` | current year → now | Explicit date span. |
+| `--guild <id>` | `GUILD_ID` | Guild id for per-guild documents. |
+| `--clean` | — | Remove only previously-seeded data, then exit. |
+
+```bash
+npm run build
+npm run seed-sample-data -- --users 25 --years 1 --seed 42 --yes   # seed
+npm run seed-sample-data -- --clean --yes                          # tidy up
+```
+
+#### Seeding via Docker
+
+The seeder is a dev-only tool, so run it from the **dev** compose stack
+(`docker-compose.dev.yml`), which builds the dev image with devDependencies
+(including `@faker-js/faker`) and mounts the source tree:
+
+```bash
+# Bring up the dev stack (bot + a host-reachable MongoDB)
+docker compose -f docker-compose.dev.yml up -d
+
+# Build once, then seed (the dev container has devDeps + the mounted source)
+docker compose -f docker-compose.dev.yml exec koolbot npm run build
+docker compose -f docker-compose.dev.yml exec koolbot npm run seed-sample-data -- --users 25 --yes
+
+# Remove only the seeded data later
+docker compose -f docker-compose.dev.yml exec koolbot npm run seed-sample-data -- --clean --yes
+```
+
+The production `docker-compose.yml` image prunes devDependencies and is **not**
+intended for seeding — keep sample data out of production.
 
 ---
 
