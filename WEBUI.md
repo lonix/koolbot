@@ -804,6 +804,7 @@ counters.
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                       |
 | **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements, weekly digest, Rewind nudge). Each toggle records a `WebAuditLog` row.                              |
+| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.            |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, annual rank, weekly-rank journey, and text activity. |
 
 Notification preferences are scoped per `(userId, guildId)`. The page
@@ -815,6 +816,23 @@ The whole feature is gated by `rewind.enabled` (`#608`). When it is off
 the route returns a 404 "feature disabled" state and the nav link is
 suppressed on every `/me/*` page; the end-of-year DM nudge is a separate
 toggle (`rewind.nudge.enabled`).
+
+The **Voice** page (`/me/voice`, `#656`) lets a member manage the
+per-user voice preferences that back the Discord control panel's
+**Presets** button. It exposes two things: a **channel name pattern**
+(applied to every channel you spawn from the lobby — use `{username}` as a
+placeholder for your display name; leave blank for the server default
+naming) and your **saved presets**. Presets themselves are still *created*
+in Discord by snapshotting a live channel (control panel → Presets → Save
+current as preset); the web page lets you **edit** a preset's name, channel
+name, user limit, and bitrate, **set-default** (the default auto-applies on
+your next lobby spawn), and **delete**. Every write goes through the same
+`UserVoicePrefsService` validation as the Discord modal — so the
+max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
+identical on both surfaces — and records a `WebAuditLog` row
+(`user.voice.namepattern.set`, `user.voice.preset.edit|default|delete`).
+The whole page is gated by `voicechannels.presets.enabled`: when off it
+returns a 404 "feature disabled" state and its nav link is suppressed.
 
 The bare **Rewind** page (`/me/rewind`) lands on the most recent year you
 actually have data for, so visiting right after the year rolls over shows

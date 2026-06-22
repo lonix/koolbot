@@ -2,7 +2,10 @@ import { ModalSubmitInteraction, ChannelType } from "discord.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
-import { UserVoicePreferences } from "../models/user-voice-preferences.js";
+import {
+  UserVoicePrefsService,
+  VoicePrefsValidationError,
+} from "../services/user-voice-prefs-service.js";
 
 const configService = ConfigService.getInstance();
 
@@ -157,14 +160,7 @@ async function handleSavePresetModal(
     return;
   }
 
-  const presetName = interaction.fields.getTextInputValue("name").trim();
-  if (presetName.length === 0 || presetName.length > 50) {
-    await interaction.reply({
-      content: "❌ Preset name must be 1–50 characters.",
-      ephemeral: true,
-    });
-    return;
-  }
+  const presetName = interaction.fields.getTextInputValue("name");
 
   const channel = await interaction.guild?.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildVoice) {
@@ -179,50 +175,40 @@ async function handleSavePresetModal(
     "voicechannels.presets.max_per_user",
     3,
   );
-  const prefs =
-    (await UserVoicePreferences.findOne({ userId })) ??
-    (await UserVoicePreferences.create({ userId, presets: [] }));
 
-  const existingIndex = prefs.presets.findIndex(
-    (p) => p.name.toLowerCase() === presetName.toLowerCase(),
-  );
+  try {
+    const { updated, name } =
+      await UserVoicePrefsService.getInstance().savePreset(
+        userId,
+        presetName,
+        {
+          channelName: channel.name,
+          userLimit: channel.userLimit ?? 0,
+          bitrate: Math.round((channel.bitrate ?? 64000) / 1000),
+        },
+        max,
+      );
 
-  if (existingIndex === -1 && prefs.presets.length >= max) {
+    logger.info(
+      `User ${userId} saved preset "${name}" from channel ${channelId}`,
+    );
+
     await interaction.reply({
-      content: `❌ You already have ${max} presets (the configured maximum). Delete one first or rename an existing preset.`,
+      content: updated
+        ? `✅ Preset **${name}** updated from this channel's settings.`
+        : `✅ Preset **${name}** saved.`,
       ephemeral: true,
     });
-    return;
+  } catch (error) {
+    if (error instanceof VoicePrefsValidationError) {
+      await interaction.reply({
+        content: `❌ ${error.message}`,
+        ephemeral: true,
+      });
+      return;
+    }
+    throw error;
   }
-
-  const snapshot = {
-    name: presetName,
-    channelName: channel.name,
-    userLimit: channel.userLimit ?? 0,
-    bitrate: Math.round((channel.bitrate ?? 64000) / 1000),
-    isDefault:
-      existingIndex !== -1 ? !!prefs.presets[existingIndex].isDefault : false,
-  };
-
-  if (existingIndex !== -1) {
-    prefs.presets[existingIndex] = snapshot;
-  } else {
-    prefs.presets.push(snapshot);
-  }
-  prefs.markModified("presets");
-  await prefs.save();
-
-  logger.info(
-    `User ${userId} saved preset "${presetName}" from channel ${channelId}`,
-  );
-
-  await interaction.reply({
-    content:
-      existingIndex !== -1
-        ? `✅ Preset **${presetName}** updated from this channel's settings.`
-        : `✅ Preset **${presetName}** saved.`,
-    ephemeral: true,
-  });
 }
 
 async function handleRenamePresetModal(
@@ -242,44 +228,28 @@ async function handleRenamePresetModal(
     return;
   }
 
-  const newName = interaction.fields.getTextInputValue("name").trim();
-  if (newName.length === 0 || newName.length > 50) {
+  const newName = interaction.fields.getTextInputValue("name");
+
+  try {
+    const { oldName, newName: savedName } =
+      await UserVoicePrefsService.getInstance().renamePreset(
+        userId,
+        presetIndex,
+        newName,
+      );
+
     await interaction.reply({
-      content: "❌ Preset name must be 1–50 characters.",
+      content: `✏️ Preset **${oldName}** renamed to **${savedName}**.`,
       ephemeral: true,
     });
-    return;
+  } catch (error) {
+    if (error instanceof VoicePrefsValidationError) {
+      await interaction.reply({
+        content: `❌ ${error.message}`,
+        ephemeral: true,
+      });
+      return;
+    }
+    throw error;
   }
-
-  const prefs = await UserVoicePreferences.findOne({ userId });
-  const preset = prefs?.presets?.[presetIndex];
-  if (!prefs || !preset) {
-    await interaction.reply({
-      content: "❌ Preset no longer exists.",
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const collision = prefs.presets.findIndex(
-    (p, i) =>
-      i !== presetIndex && p.name.toLowerCase() === newName.toLowerCase(),
-  );
-  if (collision !== -1) {
-    await interaction.reply({
-      content: `❌ You already have a preset named **${newName}**.`,
-      ephemeral: true,
-    });
-    return;
-  }
-
-  const oldName = preset.name;
-  preset.name = newName;
-  prefs.markModified("presets");
-  await prefs.save();
-
-  await interaction.reply({
-    content: `✏️ Preset **${oldName}** renamed to **${newName}**.`,
-    ephemeral: true,
-  });
 }

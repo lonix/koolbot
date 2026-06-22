@@ -1504,11 +1504,37 @@ export class VoiceChannelManager {
 
       const member = await guild.members.fetch(userId);
 
-      // Determine channel name
-      let finalChannelName: string;
+      // Determine channel name. Precedence: explicit name argument →
+      // the owner's saved name pattern (a "my channels are always X"
+      // preference, #656) → the server's default prefix/suffix scheme.
+      // The name pattern only applies while per-user presets are enabled,
+      // the same feature gate that exposes its management UI.
+      let finalChannelName: string | null = null;
       if (channelName) {
         finalChannelName = channelName;
       } else {
+        const presetsEnabledForNaming = await configService.getBoolean(
+          "voicechannels.presets.enabled",
+          false,
+        );
+        if (presetsEnabledForNaming && member) {
+          try {
+            const { applyNamePattern, UserVoicePrefsService } =
+              await import("./user-voice-prefs-service.js");
+            const namePattern =
+              await UserVoicePrefsService.getInstance().getNamePattern(userId);
+            if (namePattern) {
+              finalChannelName = applyNamePattern(
+                namePattern,
+                member.displayName,
+              );
+            }
+          } catch (error) {
+            logger.error("Error applying user name pattern:", error);
+          }
+        }
+      }
+      if (!finalChannelName) {
         // Use default naming
         const channelPrefix = await configService.getString(
           "voicechannels.channel.prefix",

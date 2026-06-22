@@ -881,6 +881,323 @@ describe("/me/rewind", () => {
   });
 });
 
+describe("/me/voice (#656)", () => {
+  beforeEach(() => {
+    process.env.WEBUI_SESSION_SECRET = SECRET;
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "30";
+    (WebSessionService as unknown as { instance: unknown }).instance = null;
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  async function dispatch(opts: {
+    method: "GET" | "POST";
+    url?: string; // path under /me, e.g. "/voice/preset/default"
+    body?: Record<string, unknown>;
+    csrfHeader?: string;
+    presetsEnabled?: boolean;
+    prefs?: { namePattern?: string; presets: unknown[] };
+    serviceImpl?: Record<string, unknown>;
+  }): Promise<{
+    statusCode: number;
+    body: string;
+    redirectedTo?: string;
+    audit?: Record<string, unknown>;
+  }> {
+    const now = Date.now();
+    const payload: CookiePayload = {
+      sid: "session-id",
+      uid: "user-1",
+      gid: "guild-1",
+      rol: "user",
+      iat: now - 60_000,
+      act: now - 60_000,
+    };
+    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+
+    const svc = WebSessionService.getInstance();
+    jest.spyOn(svc, "findById").mockResolvedValue({
+      discordUserId: "user-1",
+      guildId: "guild-1",
+      role: "user",
+      scopes: [],
+      revokedAt: null,
+      expiresAt: new Date(now + 60 * 60 * 1000),
+    } as never);
+
+    const { PermissionsService } =
+      await import("../../src/services/permissions-service.js");
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      checkCommandPermission: async () => true,
+    } as never);
+
+    const presetsEnabled = opts.presetsEnabled ?? true;
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getBoolean: async (key: string) =>
+        key === "voicechannels.presets.enabled" ? presetsEnabled : false,
+      getNumber: async () => 3,
+    } as never);
+
+    const { UserVoicePrefsService } =
+      await import("../../src/services/user-voice-prefs-service.js");
+    const defaults = {
+      getPrefs: async () =>
+        opts.prefs ?? { namePattern: undefined, presets: [] },
+      setNamePattern: jest
+        .fn<(u: string, raw: string) => Promise<string | null>>()
+        .mockImplementation(async (_u, raw) => (raw.trim() === "" ? null : raw.trim())),
+      setDefault: jest
+        .fn()
+        .mockResolvedValue({ name: "Squad", isDefault: true } as never),
+      deletePreset: jest
+        .fn()
+        .mockResolvedValue({ name: "Squad", remaining: 0 } as never),
+      editPreset: jest.fn().mockResolvedValue({ name: "Squad" } as never),
+    };
+    const serviceImpl = { ...defaults, ...(opts.serviceImpl ?? {}) };
+    jest
+      .spyOn(UserVoicePrefsService, "getInstance")
+      .mockReturnValue(serviceImpl as never);
+
+    const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+    const createSpy = jest
+      .spyOn(WebAuditLog, "create")
+      .mockResolvedValue({} as never);
+
+    const mockClient = {} as never;
+    const { createSessionMiddleware } =
+      await import("../../src/web/session.js");
+    const requireSession = createSessionMiddleware(mockClient);
+    const router = createUserRouter(mockClient, requireSession);
+
+    const headers: Record<string, unknown> = { cookie };
+    if (opts.method === "POST" && opts.csrfHeader) {
+      headers["x-csrf-token"] = opts.csrfHeader;
+    }
+
+    const url = opts.url ?? "/voice";
+    const captured: {
+      statusCode: number;
+      body: string;
+      redirectedTo?: string;
+    } = { statusCode: 200, body: "" };
+    const res = makeRes() as ReturnType<typeof makeRes> & {
+      redirect: jest.Mock;
+      header: jest.Mock;
+    };
+    res.status.mockImplementation((code: number) => {
+      captured.statusCode = code;
+      res.statusCode = code;
+      return res;
+    });
+    res.send.mockImplementation((body: unknown) => {
+      captured.body = typeof body === "string" ? body : String(body);
+      res.body = captured.body;
+      return res;
+    });
+    res.redirect = jest.fn((code: unknown, target?: unknown) => {
+      if (typeof code === "number") {
+        captured.statusCode = code;
+        captured.redirectedTo = String(target);
+      } else {
+        captured.statusCode = 302;
+        captured.redirectedTo = String(code);
+      }
+      return res;
+    });
+    res.header = jest.fn(() => res);
+
+    const req = {
+      method: opts.method,
+      url,
+      originalUrl: `/me${url}`,
+      path: url,
+      baseUrl: "/me",
+      headers,
+      body: opts.body ?? {},
+      query: {},
+      csrfToken: "csrf-1",
+      header: (name: string) => headers[name.toLowerCase()],
+    } as never as Parameters<typeof router>[0];
+
+    await new Promise<void>((resolve) => {
+      router(req as never, res as never, (() => resolve()) as never);
+      setTimeout(resolve, 0);
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const auditCall = createSpy.mock.calls.at(-1)?.[0] as
+      | Record<string, unknown>
+      | undefined;
+    return { ...captured, audit: auditCall };
+  }
+
+  it("renders the voice page with the name pattern and presets", async () => {
+    const out = await dispatch({
+      method: "GET",
+      prefs: {
+        namePattern: "{username}'s Room",
+        presets: [
+          {
+            name: "Squad",
+            channelName: "Squad HQ",
+            userLimit: 5,
+            bitrate: 96,
+            isDefault: true,
+          },
+        ],
+      },
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("Voice preferences");
+    expect(out.body).toContain('action="/me/voice/name-pattern"');
+    expect(out.body).toContain("{username}&#39;s Room");
+    expect(out.body).toContain("Squad");
+    // The preview substitutes the (fallback) display name.
+    expect(out.body).toContain("Preview:");
+  });
+
+  it("returns a 404 disabled state when presets are off, and hides the nav link", async () => {
+    const out = await dispatch({ method: "GET", presetsEnabled: false });
+    expect(out.statusCode).toBe(404);
+    expect(out.body).toContain("voice presets are currently disabled");
+    expect(out.body).not.toContain('href="/me/voice"');
+  });
+
+  it("saves the name pattern and audits it", async () => {
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/name-pattern",
+      body: { _csrf: "csrf-1", namePattern: "🎮 {username}" },
+      csrfHeader: "csrf-1",
+    });
+    expect(out.statusCode).toBe(303);
+    expect(out.redirectedTo).toMatch(/^\/me\/voice\?/);
+    expect(out.audit).toMatchObject({
+      action: "user.voice.namepattern.set",
+      result: "success",
+    });
+  });
+
+  it("rejects a name-pattern POST without CSRF", async () => {
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/name-pattern",
+      body: { namePattern: "x" },
+    });
+    expect(out.statusCode).toBe(403);
+  });
+
+  it("sets a preset as default through the service", async () => {
+    const setDefault = jest
+      .fn()
+      .mockResolvedValue({ name: "Squad", isDefault: true } as never);
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/preset/default",
+      body: { _csrf: "csrf-1", index: "0", expectedName: "Squad" },
+      csrfHeader: "csrf-1",
+      serviceImpl: { setDefault },
+    });
+    expect(out.statusCode).toBe(303);
+    expect(setDefault).toHaveBeenCalledWith("user-1", 0, "Squad");
+    expect(out.audit).toMatchObject({
+      action: "user.voice.preset.default",
+      result: "success",
+    });
+  });
+
+  it("deletes a preset through the service", async () => {
+    const deletePreset = jest
+      .fn()
+      .mockResolvedValue({ name: "Squad", remaining: 0 } as never);
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/preset/delete",
+      body: { _csrf: "csrf-1", index: "0", expectedName: "Squad" },
+      csrfHeader: "csrf-1",
+      serviceImpl: { deletePreset },
+    });
+    expect(out.statusCode).toBe(303);
+    expect(deletePreset).toHaveBeenCalledWith("user-1", 0, "Squad");
+  });
+
+  it("edits a preset's fields through the service", async () => {
+    const editPreset = jest
+      .fn()
+      .mockResolvedValue({ name: "Squad+" } as never);
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/preset/edit",
+      body: {
+        _csrf: "csrf-1",
+        index: "0",
+        expectedName: "Squad",
+        name: "Squad+",
+        channelName: "Room",
+        userLimit: "10",
+        bitrate: "128",
+      },
+      csrfHeader: "csrf-1",
+      serviceImpl: { editPreset },
+    });
+    expect(out.statusCode).toBe(303);
+    expect(editPreset).toHaveBeenCalledWith(
+      "user-1",
+      0,
+      { name: "Squad+", channelName: "Room", userLimit: 10, bitrate: 128 },
+      "Squad",
+    );
+  });
+
+  it("surfaces a validation error as a warn flash without throwing", async () => {
+    const { VoicePrefsValidationError } =
+      await import("../../src/services/user-voice-prefs-service.js");
+    const editPreset = jest
+      .fn()
+      .mockRejectedValue(
+        new VoicePrefsValidationError("Bitrate must be a whole number"),
+      );
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/preset/edit",
+      body: {
+        _csrf: "csrf-1",
+        index: "0",
+        expectedName: "Squad",
+        name: "Squad",
+        bitrate: "999",
+      },
+      csrfHeader: "csrf-1",
+      serviceImpl: { editPreset },
+    });
+    expect(out.statusCode).toBe(303);
+    expect(out.redirectedTo).toContain("flash=warn");
+    expect(out.audit).toMatchObject({
+      action: "user.voice.preset.edit",
+      result: "failure",
+    });
+  });
+
+  it("rejects an edit with a missing preset index", async () => {
+    const editPreset = jest.fn();
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/preset/edit",
+      body: { _csrf: "csrf-1", name: "Squad" },
+      csrfHeader: "csrf-1",
+      serviceImpl: { editPreset },
+    });
+    expect(out.statusCode).toBe(303);
+    expect(out.redirectedTo).toContain("flash=err");
+    expect(editPreset).not.toHaveBeenCalled();
+  });
+});
+
 describe("/me/timezone (#524)", () => {
   beforeEach(() => {
     process.env.WEBUI_SESSION_SECRET = SECRET;

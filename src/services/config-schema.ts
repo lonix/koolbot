@@ -534,9 +534,9 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     type: "boolean",
   },
   "voicechannels.presets.enabled": {
-    label: "Per-user channel presets enabled",
+    label: "Per-user voice preferences enabled",
     description:
-      "Enable per-user channel presets (saved channel name + privacy).",
+      "Enable per-user voice preferences: a channel name pattern and saved presets (channel name, user limit, bitrate), managed from the Discord control panel and the /me/voice web page.",
     category: "voicechannels",
     type: "boolean",
   },

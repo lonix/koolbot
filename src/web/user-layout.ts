@@ -22,7 +22,7 @@ interface UserNavItem {
    * (#608): a disabled feature drops out of the nav but the URL stays
    * reachable by direct navigation (the route itself enforces the gate).
    */
-  feature?: "rewind";
+  feature?: "rewind" | "voice";
 }
 
 /**
@@ -35,6 +35,7 @@ export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/", label: "Overview" },
   { href: "/me/notifications", label: "Notifications" },
   { href: "/me/timezone", label: "Timezone" },
+  { href: "/me/voice", label: "Voice", feature: "voice" },
   { href: "/me/rewind", label: "Rewind", feature: "rewind" },
 ];
 
@@ -69,6 +70,12 @@ export interface UserPageOptions {
    * unchanged.
    */
   rewindEnabled?: boolean;
+  /**
+   * Enabled-state of the feature-gated Voice-preferences page (#656). When
+   * `false`, the Voice nav link is suppressed. Omitted/`undefined` keeps the
+   * link visible, mirroring `rewindEnabled`.
+   */
+  presetsEnabled?: boolean;
 }
 
 const STYLE = [
@@ -115,6 +122,15 @@ const STYLE = [
   ".tz-preview .now{font-weight:600;color:#e4e6eb}",
   ".btn{background:#2563eb;color:#fff;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
   ".btn:hover{background:#1d4ed8}",
+  ".btn-secondary{background:#374151;color:#e4e6eb;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
+  ".btn-secondary:hover{background:#4b5563}",
+  ".btn-danger{background:#dc2626;color:#fff;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
+  ".btn-danger:hover{background:#b91c1c}",
+  ".preset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem;margin:.5rem 0}",
+  ".preset-grid label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:#94a3b8}",
+  ".preset-grid input{background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:4px;padding:.4rem .5rem;font-size:.9rem}",
+  ".preset-actions{display:flex;gap:.5rem;margin-top:.5rem}",
+  ".preset-actions form{display:inline;margin:0}",
   ".form-actions{margin-top:1rem;display:flex;gap:.5rem;align-items:center}",
   ".feature-list{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:.75rem}",
   ".feature-list li{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.75rem 1rem}",
@@ -217,19 +233,25 @@ export function renderUserPage(opts: UserPageOptions): string {
     '<button type="submit">Finish</button>',
     "</form></div></div>",
     '<div class="shell">',
-    `<main>${renderPageNav(opts.active, opts.rewindEnabled)}${renderFlash(opts.flash)}${opts.body}</main></div>`,
+    `<main>${renderPageNav(opts.active, opts.rewindEnabled, opts.presetsEnabled)}${renderFlash(opts.flash)}${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }
 
-function renderPageNav(active: string, rewindEnabled?: boolean): string {
-  const items = USER_NAV_ITEMS.filter(
+function renderPageNav(
+  active: string,
+  rewindEnabled?: boolean,
+  presetsEnabled?: boolean,
+): string {
+  const items = USER_NAV_ITEMS.filter((item) => {
     // A feature-gated item only shows while its feature is enabled.
     // `undefined` is treated as enabled so non-gating callers are
-    // unaffected (#608).
-    (item) => item.feature !== "rewind" || rewindEnabled !== false,
-  )
+    // unaffected (#608/#656).
+    if (item.feature === "rewind") return rewindEnabled !== false;
+    if (item.feature === "voice") return presetsEnabled !== false;
+    return true;
+  })
     .map((item) => {
       const isActive =
         item.href === active ||
@@ -260,6 +282,9 @@ export function renderUserIndexBody(opts: {
   // Whether the feature-gated Rewind page is enabled (#608). When false,
   // its card is omitted so the overview never links to a disabled page.
   rewindEnabled?: boolean;
+  // Whether the feature-gated Voice page is enabled (#656). When false,
+  // its card is omitted so the overview never links to a disabled page.
+  presetsEnabled?: boolean;
 }): string {
   const greeting = opts.isAdmin
     ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Back to admin panel</em> link above to manage the server.</p>`
@@ -269,6 +294,11 @@ export function renderUserIndexBody(opts: {
       ? ""
       : '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
         '<span class="feature-desc">Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.</span></li>';
+  const voiceCard =
+    opts.presetsEnabled === false
+      ? ""
+      : '<li><span class="feature-name"><a href="/me/voice">Voice</a></span>' +
+        '<span class="feature-desc">Manage your channel name pattern and saved voice-channel presets.</span></li>';
   return [
     "<h1>My preferences</h1>",
     greeting,
@@ -280,6 +310,7 @@ export function renderUserIndexBody(opts: {
       '<span class="feature-desc">Opt in or out of DM nudges from Koolbot.</span></li>',
     '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
       '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
+    voiceCard,
     rewindCard,
     "</ul>",
     "</div>",
@@ -721,5 +752,118 @@ export function renderUserNotificationsBody(
     "</div>",
     "</div>",
     "</form>",
+  ].join("");
+}
+
+// --------------------------------------------------------------------
+// Voice preferences page (#656)
+// --------------------------------------------------------------------
+
+export interface VoicePresetView {
+  /** Stable index into the user's preset array (the form's row key). */
+  index: number;
+  name: string;
+  channelName: string | null;
+  /** null = inherit Discord's default (unlimited); 0 = explicitly unlimited. */
+  userLimit: number | null;
+  bitrate: number | null;
+  isDefault: boolean;
+}
+
+export interface VoicePageBodyOptions {
+  csrfToken: string;
+  /** Current name pattern, or null when unset. */
+  namePattern: string | null;
+  /** Member display name, used to preview the pattern. */
+  displayName: string;
+  presets: VoicePresetView[];
+  /** Configured max presets per user (shown as guidance). */
+  maxPerUser: number;
+}
+
+function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
+  const bits: string[] = [];
+  if (p.channelName) bits.push(`name "${escapeHtml(p.channelName)}"`);
+  if (p.userLimit !== null)
+    bits.push(p.userLimit === 0 ? "no limit" : `limit ${p.userLimit}`);
+  if (p.bitrate !== null) bits.push(`${p.bitrate}kbps`);
+  const summary = bits.length ? bits.join(" · ") : "(empty)";
+
+  const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">`;
+  // The hidden `index`/`expectedName` pair lets the server reject a stale
+  // form whose row shifted (e.g. another tab deleted a preset first).
+  const idFields =
+    `<input type="hidden" name="index" value="${p.index}">` +
+    `<input type="hidden" name="expectedName" value="${escapeHtml(p.name)}">`;
+
+  return [
+    '<div class="card">',
+    `<h2>${escapeHtml(p.name)} ${p.isDefault ? "⭐" : ""}</h2>`,
+    `<p class="muted">${summary}</p>`,
+    // Edit form (name + channel name + limit + bitrate in one save).
+    '<form method="POST" action="/me/voice/preset/edit">',
+    csrf,
+    idFields,
+    '<div class="preset-grid">',
+    `<label>Preset name<input type="text" name="name" value="${escapeHtml(p.name)}" maxlength="50" required></label>`,
+    `<label>Channel name<input type="text" name="channelName" value="${escapeHtml(p.channelName ?? "")}" maxlength="100" placeholder="(unchanged)"></label>`,
+    `<label>User limit<input type="number" name="userLimit" value="${p.userLimit ?? ""}" min="0" max="99" placeholder="(default)"></label>`,
+    `<label>Bitrate (kbps)<input type="number" name="bitrate" value="${p.bitrate ?? ""}" min="8" max="384" placeholder="(default)"></label>`,
+    "</div>",
+    '<div class="form-actions"><button class="btn" type="submit">Save changes</button></div>',
+    "</form>",
+    // Default + delete as separate small forms so each is a single POST.
+    '<div class="preset-actions">',
+    '<form method="POST" action="/me/voice/preset/default">',
+    csrf,
+    idFields,
+    `<button class="btn-secondary" type="submit">${p.isDefault ? "Unset default" : "Set as default"}</button>`,
+    "</form>",
+    '<form method="POST" action="/me/voice/preset/delete">',
+    csrf,
+    idFields,
+    '<button class="btn-danger" type="submit">Delete</button>',
+    "</form>",
+    "</div>",
+    "</div>",
+  ].join("");
+}
+
+/**
+ * Inner HTML for `GET /me/voice` (#656). One form to edit the name
+ * pattern, then a card per saved preset (edit / set-default / delete).
+ * Presets themselves are created in Discord by snapshotting a live
+ * channel — the web surface manages the ones you already have.
+ */
+export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
+  const presetCards =
+    opts.presets.length === 0
+      ? '<div class="card"><div class="empty">No saved presets yet. Open a voice channel\'s control panel in Discord and choose <strong>Presets → Save current as preset</strong> to create one.</div></div>'
+      : opts.presets.map((p) => renderPresetRow(p, opts.csrfToken)).join("");
+
+  return [
+    "<h1>Voice preferences</h1>",
+    '<p class="subtitle">Manage how your dynamic voice channels are named and the presets you can apply to them.</p>',
+    // ---- Name pattern ----
+    '<form method="POST" action="/me/voice/name-pattern">',
+    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
+    '<div class="card">',
+    "<h2>Channel name pattern</h2>",
+    '<p class="muted">Applied to every new channel you spawn from the lobby. Use <code>{username}</code> as a placeholder for your display name. Leave blank to use the server default naming.</p>',
+    `<div style="margin-top:.5rem"><input type="text" name="namePattern" class="tz-select" maxlength="100" value="${escapeHtml(opts.namePattern ?? "")}" placeholder="e.g. {username}'s Room"></div>`,
+    `<p class="muted" style="margin-top:.5rem">Preview: <span class="mono">${escapeHtml(
+      opts.namePattern
+        ? opts.namePattern
+            .replace(/\{username\}/gi, opts.displayName)
+            .replace(/\{displayname\}/gi, opts.displayName)
+        : "(server default)",
+    )}</span></p>`,
+    '<div class="form-actions"><button class="btn" type="submit">Save name pattern</button>',
+    '<span class="muted">Save an empty value to clear it.</span></div>',
+    "</div>",
+    "</form>",
+    // ---- Presets ----
+    `<h2>Saved presets <span class="muted" style="font-size:.85rem">(max ${opts.maxPerUser})</span></h2>`,
+    presetCards,
   ].join("");
 }
