@@ -2,13 +2,8 @@ import { describe, it, expect, afterEach } from "@jest/globals";
 
 const ORIGINAL_ENV = { ...process.env };
 
-const {
-  env,
-  getEnv,
-  hasEnv,
-  requireEnv,
-  getMissingRequiredEnv,
-} = await import("../../src/config/env.js");
+const { env, getEnv, hasEnv, requireEnv, getMissingRequiredEnv } =
+  await import("../../src/config/env.js");
 
 describe("config/env", () => {
   afterEach(() => {

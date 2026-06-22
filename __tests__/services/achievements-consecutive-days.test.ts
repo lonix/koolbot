@@ -1,7 +1,7 @@
-import { describe, it, expect, jest } from '@jest/globals';
+import { describe, it, expect, jest } from "@jest/globals";
 
 // Mock mongoose connection before importing the service
-jest.mock('mongoose', () => ({
+jest.mock("mongoose", () => ({
   __esModule: true,
   default: {
     connection: {
@@ -11,10 +11,10 @@ jest.mock('mongoose', () => ({
   },
 }));
 
-jest.mock('../../src/utils/logger.js');
-jest.mock('../../src/services/config-service.js');
+jest.mock("../../src/utils/logger.js");
+jest.mock("../../src/services/config-service.js");
 
-describe('AchievementsService - Consecutive Days Calculation', () => {
+describe("AchievementsService - Consecutive Days Calculation", () => {
   // Helper to create a date in YYYY-MM-DD format
   const createDate = (daysAgo: number): Date => {
     const date = new Date();
@@ -25,12 +25,11 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
 
   // Helper to format date as YYYY-MM-DD (matches implementation)
   const formatDateKeyUTC = (date: Date): string => {
-    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`;
+    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
   };
 
-  describe('consecutive days streak logic', () => {
-
-    it('should calculate 0 streak for empty sessions', () => {
+  describe("consecutive days streak logic", () => {
+    it("should calculate 0 streak for empty sessions", () => {
       const sessions: Array<{ startTime: Date; duration?: number }> = [];
 
       // Simulate the calculation logic
@@ -42,7 +41,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       }
     });
 
-    it('should calculate 1 day streak for single qualifying day', () => {
+    it("should calculate 1 day streak for single qualifying day", () => {
       const sessions = [
         { startTime: createDate(0), duration: 400 }, // Today, 6 min 40 sec
       ];
@@ -67,7 +66,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       expect(qualifyingDays.length).toBe(1);
     });
 
-    it('should not count days below minimum duration', () => {
+    it("should not count days below minimum duration", () => {
       const sessions = [
         { startTime: createDate(0), duration: 200 }, // Today, 3 min 20 sec (below 5 min)
         { startTime: createDate(1), duration: 100 }, // Yesterday, 1 min 40 sec
@@ -92,7 +91,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       expect(qualifyingDays.length).toBe(0);
     });
 
-    it('should aggregate multiple sessions on same day', () => {
+    it("should aggregate multiple sessions on same day", () => {
       const today = createDate(0);
       const sessions = [
         { startTime: today, duration: 180 }, // 3 minutes
@@ -123,7 +122,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       expect(totalDuration).toBe(360); // 6 minutes total
     });
 
-    it('should calculate 7 day consecutive streak', () => {
+    it("should calculate 7 day consecutive streak", () => {
       const sessions = Array.from({ length: 7 }, (_, i) => ({
         startTime: createDate(6 - i), // 6 days ago to today
         duration: 400,
@@ -152,8 +151,8 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       let currentStreak = 1;
 
       for (let i = 1; i < qualifyingDays.length; i++) {
-        const prevDate = new Date(qualifyingDays[i - 1] + 'T00:00:00Z');
-        const currDate = new Date(qualifyingDays[i] + 'T00:00:00Z');
+        const prevDate = new Date(qualifyingDays[i - 1] + "T00:00:00Z");
+        const currDate = new Date(qualifyingDays[i] + "T00:00:00Z");
         const diffDays = Math.floor(
           (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
         );
@@ -169,7 +168,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       expect(longestStreak).toBe(7);
     });
 
-    it('should handle broken streaks correctly', () => {
+    it("should handle broken streaks correctly", () => {
       const sessions = [
         { startTime: createDate(10), duration: 400 }, // 10 days ago
         { startTime: createDate(9), duration: 400 }, // 9 days ago
@@ -206,8 +205,8 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       let currentStreak = 1;
 
       for (let i = 1; i < qualifyingDays.length; i++) {
-        const prevDate = new Date(qualifyingDays[i - 1] + 'T00:00:00Z');
-        const currDate = new Date(qualifyingDays[i] + 'T00:00:00Z');
+        const prevDate = new Date(qualifyingDays[i - 1] + "T00:00:00Z");
+        const currDate = new Date(qualifyingDays[i] + "T00:00:00Z");
         const diffDays = Math.floor(
           (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
         );
@@ -224,7 +223,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       expect(longestStreak).toBe(6);
     });
 
-    it('should calculate 30 day consecutive streak', () => {
+    it("should calculate 30 day consecutive streak", () => {
       const sessions = Array.from({ length: 30 }, (_, i) => ({
         startTime: createDate(29 - i), // 29 days ago to today
         duration: 400,
@@ -252,8 +251,8 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       let currentStreak = 1;
 
       for (let i = 1; i < qualifyingDays.length; i++) {
-        const prevDate = new Date(qualifyingDays[i - 1] + 'T00:00:00Z');
-        const currDate = new Date(qualifyingDays[i] + 'T00:00:00Z');
+        const prevDate = new Date(qualifyingDays[i - 1] + "T00:00:00Z");
+        const currDate = new Date(qualifyingDays[i] + "T00:00:00Z");
         const diffDays = Math.floor(
           (currDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24),
         );
@@ -269,7 +268,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       expect(longestStreak).toBe(30);
     });
 
-    it('should handle sessions with missing duration', () => {
+    it("should handle sessions with missing duration", () => {
       const sessions = [
         { startTime: createDate(0), duration: 400 },
         { startTime: createDate(1), duration: undefined }, // Missing duration
@@ -296,7 +295,7 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
       expect(qualifyingDays.length).toBe(2);
     });
 
-    it('should use correct minimum duration threshold', () => {
+    it("should use correct minimum duration threshold", () => {
       const sessions = [
         { startTime: createDate(0), duration: 300 }, // Exactly 5 minutes
         { startTime: createDate(1), duration: 299 }, // Just under 5 minutes
@@ -323,62 +322,62 @@ describe('AchievementsService - Consecutive Days Calculation', () => {
     });
   });
 
-  describe('accolade type definitions', () => {
-    it('should include consecutive day accolade types', () => {
+  describe("accolade type definitions", () => {
+    it("should include consecutive day accolade types", () => {
       const accoladeTypes = [
-        'first_hour',
-        'voice_veteran_100',
-        'voice_veteran_500',
-        'voice_veteran_1000',
-        'voice_legend_8765',
-        'marathon_runner',
-        'ultra_marathoner',
-        'social_butterfly',
-        'connector',
-        'night_owl',
-        'early_bird',
-        'weekend_warrior',
-        'weekday_warrior',
-        'consistent_week',
-        'consistent_fortnight',
-        'consistent_month',
+        "first_hour",
+        "voice_veteran_100",
+        "voice_veteran_500",
+        "voice_veteran_1000",
+        "voice_legend_8765",
+        "marathon_runner",
+        "ultra_marathoner",
+        "social_butterfly",
+        "connector",
+        "night_owl",
+        "early_bird",
+        "weekend_warrior",
+        "weekday_warrior",
+        "consistent_week",
+        "consistent_fortnight",
+        "consistent_month",
       ];
 
       // Verify new types are present
-      expect(accoladeTypes).toContain('consistent_week');
-      expect(accoladeTypes).toContain('consistent_fortnight');
-      expect(accoladeTypes).toContain('consistent_month');
+      expect(accoladeTypes).toContain("consistent_week");
+      expect(accoladeTypes).toContain("consistent_fortnight");
+      expect(accoladeTypes).toContain("consistent_month");
     });
   });
 
-  describe('accolade metadata', () => {
-    it('should format streak metadata correctly', () => {
+  describe("accolade metadata", () => {
+    it("should format streak metadata correctly", () => {
       const mockMetadata = {
         value: 7,
-        description: '7+ day streak',
-        unit: 'days',
+        description: "7+ day streak",
+        unit: "days",
       };
 
       expect(mockMetadata.value).toBe(7);
-      expect(mockMetadata.unit).toBe('days');
-      expect(mockMetadata.description).toContain('streak');
+      expect(mockMetadata.unit).toBe("days");
+      expect(mockMetadata.description).toContain("streak");
     });
 
-    it('should format different streak tiers correctly', () => {
+    it("should format different streak tiers correctly", () => {
       const weekStreak = {
         value: 7,
-        description: '7+ day streak',
-        unit: 'days',
+        description: "7+ day streak",
+        unit: "days",
       };
       const fortnightStreak = {
         value: 14,
-        description: '14+ day streak',
-        unit: 'days',
+        description: "14+ day streak",
+        unit: "days",
       };
       const monthStreak = {
         value: 30,
-        description: '30+ day streak',
-        unit: 'days',
+        description: "30+ day streak",
+        unit: "days",
       };
 
       expect(weekStreak.value).toBe(7);

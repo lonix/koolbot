@@ -1,5 +1,8 @@
 import { Collection } from "discord.js";
+import mongoose from "mongoose";
 import logger from "../utils/logger.js";
+import { CommandMetrics as CommandMetricsModel } from "../models/command-metrics.js";
+import { ConfigService } from "./config-service.js";
 
 interface CommandMetrics {
   name: string;
@@ -9,6 +12,49 @@ interface CommandMetrics {
   errorCount: number;
   lastUsed: Date;
   firstUsed: Date;
+}
+
+/**
+ * Accumulated counters for a single `{guildId, command, date}` bucket,
+ * waiting to be flushed to MongoDB. Batching these in memory keeps the DB
+ * write off the per-invocation hot path (issue #648).
+ */
+interface PendingBucket {
+  command: string;
+  guildId: string;
+  /** UTC "YYYY-MM-DD" day key. */
+  date: string;
+  usageCount: number;
+  errorCount: number;
+  totalResponseMs: number;
+  firstUsedAt: Date;
+  lastUsedAt: Date;
+}
+
+/**
+ * How often the pending buckets are flushed to MongoDB. Comfortably under
+ * the "at least once per hour" bar from the issue, while still batching so
+ * a busy guild doesn't trigger a write per command.
+ */
+const FLUSH_INTERVAL_MS = 5 * 60 * 1000;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Hard cap on the number of distinct pending buckets held in memory. A
+ * prolonged DB outage makes `flushMetrics` keep (rather than drain) the
+ * buffer, so without a cap a busy multi-guild bot could accumulate buckets
+ * without bound and OOM during the very incident that caused the outage.
+ * At the cap, new buckets are dropped (with a one-shot warning) while
+ * already-tracked buckets keep merging. Buckets are tiny, so this still
+ * allows tens of thousands — far beyond any legitimate
+ * commands x guilds x days working set — before shedding load.
+ */
+export const MAX_PENDING_BUCKETS = 50_000;
+
+function pendingKey(guildId: string, command: string, date: string): string {
+  // NUL separator can't appear in a command name or snowflake.
+  return `${guildId}\u0000${command}\u0000${date}`;
 }
 
 interface PerformanceMetrics {
@@ -31,10 +77,19 @@ export class MonitoringService {
   private totalCommands: number = 0;
   private totalErrors: number = 0;
   private periodicLoggingInterval: ReturnType<typeof setInterval> | null = null;
+  // Per-bucket counters awaiting a batched DB flush (issue #648).
+  private pendingBuckets: Map<string, PendingBucket> = new Map();
+  private flushInterval: ReturnType<typeof setInterval> | null = null;
+  // Latches true once the buffer hits MAX_PENDING_BUCKETS so the cap warning
+  // fires once per episode rather than on every dropped bucket. Cleared when
+  // the buffer next drains via a successful flush.
+  private droppingPending = false;
 
   private constructor() {
     // Start periodic memory usage logging
     this.startPeriodicLogging();
+    // Periodically persist accumulated command metrics to MongoDB.
+    this.startPeriodicFlush();
   }
 
   public static getInstance(): MonitoringService {
@@ -74,13 +129,20 @@ export class MonitoringService {
   }
 
   /**
-   * Track command execution completion
+   * Track command execution completion.
+   *
+   * When a `guildId` is supplied, the invocation is also accumulated into a
+   * pending daily bucket for batched persistence to MongoDB (issue #648).
+   * Callers that represent a blocked attempt rather than a real execution
+   * (permission denied, rate limited) intentionally omit the `guildId` so
+   * those don't pollute the historical usage/error counts.
    */
   public trackCommandEnd(
     commandName: string,
     trackingId: string,
     startTime: number,
     success: boolean = true,
+    guildId?: string | null,
   ): void {
     const endTime = Date.now();
     const responseTime = endTime - startTime;
@@ -97,9 +159,137 @@ export class MonitoringService {
       }
     }
 
+    if (guildId) {
+      const now = new Date();
+      this.addPending({
+        command: commandName,
+        guildId,
+        date: this.dayKey(now),
+        usageCount: 1,
+        errorCount: success ? 0 : 1,
+        totalResponseMs: responseTime,
+        firstUsedAt: now,
+        lastUsedAt: now,
+      });
+    }
+
     logger.debug(
       `Command completed: ${commandName} (ID: ${trackingId}) - ${responseTime}ms - ${success ? "SUCCESS" : "ERROR"}`,
     );
+  }
+
+  /** UTC day-bucket key ("YYYY-MM-DD") for a timestamp. */
+  private dayKey(when: Date): string {
+    return when.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Fold a bucket's counters into the pending map, merging with any counters
+   * already accumulated for the same `{guildId, command, date}` key. Used both
+   * by the live track path and by `flushMetrics` when re-queuing a batch that
+   * failed to write.
+   */
+  private addPending(bucket: PendingBucket): void {
+    const key = pendingKey(bucket.guildId, bucket.command, bucket.date);
+    const existing = this.pendingBuckets.get(key);
+    if (existing) {
+      existing.usageCount += bucket.usageCount;
+      existing.errorCount += bucket.errorCount;
+      existing.totalResponseMs += bucket.totalResponseMs;
+      if (bucket.firstUsedAt < existing.firstUsedAt) {
+        existing.firstUsedAt = bucket.firstUsedAt;
+      }
+      if (bucket.lastUsedAt > existing.lastUsedAt) {
+        existing.lastUsedAt = bucket.lastUsedAt;
+      }
+      return;
+    }
+    // Merging above never adds a key; only a brand-new bucket grows the map.
+    // Shed those once at the cap so a DB outage can't drive unbounded growth.
+    if (this.pendingBuckets.size >= MAX_PENDING_BUCKETS) {
+      if (!this.droppingPending) {
+        this.droppingPending = true;
+        logger.warn(
+          `Command-metrics buffer reached its ${MAX_PENDING_BUCKETS}-bucket cap; ` +
+            "dropping new buckets until it drains (is MongoDB reachable?).",
+        );
+      }
+      return;
+    }
+    this.pendingBuckets.set(key, bucket);
+  }
+
+  /**
+   * Persist accumulated command-metric buckets to MongoDB in a single
+   * `bulkWrite` of upserts (issue #648). Each op increments the matching
+   * daily doc's counters and bumps its TTL anchor based on the configured
+   * retention.
+   *
+   * No-op (counters kept for the next tick) when the DB isn't connected, and
+   * a guard skips the whole pass when persistence is disabled. A failed write
+   * re-queues the whole batch so a transient blip doesn't lose counts. Never
+   * throws — safe to call from a timer.
+   */
+  public async flushMetrics(): Promise<void> {
+    if (this.pendingBuckets.size === 0) return;
+    if (mongoose.connection.readyState !== 1) return;
+
+    const config = ConfigService.getInstance();
+    const enabled = await config
+      .getBoolean("monitoring.metrics_persistence.enabled", true)
+      .catch(() => true);
+    if (!enabled) {
+      // Persistence is off — drop the buffer so it can't grow unbounded.
+      this.pendingBuckets.clear();
+      this.droppingPending = false;
+      return;
+    }
+    const retentionDays = await config
+      .getNumber("monitoring.metrics_retention_days", 30)
+      .catch(() => 30);
+
+    // Snapshot and clear up front so concurrent tracking accumulates into a
+    // fresh batch rather than racing the write below.
+    const batch = Array.from(this.pendingBuckets.values());
+    this.pendingBuckets.clear();
+
+    const ops = batch.map((bucket) => {
+      const expiresAt = new Date(
+        bucket.lastUsedAt.getTime() + retentionDays * DAY_MS,
+      );
+      return {
+        updateOne: {
+          filter: {
+            command: bucket.command,
+            date: bucket.date,
+            guildId: bucket.guildId,
+          },
+          update: {
+            $inc: {
+              usageCount: bucket.usageCount,
+              totalResponseMs: bucket.totalResponseMs,
+              errorCount: bucket.errorCount,
+            },
+            $min: { firstUsedAt: bucket.firstUsedAt },
+            $max: { lastUsedAt: bucket.lastUsedAt, expiresAt },
+          },
+          upsert: true,
+        },
+      };
+    });
+
+    try {
+      // `ordered: false` so one bad op can't block the rest of the batch.
+      await CommandMetricsModel.bulkWrite(ops, { ordered: false });
+      // A clean flush drained the buffer — clear the cap-warning latch.
+      this.droppingPending = false;
+    } catch (error) {
+      logger.error("Failed to flush command metrics batch:", error);
+      // Re-queue the whole batch so the counts survive a transient DB failure.
+      for (const bucket of batch) {
+        this.addPending(bucket);
+      }
+    }
   }
 
   /**
@@ -222,6 +412,17 @@ export class MonitoringService {
   }
 
   /**
+   * Start the periodic batched flush of command metrics to MongoDB.
+   */
+  private startPeriodicFlush(): void {
+    this.flushInterval = setInterval(() => {
+      this.flushMetrics().catch((error) => {
+        logger.error("Periodic command-metrics flush failed:", error);
+      });
+    }, FLUSH_INTERVAL_MS);
+  }
+
+  /**
    * Format uptime for display
    */
   public formatUptime(): string {
@@ -242,12 +443,21 @@ export class MonitoringService {
   }
 
   /**
-   * Stop periodic logging and clear the interval handle.
+   * Stop periodic logging/flush timers and clear the interval handles.
+   *
+   * Any metrics still pending are NOT flushed here (destroy is synchronous
+   * and runs during shutdown right before the DB connection closes). The
+   * shutdown path awaits `flushMetrics()` explicitly before calling this so
+   * the final batch isn't lost.
    */
   public destroy(): void {
     if (this.periodicLoggingInterval) {
       clearInterval(this.periodicLoggingInterval);
       this.periodicLoggingInterval = null;
+    }
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval);
+      this.flushInterval = null;
     }
   }
 }

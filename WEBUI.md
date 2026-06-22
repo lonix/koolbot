@@ -755,6 +755,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Voice Channels** | `/vc force-reload` (single **Force VC cleanup** button)                                             |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
+| **Command Metrics**| (new — historical per-command usage / error-rate / latency dashboard)                               |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
 Feature pages (Announcements, Polls, Reaction Roles, Notices, Voice
@@ -780,6 +781,22 @@ use **Seed defaults into store** to start editing from those defaults.
 Entries in the *multiple users* pool must contain the `{count}`
 placeholder (replaced with the live user count); the editor rejects saves
 that omit it.
+
+The **Command Metrics** page (`/admin/metrics`) is a read-only analytics
+dashboard for slash-command usage over a trailing window (7- or 30-day
+toggle). `MonitoringService` accumulates per-command counters in memory and
+flushes them in batches to MongoDB as daily `{command, date, guildId}`
+buckets, so the data survives restarts (unlike the live in-memory view) and
+is pruned automatically by a TTL index. The page shows commands by usage,
+an error spotlight (commands at or above a 10% error rate), the slowest
+commands by average response time, and a per-day usage trend. The 7d/30d
+toggle only selects the view window over already-persisted data; it is not a
+config key. Persistence is governed by `monitoring.metrics_persistence.enabled`
+(default on), while `monitoring.metrics_retention_days` (default 30) controls
+how long buckets are kept before the TTL index prunes them. This is
+complementary to the Prometheus `/metrics` endpoint, which exposes
+process-level gauges (uptime, memory) rather than historical per-command
+counters.
 
 ### User self-service (`/me/*`, both admin and user roles)
 

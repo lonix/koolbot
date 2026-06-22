@@ -1,15 +1,15 @@
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { QuoteService } from '../../src/services/quote-service.js';
+import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+import { QuoteService } from "../../src/services/quote-service.js";
 
-jest.mock('mongoose');
-jest.mock('../../src/database/schema.js');
-jest.mock('../../src/services/config-service.js');
-jest.mock('../../src/services/cooldown-manager.js');
-jest.mock('../../src/utils/logger.js');
+jest.mock("mongoose");
+jest.mock("../../src/database/schema.js");
+jest.mock("../../src/services/config-service.js");
+jest.mock("../../src/services/cooldown-manager.js");
+jest.mock("../../src/utils/logger.js");
 
-const VALID_ID = '0123456789abcdef01234567';
+const VALID_ID = "0123456789abcdef01234567";
 
-describe('QuoteService backup & vote persistence', () => {
+describe("QuoteService backup & vote persistence", () => {
   let service: QuoteService;
   let model: any;
 
@@ -26,45 +26,45 @@ describe('QuoteService backup & vote persistence', () => {
     (service as any).model = model;
   });
 
-  describe('setVoteCountsByMessageId', () => {
-    it('writes the tally keyed by messageId', async () => {
+  describe("setVoteCountsByMessageId", () => {
+    it("writes the tally keyed by messageId", async () => {
       model.findOneAndUpdate.mockResolvedValue({});
-      await service.setVoteCountsByMessageId('msg1', 3, 1);
+      await service.setVoteCountsByMessageId("msg1", 3, 1);
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
-        { messageId: 'msg1' },
+        { messageId: "msg1" },
         { likes: 3, dislikes: 1 },
       );
     });
 
-    it('clamps negative counts to zero', async () => {
+    it("clamps negative counts to zero", async () => {
       model.findOneAndUpdate.mockResolvedValue({});
-      await service.setVoteCountsByMessageId('msg1', -2, -5);
+      await service.setVoteCountsByMessageId("msg1", -2, -5);
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
-        { messageId: 'msg1' },
+        { messageId: "msg1" },
         { likes: 0, dislikes: 0 },
       );
     });
 
-    it('is a no-op when messageId is empty', async () => {
-      await service.setVoteCountsByMessageId('', 1, 1);
+    it("is a no-op when messageId is empty", async () => {
+      await service.setVoteCountsByMessageId("", 1, 1);
       expect(model.findOneAndUpdate).not.toHaveBeenCalled();
     });
   });
 
-  describe('exportQuotes', () => {
-    it('serialises quotes including vote tallies', async () => {
+  describe("exportQuotes", () => {
+    it("serialises quotes including vote tallies", async () => {
       const docs = [
         {
           _id: { toString: () => VALID_ID },
-          content: 'hi',
-          authorId: 'a',
-          addedById: 'b',
-          channelId: 'c',
-          messageId: 'm',
+          content: "hi",
+          authorId: "a",
+          addedById: "b",
+          channelId: "c",
+          messageId: "m",
           likes: 2,
           dislikes: 1,
-          createdAt: new Date('2020-01-01T00:00:00Z'),
-          addedAt: new Date('2020-01-02T00:00:00Z'),
+          createdAt: new Date("2020-01-01T00:00:00Z"),
+          addedAt: new Date("2020-01-02T00:00:00Z"),
         },
       ];
       model.find.mockReturnValue({ sort: jest.fn().mockResolvedValue(docs) });
@@ -75,29 +75,29 @@ describe('QuoteService backup & vote persistence', () => {
       expect(out.quotes).toHaveLength(1);
       expect(out.quotes[0]).toMatchObject({
         id: VALID_ID,
-        content: 'hi',
+        content: "hi",
         likes: 2,
         dislikes: 1,
       });
     });
   });
 
-  describe('importQuotes', () => {
-    it('imports new entries and preserves id + votes', async () => {
+  describe("importQuotes", () => {
+    it("imports new entries and preserves id + votes", async () => {
       model.findOne.mockResolvedValue(null);
       model.create.mockResolvedValue({});
 
       const res = await service.importQuotes({
         version: 1,
-        exportedAt: 'x',
+        exportedAt: "x",
         quotes: [
           {
             id: VALID_ID,
-            content: 'hi',
-            authorId: 'a',
-            addedById: 'b',
-            channelId: 'c',
-            messageId: 'm',
+            content: "hi",
+            authorId: "a",
+            addedById: "b",
+            channelId: "c",
+            messageId: "m",
             likes: 2,
             dislikes: 1,
           },
@@ -109,26 +109,26 @@ describe('QuoteService backup & vote persistence', () => {
       expect(model.create).toHaveBeenCalledWith(
         expect.objectContaining({
           _id: VALID_ID,
-          content: 'hi',
+          content: "hi",
           likes: 2,
           dislikes: 1,
         }),
       );
     });
 
-    it('round-trips an export back into an import', async () => {
+    it("round-trips an export back into an import", async () => {
       const docs = [
         {
           _id: { toString: () => VALID_ID },
-          content: 'round trip',
-          authorId: 'a',
-          addedById: 'b',
-          channelId: 'c',
-          messageId: 'm',
+          content: "round trip",
+          authorId: "a",
+          addedById: "b",
+          channelId: "c",
+          messageId: "m",
           likes: 5,
           dislikes: 2,
-          createdAt: new Date('2021-01-01T00:00:00Z'),
-          addedAt: new Date('2021-01-01T00:00:00Z'),
+          createdAt: new Date("2021-01-01T00:00:00Z"),
+          addedAt: new Date("2021-01-01T00:00:00Z"),
         },
       ];
       model.find.mockReturnValue({ sort: jest.fn().mockResolvedValue(docs) });
@@ -140,16 +140,20 @@ describe('QuoteService backup & vote persistence', () => {
 
       expect(res.imported).toBe(1);
       expect(model.create).toHaveBeenCalledWith(
-        expect.objectContaining({ content: 'round trip', likes: 5, dislikes: 2 }),
+        expect.objectContaining({
+          content: "round trip",
+          likes: 5,
+          dislikes: 2,
+        }),
       );
     });
 
-    it('skips an entry whose original id already exists', async () => {
-      model.findOne.mockResolvedValue({ _id: 'exists' });
+    it("skips an entry whose original id already exists", async () => {
+      model.findOne.mockResolvedValue({ _id: "exists" });
 
       const res = await service.importQuotes({
         quotes: [
-          { id: VALID_ID, content: 'hi', authorId: 'a', addedById: 'b' },
+          { id: VALID_ID, content: "hi", authorId: "a", addedById: "b" },
         ],
       });
 
@@ -158,13 +162,13 @@ describe('QuoteService backup & vote persistence', () => {
       expect(model.create).not.toHaveBeenCalled();
     });
 
-    it('dedups on content+author even when the entry has a valid id', async () => {
+    it("dedups on content+author even when the entry has a valid id", async () => {
       // A matching content+author already exists under a different id.
-      model.findOne.mockResolvedValue({ _id: 'someOtherId' });
+      model.findOne.mockResolvedValue({ _id: "someOtherId" });
 
       const res = await service.importQuotes({
         quotes: [
-          { id: VALID_ID, content: 'dup', authorId: 'a', addedById: 'b' },
+          { id: VALID_ID, content: "dup", authorId: "a", addedById: "b" },
         ],
       });
 
@@ -172,19 +176,19 @@ describe('QuoteService backup & vote persistence', () => {
       expect(model.create).not.toHaveBeenCalled();
       // The dedup query must consider both the id AND content+author.
       expect(model.findOne).toHaveBeenCalledWith({
-        $or: [{ _id: VALID_ID }, { content: 'dup', authorId: 'a' }],
+        $or: [{ _id: VALID_ID }, { content: "dup", authorId: "a" }],
       });
     });
 
-    it('rejects a structurally invalid payload', async () => {
+    it("rejects a structurally invalid payload", async () => {
       const res = await service.importQuotes(null);
       expect(res.imported).toBe(0);
       expect(res.errors.length).toBeGreaterThan(0);
     });
 
-    it('records an error for an entry missing content', async () => {
+    it("records an error for an entry missing content", async () => {
       const res = await service.importQuotes({
-        quotes: [{ authorId: 'a', addedById: 'b' }],
+        quotes: [{ authorId: "a", addedById: "b" }],
       });
       expect(res.skipped).toBe(1);
       expect(res.errors[0]).toMatch(/content/i);

@@ -65,7 +65,9 @@ describe("timezone utils", () => {
   describe("formatInZone", () => {
     it("formats a UTC instant in the requested zone", () => {
       const d = new Date("2026-06-12T12:00:00Z");
-      expect(formatInZone(d, "UTC", "yyyy-MM-dd HH:mm")).toBe("2026-06-12 12:00");
+      expect(formatInZone(d, "UTC", "yyyy-MM-dd HH:mm")).toBe(
+        "2026-06-12 12:00",
+      );
       // 12:00 UTC is 08:00 in New York (EDT, UTC-4) in June.
       expect(formatInZone(d, "America/New_York", "yyyy-MM-dd HH:mm")).toBe(
         "2026-06-12 08:00",

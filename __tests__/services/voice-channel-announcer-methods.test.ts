@@ -1,7 +1,7 @@
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from "@jest/globals";
 
-describe('VoiceChannelAnnouncer Methods', () => {
-  it('placeholder test', () => {
+describe("VoiceChannelAnnouncer Methods", () => {
+  it("placeholder test", () => {
     expect(true).toBe(true);
   });
 });

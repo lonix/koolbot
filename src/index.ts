@@ -495,6 +495,9 @@ async function gracefulShutdown(signal: string): Promise<void> {
         digestService.destroy();
         rewindNudgeService.destroy();
         WizardService.getInstance().shutdown();
+        // Persist any metrics still buffered in memory before the DB
+        // connection closes below, then stop the flush/logging timers.
+        await MonitoringService.getInstance().flushMetrics();
         MonitoringService.getInstance().destroy();
         await botStatusService.shutdown();
       },

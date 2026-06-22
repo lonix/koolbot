@@ -1,17 +1,25 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import { ChannelType, type ModalSubmitInteraction, type Guild, type VoiceChannel, type Client } from 'discord.js';
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import {
+  ChannelType,
+  type ModalSubmitInteraction,
+  type Guild,
+  type VoiceChannel,
+  type Client,
+} from "discord.js";
 
 // Mock dependencies before importing
-jest.mock('../../src/utils/logger.js');
-jest.mock('../../src/services/voice-channel-manager.js');
+jest.mock("../../src/utils/logger.js");
+jest.mock("../../src/services/voice-channel-manager.js");
 
 // Import after mocks
-import { VoiceChannelManager } from '../../src/services/voice-channel-manager.js';
-import { handleVCModal } from '../../src/handlers/vc-modal-handler.js';
+import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
+import { handleVCModal } from "../../src/handlers/vc-modal-handler.js";
 
-const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<typeof VoiceChannelManager>;
+const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<
+  typeof VoiceChannelManager
+>;
 
-describe('VCModalHandler - Custom Name Tracking', () => {
+describe("VCModalHandler - Custom Name Tracking", () => {
   let mockInteraction: Partial<ModalSubmitInteraction>;
   let mockGuild: Partial<Guild>;
   let mockChannel: Partial<VoiceChannel>;
@@ -27,68 +35,70 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       setCustomChannelName: mockSetCustomChannelName,
     }));
 
-    (mockVoiceChannelManager.getInstance as unknown as jest.Mock) = mockGetInstance;
+    (mockVoiceChannelManager.getInstance as unknown as jest.Mock) =
+      mockGetInstance;
 
     mockChannel = {
-      id: 'test-channel-id',
-      name: 'Old Channel Name',
+      id: "test-channel-id",
+      name: "Old Channel Name",
       type: ChannelType.GuildVoice,
       setName: jest.fn().mockResolvedValue(undefined),
     } as any;
 
     mockGuild = {
-      id: 'test-guild-id',
-      name: 'Test Guild',
+      id: "test-guild-id",
+      name: "Test Guild",
       channels: {
         fetch: jest.fn().mockResolvedValue(mockChannel),
       } as any,
     } as any;
 
     mockInteraction = {
-      customId: 'vc_modal_name_test-channel-id_test-user-id',
+      customId: "vc_modal_name_test-channel-id_test-user-id",
       user: {
-        id: 'test-user-id',
-        displayName: 'TestUser',
+        id: "test-user-id",
+        displayName: "TestUser",
       } as any,
       fields: {
-        getTextInputValue: jest.fn().mockReturnValue('New Custom Name'),
+        getTextInputValue: jest.fn().mockReturnValue("New Custom Name"),
       } as any,
       reply: jest.fn().mockResolvedValue(undefined),
       guild: mockGuild as Guild,
-      client: {
-      } as any as Client,
+      client: {} as any as Client,
     } as any;
   });
 
-  describe('Custom name tracking on rename', () => {
-    it('should mark channel as having custom name after successful rename', async () => {
+  describe("Custom name tracking on rename", () => {
+    it("should mark channel as having custom name after successful rename", async () => {
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
-      expect(mockChannel.setName).toHaveBeenCalledWith('New Custom Name');
+      expect(mockChannel.setName).toHaveBeenCalledWith("New Custom Name");
       expect(mockSetCustomChannelName).toHaveBeenCalledWith(
-        'test-channel-id',
-        'New Custom Name'
+        "test-channel-id",
+        "New Custom Name",
       );
       expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: '✅ Channel renamed to: **New Custom Name**',
+        content: "✅ Channel renamed to: **New Custom Name**",
         ephemeral: true,
       });
     });
 
-    it('should not mark channel as custom if rename fails', async () => {
-      mockChannel.setName = jest.fn().mockRejectedValue(new Error('Rename failed'));
+    it("should not mark channel as custom if rename fails", async () => {
+      mockChannel.setName = jest
+        .fn()
+        .mockRejectedValue(new Error("Rename failed"));
 
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
 
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: '❌ Failed to rename channel. Please try again.',
+        content: "❌ Failed to rename channel. Please try again.",
         ephemeral: true,
       });
     });
 
-    it('should reject names longer than 100 characters', async () => {
-      const longName = 'a'.repeat(101);
+    it("should reject names longer than 100 characters", async () => {
+      const longName = "a".repeat(101);
       mockInteraction.fields = {
         getTextInputValue: jest.fn().mockReturnValue(longName),
       } as any;
@@ -98,14 +108,14 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       expect(mockChannel.setName).not.toHaveBeenCalled();
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: '❌ Channel name must be 100 characters or less.',
+        content: "❌ Channel name must be 100 characters or less.",
         ephemeral: true,
       });
     });
 
-    it('should reject empty names', async () => {
+    it("should reject empty names", async () => {
       mockInteraction.fields = {
-        getTextInputValue: jest.fn().mockReturnValue(''),
+        getTextInputValue: jest.fn().mockReturnValue(""),
       } as any;
 
       await handleVCModal(mockInteraction as ModalSubmitInteraction);
@@ -113,7 +123,7 @@ describe('VCModalHandler - Custom Name Tracking', () => {
       expect(mockChannel.setName).not.toHaveBeenCalled();
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith({
-        content: '❌ Channel name cannot be empty.',
+        content: "❌ Channel name cannot be empty.",
         ephemeral: true,
       });
     });

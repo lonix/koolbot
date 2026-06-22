@@ -989,6 +989,18 @@ above).
 - `ratelimit.window_seconds` (number, default: 10)
 - `ratelimit.bypass_admin` (bool, default: true)
 
+#### Command Metrics (persisted analytics)
+
+`MonitoringService` keeps live, in-memory per-command counters and also
+persists them to MongoDB in daily buckets so they survive restarts and feed
+the Web UI's **Command Metrics** dashboard (`/admin/metrics`). Writes are
+batched (every few minutes, never per-invocation) and pruned by a TTL index.
+
+- `monitoring.metrics_persistence.enabled` (bool, default: true) — when off,
+  command metrics stay in-memory only and nothing is written to MongoDB.
+- `monitoring.metrics_retention_days` (number, default: 30) — days to keep
+  persisted daily buckets before the TTL index prunes them.
+
 ### Bootstrap env vars (read-only in Web UI)
 
 - `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `MONGODB_URI`

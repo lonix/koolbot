@@ -2437,3 +2437,188 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
     navFeatureStatus: props.navFeatureStatus,
   });
 }
+
+// ---------- Command Metrics (issue #648) ----------
+
+export interface CommandMetricsRow {
+  command: string;
+  usageCount: number;
+  errorCount: number;
+  /** errorCount / usageCount, in the range 0..1. */
+  errorRate: number;
+  avgResponseMs: number;
+  lastUsedAt: string | null;
+}
+
+export interface CommandMetricsDailyView {
+  date: string;
+  usageCount: number;
+  errorCount: number;
+}
+
+export interface CommandMetricsProps extends CommonProps {
+  enabled: boolean;
+  retentionDays: number;
+  /** Selected trailing window in days (7 or 30). */
+  windowDays: number;
+  totalUsage: number;
+  totalErrors: number;
+  /** Per-command rollup, sorted by usage descending. */
+  rows: CommandMetricsRow[];
+  /** Per-day totals over the window, sorted by date ascending. */
+  dailyTotals: CommandMetricsDailyView[];
+}
+
+/** Error rate (as a fraction) at or above which a command is "spotlit". */
+const METRICS_ERROR_SPOTLIGHT = 0.1;
+
+function formatMs(ms: number): string {
+  return `${Math.round(ms)}ms`;
+}
+
+function formatPct(fraction: number): string {
+  return `${(fraction * 100).toFixed(1)}%`;
+}
+
+function errorRateTag(rate: number): string {
+  if (rate >= METRICS_ERROR_SPOTLIGHT) {
+    return `<span class="tag tag-off">${formatPct(rate)}</span>`;
+  }
+  if (rate > 0) {
+    return `<span class="tag tag-warn">${formatPct(rate)}</span>`;
+  }
+  return `<span class="tag tag-on">0%</span>`;
+}
+
+export function renderCommandMetricsPage(props: CommandMetricsProps): string {
+  const windowToggle = [7, 30]
+    .map((w) => {
+      const active = w === props.windowDays;
+      const cls = active ? "btn btn-sm btn-primary" : "btn btn-sm";
+      return `<a class="${cls}" href="/admin/metrics?window=${w}">${w}d</a>`;
+    })
+    .join(" ");
+
+  const usageRowsHtml =
+    props.rows.length === 0
+      ? `<div class="empty">No command metrics recorded in the last ${props.windowDays} days.</div>`
+      : `<table>
+<thead><tr>
+<th>Command</th><th>Invocations</th><th>Error rate</th><th>Avg response</th><th>Last used</th>
+</tr></thead>
+<tbody>${props.rows
+          .map(
+            (r) => `<tr>
+<td class="mono">/${escapeHtml(r.command)}</td>
+<td>${r.usageCount}</td>
+<td>${errorRateTag(r.errorRate)} <span class="muted">(${r.errorCount})</span></td>
+<td class="muted">${formatMs(r.avgResponseMs)}</td>
+<td class="muted mono">${r.lastUsedAt ? escapeHtml(r.lastUsedAt) : "—"}</td>
+</tr>`,
+          )
+          .join("")}</tbody></table>`;
+
+  const spotlight = props.rows.filter(
+    (r) => r.errorRate >= METRICS_ERROR_SPOTLIGHT,
+  );
+  const spotlightHtml =
+    spotlight.length === 0
+      ? `<p class="muted">No command exceeded a ${formatPct(METRICS_ERROR_SPOTLIGHT)} error rate. 🎉</p>`
+      : `<table>
+<thead><tr><th>Command</th><th>Error rate</th><th>Errors</th><th>Invocations</th></tr></thead>
+<tbody>${spotlight
+          .map(
+            (r) => `<tr>
+<td class="mono">/${escapeHtml(r.command)}</td>
+<td>${errorRateTag(r.errorRate)}</td>
+<td>${r.errorCount}</td>
+<td class="muted">${r.usageCount}</td>
+</tr>`,
+          )
+          .join("")}</tbody></table>`;
+
+  const slowest = [...props.rows]
+    .filter((r) => r.usageCount > 0)
+    .sort((a, b) => b.avgResponseMs - a.avgResponseMs)
+    .slice(0, 10);
+  const slowestHtml =
+    slowest.length === 0
+      ? `<div class="empty">No data yet.</div>`
+      : `<table>
+<thead><tr><th>Command</th><th>Avg response</th><th>Invocations</th></tr></thead>
+<tbody>${slowest
+          .map(
+            (r) => `<tr>
+<td class="mono">/${escapeHtml(r.command)}</td>
+<td>${formatMs(r.avgResponseMs)}</td>
+<td class="muted">${r.usageCount}</td>
+</tr>`,
+          )
+          .join("")}</tbody></table>`;
+
+  const maxDaily = props.dailyTotals.reduce(
+    (max, d) => Math.max(max, d.usageCount),
+    0,
+  );
+  const trendHtml =
+    props.dailyTotals.length === 0
+      ? `<div class="empty">No data yet.</div>`
+      : props.dailyTotals
+          .map((d) => {
+            const pct = maxDaily > 0 ? (d.usageCount / maxDaily) * 100 : 0;
+            return `<div class="field-row" style="align-items:center;gap:.75rem">
+<span class="muted mono" style="min-width:6rem">${escapeHtml(d.date)}</span>
+<span style="flex:1;background:#1e293b;border-radius:4px;overflow:hidden">
+  <span style="display:block;height:1rem;width:${pct.toFixed(1)}%;background:#3b82f6"></span>
+</span>
+<span class="mono" style="min-width:3rem;text-align:right">${d.usageCount}</span>
+</div>`;
+          })
+          .join("");
+
+  const body = `
+<h1>Command metrics</h1>
+<p class="subtitle">Historical per-command usage, error rate, and latency persisted to MongoDB. Complements the live in-memory view and the Prometheus <code>/metrics</code> endpoint.</p>
+
+<div class="card">
+  <h2>Overview</h2>
+  <dl class="kv">
+    <dt>Persistence</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
+    <dt>Retention</dt><dd>${props.retentionDays} days</dd>
+    <dt>Window</dt><dd>${props.windowDays} days &nbsp; ${windowToggle}</dd>
+    <dt>Total invocations</dt><dd>${props.totalUsage}</dd>
+    <dt>Total errors</dt><dd>${props.totalErrors}</dd>
+  </dl>
+  ${props.enabled ? "" : '<p class="muted">Enable <code>monitoring.metrics_persistence.enabled</code> in Settings to start recording. Counts already shown were captured before it was disabled.</p>'}
+</div>
+
+<div class="card">
+  <h2>Commands by usage</h2>
+  ${usageRowsHtml}
+</div>
+
+<div class="card">
+  <h2>Error spotlight</h2>
+  <p class="subtitle">Commands with an error rate at or above ${formatPct(METRICS_ERROR_SPOTLIGHT)} over the window.</p>
+  ${spotlightHtml}
+</div>
+
+<div class="card">
+  <h2>Slowest commands</h2>
+  ${slowestHtml}
+</div>
+
+<div class="card">
+  <h2>Usage trend</h2>
+  ${trendHtml}
+</div>
+`;
+  return renderAdminPage({
+    title: "Command metrics",
+    active: "/admin/metrics",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}

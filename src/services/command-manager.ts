@@ -554,6 +554,7 @@ export class CommandManager {
         trackingId,
         startTime,
         true,
+        interaction.guildId,
       );
       recordCommandInvocation(commandName, "ok");
       await recordAudit("success", null);
@@ -563,6 +564,7 @@ export class CommandManager {
         trackingId,
         startTime,
         false,
+        interaction.guildId,
       );
       monitoringService.trackError(commandName, error as Error);
       recordCommandInvocation(commandName, "error");

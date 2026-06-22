@@ -176,7 +176,9 @@ describe("WebSessionService", () => {
     };
     const newExpiresAt = update.$set.expiresAt.getTime();
     const defaultLifetimeMs = 24 * 60 * 60 * 1000;
-    expect(newExpiresAt).toBeGreaterThanOrEqual(before + defaultLifetimeMs - 1000);
+    expect(newExpiresAt).toBeGreaterThanOrEqual(
+      before + defaultLifetimeMs - 1000,
+    );
     expect(newExpiresAt).toBeLessThanOrEqual(after + defaultLifetimeMs + 1000);
   });
 

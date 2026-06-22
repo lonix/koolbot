@@ -377,13 +377,15 @@ describe("coerceConfigValue", () => {
     });
 
     it("leaves a name value with no shortcode unchanged", () => {
-      expect(
-        coerceConfigValue("voicechannels.lobby.name", "Lobby"),
-      ).toEqual({ ok: true, value: "Lobby" });
+      expect(coerceConfigValue("voicechannels.lobby.name", "Lobby")).toEqual({
+        ok: true,
+        value: "Lobby",
+      });
       // Raw Unicode the admin pasted directly must survive verbatim.
-      expect(
-        coerceConfigValue("voicechannels.channel.prefix", "🎮"),
-      ).toEqual({ ok: true, value: "🎮" });
+      expect(coerceConfigValue("voicechannels.channel.prefix", "🎮")).toEqual({
+        ok: true,
+        value: "🎮",
+      });
     });
 
     it("does not resolve shortcodes for non-name string keys", () => {
@@ -395,10 +397,7 @@ describe("coerceConfigValue", () => {
       );
       expect(nameResult.ok && nameResult.value).toBe("🟢");
       // A non-name string key is left as-typed.
-      const r = coerceConfigValue(
-        "leaderboard_roles.tiers",
-        ":green_circle:",
-      );
+      const r = coerceConfigValue("leaderboard_roles.tiers", ":green_circle:");
       expect(r).toEqual({ ok: true, value: ":green_circle:" });
     });
   });

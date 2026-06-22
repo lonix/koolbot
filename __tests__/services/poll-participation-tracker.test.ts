@@ -14,9 +14,8 @@ jest.mock("../../src/utils/logger.js", () => ({
 import { PollParticipationTracker } from "../../src/services/poll-participation-tracker.js";
 import { PollParticipationTracking } from "../../src/models/poll-participation-tracking.js";
 
-(
-  PollParticipationTracking as unknown as { updateOne: jest.Mock }
-).updateOne = jest.fn();
+(PollParticipationTracking as unknown as { updateOne: jest.Mock }).updateOne =
+  jest.fn();
 
 function createTracker(voter: { username: string; bot: boolean } | null) {
   const usersFetch = jest
@@ -64,9 +63,8 @@ describe("PollParticipationTracker", () => {
       PollParticipationTracking as unknown as { updateOne: jest.Mock }
     ).updateOne;
     updateOne.mockResolvedValue({ matchedCount: 1 });
-    (
-      PollParticipationTracker as unknown as { instance: unknown }
-    ).instance = undefined;
+    (PollParticipationTracker as unknown as { instance: unknown }).instance =
+      undefined;
   });
 
   describe("singleton pattern", () => {

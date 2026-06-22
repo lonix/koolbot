@@ -41,6 +41,7 @@ import {
 } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
+import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
 import { getEnv } from "../config/env.js";
 import {
@@ -58,6 +59,7 @@ import {
   renderBootstrapPage,
   renderBotStatusPage,
   renderCommandAuditPage,
+  renderCommandMetricsPage,
   renderDashboardPage,
   renderDatabasePage,
   renderNoticesPage,
@@ -967,6 +969,57 @@ export function createReadOnlyRouter(
           channels,
           categoryFound,
           flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Command Metrics (#648) ----------
+  router.get(
+    "/metrics",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+
+      // Only the two documented windows are accepted; anything else falls
+      // back to 30 so a hand-edited query string can't request an
+      // unbounded scan.
+      const windowRaw = Number.parseInt(String(req.query.window ?? "30"), 10);
+      const windowDays = windowRaw === 7 ? 7 : 30;
+
+      const [enabled, retentionDays, summary] = await Promise.all([
+        config.getBoolean("monitoring.metrics_persistence.enabled", true),
+        config.getNumber("monitoring.metrics_retention_days", 30),
+        getCommandMetricsSummary(common.guildId, windowDays).catch((err) => {
+          logger.debug("command metrics aggregation failed", err);
+          return {
+            windowDays,
+            fromDate: "",
+            rows: [],
+            dailyTotals: [],
+            totalUsage: 0,
+            totalErrors: 0,
+          };
+        }),
+      ]);
+
+      res.type("text/html").send(
+        renderCommandMetricsPage({
+          ...common,
+          enabled,
+          retentionDays,
+          windowDays,
+          totalUsage: summary.totalUsage,
+          totalErrors: summary.totalErrors,
+          rows: summary.rows.map((r) => ({
+            command: r.command,
+            usageCount: r.usageCount,
+            errorCount: r.errorCount,
+            errorRate: r.errorRate,
+            avgResponseMs: r.avgResponseMs,
+            lastUsedAt: r.lastUsedAt,
+          })),
+          dailyTotals: summary.dailyTotals,
         }),
       );
     }),

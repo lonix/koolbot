@@ -2,9 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 
 describe("DiscordCommandAuditLog model", () => {
   it("loads without throwing under the global mongoose mock", async () => {
-    const mod = await import(
-      "../../src/models/discord-command-audit-log.js"
-    );
+    const mod = await import("../../src/models/discord-command-audit-log.js");
     expect(mod.DiscordCommandAuditLog).toBeDefined();
   });
 

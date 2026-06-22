@@ -81,9 +81,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { RewindNudgeService } = await import(
-  "../../src/services/rewind-nudge-service.js"
-);
+const { RewindNudgeService } =
+  await import("../../src/services/rewind-nudge-service.js");
 
 type ServiceInstance = InstanceType<typeof RewindNudgeService>;
 
@@ -271,11 +270,10 @@ describe("RewindNudgeService", () => {
       expect(result!.sent).toBe(1);
       expect(mockUserSend).toHaveBeenCalledTimes(1);
       expect(mockNudgeStateFindOneAndUpdate).toHaveBeenCalledTimes(1);
-      const [filter, update] =
-        mockNudgeStateFindOneAndUpdate.mock.calls[0] as [
-          Record<string, unknown>,
-          { $set: Record<string, unknown> },
-        ];
+      const [filter, update] = mockNudgeStateFindOneAndUpdate.mock.calls[0] as [
+        Record<string, unknown>,
+        { $set: Record<string, unknown> },
+      ];
       const year = new Date().getUTCFullYear();
       expect(filter).toEqual({ userId: "u1", guildId: "guild-1", year });
       expect(update.$set).toMatchObject({
@@ -352,7 +350,12 @@ describe("RewindNudgeService", () => {
 
       const year = new Date().getUTCFullYear();
       expect(mockSnapshotYear).toHaveBeenCalledTimes(2);
-      expect(mockSnapshotYear).toHaveBeenCalledWith("u1", "guild-1", year, null);
+      expect(mockSnapshotYear).toHaveBeenCalledWith(
+        "u1",
+        "guild-1",
+        year,
+        null,
+      );
       expect(result!.snapshotsCreated).toBe(1);
       expect(result!.snapshotsExisting).toBe(1);
     });

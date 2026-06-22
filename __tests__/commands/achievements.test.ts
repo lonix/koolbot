@@ -1,73 +1,75 @@
-import { describe, it, expect, jest } from '@jest/globals';
-import { data, formatMetadata } from '../../src/commands/achievements.js';
+import { describe, it, expect, jest } from "@jest/globals";
+import { data, formatMetadata } from "../../src/commands/achievements.js";
 
-jest.mock('../../src/services/achievements-service.js');
-jest.mock('../../src/utils/logger.js');
+jest.mock("../../src/services/achievements-service.js");
+jest.mock("../../src/utils/logger.js");
 
-describe('Achievements Command', () => {
-  describe('command metadata', () => {
-    it('should have correct command name', () => {
-      expect(data.name).toBe('achievements');
+describe("Achievements Command", () => {
+  describe("command metadata", () => {
+    it("should have correct command name", () => {
+      expect(data.name).toBe("achievements");
     });
 
-    it('should have a description', () => {
+    it("should have a description", () => {
       expect(data.description).toBeTruthy();
-      expect(data.description).toBe('View earned badges and achievements');
+      expect(data.description).toBe("View earned badges and achievements");
     });
 
-    it('should be a valid slash command', () => {
+    it("should be a valid slash command", () => {
       const json = data.toJSON();
-      expect(json).toHaveProperty('name', 'achievements');
-      expect(json).toHaveProperty('description');
+      expect(json).toHaveProperty("name", "achievements");
+      expect(json).toHaveProperty("description");
     });
 
-    it('should have optional user parameter', () => {
+    it("should have optional user parameter", () => {
       const json = data.toJSON();
       expect(json.options).toBeDefined();
       expect(json.options?.length).toBe(1);
-      
+
       const userOption = json.options?.[0];
-      expect(userOption?.name).toBe('user');
+      expect(userOption?.name).toBe("user");
       expect(userOption?.type).toBe(6); // USER type
       expect(userOption?.required).toBe(false);
     });
 
-    it('should have description for user parameter', () => {
+    it("should have description for user parameter", () => {
       const json = data.toJSON();
       const userOption = json.options?.[0];
       expect(userOption?.description).toBeTruthy();
-      expect(userOption?.description).toContain('user');
+      expect(userOption?.description).toContain("user");
     });
   });
 
-  describe('embed chunking logic', () => {
-    it('should respect Discord 1024 character field limit', () => {
+  describe("embed chunking logic", () => {
+    it("should respect Discord 1024 character field limit", () => {
       // Test the chunking algorithm conceptually
       const MAX_FIELD_LENGTH = 1024;
-      
+
       // Create mock accolade texts that together exceed the limit
       const mockAccolades = [
-        'A'.repeat(300),
-        'B'.repeat(300),
-        'C'.repeat(300),
-        'D'.repeat(300),
+        "A".repeat(300),
+        "B".repeat(300),
+        "C".repeat(300),
+        "D".repeat(300),
       ];
 
       // Simulate chunking logic
       const chunks: string[] = [];
-      let currentChunk = '';
+      let currentChunk = "";
 
       for (const accoladeText of mockAccolades) {
-        const separator = currentChunk.length > 0 ? '\n\n' : '';
-        const potentialLength = currentChunk.length + separator.length + accoladeText.length;
+        const separator = currentChunk.length > 0 ? "\n\n" : "";
+        const potentialLength =
+          currentChunk.length + separator.length + accoladeText.length;
 
         if (potentialLength > MAX_FIELD_LENGTH) {
           if (currentChunk.length > 0) {
             chunks.push(currentChunk);
           }
-          currentChunk = accoladeText.length > MAX_FIELD_LENGTH
-            ? `${accoladeText.slice(0, MAX_FIELD_LENGTH - 3)}...`
-            : accoladeText;
+          currentChunk =
+            accoladeText.length > MAX_FIELD_LENGTH
+              ? `${accoladeText.slice(0, MAX_FIELD_LENGTH - 3)}...`
+              : accoladeText;
         } else {
           currentChunk += `${separator}${accoladeText}`;
         }
@@ -78,7 +80,7 @@ describe('Achievements Command', () => {
       }
 
       // Verify all chunks are within limit
-      chunks.forEach(chunk => {
+      chunks.forEach((chunk) => {
         expect(chunk.length).toBeLessThanOrEqual(MAX_FIELD_LENGTH);
       });
 
@@ -86,22 +88,23 @@ describe('Achievements Command', () => {
       expect(chunks.length).toBeGreaterThan(1);
     });
 
-    it('should handle single long accolade that exceeds limit', () => {
+    it("should handle single long accolade that exceeds limit", () => {
       const MAX_FIELD_LENGTH = 1024;
-      const longText = 'X'.repeat(1500);
+      const longText = "X".repeat(1500);
 
       // Truncate logic
-      const truncatedText = longText.length > MAX_FIELD_LENGTH
-        ? `${longText.slice(0, MAX_FIELD_LENGTH - 3)}...`
-        : longText;
+      const truncatedText =
+        longText.length > MAX_FIELD_LENGTH
+          ? `${longText.slice(0, MAX_FIELD_LENGTH - 3)}...`
+          : longText;
 
       expect(truncatedText.length).toBeLessThanOrEqual(MAX_FIELD_LENGTH);
-      expect(truncatedText.endsWith('...')).toBe(true);
+      expect(truncatedText.endsWith("...")).toBe(true);
     });
 
-    it('should handle empty accolade list', () => {
+    it("should handle empty accolade list", () => {
       const accoladesList: string[] = [];
-      
+
       // Should not create any chunks
       const chunks: string[] = [];
       if (accoladesList.length === 0) {
@@ -112,77 +115,77 @@ describe('Achievements Command', () => {
     });
   });
 
-  describe('metadata formatting', () => {
-    it('should use unit field when available', () => {
+  describe("metadata formatting", () => {
+    it("should use unit field when available", () => {
       const metadataText = formatMetadata({
         value: 100,
-        description: '100 hours milestone',
-        unit: 'hrs',
+        description: "100 hours milestone",
+        unit: "hrs",
       });
 
-      expect(metadataText).toBe(' - 100 hrs');
+      expect(metadataText).toBe(" - 100 hrs");
     });
 
-    it('should handle missing unit field gracefully', () => {
+    it("should handle missing unit field gracefully", () => {
       const metadataText = formatMetadata({
         value: 100,
-        description: '100 hours milestone',
+        description: "100 hours milestone",
       });
 
-      expect(metadataText).toBe(' - 100');
+      expect(metadataText).toBe(" - 100");
     });
 
-    it('should handle user count with users unit', () => {
+    it("should handle user count with users unit", () => {
       const metadataText = formatMetadata({
         value: 25,
-        description: '25+ unique users',
-        unit: 'users',
+        description: "25+ unique users",
+        unit: "users",
       });
 
-      expect(metadataText).toBe(' - 25 users');
+      expect(metadataText).toBe(" - 25 users");
     });
 
-    it('should handle missing metadata', () => {
+    it("should handle missing metadata", () => {
       const metadataText = formatMetadata(undefined);
 
-      expect(metadataText).toBe('');
+      expect(metadataText).toBe("");
     });
   });
 
-  describe('accolade text formatting', () => {
-    it('should format complete accolade text correctly', () => {
+  describe("accolade text formatting", () => {
+    it("should format complete accolade text correctly", () => {
       const mockDefinition = {
-        emoji: '🎉',
-        name: 'First Steps',
-        description: 'Spent your first hour in voice chat',
+        emoji: "🎉",
+        name: "First Steps",
+        description: "Spent your first hour in voice chat",
       };
 
-      const earnedDate = '1/19/2026';
-      const metadataText = ' - 12 hrs';
+      const earnedDate = "1/19/2026";
+      const metadataText = " - 12 hrs";
 
       const accoladeText = `${mockDefinition.emoji} **${mockDefinition.name}**${metadataText}\n*${mockDefinition.description}*\nEarned: ${earnedDate}`;
 
-      expect(accoladeText).toContain('🎉');
-      expect(accoladeText).toContain('**First Steps**');
-      expect(accoladeText).toContain('12 hrs');
-      expect(accoladeText).toContain('*Spent your first hour in voice chat*');
-      expect(accoladeText).toContain('Earned: 1/19/2026');
+      expect(accoladeText).toContain("🎉");
+      expect(accoladeText).toContain("**First Steps**");
+      expect(accoladeText).toContain("12 hrs");
+      expect(accoladeText).toContain("*Spent your first hour in voice chat*");
+      expect(accoladeText).toContain("Earned: 1/19/2026");
     });
 
-    it('should handle accolade without metadata', () => {
+    it("should handle accolade without metadata", () => {
       const mockDefinition = {
-        emoji: '🏆',
-        name: 'Some Badge',
-        description: 'A badge description',
+        emoji: "🏆",
+        name: "Some Badge",
+        description: "A badge description",
       };
 
-      const earnedDate = '1/19/2026';
-      const metadataText = '';
+      const earnedDate = "1/19/2026";
+      const metadataText = "";
 
       const accoladeText = `${mockDefinition.emoji} **${mockDefinition.name}**${metadataText}\n*${mockDefinition.description}*\nEarned: ${earnedDate}`;
 
-      expect(accoladeText).not.toContain(' - ');
-      expect(accoladeText).toContain('🏆 **Some Badge**\n');
+      expect(accoladeText).not.toContain(" - ");
+      expect(accoladeText).toContain("🏆 **Some Badge**\n");
     });
   });
 

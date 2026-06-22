@@ -3,7 +3,7 @@
  */
 export function createMockCollection<K, V>(entries: [K, V][] = []): any {
   const map = new Map(entries);
-  
+
   return {
     get: (key: K): V | undefined => map.get(key),
     set: (key: K, value: V): Map<K, V> => map.set(key, value),
@@ -11,8 +11,11 @@ export function createMockCollection<K, V>(entries: [K, V][] = []): any {
     delete: (key: K): boolean => map.delete(key),
     clear: (): void => map.clear(),
     forEach: (fn: (value: V, key: K) => void): void => map.forEach(fn),
-    map: <T>(fn: (value: V, key: K) => T): T[] => Array.from(map.values()).map((v, i) => fn(v, Array.from(map.keys())[i])),
-    filter: (fn: (value: V, key: K) => boolean): ReturnType<typeof createMockCollection<K, V>> => {
+    map: <T>(fn: (value: V, key: K) => T): T[] =>
+      Array.from(map.values()).map((v, i) => fn(v, Array.from(map.keys())[i])),
+    filter: (
+      fn: (value: V, key: K) => boolean,
+    ): ReturnType<typeof createMockCollection<K, V>> => {
       const filtered = Array.from(map.entries()).filter(([k, v]) => fn(v, k));
       return createMockCollection(filtered);
     },

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 
-const mockGetBoolean = jest.fn<(key: string, def: boolean) => Promise<boolean>>();
+const mockGetBoolean =
+  jest.fn<(key: string, def: boolean) => Promise<boolean>>();
 const mockGetNumber = jest.fn<(key: string, def: number) => Promise<number>>();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
@@ -12,8 +13,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   },
 }));
 
-const mockDeleteMany =
-  jest.fn<() => Promise<{ deletedCount: number }>>();
+const mockDeleteMany = jest.fn<() => Promise<{ deletedCount: number }>>();
 
 jest.unstable_mockModule(
   "../../src/models/discord-command-audit-log.js",
@@ -38,9 +38,8 @@ jest.unstable_mockModule("cron", () => ({
   },
 }));
 
-const { CommandAuditCleanupService } = await import(
-  "../../src/services/command-audit-cleanup.js"
-);
+const { CommandAuditCleanupService } =
+  await import("../../src/services/command-audit-cleanup.js");
 
 describe("CommandAuditCleanupService", () => {
   beforeEach(() => {

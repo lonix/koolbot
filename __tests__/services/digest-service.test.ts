@@ -87,9 +87,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { DigestService } = await import(
-  "../../src/services/digest-service.js"
-);
+const { DigestService } = await import("../../src/services/digest-service.js");
 
 type ServiceInstance = InstanceType<typeof DigestService>;
 
@@ -119,12 +117,14 @@ describe("DigestService", () => {
       if (k === "digest.cron") return "0 9 * * 1";
       return "";
     });
-    mockConfigGetNumber.mockImplementation(async (key: unknown, def: unknown) => {
-      const k = key as string;
-      if (k === "digest.min_active_minutes") return 30;
-      if (k === "digest.streak_min_minutes") return 30;
-      return (def as number) ?? 0;
-    });
+    mockConfigGetNumber.mockImplementation(
+      async (key: unknown, def: unknown) => {
+        const k = key as string;
+        if (k === "digest.min_active_minutes") return 30;
+        if (k === "digest.streak_min_minutes") return 30;
+        return (def as number) ?? 0;
+      },
+    );
     mockGetPrefs.mockResolvedValue({
       achievements: true,
       digest: true,
@@ -224,7 +224,8 @@ describe("DigestService", () => {
       expect(result!.skippedOptOut).toBe(0);
       expect(mockUserSend).toHaveBeenCalledTimes(1);
       expect(mockDigestStateFindOneAndUpdate).toHaveBeenCalledTimes(1);
-      const [filter, update] = mockDigestStateFindOneAndUpdate.mock.calls[0] as [
+      const [filter, update] = mockDigestStateFindOneAndUpdate.mock
+        .calls[0] as [
         Record<string, unknown>,
         { $set: Record<string, unknown> },
       ];
