@@ -3,7 +3,9 @@ import {
   defaultConfig,
   settingsMetadata,
   categoryMetadata,
+  getDependencies,
   REWIND_RETENTION_MIN_DAYS,
+  type ConfigSchema,
 } from "../../src/services/config-schema.js";
 
 describe("Config Schema", () => {
@@ -163,6 +165,66 @@ describe("Config Schema", () => {
         (k) => !(k in defaultConfig),
       );
       expect(orphans).toEqual([]);
+    });
+  });
+
+  describe("feature dependencies (dependsOn / #662)", () => {
+    // The hard-dependency table from #659: each key may only be enabled
+    // when every listed key is also enabled. This is the single source of
+    // truth consumed by write-time enforcement (#663) and the Settings
+    // "requires X" hint (#666). Rewind is deliberately absent — it is a
+    // graceful aggregator that must never be blocked on enable.
+    // `satisfies` checks every key/value against `keyof ConfigSchema` at
+    // compile time, so a typo in a config key fails the build instead of
+    // being hidden by a runtime cast.
+    const EXPECTED_DEPENDENCIES = {
+      "leaderboard_roles.enabled": ["voicetracking.enabled"],
+      "digest.enabled": ["voicetracking.enabled"],
+      "digest.include_achievements": ["achievements.enabled"],
+      "achievements.enabled": ["voicetracking.enabled"],
+      "voicetracking.announcements.enabled": ["voicetracking.enabled"],
+    } satisfies Partial<Record<keyof ConfigSchema, (keyof ConfigSchema)[]>>;
+
+    it("declares exactly the #659 hard-dependency table", () => {
+      const declared: Record<string, (keyof ConfigSchema)[]> = {};
+      for (const [key, meta] of Object.entries(settingsMetadata)) {
+        if (meta.dependsOn && meta.dependsOn.length > 0) {
+          declared[key] = meta.dependsOn;
+        }
+      }
+      expect(declared).toEqual(EXPECTED_DEPENDENCIES);
+    });
+
+    it("exposes each key's dependencies through getDependencies()", () => {
+      for (const [key, deps] of Object.entries(EXPECTED_DEPENDENCIES)) {
+        expect(getDependencies(key as keyof ConfigSchema)).toEqual(deps);
+      }
+    });
+
+    it("returns an empty array for keys with no declared dependencies", () => {
+      expect(getDependencies("voicetracking.enabled")).toEqual([]);
+      expect(getDependencies("quotes.enabled")).toEqual([]);
+    });
+
+    it("does NOT declare dependsOn on any rewind key (graceful aggregator)", () => {
+      const rewindKeys = Object.keys(settingsMetadata).filter((k) =>
+        k.startsWith("rewind."),
+      );
+      // Sanity check that rewind keys actually exist in the schema.
+      expect(rewindKeys.length).toBeGreaterThan(0);
+      for (const key of rewindKeys) {
+        expect(getDependencies(key as keyof ConfigSchema)).toEqual([]);
+      }
+    });
+
+    it("only points dependencies at real, enableable config keys", () => {
+      for (const deps of Object.values(EXPECTED_DEPENDENCIES)) {
+        for (const dep of deps) {
+          expect(dep in defaultConfig).toBe(true);
+          // Hard dependencies are always on an `*.enabled` gate.
+          expect(dep.endsWith(".enabled")).toBe(true);
+        }
+      }
     });
   });
 

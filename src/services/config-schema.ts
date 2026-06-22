@@ -376,6 +376,33 @@ export interface SettingMetadata {
    * Ignored for non-channel types.
    */
   channelKind?: "text" | "voice";
+  /**
+   * Hard dependencies: this key may only be enabled when every listed key
+   * is also enabled (truthy). Used by write-time validation and the Settings
+   * UI to block/grey a toggle until its requirements are met. Only declare
+   * *hard* data dependencies here — features that are broken/empty without
+   * the target. Optional/graceful readers (e.g. rewind's per-section sources)
+   * are intentionally NOT listed: rewind is a graceful aggregator that renders
+   * only the sections that are tracked, so it must never be blocked on enable.
+   * Sub-feature/parent gates may also be declared when it helps the UI.
+   */
+  dependsOn?: (keyof ConfigSchema)[];
+}
+
+/**
+ * Read the hard dependencies declared for a config key. Returns the keys that
+ * must also be enabled before `key` may be turned on, or an empty array when
+ * the key declares none. Typed against `ConfigSchema` so callers
+ * (write-time validation #663, the Settings "requires X" hint #666) get a
+ * checked list. The single source of truth is each key's `dependsOn` in
+ * `settingsMetadata`.
+ */
+export function getDependencies(
+  key: keyof ConfigSchema,
+): (keyof ConfigSchema)[] {
+  // Return a fresh copy so callers can't mutate the array stored in
+  // settingsMetadata and silently corrupt the shared dependency graph.
+  return [...(settingsMetadata[key]?.dependsOn ?? [])];
 }
 
 /**
@@ -599,6 +626,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Enable scheduled voice-stats announcements.",
     category: "voicetracking",
     type: "boolean",
+    dependsOn: ["voicetracking.enabled"],
   },
   "voicetracking.announcements.schedule": {
     label: "Announcement schedule (cron)",
@@ -801,6 +829,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Enable the achievements / accolades system.",
     category: "achievements",
     type: "boolean",
+    dependsOn: ["voicetracking.enabled"],
   },
   "achievements.announcements.enabled": {
     label: "Channel announcements for earned achievements",
@@ -822,6 +851,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Send a personalised weekly DM summarising each eligible user's voice activity, rank, streak, and new achievements.",
     category: "digest",
     type: "boolean",
+    dependsOn: ["voicetracking.enabled"],
   },
   "digest.cron": {
     label: "Digest schedule (cron)",
@@ -850,6 +880,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Embed the achievements earned during the past week alongside the activity summary.",
     category: "digest",
     type: "boolean",
+    dependsOn: ["achievements.enabled"],
   },
 
   // Rewind year-in-review (#484, #608)
@@ -964,6 +995,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Auto-assign Discord roles to users based on their voice-leaderboard position.",
     category: "leaderboard_roles",
     type: "boolean",
+    dependsOn: ["voicetracking.enabled"],
   },
   "leaderboard_roles.period": {
     label: "Period",

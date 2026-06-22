@@ -882,6 +882,27 @@ keys that may be missing from this summary include the `help.*` toggle,
 `leaderboard_roles.*` family (covered in [its own section](#-leaderboard-role-rewards)
 above).
 
+#### Feature dependencies (`dependsOn` metadata)
+
+Some features only work when another feature is enabled. These hard
+dependencies are declared once in the `dependsOn` field of each key's
+`SettingMetadata` in `src/services/config-schema.ts` (read via the
+`getDependencies(key)` accessor), so the Settings page, setup wizard, and
+write-time validation can all share one source of truth. A key declares
+`dependsOn` only when it is genuinely broken/empty without the target —
+graceful aggregators like Rewind, which render only the sections that are
+tracked, are intentionally **not** listed and are never blocked on enable.
+
+Current hard dependencies:
+
+| Setting | Requires |
+| --- | --- |
+| `leaderboard_roles.enabled` | `voicetracking.enabled` |
+| `digest.enabled` | `voicetracking.enabled` |
+| `digest.include_achievements` | `achievements.enabled` |
+| `achievements.enabled` | `voicetracking.enabled` |
+| `voicetracking.announcements.enabled` | `voicetracking.enabled` |
+
 #### Commands
 
 - `ping.enabled` (bool, default: false)
