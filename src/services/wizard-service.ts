@@ -33,7 +33,7 @@ export class WizardService {
   private static instance: WizardService;
   private sessions: Map<string, WizardState> = new Map();
   private readonly SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-  private cleanupInterval: ReturnType<typeof setTimeout> | null = null;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private configService: ConfigService;
 
   private constructor() {
@@ -53,8 +53,15 @@ export class WizardService {
    */
   private startCleanupTimer(): void {
     this.cleanupInterval = setInterval(() => {
-      this.cleanupExpiredSessions();
+      try {
+        this.cleanupExpiredSessions();
+      } catch (error) {
+        logger.error("WizardService: error during session cleanup:", error);
+      }
     }, 60000); // Check every minute
+
+    // Don't keep the event loop alive solely for this background cleanup.
+    this.cleanupInterval.unref?.();
   }
 
   /**
