@@ -92,6 +92,38 @@ export function isoDateInZone(date: Date, tz: string): string {
 }
 
 /**
+ * Wall-clock hour (0–23) for `date` in an explicit IANA zone. Used by the
+ * time-of-day accolades (Night Owl / Early Bird) so their hour windows are
+ * evaluated in the user's local time rather than UTC (#658). Callers pass
+ * `"UTC"` for users with no timezone preference.
+ */
+export function hourInZone(date: Date, tz: string): number {
+  return Number(formatInTimeZone(date, tz, "H"));
+}
+
+/**
+ * Day of week for `date` in an explicit IANA zone, using JS
+ * `Date.getDay()` numbering (0 = Sunday … 6 = Saturday) so it drops in for
+ * the previous `getUTCDay()` calls in the day-of-week accolades (#658).
+ */
+export function dayOfWeekInZone(date: Date, tz: string): number {
+  // date-fns "i" is ISO day-of-week (1 = Mon … 7 = Sun); map Sunday → 0.
+  return Number(formatInTimeZone(date, tz, "i")) % 7;
+}
+
+/**
+ * Seconds elapsed since the start of the current wall-clock hour in `tz`.
+ * Lets the hour-window accolade walk align its segments to local-hour
+ * boundaries even in zones with sub-hour offsets (#658).
+ */
+export function secondsIntoHourInZone(date: Date, tz: string): number {
+  const [minute, second] = formatInTimeZone(date, tz, "m:s")
+    .split(":")
+    .map(Number);
+  return minute * 60 + second;
+}
+
+/**
  * Render a date+time plus the resolved zone name, e.g.
  * `2026-06-12 14:30 (Europe/London)`. Used where a bare timestamp would
  * otherwise be ambiguous (e.g. `/voicestats user`).
