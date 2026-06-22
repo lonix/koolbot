@@ -10,6 +10,13 @@ import {
 } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
+import {
+  dayOfWeekInZone,
+  hourInZone,
+  isoDateInZone,
+  isValidTimezone,
+  secondsIntoHourInZone,
+} from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import mongoose from "mongoose";
 import { quoteService } from "./quote-service.js";
@@ -22,13 +29,19 @@ import {
 export type { AccoladeType, AchievementType };
 
 interface BadgeLogic {
+  // `timeZone` is the IANA zone the time-sensitive accolades bucket in
+  // (#658) — the acting user's `UserNotificationPrefs.timezone`, or "UTC"
+  // when unset. Hour/day-agnostic checks (total hours, social, quote)
+  // simply omit the parameter.
   checkFunction: (
     userId: string,
     userData: IVoiceChannelTracking | null,
+    timeZone: string,
   ) => Promise<boolean>;
   metadataFunction?: (
     userId: string,
     userData: IVoiceChannelTracking | null,
+    timeZone: string,
   ) => Promise<{ value?: number; description?: string; unit?: string }>;
 }
 
@@ -276,6 +289,7 @@ export class AchievementsService {
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -286,6 +300,7 @@ export class AchievementsService {
             lateNightSeconds += this.calculateLateNightDuration(
               session.startTime,
               session.endTime,
+              timeZone,
             );
           }
         }
@@ -294,6 +309,7 @@ export class AchievementsService {
       metadataFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -304,6 +320,7 @@ export class AchievementsService {
               lateNightSeconds += this.calculateLateNightDuration(
                 session.startTime,
                 session.endTime,
+                timeZone,
               );
             }
           }
@@ -319,6 +336,7 @@ export class AchievementsService {
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -329,6 +347,7 @@ export class AchievementsService {
             earlyMorningSeconds += this.calculateEarlyMorningDuration(
               session.startTime,
               session.endTime,
+              timeZone,
             );
           }
         }
@@ -337,6 +356,7 @@ export class AchievementsService {
       metadataFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -347,6 +367,7 @@ export class AchievementsService {
               earlyMorningSeconds += this.calculateEarlyMorningDuration(
                 session.startTime,
                 session.endTime,
+                timeZone,
               );
             }
           }
@@ -362,6 +383,7 @@ export class AchievementsService {
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -369,7 +391,7 @@ export class AchievementsService {
         let weekendSeconds = 0;
         for (const session of user.sessions) {
           if (session.startTime && session.duration) {
-            const day = session.startTime.getDay();
+            const day = dayOfWeekInZone(session.startTime, timeZone);
             if (day === 0 || day === 6) {
               weekendSeconds += session.duration;
             }
@@ -380,6 +402,7 @@ export class AchievementsService {
       metadataFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -387,7 +410,7 @@ export class AchievementsService {
         if (user) {
           for (const session of user.sessions) {
             if (session.startTime && session.duration) {
-              const day = session.startTime.getDay();
+              const day = dayOfWeekInZone(session.startTime, timeZone);
               if (day === 0 || day === 6) {
                 weekendSeconds += session.duration;
               }
@@ -405,6 +428,7 @@ export class AchievementsService {
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -412,7 +436,7 @@ export class AchievementsService {
         let weekdaySeconds = 0;
         for (const session of user.sessions) {
           if (session.startTime && session.duration) {
-            const day = session.startTime.getDay();
+            const day = dayOfWeekInZone(session.startTime, timeZone);
             if (day >= 1 && day <= 5) {
               weekdaySeconds += session.duration;
             }
@@ -423,6 +447,7 @@ export class AchievementsService {
       metadataFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -430,7 +455,7 @@ export class AchievementsService {
         if (user) {
           for (const session of user.sessions) {
             if (session.startTime && session.duration) {
-              const day = session.startTime.getDay();
+              const day = dayOfWeekInZone(session.startTime, timeZone);
               if (day >= 1 && day <= 5) {
                 weekdaySeconds += session.duration;
               }
@@ -448,12 +473,14 @@ export class AchievementsService {
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
+          timeZone,
           AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 7;
@@ -461,6 +488,7 @@ export class AchievementsService {
       metadataFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -473,6 +501,7 @@ export class AchievementsService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
+          timeZone,
           AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
@@ -486,12 +515,14 @@ export class AchievementsService {
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
+          timeZone,
           AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 14;
@@ -499,6 +530,7 @@ export class AchievementsService {
       metadataFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -511,6 +543,7 @@ export class AchievementsService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
+          timeZone,
           AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
@@ -524,12 +557,14 @@ export class AchievementsService {
       checkFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
         if (!user) return false;
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
+          timeZone,
           AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return longestStreak >= 30;
@@ -537,6 +572,7 @@ export class AchievementsService {
       metadataFunction: async (
         userId: string,
         userData: IVoiceChannelTracking | null,
+        timeZone: string,
       ) => {
         const user =
           userData || (await VoiceChannelTracking.findOne({ userId }));
@@ -549,6 +585,7 @@ export class AchievementsService {
         }
         const { longestStreak } = this.calculateConsecutiveDays(
           user.sessions,
+          timeZone,
           AchievementsService.MIN_DAILY_DURATION_SECONDS,
         );
         return {
@@ -722,69 +759,70 @@ export class AchievementsService {
   }
 
   /**
-   * Calculate how much of a session occurred during late night hours (10 PM - 6 AM)
+   * Sum the seconds of `[startTime, endTime)` whose wall-clock hour (in the
+   * given IANA `timeZone`) satisfies `inWindow`. The walk aligns each
+   * segment to the local-hour boundary in that zone, so it stays correct
+   * for zones with sub-hour offsets and honours the user's timezone (#658).
+   * Callers pass "UTC" for users with no timezone preference.
    */
-  private calculateLateNightDuration(startTime: Date, endTime: Date): number {
+  private calculateHourWindowSeconds(
+    startTime: Date,
+    endTime: Date,
+    timeZone: string,
+    inWindow: (hour: number) => boolean,
+  ): number {
     let totalSeconds = 0;
-    const current = new Date(startTime);
-    const end = new Date(endTime);
+    let current = startTime.getTime();
+    const end = endTime.getTime();
 
     while (current < end) {
-      const hour = current.getHours();
-      const isLateNight = hour >= 22 || hour < 6;
+      const at = new Date(current);
+      const hour = hourInZone(at, timeZone);
+      const secondsToBoundary = 3600 - secondsIntoHourInZone(at, timeZone);
+      const segmentEnd = Math.min(current + secondsToBoundary * 1000, end);
 
-      if (isLateNight) {
-        const nextHour = new Date(current);
-        nextHour.setHours(current.getHours() + 1, 0, 0, 0);
-        const segmentEnd = nextHour < end ? nextHour : end;
-        totalSeconds += Math.floor(
-          (segmentEnd.getTime() - current.getTime()) / 1000,
-        );
-        current.setTime(segmentEnd.getTime());
-      } else {
-        current.setHours(current.getHours() + 1, 0, 0, 0);
+      if (inWindow(hour)) {
+        totalSeconds += Math.floor((segmentEnd - current) / 1000);
       }
+
+      current = segmentEnd;
     }
 
     return totalSeconds;
   }
 
   /**
-   * Calculate how much of a session occurred during early morning (6 AM - 10 AM)
+   * Calculate how much of a session occurred during late night hours
+   * (10 PM - 6 AM in the user's timezone, UTC when unset).
+   */
+  private calculateLateNightDuration(
+    startTime: Date,
+    endTime: Date,
+    timeZone: string,
+  ): number {
+    return this.calculateHourWindowSeconds(
+      startTime,
+      endTime,
+      timeZone,
+      (hour) => hour >= 22 || hour < 6,
+    );
+  }
+
+  /**
+   * Calculate how much of a session occurred during early morning
+   * (6 AM - 10 AM in the user's timezone, UTC when unset).
    */
   private calculateEarlyMorningDuration(
     startTime: Date,
     endTime: Date,
+    timeZone: string,
   ): number {
-    let totalSeconds = 0;
-    const current = new Date(startTime);
-    const end = new Date(endTime);
-
-    while (current < end) {
-      const hour = current.getHours();
-      const isEarlyMorning = hour >= 6 && hour < 10;
-
-      if (isEarlyMorning) {
-        const nextHour = new Date(current);
-        nextHour.setHours(current.getHours() + 1, 0, 0, 0);
-        const segmentEnd = nextHour < end ? nextHour : end;
-        totalSeconds += Math.floor(
-          (segmentEnd.getTime() - current.getTime()) / 1000,
-        );
-        current.setTime(segmentEnd.getTime());
-      } else {
-        current.setHours(current.getHours() + 1, 0, 0, 0);
-      }
-    }
-
-    return totalSeconds;
-  }
-
-  /**
-   * Format a date as YYYY-MM-DD string using UTC
-   */
-  private formatDateKeyUTC(date: Date): string {
-    return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
+    return this.calculateHourWindowSeconds(
+      startTime,
+      endTime,
+      timeZone,
+      (hour) => hour >= 6 && hour < 10,
+    );
   }
 
   /**
@@ -797,24 +835,27 @@ export class AchievementsService {
    * - For longer streaks: Increase retention accordingly
    *
    * @param sessions Array of user sessions
+   * @param timeZone IANA zone to bucket days in ("UTC" when the user has no
+   *   timezone preference) so streaks reflect the user's local midnight (#658)
    * @param minDuration Minimum duration in seconds per day (default: MIN_DAILY_DURATION_SECONDS)
    * @returns Object with currentStreak and longestStreak
    */
   private calculateConsecutiveDays(
     sessions: Array<{ startTime: Date; duration?: number }>,
+    timeZone: string,
     minDuration: number = AchievementsService.MIN_DAILY_DURATION_SECONDS,
   ): { currentStreak: number; longestStreak: number } {
     if (!sessions || sessions.length === 0) {
       return { currentStreak: 0, longestStreak: 0 };
     }
 
-    // Group sessions by day (using UTC date)
+    // Group sessions by day, bucketed in the user's timezone (UTC default).
     const dayTotals = new Map<string, number>();
 
     for (const session of sessions) {
       if (session.startTime && session.duration) {
         const date = new Date(session.startTime);
-        const dayKey = this.formatDateKeyUTC(date);
+        const dayKey = isoDateInZone(date, timeZone);
         const currentTotal = dayTotals.get(dayKey) || 0;
         dayTotals.set(dayKey, currentTotal + session.duration);
       }
@@ -834,9 +875,16 @@ export class AchievementsService {
     let longestStreak = 1;
     let currentStreak = 1;
     const today = new Date();
-    const todayKey = this.formatDateKeyUTC(today);
-    const yesterday = new Date(today.getTime() - 86400000);
-    const yesterdayKey = this.formatDateKeyUTC(yesterday);
+    const todayKey = isoDateInZone(today, timeZone);
+    // Derive "yesterday" from the calendar-day key, not by subtracting 24h
+    // of wall-clock time: around DST transitions a local day is 23/25 hours,
+    // so a fixed 86,400,000ms step can skip or repeat a calendar day and
+    // wrongly break an active streak. Anchoring at the date string's UTC
+    // midnight makes the minus-one-day arithmetic DST-safe.
+    const yesterdayKey = isoDateInZone(
+      new Date(new Date(`${todayKey}T00:00:00Z`).getTime() - 86400000),
+      "UTC",
+    );
 
     for (let i = 1; i < qualifyingDays.length; i++) {
       const prevDate = new Date(qualifyingDays[i - 1] + "T00:00:00Z");
@@ -935,6 +983,33 @@ export class AchievementsService {
   }
 
   /**
+   * Resolve the acting user's accolade-bucketing timezone (#658), mirroring
+   * Rewind's default semantics: the stored `UserNotificationPrefs.timezone`
+   * when set and valid, otherwise "UTC" (so unconfigured members keep their
+   * existing progress). The guild id comes from bootstrap `GUILD_ID` config,
+   * matching `notifyUserOfAccolades`; when it's unset we can't look up prefs,
+   * so we fall back to UTC. Any error degrades to UTC rather than failing the
+   * whole accolade check.
+   */
+  private async resolveUserTimezone(userId: string): Promise<string> {
+    try {
+      const guildId = await this.configService.getString("GUILD_ID", "");
+      if (!guildId) return "UTC";
+      const tz = await UserNotificationPrefsService.getInstance().getTimezone(
+        userId,
+        guildId,
+      );
+      return tz && isValidTimezone(tz) ? tz : "UTC";
+    } catch (error) {
+      logger.warn(
+        `Failed to resolve timezone for ${userId}; defaulting to UTC:`,
+        error,
+      );
+      return "UTC";
+    }
+  }
+
+  /**
    * Check and award accolades (persistent badges) to a user
    * Returns newly earned accolades
    */
@@ -973,6 +1048,13 @@ export class AchievementsService {
       // Fetch user tracking data once to avoid multiple DB queries
       const userTrackingData = await VoiceChannelTracking.findOne({ userId });
 
+      // Resolve the acting user's timezone once per evaluation (#658): the
+      // time-of-day / day-of-week / streak accolades bucket sessions in it,
+      // falling back to UTC when unset or invalid so unconfigured members'
+      // progress doesn't shift. Kept out of the per-accolade loop — and well
+      // out of the per-session inner loops — so it costs at most one lookup.
+      const timeZone = await this.resolveUserTimezone(userId);
+
       // Check each accolade type
       for (const type of Object.keys(ACCOLADE_METADATA) as AccoladeType[]) {
         if (existingAccoladeTypes.has(type)) {
@@ -980,10 +1062,14 @@ export class AchievementsService {
         }
 
         const logic = this.accoladeLogic[type];
-        const earned = await logic.checkFunction(userId, userTrackingData);
+        const earned = await logic.checkFunction(
+          userId,
+          userTrackingData,
+          timeZone,
+        );
         if (earned) {
           const metadata = logic.metadataFunction
-            ? await logic.metadataFunction(userId, userTrackingData)
+            ? await logic.metadataFunction(userId, userTrackingData, timeZone)
             : {};
 
           const accolade: IAccolade = {
@@ -1069,10 +1155,13 @@ export class AchievementsService {
         const logic = this.achievementLogic[type];
         if (!logic) continue;
 
-        const earned = await logic.checkFunction(userId, null);
+        // Weekly achievements are time-window aggregates evaluated in UTC
+        // (out of scope for #658); the timezone arg is accepted for a
+        // uniform BadgeLogic signature but unused by these checks.
+        const earned = await logic.checkFunction(userId, null, "UTC");
         if (earned) {
           const metadata = logic.metadataFunction
-            ? await logic.metadataFunction(userId, null)
+            ? await logic.metadataFunction(userId, null, "UTC")
             : undefined;
 
           const achievement: IAchievement = {

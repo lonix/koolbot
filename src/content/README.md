@@ -53,8 +53,10 @@ Two-step change, both verified by the type checker:
 
    ```ts
    my_new_accolade: {
-     checkFunction: async (userId, userData) => { /* ... */ },
-     metadataFunction: async (userId, userData) => { /* ... */ },
+     // `timeZone` is the user's accolade-bucketing zone ("UTC" when unset);
+     // time-of-day / day-of-week / streak checks use it, others omit it.
+     checkFunction: async (userId, userData, timeZone) => { /* ... */ },
+     metadataFunction: async (userId, userData, timeZone) => { /* ... */ },
    },
    ```
 

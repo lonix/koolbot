@@ -276,8 +276,8 @@ Total Achievements: 0
 - 🦸 **Ultra Marathoner** — 8+ hour session
 - 🦋 **Social Butterfly** — 10+ unique users
 - 🤝 **Connector** — 25+ unique users
-- 🦉 **Night Owl** — 50+ late-night hours (10 PM - 6 AM UTC)
-- 🐦 **Early Bird** — 50+ early-morning hours (6 AM - 10 AM UTC)
+- 🦉 **Night Owl** — 50+ late-night hours (10 PM - 6 AM, your timezone)
+- 🐦 **Early Bird** — 50+ early-morning hours (6 AM - 10 AM, your timezone)
 - 🎮 **Weekend Warrior** — 100+ weekend hours
 - 💼 **Weekday Warrior** — 100+ weekday hours
 - 🔥 **On a Roll** — 7 consecutive days (5+ min/day)
@@ -293,8 +293,14 @@ Total Achievements: 0
 
 **Notes on time-based accolades:**
 
-- Night Owl / Early Bird use **UTC**, not your local timezone
-- Weekend Warrior / Weekday Warrior use UTC day-of-week
+- Night Owl / Early Bird evaluate their hour windows in **your configured
+  timezone** (set it on your personal Web UI page: `/config` → **My
+  preferences** → **Timezone**, i.e. `/me/timezone`). If you haven't set one,
+  they fall back to **UTC**.
+- Weekend Warrior / Weekday Warrior bucket day-of-week in your configured
+  timezone too (UTC when unset).
+- The consistency streaks (On a Roll / Dedicated AF / No-Lifer) count
+  consecutive days using your timezone's local midnight (UTC when unset).
 
 **Notifications:**
 
