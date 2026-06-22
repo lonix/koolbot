@@ -20,6 +20,7 @@ import {
   IChannelPreset,
   IUserVoicePreferences,
 } from "../models/user-voice-preferences.js";
+import { UserVoicePrefsService } from "../services/user-voice-prefs-service.js";
 
 const configService = ConfigService.getInstance();
 
@@ -481,9 +482,13 @@ async function toggleDefault(
   parsed: ParsedId,
 ): Promise<void> {
   if (parsed.presetIndex === null) return;
-  const prefs = await loadPrefs(parsed.ownerId);
-  const target = prefs.presets[parsed.presetIndex];
-  if (!target) {
+  let result: { name: string; isDefault: boolean };
+  try {
+    result = await UserVoicePrefsService.getInstance().setDefault(
+      parsed.ownerId,
+      parsed.presetIndex,
+    );
+  } catch {
     await interaction.reply({
       content: "❌ Preset no longer exists.",
       flags: MessageFlags.Ephemeral,
@@ -491,19 +496,11 @@ async function toggleDefault(
     return;
   }
 
-  const wasDefault = !!target.isDefault;
-  prefs.presets.forEach((p) => {
-    p.isDefault = false;
-  });
-  if (!wasDefault) target.isDefault = true;
-  prefs.markModified("presets");
-  await prefs.save();
-
   await switchToManage(interaction, parsed, parsed.presetIndex);
   await interaction.followUp({
-    content: wasDefault
-      ? `⭐ **${target.name}** is no longer the default.`
-      : `⭐ **${target.name}** will auto-apply on your next channel.`,
+    content: result.isDefault
+      ? `⭐ **${result.name}** will auto-apply on your next channel.`
+      : `⭐ **${result.name}** is no longer the default.`,
     flags: MessageFlags.Ephemeral,
   });
 }
@@ -513,9 +510,13 @@ async function deletePreset(
   parsed: ParsedId,
 ): Promise<void> {
   if (parsed.presetIndex === null) return;
-  const prefs = await loadPrefs(parsed.ownerId);
-  const target = prefs.presets[parsed.presetIndex];
-  if (!target) {
+  let removed: { name: string; remaining: number };
+  try {
+    removed = await UserVoicePrefsService.getInstance().deletePreset(
+      parsed.ownerId,
+      parsed.presetIndex,
+    );
+  } catch {
     await interaction.reply({
       content: "❌ Preset no longer exists.",
       flags: MessageFlags.Ephemeral,
@@ -523,18 +524,13 @@ async function deletePreset(
     return;
   }
 
-  const removedName = target.name;
-  prefs.presets.splice(parsed.presetIndex, 1);
-  prefs.markModified("presets");
-  await prefs.save();
-
-  if (prefs.presets.length === 0) {
+  if (removed.remaining === 0) {
     await switchToApply(interaction, parsed);
   } else {
     await switchToManage(interaction, parsed, null);
   }
   await interaction.followUp({
-    content: `🗑️ Deleted preset **${removedName}**.`,
+    content: `🗑️ Deleted preset **${removed.name}**.`,
     flags: MessageFlags.Ephemeral,
   });
 }

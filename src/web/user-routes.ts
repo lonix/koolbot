@@ -39,8 +39,14 @@ import {
   renderUserPage,
   renderUserRewindBody,
   renderUserTimezoneBody,
+  renderUserVoiceBody,
   type UserFlashMessage,
+  type VoicePresetView,
 } from "./user-layout.js";
+import {
+  UserVoicePrefsService,
+  VoicePrefsValidationError,
+} from "../services/user-voice-prefs-service.js";
 import {
   getServerTimezone,
   listSupportedTimezones,
@@ -194,6 +200,67 @@ async function isRewindFeatureEnabled(): Promise<boolean> {
   return ConfigService.getInstance().getBoolean("rewind.enabled", false);
 }
 
+/**
+ * Whether the per-user voice-preferences feature (`/me/voice` + its nav
+ * entry) is enabled (#656). Shares the `voicechannels.presets.enabled`
+ * gate with the Discord modal surface so both turn on together. Defaults
+ * to `false`, following the repo's opt-in feature-gate convention.
+ */
+async function isVoicePresetsEnabled(): Promise<boolean> {
+  return ConfigService.getInstance().getBoolean(
+    "voicechannels.presets.enabled",
+    false,
+  );
+}
+
+/**
+ * Resolve the session user's display name for the name-pattern preview.
+ * Best-effort: falls back to the raw user id when the member can't be
+ * fetched (e.g. left the guild), so the page still renders.
+ */
+async function resolveDisplayName(
+  client: Client,
+  guildId: string,
+  userId: string,
+): Promise<string> {
+  try {
+    const guild =
+      client.guilds.cache.get(guildId) ?? (await client.guilds.fetch(guildId));
+    const member = await guild.members.fetch(userId);
+    return member.displayName;
+  } catch {
+    return userId;
+  }
+}
+
+/** Parse an optional numeric form field, treating blank as "unset". */
+function parseOptionalInt(raw: unknown): number | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? Math.trunc(n) : NaN;
+}
+
+function toPresetViews(
+  presets: {
+    name: string;
+    channelName?: string;
+    userLimit?: number;
+    bitrate?: number;
+    isDefault?: boolean;
+  }[],
+): VoicePresetView[] {
+  return presets.map((p, index) => ({
+    index,
+    name: p.name,
+    channelName: p.channelName ?? null,
+    userLimit: typeof p.userLimit === "number" ? p.userLimit : null,
+    bitrate: typeof p.bitrate === "number" ? p.bitrate : null,
+    isDefault: !!p.isDefault,
+  }));
+}
+
 function parseYearParam(raw: unknown, fallback: number): number {
   if (typeof raw !== "string" || raw.length === 0) return fallback;
   const n = Number.parseInt(raw, 10);
@@ -233,6 +300,7 @@ export function createUserRouter(
         return;
       }
       const rewindEnabled = await isRewindFeatureEnabled();
+      const presetsEnabled = await isVoicePresetsEnabled();
       res.type("text/html").send(
         renderUserPage({
           title: "Overview",
@@ -242,11 +310,13 @@ export function createUserRouter(
             guildId: session.guildId,
             isAdmin: session.role === "admin",
             rewindEnabled,
+            presetsEnabled,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           rewindEnabled,
+          presetsEnabled,
         }),
       );
     }),
@@ -283,6 +353,7 @@ export function createUserRouter(
           isAdmin: session.role === "admin",
           flash,
           rewindEnabled: await isRewindFeatureEnabled(),
+          presetsEnabled: await isVoicePresetsEnabled(),
         }),
       );
     }),
@@ -404,6 +475,7 @@ export function createUserRouter(
           isAdmin: session.role === "admin",
           flash,
           rewindEnabled: await isRewindFeatureEnabled(),
+          presetsEnabled: await isVoicePresetsEnabled(),
         }),
       );
     }),
@@ -494,6 +566,7 @@ export function createUserRouter(
       userId: session.discordUserId,
       guildId: session.guildId,
     });
+    const presetsEnabled = await isVoicePresetsEnabled();
 
     // Feature gate (#608): when Rewind is disabled the page is not served
     // (and the nav link is already suppressed). Return a friendly disabled
@@ -514,6 +587,7 @@ export function createUserRouter(
             remainingMs: getDisplayedRemainingMs(session),
             isAdmin: session.role === "admin",
             rewindEnabled: false,
+            presetsEnabled,
           }),
         );
       return;
@@ -561,6 +635,7 @@ export function createUserRouter(
             remainingMs: getDisplayedRemainingMs(session),
             isAdmin: session.role === "admin",
             rewindEnabled: true,
+            presetsEnabled,
           }),
         );
       return;
@@ -628,11 +703,316 @@ export function createUserRouter(
         remainingMs: getDisplayedRemainingMs(session),
         isAdmin: session.role === "admin",
         rewindEnabled: true,
+        presetsEnabled,
       }),
     );
   });
   router.get("/rewind", rewindHandler);
   router.get("/rewind/:year", rewindHandler);
+
+  // ---------- Voice preferences (#656) ----------
+  // `/me/voice` manages the per-user name pattern + saved presets. It
+  // shares the `voicechannels.presets.enabled` gate with the Discord
+  // modal surface and reuses `UserVoicePrefsService` so the validation
+  // rules never diverge between the two surfaces. Presets are created in
+  // Discord (snapshot of a live channel); the web surface edits, sets the
+  // default, and deletes the ones you already have.
+
+  // Helper shared by every voice route: 404 with a friendly disabled
+  // state when the feature is off (mirrors the Rewind gate, #608).
+  const renderVoiceDisabled = (
+    req: AuthenticatedRequest,
+    res: Response,
+    session: WebSessionContext,
+  ): void => {
+    res
+      .status(404)
+      .type("text/html")
+      .send(
+        renderUserPage({
+          title: "Voice preferences",
+          active: "/me/voice",
+          body:
+            "<h1>Voice preferences</h1>" +
+            '<div class="notice info">Per-user voice presets are currently disabled on this server.</div>',
+          csrfToken: getCsrfToken(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          presetsEnabled: false,
+        }),
+      );
+  };
+
+  router.get(
+    "/voice",
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      if (!(await isVoicePresetsEnabled())) {
+        renderVoiceDisabled(req, res, session);
+        return;
+      }
+      const { userId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      const service = UserVoicePrefsService.getInstance();
+      const prefs = await service.getPrefs(userId);
+      const displayName = await resolveDisplayName(
+        client,
+        session.guildId,
+        userId,
+      );
+      const maxPerUser = await ConfigService.getInstance().getNumber(
+        "voicechannels.presets.max_per_user",
+        3,
+      );
+      const flash = readFlashFromQuery(req);
+
+      res.type("text/html").send(
+        renderUserPage({
+          title: "Voice preferences",
+          active: "/me/voice",
+          body: renderUserVoiceBody({
+            csrfToken: getCsrfToken(req),
+            namePattern: prefs.namePattern ?? null,
+            displayName,
+            presets: toPresetViews(prefs.presets),
+            maxPerUser,
+          }),
+          csrfToken: getCsrfToken(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          flash,
+          rewindEnabled: await isRewindFeatureEnabled(),
+          presetsEnabled: true,
+        }),
+      );
+    }),
+  );
+
+  router.post(
+    "/voice/name-pattern",
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      if (!(await isVoicePresetsEnabled())) {
+        renderVoiceDisabled(req, res, session);
+        return;
+      }
+      const { userId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const raw =
+        typeof body.namePattern === "string"
+          ? body.namePattern.replace(/[\r\n]+/g, "")
+          : "";
+
+      let result: "success" | "failure" = "success";
+      let errorMessage: string | null = null;
+      let stored: string | null = null;
+      try {
+        stored = await UserVoicePrefsService.getInstance().setNamePattern(
+          userId,
+          raw,
+        );
+      } catch (err) {
+        result = "failure";
+        errorMessage = err instanceof Error ? err.message : String(err);
+      }
+
+      await recordAudit(session, {
+        action: "user.voice.namepattern.set",
+        targetId: userId,
+        details:
+          result === "success"
+            ? { pattern: stored }
+            : { attempted: sanitizeForLog(raw) },
+        result,
+        errorMessage,
+      });
+
+      const flash: UserFlashMessage =
+        result === "failure"
+          ? {
+              type: "err",
+              text: `Could not save your name pattern: ${errorMessage ?? "unknown error"}.`,
+            }
+          : stored === null
+            ? { type: "ok", text: "Cleared your name pattern." }
+            : { type: "ok", text: `Saved your name pattern as "${stored}".` };
+      res.redirect(303, flashUrl("/me/voice", flash));
+    }),
+  );
+
+  // Shared body for the three preset-mutation routes: validates the
+  // `index`/`expectedName` pair, runs `op`, and PRG-redirects with a flash.
+  const presetMutation = (
+    action: string,
+    op: (args: {
+      service: UserVoicePrefsService;
+      userId: string;
+      index: number;
+      expectedName: string;
+      body: Record<string, unknown>;
+    }) => Promise<{
+      flash: UserFlashMessage;
+      details: Record<string, unknown>;
+    }>,
+  ): RequestHandler =>
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      if (!(await isVoicePresetsEnabled())) {
+        renderVoiceDisabled(req, res, session);
+        return;
+      }
+      const { userId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const index = parseOptionalInt(body.index);
+      const expectedName =
+        typeof body.expectedName === "string" ? body.expectedName : "";
+
+      let result: "success" | "failure" = "success";
+      let errorMessage: string | null = null;
+      let flash: UserFlashMessage;
+      let details: Record<string, unknown> = {};
+
+      if (index === undefined || index === null || Number.isNaN(index)) {
+        result = "failure";
+        errorMessage = "Invalid preset reference.";
+        flash = {
+          type: "err",
+          text: "Could not find that preset — reload the page and try again.",
+        };
+      } else {
+        try {
+          const out = await op({
+            service: UserVoicePrefsService.getInstance(),
+            userId,
+            index,
+            expectedName,
+            body,
+          });
+          flash = out.flash;
+          details = out.details;
+        } catch (err) {
+          result = "failure";
+          errorMessage = err instanceof Error ? err.message : String(err);
+          flash = {
+            type: err instanceof VoicePrefsValidationError ? "warn" : "err",
+            text:
+              err instanceof VoicePrefsValidationError
+                ? errorMessage
+                : `Could not update the preset: ${errorMessage}.`,
+          };
+        }
+      }
+
+      await recordAudit(session, {
+        action,
+        targetId: userId,
+        details: { ...details, index, expectedName },
+        result,
+        errorMessage,
+      });
+
+      res.redirect(303, flashUrl("/me/voice", flash));
+    });
+
+  router.post(
+    "/voice/preset/edit",
+    requireCsrf,
+    presetMutation(
+      "user.voice.preset.edit",
+      async ({ service, userId, index, expectedName, body }) => {
+        const name = typeof body.name === "string" ? body.name : "";
+        const channelName =
+          typeof body.channelName === "string" ? body.channelName : undefined;
+        const userLimit = parseOptionalInt(body.userLimit);
+        const bitrate = parseOptionalInt(body.bitrate);
+        // NaN means "present but not a number" — surface a friendly error
+        // rather than passing it to the validator as a bound check.
+        if (Number.isNaN(userLimit)) {
+          throw new VoicePrefsValidationError("User limit must be a number.");
+        }
+        if (Number.isNaN(bitrate)) {
+          throw new VoicePrefsValidationError("Bitrate must be a number.");
+        }
+        const saved = await service.editPreset(
+          userId,
+          index,
+          { name, channelName, userLimit, bitrate },
+          expectedName,
+        );
+        return {
+          flash: { type: "ok", text: `Saved changes to "${saved.name}".` },
+          details: { name: saved.name },
+        };
+      },
+    ),
+  );
+
+  router.post(
+    "/voice/preset/default",
+    requireCsrf,
+    presetMutation(
+      "user.voice.preset.default",
+      async ({ service, userId, index, expectedName }) => {
+        const { name, isDefault } = await service.setDefault(
+          userId,
+          index,
+          expectedName,
+        );
+        return {
+          flash: {
+            type: "ok",
+            text: isDefault
+              ? `"${name}" will auto-apply on your next channel.`
+              : `"${name}" is no longer the default.`,
+          },
+          details: { name, isDefault },
+        };
+      },
+    ),
+  );
+
+  router.post(
+    "/voice/preset/delete",
+    requireCsrf,
+    presetMutation(
+      "user.voice.preset.delete",
+      async ({ service, userId, index, expectedName }) => {
+        const { name } = await service.deletePreset(
+          userId,
+          index,
+          expectedName,
+        );
+        return {
+          flash: { type: "ok", text: `Deleted preset "${name}".` },
+          details: { name },
+        };
+      },
+    ),
+  );
 
   // ---------- Finish (sign out) ----------
   // CSRF-checked, same pattern as `/admin/finish`. The session row is
