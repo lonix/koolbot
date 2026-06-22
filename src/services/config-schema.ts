@@ -107,6 +107,10 @@ export interface ConfigSchema {
   // Discord slash-command audit log (issue #459)
   "core.command_audit.enabled": boolean;
   "core.command_audit.retention_days": number;
+
+  // Persisted command metrics (issue #648)
+  "monitoring.metrics_persistence.enabled": boolean;
+  "monitoring.metrics_retention_days": number;
 }
 
 /**
@@ -269,6 +273,12 @@ export const defaultConfig: ConfigSchema = {
   // matches the proposal in the issue (90 days).
   "core.command_audit.enabled": true,
   "core.command_audit.retention_days": 90,
+
+  // Persisted command metrics defaults (#648). On by default so fresh
+  // installs get historical command analytics in the Admin → Command
+  // Metrics dashboard out of the box; 30-day window matches the issue.
+  "monitoring.metrics_persistence.enabled": true,
+  "monitoring.metrics_retention_days": 30,
 };
 
 /**
@@ -1001,6 +1011,20 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Slash-command audit retention (days)",
     description:
       "Days to keep slash-command audit rows before the cleanup job prunes them.",
+    category: "core",
+    type: "number",
+  },
+  "monitoring.metrics_persistence.enabled": {
+    label: "Persist command metrics",
+    description:
+      "Store per-command daily usage/error/latency buckets in MongoDB so command analytics survive restarts and feed the Admin → Command Metrics dashboard. When off, metrics remain in-memory only.",
+    category: "core",
+    type: "boolean",
+  },
+  "monitoring.metrics_retention_days": {
+    label: "Command-metrics retention (days)",
+    description:
+      "Days to keep persisted command-metric buckets before MongoDB's TTL index prunes them.",
     category: "core",
     type: "number",
   },

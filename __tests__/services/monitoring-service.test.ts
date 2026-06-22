@@ -226,9 +226,11 @@ describe('MonitoringService', () => {
         fresh.destroy();
       }).not.toThrow();
 
-      // Only the first call should have anything to clear.
-      expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+      // Only the first call should have anything to clear: the periodic
+      // logging interval and the metrics-flush interval (#648) — two handles.
+      expect(clearIntervalSpy).toHaveBeenCalledTimes(2);
       expect((fresh as any).periodicLoggingInterval).toBeNull();
+      expect((fresh as any).flushInterval).toBeNull();
 
       clearIntervalSpy.mockRestore();
     });

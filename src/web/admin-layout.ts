@@ -99,6 +99,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/admin/bot-status", label: "Bot Status", group: "Info" },
   { href: "/admin/database", label: "Database", group: "Info" },
   { href: "/admin/audit/commands", label: "Command Audit", group: "Info" },
+  { href: "/admin/metrics", label: "Command Metrics", group: "Info" },
   { href: "/admin/bootstrap", label: "Bootstrap", group: "Info" },
   // Settings — configuration & setup surfaces.
   { href: "/admin/settings", label: "Settings", group: "Settings" },

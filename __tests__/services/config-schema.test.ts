@@ -225,6 +225,10 @@ describe('Config Schema', () => {
       // analogous to how WebAuditLog records every WebUI write without
       // requiring opt-in.
       'core.command_audit.enabled': true,
+      // Persisted command metrics (#648) — same rationale as audit logging:
+      // a cross-cutting operator-visibility feature, on by default so fresh
+      // installs get historical command analytics out of the box.
+      'monitoring.metrics_persistence.enabled': true,
     };
 
     // Parent feature each rule-2 (default-true) sub-feature is gated by.
