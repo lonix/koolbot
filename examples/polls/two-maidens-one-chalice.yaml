@@ -10,7 +10,7 @@
 #   - multiselect: false, always. You pick ONE. Choose your fighter.
 #   - Each answer kept under Discord's 55-character cap.
 #
-# Import via Polls -> Import from URL (host it on a raw GitHub URL).
+# Import via Polls -> Import questions (upload this file or paste its contents).
 # Re-importing is safe: duplicates (matched by question text) are skipped.
 # =============================================================================
 

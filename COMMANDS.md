@@ -751,7 +751,7 @@ Once in the admin Web UI (admin sessions):
 | Permissions    | `/permissions set/add/remove/clear/list/view`                              |
 | Setup Wizard   | `/setup wizard`                                                            |
 | Announcements  | `/announce create/list/delete`, `/announce-vc-stats`                       |
-| Polls          | `/poll create/list/add-item/import-url/delete/delete-item/test/list-items` |
+| Polls          | `/poll create/list/add-item/delete/delete-item/test/list-items`            |
 | Reaction Roles | `/reactrole create/archive/unarchive/delete/list/status`                   |
 | Notices        | `/notice add/edit/delete/sync`                                             |
 | Voice Channels | `/vc reload`, `/vc force-reload`                                           |

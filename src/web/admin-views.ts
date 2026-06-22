@@ -1465,6 +1465,45 @@ export interface PollsProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
+// Progressive enhancement for the poll-import file picker (#646). Reading the
+// chosen file in the browser and dropping its text into the existing textarea
+// keeps the form a plain application/x-www-form-urlencoded POST — the router
+// only mounts express.urlencoded, so a multipart upload would arrive empty and
+// drop the CSRF token. The textarea stays the source of truth: an admin can
+// review or edit the loaded content before importing, and paste still works
+// with no file selected (the input is optional). Browsers without FileReader
+// simply keep the paste-only behaviour.
+//
+// A file that can't actually be submitted is rejected before it is read: the
+// cap is the textarea's own maxlength (the binding limit for what the form
+// will POST, well under the server's 2 MB importFromString cap), so an admin
+// who fat-fingers a huge file gets a clear message instead of a frozen tab or
+// silently truncated content. We compare bytes (file.size) to the char cap —
+// for ASCII YAML/JSON these are equal, and any multi-byte slack is caught by
+// the defensive slice() after the read.
+const POLL_IMPORT_UPLOAD_SCRIPT =
+  "(function(){" +
+  "var file=document.getElementById('poll-import-file');" +
+  "var area=document.getElementById('poll-import-content');" +
+  "var msg=document.getElementById('poll-import-msg');" +
+  "if(!file||!area||typeof FileReader!=='function')return;" +
+  "var cap=area.maxLength&&area.maxLength>0?area.maxLength:200000;" +
+  "function note(t){if(msg)msg.textContent=t}" +
+  "file.addEventListener('change',function(){" +
+  "var f=file.files&&file.files[0];if(!f)return;" +
+  "if(typeof f.size==='number'&&f.size>cap){" +
+  "file.value='';" +
+  "note('File is too large (max '+cap+' characters). Trim it or paste a smaller library.');" +
+  "return}" +
+  "var reader=new FileReader();" +
+  "reader.onerror=function(){note('Could not read that file. Try pasting its contents instead.')};" +
+  "reader.onload=function(){var t=String(reader.result||'');" +
+  "if(t.length>cap){t=t.slice(0,cap);" +
+  "note('File was truncated to '+cap+' characters. Review the box before importing.')}" +
+  "else{note('')}" +
+  "area.value=t};" +
+  "reader.readAsText(f)})})();";
+
 export function renderPollsPage(props: PollsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
 
@@ -1524,7 +1563,7 @@ export function renderPollsPage(props: PollsProps): string {
 
   const body = `
 <h1>Polls</h1>
-<p class="subtitle">Poll schedules and the question library. Replaces <code>/poll create|delete|test|add-item|delete-item|import-url|list|list-items</code>; the slash commands still work in parallel during migration.</p>
+<p class="subtitle">Poll schedules and the question library. Replaces <code>/poll create|delete|test|add-item|delete-item|list|list-items</code>; the slash commands still work in parallel during migration.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
 <div class="card">
@@ -1594,27 +1633,21 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureK
   </form>
 </div>
 <div class="card">
-  <h2>Bulk import from URL</h2>
-  <p class="muted">Fetches a YAML or JSON document shaped as <code>{ polls: [{ question, answers, multiselect?, tags? }] }</code>. Duplicate questions (same text) are skipped.</p>
-  <form method="POST" action="/admin/polls/items/import" class="stack">
-    ${csrfInput}
-    <label>URL
-      <input type="url" name="url" placeholder="https://example.com/polls.yaml" required>
-    </label>
-    <button type="submit" class="btn btn-primary">Import</button>
-  </form>
-</div>
-<div class="card">
-  <h2>Paste import</h2>
-  <p class="muted">Paste a YAML or JSON document shaped as <code>{ polls: [{ question, answers, multiselect?, tags? }] }</code> directly — no hosting required. Same validation and duplicate-skipping as the URL import; nothing is fetched from the network.</p>
+  <h2>Import questions</h2>
+  <p class="muted">Upload a file or paste a YAML or JSON document shaped as <code>{ polls: [{ question, answers, multiselect?, tags? }] }</code>. Choosing a file loads its contents into the box below; you can review or edit before importing. Duplicate questions (same text) are skipped. Nothing is fetched from the network.</p>
   <form method="POST" action="/admin/polls/items/import-text" class="stack">
     ${csrfInput}
+    <label>Upload a file (optional)
+      <input type="file" id="poll-import-file" accept=".yaml,.yml,.json,.txt,application/json,application/x-yaml,text/yaml,text/plain">
+    </label>
+    <p id="poll-import-msg" class="muted" role="status" aria-live="polite"></p>
     <label>Poll library (YAML or JSON)
-      <textarea name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
+      <textarea id="poll-import-content" name="content" rows="10" maxlength="200000" placeholder="polls:&#10;  - question: Favourite colour?&#10;    answers: [Red, Green, Blue]&#10;    multiselect: false&#10;    tags: [fun]" required></textarea>
     </label>
     <button type="submit" class="btn btn-primary">Import</button>
   </form>
 </div>
+<script>${POLL_IMPORT_UPLOAD_SCRIPT}</script>
 `;
   return renderAdminPage({
     title: "Polls",

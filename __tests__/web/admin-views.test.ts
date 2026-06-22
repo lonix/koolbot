@@ -1073,7 +1073,7 @@ describe("renderPollsPage", () => {
     expect(html).toContain("(unavailable)");
   });
 
-  it("renders write forms for schedules, items and bulk import", () => {
+  it("renders write forms for schedules, items and file/paste import", () => {
     const html = renderPollsPage({
       ...COMMON,
       enabled: true,
@@ -1086,7 +1086,11 @@ describe("renderPollsPage", () => {
     });
     expect(html).toContain("/admin/polls/schedules/create");
     expect(html).toContain("/admin/polls/items/create");
-    expect(html).toContain("/admin/polls/items/import");
+    // The sole import path is the file-upload/paste form (#646): no URL import.
+    expect(html).toContain("/admin/polls/items/import-text");
+    expect(html).toContain('id="poll-import-file"');
+    expect(html).not.toContain('action="/admin/polls/items/import"');
+    expect(html).not.toContain('name="url"');
   });
 });
 
