@@ -36,6 +36,7 @@ export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/notifications", label: "Notifications" },
   { href: "/me/timezone", label: "Timezone" },
   { href: "/me/voice", label: "Voice", feature: "voice" },
+  { href: "/me/birthday", label: "Birthday" },
   { href: "/me/rewind", label: "Rewind", feature: "rewind" },
 ];
 
@@ -311,6 +312,8 @@ export function renderUserIndexBody(opts: {
     '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
       '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
     voiceCard,
+    '<li><span class="feature-name"><a href="/me/birthday">Birthday</a></span>' +
+      '<span class="feature-desc">Set your birthday (the year is optional) so Koolbot can celebrate it on the day — in your own timezone.</span></li>',
     rewindCard,
     "</ul>",
     "</div>",
@@ -598,6 +601,88 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     '<div class="card"><h2>Badges earned this year</h2>' +
       renderBadges([...opts.accolades, ...opts.achievements]) +
       "</div>",
+  ].join("");
+}
+
+// --------------------------------------------------------------------
+// Birthday page (#657)
+// --------------------------------------------------------------------
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+export interface BirthdayPageBodyOptions {
+  csrfToken: string;
+  /** Currently stored birthday, or null when none is set. */
+  selected: { month: number; day: number; year: number | null } | null;
+  /**
+   * Whether birthday announcements are enabled on the server. When off,
+   * the page still lets a member pre-set their date (mirroring how the
+   * notifications page exposes not-yet-active toggles) but shows a notice
+   * that nothing will be posted until an admin turns the feature on.
+   */
+  featureEnabled: boolean;
+}
+
+function renderMonthOptions(selected: number | null): string {
+  const blank = `<option value=""${selected === null ? " selected" : ""}>— Month —</option>`;
+  const months = MONTH_NAMES.map((name, i) => {
+    const value = i + 1;
+    const sel = value === selected ? " selected" : "";
+    return `<option value="${value}"${sel}>${escapeHtml(name)}</option>`;
+  }).join("");
+  return blank + months;
+}
+
+/**
+ * Inner HTML for `GET /me/birthday` (#657). Month dropdown + day/year
+ * number inputs, one POST. Year is optional (privacy): leave it blank to
+ * share the date without the age. A second "Remove" button clears the
+ * stored birthday.
+ */
+export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
+  const month = opts.selected?.month ?? null;
+  const day = opts.selected?.day ?? null;
+  const year = opts.selected?.year ?? null;
+  const disabledNotice = opts.featureEnabled
+    ? ""
+    : "<div class=\"notice info\">Birthday announcements aren't enabled on this server yet, but you can set your date now — it'll be ready the moment an admin turns the feature on.</div>";
+  const hasBirthday = opts.selected !== null;
+  return [
+    "<h1>Birthday</h1>",
+    `<p class="subtitle">Set your birthday so Koolbot can celebrate it on the day — evaluated in your own timezone (set that on the <a href="/me/timezone">Timezone</a> page). The year is optional; leave it blank to share the date without your age.</p>`,
+    disabledNotice,
+    '<form method="POST" action="/me/birthday">',
+    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
+    '<div class="card">',
+    '<div style="display:flex;gap:.75rem;flex-wrap:wrap;align-items:flex-end">',
+    '<div><label for="bd-month"><strong>Month</strong></label>' +
+      `<div style="margin-top:.35rem"><select id="bd-month" name="month" class="tz-select" style="max-width:12rem">${renderMonthOptions(month)}</select></div></div>`,
+    '<div><label for="bd-day"><strong>Day</strong></label>' +
+      `<div style="margin-top:.35rem"><input id="bd-day" name="day" type="number" min="1" max="31" class="tz-select" style="max-width:6rem" value="${day ?? ""}"></div></div>`,
+    '<div><label for="bd-year"><strong>Year</strong> <span class="muted">(optional)</span></label>' +
+      `<div style="margin-top:.35rem"><input id="bd-year" name="year" type="number" min="1900" placeholder="—" class="tz-select" style="max-width:8rem" value="${year ?? ""}"></div></div>`,
+    "</div>",
+    '<div class="form-actions">',
+    '<button class="btn" type="submit">Save birthday</button>',
+    hasBirthday
+      ? '<button class="btn" type="submit" name="clear" value="1" style="background:#4b5563">Remove my birthday</button>'
+      : "",
+    "</div>",
+    "</div>",
+    "</form>",
   ].join("");
 }
 

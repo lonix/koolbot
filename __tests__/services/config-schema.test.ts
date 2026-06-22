@@ -267,6 +267,7 @@ describe("Config Schema", () => {
       "achievements.enabled": false,
       "digest.enabled": false,
       "rewind.enabled": false,
+      "birthdays.enabled": false,
       "reactionroles.enabled": false,
       "notices.enabled": false,
       "polls.enabled": false,

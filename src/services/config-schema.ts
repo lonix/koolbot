@@ -80,6 +80,15 @@ export interface ConfigSchema {
   "rewind.cron": string; // Cron schedule for the end-of-year DM nudge
   "rewind.min_minutes": number; // Min annual minutes to qualify for the nudge
 
+  // Birthdays (#657)
+  "birthdays.enabled": boolean;
+  "birthdays.cron": string; // Cron schedule for the birthday check (sub-daily)
+  "birthdays.channel_id": string; // Channel ID for birthday announcements
+  "birthdays.message": string; // Template; {user} mention, {username}, {age}
+  "birthdays.mention": boolean; // Whether the announcement pings the member
+  "birthdays.role_id": string; // Optional temporary "birthday" role
+  "birthdays.role_duration_hours": number; // How long the temp role is held
+
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
@@ -240,6 +249,19 @@ export const defaultConfig: ConfigSchema = {
   "rewind.nudge.enabled": false,
   "rewind.cron": "0 10 30 12 *", // Dec 30 at 10:00 in the host timezone
   "rewind.min_minutes": 60,
+
+  // Birthday defaults (#657). Master gate off, follows rule 1 — the
+  // hourly check does nothing until an operator opts in and points it at
+  // a channel. The hourly cadence (rather than once-daily) lets the post
+  // fire on each member's *local* day across timezones; the per-row
+  // `lastAnnouncedYear` guard keeps it to one announcement per year.
+  "birthdays.enabled": false,
+  "birthdays.cron": "0 * * * *", // Top of every hour (host timezone)
+  "birthdays.channel_id": "",
+  "birthdays.message": "🎂 Happy birthday, {user}! 🎉",
+  "birthdays.mention": true,
+  "birthdays.role_id": "", // Empty → no temporary role granted
+  "birthdays.role_duration_hours": 24,
 
   // Reaction Roles defaults
   "reactionroles.enabled": false,
@@ -478,6 +500,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Rewind (Year-in-Review)",
     description:
       "Personalised end-of-year recap at /me/rewind plus a one-shot DM nudge in late December. Opt-out lives on the user's /me/notifications page.",
+  },
+  birthdays: {
+    title: "Birthdays",
+    description:
+      "Celebrate members' birthdays with a daily announcement in their own timezone, optionally granting a temporary birthday role. Members set their date on /me/birthday.",
   },
   reactionroles: {
     title: "Reaction Roles",
@@ -914,6 +941,54 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
 
   // Reaction Roles
+  "birthdays.enabled": {
+    label: "Birthday celebrations enabled",
+    description:
+      "Post a birthday message in a configured channel on each member's birthday, evaluated in their own timezone. Members set their date on /me/birthday.",
+    category: "birthdays",
+    type: "boolean",
+  },
+  "birthdays.cron": {
+    label: "Birthday check schedule (cron)",
+    description:
+      "How often the birthday check runs. Hourly by default so the post lands on each member's local day across timezones — a once-daily schedule can miss members several hours ahead of or behind the host.",
+    category: "birthdays",
+    type: "cron",
+  },
+  "birthdays.channel_id": {
+    label: "Birthday announcement channel",
+    description: "Channel where birthday messages are posted.",
+    category: "birthdays",
+    type: "channel",
+  },
+  "birthdays.message": {
+    label: "Birthday message template",
+    description:
+      "Message posted on a member's birthday. Placeholders: {user} (mention), {username} (display name, no ping), {age} (blank when the member didn't share a birth year).",
+    category: "birthdays",
+    type: "string",
+  },
+  "birthdays.mention": {
+    label: "Ping the birthday member",
+    description:
+      "When on, the {user} placeholder pings the member. When off, their name shows but no notification is sent.",
+    category: "birthdays",
+    type: "boolean",
+  },
+  "birthdays.role_id": {
+    label: "Temporary birthday role",
+    description:
+      "Optional role granted on a member's birthday and removed automatically after the configured duration. Leave empty to skip the role.",
+    category: "birthdays",
+    type: "role",
+  },
+  "birthdays.role_duration_hours": {
+    label: "Birthday role duration (hours)",
+    description:
+      "How long the temporary birthday role is held before the daily sweep removes it.",
+    category: "birthdays",
+    type: "number",
+  },
   "reactionroles.enabled": {
     label: "Reaction roles enabled",
     description: "Enable the reaction-role system and the /reactrole command.",
