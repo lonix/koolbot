@@ -7,6 +7,7 @@ import {
   renderCommandAuditPage,
   renderDashboardPage,
   renderDatabasePage,
+  renderDigestPage,
   renderImportDiffPage,
   renderNoticesPage,
   renderPermissionsPage,
@@ -1358,6 +1359,106 @@ describe("renderVoiceChannelsPage", () => {
       /<button[^>]*type="submit"[^>]*disabled[^>]*>Force VC cleanup<\/button>/,
     );
     expect(html).not.toContain("Clean up empty channels");
+  });
+});
+
+describe("renderDigestPage", () => {
+  const DIGEST_CONFIG = {
+    enabled: true,
+    cron: "0 9 * * 1",
+    minActiveMinutes: 30,
+    streakMinMinutes: 30,
+    includeAchievements: true,
+  };
+
+  it("renders the feature-disabled banner and disables actions when off", () => {
+    const html = renderDigestPage({
+      ...COMMON,
+      ...DIGEST_CONFIG,
+      enabled: false,
+      preview: null,
+    });
+    expect(html).toContain("feature-disabled");
+    expect(html).toMatch(
+      /<button[^>]*name="preview"[^>]*disabled[^>]*>Preview digest<\/button>/,
+    );
+    expect(html).toMatch(
+      /<button[^>]*type="submit"[^>]*disabled[^>]*>Send now<\/button>/,
+    );
+  });
+
+  it("exposes the preview (GET) and send-now (POST) actions when enabled", () => {
+    const html = renderDigestPage({
+      ...COMMON,
+      ...DIGEST_CONFIG,
+      preview: null,
+    });
+    expect(html).toContain('method="GET" action="/admin/digest"');
+    expect(html).toContain('action="/admin/digest/send-now"');
+    // No preview requested → no rendered embed card (the CSS in <style> stays).
+    expect(html).not.toContain('<div class="digest-embed">');
+  });
+
+  it("renders the summary line and embed cards for a preview", () => {
+    const html = renderDigestPage({
+      ...COMMON,
+      ...DIGEST_CONFIG,
+      preview: {
+        generatedAt: "2026-06-22T09:00:00.000Z",
+        weekRange: "Jun 15 – Jun 22",
+        qualifying: 3,
+        optedIn: 2,
+        skippedOptOut: 1,
+        alreadySentAt: null,
+        includeAchievements: true,
+        limit: 25,
+        entries: [
+          {
+            username: "alice",
+            rank: 1,
+            title: "📊 Your weekly voice digest",
+            description: "Here's a snapshot, alice.",
+            fields: [
+              { name: "This week", value: "5h\n▲ 1h vs last week", inline: true },
+              { name: "Rank", value: "#1", inline: true },
+            ],
+            footer: "Keep it up!\nDon't want these? Run /config.",
+          },
+        ],
+      },
+    });
+    expect(html).toContain("members qualify");
+    expect(html).toContain("opted in");
+    expect(html).toContain("opted out");
+    expect(html).toContain("digest has not been sent yet this week");
+    expect(html).toContain('<div class="digest-embed">');
+    expect(html).toContain("alice");
+    // Newlines in field values become <br> in the HTML approximation.
+    expect(html).toContain("▲ 1h vs last week");
+  });
+
+  it("shows the already-sent state when a delivery landed this week", () => {
+    const html = renderDigestPage({
+      ...COMMON,
+      ...DIGEST_CONFIG,
+      preview: {
+        generatedAt: "2026-06-22T09:00:00.000Z",
+        weekRange: "Jun 15 – Jun 22",
+        qualifying: 1,
+        optedIn: 1,
+        skippedOptOut: 0,
+        alreadySentAt: "2026-06-22T09:00:00.000Z",
+        includeAchievements: false,
+        limit: 25,
+        entries: [],
+      },
+    });
+    expect(html).toContain("already sent at");
+    // Achievements-off note surfaces.
+    expect(html).toContain("digest.include_achievements");
+    expect(html).toContain(
+      "No opted-in members qualify for the digest this week",
+    );
   });
 });
 

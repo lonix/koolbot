@@ -28,6 +28,52 @@ export interface DigestRunSummary {
   failed: number;
 }
 
+/** One rendered digest entry in a preview (no DM sent). */
+export interface DigestPreviewEntry {
+  userId: string;
+  username: string;
+  rank: number;
+  totalTime: number; // seconds
+  streakWeeks: number;
+  /** Embed title, e.g. "📊 Your weekly voice digest". */
+  title: string;
+  /** Embed description (week range + greeting), rendered in the user's zone. */
+  description: string;
+  /** The embed fields exactly as they would appear in the DM'd embed. */
+  fields: Array<{ name: string; value: string; inline: boolean }>;
+  /** Embed footer text (motivational line + opt-out hint). */
+  footer: string;
+}
+
+/**
+ * Result of a dry-run digest preview (#539). Reuses the same qualifying-users
+ * query and embed builder as the real cron run but sends no DMs and writes
+ * nothing to `DigestState`.
+ */
+export interface DigestPreview {
+  enabled: boolean;
+  generatedAt: Date;
+  /** Week window label in the server timezone, e.g. "Jun 15 – Jun 22". */
+  weekRange: string;
+  /** Total users clearing the min-active threshold this week. */
+  qualifying: number;
+  /** Of the qualifying users, how many have opted in to the digest DM. */
+  optedIn: number;
+  /** Of the qualifying users, how many opted out (would be skipped). */
+  skippedOptOut: number;
+  /**
+   * Whether the digest has already gone out this week, and when. Derived
+   * from the most recent `DigestState.lastSentAt` inside the current 7-day
+   * window — null when no delivery has landed this week yet.
+   */
+  alreadySentAt: Date | null;
+  includeAchievements: boolean;
+  /** Max entries rendered (the rest are counted but not built). */
+  limit: number;
+  /** Rendered embeds for the opted-in qualifying users, up to `limit`. */
+  entries: DigestPreviewEntry[];
+}
+
 const DEFAULT_CRON = "0 9 * * 1";
 const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_WEEK = 7 * 24 * 60 * 60;
@@ -257,22 +303,13 @@ export class DigestService {
       const streakMinSeconds =
         Math.max(0, streakMinMinutes) * SECONDS_PER_MINUTE;
 
-      const tracker = VoiceChannelTracker.getInstance(this.client);
       const prefsService = UserNotificationPrefsService.getInstance();
       // Ensure the singleton is alive so a guild that flips this on
       // without ever having earned an accolade still has the service
       // ready when we look up weekly rows below.
       AchievementsService.getInstance(this.client);
 
-      const ranked = await tracker.getTopUsers(0, "week");
-      const qualifying: QualifyingUser[] = ranked
-        .map((user, index) => ({
-          userId: user.userId,
-          username: user.username,
-          totalTime: user.totalTime,
-          rank: index + 1,
-        }))
-        .filter((user) => user.totalTime >= minActiveSeconds);
+      const qualifying = await this.getQualifyingUsers(minActiveSeconds);
 
       const summary: DigestRunSummary = {
         ranAt: new Date(),
@@ -373,6 +410,175 @@ export class DigestService {
     } finally {
       this.isRunning = false;
     }
+  }
+
+  /**
+   * Rank this week's voice activity and keep everyone who clears the
+   * minimum-active threshold. Shared by the cron run and the dry-run
+   * preview (#539) so both see an identical qualifying set.
+   */
+  private async getQualifyingUsers(
+    minActiveSeconds: number,
+  ): Promise<QualifyingUser[]> {
+    const tracker = VoiceChannelTracker.getInstance(this.client);
+    const ranked = await tracker.getTopUsers(0, "week");
+    return ranked
+      .map((user, index) => ({
+        userId: user.userId,
+        username: user.username,
+        totalTime: user.totalTime,
+        rank: index + 1,
+      }))
+      .filter((user) => user.totalTime >= minActiveSeconds);
+  }
+
+  /**
+   * Dry-run the weekly digest (#539). Reuses the exact qualifying-users
+   * query and embed builder the cron run uses, but **sends no DMs and
+   * writes nothing to `DigestState`** — safe to call repeatedly from the
+   * admin Web UI to preview the output for the current week's window.
+   *
+   * Only opted-in qualifying users get a rendered embed (capped at
+   * `limit`); opt-outs are counted but not built. DMs-closed skips are
+   * *not* determined here — that can only be known by actually sending —
+   * so the preview reports qualifying/opted-in/opted-out and leaves
+   * delivery failures to the real run.
+   */
+  public async previewDigest(limit = 25): Promise<DigestPreview> {
+    const generatedAt = new Date();
+    const enabled = await this.configService.getBoolean(
+      "digest.enabled",
+      false,
+    );
+    const guildId = await this.configService.getString("GUILD_ID", "");
+
+    const weekStart = new Date(generatedAt.getTime() - SECONDS_PER_WEEK * 1000);
+    const weekRange = `${formatInZone(weekStart, null, "MMM d")} – ${formatInZone(generatedAt, null, "MMM d")}`;
+
+    const empty: DigestPreview = {
+      enabled,
+      generatedAt,
+      weekRange,
+      qualifying: 0,
+      optedIn: 0,
+      skippedOptOut: 0,
+      alreadySentAt: null,
+      includeAchievements: false,
+      limit,
+      entries: [],
+    };
+
+    if (!enabled || !guildId) {
+      return empty;
+    }
+
+    const minActiveMinutes = await this.configService.getNumber(
+      "digest.min_active_minutes",
+      30,
+    );
+    const streakMinMinutes = await this.configService.getNumber(
+      "digest.streak_min_minutes",
+      30,
+    );
+    const includeAchievements = await this.configService.getBoolean(
+      "digest.include_achievements",
+      true,
+    );
+    const minActiveSeconds = Math.max(0, minActiveMinutes) * SECONDS_PER_MINUTE;
+    const streakMinSeconds = Math.max(0, streakMinMinutes) * SECONDS_PER_MINUTE;
+
+    const prefsService = UserNotificationPrefsService.getInstance();
+    const qualifying = await this.getQualifyingUsers(minActiveSeconds);
+
+    // "Already sent this week?" — the most recent delivery anywhere in the
+    // guild that landed inside the current 7-day window.
+    const recent = await DigestState.findOne({
+      guildId,
+      lastSentAt: { $gte: weekStart },
+    }).sort({ lastSentAt: -1 });
+    const alreadySentAt = recent?.lastSentAt ?? null;
+
+    let skippedOptOut = 0;
+    const entries: DigestPreviewEntry[] = [];
+
+    for (const user of qualifying) {
+      const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
+        user.userId,
+        guildId,
+      );
+      if (!prefs.digest) {
+        skippedOptOut += 1;
+        continue;
+      }
+      // Cap rendered embeds but keep counting opt-outs beyond the cap so
+      // the summary line stays accurate for large guilds.
+      if (entries.length >= limit) continue;
+
+      const previousState = await DigestState.findOne({
+        userId: user.userId,
+        guildId,
+      });
+
+      const streakWeeks = this.computeStreak(
+        user.totalTime,
+        streakMinSeconds,
+        previousState?.lastSentAt ?? null,
+        previousState?.streakWeeks ?? 0,
+        generatedAt,
+      );
+
+      let weeklyAchievements: Array<{
+        emoji: string;
+        name: string;
+        description: string;
+      }> = [];
+      if (includeAchievements) {
+        weeklyAchievements = await this.collectWeeklyAchievements(
+          user.userId,
+          generatedAt,
+        );
+      }
+
+      const embed = this.buildEmbed({
+        user,
+        previousState,
+        streakWeeks,
+        includeAchievements,
+        weeklyAchievements,
+        ranAt: generatedAt,
+        timezone,
+      });
+      const data = embed.data;
+
+      entries.push({
+        userId: user.userId,
+        username: user.username,
+        rank: user.rank,
+        totalTime: user.totalTime,
+        streakWeeks,
+        title: data.title ?? "",
+        description: data.description ?? "",
+        fields: (data.fields ?? []).map((f) => ({
+          name: f.name,
+          value: f.value,
+          inline: f.inline ?? false,
+        })),
+        footer: data.footer?.text ?? "",
+      });
+    }
+
+    return {
+      enabled,
+      generatedAt,
+      weekRange,
+      qualifying: qualifying.length,
+      optedIn: qualifying.length - skippedOptOut,
+      skippedOptOut,
+      alreadySentAt,
+      includeAchievements,
+      limit,
+      entries,
+    };
   }
 
   /**
