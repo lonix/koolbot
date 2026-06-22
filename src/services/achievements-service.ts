@@ -876,8 +876,15 @@ export class AchievementsService {
     let currentStreak = 1;
     const today = new Date();
     const todayKey = isoDateInZone(today, timeZone);
-    const yesterday = new Date(today.getTime() - 86400000);
-    const yesterdayKey = isoDateInZone(yesterday, timeZone);
+    // Derive "yesterday" from the calendar-day key, not by subtracting 24h
+    // of wall-clock time: around DST transitions a local day is 23/25 hours,
+    // so a fixed 86,400,000ms step can skip or repeat a calendar day and
+    // wrongly break an active streak. Anchoring at the date string's UTC
+    // midnight makes the minus-one-day arithmetic DST-safe.
+    const yesterdayKey = isoDateInZone(
+      new Date(new Date(`${todayKey}T00:00:00Z`).getTime() - 86400000),
+      "UTC",
+    );
 
     for (let i = 1; i < qualifyingDays.length; i++) {
       const prevDate = new Date(qualifyingDays[i - 1] + "T00:00:00Z");

@@ -294,8 +294,9 @@ Total Achievements: 0
 **Notes on time-based accolades:**
 
 - Night Owl / Early Bird evaluate their hour windows in **your configured
-  timezone** (set it via `/config`). If you haven't set one, they fall back
-  to **UTC**.
+  timezone** (set it on your personal Web UI page: `/config` → **My
+  preferences** → **Timezone**, i.e. `/me/timezone`). If you haven't set one,
+  they fall back to **UTC**.
 - Weekend Warrior / Weekday Warrior bucket day-of-week in your configured
   timezone too (UTC when unset).
 - The consistency streaks (On a Roll / Dedicated AF / No-Lifer) count
