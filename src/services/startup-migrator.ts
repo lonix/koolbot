@@ -248,11 +248,15 @@ export class StartupMigrator {
               `Creating missing setting: ${migration.newKey} with default value: ${migration.defaultValue}`,
             );
 
+            // Startup migration backfills missing schema keys with their
+            // defaults; it isn't an operator enabling a feature, so it must
+            // never be blocked by dependency validation (#663).
             await this.configService.set(
               migration.newKey,
               migration.defaultValue,
               migration.description,
               migration.category,
+              { skipDependencyCheck: true },
             );
 
             createdCount++;

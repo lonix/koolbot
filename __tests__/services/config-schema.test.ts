@@ -4,6 +4,9 @@ import {
   settingsMetadata,
   categoryMetadata,
   getDependencies,
+  getDependents,
+  isEnabledValue,
+  validateDependencies,
   REWIND_RETENTION_MIN_DAYS,
   type ConfigSchema,
 } from "../../src/services/config-schema.js";
@@ -225,6 +228,142 @@ describe("Config Schema", () => {
           expect(dep.endsWith(".enabled")).toBe(true);
         }
       }
+    });
+  });
+
+  describe("getDependents (reverse graph / #663)", () => {
+    it("lists every key that declares the target as a hard dependency", () => {
+      expect(new Set(getDependents("voicetracking.enabled"))).toEqual(
+        new Set([
+          "voicetracking.announcements.enabled",
+          "achievements.enabled",
+          "digest.enabled",
+          "leaderboard_roles.enabled",
+        ]),
+      );
+    });
+
+    it("follows a single edge for a leaf dependency", () => {
+      expect(getDependents("achievements.enabled")).toEqual([
+        "digest.include_achievements",
+      ]);
+    });
+
+    it("returns an empty array for keys nothing depends on", () => {
+      expect(getDependents("quotes.enabled")).toEqual([]);
+      expect(getDependents("digest.include_achievements")).toEqual([]);
+    });
+  });
+
+  describe("isEnabledValue (#663)", () => {
+    it("treats booleans, the string 'true', and non-zero numbers as enabled", () => {
+      expect(isEnabledValue(true)).toBe(true);
+      expect(isEnabledValue("true")).toBe(true);
+      expect(isEnabledValue(1)).toBe(true);
+      expect(isEnabledValue(-1)).toBe(true);
+    });
+
+    it("treats false, 'false', other strings, 0, and nullish as disabled", () => {
+      expect(isEnabledValue(false)).toBe(false);
+      expect(isEnabledValue("false")).toBe(false);
+      expect(isEnabledValue("yes")).toBe(false);
+      expect(isEnabledValue(0)).toBe(false);
+      expect(isEnabledValue(null)).toBe(false);
+      expect(isEnabledValue(undefined)).toBe(false);
+    });
+  });
+
+  describe("validateDependencies (write-time enforcement / #663)", () => {
+    // All dependencies are disabled unless the test overrides the resolver.
+    const allOff = () => false;
+
+    it("rejects enabling a key whose dependency is disabled", () => {
+      const issues = validateDependencies(
+        { "achievements.enabled": true },
+        allOff,
+      );
+      expect(issues).toHaveLength(1);
+      expect(issues[0].key).toBe("achievements.enabled");
+      // Operator-friendly: names the unmet dependency by key and label.
+      expect(issues[0].message).toContain("voicetracking.enabled");
+      expect(issues[0].message).toContain("Voice Tracking enabled");
+    });
+
+    it("allows enabling once the dependency is already on", () => {
+      const issues = validateDependencies(
+        { "achievements.enabled": true },
+        (k) => k === "voicetracking.enabled",
+      );
+      expect(issues).toEqual([]);
+    });
+
+    it("allows enabling a feature and its dependency together in one batch", () => {
+      // The dependency is off in the persisted config, but enabled in the
+      // same pending batch — resolved against the pending set, so it passes.
+      const issues = validateDependencies(
+        {
+          "voicetracking.enabled": true,
+          "achievements.enabled": true,
+        },
+        allOff,
+      );
+      expect(issues).toEqual([]);
+    });
+
+    it("coerces the string 'true' submitted by web forms as enabling", () => {
+      const issues = validateDependencies(
+        { "achievements.enabled": "true" },
+        allOff,
+      );
+      expect(issues).toHaveLength(1);
+    });
+
+    it("blocks disabling a key while something still depends on it", () => {
+      const issues = validateDependencies(
+        { "voicetracking.enabled": false },
+        (k) => k === "achievements.enabled",
+      );
+      expect(issues).toHaveLength(1);
+      expect(issues[0].key).toBe("voicetracking.enabled");
+      expect(issues[0].message).toContain("achievements.enabled");
+      expect(issues[0].message.toLowerCase()).toContain("disable");
+    });
+
+    it("allows disabling when no dependent is enabled", () => {
+      const issues = validateDependencies(
+        { "voicetracking.enabled": false },
+        allOff,
+      );
+      expect(issues).toEqual([]);
+    });
+
+    it("allows disabling a dependency and its dependent together in one batch", () => {
+      const issues = validateDependencies(
+        {
+          "voicetracking.enabled": false,
+          "achievements.enabled": false,
+        },
+        (k) => k === "achievements.enabled",
+      );
+      expect(issues).toEqual([]);
+    });
+
+    it("ignores keys that are not part of the schema", () => {
+      expect(validateDependencies({ "bogus.key": true }, allOff)).toEqual([]);
+    });
+
+    it("reports one issue per offending key in a batch", () => {
+      const issues = validateDependencies(
+        {
+          "achievements.enabled": true,
+          "leaderboard_roles.enabled": true,
+        },
+        allOff,
+      );
+      expect(issues.map((i) => i.key).sort()).toEqual([
+        "achievements.enabled",
+        "leaderboard_roles.enabled",
+      ]);
     });
   });
 

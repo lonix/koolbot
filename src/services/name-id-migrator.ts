@@ -119,11 +119,14 @@ export async function runNameToIdMigrations(
         continue;
       }
 
+      // System migration of a name→ID value (not a feature toggle); never
+      // subject to dependency validation (#663).
       await configService.set(
         spec.newKey,
         resolvedId,
         `Migrated from ${spec.oldKey}="${oldValue}"`,
         spec.newKey.split(".")[0],
+        { skipDependencyCheck: true },
       );
       await configService.delete(spec.oldKey);
       logger.info(

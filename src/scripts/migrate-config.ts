@@ -177,12 +177,15 @@ async function migrateConfiguration(): Promise<void> {
           finalValue = Number(value);
         }
 
-        // Set the new configuration
+        // Set the new configuration. This offline migration moves stored
+        // values to renamed keys; it isn't an operator toggling a feature, so
+        // it bypasses dependency validation (#663).
         await configService.set(
           migration.newKey,
           finalValue,
           migration.description,
           migration.category,
+          { skipDependencyCheck: true },
         );
 
         logger.info(

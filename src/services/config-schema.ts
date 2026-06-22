@@ -406,6 +406,135 @@ export function getDependencies(
 }
 
 /**
+ * Reverse of {@link getDependencies}: the keys that declare `key` as a hard
+ * dependency — i.e. the dependents that may only be enabled while `key` is on.
+ * Scans the `dependsOn` graph in `settingsMetadata`. Used by write-time
+ * validation (#663) to block disabling a feature that something still needs.
+ */
+export function getDependents(key: keyof ConfigSchema): (keyof ConfigSchema)[] {
+  const dependents: (keyof ConfigSchema)[] = [];
+  for (const candidate of Object.keys(
+    settingsMetadata,
+  ) as (keyof ConfigSchema)[]) {
+    if (settingsMetadata[candidate].dependsOn?.includes(key)) {
+      dependents.push(candidate);
+    }
+  }
+  return dependents;
+}
+
+/**
+ * Interpret a raw config value as an on/off state, matching
+ * `ConfigService.getBoolean`: real booleans pass through, the strings
+ * "true"/"false" coerce, and non-zero numbers count as on. Web forms submit
+ * the string "true", so dependency validation must treat that as enabling.
+ */
+export function isEnabledValue(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value === "true";
+  if (typeof value === "number") return value !== 0;
+  return false;
+}
+
+/** Human-friendly reference to a key: `"Label" (`dotted.key`)`. */
+function describeKey(key: keyof ConfigSchema): string {
+  const label = settingsMetadata[key]?.label;
+  return label ? `"${label}" (\`${key}\`)` : `\`${key}\``;
+}
+
+function describeList(keys: (keyof ConfigSchema)[]): string {
+  return keys.map(describeKey).join(", ");
+}
+
+/**
+ * A single dependency-graph violation produced by {@link validateDependencies}.
+ * `key` is the offending pending write; `message` is operator-friendly and
+ * ready to surface (it already names the unmet dependency / blocking dependent
+ * with both its human label and its dotted key).
+ */
+export interface DependencyIssue {
+  key: keyof ConfigSchema;
+  message: string;
+}
+
+/**
+ * Thrown by `ConfigService.set` when a single write would violate the feature
+ * dependency graph. Carries the structured `issues` so callers can inspect
+ * them; `message` joins their human-readable text for direct display.
+ */
+export class DependencyError extends Error {
+  readonly issues: DependencyIssue[];
+
+  constructor(issues: DependencyIssue[]) {
+    super(issues.map((issue) => issue.message).join(" "));
+    this.name = "DependencyError";
+    this.issues = issues;
+  }
+}
+
+/**
+ * Surface-agnostic feature-dependency check shared by every config write path
+ * (#663): `ConfigService.set`, the Settings save handlers, and the Setup
+ * Wizard apply. Given a batch of proposed writes (`pending`, keyed by dotted
+ * config key) and a resolver for the *current* persisted state of any key not
+ * in the batch, it returns the writes that would leave the hard-dependency
+ * graph (`dependsOn`) violated. An empty array means the batch is consistent.
+ *
+ * Both directions are enforced, judged against the *resulting* state so an
+ * intra-batch pair (enabling a feature and its dependency together in one
+ * wizard apply) validates without ordering tricks:
+ *
+ *  - **Forward** — enabling a key whose `dependsOn` target is (and stays) off.
+ *  - **Reverse** — disabling a key while something that depends on it stays on.
+ *    We *block* (rather than silently cascade-disable across features) so a
+ *    cross-feature disable can never quietly tear down another feature; the
+ *    message names the dependents the operator must turn off first.
+ *
+ * `resolveCurrent` returns the effective on/off state of a key the caller backs
+ * with `ConfigService.getBoolean`. Keys absent from the schema are ignored.
+ */
+export function validateDependencies(
+  pending: Record<string, unknown>,
+  resolveCurrent: (key: keyof ConfigSchema) => boolean,
+): DependencyIssue[] {
+  const effective = (key: keyof ConfigSchema): boolean =>
+    key in pending ? isEnabledValue(pending[key]) : resolveCurrent(key);
+
+  const issues: DependencyIssue[] = [];
+  for (const rawKey of Object.keys(pending)) {
+    if (!(rawKey in settingsMetadata)) continue;
+    const key = rawKey as keyof ConfigSchema;
+
+    if (isEnabledValue(pending[rawKey])) {
+      const unmet = getDependencies(key).filter((dep) => !effective(dep));
+      if (unmet.length > 0) {
+        issues.push({
+          key,
+          message: `Cannot enable ${describeKey(key)}: requires ${describeList(
+            unmet,
+          )} to be enabled. Enable ${unmet.length === 1 ? "it" : "them"} first.`,
+        });
+      }
+    } else {
+      const blockers = getDependents(key).filter((dependent) =>
+        effective(dependent),
+      );
+      if (blockers.length > 0) {
+        issues.push({
+          key,
+          message: `Cannot disable ${describeKey(key)}: ${describeList(
+            blockers,
+          )} still ${
+            blockers.length === 1 ? "depends" : "depend"
+          } on it. Disable ${blockers.length === 1 ? "it" : "them"} first.`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+/**
  * Shared warning shown when a Rewind-relevant retention is below the year
  * threshold. Built from `REWIND_RETENTION_MIN_DAYS` so the number stays in
  * one place.
