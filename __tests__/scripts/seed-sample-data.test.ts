@@ -92,12 +92,64 @@ describe("seed-sample-data helpers", () => {
     expect(doc.yearlyTotals.some((y) => y.year === "2026")).toBe(true);
   });
 
-  it("uses real accolade type keys from src/content", () => {
+  it("never lets a session run past the end of the span", () => {
+    // A short window: most random durations would overshoot without clamping.
+    const ds = generateSampleDataset({
+      ...baseOptions,
+      from: new Date("2026-05-30T00:00:00Z"),
+      to: new Date("2026-06-01T00:00:00Z"),
+    });
+    for (const doc of ds.voiceTracking) {
+      for (const s of doc.sessions) {
+        expect(s.endTime.getTime()).toBeLessThanOrEqual(
+          new Date("2026-06-01T00:00:00Z").getTime(),
+        );
+        expect(s.duration).toBeGreaterThanOrEqual(1);
+        for (const c of s.companions) {
+          expect(c.seconds).toBeLessThanOrEqual(s.duration);
+        }
+      }
+    }
+  });
+
+  it("gives shared voice channels stable ids shared across users", () => {
+    const ds = generateSampleDataset(baseOptions);
+    const sharedIds = new Set<string>();
+    const personalIds = new Set<string>();
+    for (const doc of ds.voiceTracking) {
+      for (const s of doc.sessions) {
+        if (s.channelId.startsWith("seed-vc-shared-"))
+          sharedIds.add(s.channelId);
+        if (s.channelId.startsWith("seed-vc-personal-"))
+          personalIds.add(s.channelId);
+        // No personal room ever collapses to the buggy "seed-vc-0-*" form.
+        expect(s.channelId).not.toMatch(/^seed-vc-0-/);
+      }
+    }
+    // Shared channel ids carry no user suffix, so the pool is small and reused.
+    expect(sharedIds.size).toBeLessThanOrEqual(5);
+    // Personal rooms are per-user, so there are several distinct ids.
+    expect(personalIds.size).toBeGreaterThan(1);
+  });
+
+  it("uses real, renderable accolade and achievement type keys from src/content", async () => {
+    const { ACCOLADE_METADATA } =
+      await import("../../src/content/accolades.js");
+    const { ACHIEVEMENT_METADATA } =
+      await import("../../src/content/achievements.js");
+    const validAccolades = new Set(Object.keys(ACCOLADE_METADATA));
+    const validAchievements = new Set(Object.keys(ACHIEVEMENT_METADATA));
+
     const ds = generateSampleDataset(baseOptions);
     const doc = ds.achievements[0];
     expect(doc.accolades.length).toBeGreaterThan(0);
     expect(doc.statistics.totalAccolades).toBe(doc.accolades.length);
     expect(doc.statistics.totalAchievements).toBe(doc.achievements.length);
+    // Every seeded type has display metadata, so Rewind/digest will render it.
+    expect(doc.accolades.every((a) => validAccolades.has(a.type))).toBe(true);
+    expect(doc.achievements.every((a) => validAchievements.has(a.type))).toBe(
+      true,
+    );
   });
 
   it("builds per-year reaction and poll buckets that sum to the totals", () => {
@@ -157,5 +209,21 @@ describe("parseOptions", () => {
     expect(() =>
       parseOptions(["--from", "2026-12-31", "--to", "2026-01-01"]),
     ).toThrow();
+  });
+
+  it("fails fast on non-numeric --users / --seed / --years", () => {
+    expect(() => parseOptions(["--users", "foo", "--guild", "g"])).toThrow(
+      /users/,
+    );
+    expect(() => parseOptions(["--seed", "bar", "--guild", "g"])).toThrow(
+      /seed/,
+    );
+    expect(() => parseOptions(["--years", "baz", "--guild", "g"])).toThrow(
+      /years/,
+    );
+  });
+
+  it("rejects a non-positive --years", () => {
+    expect(() => parseOptions(["--years", "0", "--guild", "g"])).toThrow();
   });
 });

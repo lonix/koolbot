@@ -35,6 +35,7 @@ import { PollParticipationTracking } from "../models/poll-participation-tracking
 import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { ACCOLADE_METADATA } from "../content/accolades.js";
+import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
 
 // All seeded fake users share this id prefix. `--clean` matches on it, so it
 // must be something a real Discord snowflake (a numeric string) can never be.
@@ -42,17 +43,6 @@ export const SEED_USER_PREFIX = "seed-";
 
 const DEFAULT_USERS = 10;
 const DEFAULT_SEED = 1337;
-
-// Time-based achievement ids (the `AchievementType` union in
-// `src/content/achievements.ts`). Only `type` is needed at the model level.
-const ACHIEVEMENT_TYPES = [
-  "weekly_champion",
-  "weekly_night_owl",
-  "weekly_marathon",
-  "weekly_social_butterfly",
-  "weekly_active",
-  "weekly_consistent",
-] as const;
 
 // A small pool of IANA zones so timezone-aware bucketing (#524) has something
 // to exercise. `undefined` means "use the server timezone".
@@ -290,15 +280,27 @@ export function generateVoiceTracking(
   const sessions: SeededSession[] = [];
   for (let i = 0; i < sessionCount; i++) {
     const startTime = faker.date.between({ from: opts.from, to: opts.to });
-    // Weighted toward shorter sessions, with the occasional marathon.
-    const duration = faker.number.int({ min: 5 * 60, max: 5 * 60 * 60 });
+    // Weighted toward shorter sessions, with the occasional marathon, but
+    // clamped so the session never runs past the end of the requested span.
+    const rawDuration = faker.number.int({ min: 5 * 60, max: 5 * 60 * 60 });
+    const maxDuration = Math.floor(
+      (opts.to.getTime() - startTime.getTime()) / 1000,
+    );
+    const duration = Math.max(1, Math.min(rawDuration, maxDuration));
     const endTime = new Date(startTime.getTime() + duration * 1000);
     const channelName = faker.helpers.arrayElement(channelPool);
-    const channelId = `seed-vc-${SHARED_VOICE_CHANNELS.indexOf(channelName) + 1}-${identity.userId}`;
+    // Shared channels get a stable id (no user suffix) so they are genuinely
+    // shared across users — companions/overlap stats cluster on them. The
+    // personal room gets a per-user id.
+    const sharedIdx = SHARED_VOICE_CHANNELS.indexOf(channelName);
+    const channelId =
+      sharedIdx === -1
+        ? `seed-vc-personal-${identity.userId}`
+        : `seed-vc-shared-${sharedIdx}`;
     const others = pickSome(otherUserIds, faker.number.int({ min: 0, max: 4 }));
     const companions = others.map((userId) => ({
       userId,
-      seconds: faker.number.int({ min: 60, max: duration }),
+      seconds: faker.number.int({ min: Math.min(60, duration), max: duration }),
     }));
 
     sessions.push({
@@ -404,8 +406,12 @@ export function generateUserAchievements(
     };
   });
 
+  // Only sample achievement ids that have display metadata — Rewind and the
+  // digest skip entries without it (see `rewind-service.ts` lookupAchievement),
+  // so reserved-but-unimplemented ids would never render for seeded users.
+  const achievementKeys = Object.keys(ACHIEVEMENT_METADATA);
   const chosenAchievements = pickSome(
-    [...ACHIEVEMENT_TYPES],
+    achievementKeys,
     faker.number.int({ min: 1, max: 5 }),
   );
   const achievements = chosenAchievements.map((type) => {
@@ -649,6 +655,19 @@ interface ParsedOptions extends SeedOptions {
   yes: boolean;
 }
 
+/** Parse a numeric flag, throwing a clear error when it isn't a valid number. */
+function numericFlag(
+  name: string,
+  raw: string | undefined,
+): number | undefined {
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) {
+    throw new Error(`--${name} must be a valid number (got "${raw}")`);
+  }
+  return n;
+}
+
 /** Parse CLI flags / env vars into resolved options. Pure (no DB / no exit). */
 export function parseOptions(argv: string[]): ParsedOptions {
   const { values } = parseArgs({
@@ -666,6 +685,10 @@ export function parseOptions(argv: string[]): ParsedOptions {
     allowPositionals: false,
   });
 
+  const usersFlag = numericFlag("users", values.users);
+  const seedFlag = numericFlag("seed", values.seed);
+  const yearsFlag = numericFlag("years", values.years);
+
   const now = new Date();
   let from: Date;
   let to: Date = now;
@@ -675,10 +698,12 @@ export function parseOptions(argv: string[]): ParsedOptions {
       ? new Date(values.from)
       : new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
     to = values.to ? new Date(values.to) : now;
-  } else if (values.years) {
-    const years = Number(values.years);
+  } else if (yearsFlag !== undefined) {
+    if (yearsFlag <= 0) {
+      throw new Error("--years must be greater than 0");
+    }
     from = new Date(now);
-    from.setUTCFullYear(from.getUTCFullYear() - years);
+    from.setUTCFullYear(from.getUTCFullYear() - yearsFlag);
   } else {
     // Default span: the current calendar year so far.
     from = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
@@ -694,9 +719,12 @@ export function parseOptions(argv: string[]): ParsedOptions {
   const guildId = values.guild ?? env.guildId ?? "";
 
   return {
-    users: values.users ? Math.max(1, Number(values.users)) : DEFAULT_USERS,
+    users:
+      usersFlag !== undefined
+        ? Math.max(1, Math.floor(usersFlag))
+        : DEFAULT_USERS,
     guildId,
-    seed: values.seed ? Number(values.seed) : DEFAULT_SEED,
+    seed: seedFlag !== undefined ? Math.floor(seedFlag) : DEFAULT_SEED,
     from,
     to,
     clean: values.clean,
