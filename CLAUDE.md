@@ -44,7 +44,9 @@ npx markdownlint "**/*.md" --ignore node_modules --ignore dist
 ```
 
 Operational scripts (run against compiled output in `dist/`, so `npm run build` first): `validate-config`,
-`migrate-config`, `cleanup-global-commands`, `unregister-guild-commands`.
+`migrate-config`, `cleanup-global-commands`, `unregister-guild-commands`, `seed-sample-data` (dev/test only —
+populates a non-prod DB with deterministic fake activity; guarded by `--yes`, namespaced behind a `seed-` id
+prefix so `--clean` removes only seeded rows; see `DEVELOPER_GUIDE.md`).
 
 ## Architecture
 

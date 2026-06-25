@@ -16,6 +16,7 @@
     "cleanup-global-commands": "node dist/scripts/cleanup-global-commands.js",
     "migrate-config": "node dist/scripts/migrate-config.js",
     "validate-config": "node dist/scripts/validate-config.js",
+    "seed-sample-data": "node dist/scripts/seed-sample-data.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
@@ -42,6 +43,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@faker-js/faker": "^10.5.0",
     "@jest/globals": "^30.4.1",
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
