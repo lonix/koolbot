@@ -133,7 +133,7 @@ describe("ConfigService dependency enforcement (#663)", () => {
       );
     });
 
-    it("never blocks disabling a key (forward check only guards enabling)", async () => {
+    it("allows disabling a key even when its own dependency is off", async () => {
       seedConfig({ "voicetracking.enabled": false });
 
       await service.set(

@@ -424,6 +424,16 @@ export function getDependents(key: keyof ConfigSchema): (keyof ConfigSchema)[] {
 }
 
 /**
+ * Own-property check that ignores inherited members. Dependency batches can be
+ * built from user-controlled input (parsed YAML/JSON, form bodies), so plain
+ * `key in obj` would treat inherited keys like `__proto__`/`constructor` as
+ * real entries and could be abused for prototype-pollution-style inputs.
+ */
+export function hasOwn(obj: object, key: PropertyKey): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+/**
  * Interpret a raw config value as an on/off state, matching
  * `ConfigService.getBoolean`: real booleans pass through, the strings
  * "true"/"false" coerce, and non-zero numbers count as on. Web forms submit
@@ -498,11 +508,11 @@ export function validateDependencies(
   resolveCurrent: (key: keyof ConfigSchema) => boolean,
 ): DependencyIssue[] {
   const effective = (key: keyof ConfigSchema): boolean =>
-    key in pending ? isEnabledValue(pending[key]) : resolveCurrent(key);
+    hasOwn(pending, key) ? isEnabledValue(pending[key]) : resolveCurrent(key);
 
   const issues: DependencyIssue[] = [];
   for (const rawKey of Object.keys(pending)) {
-    if (!(rawKey in settingsMetadata)) continue;
+    if (!hasOwn(settingsMetadata, rawKey)) continue;
     const key = rawKey as keyof ConfigSchema;
 
     if (isEnabledValue(pending[rawKey])) {

@@ -352,6 +352,14 @@ describe("Config Schema", () => {
       expect(validateDependencies({ "bogus.key": true }, allOff)).toEqual([]);
     });
 
+    it("ignores inherited-property keys like __proto__ (no prototype pollution)", () => {
+      // JSON.parse can produce an own `__proto__` data property; `in` checks
+      // would treat it as a schema key, so the validator uses own-property
+      // checks. A crafted payload must simply be ignored.
+      const crafted = JSON.parse('{"__proto__": true, "constructor": true}');
+      expect(validateDependencies(crafted, allOff)).toEqual([]);
+    });
+
     it("reports one issue per offending key in a batch", () => {
       const issues = validateDependencies(
         {

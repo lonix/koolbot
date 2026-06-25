@@ -9,6 +9,7 @@ import {
   getDependencies,
   getDependents,
   validateDependencies,
+  hasOwn,
   DependencyError,
   type ConfigSchema,
   type DependencyIssue,
@@ -442,14 +443,14 @@ export class ConfigService {
     // but doesn't itself set; keys inside the batch are judged from `pending`.
     const needed = new Set<keyof ConfigSchema>();
     for (const rawKey of Object.keys(pending)) {
-      if (!(rawKey in settingsMetadata)) continue;
+      if (!hasOwn(settingsMetadata, rawKey)) continue;
       const schemaKey = rawKey as keyof ConfigSchema;
       for (const dep of getDependencies(schemaKey)) needed.add(dep);
       for (const dependent of getDependents(schemaKey)) needed.add(dependent);
     }
     const snapshot = new Map<keyof ConfigSchema, boolean>();
     for (const relatedKey of needed) {
-      if (relatedKey in pending) continue;
+      if (hasOwn(pending, relatedKey)) continue;
       snapshot.set(relatedKey, await this.getBoolean(relatedKey, false));
     }
     return validateDependencies(pending, (k) => snapshot.get(k) ?? false);
@@ -466,7 +467,7 @@ export class ConfigService {
     key: string,
     value: unknown,
   ): Promise<void> {
-    if (!(key in settingsMetadata)) return;
+    if (!hasOwn(settingsMetadata, key)) return;
     const issues = await this.findDependencyIssues({ [key]: value });
     if (issues.length > 0) {
       throw new DependencyError(issues);
