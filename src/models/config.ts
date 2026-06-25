@@ -12,6 +12,7 @@ export const CONFIG_CATEGORIES = [
   "achievements",
   "amikool", // Kept for backward compatibility; key removed but legacy rows may exist
   "announcements",
+  "birthdays",
   "core",
   "digest",
   "fun", // Kept for backward compatibility; key removed but legacy rows may exist

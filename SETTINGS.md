@@ -526,6 +526,41 @@ expose the page.
 
 ---
 
+## 🎂 Birthdays
+
+Celebrate members' birthdays with a message in a configured channel on
+the day — evaluated in **each member's own timezone** — optionally
+granting a temporary "birthday" role that is removed automatically.
+Members set their birthday on the **`/me/birthday`** page (the year is
+optional for privacy); there is no slash command.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `birthdays.enabled` | `false` | Master switch — enables the recurring check and announcements |
+| `birthdays.cron` | `"0 * * * *"` | Cron schedule for the check. Hourly by default so the post lands on each member's local day across timezones; a once-daily schedule can miss members far ahead of or behind the host |
+| `birthdays.channel_id` | `""` | Channel where birthday messages are posted (required) |
+| `birthdays.message` | `"🎂 Happy birthday, {user}! 🎉"` | Message template. Placeholders: `{user}` (mention), `{username}` (display name, no ping), `{age}` (blank when no birth year is on file) |
+| `birthdays.mention` | `true` | When on, the `{user}` placeholder pings the member; when off, the name shows without a notification |
+| `birthdays.role_id` | `""` | Optional role granted on the birthday and auto-removed later. Leave empty to skip the role |
+| `birthdays.role_duration_hours` | `24` | How long the temporary birthday role is held before the sweep removes it |
+
+**Notes:**
+
+- The date is evaluated in the member's `/me/timezone` preference
+  (falling back to the server timezone when unset, #524), so a birthday
+  fires on the member's local day rather than the host's.
+- A per-row `lastAnnouncedYear` (keyed to the member's local year) makes
+  the announcement idempotent across restarts, DST edges, and the
+  sub-daily cron cadence — each member is celebrated once per year.
+- Feb 29 birthdays are celebrated on Mar 1 in non-leap years.
+- The temporary role's grant time is persisted, so the daily sweep can
+  revoke it after the configured duration even across a restart.
+- A summary row (announced / roles granted / roles removed / failed) is
+  posted to the configured cron log channel after a run that did
+  anything (empty hourly ticks are silent).
+
+---
+
 ### Cron schedule format
 
 ```text
@@ -990,6 +1025,16 @@ Current hard dependencies:
 - `rewind.nudge.enabled` (bool, default: false)
 - `rewind.cron` (string, default: `"0 10 30 12 *"`)
 - `rewind.min_minutes` (number, default: 60)
+
+#### Birthdays
+
+- `birthdays.enabled` (bool, default: false)
+- `birthdays.cron` (string, default: `"0 * * * *"`)
+- `birthdays.channel_id` (string, default: "")
+- `birthdays.message` (string, default: `"🎂 Happy birthday, {user}! 🎉"`)
+- `birthdays.mention` (bool, default: true)
+- `birthdays.role_id` (string, default: "")
+- `birthdays.role_duration_hours` (number, default: 24)
 
 #### Cleanup
 

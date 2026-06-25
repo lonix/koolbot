@@ -48,6 +48,7 @@ describe("settingsMetadata", () => {
       "ratelimit",
       "announcements",
       "achievements",
+      "birthdays",
       "reactionroles",
       "wizard",
       "notices",

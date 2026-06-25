@@ -43,6 +43,7 @@ import { PollService } from "./services/poll-service.js";
 import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
 import { DigestService } from "./services/digest-service.js";
 import { RewindNudgeService } from "./services/rewind-nudge-service.js";
+import { BirthdayService } from "./services/birthday-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
@@ -494,6 +495,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         leaderboardRoleService.destroy();
         digestService.destroy();
         rewindNudgeService.destroy();
+        birthdayService.destroy();
         WizardService.getInstance().shutdown();
         // Persist any metrics still buffered in memory before the DB
         // connection closes below, then stop the flush/logging timers.
@@ -559,6 +561,7 @@ let pollService: PollService;
 let leaderboardRoleService: LeaderboardRoleService;
 let digestService: DigestService;
 let rewindNudgeService: RewindNudgeService;
+let birthdayService: BirthdayService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
@@ -585,6 +588,7 @@ try {
   leaderboardRoleService = LeaderboardRoleService.getInstance(client);
   digestService = DigestService.getInstance(client);
   rewindNudgeService = RewindNudgeService.getInstance(client);
+  birthdayService = BirthdayService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
@@ -691,6 +695,11 @@ async function initializeServices(): Promise<void> {
     // page itself is served by the user WebUI router regardless of
     // this service — this only schedules the end-of-year DM nudge.
     await rewindNudgeService.start();
+
+    // Initialize birthday celebrations service (#657). Members set their
+    // date on /me/birthday; this schedules the recurring "is it anyone's
+    // birthday today (in their timezone)?" check.
+    await birthdayService.start();
 
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();

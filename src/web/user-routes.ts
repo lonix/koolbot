@@ -34,6 +34,7 @@ import {
 } from "./session.js";
 import { getDisplayedRemainingMs } from "./admin-layout.js";
 import {
+  renderUserBirthdayBody,
   renderUserIndexBody,
   renderUserNotificationsBody,
   renderUserPage,
@@ -43,6 +44,7 @@ import {
   type UserFlashMessage,
   type VoicePresetView,
 } from "./user-layout.js";
+import { BirthdayService } from "../services/birthday-service.js";
 import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
@@ -214,6 +216,15 @@ async function isVoicePresetsEnabled(): Promise<boolean> {
 }
 
 /**
+ * Whether birthday celebrations are enabled (#657). Used only to soften
+ * the `/me/birthday` page copy — the page stays reachable either way so
+ * members can pre-set their date before an admin flips the feature on.
+ */
+async function isBirthdayFeatureEnabled(): Promise<boolean> {
+  return ConfigService.getInstance().getBoolean("birthdays.enabled", false);
+}
+
+/**
  * Resolve the session user's display name for the name-pattern preview.
  * Best-effort: falls back to the raw user id when the member can't be
  * fetched (e.g. left the guild), so the page still renders.
@@ -244,6 +255,18 @@ function parseOptionalInt(raw: unknown): number | undefined {
   if (trimmed.length === 0) return undefined;
   const n = Number(trimmed);
   return Number.isInteger(n) ? n : NaN;
+}
+
+/**
+ * Parse an optional integer field from a posted form. Returns `null` for
+ * blank/absent values and `NaN` for non-numeric junk so the caller can
+ * tell "not provided" from "provided but invalid".
+ */
+function parseIntField(raw: unknown): number | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  return Number.parseInt(trimmed, 10);
 }
 
 function toPresetViews(
@@ -553,6 +576,121 @@ export function createUserRouter(
         flash = { type: "ok", text: `Saved your timezone as ${after}.` };
       }
       res.redirect(303, flashUrl("/me/timezone", flash));
+    }),
+  );
+
+  // ---------- Birthday (#657) ----------
+  router.get(
+    "/birthday",
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      const { userId, guildId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+      const selected = await BirthdayService.getInstance(client).getBirthday(
+        userId,
+        guildId,
+      );
+      const flash = readFlashFromQuery(req);
+      res.type("text/html").send(
+        renderUserPage({
+          title: "Birthday",
+          active: "/me/birthday",
+          body: renderUserBirthdayBody({
+            csrfToken: getCsrfToken(req),
+            selected,
+            featureEnabled: await isBirthdayFeatureEnabled(),
+          }),
+          csrfToken: getCsrfToken(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          flash,
+          rewindEnabled: await isRewindFeatureEnabled(),
+        }),
+      );
+    }),
+  );
+
+  router.post(
+    "/birthday",
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      const { userId, guildId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const service = BirthdayService.getInstance(client);
+      const before = await service.getBirthday(userId, guildId);
+
+      // Clearing is only ever the explicit "Remove" button (which posts
+      // `clear`). A plain "Save" with no month/day is a validation error,
+      // not a silent delete of an existing birthday.
+      const month = parseIntField(body.month);
+      const day = parseIntField(body.day);
+      const year = parseIntField(body.year);
+      const clearing = typeof body.clear === "string" && body.clear.length > 0;
+
+      let result: "success" | "failure" = "success";
+      let errorMessage: string | null = null;
+      let after = before;
+      try {
+        if (clearing) {
+          after = await service.setBirthday(userId, guildId, null);
+        } else if (month === null || day === null) {
+          throw new Error("Please choose a month and enter a day.");
+        } else {
+          after = await service.setBirthday(userId, guildId, {
+            month,
+            day,
+            year,
+          });
+        }
+      } catch (err) {
+        result = "failure";
+        errorMessage = err instanceof Error ? err.message : String(err);
+        logger.error(
+          `Failed to save birthday: ${sanitizeForLog(errorMessage)}`,
+        );
+      }
+
+      await recordAudit(session, {
+        action: "user.birthday.set",
+        targetId: userId,
+        details:
+          result === "success"
+            ? { before, after }
+            : { attempted: { month, day, year } },
+        result,
+        errorMessage,
+      });
+
+      let flash: UserFlashMessage;
+      if (result === "failure") {
+        flash = {
+          type: "err",
+          text: `Could not save your birthday: ${errorMessage ?? "unknown error"}.`,
+        };
+      } else if (after === null) {
+        flash = { type: "ok", text: "Removed your birthday." };
+      } else {
+        flash = {
+          type: "ok",
+          text: `Saved your birthday as ${after.month}/${after.day}${after.year ? `/${after.year}` : ""}.`,
+        };
+      }
+      res.redirect(303, flashUrl("/me/birthday", flash));
     }),
   );
 

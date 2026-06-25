@@ -822,12 +822,25 @@ slash command** — the Web UI is the admin surface.
 | **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                       |
 | **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements, weekly digest, Rewind nudge). Each toggle records a `WebAuditLog` row.                              |
 | **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.            |
+| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row.  |
+| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, annual rank, weekly-rank journey, and text activity. |
 
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;
 toggling one row is a single POST that records the diff in the audit
 log and PRG-redirects back to the page.
+
+The **Birthday** page (`#657`) stores a month/day and an optional year
+per `(userId, guildId)`. The year is optional by design — many people
+share the date but not the age — and when omitted no age is computed or
+shown. The page stays reachable even when `birthdays.enabled` is off so a
+member can pre-set their date (it shows an informational notice that
+nothing will be posted until an admin enables the feature), mirroring how
+the Notifications page exposes toggles for not-yet-active paths. A
+"Remove my birthday" button clears the stored date. The daily birthday
+announcement itself is evaluated in the member's `/me/timezone`
+preference so it fires on their local day (`#524`).
 
 The whole feature is gated by `rewind.enabled` (`#608`). When it is off
 the route returns a 404 "feature disabled" state and the nav link is
