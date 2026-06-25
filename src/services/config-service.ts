@@ -467,8 +467,17 @@ export class ConfigService {
     key: string,
     value: unknown,
   ): Promise<void> {
-    if (!hasOwn(settingsMetadata, key)) return;
-    const issues = await this.findDependencyIssues({ [key]: value });
+    // Resolve `key` to the matching schema key *taken from the trusted key
+    // list* rather than reusing the caller-supplied (and possibly remote)
+    // string. Using the allowlist's own element means the computed-property
+    // write below can never be driven to an attacker-chosen name — a genuine
+    // sanitization of the property-injection vector, not just a guard.
+    const schemaKey = (
+      Object.keys(settingsMetadata) as (keyof ConfigSchema)[]
+    ).find((candidate) => candidate === key);
+    if (schemaKey === undefined) return;
+
+    const issues = await this.findDependencyIssues({ [schemaKey]: value });
     if (issues.length > 0) {
       throw new DependencyError(issues);
     }
