@@ -938,6 +938,24 @@ Current hard dependencies:
 | `achievements.enabled` | `voicetracking.enabled` |
 | `voicetracking.announcements.enabled` | `voicetracking.enabled` |
 
+**Write-time enforcement.** Every config write surface — `ConfigService.set`,
+the Settings single-key save and section save, the YAML import, and the setup
+wizard apply — validates these dependencies before persisting, so the rule
+holds no matter how a value is changed:
+
+- **Enabling** a key whose dependency is off is **rejected** with a message
+  naming the unmet dependency (e.g. *"Cannot enable Achievements: requires
+  Voice Tracking enabled (`voicetracking.enabled`) to be enabled. Enable it
+  first."*). Enabling a feature **and** its dependency together in one wizard
+  run or one section save is allowed — the batch is validated as a whole.
+- **Disabling** a key while another enabled feature still depends on it is
+  **blocked** (not silently cascade-disabled), with a message naming the
+  dependents to turn off first. Disable the dependents, then the dependency.
+
+Bulk/system writers that replace a whole consistent snapshot — reset-to-defaults
+and the startup/env migrations — bypass the per-key check, since they never
+leave the graph in a broken state.
+
 #### Commands
 
 - `ping.enabled` (bool, default: false)

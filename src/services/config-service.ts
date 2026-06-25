@@ -3,7 +3,17 @@ import { env, getEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { Client } from "discord.js";
 import mongoose from "mongoose";
-import { defaultConfig } from "./config-schema.js";
+import {
+  defaultConfig,
+  settingsMetadata,
+  getDependencies,
+  getDependents,
+  validateDependencies,
+  hasOwn,
+  DependencyError,
+  type ConfigSchema,
+  type DependencyIssue,
+} from "./config-schema.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 export class ConfigService {
@@ -321,12 +331,15 @@ export class ConfigService {
           logger.info(
             `⚠️  Found old gamification config key: ${sanitizeForLog(oldKey)}, migrating to ${sanitizeForLog(key)}`,
           );
-          // Migrate the old key to new key
+          // Migrate the old key to new key. This is a rename carrying the
+          // previously-stored value verbatim, not an operator enabling a
+          // feature, so it must never be blocked by dependency validation.
           await this.set(
             key,
             oldConfig.value,
             oldConfig.description.replace(/gamification/gi, "achievements"),
             "achievements",
+            { skipDependencyCheck: true },
           );
           // Delete the old key
           await Config.deleteOne({ key: oldKey });
@@ -412,12 +425,84 @@ export class ConfigService {
     return defaultValue;
   }
 
+  /**
+   * Validate a batch of proposed writes against the feature dependency graph
+   * (#663) and return any violations (empty array when consistent). Shared by
+   * every multi-key write surface — the Settings section save, YAML import, and
+   * the Setup Wizard apply — so they all reject the same way and an intra-batch
+   * pair (enabling a feature and its dependency together) passes.
+   *
+   * Dependency state for keys not in the batch is read from the live config via
+   * `getBoolean` with a `false` fallback, so a dependent only blocks a disable
+   * when it is *actively* turned on — a default-on-but-unset sub-toggle won't.
+   */
+  public async findDependencyIssues(
+    pending: Record<string, unknown>,
+  ): Promise<DependencyIssue[]> {
+    // Resolve the live state of every dependency/dependent the batch touches
+    // but doesn't itself set; keys inside the batch are judged from `pending`.
+    const needed = new Set<keyof ConfigSchema>();
+    for (const rawKey of Object.keys(pending)) {
+      if (!hasOwn(settingsMetadata, rawKey)) continue;
+      const schemaKey = rawKey as keyof ConfigSchema;
+      for (const dep of getDependencies(schemaKey)) needed.add(dep);
+      for (const dependent of getDependents(schemaKey)) needed.add(dependent);
+    }
+    const snapshot = new Map<keyof ConfigSchema, boolean>();
+    for (const relatedKey of needed) {
+      if (hasOwn(pending, relatedKey)) continue;
+      snapshot.set(relatedKey, await this.getBoolean(relatedKey, false));
+    }
+    return validateDependencies(pending, (k) => snapshot.get(k) ?? false);
+  }
+
+  /**
+   * Validate a single proposed write against the feature dependency graph
+   * (#663). Throws {@link DependencyError} when enabling a key whose
+   * dependency is off, or disabling a key something still depends on. Only
+   * schema keys participate; anything else (timestamps, header message IDs,
+   * env-mirrored bootstrap keys) returns immediately.
+   */
+  private async assertDependenciesSatisfied(
+    key: string,
+    value: unknown,
+  ): Promise<void> {
+    // Resolve `key` to the matching schema key *taken from the trusted key
+    // list* rather than reusing the caller-supplied (and possibly remote)
+    // string. Using the allowlist's own element means the computed-property
+    // write below can never be driven to an attacker-chosen name — a genuine
+    // sanitization of the property-injection vector, not just a guard.
+    const schemaKey = (
+      Object.keys(settingsMetadata) as (keyof ConfigSchema)[]
+    ).find((candidate) => candidate === key);
+    if (schemaKey === undefined) return;
+
+    const issues = await this.findDependencyIssues({ [schemaKey]: value });
+    if (issues.length > 0) {
+      throw new DependencyError(issues);
+    }
+  }
+
+  /**
+   * Persist a config value.
+   *
+   * By default every write is checked against the feature dependency graph
+   * (#663) and rejected with a {@link DependencyError} if it would break it.
+   * Pass `skipDependencyCheck` for bulk/system writers that validate the whole
+   * batch up front (Setup Wizard apply, Settings section save) or that replace
+   * the entire config snapshot (reset-to-defaults, YAML import, env migration),
+   * where per-key ordering would otherwise produce spurious rejections.
+   */
   public async set<T>(
     key: string,
     value: T,
     description: string,
     category: string,
+    options: { skipDependencyCheck?: boolean } = {},
   ): Promise<void> {
+    if (!options.skipDependencyCheck) {
+      await this.assertDependenciesSatisfied(key, value);
+    }
     try {
       await Config.findOneAndUpdate(
         { key },
@@ -584,6 +669,7 @@ export class ConfigService {
             envValue,
             mapping.description,
             mapping.category,
+            { skipDependencyCheck: true },
           );
           migratedSettings.push(mapping.key);
           logger.info(`Migrated ${mapping.key} from environment variables`);
@@ -597,6 +683,7 @@ export class ConfigService {
             mapping.defaultValue,
             mapping.description,
             mapping.category,
+            { skipDependencyCheck: true },
           );
           logger.info(`Set default value for ${mapping.key}`);
         } catch (error) {

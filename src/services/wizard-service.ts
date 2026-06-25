@@ -1,6 +1,7 @@
 import { TextChannel, VoiceChannel, CategoryChannel } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
+import { DependencyError } from "./config-schema.js";
 
 export interface WizardConfiguration {
   [key: string]: string | number | boolean;
@@ -255,16 +256,33 @@ export class WizardService {
       return false;
     }
 
+    // Validate the whole proposed batch against the feature dependency graph
+    // (#663) before writing anything. Validating the batch (rather than each
+    // key in isolation) lets an operator enable a feature and its dependency
+    // together in one wizard run. A violation aborts the apply with an
+    // operator-friendly message so the caller can surface it; partial writes
+    // are avoided because nothing has been persisted yet.
+    const issues = await this.configService.findDependencyIssues(
+      state.configuration,
+    );
+    if (issues.length > 0) {
+      throw new DependencyError(issues);
+    }
+
     try {
       logger.info(
         `Applying wizard configuration for user ${userId}: ${Object.keys(state.configuration).length} settings`,
       );
 
-      // Apply each configuration setting
+      // Apply each configuration setting. The batch was already validated
+      // above, so per-key dependency checks are skipped to avoid spurious
+      // ordering-dependent rejections within the batch.
       for (const [key, value] of Object.entries(state.configuration)) {
         const category = key.split(".")[0];
         const description = this.getSettingDescription(key);
-        await this.configService.set(key, value, description, category);
+        await this.configService.set(key, value, description, category, {
+          skipDependencyCheck: true,
+        });
         logger.debug(`Set ${key} = ${value}`);
       }
 

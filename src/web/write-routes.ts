@@ -447,6 +447,7 @@ export interface ResetConfigStore {
     value: unknown,
     description: string,
     category: string,
+    options?: { skipDependencyCheck?: boolean },
   ): Promise<void>;
   delete(key: string): Promise<void>;
 }
@@ -473,11 +474,16 @@ export async function resetConfigToDefaults(config: ResetConfigStore): Promise<{
   for (const [key, value] of Object.entries(defaultConfig)) {
     const meta = settingsMetadata[key as keyof typeof settingsMetadata];
     try {
+      // Reset rewrites the whole schema to its defaults; per-key dependency
+      // validation would spuriously reject intermediate states (e.g. clearing
+      // voicetracking.enabled before a dependent's default lands). The default
+      // set is internally consistent, so skip the check.
       await config.set(
         key,
         value,
         meta?.description ?? "",
         meta?.category ?? key.split(".")[0],
+        { skipDependencyCheck: true },
       );
       updated++;
     } catch (err) {
@@ -838,7 +844,7 @@ export function createWriteRouter(
       // unique keys is required so a duplicate hidden input can't trick
       // the handler into double-writing or mis-counting rejections.
       const seen = new Set<string>();
-      const coerced: Array<{
+      let coerced: Array<{
         key: string;
         value: string | number | boolean;
       }> = [];
@@ -853,6 +859,27 @@ export function createWriteRouter(
           coerced.push({ key, value: r.value });
         } else {
           rejected.push({ key, reason: r.reason });
+        }
+      }
+
+      // Cross-feature dependency validation (#663). Validate the whole coerced
+      // batch together (against the live config for keys outside it) so a
+      // section that enables a feature and its dependency at once passes, while
+      // a write that would break the dependency graph is rejected with an
+      // operator-friendly message. Flagged keys join `rejected`, so the
+      // existing all-or-nothing guard below blocks the save.
+      if (coerced.length > 0) {
+        const pending = Object.fromEntries(
+          coerced.map((c) => [c.key, c.value]),
+        );
+        const issues =
+          await ConfigService.getInstance().findDependencyIssues(pending);
+        if (issues.length > 0) {
+          const flagged = new Set(issues.map((i) => i.key as string));
+          for (const issue of issues) {
+            rejected.push({ key: issue.key, reason: issue.message });
+          }
+          coerced = coerced.filter((c) => !flagged.has(c.key));
         }
       }
 
@@ -889,11 +916,14 @@ export function createWriteRouter(
           stored ?? defaultConfig[key as keyof typeof defaultConfig];
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
         try {
+          // Dependencies were validated for the whole batch above; skip the
+          // per-key check so intra-batch ordering can't trigger a false reject.
           await config.set(
             key,
             value,
             meta?.description ?? "",
             meta?.category ?? key.split(".")[0],
+            { skipDependencyCheck: true },
           );
           applied.push({ key, before, after: value });
         } catch (err) {
@@ -1158,6 +1188,11 @@ export function createWriteRouter(
       let applied = 0;
       const failed: Array<{ key: string; reason: string }> = [];
 
+      // Phase 1: coerce every importable key. An import is a (possibly
+      // partial) config snapshot, so collect the whole valid set before
+      // writing — the dependency check below judges them together.
+      const pending: Array<{ key: string; value: string | number | boolean }> =
+        [];
       for (const [key, value] of Object.entries(
         parsed as Record<string, unknown>,
       )) {
@@ -1174,13 +1209,39 @@ export function createWriteRouter(
           failed.push({ key, reason: coerced.reason });
           continue;
         }
+        pending.push({ key, value: coerced.value });
+      }
+
+      // Cross-feature dependency validation (#663). Validate the imported set
+      // as a batch so a snapshot that enables a feature and its dependency
+      // together imports cleanly, while one that breaks the dependency graph
+      // has the offending keys rejected (the rest still apply).
+      let toWrite = pending;
+      if (pending.length > 0) {
+        const issues = await config.findDependencyIssues(
+          Object.fromEntries(pending.map((p) => [p.key, p.value])),
+        );
+        if (issues.length > 0) {
+          const flagged = new Set(issues.map((i) => i.key as string));
+          for (const issue of issues) {
+            failed.push({ key: issue.key, reason: issue.message });
+          }
+          toWrite = pending.filter((p) => !flagged.has(p.key));
+        }
+      }
+
+      // Phase 2: apply the validated set. Skip the per-key check — the batch
+      // was already validated, and per-key ordering would falsely reject an
+      // intra-snapshot dependency pair.
+      for (const { key, value } of toWrite) {
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
         try {
           await config.set(
             key,
-            coerced.value,
+            value,
             meta?.description ?? "",
             meta?.category ?? key.split(".")[0],
+            { skipDependencyCheck: true },
           );
           applied++;
         } catch (err) {
