@@ -385,6 +385,10 @@ export interface RewindBodyOptions {
   messagesSent: number;
   topTextChannels: RewindTextChannelView[];
   peakMessageDay: { date: string; count: number } | null;
+  // Reaction activity (#653). Given / received counts for the year; the
+  // block is hidden when both are 0 (no data or reaction tracking off).
+  reactionsGiven: number;
+  reactionsReceived: number;
 }
 
 function renderYearPicker(current: number, years: number[]): string {
@@ -494,6 +498,28 @@ function renderTextActivity(opts: RewindBodyOptions): string {
   ].join("");
 }
 
+/**
+ * Reaction-activity stat pair (#653). Reuses the voice/text `.rw-stat`
+ * styling. Returns "" when the user gave and received no reactions this
+ * year (no data or reaction tracking off) so the route can append it
+ * unconditionally and the block simply disappears.
+ */
+function renderReactionActivity(opts: RewindBodyOptions): string {
+  const given = opts.reactionsGiven > 0 ? opts.reactionsGiven : 0;
+  const received = opts.reactionsReceived > 0 ? opts.reactionsReceived : 0;
+  if (given <= 0 && received <= 0) return "";
+
+  return [
+    "<h2>Reactions</h2>",
+    '<div class="rw-grid">',
+    '<div class="rw-stat"><div class="label">Reactions given</div>' +
+      `<div class="value">${given}</div></div>`,
+    '<div class="rw-stat"><div class="label">Reactions received</div>' +
+      `<div class="value">${received}</div></div>`,
+    "</div>",
+  ].join("");
+}
+
 export function renderUserRewindBody(opts: RewindBodyOptions): string {
   const years = opts.availableYears.includes(opts.year)
     ? opts.availableYears
@@ -595,6 +621,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     "</div>",
     '<div class="card"><h2>Top voice companions</h2>' + companions + "</div>",
     renderTextActivity(opts),
+    renderReactionActivity(opts),
     '<div class="card"><h2>Rank journey</h2>' +
       renderJourney(opts.weeklyJourney) +
       "</div>",

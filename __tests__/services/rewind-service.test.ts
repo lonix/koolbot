@@ -36,6 +36,29 @@ jest.unstable_mockModule("../../src/models/user-achievements.js", () => ({
   },
 }));
 
+// Reaction activity (#653). `findOne(...).lean()` returns the per-year
+// buckets; the default `mockGetBoolean` leaves reaction tracking disabled so
+// existing getSummary tests never reach this model.
+const mockFindOneReaction = jest.fn();
+jest.unstable_mockModule(
+  "../../src/models/reaction-activity-tracking.js",
+  () => ({
+    ReactionActivityTracking: {
+      findOne: mockFindOneReaction,
+    },
+  }),
+);
+
+// Config is consulted by `computeTextActivity` / `computeReactionActivity`
+// for their `*.enabled` gates. Default everything off so the voice-only
+// tests are unaffected; individual tests override per key as needed.
+const mockGetBoolean = jest.fn(async () => false);
+jest.unstable_mockModule("../../src/services/config-service.js", () => ({
+  ConfigService: {
+    getInstance: () => ({ getBoolean: mockGetBoolean }),
+  },
+}));
+
 jest.unstable_mockModule("../../src/content/accolades.js", () => ({
   ACCOLADE_METADATA: {
     night_owl: {
@@ -75,6 +98,7 @@ const {
   computeTopCompanions,
   computePeakMessageDay,
   computeTopTextChannels,
+  extractYearlyReactionCount,
   messagesInWindow,
   formatFunComparison,
   formatHoursMinutes,
@@ -937,6 +961,24 @@ describe("RewindService snapshots (#574)", () => {
       expect(empty.hasData).toBe(false);
       expect(empty.availableYears).toEqual([]);
     });
+
+    it("defaults reaction fields to 0 for pre-#653 (schema v1) snapshots", () => {
+      const norm = normalizeSnapshotSummary(
+        { totalSeconds: 5, hasData: true },
+        { userId: "u", guildId: "g", year: 2021 },
+      );
+      expect(norm.reactionsGiven).toBe(0);
+      expect(norm.reactionsReceived).toBe(0);
+    });
+
+    it("preserves stored reaction counts when present", () => {
+      const norm = normalizeSnapshotSummary(
+        { reactionsGiven: 11, reactionsReceived: 4 },
+        { userId: "u", guildId: "g", year: 2021 },
+      );
+      expect(norm.reactionsGiven).toBe(11);
+      expect(norm.reactionsReceived).toBe(4);
+    });
   });
 
   describe("getSummary serving", () => {
@@ -1144,6 +1186,117 @@ describe("RewindService text helpers (#496)", () => {
 
     it("returns null when there are no messages", () => {
       expect(computePeakMessageDay([])).toBeNull();
+    });
+  });
+});
+
+describe("RewindService reaction helpers (#653)", () => {
+  describe("extractYearlyReactionCount", () => {
+    it("reads the requested year's count from a plain object (lean shape)", () => {
+      const bucket = { "2025": 7, "2026": 12 };
+      expect(extractYearlyReactionCount(bucket, 2026)).toBe(12);
+    });
+
+    it("reads the requested year's count from a Map (hydrated shape)", () => {
+      const bucket = new Map([
+        ["2025", 7],
+        ["2026", 12],
+      ]);
+      expect(extractYearlyReactionCount(bucket, 2026)).toBe(12);
+    });
+
+    it("returns 0 for a year absent from a populated bucket", () => {
+      expect(extractYearlyReactionCount({ "2025": 7 }, 2026)).toBe(0);
+    });
+
+    it("returns 0 for an empty / missing bucket (zero-data)", () => {
+      expect(extractYearlyReactionCount({}, 2026)).toBe(0);
+      expect(extractYearlyReactionCount(null, 2026)).toBe(0);
+      expect(extractYearlyReactionCount(undefined, 2026)).toBe(0);
+    });
+
+    it("coerces malformed / non-positive bucket values to 0", () => {
+      expect(
+        extractYearlyReactionCount(
+          { "2026": Number.NaN } as Record<string, number>,
+          2026,
+        ),
+      ).toBe(0);
+      expect(extractYearlyReactionCount({ "2026": 0 }, 2026)).toBe(0);
+    });
+  });
+
+  describe("getSummary reaction wiring", () => {
+    function lean<T>(value: T): { lean: () => Promise<T> } {
+      return { lean: jest.fn(async () => value) };
+    }
+    function selectLean<T>(value: T): {
+      select: () => { lean: () => Promise<T> };
+    } {
+      return { select: jest.fn(() => lean(value)) };
+    }
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      resetSingleton();
+      mockFindOneVc.mockReturnValue(lean({ sessions: [] }));
+      mockFindVc.mockReturnValue(selectLean([]));
+      mockFindOneAch.mockReturnValue(lean(null));
+      mockAggregateVc.mockResolvedValue([]);
+      mockSnapFindOne.mockReturnValue(lean(null));
+      mockSnapFind.mockReturnValue(lean([]));
+      mockSnapCreate.mockResolvedValue({});
+      mockFindOneReaction.mockReturnValue(lean(null));
+      // Reaction tracking on by default for this block; other gates off.
+      mockGetBoolean.mockImplementation(
+        async (key: string) => key === "reactiontracking.enabled",
+      );
+    });
+
+    function makeSvc() {
+      return RewindService.getInstance(
+        makeClient() as Parameters<typeof RewindService.getInstance>[0],
+      );
+    }
+
+    it("surfaces the requested year's given/received counts", async () => {
+      mockFindOneReaction.mockReturnValueOnce(
+        lean({
+          yearlyGiven: { "2025": 3, "2026": 9 },
+          yearlyReceived: { "2026": 4 },
+        }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.reactionsGiven).toBe(9);
+      expect(summary!.reactionsReceived).toBe(4);
+    });
+
+    it("reads 0 for a year the user has no bucket entry for", async () => {
+      mockFindOneReaction.mockReturnValueOnce(
+        lean({ yearlyGiven: { "2024": 5 }, yearlyReceived: { "2024": 2 } }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.reactionsGiven).toBe(0);
+      expect(summary!.reactionsReceived).toBe(0);
+    });
+
+    it("reads 0 (and never queries the model) when reaction tracking is off", async () => {
+      mockGetBoolean.mockImplementation(async () => false);
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.reactionsGiven).toBe(0);
+      expect(summary!.reactionsReceived).toBe(0);
+      expect(mockFindOneReaction).not.toHaveBeenCalled();
+    });
+
+    it("reads 0 when the user has no reaction row", async () => {
+      mockFindOneReaction.mockReturnValueOnce(lean(null));
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.reactionsGiven).toBe(0);
+      expect(summary!.reactionsReceived).toBe(0);
     });
   });
 });
