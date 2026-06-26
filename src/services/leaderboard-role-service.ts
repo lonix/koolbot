@@ -223,6 +223,20 @@ export class LeaderboardRoleService {
         return null;
       }
 
+      // Voice tracking is a hard dependency (#659): without it there is no
+      // ranking data, so reconciling roles would only churn members against
+      // empty/stale data. Mirror voice-channel-announcer.ts and short-circuit.
+      const trackingEnabled = await this.configService.getBoolean(
+        "voicetracking.enabled",
+        false,
+      );
+      if (!trackingEnabled) {
+        logger.warn(
+          "Leaderboard role reconciliation skipped: voice tracking is disabled (voicetracking.enabled=false).",
+        );
+        return null;
+      }
+
       const guildId = await this.configService.getString("GUILD_ID", "");
       if (!guildId) {
         logger.error("GUILD_ID not configured");

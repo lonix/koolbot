@@ -4,6 +4,7 @@ import type { Client } from "discord.js";
 const mockRegisterReloadCallback = jest.fn();
 const mockConfigGetBoolean = jest.fn();
 const mockConfigGetString = jest.fn();
+const mockLoggerWarn = jest.fn();
 
 const mockGetTopUsers = jest.fn();
 const mockTrackerGetInstance = jest.fn(() => ({
@@ -49,7 +50,7 @@ jest.unstable_mockModule(
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: jest.fn(),
-    warn: jest.fn(),
+    warn: mockLoggerWarn,
     error: jest.fn(),
     debug: jest.fn(),
   },
@@ -166,6 +167,28 @@ describe("LeaderboardRoleService", () => {
       const result = await svc.runNow();
       expect(result).toBeNull();
       expect(mockGetTopUsers).not.toHaveBeenCalled();
+    });
+
+    it("short-circuits and warns when voice tracking is disabled", async () => {
+      // Feature on, but its hard dependency (voice tracking) is off.
+      mockConfigGetBoolean.mockImplementation(async (key: unknown) =>
+        key === "voicetracking.enabled" ? false : true,
+      );
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.tiers") return "1:99999001";
+        if (k === "leaderboard_roles.period") return "alltime";
+        return "";
+      });
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+      expect(result).toBeNull();
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.stringContaining("voice tracking is disabled"),
+      );
     });
 
     it("returns null when no tiers are configured", async () => {

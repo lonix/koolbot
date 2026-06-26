@@ -5,6 +5,7 @@ const mockRegisterReloadCallback = jest.fn();
 const mockConfigGetBoolean = jest.fn();
 const mockConfigGetString = jest.fn();
 const mockConfigGetNumber = jest.fn();
+const mockLoggerWarn = jest.fn();
 
 const mockGetTopUsers = jest.fn();
 const mockTrackerGetInstance = jest.fn(() => ({
@@ -81,7 +82,7 @@ jest.unstable_mockModule("../../src/models/user-achievements.js", () => ({
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: jest.fn(),
-    warn: jest.fn(),
+    warn: mockLoggerWarn,
     error: jest.fn(),
     debug: jest.fn(),
   },
@@ -108,6 +109,7 @@ describe("DigestService", () => {
     mockConfigGetBoolean.mockImplementation(async (key: unknown) => {
       const k = key as string;
       if (k === "digest.enabled") return true;
+      if (k === "voicetracking.enabled") return true;
       if (k === "digest.include_achievements") return false;
       return false;
     });
@@ -185,6 +187,21 @@ describe("DigestService", () => {
       const result = await svc.runNow();
       expect(result).toBeNull();
       expect(mockGetTopUsers).not.toHaveBeenCalled();
+    });
+
+    it("short-circuits and warns when voice tracking is disabled", async () => {
+      // Digest on, but its hard dependency (voice tracking) is off.
+      mockConfigGetBoolean.mockImplementation(async (key: unknown) =>
+        key === "digest.enabled" ? true : false,
+      );
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const result = await svc.runNow();
+      expect(result).toBeNull();
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+      expect(mockUserSend).not.toHaveBeenCalled();
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.stringContaining("voice tracking is disabled"),
+      );
     });
   });
 

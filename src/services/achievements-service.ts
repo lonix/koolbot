@@ -57,6 +57,13 @@ export class AchievementsService {
   private configService: ConfigService;
   private isConnected: boolean = false;
 
+  // Voice tracking is a hard dependency (#659): accolades/achievements are
+  // evaluated against tracked voice sessions. The accolade/achievement checks
+  // fire once per session end (per user), so we throttle the "tracking
+  // disabled" warning instead of logging it for every user.
+  private static readonly VOICE_DISABLED_LOG_INTERVAL_MS = 60 * 60 * 1000; // 1h
+  private lastVoiceTrackingDisabledLogAt = 0;
+
   // Minimum duration threshold for consecutive days (5 minutes in seconds)
   private static readonly MIN_DAILY_DURATION_SECONDS = 300;
 
@@ -1010,6 +1017,34 @@ export class AchievementsService {
   }
 
   /**
+   * Whether voice tracking — the hard dependency for every accolade and
+   * achievement (#659) — is enabled. When it is off we short-circuit before
+   * evaluating any badge logic against absent voice data, mirroring
+   * `voice-channel-announcer.ts`. The warning is throttled (once per
+   * {@link VOICE_DISABLED_LOG_INTERVAL_MS}) so the per-user invocations don't
+   * spam the logs.
+   */
+  private async isVoiceTrackingEnabled(): Promise<boolean> {
+    const enabled = await this.configService.getBoolean(
+      "voicetracking.enabled",
+      false,
+    );
+    if (!enabled) {
+      const now = Date.now();
+      if (
+        now - this.lastVoiceTrackingDisabledLogAt >=
+        AchievementsService.VOICE_DISABLED_LOG_INTERVAL_MS
+      ) {
+        this.lastVoiceTrackingDisabledLogAt = now;
+        logger.warn(
+          "Accolade/achievement evaluation skipped: voice tracking is disabled (voicetracking.enabled=false).",
+        );
+      }
+    }
+    return enabled;
+  }
+
+  /**
    * Check and award accolades (persistent badges) to a user
    * Returns newly earned accolades
    */
@@ -1025,6 +1060,10 @@ export class AchievementsService {
         false,
       );
       if (!isEnabled) {
+        return [];
+      }
+
+      if (!(await this.isVoiceTrackingEnabled())) {
         return [];
       }
 
@@ -1116,6 +1155,10 @@ export class AchievementsService {
       );
 
       if (!isEnabled) {
+        return [];
+      }
+
+      if (!(await this.isVoiceTrackingEnabled())) {
         return [];
       }
 

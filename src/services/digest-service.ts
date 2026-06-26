@@ -279,6 +279,20 @@ export class DigestService {
         return null;
       }
 
+      // Voice tracking is a hard dependency (#659): the digest ranks members
+      // by tracked voice time, so without it every DM would report empty/stale
+      // rankings. Mirror voice-channel-announcer.ts and short-circuit.
+      const trackingEnabled = await this.configService.getBoolean(
+        "voicetracking.enabled",
+        false,
+      );
+      if (!trackingEnabled) {
+        logger.warn(
+          "Digest run aborted: voice tracking is disabled (voicetracking.enabled=false).",
+        );
+        return null;
+      }
+
       const guildId = await this.configService.getString("GUILD_ID", "");
       if (!guildId) {
         logger.error("Digest run aborted: GUILD_ID not configured");
