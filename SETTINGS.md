@@ -198,6 +198,7 @@ Configure the quote management system.
 | `quotes.header_enabled` | `true` | Show informational header post in quote channel |
 | `quotes.header_pin_enabled` | `true` | Pin the header post for easy access |
 | `quotes.header_message_id` | `""` | Stores header message ID (managed automatically) |
+| `quotes.clear_on_sync` | `false` | Wipe and re-post the entire channel on each quote sync |
 
 **Notes:**
 
@@ -207,6 +208,9 @@ Configure the quote management system.
   Auto-recreated if deleted.
 - `quotes.header_pin_enabled` — Controls whether the header is pinned.
 - `quotes.header_message_id` — Managed by the bot.
+- `quotes.clear_on_sync` — When enabled, the quote channel is wiped and all
+  quotes are re-posted from scratch on each sync. Destructive and slow on large
+  collections; leave off unless you need a full rebuild.
 
 ---
 
@@ -983,6 +987,7 @@ leave the graph in a broken state.
 - `quotes.delete_roles` (string, default: "")
 - `quotes.header_enabled` (bool, default: true)
 - `quotes.header_pin_enabled` (bool, default: true)
+- `quotes.clear_on_sync` (bool, default: false)
 
 #### Notices
 
