@@ -99,6 +99,7 @@ const {
   computePeakMessageDay,
   computeTopTextChannels,
   extractYearlyReactionCount,
+  reactionActivityYears,
   messagesInWindow,
   formatFunComparison,
   formatHoursMinutes,
@@ -837,6 +838,10 @@ describe("RewindService.getDefaultRewindYear (#573)", () => {
     mockFindOneAch.mockReturnValue(lean(null));
     mockAggregateVc.mockResolvedValue([]);
     mockSnapFind.mockReturnValue(lean([]));
+    // Reset the shared config + reaction mocks (implementations survive
+    // clearAllMocks): tracking off, no reaction row, unless a test opts in.
+    mockGetBoolean.mockImplementation(async () => false);
+    mockFindOneReaction.mockReturnValue(lean(null));
   });
 
   it("lands on the prior year when the current year has no data", async () => {
@@ -860,6 +865,21 @@ describe("RewindService.getDefaultRewindYear (#573)", () => {
   it("falls back to the current year when the user has no data anywhere", async () => {
     const year = await makeSvc().getDefaultRewindYear("u1", "g1");
     expect(year).toBe(currentYear);
+  });
+
+  it("lands on a reaction-only past year when it is the newest data (#653)", async () => {
+    mockGetBoolean.mockImplementation(
+      async (key: string) => key === "reactiontracking.enabled",
+    );
+    mockFindOneReaction.mockReturnValueOnce(
+      lean({
+        yearlyGiven: { [String(currentYear - 1)]: 4 },
+        yearlyReceived: {},
+      }),
+    );
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(year).toBe(currentYear - 1);
   });
 
   it("considers snapshotted years that have outlived their raw data", async () => {
@@ -914,6 +934,10 @@ describe("RewindService snapshots (#574)", () => {
     mockSnapFindOne.mockReturnValue(lean(null));
     mockSnapFind.mockReturnValue(lean([]));
     mockSnapCreate.mockResolvedValue({});
+    // Reaction tracking off so getSummary's live path skips the reaction
+    // query (implementations survive clearAllMocks).
+    mockGetBoolean.mockImplementation(async () => false);
+    mockFindOneReaction.mockReturnValue(lean(null));
   });
 
   describe("normalizeSnapshotSummary", () => {
@@ -1226,6 +1250,40 @@ describe("RewindService reaction helpers (#653)", () => {
     });
   });
 
+  describe("reactionActivityYears", () => {
+    it("unions the distinct years across both buckets (object shape)", () => {
+      expect(
+        reactionActivityYears(
+          { "2024": 5, "2026": 9 },
+          { "2025": 2, "2026": 4 },
+        ).sort(),
+      ).toEqual([2024, 2025, 2026]);
+    });
+
+    it("reads Map buckets too (hydrated shape)", () => {
+      expect(
+        reactionActivityYears(
+          new Map([["2023", 1]]),
+          new Map([["2024", 3]]),
+        ).sort(),
+      ).toEqual([2023, 2024]);
+    });
+
+    it("skips non-positive counts and unparseable keys", () => {
+      expect(
+        reactionActivityYears({
+          "2024": 0,
+          "2025": 7,
+          notayear: 3,
+        } as Record<string, number>),
+      ).toEqual([2025]);
+    });
+
+    it("returns an empty array for nullish / empty buckets (zero-data)", () => {
+      expect(reactionActivityYears(null, undefined, {})).toEqual([]);
+    });
+  });
+
   describe("getSummary reaction wiring", () => {
     function lean<T>(value: T): { lean: () => Promise<T> } {
       return { lean: jest.fn(async () => value) };
@@ -1270,6 +1328,34 @@ describe("RewindService reaction helpers (#653)", () => {
       const summary = await makeSvc().getSummary("u1", "g1", 2026);
       expect(summary!.reactionsGiven).toBe(9);
       expect(summary!.reactionsReceived).toBe(4);
+    });
+
+    it("treats a reaction-only year as data and offers its years in the picker", async () => {
+      // No voice / text / achievements — reactions are the only activity.
+      mockFindOneReaction.mockReturnValueOnce(
+        lean({
+          yearlyGiven: { "2025": 3, "2026": 9 },
+          yearlyReceived: { "2026": 4 },
+        }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.hasData).toBe(true);
+      // Both reaction years are navigable, newest first.
+      expect(summary!.availableYears).toEqual([2026, 2025]);
+    });
+
+    it("does not mark hasData when the requested year has no reactions", async () => {
+      // Buckets exist for another year only — the requested 2026 is empty,
+      // so with no other activity the page stays in its empty state.
+      mockFindOneReaction.mockReturnValueOnce(
+        lean({ yearlyGiven: { "2024": 5 }, yearlyReceived: {} }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.hasData).toBe(false);
+      // 2024 is still offered so the user can navigate to it.
+      expect(summary!.availableYears).toEqual([2024]);
     });
 
     it("reads 0 for a year the user has no bucket entry for", async () => {
