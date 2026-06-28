@@ -10,6 +10,7 @@ const mockFindOneVc = jest.fn();
 const mockFindVc = jest.fn();
 const mockAggregateVc = jest.fn();
 const mockFindOneAch = jest.fn();
+const mockFindOneMsg = jest.fn();
 const mockSnapFindOne = jest.fn();
 const mockSnapFind = jest.fn();
 const mockSnapCreate = jest.fn();
@@ -35,6 +36,18 @@ jest.unstable_mockModule("../../src/models/user-achievements.js", () => ({
     findOne: mockFindOneAch,
   },
 }));
+
+// Text-message detail (#496). Only consulted when `messagetracking.enabled`
+// is on, so the default-off tests never touch it; the section-gating tests
+// (#665) enable the gate and supply rows through this double.
+jest.unstable_mockModule(
+  "../../src/models/message-activity-tracking.js",
+  () => ({
+    MessageActivityTracking: {
+      findOne: mockFindOneMsg,
+    },
+  }),
+);
 
 // Reaction activity (#653). `findOne(...).lean()` returns the per-year
 // buckets; the default `mockGetBoolean` leaves reaction tracking disabled so
@@ -516,6 +529,13 @@ describe("RewindService.getSummary", () => {
     mockSnapFindOne.mockReturnValue(lean(null));
     mockSnapFind.mockReturnValue(lean([]));
     mockSnapCreate.mockResolvedValue({});
+    // Rewind gates each section on its source feature (#665). These voice +
+    // achievements assertions expect both sections rendered, so enable them;
+    // text/reaction tracking stays off (those blocks opt in per-test).
+    mockGetBoolean.mockImplementation(
+      async (key: string) =>
+        key === "voicetracking.enabled" || key === "achievements.enabled",
+    );
   });
 
   it("returns hasData=false when the user has no sessions or achievements", async () => {
@@ -815,6 +835,190 @@ describe("RewindService.getSummary", () => {
   });
 });
 
+// Rewind is the graceful aggregator (#659/#665): it renders each section
+// only when that section's *source* feature is enabled, and is never blocked
+// or short-circuited because a source is off. These tests pin the per-section
+// gates for voice (`voicetracking.enabled`) and achievements
+// (`achievements.enabled`) alongside the pre-existing text gate.
+describe("RewindService.getSummary section gating (#665)", () => {
+  function lean<T>(value: T): { lean: () => Promise<T> } {
+    return { lean: jest.fn(async () => value) };
+  }
+  function selectLean<T>(value: T): {
+    select: () => { lean: () => Promise<T> };
+  } {
+    return { select: jest.fn(() => lean(value)) };
+  }
+
+  // A client with the caches the text/companion resolvers touch, so a fully
+  // enabled recap can resolve channel/user names instead of tripping the
+  // service's defensive try/catch and silently emptying the section.
+  function makeRichClient(): unknown {
+    return {
+      channels: { cache: { get: () => ({ name: "general" }) } },
+      guilds: { cache: { get: () => undefined } },
+      users: { cache: { get: () => undefined } },
+    } as unknown;
+  }
+
+  // The current year recomputes live (a past year would short-circuit to a
+  // snapshot before any gate runs), so use it for every case here.
+  const year = new Date().getUTCFullYear();
+
+  const sessions = [
+    {
+      startTime: new Date(`${year}-03-01T10:00:00Z`),
+      duration: 3600,
+      channelId: "general",
+      channelName: "general-vc",
+    },
+  ];
+  const achievementsDoc = {
+    accolades: [
+      { type: "night_owl", earnedAt: new Date(`${year}-04-01T00:00:00Z`) },
+    ],
+    achievements: [
+      { type: "weekly_active", earnedAt: new Date(`${year}-04-01T00:00:00Z`) },
+    ],
+  };
+  const messageDoc = {
+    recentMessages: [
+      { sentAt: new Date(`${year}-05-01T12:00:00Z`), channelId: "c1" },
+    ],
+  };
+  const reactionDoc = {
+    yearlyGiven: { [String(year)]: 5 },
+    yearlyReceived: { [String(year)]: 2 },
+  };
+
+  function enableOnly(...keys: string[]) {
+    mockGetBoolean.mockImplementation(async (key: string) =>
+      keys.includes(key),
+    );
+  }
+
+  function makeSvc() {
+    return RewindService.getInstance(
+      makeRichClient() as Parameters<typeof RewindService.getInstance>[0],
+    );
+  }
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    resetSingleton();
+    // Every source has data available; only the per-section gate decides
+    // whether it surfaces. Aggregates default to empty (rank/journey null),
+    // which is orthogonal to the gating under test.
+    mockFindOneVc.mockReturnValue(lean({ sessions }));
+    mockFindVc.mockReturnValue(selectLean([]));
+    mockFindOneAch.mockReturnValue(lean(achievementsDoc));
+    mockFindOneMsg.mockReturnValue(lean(messageDoc));
+    mockFindOneReaction.mockReturnValue(lean(reactionDoc));
+    mockAggregateVc.mockResolvedValue([]);
+    mockSnapFindOne.mockReturnValue(lean(null));
+    mockSnapFind.mockReturnValue(lean([]));
+    mockSnapCreate.mockResolvedValue({});
+  });
+
+  it("renders only the voice section when only voice tracking is enabled", async () => {
+    enableOnly("voicetracking.enabled");
+
+    const summary = await makeSvc().getSummary("u1", "g1", year);
+    expect(summary).not.toBeNull();
+    // Voice present...
+    expect(summary!.totalSeconds).toBe(3600);
+    expect(summary!.sessionCount).toBe(1);
+    expect(summary!.hasData).toBe(true);
+    // ...everything else hidden.
+    expect(summary!.accolades).toEqual([]);
+    expect(summary!.achievements).toEqual([]);
+    expect(summary!.messagesSent).toBe(0);
+    expect(summary!.reactionsGiven).toBe(0);
+    expect(summary!.reactionsReceived).toBe(0);
+    // Disabled sources are never queried.
+    expect(mockFindOneMsg).not.toHaveBeenCalled();
+    expect(mockFindOneReaction).not.toHaveBeenCalled();
+  });
+
+  it("renders only the achievements section when only achievements is enabled", async () => {
+    enableOnly("achievements.enabled");
+
+    const summary = await makeSvc().getSummary("u1", "g1", year);
+    expect(summary).not.toBeNull();
+    // Achievements present...
+    expect(summary!.accolades).toHaveLength(1);
+    expect(summary!.accolades[0].name).toBe("Night Owl");
+    expect(summary!.achievements).toHaveLength(1);
+    expect(summary!.achievements[0].name).toBe("Weekly Active");
+    expect(summary!.hasData).toBe(true);
+    // ...voice section hidden, including the independently-aggregated
+    // rank/journey, and the voice doc is never read.
+    expect(summary!.totalSeconds).toBe(0);
+    expect(summary!.sessionCount).toBe(0);
+    expect(summary!.annualRank).toBeNull();
+    expect(summary!.weeklyJourney).toEqual({
+      first: null,
+      last: null,
+      best: null,
+    });
+    expect(summary!.messagesSent).toBe(0);
+    expect(mockFindOneVc).not.toHaveBeenCalled();
+  });
+
+  it("renders only the text section when only message tracking is enabled", async () => {
+    enableOnly("messagetracking.enabled");
+
+    const summary = await makeSvc().getSummary("u1", "g1", year);
+    expect(summary).not.toBeNull();
+    // Text present...
+    expect(summary!.messagesSent).toBe(1);
+    expect(summary!.hasData).toBe(true);
+    // ...voice + achievements hidden.
+    expect(summary!.totalSeconds).toBe(0);
+    expect(summary!.accolades).toEqual([]);
+    expect(summary!.achievements).toEqual([]);
+    expect(summary!.reactionsGiven).toBe(0);
+    expect(mockFindOneVc).not.toHaveBeenCalled();
+  });
+
+  it("renders every section when all sources are enabled", async () => {
+    enableOnly(
+      "voicetracking.enabled",
+      "achievements.enabled",
+      "messagetracking.enabled",
+      "reactiontracking.enabled",
+    );
+
+    const summary = await makeSvc().getSummary("u1", "g1", year);
+    expect(summary).not.toBeNull();
+    expect(summary!.totalSeconds).toBe(3600);
+    expect(summary!.accolades).toHaveLength(1);
+    expect(summary!.achievements).toHaveLength(1);
+    expect(summary!.messagesSent).toBe(1);
+    expect(summary!.reactionsGiven).toBe(5);
+    expect(summary!.reactionsReceived).toBe(2);
+    expect(summary!.hasData).toBe(true);
+  });
+
+  it("still produces a summary (never blocks) when every source is disabled", async () => {
+    enableOnly();
+
+    const summary = await makeSvc().getSummary("u1", "g1", year);
+    // The aggregator degrades to an empty recap rather than failing — this
+    // is the inverse of a hard dependency: rewind is never rejected.
+    expect(summary).not.toBeNull();
+    expect(summary!.hasData).toBe(false);
+    expect(summary!.totalSeconds).toBe(0);
+    expect(summary!.accolades).toEqual([]);
+    expect(summary!.achievements).toEqual([]);
+    expect(summary!.messagesSent).toBe(0);
+    expect(summary!.reactionsGiven).toBe(0);
+    expect(mockFindOneVc).not.toHaveBeenCalled();
+    expect(mockFindOneMsg).not.toHaveBeenCalled();
+    expect(mockFindOneReaction).not.toHaveBeenCalled();
+  });
+});
+
 describe("RewindService.getDefaultRewindYear (#573)", () => {
   function lean<T>(value: T): { lean: () => Promise<T> } {
     return { lean: jest.fn(async () => value) };
@@ -934,9 +1138,13 @@ describe("RewindService snapshots (#574)", () => {
     mockSnapFindOne.mockReturnValue(lean(null));
     mockSnapFind.mockReturnValue(lean([]));
     mockSnapCreate.mockResolvedValue({});
-    // Reaction tracking off so getSummary's live path skips the reaction
-    // query (implementations survive clearAllMocks).
-    mockGetBoolean.mockImplementation(async () => false);
+    // Voice + achievements on so getSummary's live path renders those
+    // sections (#665); reaction tracking off so it skips the reaction query
+    // (implementations survive clearAllMocks).
+    mockGetBoolean.mockImplementation(
+      async (key: string) =>
+        key === "voicetracking.enabled" || key === "achievements.enabled",
+    );
     mockFindOneReaction.mockReturnValue(lean(null));
   });
 

@@ -602,10 +602,30 @@ export class RewindService {
       const dayZone =
         timeZone && isValidTimezone(timeZone) ? timeZone : undefined;
 
+      // Rewind is the graceful aggregator (#659): each section renders only
+      // when its own source feature is enabled, but enabling rewind itself is
+      // never gated on these — so these checks live here, never in any
+      // `dependsOn`. This mirrors the per-section gate the text/reaction
+      // blocks already apply (see `computeTextActivity`), so a recap with only
+      // a subset of sources on still renders the remaining sections cleanly.
+      const [voiceTrackingEnabled, achievementsEnabled] = await Promise.all([
+        this.configService.getBoolean("voicetracking.enabled", false),
+        this.configService.getBoolean("achievements.enabled", false),
+      ]);
+
       const [userDoc, achievementsDoc] = await Promise.all([
-        VoiceChannelTracking.findOne({ userId }).lean<{
-          sessions?: RawSession[];
-        }>(),
+        // The voice doc feeds only the voice section, so skip the read
+        // entirely when voice tracking is off — the section then renders from
+        // an empty session list, exactly as the text gate skips its query.
+        voiceTrackingEnabled
+          ? VoiceChannelTracking.findOne({ userId }).lean<{
+              sessions?: RawSession[];
+            }>()
+          : null,
+        // The achievements doc also feeds the year picker below
+        // (`collectAvailableYears`), so it is always read to keep every year
+        // navigable; only the rendered accolades/achievements section is gated
+        // on `achievements.enabled`.
         UserAchievements.findOne({ userId }).lean<{
           accolades?: Array<{ type: string; earnedAt: Date }>;
           achievements?: Array<{ type: string; earnedAt: Date }>;
@@ -645,21 +665,31 @@ export class RewindService {
       const longestSession = computeLongestSession(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
 
-      const accolades = (achievementsDoc?.accolades ?? [])
-        .filter((a) => a.earnedAt >= start && a.earnedAt < end)
-        .map((a) => {
-          const meta = lookupAccolade(a.type);
-          return meta ? { type: a.type, ...meta, earnedAt: a.earnedAt } : null;
-        })
-        .filter((a): a is RewindAchievement => a !== null);
+      // Accolades/achievements render only when the achievements feature is
+      // on; otherwise the section is hidden (empty), never blocking the recap.
+      const accolades = achievementsEnabled
+        ? (achievementsDoc?.accolades ?? [])
+            .filter((a) => a.earnedAt >= start && a.earnedAt < end)
+            .map((a) => {
+              const meta = lookupAccolade(a.type);
+              return meta
+                ? { type: a.type, ...meta, earnedAt: a.earnedAt }
+                : null;
+            })
+            .filter((a): a is RewindAchievement => a !== null)
+        : [];
 
-      const achievements = (achievementsDoc?.achievements ?? [])
-        .filter((a) => a.earnedAt >= start && a.earnedAt < end)
-        .map((a) => {
-          const meta = lookupAchievement(a.type);
-          return meta ? { type: a.type, ...meta, earnedAt: a.earnedAt } : null;
-        })
-        .filter((a): a is RewindAchievement => a !== null);
+      const achievements = achievementsEnabled
+        ? (achievementsDoc?.achievements ?? [])
+            .filter((a) => a.earnedAt >= start && a.earnedAt < end)
+            .map((a) => {
+              const meta = lookupAchievement(a.type);
+              return meta
+                ? { type: a.type, ...meta, earnedAt: a.earnedAt }
+                : null;
+            })
+            .filter((a): a is RewindAchievement => a !== null)
+        : [];
 
       // These reads are independent — run them concurrently so the
       // on-demand /me/rewind render doesn't pay their latency in series.
@@ -672,7 +702,13 @@ export class RewindService {
         storedCompanionNames,
       ] = await Promise.all([
         this.computeAnnualRank(userId, start, end, totalSeconds),
-        this.computeWeeklyJourney(userId, start, end),
+        // Weekly journey runs its own voice aggregate, so gate it on the same
+        // switch — when voice tracking is off the whole voice section
+        // (rank/journey included) stays hidden. computeAnnualRank already
+        // short-circuits to nulls via the zero totalSeconds above.
+        voiceTrackingEnabled
+          ? this.computeWeeklyJourney(userId, start, end)
+          : Promise.resolve({ first: null, last: null, best: null }),
         this.computeTextActivity(userId, guildId, start, end, dayZone),
         this.computeReactionActivity(userId, guildId, year),
         this.collectSnapshotYears(userId, guildId),
