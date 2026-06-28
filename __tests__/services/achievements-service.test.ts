@@ -47,6 +47,7 @@ import {
   type IVoiceChannelTracking,
 } from "../../src/models/voice-channel-tracking.js";
 import { UserNotificationPrefsService } from "../../src/services/user-notification-prefs-service.js";
+import logger from "../../src/utils/logger.js";
 
 // Helper that mimics a Mongoose query cursor over a fixed set of docs, so
 // tests can exercise the streaming `.find({}).cursor()` path.
@@ -82,8 +83,19 @@ function createAchievementsService(mockClient: Partial<Client>) {
 
 describe("AchievementsService", () => {
   let mockClient: Partial<Client>;
+  // The global ESM logger mock doesn't intercept the singleton the service
+  // imports, so spy on the real logger object (a shared module cache instance)
+  // to observe the voice-tracking-disabled warning. Fresh spy per test.
+  let warnSpy: ReturnType<typeof jest.spyOn>;
 
   beforeEach(() => {
+    warnSpy = jest
+      .spyOn(logger, "warn")
+      .mockImplementation((() => logger) as never);
+    // spyOn returns the same spy across tests once installed, so reset its
+    // call history each run to keep per-test assertions isolated.
+    warnSpy.mockClear();
+
     // Reconfigure mock methods for each test
     (UserAchievements.findOne as jest.Mock).mockResolvedValue(null);
     (UserAchievements.find as jest.Mock).mockReturnValue(mockFindCursor([]));
@@ -244,6 +256,46 @@ describe("AchievementsService", () => {
       expect(Array.isArray(result)).toBe(true);
     });
 
+    it("short-circuits and warns when voice tracking is disabled", async () => {
+      (VoiceChannelTracking.findOne as jest.Mock).mockClear();
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      // Achievements on, but its hard dependency (voice tracking) is off.
+      mockConfigService.getBoolean.mockImplementation(async (key: unknown) =>
+        key === "voicetracking.enabled" ? false : true,
+      );
+
+      const result = await service.checkAndAwardAccolades(
+        "user123",
+        "TestUser",
+      );
+
+      expect(result).toEqual([]);
+      // No badge evaluation: the per-user tracking lookup never runs.
+      expect(VoiceChannelTracking.findOne as jest.Mock).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("voice tracking is disabled"),
+      );
+    });
+
+    it("logs the voice-tracking-disabled warning once across many users", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      mockConfigService.getBoolean.mockImplementation(async (key: unknown) =>
+        key === "voicetracking.enabled" ? false : true,
+      );
+
+      await service.checkAndAwardAccolades("u1", "U1");
+      await service.checkAndAwardAccolades("u2", "U2");
+      await service.checkAndAwardAccolades("u3", "U3");
+
+      // Throttled: per-user invocations must not spam the log.
+      const warnCalls = warnSpy.mock.calls.filter((c) =>
+        String(c[0]).includes("voice tracking is disabled"),
+      );
+      expect(warnCalls).toHaveLength(1);
+    });
+
     it("should return empty when user has existing accolades already", async () => {
       const { service, mockConfigService } =
         createAchievementsService(mockClient);
@@ -301,6 +353,27 @@ describe("AchievementsService", () => {
         "TestUser",
       );
       expect(Array.isArray(result)).toBe(true);
+    });
+
+    it("short-circuits and warns when voice tracking is disabled", async () => {
+      (UserAchievements.findOne as jest.Mock).mockClear();
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      // Achievements on, but its hard dependency (voice tracking) is off.
+      mockConfigService.getBoolean.mockImplementation(async (key: unknown) =>
+        key === "voicetracking.enabled" ? false : true,
+      );
+
+      const result = await service.checkAndAwardAchievements(
+        "user123",
+        "TestUser",
+      );
+
+      expect(result).toEqual([]);
+      expect(UserAchievements.findOne as jest.Mock).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("voice tracking is disabled"),
+      );
     });
 
     it("should handle database errors gracefully", async () => {
