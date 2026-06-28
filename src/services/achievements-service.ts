@@ -57,10 +57,13 @@ export class AchievementsService {
   private configService: ConfigService;
   private isConnected: boolean = false;
 
-  // Voice tracking is a hard dependency (#659): accolades/achievements are
-  // evaluated against tracked voice sessions. The accolade/achievement checks
-  // fire once per session end (per user), so we throttle the "tracking
-  // disabled" warning instead of logging it for every user.
+  // Accolade/achievement evaluation is driven entirely by the session-end
+  // flow, whose hard dependency is voice tracking (#659): most badges score
+  // tracked voice sessions, and the few quote-based accolades are only
+  // evaluated here too (piggybacked on session end). When voice tracking is
+  // off we short-circuit the whole flow. Those checks fire once per session
+  // end (per user), so we throttle the "tracking disabled" warning instead of
+  // logging it for every user.
   private static readonly VOICE_DISABLED_LOG_INTERVAL_MS = 60 * 60 * 1000; // 1h
   private lastVoiceTrackingDisabledLogAt = 0;
 
@@ -1017,12 +1020,14 @@ export class AchievementsService {
   }
 
   /**
-   * Whether voice tracking — the hard dependency for every accolade and
-   * achievement (#659) — is enabled. When it is off we short-circuit before
-   * evaluating any badge logic against absent voice data, mirroring
-   * `voice-channel-announcer.ts`. The warning is throttled (once per
-   * {@link VOICE_DISABLED_LOG_INTERVAL_MS}) so the per-user invocations don't
-   * spam the logs.
+   * Whether voice tracking — the hard dependency of the session-end badge
+   * evaluation flow (#659) — is enabled. Most accolades/achievements score
+   * tracked voice sessions; the few quote-based accolades are voice-agnostic
+   * but are only evaluated via this same session-end flow, so when voice
+   * tracking is off we short-circuit the whole flow before touching any badge
+   * logic, mirroring `voice-channel-announcer.ts`. The warning is throttled
+   * (once per {@link VOICE_DISABLED_LOG_INTERVAL_MS}) so the per-user
+   * invocations don't spam the logs.
    */
   private async isVoiceTrackingEnabled(): Promise<boolean> {
     const enabled = await this.configService.getBoolean(
