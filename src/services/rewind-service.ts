@@ -2,6 +2,7 @@ import { Client } from "discord.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { UserAchievements } from "../models/user-achievements.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
+import { ReactionActivityTracking } from "../models/reaction-activity-tracking.js";
 import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { ConfigService } from "./config-service.js";
 import { ACCOLADE_METADATA } from "../content/accolades.js";
@@ -91,6 +92,16 @@ export interface RewindSummary {
   messagesSent: number;
   topTextChannels: RewindTextChannel[];
   peakMessageDay: { date: string; count: number } | null; // ISO date (YYYY-MM-DD)
+  // Reaction activity for the year (#653, a #570 spin-off). Reads as zero
+  // when reaction tracking is disabled or the user has no row. Sourced from
+  // the per-year `yearlyGiven` / `yearlyReceived` buckets on
+  // `ReactionActivityTracking`, which are keyed by **host-timezone** year at
+  // capture time — unlike the user-timezone day bucketing used for voice and
+  // text peaks (#524). The model retains only counts, not per-reaction
+  // timestamps, so these buckets cannot be re-bucketed into a user zone; the
+  // minor inconsistency is accepted (see the model header).
+  reactionsGiven: number;
+  reactionsReceived: number;
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
   accolades: RewindAchievement[];
@@ -104,8 +115,8 @@ export interface RewindSummary {
     best: RewindWeeklyRank | null;
   };
   // Years for which the user has any data (voice sessions, text-message
-  // activity, or achievements). Used by the page to render a small year
-  // picker.
+  // activity, reaction activity, or achievements). Used by the page to
+  // render a small year picker.
   availableYears: number[];
   // How this summary was produced (#574): "live" recomputes from raw
   // activity, "snapshot" is served verbatim from a frozen completed-year
@@ -119,7 +130,7 @@ export interface RewindSummary {
  * keep their stored version and are rendered tolerantly by
  * `normalizeSnapshotSummary`.
  */
-export const SNAPSHOT_SCHEMA_VERSION = 1;
+export const SNAPSHOT_SCHEMA_VERSION = 2;
 
 /** How many voice companions the Rewind card renders (#567). */
 export const TOP_COMPANIONS_SHOWN = 5;
@@ -348,6 +359,58 @@ export function computePeakMessageDay(
 }
 
 /**
+ * Pull a single year's reaction count out of a `yearly*` bucket (#653).
+ *
+ * The bucket is the model's `Map<"YYYY", number>` field. Mongoose returns
+ * Map fields as a real `Map` from a hydrated doc but as a plain object from
+ * a `.lean()` read, so we accept both shapes (plus null/undefined for a
+ * user with no row). Missing year, malformed value, or absent bucket all
+ * read as `0` so the caller and view never special-case empty data.
+ */
+export function extractYearlyReactionCount(
+  bucket: Map<string, number> | Record<string, number> | null | undefined,
+  year: number,
+): number {
+  if (!bucket) return 0;
+  const key = String(year);
+  const raw =
+    bucket instanceof Map
+      ? bucket.get(key)
+      : (bucket as Record<string, number>)[key];
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+/**
+ * The distinct numeric years present across a user's reaction buckets
+ * (#653), so reaction-only years stay navigable in the picker and the bare
+ * `/me/rewind` landing-year resolver — mirroring how text-activity years
+ * feed `availableYears`. Accepts the same Map / plain-object / nullish
+ * shapes as `extractYearlyReactionCount`; only `"YYYY"` keys with a
+ * positive count are counted, and unparseable keys are dropped.
+ */
+export function reactionActivityYears(
+  ...buckets: Array<
+    Map<string, number> | Record<string, number> | null | undefined
+  >
+): number[] {
+  const years = new Set<number>();
+  for (const bucket of buckets) {
+    if (!bucket) continue;
+    const entries =
+      bucket instanceof Map
+        ? bucket.entries()
+        : Object.entries(bucket as Record<string, number>);
+    for (const [key, value] of entries) {
+      const year = Number(key);
+      if (Number.isInteger(year) && typeof value === "number" && value > 0) {
+        years.add(year);
+      }
+    }
+  }
+  return [...years];
+}
+
+/**
  * Longest run of consecutive days that contain ≥1 session. Returns the
  * day count and the start/end ISO dates of the winning run. A single day
  * of activity counts as a streak of 1. Days are bucketed in UTC by
@@ -460,6 +523,10 @@ export function normalizeSnapshotSummary(
     messagesSent: s.messagesSent ?? 0,
     topTextChannels: s.topTextChannels ?? [],
     peakMessageDay: s.peakMessageDay ?? null,
+    // Snapshots frozen before #653 (schema v1) carry no reaction fields;
+    // default them to 0 so the card stays hidden rather than rendering NaN.
+    reactionsGiven: s.reactionsGiven ?? 0,
+    reactionsReceived: s.reactionsReceived ?? 0,
     longestStreakDays: s.longestStreakDays ?? 0,
     longestStreakRange: s.longestStreakRange ?? null,
     accolades: s.accolades ?? [],
@@ -600,12 +667,14 @@ export class RewindService {
         { annualRank, annualGuildMembers, percentAboveMedian },
         weeklyJourney,
         text,
+        reactions,
         snapshotYears,
         storedCompanionNames,
       ] = await Promise.all([
         this.computeAnnualRank(userId, start, end, totalSeconds),
         this.computeWeeklyJourney(userId, start, end),
         this.computeTextActivity(userId, guildId, start, end, dayZone),
+        this.computeReactionActivity(userId, guildId, year),
         this.collectSnapshotYears(userId, guildId),
         this.fetchStoredUsernames(companionCandidates.map((c) => c.userId)),
       ]);
@@ -629,18 +698,27 @@ export class RewindService {
         });
       }
 
-      // The picker should offer any year the user has either kind of data,
-      // plus any snapshotted year — those must stay navigable even after
-      // their raw sessions/messages have been truncated away (#574).
+      // The picker should offer any year the user has any kind of data
+      // (voice, text, or reactions), plus any snapshotted year — those must
+      // stay navigable even after their raw sessions/messages have been
+      // truncated away (#574). Reaction years come straight from the
+      // already-fetched per-year buckets, so no extra query (#653).
       const mergedYears = [
-        ...new Set([...availableYears, ...text.years, ...snapshotYears]),
+        ...new Set([
+          ...availableYears,
+          ...text.years,
+          ...reactions.years,
+          ...snapshotYears,
+        ]),
       ].sort((a, b) => b - a);
 
       const hasData =
         totalSeconds > 0 ||
         accolades.length > 0 ||
         achievements.length > 0 ||
-        text.messagesSent > 0;
+        text.messagesSent > 0 ||
+        reactions.given > 0 ||
+        reactions.received > 0;
 
       return {
         userId,
@@ -656,6 +734,8 @@ export class RewindService {
         messagesSent: text.messagesSent,
         topTextChannels: text.topTextChannels,
         peakMessageDay: text.peakMessageDay,
+        reactionsGiven: reactions.given,
+        reactionsReceived: reactions.received,
         longestStreakDays: streak.days,
         longestStreakRange:
           streak.startDate && streak.endDate
@@ -703,12 +783,17 @@ export class RewindService {
         achievements?: Array<{ earnedAt: Date }>;
       }>();
 
-      const [sessionAndAchievementYears, textYears, snapshotYears] =
-        await Promise.all([
-          this.collectAvailableYears(userId, achievementsDoc),
-          this.collectTextActivityYears(userId, guildId),
-          this.collectSnapshotYears(userId, guildId),
-        ]);
+      const [
+        sessionAndAchievementYears,
+        textYears,
+        reactionYears,
+        snapshotYears,
+      ] = await Promise.all([
+        this.collectAvailableYears(userId, achievementsDoc),
+        this.collectTextActivityYears(userId, guildId),
+        this.collectReactionActivityYears(userId, guildId),
+        this.collectSnapshotYears(userId, guildId),
+      ]);
 
       // Guard against a non-finite year slipping through any collector
       // (e.g. a corrupt `sentAt`/`earnedAt` yielding `NaN` — which passes a
@@ -718,6 +803,7 @@ export class RewindService {
       const years = [
         ...sessionAndAchievementYears,
         ...textYears,
+        ...reactionYears,
         ...snapshotYears,
       ].filter((y) => Number.isFinite(y));
       // No data anywhere → land on the (empty) current year, preserving
@@ -894,6 +980,42 @@ export class RewindService {
   }
 
   /**
+   * Distinct years present in the user's reaction buckets (#653). The
+   * reaction cousin of `collectTextActivityYears`, used purely for
+   * landing-year resolution so a reaction-only past year is still offered by
+   * the bare `/me/rewind` route. Respects the `reactiontracking.enabled`
+   * gate; a failure (or disabled feature) degrades to an empty list.
+   */
+  private async collectReactionActivityYears(
+    userId: string,
+    guildId: string,
+  ): Promise<number[]> {
+    try {
+      const enabled = await this.configService.getBoolean(
+        "reactiontracking.enabled",
+        false,
+      );
+      if (!enabled) return [];
+
+      const doc = await ReactionActivityTracking.findOne(
+        { userId, guildId },
+        { yearlyGiven: 1, yearlyReceived: 1 },
+      ).lean<{
+        yearlyGiven?: Map<string, number> | Record<string, number>;
+        yearlyReceived?: Map<string, number> | Record<string, number>;
+      }>();
+      if (!doc) return [];
+      return reactionActivityYears(doc.yearlyGiven, doc.yearlyReceived);
+    } catch (error) {
+      logger.warn(
+        `RewindService.collectReactionActivityYears failed for ${userId}:`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /**
    * Years for which we have any data (sessions or achievements). Used by
    * the year picker so the page only offers years that won't render an
    * empty state. Reuses the already-fetched achievements doc to avoid a
@@ -998,6 +1120,60 @@ export class RewindService {
     } catch (error) {
       logger.warn(
         `RewindService.computeTextActivity failed for ${userId}:`,
+        error,
+      );
+      return empty;
+    }
+  }
+
+  /**
+   * Read the user's reaction activity for the year (#653). One indexed
+   * `(userId, guildId)` lookup pulling just the two `yearly*` buckets, then
+   * the requested year's count out of each — consistent with the model's
+   * "read a single year's count in one lookup" design. Returns zero when
+   * reaction tracking is disabled (per the gate) or the user has no row, so
+   * the view can hide the card without special-casing.
+   *
+   * Note: unlike the voice/text peaks, these buckets are keyed by
+   * host-timezone year at capture time and intentionally retain no
+   * per-reaction timestamps, so they are *not* re-bucketed into the user's
+   * zone — see the `RewindSummary` field comment and the model header.
+   *
+   * `years` reflects every year present in either bucket so reaction-only
+   * years stay navigable in the picker, mirroring `computeTextActivity`.
+   */
+  private async computeReactionActivity(
+    userId: string,
+    guildId: string,
+    year: number,
+  ): Promise<{ given: number; received: number; years: number[] }> {
+    const empty = { given: 0, received: 0, years: [] as number[] };
+    try {
+      const enabled = await this.configService.getBoolean(
+        "reactiontracking.enabled",
+        false,
+      );
+      if (!enabled) return empty;
+
+      const doc = await ReactionActivityTracking.findOne(
+        { userId, guildId },
+        // Only the per-year buckets are needed — skip lifetime totals
+        // (which span all years) and the username/timestamp fields.
+        { yearlyGiven: 1, yearlyReceived: 1 },
+      ).lean<{
+        yearlyGiven?: Map<string, number> | Record<string, number>;
+        yearlyReceived?: Map<string, number> | Record<string, number>;
+      }>();
+      if (!doc) return empty;
+
+      return {
+        given: extractYearlyReactionCount(doc.yearlyGiven, year),
+        received: extractYearlyReactionCount(doc.yearlyReceived, year),
+        years: reactionActivityYears(doc.yearlyGiven, doc.yearlyReceived),
+      };
+    } catch (error) {
+      logger.warn(
+        `RewindService.computeReactionActivity failed for ${userId}:`,
         error,
       );
       return empty;

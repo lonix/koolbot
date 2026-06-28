@@ -713,6 +713,8 @@ describe("/me/rewind", () => {
       messagesSent: 0,
       topTextChannels: [],
       peakMessageDay: null,
+      reactionsGiven: 0,
+      reactionsReceived: 0,
       longestStreakDays: 4,
       longestStreakRange: { startDate: "2026-03-12", endDate: "2026-03-15" },
       accolades: [],
@@ -813,6 +815,28 @@ describe("/me/rewind", () => {
     });
     expect(out.statusCode).toBe(200);
     expect(out.body).not.toContain("Text activity");
+  });
+
+  it("renders the reaction-activity block when reaction data exists (#653)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({ reactionsGiven: 24, reactionsReceived: 9 }),
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("Reactions");
+    expect(out.body).toContain("Reactions given");
+    expect(out.body).toContain("24");
+    expect(out.body).toContain("Reactions received");
+    expect(out.body).toContain("9");
+  });
+
+  it("hides the reaction-activity block when both counts are 0 (#653)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary(), // reactions default to 0
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).not.toContain("Reactions given");
   });
 
   it("renders the empty-state body when the user has no data", async () => {

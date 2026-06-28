@@ -824,7 +824,7 @@ slash command** — the Web UI is the admin surface.
 | **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.            |
 | **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row.  |
 | **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
-| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, annual rank, weekly-rank journey, and text activity. |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.      |
 
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;

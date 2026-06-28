@@ -484,9 +484,15 @@ the user's **/me/notifications** page (no slash command).
 ## ✨ Rewind (Year-in-Review)
 
 Per-user year-in-review page at **`/me/rewind`** (also `/me/rewind/:year`
-for past years). Renders total voice time, top channels, peak day,
-longest streak, badges earned, annual rank, and a first/best/last
-weekly-rank journey. Year picker bottom-anchored to years with data.
+for past years). Renders total voice time, top voice companions, peak day,
+longest session, longest streak, badges earned, annual rank, a
+first/best/last weekly-rank journey, text activity, and reaction activity
+(given / received). Year picker bottom-anchored to years with data.
+
+The text- and reaction-activity blocks read from `MessageActivityTracking`
+and `ReactionActivityTracking` respectively, and only appear when their
+tracking is enabled (`messagetracking.enabled` / `reactiontracking.enabled`)
+and the user has data for the year — otherwise the block is hidden.
 
 The feature and the end-of-year DM nudge have **separate** switches
 (#608). `rewind.enabled` gates the page itself; `rewind.nudge.enabled`
