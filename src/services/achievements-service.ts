@@ -777,6 +777,13 @@ export class AchievementsService {
         };
       },
     },
+    // Two poll-participation tiers (#654 shipped Poll Regular; #655 adds the
+    // Poll Devotee tier). Both score the lifetime `totalVotes` counter via the
+    // shared `getPollTracking` helper and are gated behind
+    // `polls.participation.enabled` in ACCOLADE_ENABLED_KEYS. We score counts,
+    // not a streak: the model stores per-year/lifetime counters only, with no
+    // per-poll record, so a true "voted N polls/weeks running" streak would
+    // need new high-volume capture (deferred — see #655).
     poll_regular: {
       checkFunction: async (userId: string) => {
         const doc = await this.getPollTracking(userId);
@@ -787,6 +794,20 @@ export class AchievementsService {
         return {
           value: doc?.totalVotes ?? 0,
           description: "25 poll votes cast",
+          unit: "votes",
+        };
+      },
+    },
+    poll_devotee: {
+      checkFunction: async (userId: string) => {
+        const doc = await this.getPollTracking(userId);
+        return (doc?.totalVotes ?? 0) >= 50;
+      },
+      metadataFunction: async (userId: string) => {
+        const doc = await this.getPollTracking(userId);
+        return {
+          value: doc?.totalVotes ?? 0,
+          description: "50 poll votes cast",
           unit: "votes",
         };
       },
@@ -828,6 +849,7 @@ export class AchievementsService {
     chatterbox: 1000,
     reactor: 500,
     poll_regular: 25,
+    poll_devotee: 50,
   };
 
   // Capture key that must be true for an accolade to be awarded or shown as
@@ -838,6 +860,7 @@ export class AchievementsService {
     chatterbox: "messagetracking.enabled",
     reactor: "reactiontracking.enabled",
     poll_regular: "polls.participation.enabled",
+    poll_devotee: "polls.participation.enabled",
   };
 
   // Awarding logic per achievement (display metadata lives in

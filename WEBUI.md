@@ -862,6 +862,12 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.      |
 
+When `polls.participation.enabled` is on and you have voted on at least
+one poll, the **Overview** page also shows a read-only **Poll
+participation** card — lifetime votes, this-year votes, and when you last
+voted (#655). The same per-year count surfaces on **Rewind** as the
+**Poll votes cast** stat, hidden in any year you cast no votes.
+
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;
 toggling one row is a single POST that records the diff in the audit

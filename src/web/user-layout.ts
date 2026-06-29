@@ -310,6 +310,16 @@ export function renderUserIndexBody(opts: {
   // Whether the feature-gated Voice page is enabled (#656). When false,
   // its card is omitted so the overview never links to a disabled page.
   presetsEnabled?: boolean;
+  // The member's poll-participation summary (#655), or null/undefined when
+  // poll-participation capture is off or the member has never voted. When
+  // present, a small read-only "Poll participation" card surfaces their
+  // lifetime + this-year votes and when they last voted. `lastVoted` is a
+  // pre-formatted ISO date (or null when never).
+  pollParticipation?: {
+    totalVotes: number;
+    thisYearVotes: number;
+    lastVoted: string | null;
+  } | null;
 }): string {
   const greeting = opts.isAdmin
     ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Back to admin panel</em> link above to manage the server.</p>`
@@ -324,6 +334,29 @@ export function renderUserIndexBody(opts: {
       ? ""
       : '<li><span class="feature-name"><a href="/me/voice">Voice</a></span>' +
         '<span class="feature-desc">Manage your channel name pattern and saved voice-channel presets.</span></li>';
+  // Read-only poll-participation summary (#655). Only rendered when the
+  // route supplies a summary (capture on + the member has a tracking row).
+  const poll = opts.pollParticipation;
+  const pollCard = poll
+    ? [
+        '<div class="card">',
+        "<h2>Poll participation</h2>",
+        '<p class="muted">Your votes on server polls. Capture this and ' +
+          "you'll see your yearly tally on Rewind too.</p>",
+        '<div class="rw-grid">',
+        '<div class="rw-stat"><div class="label">Votes cast (all time)</div>' +
+          `<div class="value">${poll.totalVotes}</div></div>`,
+        '<div class="rw-stat"><div class="label">Votes cast this year</div>' +
+          `<div class="value">${poll.thisYearVotes}</div></div>`,
+        '<div class="rw-stat"><div class="label">Last voted</div>' +
+          (poll.lastVoted
+            ? `<div class="value">${escapeHtml(poll.lastVoted)}</div></div>`
+            : '<div class="value">—</div></div>'),
+        "</div>",
+        "</div>",
+      ].join("")
+    : "";
+
   return [
     "<h1>My preferences</h1>",
     greeting,
@@ -341,6 +374,7 @@ export function renderUserIndexBody(opts: {
     rewindCard,
     "</ul>",
     "</div>",
+    pollCard,
     '<div class="card">',
     "<h2>Account context</h2>",
     `<p class="mono">User: ${escapeHtml(opts.discordUserId)} · Guild: ${escapeHtml(opts.guildId)}</p>`,
@@ -419,6 +453,9 @@ export interface RewindBodyOptions {
   // empty / all-zero (no data or voice tracking off).
   hourOfDayDistribution: number[];
   dayOfWeekDistribution: number[];
+  // Poll votes cast for the year (#655). The stat is hidden when 0 (no data
+  // or poll-participation capture off).
+  pollVotesCast: number;
 }
 
 function renderYearPicker(current: number, years: number[]): string {
@@ -634,6 +671,25 @@ function renderActivityHeatmap(opts: RewindBodyOptions): string {
   );
 }
 
+/**
+ * Poll-participation stat (#655). A single "Votes cast" stat reusing the
+ * voice/text/reaction `.rw-stat` styling. Returns "" when the user cast no
+ * votes this year (no data or poll-participation capture off) so the route
+ * can append it unconditionally and the block simply disappears.
+ */
+function renderPollActivity(opts: RewindBodyOptions): string {
+  const votes = opts.pollVotesCast > 0 ? opts.pollVotesCast : 0;
+  if (votes <= 0) return "";
+
+  return [
+    "<h2>Polls</h2>",
+    '<div class="rw-grid">',
+    '<div class="rw-stat"><div class="label">Poll votes cast</div>' +
+      `<div class="value">${votes}</div></div>`,
+    "</div>",
+  ].join("");
+}
+
 export function renderUserRewindBody(opts: RewindBodyOptions): string {
   const years = opts.availableYears.includes(opts.year)
     ? opts.availableYears
@@ -737,6 +793,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     renderTextActivity(opts),
     renderReactionActivity(opts),
     renderActivityHeatmap(opts),
+    renderPollActivity(opts),
     '<div class="card"><h2>Rank journey</h2>' +
       renderJourney(opts.weeklyJourney) +
       "</div>",

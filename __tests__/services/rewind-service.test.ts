@@ -62,6 +62,20 @@ jest.unstable_mockModule(
   }),
 );
 
+// Poll participation (#655). `findOne(...).lean()` returns the per-year
+// `yearlyVotes` bucket; the default `mockGetBoolean` leaves
+// `polls.participation.enabled` off so existing getSummary tests never reach
+// this model.
+const mockFindOnePoll = jest.fn();
+jest.unstable_mockModule(
+  "../../src/models/poll-participation-tracking.js",
+  () => ({
+    PollParticipationTracking: {
+      findOne: mockFindOnePoll,
+    },
+  }),
+);
+
 // Config is consulted by `computeTextActivity` / `computeReactionActivity`
 // for their `*.enabled` gates. Default everything off so the voice-only
 // tests are unaffected; individual tests override per key as needed.
@@ -1051,6 +1065,9 @@ describe("RewindService.getSummary section gating (#665)", () => {
     yearlyGiven: { [String(year)]: 5 },
     yearlyReceived: { [String(year)]: 2 },
   };
+  const pollDoc = {
+    yearlyVotes: { [String(year)]: 7 },
+  };
 
   function enableOnly(...keys: string[]) {
     mockGetBoolean.mockImplementation(async (key: string) =>
@@ -1075,6 +1092,7 @@ describe("RewindService.getSummary section gating (#665)", () => {
     mockFindOneAch.mockReturnValue(lean(achievementsDoc));
     mockFindOneMsg.mockReturnValue(lean(messageDoc));
     mockFindOneReaction.mockReturnValue(lean(reactionDoc));
+    mockFindOnePoll.mockReturnValue(lean(pollDoc));
     mockAggregateVc.mockResolvedValue([]);
     mockSnapFindOne.mockReturnValue(lean(null));
     mockSnapFind.mockReturnValue(lean([]));
@@ -1149,12 +1167,30 @@ describe("RewindService.getSummary section gating (#665)", () => {
     expect(mockFindOneAch).not.toHaveBeenCalled();
   });
 
+  it("renders only the polls section when only poll participation is enabled", async () => {
+    enableOnly("polls.participation.enabled");
+
+    const summary = await makeSvc().getSummary("u1", "g1", year);
+    expect(summary).not.toBeNull();
+    // Polls present...
+    expect(summary!.pollVotesCast).toBe(7);
+    expect(summary!.hasData).toBe(true);
+    // ...every other source hidden and never queried.
+    expect(summary!.totalSeconds).toBe(0);
+    expect(summary!.reactionsGiven).toBe(0);
+    expect(summary!.messagesSent).toBe(0);
+    expect(mockFindOneVc).not.toHaveBeenCalled();
+    expect(mockFindOneAch).not.toHaveBeenCalled();
+    expect(mockFindOneReaction).not.toHaveBeenCalled();
+  });
+
   it("renders every section when all sources are enabled", async () => {
     enableOnly(
       "voicetracking.enabled",
       "achievements.enabled",
       "messagetracking.enabled",
       "reactiontracking.enabled",
+      "polls.participation.enabled",
     );
 
     const summary = await makeSvc().getSummary("u1", "g1", year);
@@ -1165,6 +1201,7 @@ describe("RewindService.getSummary section gating (#665)", () => {
     expect(summary!.messagesSent).toBe(1);
     expect(summary!.reactionsGiven).toBe(5);
     expect(summary!.reactionsReceived).toBe(2);
+    expect(summary!.pollVotesCast).toBe(7);
     expect(summary!.hasData).toBe(true);
   });
 
@@ -1181,12 +1218,14 @@ describe("RewindService.getSummary section gating (#665)", () => {
     expect(summary!.achievements).toEqual([]);
     expect(summary!.messagesSent).toBe(0);
     expect(summary!.reactionsGiven).toBe(0);
+    expect(summary!.pollVotesCast).toBe(0);
     // No source is queried at all when everything is off.
     expect(mockFindOneVc).not.toHaveBeenCalled();
     expect(mockAggregateVc).not.toHaveBeenCalled();
     expect(mockFindOneAch).not.toHaveBeenCalled();
     expect(mockFindOneMsg).not.toHaveBeenCalled();
     expect(mockFindOneReaction).not.toHaveBeenCalled();
+    expect(mockFindOnePoll).not.toHaveBeenCalled();
   });
 });
 
@@ -1222,6 +1261,7 @@ describe("RewindService.getDefaultRewindYear (#573)", () => {
         key === "voicetracking.enabled" || key === "achievements.enabled",
     );
     mockFindOneReaction.mockReturnValue(lean(null));
+    mockFindOnePoll.mockReturnValue(lean(null));
   });
 
   it("lands on the prior year when the current year has no data", async () => {
@@ -1256,6 +1296,18 @@ describe("RewindService.getDefaultRewindYear (#573)", () => {
         yearlyGiven: { [String(currentYear - 1)]: 4 },
         yearlyReceived: {},
       }),
+    );
+
+    const year = await makeSvc().getDefaultRewindYear("u1", "g1");
+    expect(year).toBe(currentYear - 1);
+  });
+
+  it("lands on a poll-only past year when it is the newest data (#655)", async () => {
+    mockGetBoolean.mockImplementation(
+      async (key: string) => key === "polls.participation.enabled",
+    );
+    mockFindOnePoll.mockReturnValueOnce(
+      lean({ yearlyVotes: { [String(currentYear - 1)]: 6 } }),
     );
 
     const year = await makeSvc().getDefaultRewindYear("u1", "g1");
@@ -1386,6 +1438,22 @@ describe("RewindService snapshots (#574)", () => {
       );
       expect(norm.reactionsGiven).toBe(11);
       expect(norm.reactionsReceived).toBe(4);
+    });
+
+    it("defaults pollVotesCast to 0 for pre-#655 (schema ≤ v3) snapshots", () => {
+      const norm = normalizeSnapshotSummary(
+        { totalSeconds: 5, hasData: true },
+        { userId: "u", guildId: "g", year: 2021 },
+      );
+      expect(norm.pollVotesCast).toBe(0);
+    });
+
+    it("preserves a stored pollVotesCast when present", () => {
+      const norm = normalizeSnapshotSummary(
+        { pollVotesCast: 17 },
+        { userId: "u", guildId: "g", year: 2021 },
+      );
+      expect(norm.pollVotesCast).toBe(17);
     });
   });
 
@@ -1767,6 +1835,84 @@ describe("RewindService reaction helpers (#653)", () => {
       const summary = await makeSvc().getSummary("u1", "g1", 2026);
       expect(summary!.reactionsGiven).toBe(0);
       expect(summary!.reactionsReceived).toBe(0);
+    });
+  });
+
+  describe("getSummary poll-participation wiring (#655)", () => {
+    function lean<T>(value: T): { lean: () => Promise<T> } {
+      return { lean: jest.fn(async () => value) };
+    }
+    function selectLean<T>(value: T): {
+      select: () => { lean: () => Promise<T> };
+    } {
+      return { select: jest.fn(() => lean(value)) };
+    }
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      resetSingleton();
+      mockFindOneVc.mockReturnValue(lean({ sessions: [] }));
+      mockFindVc.mockReturnValue(selectLean([]));
+      mockFindOneAch.mockReturnValue(lean(null));
+      mockAggregateVc.mockResolvedValue([]);
+      mockSnapFindOne.mockReturnValue(lean(null));
+      mockSnapFind.mockReturnValue(lean([]));
+      mockSnapCreate.mockResolvedValue({});
+      mockFindOnePoll.mockReturnValue(lean(null));
+      // Poll-participation capture on by default for this block; other gates off.
+      mockGetBoolean.mockImplementation(
+        async (key: string) => key === "polls.participation.enabled",
+      );
+    });
+
+    function makeSvc() {
+      return RewindService.getInstance(
+        makeClient() as Parameters<typeof RewindService.getInstance>[0],
+      );
+    }
+
+    it("surfaces the requested year's votes cast", async () => {
+      mockFindOnePoll.mockReturnValueOnce(
+        lean({ yearlyVotes: { "2025": 3, "2026": 9 } }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.pollVotesCast).toBe(9);
+    });
+
+    it("treats a poll-only year as data and offers its years in the picker", async () => {
+      mockFindOnePoll.mockReturnValueOnce(
+        lean({ yearlyVotes: { "2025": 3, "2026": 9 } }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.hasData).toBe(true);
+      expect(summary!.availableYears).toEqual([2026, 2025]);
+    });
+
+    it("does not mark hasData when the requested year has no votes", async () => {
+      mockFindOnePoll.mockReturnValueOnce(
+        lean({ yearlyVotes: { "2024": 5 } }),
+      );
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.hasData).toBe(false);
+      expect(summary!.availableYears).toEqual([2024]);
+    });
+
+    it("reads 0 (and never queries the model) when capture is off", async () => {
+      mockGetBoolean.mockImplementation(async () => false);
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.pollVotesCast).toBe(0);
+      expect(mockFindOnePoll).not.toHaveBeenCalled();
+    });
+
+    it("reads 0 when the user has no poll row", async () => {
+      mockFindOnePoll.mockReturnValueOnce(lean(null));
+
+      const summary = await makeSvc().getSummary("u1", "g1", 2026);
+      expect(summary!.pollVotesCast).toBe(0);
     });
   });
 });

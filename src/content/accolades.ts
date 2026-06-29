@@ -143,6 +143,12 @@ export const ACCOLADE_METADATA = {
     name: "Poll Regular",
     description: "Cast 25 poll votes",
   },
+  // Second poll-participation tier (#655), one rung above Poll Regular.
+  poll_devotee: {
+    emoji: "📊",
+    name: "Poll Devotee",
+    description: "Cast 50 poll votes",
+  },
 } as const;
 
 export type AccoladeType = keyof typeof ACCOLADE_METADATA;

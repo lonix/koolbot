@@ -58,6 +58,7 @@ import {
   formatFunComparison,
   formatHoursMinutes,
 } from "../services/rewind-service.js";
+import { PollParticipationTracker } from "../services/poll-participation-tracker.js";
 import { recordAudit } from "./audit.js";
 import { renderSignedOut } from "./views.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -216,6 +217,18 @@ async function isVoicePresetsEnabled(): Promise<boolean> {
 }
 
 /**
+ * Whether per-user poll-participation capture is enabled (#655). Gates the
+ * read-only "Poll participation" card on the `/me/` overview: when off we
+ * skip the lookup entirely and the card is omitted (no rows exist anyway).
+ */
+async function isPollParticipationEnabled(): Promise<boolean> {
+  return ConfigService.getInstance().getBoolean(
+    "polls.participation.enabled",
+    false,
+  );
+}
+
+/**
  * Whether birthday celebrations are enabled (#657). Used only to soften
  * the `/me/birthday` page copy — the page stays reachable either way so
  * members can pre-set their date before an admin flips the feature on.
@@ -328,6 +341,16 @@ export function createUserRouter(
       }
       const rewindEnabled = await isRewindFeatureEnabled();
       const presetsEnabled = await isVoicePresetsEnabled();
+
+      // Read-only poll-participation summary for the overview card (#655).
+      // Only fetched when capture is on; a member who has never voted has no
+      // row, so `getParticipationSummary` returns null and the card is hidden.
+      const pollParticipation = (await isPollParticipationEnabled())
+        ? await PollParticipationTracker.getInstance(
+            client,
+          ).getParticipationSummary(session.discordUserId, session.guildId)
+        : null;
+
       res.type("text/html").send(
         renderUserPage({
           title: "Overview",
@@ -338,6 +361,15 @@ export function createUserRouter(
             isAdmin: session.role === "admin",
             rewindEnabled,
             presetsEnabled,
+            pollParticipation: pollParticipation
+              ? {
+                  totalVotes: pollParticipation.totalVotes,
+                  thisYearVotes: pollParticipation.thisYearVotes,
+                  lastVoted: pollParticipation.lastVoteAt
+                    ? pollParticipation.lastVoteAt.toISOString().slice(0, 10)
+                    : null,
+                }
+              : null,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
@@ -844,6 +876,7 @@ export function createUserRouter(
           reactionsReceived: summary.reactionsReceived,
           hourOfDayDistribution: summary.hourOfDayDistribution ?? [],
           dayOfWeekDistribution: summary.dayOfWeekDistribution ?? [],
+          pollVotesCast: summary.pollVotesCast,
         }),
         csrfToken: getCsrfToken(req),
         remainingMs: getDisplayedRemainingMs(session),
