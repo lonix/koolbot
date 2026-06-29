@@ -2,6 +2,11 @@ FROM node:24-alpine
 
 WORKDIR /app
 
+# Refresh the npm bundled in the base image so its undici/tar copies are patched
+# (mirrors the production Dockerfile; clears Trivy #142-#146 base-image findings).
+# hadolint ignore=DL3016
+RUN npm install -g npm@latest --no-audit --no-fund && npm cache clean --force
+
 # Install development dependencies
 COPY package*.json ./
 RUN npm install --include=dev
