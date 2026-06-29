@@ -256,9 +256,16 @@ describe("AchievementsService — progress & engagement (#654)", () => {
 
     it("weekly_consistent counts distinct active days", async () => {
       const service = createService();
+      // Five distinct days *within this week* (Mon-Fri at noon). The leading
+      // edge is already inside the week, so clipping leaves the day bucketing
+      // intact and the check must see five distinct active days.
       const sessions = [0, 1, 2, 3, 4].map((d) => ({
-        startTime: new Date(Date.UTC(2026, 0, 5 + d, 12, 0, 0)),
-        endTime: new Date(weekStart.getTime() + 3600_000),
+        startTime: new Date(
+          weekStart.getTime() + d * 86400_000 + 12 * 3600_000,
+        ),
+        endTime: new Date(
+          weekStart.getTime() + d * 86400_000 + 12 * 3600_000 + 600_000,
+        ),
         duration: 600,
         otherUsers: [],
       }));
@@ -286,6 +293,27 @@ describe("AchievementsService — progress & engagement (#654)", () => {
       const logic = achievementLogic(service, "weekly_night_owl");
       expect(await logic.checkFunction("u", null, "UTC")).toBe(true);
       expect((await logic.metadataFunction("u", null, "UTC")).value).toBe(6);
+    });
+
+    it("clips a session straddling the week boundary to in-week time", async () => {
+      const service = createService();
+      // Sunday 23:00 UTC -> Monday 02:00 UTC. Unclipped this is 3 late-night
+      // hours; clipped to Monday 00:00 it is only the 2 in-week hours.
+      (VoiceChannelTracking.findOne as jest.Mock).mockResolvedValue({
+        sessions: [
+          {
+            startTime: new Date(weekStart.getTime() - 3600_000),
+            endTime: new Date(weekStart.getTime() + 2 * 3600_000),
+            duration: 3 * 3600,
+            otherUsers: [],
+          },
+        ],
+      });
+      const meta = await achievementLogic(
+        service,
+        "weekly_night_owl",
+      ).metadataFunction("u", null, "UTC");
+      expect(meta.value).toBe(2);
     });
   });
 

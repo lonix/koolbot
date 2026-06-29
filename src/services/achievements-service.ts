@@ -59,6 +59,19 @@ interface BadgeLogic {
 }
 
 /**
+ * A voice session clipped to the current week for the weekly_* achievement
+ * checks (#654). `startTime` is the later of the raw start and Monday 00:00
+ * UTC, and `duration` is recomputed from that clipped window, so weekly checks
+ * never count time that bled in from before the week.
+ */
+interface WeeklySession {
+  startTime: Date;
+  endTime: Date;
+  duration: number;
+  otherUsers: string[];
+}
+
+/**
  * One row of the "closest unearned accolades" progress display (#654),
  * surfaced under the earned list in `/achievements`.
  */
@@ -778,10 +791,14 @@ export class AchievementsService {
   // Numeric goal (in the unit returned by each accolade's metadataFunction)
   // used to render progress bars for *unearned* threshold accolades (#654).
   // Types absent here are excluded from the progress display.
+  // `first_hour` and `quotable` are intentionally omitted: their target is 1,
+  // and the progress display filters out both `current <= 0` and
+  // `current >= target`, so with no integer strictly between 0 and 1 they could
+  // never render — listing them would only add wasted evaluation (a quote
+  // lookup, in `quotable`'s case).
   private static readonly ACCOLADE_PROGRESS_TARGETS: Partial<
     Record<AccoladeType, number>
   > = {
-    first_hour: 1,
     voice_veteran_100: 100,
     voice_veteran_500: 500,
     voice_veteran_1000: 1000,
@@ -797,7 +814,6 @@ export class AchievementsService {
     consistent_week: 7,
     consistent_fortnight: 14,
     consistent_month: 30,
-    quotable: 1,
     quote_master: 10,
     quote_collector: 50,
     quote_legend: 100,
@@ -1155,18 +1171,39 @@ export class AchievementsService {
   }
 
   /**
-   * This week's sessions for a user (those ending on/after Monday 00:00 UTC).
-   * Used by the weekly_* achievement checks (#654).
+   * This week's sessions for a user, clipped to the week boundary. A session
+   * counts when it ends on/after Monday 00:00 UTC; its leading edge is then
+   * clamped to that boundary (mirroring `getWeeklyTimeForUser`'s overlap
+   * handling) and its duration recomputed, so a session straddling the
+   * boundary contributes only its in-week portion to the weekly_* checks
+   * (late-night seconds, active-day bucketing, session length). Used by the
+   * weekly_* achievement checks (#654).
    */
-  private async getWeeklySessions(
-    userId: string,
-  ): Promise<IVoiceChannelTracking["sessions"]> {
+  private async getWeeklySessions(userId: string): Promise<WeeklySession[]> {
     const user = await VoiceChannelTracking.findOne({ userId });
     if (!user?.sessions?.length) return [];
     const startOfWeek = this.getStartOfWeekUtc();
-    return user.sessions.filter(
-      (s) => s.endTime && new Date(s.endTime) >= startOfWeek,
-    );
+
+    const weekly: WeeklySession[] = [];
+    for (const session of user.sessions) {
+      if (!session.endTime) continue;
+      const end = new Date(session.endTime);
+      if (end < startOfWeek) continue;
+
+      const rawStart = new Date(session.startTime);
+      const start = rawStart < startOfWeek ? startOfWeek : rawStart;
+      const duration = Math.max(
+        0,
+        Math.floor((end.getTime() - start.getTime()) / 1000),
+      );
+      weekly.push({
+        startTime: start,
+        endTime: end,
+        duration,
+        otherUsers: session.otherUsers ?? [],
+      });
+    }
+    return weekly;
   }
 
   /**
@@ -1218,6 +1255,12 @@ export class AchievementsService {
    * tracking collection directly to avoid a service dependency cycle with
    * VoiceChannelTracker. Returns `{ userId: null, totalTime: 0 }` when there
    * is no qualifying activity.
+   *
+   * Intentionally mirrors `VoiceChannelTracker.getTopUsers`' aggregation —
+   * bucket by `sessions.startTime` and sum full `sessions.duration`, no
+   * boundary clipping — so "champion" matches the leaderboard members actually
+   * see. Clipping here (unlike the per-user weekly_* checks) would make the
+   * award disagree with the displayed ranking.
    */
   private async getWeeklyTopUser(): Promise<{
     userId: string | null;
