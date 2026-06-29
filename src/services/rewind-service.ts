@@ -602,19 +602,40 @@ export class RewindService {
       const dayZone =
         timeZone && isValidTimezone(timeZone) ? timeZone : undefined;
 
+      // Rewind is the graceful aggregator (#659): each section renders only
+      // when its own source feature is enabled, but enabling rewind itself is
+      // never gated on these — so these checks live here, never in any
+      // `dependsOn`. This mirrors the per-section gate the text/reaction
+      // blocks already apply (see `computeTextActivity`), so a recap with only
+      // a subset of sources on still renders the remaining sections cleanly.
+      const [voiceTrackingEnabled, achievementsEnabled] = await Promise.all([
+        this.configService.getBoolean("voicetracking.enabled", false),
+        this.configService.getBoolean("achievements.enabled", false),
+      ]);
+
+      // A disabled source contributes nothing — neither its rendered section
+      // nor its years in the picker — exactly like the text/reaction gates
+      // already skip their reads. Skip the per-user voice/achievements reads
+      // entirely when off; snapshotted years stay navigable via the
+      // independent `collectSnapshotYears`.
       const [userDoc, achievementsDoc] = await Promise.all([
-        VoiceChannelTracking.findOne({ userId }).lean<{
-          sessions?: RawSession[];
-        }>(),
-        UserAchievements.findOne({ userId }).lean<{
-          accolades?: Array<{ type: string; earnedAt: Date }>;
-          achievements?: Array<{ type: string; earnedAt: Date }>;
-        }>(),
+        voiceTrackingEnabled
+          ? VoiceChannelTracking.findOne({ userId }).lean<{
+              sessions?: RawSession[];
+            }>()
+          : null,
+        achievementsEnabled
+          ? UserAchievements.findOne({ userId }).lean<{
+              accolades?: Array<{ type: string; earnedAt: Date }>;
+              achievements?: Array<{ type: string; earnedAt: Date }>;
+            }>()
+          : null,
       ]);
 
       const availableYears = await this.collectAvailableYears(
         userId,
         achievementsDoc,
+        voiceTrackingEnabled,
       );
 
       const sessions = (userDoc?.sessions ?? []).filter(
@@ -645,21 +666,31 @@ export class RewindService {
       const longestSession = computeLongestSession(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
 
-      const accolades = (achievementsDoc?.accolades ?? [])
-        .filter((a) => a.earnedAt >= start && a.earnedAt < end)
-        .map((a) => {
-          const meta = lookupAccolade(a.type);
-          return meta ? { type: a.type, ...meta, earnedAt: a.earnedAt } : null;
-        })
-        .filter((a): a is RewindAchievement => a !== null);
+      // Accolades/achievements render only when the achievements feature is
+      // on; otherwise the section is hidden (empty), never blocking the recap.
+      const accolades = achievementsEnabled
+        ? (achievementsDoc?.accolades ?? [])
+            .filter((a) => a.earnedAt >= start && a.earnedAt < end)
+            .map((a) => {
+              const meta = lookupAccolade(a.type);
+              return meta
+                ? { type: a.type, ...meta, earnedAt: a.earnedAt }
+                : null;
+            })
+            .filter((a): a is RewindAchievement => a !== null)
+        : [];
 
-      const achievements = (achievementsDoc?.achievements ?? [])
-        .filter((a) => a.earnedAt >= start && a.earnedAt < end)
-        .map((a) => {
-          const meta = lookupAchievement(a.type);
-          return meta ? { type: a.type, ...meta, earnedAt: a.earnedAt } : null;
-        })
-        .filter((a): a is RewindAchievement => a !== null);
+      const achievements = achievementsEnabled
+        ? (achievementsDoc?.achievements ?? [])
+            .filter((a) => a.earnedAt >= start && a.earnedAt < end)
+            .map((a) => {
+              const meta = lookupAchievement(a.type);
+              return meta
+                ? { type: a.type, ...meta, earnedAt: a.earnedAt }
+                : null;
+            })
+            .filter((a): a is RewindAchievement => a !== null)
+        : [];
 
       // These reads are independent — run them concurrently so the
       // on-demand /me/rewind render doesn't pay their latency in series.
@@ -672,7 +703,13 @@ export class RewindService {
         storedCompanionNames,
       ] = await Promise.all([
         this.computeAnnualRank(userId, start, end, totalSeconds),
-        this.computeWeeklyJourney(userId, start, end),
+        // Weekly journey runs its own voice aggregate, so gate it on the same
+        // switch — when voice tracking is off the whole voice section
+        // (rank/journey included) stays hidden. computeAnnualRank already
+        // short-circuits to nulls via the zero totalSeconds above.
+        voiceTrackingEnabled
+          ? this.computeWeeklyJourney(userId, start, end)
+          : Promise.resolve({ first: null, last: null, best: null }),
         this.computeTextActivity(userId, guildId, start, end, dayZone),
         this.computeReactionActivity(userId, guildId, year),
         this.collectSnapshotYears(userId, guildId),
@@ -776,12 +813,20 @@ export class RewindService {
   ): Promise<number> {
     const currentYear = new Date().getUTCFullYear();
     try {
-      const achievementsDoc = await UserAchievements.findOne({
-        userId,
-      }).lean<{
-        accolades?: Array<{ earnedAt: Date }>;
-        achievements?: Array<{ earnedAt: Date }>;
-      }>();
+      // Same per-source gating as `getSummary` (#665): a disabled source
+      // offers no years (snapshotted years remain via `collectSnapshotYears`),
+      // and its underlying read is skipped entirely.
+      const [voiceTrackingEnabled, achievementsEnabled] = await Promise.all([
+        this.configService.getBoolean("voicetracking.enabled", false),
+        this.configService.getBoolean("achievements.enabled", false),
+      ]);
+
+      const achievementsDoc = achievementsEnabled
+        ? await UserAchievements.findOne({ userId }).lean<{
+            accolades?: Array<{ earnedAt: Date }>;
+            achievements?: Array<{ earnedAt: Date }>;
+          }>()
+        : null;
 
       const [
         sessionAndAchievementYears,
@@ -789,7 +834,11 @@ export class RewindService {
         reactionYears,
         snapshotYears,
       ] = await Promise.all([
-        this.collectAvailableYears(userId, achievementsDoc),
+        this.collectAvailableYears(
+          userId,
+          achievementsDoc,
+          voiceTrackingEnabled,
+        ),
         this.collectTextActivityYears(userId, guildId),
         this.collectReactionActivityYears(userId, guildId),
         this.collectSnapshotYears(userId, guildId),
@@ -1020,6 +1069,12 @@ export class RewindService {
    * the year picker so the page only offers years that won't render an
    * empty state. Reuses the already-fetched achievements doc to avoid a
    * second `findOne`.
+   *
+   * Per-source gated (#665): the voice-session aggregate only runs when voice
+   * tracking is enabled, and the caller passes a null `achievementsDoc` when
+   * achievements are disabled — so a disabled source offers no years, matching
+   * the text/reaction year collectors. Snapshotted years are added separately
+   * by the caller and stay navigable regardless.
    */
   private async collectAvailableYears(
     userId: string,
@@ -1027,18 +1082,21 @@ export class RewindService {
       accolades?: Array<{ earnedAt: Date }>;
       achievements?: Array<{ earnedAt: Date }>;
     } | null,
+    voiceTrackingEnabled: boolean,
   ): Promise<number[]> {
     const years = new Set<number>();
     try {
-      const sessionYears = await VoiceChannelTracking.aggregate<{
-        _id: number;
-      }>([
-        { $match: { userId } },
-        { $unwind: "$sessions" },
-        { $group: { _id: { $year: "$sessions.startTime" } } },
-      ]);
-      for (const row of sessionYears) {
-        if (typeof row._id === "number") years.add(row._id);
+      if (voiceTrackingEnabled) {
+        const sessionYears = await VoiceChannelTracking.aggregate<{
+          _id: number;
+        }>([
+          { $match: { userId } },
+          { $unwind: "$sessions" },
+          { $group: { _id: { $year: "$sessions.startTime" } } },
+        ]);
+        for (const row of sessionYears) {
+          if (typeof row._id === "number") years.add(row._id);
+        }
       }
       for (const a of achievementsDoc?.accolades ?? []) {
         if (a.earnedAt) years.add(a.earnedAt.getUTCFullYear());

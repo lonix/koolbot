@@ -493,10 +493,24 @@ longest session, longest streak, badges earned, annual rank, a
 first/best/last weekly-rank journey, text activity, and reaction activity
 (given / received). Year picker bottom-anchored to years with data.
 
-The text- and reaction-activity blocks read from `MessageActivityTracking`
-and `ReactionActivityTracking` respectively, and only appear when their
-tracking is enabled (`messagetracking.enabled` / `reactiontracking.enabled`)
-and the user has data for the year — otherwise the block is hidden.
+**Graceful degradation (#665):** Rewind is an *aggregator* — every section
+is gated on its own source feature and degrades independently, so the page
+renders whatever subset of sources happens to be on and simply hides the
+rest. It is never blocked or rejected because a source is off (this is the
+inverse of a hard dependency — `rewind.enabled` is intentionally **not** in
+any `dependsOn`). Per-section gates:
+
+| Rewind section | Source feature | When the source is off |
+| --- | --- | --- |
+| Voice (total time, companions, peak day, longest session, streak, annual rank, weekly journey) | `voicetracking.enabled` | Voice stats read as empty / zero |
+| Badges (accolades + achievements earned) | `achievements.enabled` | Badge section hidden |
+| Text activity | `messagetracking.enabled` | Text card hidden |
+| Reaction activity (given / received) | `reactiontracking.enabled` | Reaction card hidden |
+
+Each section additionally requires the user to have data for the chosen
+year; with the source on but no data, the usual empty-state placeholder is
+shown. A recap with only one source enabled (e.g. voice on, everything else
+off) still renders cleanly with the remaining sections hidden.
 
 The feature and the end-of-year DM nudge have **separate** switches
 (#608). `rewind.enabled` gates the page itself; `rewind.nudge.enabled`
@@ -521,8 +535,10 @@ expose the page.
   `rewind.enabled` value when unset). Installs that never enabled it now
   have the page off by default, in line with every other feature gate.
 
-- Requires `voicetracking.enabled = true` so the underlying session
-  data exists; the page renders an empty state otherwise.
+- The voice section needs `voicetracking.enabled = true` for its session
+  data to exist; when off, only that section is empty — the page itself
+  still renders (see the graceful-degradation table above). The end-of-year
+  nudge, however, is voice-based and still keys off annual voice minutes.
 - Per-user opt-out is honoured before sending each nudge via the
   `prefs.rewind` field set on `/me/notifications`.
 - Users with DMs closed are silently skipped (same pattern the digest
