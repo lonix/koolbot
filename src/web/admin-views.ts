@@ -18,7 +18,9 @@ import {
   type ConfigSchema,
   type SettingOption,
 } from "../services/config-schema.js";
+import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
 import type { BotStatusPool } from "../content/statuses.js";
+import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -2918,6 +2920,147 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
   return renderAdminPage({
     title: "Command metrics",
     active: "/admin/metrics",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
+// ---------- Voice Analytics (#675, Part B) ----------
+
+export interface AnalyticsProps extends CommonProps {
+  /** Whether `voicetracking.enabled` is on; drives the disabled-state notice. */
+  enabled: boolean;
+  /** Trailing window in days the heatmap covers. */
+  windowDays: number;
+  /** The aggregated guild-wide heatmap (already bucketed by the service). */
+  heatmap: GuildVoiceHeatmap;
+}
+
+/** Compact "X hr Y min" / "X min" label for a whole-minute weight. */
+function heatMinutes(minutes: number): string {
+  if (minutes <= 0) return "0 min";
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours === 0) return `${mins} min`;
+  if (mins === 0) return `${hours} hr`;
+  return `${hours} hr ${mins} min`;
+}
+
+export function renderAnalyticsPage(props: AnalyticsProps): string {
+  const { heatmap } = props;
+  const windowToggle = [7, 30, 90]
+    .map((w) => {
+      const active = w === props.windowDays;
+      const cls = active ? "btn btn-sm btn-primary" : "btn btn-sm";
+      return `<a class="${cls}" href="/admin/analytics?window=${w}">${w}d</a>`;
+    })
+    .join(" ");
+
+  const disabledNotice = props.enabled
+    ? ""
+    : '<div class="card"><p class="muted">Voice tracking is currently disabled (<code>voicetracking.enabled</code>), so no new sessions are being recorded. Any data below was captured before it was turned off.</p></div>';
+
+  // Largest single cell drives the colour intensity scale.
+  const maxCell = heatmap.matrix.reduce(
+    (max, row) => row.reduce((m, v) => (v > m ? v : m), max),
+    0,
+  );
+
+  let grid = "";
+  if (heatmap.totalMinutes <= 0) {
+    grid = `<div class="empty">No voice activity recorded in the last ${props.windowDays} days.</div>`;
+  } else {
+    const header =
+      '<div class="hg-corner"></div>' +
+      Array.from({ length: 24 }, (_unused, h) => {
+        // Label every third hour to keep the axis readable.
+        const label = h % 3 === 0 ? String(h).padStart(2, "0") : "";
+        return `<div class="hg-col">${label}</div>`;
+      }).join("");
+
+    const rows = heatmap.matrix
+      .map((row, day) => {
+        const cells = row
+          .map((minutes, hour) => {
+            const alpha =
+              maxCell > 0 && minutes > 0
+                ? Math.max(0.08, minutes / maxCell)
+                : 0;
+            const isPeak =
+              heatmap.peak !== null &&
+              heatmap.peak.day === day &&
+              heatmap.peak.hour === hour;
+            const style =
+              alpha > 0
+                ? ` style="background:rgba(129,140,248,${alpha.toFixed(3)})"`
+                : "";
+            const cls = isPeak ? "hg-cell peak" : "hg-cell";
+            const title = `${escapeHtml(DAY_NAMES[day])} ${escapeHtml(formatHourLabel(hour))} — ${escapeHtml(heatMinutes(minutes))}`;
+            return `<div class="${cls}"${style} title="${title}"></div>`;
+          })
+          .join("");
+        return `<div class="hg-rowlabel">${escapeHtml(DAY_NAMES[day].slice(0, 3))}</div>${cells}`;
+      })
+      .join("");
+
+    grid = `<div class="heatgrid">${header}${rows}</div>`;
+  }
+
+  const peakLine = heatmap.peak
+    ? `<dt>Busiest slot</dt><dd>${escapeHtml(DAY_NAMES[heatmap.peak.day])} at ${escapeHtml(formatHourLabel(heatmap.peak.hour))} <span class="muted">(${escapeHtml(heatMinutes(heatmap.peak.minutes))})</span></dd>`
+    : "";
+
+  const maxDay = heatmap.byDay.reduce((m, v) => (v > m ? v : m), 0);
+  const dayBars = heatmap.byDay
+    .map((v, d) => {
+      const pct = maxDay > 0 ? (v / maxDay) * 100 : 0;
+      return `<div class="hbar"><span class="lbl">${escapeHtml(DAY_NAMES[d].slice(0, 3))}</span><span class="track"><span class="fill" style="width:${pct.toFixed(1)}%"></span></span><span class="val">${escapeHtml(heatMinutes(v))}</span></div>`;
+    })
+    .join("");
+
+  const maxHour = heatmap.byHour.reduce((m, v) => (v > m ? v : m), 0);
+  const hourBars = heatmap.byHour
+    .map((v, h) => {
+      const pct = maxHour > 0 ? (v / maxHour) * 100 : 0;
+      return `<div class="hbar"><span class="lbl">${escapeHtml(formatHourLabel(h))}</span><span class="track"><span class="fill" style="width:${pct.toFixed(1)}%"></span></span><span class="val">${escapeHtml(heatMinutes(v))}</span></div>`;
+    })
+    .join("");
+
+  const body = `
+<h1>Voice analytics</h1>
+<p class="subtitle">Guild-wide voice activity by hour and weekday, aggregated from tracked sessions. Use it to pick high-reach times for digests, announcements, and polls.</p>
+${disabledNotice}
+<div class="card">
+  <h2>Overview</h2>
+  <dl class="kv">
+    <dt>Window</dt><dd>${props.windowDays} days &nbsp; ${windowToggle}</dd>
+    <dt>Timezone</dt><dd class="mono">${escapeHtml(heatmap.timeZone)}</dd>
+    <dt>Total voice time</dt><dd>${escapeHtml(heatMinutes(heatmap.totalMinutes))}</dd>
+    ${peakLine}
+  </dl>
+  <p class="muted">Each cell is total voice minutes for that hour×weekday; darker is busier. Sessions are bucketed by their start time in the server timezone.</p>
+</div>
+
+<div class="card">
+  <h2>Hour × weekday heatmap</h2>
+  ${grid}
+</div>
+
+<div class="card">
+  <h2>By weekday</h2>
+  <div class="heat-bars">${dayBars}</div>
+</div>
+
+<div class="card">
+  <h2>By hour of day</h2>
+  <div class="heat-bars">${hourBars}</div>
+</div>
+`;
+  return renderAdminPage({
+    title: "Voice analytics",
+    active: "/admin/analytics",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

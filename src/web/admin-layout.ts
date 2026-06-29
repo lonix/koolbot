@@ -142,6 +142,12 @@ export const NAV_ITEMS: NavItem[] = [
     group: "Features",
     featureKey: "digest.enabled",
   },
+  {
+    href: "/admin/analytics",
+    label: "Voice Analytics",
+    group: "Features",
+    featureKey: "voicetracking.enabled",
+  },
 ];
 
 /**
@@ -303,6 +309,20 @@ const STYLE = [
   ".cron-picker select,.cron-picker input{font:inherit;font-size:.85rem;padding:.2rem .35rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px}",
   ".cron-picker input[type=time]{width:7rem}",
   ".cron-picker[hidden]{display:none}",
+  // Voice-analytics heatmap (#675): a 24-column × 7-row hour×weekday grid of
+  // colour-intensity cells, plus simple bar summaries for the marginals.
+  ".heatgrid{display:grid;grid-template-columns:auto repeat(24,1fr);gap:2px;font-size:.65rem}",
+  ".heatgrid .hg-corner,.heatgrid .hg-col,.heatgrid .hg-rowlabel{color:#94a3b8;display:flex;align-items:center}",
+  ".heatgrid .hg-col{justify-content:center}",
+  ".heatgrid .hg-rowlabel{padding-right:.4rem;white-space:nowrap}",
+  ".heatgrid .hg-cell{aspect-ratio:1;border-radius:2px;background:#1e293b;min-height:14px}",
+  ".heatgrid .hg-cell.peak{outline:1px solid #a5b4fc}",
+  ".heat-bars{display:flex;flex-direction:column;gap:.3rem}",
+  ".heat-bars .hbar{display:flex;align-items:center;gap:.5rem}",
+  ".heat-bars .hbar .lbl{width:3rem;color:#94a3b8;flex-shrink:0}",
+  ".heat-bars .hbar .track{flex:1;background:#0f1115;border:1px solid #2d3748;border-radius:4px;height:.9rem;overflow:hidden}",
+  ".heat-bars .hbar .track .fill{height:100%;background:#4338ca}",
+  ".heat-bars .hbar .val{width:6rem;text-align:right;color:#64748b;flex-shrink:0;font-size:.7rem}",
 ].join("");
 
 // Session banner script (#367, refreshed in #435).

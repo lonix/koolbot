@@ -7,7 +7,13 @@ import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { ConfigService } from "./config-service.js";
 import { ACCOLADE_METADATA } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
-import { isValidTimezone, isoDateInZone } from "../utils/timezone.js";
+import {
+  dayOfWeekInZone,
+  hourInZone,
+  isValidTimezone,
+  isoDateInZone,
+  secondsIntoHourInZone,
+} from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -26,6 +32,8 @@ import logger from "../utils/logger.js";
 const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_HOUR = 60 * 60;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const HOURS_PER_DAY = 24;
+const DAYS_PER_WEEK = 7;
 
 /**
  * A voice "companion" for the Rewind summary (#567) — another user the
@@ -102,6 +110,15 @@ export interface RewindSummary {
   // minor inconsistency is accepted (see the model header).
   reactionsGiven: number;
   reactionsReceived: number;
+  // Voice activity heatmap (#675). Duration-weighted minutes bucketed in the
+  // member's timezone: 24 hour-of-day weights (index 0 = midnight) and 7
+  // day-of-week weights (index 0 = Sunday … 6 = Saturday). Each session is
+  // split across local hour and midnight boundaries before bucketing, so long
+  // and overnight sessions are attributed to the correct hours/weekdays. Both
+  // read as all-zero arrays when voice tracking is off or the user had no
+  // sessions, which hides the block on the Rewind card.
+  hourOfDayDistribution: number[]; // length 24, minutes
+  dayOfWeekDistribution: number[]; // length 7, minutes
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
   accolades: RewindAchievement[];
@@ -130,7 +147,7 @@ export interface RewindSummary {
  * keep their stored version and are rendered tolerantly by
  * `normalizeSnapshotSummary`.
  */
-export const SNAPSHOT_SCHEMA_VERSION = 2;
+export const SNAPSHOT_SCHEMA_VERSION = 3;
 
 /** How many voice companions the Rewind card renders (#567). */
 export const TOP_COMPANIONS_SHOWN = 5;
@@ -455,6 +472,125 @@ export function computeLongestStreak(
   return { days: bestLen, startDate: bestStart, endDate: bestEnd };
 }
 
+/** Resolve a possibly-unset/invalid zone to a usable one for bucketing. */
+function heatmapZone(timeZone?: string): string {
+  // Mirror the day-bucketing gate: only honour a valid IANA zone, otherwise
+  // fall back to UTC so unconfigured users keep the existing grouping (#524).
+  return timeZone && isValidTimezone(timeZone) ? timeZone : "UTC";
+}
+
+/**
+ * Walk a single voice session across local hour boundaries in `tz`,
+ * crediting each wall-clock hour it spans with the seconds spent there. This
+ * is the shared primitive behind both the hour-of-day and day-of-week
+ * distributions (#675): splitting at every hour boundary keeps the hour
+ * histogram accurate for long sessions and, as a side effect, splits a
+ * midnight-crossing session across the two weekdays it actually touches.
+ *
+ * `credit(day, hour, seconds)` is invoked once per hour-slice, where `day` is
+ * 0=Sun…6=Sat and `hour` is 0…23, both evaluated in `tz`. The boundary step
+ * uses wall-clock seconds-into-hour, so it stays correct in zones with
+ * sub-hour offsets and degrades gracefully across DST transitions (the same
+ * approach the time-of-day accolades use, #658).
+ */
+function walkSessionHours(
+  startTime: Date,
+  seconds: number,
+  tz: string,
+  credit: (day: number, hour: number, seconds: number) => void,
+): void {
+  let remaining = Math.floor(seconds);
+  let t = startTime.getTime();
+  // Defensive bound: even a multi-year session can't exceed this many
+  // hour-slices. The cap guarantees termination should a zone helper ever
+  // return a non-advancing boundary.
+  const MAX_SLICES = 1_000_000;
+  let guard = 0;
+  while (remaining > 0 && guard < MAX_SLICES) {
+    guard += 1;
+    const at = new Date(t);
+    const day = dayOfWeekInZone(at, tz);
+    const hour = hourInZone(at, tz);
+    const intoHour = secondsIntoHourInZone(at, tz); // 0…3599
+    const toBoundary = SECONDS_PER_HOUR - intoHour; // 1…3600
+    const slice = Math.min(remaining, toBoundary);
+    credit(day, hour, slice);
+    remaining -= slice;
+    t += slice * 1000;
+  }
+}
+
+export interface VoiceActivityHeatmap {
+  /** Duration-weighted minutes per hour-of-day (length 24, index 0 = 00:00). */
+  hourOfDay: number[];
+  /** Duration-weighted minutes per weekday (length 7, index 0 = Sunday). */
+  dayOfWeek: number[];
+}
+
+/**
+ * Build the duration-weighted hour-of-day and day-of-week distributions for a
+ * set of sessions (#675), bucketed in the member's timezone (UTC when unset).
+ * Pure and side-effect free, so it unit-tests without a DB or client.
+ *
+ * Values are whole minutes (rounded from the underlying seconds) — enough
+ * resolution for the bar chart and peak label while keeping the snapshotted
+ * arrays compact. A session with no positive duration contributes nothing.
+ */
+export function computeVoiceActivityHeatmap(
+  sessions: RawSession[],
+  timeZone?: string,
+): VoiceActivityHeatmap {
+  const tz = heatmapZone(timeZone);
+  const hourSeconds = new Array<number>(HOURS_PER_DAY).fill(0);
+  const daySeconds = new Array<number>(DAYS_PER_WEEK).fill(0);
+  for (const s of sessions) {
+    const seconds = sessionSeconds(s);
+    if (seconds <= 0) continue;
+    walkSessionHours(s.startTime, seconds, tz, (day, hour, slice) => {
+      hourSeconds[hour] += slice;
+      daySeconds[day] += slice;
+    });
+  }
+  return {
+    hourOfDay: hourSeconds.map((sec) => Math.round(sec / SECONDS_PER_MINUTE)),
+    dayOfWeek: daySeconds.map((sec) => Math.round(sec / SECONDS_PER_MINUTE)),
+  };
+}
+
+/** Hour-of-day distribution alone (#675). Thin wrapper for unit clarity. */
+export function computeHourOfDayDistribution(
+  sessions: RawSession[],
+  timeZone?: string,
+): number[] {
+  return computeVoiceActivityHeatmap(sessions, timeZone).hourOfDay;
+}
+
+/** Day-of-week distribution alone (#675). Thin wrapper for unit clarity. */
+export function computeDayOfWeekDistribution(
+  sessions: RawSession[],
+  timeZone?: string,
+): number[] {
+  return computeVoiceActivityHeatmap(sessions, timeZone).dayOfWeek;
+}
+
+/**
+ * Index of the single largest value, or null when the array is empty or every
+ * value is zero. Used to surface the peak hour/day on the Rewind card and to
+ * decide whether the heatmap block has any data to show. Ties resolve to the
+ * earliest index, so the surfaced peak is deterministic.
+ */
+export function peakIndex(values: number[]): number | null {
+  let best = 0;
+  let bestIndex: number | null = null;
+  for (let i = 0; i < values.length; i += 1) {
+    if (values[i] > best) {
+      best = values[i];
+      bestIndex = i;
+    }
+  }
+  return bestIndex;
+}
+
 function lookupAccolade(type: string): {
   emoji: string;
   name: string;
@@ -527,6 +663,10 @@ export function normalizeSnapshotSummary(
     // default them to 0 so the card stays hidden rather than rendering NaN.
     reactionsGiven: s.reactionsGiven ?? 0,
     reactionsReceived: s.reactionsReceived ?? 0,
+    // Snapshots frozen before #675 (schema v2) carry no heatmap arrays;
+    // default them to empty so the block stays hidden rather than throwing.
+    hourOfDayDistribution: s.hourOfDayDistribution ?? [],
+    dayOfWeekDistribution: s.dayOfWeekDistribution ?? [],
     longestStreakDays: s.longestStreakDays ?? 0,
     longestStreakRange: s.longestStreakRange ?? null,
     accolades: s.accolades ?? [],
@@ -665,6 +805,7 @@ export class RewindService {
       const peakDay = computePeakDay(sessions, dayZone);
       const longestSession = computeLongestSession(sessions, dayZone);
       const streak = computeLongestStreak(sessions, dayZone);
+      const heatmap = computeVoiceActivityHeatmap(sessions, dayZone);
 
       // Accolades/achievements render only when the achievements feature is
       // on; otherwise the section is hidden (empty), never blocking the recap.
@@ -773,6 +914,8 @@ export class RewindService {
         peakMessageDay: text.peakMessageDay,
         reactionsGiven: reactions.given,
         reactionsReceived: reactions.received,
+        hourOfDayDistribution: heatmap.hourOfDay,
+        dayOfWeekDistribution: heatmap.dayOfWeek,
         longestStreakDays: streak.days,
         longestStreakRange:
           streak.startDate && streak.endDate
@@ -1498,4 +1641,28 @@ export function formatFunComparison(totalSeconds: number): string | null {
     }
   }
   return null;
+}
+
+/** Weekday names indexed 0=Sun…6=Sat, matching `dayOfWeekDistribution`. */
+export const DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+/**
+ * Render an hour-of-day index (0…23) as a friendly 12-hour label, e.g.
+ * `0 → "12 AM"`, `13 → "1 PM"`, `23 → "11 PM"`. Used for the peak-hour label
+ * and the heatmap axis on the Rewind card (#675).
+ */
+export function formatHourLabel(hour: number): string {
+  const h =
+    ((Math.trunc(hour) % HOURS_PER_DAY) + HOURS_PER_DAY) % HOURS_PER_DAY;
+  const period = h < 12 ? "AM" : "PM";
+  const twelve = h % 12 === 0 ? 12 : h % 12;
+  return `${twelve} ${period}`;
 }

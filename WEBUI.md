@@ -825,6 +825,24 @@ streak/state updates; concurrent runs coalesce, so clicking it during a
 scheduled tick can't double-deliver. There is intentionally **no `/digest`
 slash command** — the Web UI is the admin surface.
 
+The **Voice Analytics** page (`/admin/analytics`) is a read-only, guild-wide
+voice-activity heatmap (#675, Part B). It aggregates the already-stored
+`VoiceChannelTracking` sessions into a 24×7 (hour × weekday) grid of total
+voice minutes — a colour-intensity matrix where darker cells are busier — plus
+per-weekday and per-hour bar breakdowns and a "busiest slot" callout. Use it to
+pick high-reach times for digests, announcements, and polls. A 7d/30d/90d
+window toggle selects the trailing date range over already-persisted data (it
+is not a config key); the default is 90 days so weekly patterns read clearly.
+Sessions are bucketed by their **start** hour/weekday in the **server**
+timezone and weighted by the whole session duration — no new data capture, no
+new writes, just a single server-side aggregation over existing sessions. (The per-member
+Rewind heatmap is more precise, splitting each session across the hour/midnight
+boundaries it crosses; the guild aggregate keeps a single group-by to stay
+cheap across every member's full history.) The page is gated by
+`voicetracking.enabled` (the #610 disabled-feature pattern): when tracking is
+off the page still renders but shows a notice and only whatever was captured
+before it was disabled.
+
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
 `celebrations.channel_id`). When enabled, the bot posts a loud, server-wide
@@ -892,6 +910,17 @@ picker at the top of the page only offers years for which you have data
 (voice sessions, text-message activity, or badges), plus any year that has
 been snapshotted (see below), and highlights the year actually shown.
 Years with no data render a friendly empty state.
+
+The **"when you're online"** block (#675) shows two duration-weighted
+distributions computed from your existing voice sessions — a 24-bar
+hour-of-day histogram and a 7-bar day-of-week breakdown — with your peak hour
+and day called out (e.g. *"Most active: Friday · 10 PM"*). Both are bucketed
+in **your** timezone (set it on the Timezone page), and each session is split
+across the local hour and midnight boundaries it crosses so long and overnight
+sessions land in the right hours/weekdays. The block hides itself when you have
+no voice activity for the year. No new data is captured — it reuses the
+`startTime` and `duration` already stored on every session.
+
 Aggregation is on-demand and not cached in v1 — see [`SETTINGS.md`](SETTINGS.md#-rewind-year-in-review)
 for the `rewind.*` keys that gate the feature and the end-of-year DM nudge.
 
