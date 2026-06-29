@@ -190,6 +190,12 @@ export class QuoteChannelManager {
       // Setup reaction handlers
       this.setupReactionHandlers();
 
+      // Optionally rebuild the channel from the database on startup. Gated by
+      // quotes.clear_on_sync (default off) inside syncExistingQuotes: when off
+      // this is a no-op, when on it wipes the channel and re-posts every stored
+      // quote so the channel mirrors the database after a manual edit/restore.
+      await this.syncExistingQuotes();
+
       // Start cleanup job to remove non-bot messages
       this.startCleanupJob();
     } catch (error) {
@@ -888,15 +894,19 @@ export class QuoteChannelManager {
   }
 
   /**
-   * Re-post every stored quote to the channel, restoring each quote's saved
-   * vote tally into its embed, and update the stored message IDs. When
-   * `clearFirst` is true the channel is wiped and the header re-created first —
-   * this is the "rebuild the channel from the database" path.
+   * Wipe the quote channel and rebuild it from the database: clear every
+   * message, re-create the header, then re-post every stored quote with its
+   * saved vote tally restored and the stored message IDs updated.
+   *
+   * The rebuild only runs when a clear was requested — either explicitly via
+   * `clearFirst` (the /quote reset path) or by the operator opting into
+   * `quotes.clear_on_sync` (the startup-rebuild path in `initialize()`). A
+   * sync that clears nothing is a no-op: `postQuote` always sends a fresh
+   * message, so re-posting on top of the existing ones would just duplicate
+   * every quote in the channel.
    */
   private async syncExistingQuotes(clearFirst = false): Promise<number> {
     try {
-      logger.info("Syncing existing quotes to channel...");
-
       const channel = await this.getQuoteChannel();
       if (!channel) {
         logger.warn("Cannot sync quotes: channel not found");
@@ -906,18 +916,24 @@ export class QuoteChannelManager {
       const shouldClear =
         clearFirst ||
         (await this.configService.getBoolean("quotes.clear_on_sync", false));
-      if (shouldClear) {
-        await this.clearChannel(channel);
-        // The header was just deleted; drop the stale stored ID so exactly one
-        // fresh header is created rather than a search turning up nothing.
-        await this.configService.set(
-          "quotes.header_message_id",
-          "",
-          "Message ID of the quote channel header post",
-          "quotes",
-        );
-        await this.ensureHeaderPost(channel);
+      if (!shouldClear) {
+        // Nothing to do: re-posting without first clearing would duplicate the
+        // messages already in the channel.
+        return 0;
       }
+
+      logger.info("Syncing existing quotes to channel...");
+
+      await this.clearChannel(channel);
+      // The header was just deleted; drop the stale stored ID so exactly one
+      // fresh header is created rather than a search turning up nothing.
+      await this.configService.set(
+        "quotes.header_message_id",
+        "",
+        "Message ID of the quote channel header post",
+        "quotes",
+      );
+      await this.ensureHeaderPost(channel);
 
       // Get every stored quote (unbounded): a rebuild must include all quotes,
       // not just the first page.
