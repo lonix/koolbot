@@ -11,9 +11,10 @@ import mongoose, { Schema, Document } from "mongoose";
  * can read a single year's "votes cast" count without retaining per-vote
  * detail or needing a cleanup pass.
  *
- * Data-capture foundation only — nothing is surfaced on Rewind or the WebUI
- * yet. Gated behind `polls.participation.enabled`; nothing is written while
- * that key is false.
+ * Gated behind `polls.participation.enabled`; nothing is written while that
+ * key is false. The captured counts are surfaced (#655) on the `/me/`
+ * overview ("Poll participation" card), on the Rewind card (`pollVotesCast`
+ * for the year), and by the poll-participation accolades.
  */
 export interface IPollParticipationTracking extends Document {
   userId: string;

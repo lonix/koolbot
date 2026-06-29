@@ -16,6 +16,14 @@ import { PollParticipationTracking } from "../../src/models/poll-participation-t
 
 (PollParticipationTracking as unknown as { updateOne: jest.Mock }).updateOne =
   jest.fn();
+(PollParticipationTracking as unknown as { findOne: jest.Mock }).findOne =
+  jest.fn();
+
+// Mirror the model's `findOne(...).lean()` chain used by
+// `getParticipationSummary`.
+function lean<T>(value: T): { lean: () => Promise<T> } {
+  return { lean: jest.fn(async () => value) };
+}
 
 function createTracker(voter: { username: string; bot: boolean } | null) {
   const usersFetch = jest
@@ -123,6 +131,80 @@ describe("PollParticipationTracker", () => {
       await expect(
         tracker.handlePollVoteAdd(makePollAnswer(), "voter1"),
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe("getParticipationSummary (#655)", () => {
+    let findOne: jest.Mock;
+
+    beforeEach(() => {
+      findOne = (
+        PollParticipationTracking as unknown as { findOne: jest.Mock }
+      ).findOne;
+    });
+
+    it("returns lifetime, this-year, and last-voted from the row", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      const year = String(new Date().getFullYear());
+      const lastVoteAt = new Date("2026-03-04T05:06:07Z");
+      findOne.mockReturnValue(
+        lean({
+          totalVotes: 42,
+          yearlyVotes: { [year]: 9, "2024": 5 },
+          lastVoteAt,
+        }),
+      );
+
+      const summary = await tracker.getParticipationSummary("voter1", "guild1");
+      expect(summary).toEqual({
+        totalVotes: 42,
+        thisYearVotes: 9,
+        lastVoteAt,
+      });
+    });
+
+    it("reads this-year votes from a Map-shaped bucket", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      const year = String(new Date().getFullYear());
+      findOne.mockReturnValue(
+        lean({
+          totalVotes: 3,
+          yearlyVotes: new Map([[year, 3]]),
+          lastVoteAt: null,
+        }),
+      );
+
+      const summary = await tracker.getParticipationSummary("voter1", "guild1");
+      expect(summary?.thisYearVotes).toBe(3);
+    });
+
+    it("reads 0 this-year when the current year has no bucket entry", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      findOne.mockReturnValue(
+        lean({ totalVotes: 5, yearlyVotes: { "2024": 5 }, lastVoteAt: null }),
+      );
+
+      const summary = await tracker.getParticipationSummary("voter1", "guild1");
+      expect(summary?.totalVotes).toBe(5);
+      expect(summary?.thisYearVotes).toBe(0);
+    });
+
+    it("returns null when the member has no tracking row", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      findOne.mockReturnValue(lean(null));
+
+      const summary = await tracker.getParticipationSummary("voter1", "guild1");
+      expect(summary).toBeNull();
+    });
+
+    it("degrades to null on a DB error", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      findOne.mockReturnValue({
+        lean: jest.fn().mockRejectedValue(new Error("DB error")),
+      });
+
+      const summary = await tracker.getParticipationSummary("voter1", "guild1");
+      expect(summary).toBeNull();
     });
   });
 });

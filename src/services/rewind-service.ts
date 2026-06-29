@@ -3,6 +3,7 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { UserAchievements } from "../models/user-achievements.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
 import { ReactionActivityTracking } from "../models/reaction-activity-tracking.js";
+import { PollParticipationTracking } from "../models/poll-participation-tracking.js";
 import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { ConfigService } from "./config-service.js";
 import { ACCOLADE_METADATA } from "../content/accolades.js";
@@ -119,6 +120,14 @@ export interface RewindSummary {
   // sessions, which hides the block on the Rewind card.
   hourOfDayDistribution: number[]; // length 24, minutes
   dayOfWeekDistribution: number[]; // length 7, minutes
+  // Poll votes cast for the year (#655, a #570 spin-off). Reads as zero when
+  // poll-participation capture is disabled (`polls.participation.enabled`) or
+  // the user has no row. Sourced from the per-year `yearlyVotes` bucket on
+  // `PollParticipationTracking`, which — like the reaction buckets above — is
+  // keyed by **host-timezone** year at capture time and retains no per-vote
+  // timestamps, so it is not re-bucketed into the user's zone. The same minor
+  // inconsistency with the voice/text peaks is accepted (see the model header).
+  pollVotesCast: number;
   longestStreakDays: number;
   longestStreakRange: { startDate: string; endDate: string } | null;
   accolades: RewindAchievement[];
@@ -147,7 +156,7 @@ export interface RewindSummary {
  * keep their stored version and are rendered tolerantly by
  * `normalizeSnapshotSummary`.
  */
-export const SNAPSHOT_SCHEMA_VERSION = 3;
+export const SNAPSHOT_SCHEMA_VERSION = 4;
 
 /** How many voice companions the Rewind card renders (#567). */
 export const TOP_COMPANIONS_SHOWN = 5;
@@ -376,7 +385,10 @@ export function computePeakMessageDay(
 }
 
 /**
- * Pull a single year's reaction count out of a `yearly*` bucket (#653).
+ * Pull a single year's count out of a `yearly*` bucket (#653; reused for
+ * poll votes in #655). Generic over any `Map<"YYYY", number>` field — the
+ * reaction `yearlyGiven`/`yearlyReceived` and poll `yearlyVotes` buckets all
+ * share this shape.
  *
  * The bucket is the model's `Map<"YYYY", number>` field. Mongoose returns
  * Map fields as a real `Map` from a hydrated doc but as a plain object from
@@ -398,10 +410,11 @@ export function extractYearlyReactionCount(
 }
 
 /**
- * The distinct numeric years present across a user's reaction buckets
- * (#653), so reaction-only years stay navigable in the picker and the bare
- * `/me/rewind` landing-year resolver — mirroring how text-activity years
- * feed `availableYears`. Accepts the same Map / plain-object / nullish
+ * The distinct numeric years present across a user's per-year count buckets
+ * (#653; reused for poll votes in #655), so a year with only that kind of
+ * activity stays navigable in the picker and the bare `/me/rewind`
+ * landing-year resolver — mirroring how text-activity years feed
+ * `availableYears`. Accepts the same Map / plain-object / nullish
  * shapes as `extractYearlyReactionCount`; only `"YYYY"` keys with a
  * positive count are counted, and unparseable keys are dropped.
  */
@@ -663,10 +676,13 @@ export function normalizeSnapshotSummary(
     // default them to 0 so the card stays hidden rather than rendering NaN.
     reactionsGiven: s.reactionsGiven ?? 0,
     reactionsReceived: s.reactionsReceived ?? 0,
-    // Snapshots frozen before #675 (schema v2) carry no heatmap arrays;
-    // default them to empty so the block stays hidden rather than throwing.
+    // Snapshots frozen before #675 carry no heatmap arrays; default them to
+    // empty so the block stays hidden rather than throwing.
     hourOfDayDistribution: s.hourOfDayDistribution ?? [],
     dayOfWeekDistribution: s.dayOfWeekDistribution ?? [],
+    // Snapshots frozen before #655 carry no poll field; default it to 0 so the
+    // stat stays hidden rather than rendering NaN.
+    pollVotesCast: s.pollVotesCast ?? 0,
     longestStreakDays: s.longestStreakDays ?? 0,
     longestStreakRange: s.longestStreakRange ?? null,
     accolades: s.accolades ?? [],
@@ -840,6 +856,7 @@ export class RewindService {
         weeklyJourney,
         text,
         reactions,
+        polls,
         snapshotYears,
         storedCompanionNames,
       ] = await Promise.all([
@@ -853,6 +870,7 @@ export class RewindService {
           : Promise.resolve({ first: null, last: null, best: null }),
         this.computeTextActivity(userId, guildId, start, end, dayZone),
         this.computeReactionActivity(userId, guildId, year),
+        this.computePollParticipation(userId, guildId, year),
         this.collectSnapshotYears(userId, guildId),
         this.fetchStoredUsernames(companionCandidates.map((c) => c.userId)),
       ]);
@@ -886,6 +904,7 @@ export class RewindService {
           ...availableYears,
           ...text.years,
           ...reactions.years,
+          ...polls.years,
           ...snapshotYears,
         ]),
       ].sort((a, b) => b - a);
@@ -896,7 +915,8 @@ export class RewindService {
         achievements.length > 0 ||
         text.messagesSent > 0 ||
         reactions.given > 0 ||
-        reactions.received > 0;
+        reactions.received > 0 ||
+        polls.votesCast > 0;
 
       return {
         userId,
@@ -916,6 +936,7 @@ export class RewindService {
         reactionsReceived: reactions.received,
         hourOfDayDistribution: heatmap.hourOfDay,
         dayOfWeekDistribution: heatmap.dayOfWeek,
+        pollVotesCast: polls.votesCast,
         longestStreakDays: streak.days,
         longestStreakRange:
           streak.startDate && streak.endDate
@@ -975,6 +996,7 @@ export class RewindService {
         sessionAndAchievementYears,
         textYears,
         reactionYears,
+        pollYears,
         snapshotYears,
       ] = await Promise.all([
         this.collectAvailableYears(
@@ -984,6 +1006,7 @@ export class RewindService {
         ),
         this.collectTextActivityYears(userId, guildId),
         this.collectReactionActivityYears(userId, guildId),
+        this.collectPollParticipationYears(userId, guildId),
         this.collectSnapshotYears(userId, guildId),
       ]);
 
@@ -996,6 +1019,7 @@ export class RewindService {
         ...sessionAndAchievementYears,
         ...textYears,
         ...reactionYears,
+        ...pollYears,
         ...snapshotYears,
       ].filter((y) => Number.isFinite(y));
       // No data anywhere → land on the (empty) current year, preserving
@@ -1208,6 +1232,41 @@ export class RewindService {
   }
 
   /**
+   * Distinct years present in the user's poll-vote bucket (#655). The poll
+   * cousin of `collectReactionActivityYears`, used purely for landing-year
+   * resolution so a poll-only past year is still offered by the bare
+   * `/me/rewind` route. Respects the `polls.participation.enabled` gate; a
+   * failure (or disabled feature) degrades to an empty list.
+   */
+  private async collectPollParticipationYears(
+    userId: string,
+    guildId: string,
+  ): Promise<number[]> {
+    try {
+      const enabled = await this.configService.getBoolean(
+        "polls.participation.enabled",
+        false,
+      );
+      if (!enabled) return [];
+
+      const doc = await PollParticipationTracking.findOne(
+        { userId, guildId },
+        { yearlyVotes: 1 },
+      ).lean<{
+        yearlyVotes?: Map<string, number> | Record<string, number>;
+      }>();
+      if (!doc) return [];
+      return reactionActivityYears(doc.yearlyVotes);
+    } catch (error) {
+      logger.warn(
+        `RewindService.collectPollParticipationYears failed for ${userId}:`,
+        error,
+      );
+      return [];
+    }
+  }
+
+  /**
    * Years for which we have any data (sessions or achievements). Used by
    * the year picker so the page only offers years that won't render an
    * empty state. Reuses the already-fetched achievements doc to avoid a
@@ -1375,6 +1434,59 @@ export class RewindService {
     } catch (error) {
       logger.warn(
         `RewindService.computeReactionActivity failed for ${userId}:`,
+        error,
+      );
+      return empty;
+    }
+  }
+
+  /**
+   * Read the user's poll votes cast for the year (#655). One indexed
+   * `(userId, guildId)` lookup pulling just the `yearlyVotes` bucket, then
+   * the requested year's count out of it — the poll cousin of
+   * `computeReactionActivity`, consistent with the model's "read a single
+   * year's count in one lookup" design. Returns zero when poll-participation
+   * capture is disabled (per the gate) or the user has no row, so the view
+   * can hide the stat without special-casing.
+   *
+   * Like the reaction buckets, `yearlyVotes` is keyed by host-timezone year
+   * at capture time and retains no per-vote timestamps, so it is *not*
+   * re-bucketed into the user's zone — see the `RewindSummary` field comment
+   * and the model header.
+   *
+   * `years` reflects every year present in the bucket so a poll-only year
+   * stays navigable in the picker, mirroring `computeReactionActivity`.
+   */
+  private async computePollParticipation(
+    userId: string,
+    guildId: string,
+    year: number,
+  ): Promise<{ votesCast: number; years: number[] }> {
+    const empty = { votesCast: 0, years: [] as number[] };
+    try {
+      const enabled = await this.configService.getBoolean(
+        "polls.participation.enabled",
+        false,
+      );
+      if (!enabled) return empty;
+
+      const doc = await PollParticipationTracking.findOne(
+        { userId, guildId },
+        // Only the per-year bucket is needed — skip the lifetime total
+        // (spans all years) and the username/timestamp fields.
+        { yearlyVotes: 1 },
+      ).lean<{
+        yearlyVotes?: Map<string, number> | Record<string, number>;
+      }>();
+      if (!doc) return empty;
+
+      return {
+        votesCast: extractYearlyReactionCount(doc.yearlyVotes, year),
+        years: reactionActivityYears(doc.yearlyVotes),
+      };
+    } catch (error) {
+      logger.warn(
+        `RewindService.computePollParticipation failed for ${userId}:`,
         error,
       );
       return empty;

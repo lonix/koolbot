@@ -123,6 +123,7 @@ describe("AchievementsService — progress & engagement (#654)", () => {
       ["chatterbox", "Chatterbox"],
       ["reactor", "Reactor"],
       ["poll_regular", "Poll Regular"],
+      ["poll_devotee", "Poll Devotee"],
     ])("exposes a definition for %s", (type, name) => {
       const def = createService().getAccoladeDefinition(type);
       expect(def).toBeDefined();
@@ -355,6 +356,71 @@ describe("AchievementsService — progress & engagement (#654)", () => {
 
       const result = await service.checkAndAwardAccolades("u", "U");
       expect(result.map((a) => a.type)).not.toContain("chatterbox");
+    });
+
+    it("awards both poll tiers at 50+ votes when participation capture is on (#655)", async () => {
+      const service = createService(
+        {
+          "messagetracking.enabled": false,
+          "reactiontracking.enabled": false,
+          "polls.participation.enabled": true,
+        },
+        "guild-1",
+      );
+      // 50 votes clears both Poll Regular (25) and Poll Devotee (50).
+      setSharedDoc({
+        accolades: [],
+        statistics: { totalAccolades: 0, totalAchievements: 0 },
+        save: jest.fn().mockResolvedValue(undefined),
+        totalVotes: 50,
+        sessions: [],
+      });
+
+      const result = await service.checkAndAwardAccolades("u", "U");
+      const types = result.map((a) => a.type);
+      expect(types).toContain("poll_regular");
+      expect(types).toContain("poll_devotee");
+    });
+
+    it("awards Poll Regular but not Poll Devotee between the tiers (#655)", async () => {
+      const service = createService(
+        {
+          "messagetracking.enabled": false,
+          "reactiontracking.enabled": false,
+          "polls.participation.enabled": true,
+        },
+        "guild-1",
+      );
+      // 30 votes clears Poll Regular (25) but not Poll Devotee (50).
+      setSharedDoc({
+        accolades: [],
+        statistics: { totalAccolades: 0, totalAchievements: 0 },
+        save: jest.fn().mockResolvedValue(undefined),
+        totalVotes: 30,
+        sessions: [],
+      });
+
+      const result = await service.checkAndAwardAccolades("u", "U");
+      const types = result.map((a) => a.type);
+      expect(types).toContain("poll_regular");
+      expect(types).not.toContain("poll_devotee");
+    });
+
+    it("never awards Poll Devotee while participation capture is off (#655)", async () => {
+      const service = createService(
+        { "polls.participation.enabled": false },
+        "guild-1",
+      );
+      setSharedDoc({
+        accolades: [],
+        statistics: { totalAccolades: 0, totalAchievements: 0 },
+        save: jest.fn().mockResolvedValue(undefined),
+        totalVotes: 999999,
+        sessions: [],
+      });
+
+      const result = await service.checkAndAwardAccolades("u", "U");
+      expect(result.map((a) => a.type)).not.toContain("poll_devotee");
     });
   });
 

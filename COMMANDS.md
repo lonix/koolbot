@@ -305,8 +305,10 @@ progress toward an accolade, even before you've earned your first badge.
   (only while `reactiontracking.enabled` is on)
 - 🗳️ **Poll Regular** — Cast 25 poll votes
   (only while `polls.participation.enabled` is on)
+- 📊 **Poll Devotee** — Cast 50 poll votes
+  (only while `polls.participation.enabled` is on)
 
-The last three engagement accolades only award (and only show progress)
+The last four engagement accolades only award (and only show progress)
 while their capture key is enabled; they stay dark when capture is off.
 
 **Weekly achievements (time-based):**

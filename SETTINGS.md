@@ -262,7 +262,7 @@ on the Web UI's **Polls** page; the settings below are global defaults.
 | `polls.enabled` | `false` | Enable/disable the poll system |
 | `polls.default_duration_hours` | `24` | Default poll duration (1-768, max 32 days) |
 | `polls.cooldown_days` | `7` | Minimum days before reusing the same poll question |
-| `polls.participation.enabled` | `false` | Capture per-user "votes cast" (lifetime + per-year) when users vote on any guild poll. Data-capture foundation for a future Rewind stat (#570) |
+| `polls.participation.enabled` | `false` | Capture per-user "votes cast" (lifetime + per-year) when users vote on any guild poll. Surfaced (#655) on the `/me/` overview "Poll participation" card, the Rewind `Poll votes cast` stat, and the poll-participation accolades (Poll Regular / Poll Devotee) |
 
 **Features:**
 
@@ -424,8 +424,9 @@ Persistent accolade system to encourage voice channel participation.
 **Features:**
 
 - **Persistent accolades** — Permanent badges earned once and kept forever
-- **22+ different accolades** — Time milestones, session length, social,
-  time-of-day, day-of-week, streak, quote-related
+- **26+ different accolades** — Time milestones, session length, social,
+  time-of-day, day-of-week, streak, quote-related, engagement
+  (messages/reactions/poll votes)
 - **Automatic tracking** — Earned automatically based on voice activity
 - **DM notifications** — Users notified immediately when earning badges
 - **Weekly announcements** — New accolades announced in voice stats channel
@@ -441,6 +442,11 @@ Persistent accolade system to encourage voice channel participation.
 
 - Requires `voicetracking.enabled = true`
 - Accolades are checked after each voice session ends
+- The **poll-participation accolades** (Poll Regular — 25 votes; Poll Devotee
+  — 50 votes) additionally require `polls.participation.enabled = true`. Like
+  the quote accolades they are voice-agnostic but are only _evaluated_ on the
+  same session-end pass, so a member must end a tracked voice session for the
+  count to be re-checked.
 - DMs require the user to have DMs enabled for the bot
 - **For consecutive-days accolades:** keep
   `voicetracking.cleanup.retention.detailed_sessions_days` at **60 days
