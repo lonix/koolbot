@@ -935,7 +935,8 @@ describe("RewindService.getSummary section gating (#665)", () => {
     expect(summary!.messagesSent).toBe(0);
     expect(summary!.reactionsGiven).toBe(0);
     expect(summary!.reactionsReceived).toBe(0);
-    // Disabled sources are never queried.
+    // Disabled sources are never queried — including the achievements doc.
+    expect(mockFindOneAch).not.toHaveBeenCalled();
     expect(mockFindOneMsg).not.toHaveBeenCalled();
     expect(mockFindOneReaction).not.toHaveBeenCalled();
   });
@@ -962,7 +963,10 @@ describe("RewindService.getSummary section gating (#665)", () => {
       best: null,
     });
     expect(summary!.messagesSent).toBe(0);
+    // Voice is truly not queried: neither the per-user doc nor the
+    // year-picker session aggregate runs when voice tracking is off (#665).
     expect(mockFindOneVc).not.toHaveBeenCalled();
+    expect(mockAggregateVc).not.toHaveBeenCalled();
   });
 
   it("renders only the text section when only message tracking is enabled", async () => {
@@ -978,7 +982,10 @@ describe("RewindService.getSummary section gating (#665)", () => {
     expect(summary!.accolades).toEqual([]);
     expect(summary!.achievements).toEqual([]);
     expect(summary!.reactionsGiven).toBe(0);
+    // Voice + achievements are gated off, so none of their reads run.
     expect(mockFindOneVc).not.toHaveBeenCalled();
+    expect(mockAggregateVc).not.toHaveBeenCalled();
+    expect(mockFindOneAch).not.toHaveBeenCalled();
   });
 
   it("renders every section when all sources are enabled", async () => {
@@ -1013,7 +1020,10 @@ describe("RewindService.getSummary section gating (#665)", () => {
     expect(summary!.achievements).toEqual([]);
     expect(summary!.messagesSent).toBe(0);
     expect(summary!.reactionsGiven).toBe(0);
+    // No source is queried at all when everything is off.
     expect(mockFindOneVc).not.toHaveBeenCalled();
+    expect(mockAggregateVc).not.toHaveBeenCalled();
+    expect(mockFindOneAch).not.toHaveBeenCalled();
     expect(mockFindOneMsg).not.toHaveBeenCalled();
     expect(mockFindOneReaction).not.toHaveBeenCalled();
   });
@@ -1043,8 +1053,13 @@ describe("RewindService.getDefaultRewindYear (#573)", () => {
     mockAggregateVc.mockResolvedValue([]);
     mockSnapFind.mockReturnValue(lean([]));
     // Reset the shared config + reaction mocks (implementations survive
-    // clearAllMocks): tracking off, no reaction row, unless a test opts in.
-    mockGetBoolean.mockImplementation(async () => false);
+    // clearAllMocks). Voice + achievements year collection is gated on their
+    // switches (#665), so enable both here; the reaction-only test opts down
+    // to reaction tracking alone.
+    mockGetBoolean.mockImplementation(
+      async (key: string) =>
+        key === "voicetracking.enabled" || key === "achievements.enabled",
+    );
     mockFindOneReaction.mockReturnValue(lean(null));
   });
 
