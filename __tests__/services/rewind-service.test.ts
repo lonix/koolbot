@@ -108,6 +108,12 @@ const {
   computeLongestSession,
   computeLongestStreak,
   computePeakDay,
+  computeVoiceActivityHeatmap,
+  computeHourOfDayDistribution,
+  computeDayOfWeekDistribution,
+  peakIndex,
+  formatHourLabel,
+  DAY_NAMES,
   computeTopCompanions,
   computePeakMessageDay,
   computeTopTextChannels,
@@ -471,6 +477,161 @@ describe("RewindService pure helpers", () => {
         startDate: null,
         endDate: null,
       });
+    });
+  });
+
+  describe("voice activity heatmap (#675)", () => {
+    it("returns all-zero distributions for empty input", () => {
+      const hm = computeVoiceActivityHeatmap([]);
+      expect(hm.hourOfDay).toHaveLength(24);
+      expect(hm.dayOfWeek).toHaveLength(7);
+      expect(hm.hourOfDay.every((v) => v === 0)).toBe(true);
+      expect(hm.dayOfWeek.every((v) => v === 0)).toBe(true);
+    });
+
+    it("buckets a single in-hour session by start hour and weekday (UTC)", () => {
+      // 2026-03-13 is a Friday. 10:00 UTC, 30 minutes.
+      const sessions = [
+        {
+          startTime: new Date("2026-03-13T10:00:00Z"),
+          duration: 30 * 60,
+          channelId: "a",
+        },
+      ];
+      const hm = computeVoiceActivityHeatmap(sessions);
+      expect(hm.hourOfDay[10]).toBe(30);
+      // Only hour 10 has activity.
+      expect(hm.hourOfDay.reduce((a, b) => a + b, 0)).toBe(30);
+      // 5 = Friday.
+      expect(hm.dayOfWeek[5]).toBe(30);
+      expect(hm.dayOfWeek.reduce((a, b) => a + b, 0)).toBe(30);
+    });
+
+    it("splits a multi-hour session across the hours it spans", () => {
+      // 22:30 UTC for 2 hours → 30m in hour 22, 60m in hour 23, 30m in hour 0.
+      const sessions = [
+        {
+          startTime: new Date("2026-03-13T22:30:00Z"),
+          duration: 2 * 60 * 60,
+          channelId: "a",
+        },
+      ];
+      const hm = computeVoiceActivityHeatmap(sessions);
+      expect(hm.hourOfDay[22]).toBe(30);
+      expect(hm.hourOfDay[23]).toBe(60);
+      expect(hm.hourOfDay[0]).toBe(30);
+    });
+
+    it("splits a midnight-crossing session across both weekdays", () => {
+      // Friday 2026-03-13 23:00 UTC for 2 hours → 60m Friday, 60m Saturday.
+      const sessions = [
+        {
+          startTime: new Date("2026-03-13T23:00:00Z"),
+          duration: 2 * 60 * 60,
+          channelId: "a",
+        },
+      ];
+      const hm = computeVoiceActivityHeatmap(sessions);
+      expect(hm.dayOfWeek[5]).toBe(60); // Friday
+      expect(hm.dayOfWeek[6]).toBe(60); // Saturday
+      expect(hm.hourOfDay[23]).toBe(60);
+      expect(hm.hourOfDay[0]).toBe(60);
+    });
+
+    it("aggregates multiple sessions, weighting by duration", () => {
+      const sessions = [
+        {
+          startTime: new Date("2026-03-13T10:00:00Z"),
+          duration: 60 * 60,
+          channelId: "a",
+        },
+        {
+          startTime: new Date("2026-03-14T10:00:00Z"), // Saturday
+          duration: 30 * 60,
+          channelId: "a",
+        },
+        {
+          startTime: new Date("2026-03-13T10:30:00Z"),
+          duration: 30 * 60,
+          channelId: "a",
+        },
+      ];
+      const hm = computeVoiceActivityHeatmap(sessions);
+      // Hour 10 collects 60 + 30 (split into 10:30→11:00 is still hour 10) + 30.
+      expect(hm.hourOfDay[10]).toBe(60 + 30 + 30);
+      expect(hm.dayOfWeek[5]).toBe(90); // Friday: 60 + 30
+      expect(hm.dayOfWeek[6]).toBe(30); // Saturday
+    });
+
+    it("buckets in the supplied timezone", () => {
+      // 02:00 UTC on Saturday is still 22:00 Friday in New York (EDT, -4).
+      const sessions = [
+        {
+          startTime: new Date("2026-03-14T02:00:00Z"),
+          duration: 60 * 60,
+          channelId: "a",
+        },
+      ];
+      const ny = computeVoiceActivityHeatmap(sessions, "America/New_York");
+      expect(ny.hourOfDay[22]).toBe(60);
+      expect(ny.dayOfWeek[5]).toBe(60); // Friday in NY
+      const utc = computeVoiceActivityHeatmap(sessions);
+      expect(utc.hourOfDay[2]).toBe(60);
+      expect(utc.dayOfWeek[6]).toBe(60); // Saturday in UTC
+    });
+
+    it("ignores zero / negative-duration sessions", () => {
+      const sessions = [
+        {
+          startTime: new Date("2026-03-13T10:00:00Z"),
+          duration: 0,
+          channelId: "a",
+        },
+      ];
+      const hm = computeVoiceActivityHeatmap(sessions);
+      expect(hm.hourOfDay.every((v) => v === 0)).toBe(true);
+    });
+
+    it("thin wrappers return just one axis", () => {
+      const sessions = [
+        {
+          startTime: new Date("2026-03-13T10:00:00Z"),
+          duration: 30 * 60,
+          channelId: "a",
+        },
+      ];
+      expect(computeHourOfDayDistribution(sessions)[10]).toBe(30);
+      expect(computeDayOfWeekDistribution(sessions)[5]).toBe(30);
+    });
+  });
+
+  describe("peakIndex", () => {
+    it("returns null for empty or all-zero arrays", () => {
+      expect(peakIndex([])).toBeNull();
+      expect(peakIndex([0, 0, 0])).toBeNull();
+    });
+    it("returns the index of the max value", () => {
+      expect(peakIndex([1, 5, 3])).toBe(1);
+    });
+    it("breaks ties toward the earliest index", () => {
+      expect(peakIndex([4, 4, 1])).toBe(0);
+    });
+  });
+
+  describe("formatHourLabel", () => {
+    it("formats midnight and noon", () => {
+      expect(formatHourLabel(0)).toBe("12 AM");
+      expect(formatHourLabel(12)).toBe("12 PM");
+    });
+    it("formats morning and evening hours", () => {
+      expect(formatHourLabel(1)).toBe("1 AM");
+      expect(formatHourLabel(13)).toBe("1 PM");
+      expect(formatHourLabel(23)).toBe("11 PM");
+    });
+    it("DAY_NAMES is Sunday-first and 7 long", () => {
+      expect(DAY_NAMES).toHaveLength(7);
+      expect(DAY_NAMES[0]).toBe("Sunday");
+      expect(DAY_NAMES[5]).toBe("Friday");
     });
   });
 

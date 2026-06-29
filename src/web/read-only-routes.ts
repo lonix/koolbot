@@ -43,6 +43,8 @@ import {
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
+import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
+import { getServerTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
 import { getEnv } from "../config/env.js";
 import {
@@ -56,6 +58,7 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import {
+  renderAnalyticsPage,
   renderAnnouncementsPage,
   renderBootstrapPage,
   renderBotStatusPage,
@@ -1092,6 +1095,43 @@ export function createReadOnlyRouter(
             lastUsedAt: r.lastUsedAt,
           })),
           dailyTotals: summary.dailyTotals,
+        }),
+      );
+    }),
+  );
+
+  // ---------- Voice Analytics (#675, Part B) ----------
+  router.get(
+    "/analytics",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+
+      // Only the three documented windows are accepted; anything else falls
+      // back to 90 so a hand-edited query string can't request an unbounded
+      // scan. 90 is the default because guild-wide weekly patterns need a few
+      // weeks of data to read clearly.
+      const windowRaw = Number.parseInt(String(req.query.window ?? "90"), 10);
+      const windowDays =
+        windowRaw === 7 || windowRaw === 30 || windowRaw === 90
+          ? windowRaw
+          : 90;
+
+      const enabled = await config.getBoolean("voicetracking.enabled", false);
+      const end = new Date();
+      const start = new Date(end.getTime() - windowDays * 24 * 60 * 60 * 1000);
+      const heatmap = await getGuildVoiceHeatmap(
+        start,
+        end,
+        getServerTimezone(),
+      );
+
+      res.type("text/html").send(
+        renderAnalyticsPage({
+          ...common,
+          enabled,
+          windowDays,
+          heatmap,
         }),
       );
     }),

@@ -10,6 +10,11 @@
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
+import {
+  DAY_NAMES,
+  formatHourLabel,
+  peakIndex,
+} from "../services/rewind-service.js";
 
 export { escapeHtml };
 
@@ -171,6 +176,25 @@ const STYLE = [
   ".rw-journey .step .num{font-size:1.4rem;font-weight:700;color:#e4e6eb}",
   ".rw-journey .step .when{font-size:.75rem;color:#94a3b8;margin-top:.15rem}",
   ".rw-journey .step .label{font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem}",
+  // Voice activity heatmap (#675): a vertical 24-bar hour histogram and a
+  // horizontal 7-bar weekday breakdown, sharing the indigo Rewind palette.
+  ".rw-heat .peak{font-size:.95rem;color:#cbd5e1;margin:0 0 .9rem}",
+  ".rw-heat .peak strong{color:#a5b4fc}",
+  ".rw-heat .heat-section{margin:0 0 1.1rem}",
+  ".rw-heat .heat-section:last-child{margin-bottom:0}",
+  ".rw-heat .heat-title{font-size:.7rem;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin:0 0 .45rem}",
+  ".rw-hours{display:flex;align-items:flex-end;gap:2px;height:84px}",
+  ".rw-hours .hb{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}",
+  ".rw-hours .hb .fill{background:#4338ca;border-radius:2px 2px 0 0;min-height:2px}",
+  ".rw-hours .hb.peak .fill{background:#a5b4fc}",
+  ".rw-hour-axis{display:flex;justify-content:space-between;font-size:.65rem;color:#64748b;margin-top:.3rem}",
+  ".rw-days{display:flex;flex-direction:column;gap:.32rem}",
+  ".rw-days .db{display:flex;align-items:center;gap:.55rem}",
+  ".rw-days .db .dl{width:2.4rem;font-size:.75rem;color:#94a3b8;flex-shrink:0}",
+  ".rw-days .db .track{flex:1;background:#0f1115;border:1px solid #2d3748;border-radius:4px;height:.95rem;overflow:hidden}",
+  ".rw-days .db .track .fill{height:100%;background:#4338ca}",
+  ".rw-days .db.peak .track .fill{background:#a5b4fc}",
+  ".rw-days .db .dv{width:5rem;text-align:right;font-size:.7rem;color:#64748b;flex-shrink:0}",
 ].join("");
 
 // Same DOM hooks (`#session-countdown`, `data-remaining-ms`,
@@ -389,6 +413,12 @@ export interface RewindBodyOptions {
   // block is hidden when both are 0 (no data or reaction tracking off).
   reactionsGiven: number;
   reactionsReceived: number;
+  // Voice activity heatmap (#675). Duration-weighted minutes per hour-of-day
+  // (length 24, index 0 = midnight) and per weekday (length 7, index 0 =
+  // Sunday), in the member's timezone. The block is hidden when both are
+  // empty / all-zero (no data or voice tracking off).
+  hourOfDayDistribution: number[];
+  dayOfWeekDistribution: number[];
 }
 
 function renderYearPicker(current: number, years: number[]): string {
@@ -520,6 +550,90 @@ function renderReactionActivity(opts: RewindBodyOptions): string {
   ].join("");
 }
 
+/** Format a whole-minute weight as a compact "X hr Y min" tooltip / value. */
+function heatMinutesLabel(minutes: number): string {
+  if (minutes <= 0) return "0 min";
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours === 0) return `${mins} min`;
+  if (mins === 0) return `${hours} hr`;
+  return `${hours} hr ${mins} min`;
+}
+
+/**
+ * Voice activity heatmap card (#675): a 24-bar hour-of-day histogram and a
+ * 7-bar weekday breakdown, both duration-weighted in the member's timezone,
+ * with the peak hour/day called out. Reuses the indigo Rewind palette.
+ * Returns "" when neither axis has any positive activity (no data or voice
+ * tracking off) so the route can append it unconditionally and the card
+ * simply disappears — mirroring the text/reaction blocks.
+ */
+function renderActivityHeatmap(opts: RewindBodyOptions): string {
+  const hours = opts.hourOfDayDistribution ?? [];
+  const days = opts.dayOfWeekDistribution ?? [];
+  const peakHour = peakIndex(hours);
+  const peakDayIdx = peakIndex(days);
+  if (peakHour === null && peakDayIdx === null) return "";
+
+  const maxHour = hours.reduce((m, v) => (v > m ? v : m), 0);
+  const maxDay = days.reduce((m, v) => (v > m ? v : m), 0);
+
+  const peakParts: string[] = [];
+  if (peakDayIdx !== null) peakParts.push(escapeHtml(DAY_NAMES[peakDayIdx]));
+  if (peakHour !== null) peakParts.push(escapeHtml(formatHourLabel(peakHour)));
+  const peakLabel = peakParts.length
+    ? `<p class="peak">Most active: <strong>${peakParts.join(" · ")}</strong></p>`
+    : "";
+
+  const hourSection =
+    peakHour === null
+      ? ""
+      : '<div class="heat-section"><p class="heat-title">By hour of day</p>' +
+        '<div class="rw-hours">' +
+        hours
+          .map((v, h) => {
+            const pct = maxHour > 0 ? Math.round((v / maxHour) * 100) : 0;
+            const cls = h === peakHour ? " peak" : "";
+            return (
+              `<div class="hb${cls}" title="${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}">` +
+              `<div class="fill" style="height:${pct}%"></div></div>`
+            );
+          })
+          .join("") +
+        "</div>" +
+        '<div class="rw-hour-axis"><span>12 AM</span><span>6 AM</span>' +
+        "<span>12 PM</span><span>6 PM</span><span>11 PM</span></div></div>";
+
+  const daySection =
+    peakDayIdx === null
+      ? ""
+      : '<div class="heat-section"><p class="heat-title">By day of week</p>' +
+        '<div class="rw-days">' +
+        days
+          .map((v, d) => {
+            const pct = maxDay > 0 ? Math.round((v / maxDay) * 100) : 0;
+            const cls = d === peakDayIdx ? " peak" : "";
+            return (
+              `<div class="db${cls}">` +
+              `<span class="dl">${escapeHtml(DAY_NAMES[d].slice(0, 3))}</span>` +
+              `<span class="track"><span class="fill" style="width:${pct}%"></span></span>` +
+              `<span class="dv">${escapeHtml(heatMinutesLabel(v))}</span>` +
+              "</div>"
+            );
+          })
+          .join("") +
+        "</div></div>";
+
+  return (
+    '<div class="card"><h2>When you\'re online</h2>' +
+    '<div class="rw-heat">' +
+    peakLabel +
+    hourSection +
+    daySection +
+    "</div></div>"
+  );
+}
+
 export function renderUserRewindBody(opts: RewindBodyOptions): string {
   const years = opts.availableYears.includes(opts.year)
     ? opts.availableYears
@@ -622,6 +736,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
     '<div class="card"><h2>Top voice companions</h2>' + companions + "</div>",
     renderTextActivity(opts),
     renderReactionActivity(opts),
+    renderActivityHeatmap(opts),
     '<div class="card"><h2>Rank journey</h2>' +
       renderJourney(opts.weeklyJourney) +
       "</div>",

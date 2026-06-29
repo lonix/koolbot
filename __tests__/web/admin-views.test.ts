@@ -2,6 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import {
   findCascadeMasterKey,
   parseCronToPickerState,
+  renderAnalyticsPage,
   renderAnnouncementsPage,
   renderBootstrapPage,
   renderCommandAuditPage,
@@ -2179,5 +2180,60 @@ describe("renderCommandAuditPage", () => {
     });
     expect(html).toContain('class="tag tag-off">disabled');
     expect(html).toContain("core.command_audit.enabled");
+  });
+});
+
+describe("renderAnalyticsPage (#675 Part B)", () => {
+  const emptyHeatmap = {
+    matrix: Array.from({ length: 7 }, () => new Array(24).fill(0)),
+    byHour: new Array(24).fill(0),
+    byDay: new Array(7).fill(0),
+    totalMinutes: 0,
+    peak: null,
+    timeZone: "UTC",
+  };
+
+  it("renders the empty state and disabled notice when off", () => {
+    const html = renderAnalyticsPage({
+      ...COMMON,
+      enabled: false,
+      windowDays: 90,
+      heatmap: emptyHeatmap,
+    });
+    expect(html).toContain("Voice analytics");
+    expect(html).toContain("No voice activity recorded");
+    expect(html).toContain("voicetracking.enabled");
+  });
+
+  it("renders the heatmap grid and peak slot when data exists", () => {
+    const matrix = Array.from({ length: 7 }, () => new Array(24).fill(0));
+    matrix[5][22] = 200; // Friday 10 PM
+    matrix[1][9] = 50; // Monday 9 AM
+    const byDay = new Array(7).fill(0);
+    byDay[5] = 200;
+    byDay[1] = 50;
+    const byHour = new Array(24).fill(0);
+    byHour[22] = 200;
+    byHour[9] = 50;
+    const html = renderAnalyticsPage({
+      ...COMMON,
+      enabled: true,
+      windowDays: 30,
+      heatmap: {
+        matrix,
+        byHour,
+        byDay,
+        totalMinutes: 250,
+        peak: { day: 5, hour: 22, minutes: 200 },
+        timeZone: "UTC",
+      },
+    });
+    expect(html).toContain("heatgrid");
+    expect(html).toContain("Busiest slot");
+    expect(html).toContain("Friday");
+    expect(html).toContain("10 PM");
+    expect(html).toContain("hg-cell peak");
+    // No disabled notice when tracking is on.
+    expect(html).not.toContain("voicetracking.enabled");
   });
 });

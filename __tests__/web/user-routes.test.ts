@@ -839,6 +839,37 @@ describe("/me/rewind", () => {
     expect(out.body).not.toContain("Reactions given");
   });
 
+  it("renders the activity heatmap with the peak hour/day when data exists (#675)", async () => {
+    const hours = new Array(24).fill(0);
+    hours[22] = 120; // peak hour: 10 PM
+    const days = new Array(7).fill(0);
+    days[5] = 200; // peak day: Friday
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({
+        hourOfDayDistribution: hours,
+        dayOfWeekDistribution: days,
+      }),
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("When you're online");
+    expect(out.body).toContain("Most active:");
+    expect(out.body).toContain("Friday");
+    expect(out.body).toContain("10 PM");
+  });
+
+  it("hides the activity heatmap when all distribution values are 0 (#675)", async () => {
+    const out = await dispatchRewind({
+      pathSuffix: "",
+      summary: makeSummary({
+        hourOfDayDistribution: new Array(24).fill(0),
+        dayOfWeekDistribution: new Array(7).fill(0),
+      }),
+    });
+    expect(out.statusCode).toBe(200);
+    expect(out.body).not.toContain("When you're online");
+  });
+
   it("renders the empty-state body when the user has no data", async () => {
     const out = await dispatchRewind({
       pathSuffix: "/2023",

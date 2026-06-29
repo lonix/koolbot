@@ -842,6 +842,8 @@ export function createUserRouter(
           peakMessageDay: summary.peakMessageDay,
           reactionsGiven: summary.reactionsGiven,
           reactionsReceived: summary.reactionsReceived,
+          hourOfDayDistribution: summary.hourOfDayDistribution ?? [],
+          dayOfWeekDistribution: summary.dayOfWeekDistribution ?? [],
         }),
         csrfToken: getCsrfToken(req),
         remainingMs: getDisplayedRemainingMs(session),
