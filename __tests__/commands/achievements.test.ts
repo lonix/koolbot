@@ -1,5 +1,9 @@
 import { describe, it, expect, jest } from "@jest/globals";
-import { data, formatMetadata } from "../../src/commands/achievements.js";
+import {
+  data,
+  formatMetadata,
+  formatProgressBar,
+} from "../../src/commands/achievements.js";
 
 jest.mock("../../src/services/achievements-service.js");
 jest.mock("../../src/utils/logger.js");
@@ -186,6 +190,34 @@ describe("Achievements Command", () => {
 
       expect(accoladeText).not.toContain(" - ");
       expect(accoladeText).toContain("🏆 **Some Badge**\n");
+    });
+  });
+
+  describe("formatProgressBar", () => {
+    it("renders an empty bar at 0%", () => {
+      expect(formatProgressBar(0)).toBe("▱▱▱▱▱▱▱▱▱▱");
+    });
+
+    it("renders a full bar at 100%", () => {
+      expect(formatProgressBar(100)).toBe("▰▰▰▰▰▰▰▰▰▰");
+    });
+
+    it("renders a partial bar (80% -> 8 filled)", () => {
+      expect(formatProgressBar(80)).toBe("▰▰▰▰▰▰▰▰▱▱");
+    });
+
+    it("rounds to the nearest segment (e.g. 94% -> 9 filled)", () => {
+      expect(formatProgressBar(94)).toBe("▰▰▰▰▰▰▰▰▰▱");
+    });
+
+    it("clamps out-of-range and non-finite percentages", () => {
+      expect(formatProgressBar(-20)).toBe("▱▱▱▱▱▱▱▱▱▱");
+      expect(formatProgressBar(150)).toBe("▰▰▰▰▰▰▰▰▰▰");
+      expect(formatProgressBar(Number.NaN)).toBe("▱▱▱▱▱▱▱▱▱▱");
+    });
+
+    it("respects a custom segment count", () => {
+      expect(formatProgressBar(50, 4)).toBe("▰▰▱▱");
     });
   });
 

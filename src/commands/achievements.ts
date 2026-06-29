@@ -20,6 +20,19 @@ export function formatMetadata(metadata?: IAccolade["metadata"]): string {
   return ` - ${metadata.value}${unit ? ` ${unit}` : ""}`;
 }
 
+/**
+ * Render a fixed-width unicode progress bar for a 0-100 percentage, e.g.
+ * `▰▰▰▰▰▰▰▰▱▱` for 80%. Used by the unearned-accolade progress display (#654).
+ */
+export function formatProgressBar(percent: number, segments = 10): string {
+  const clamped = Math.max(
+    0,
+    Math.min(100, Number.isFinite(percent) ? percent : 0),
+  );
+  const filled = Math.round((clamped / 100) * segments);
+  return "▰".repeat(filled) + "▱".repeat(segments - filled);
+}
+
 export const data = new SlashCommandBuilder()
   .setName("achievements")
   .setDescription("View earned badges and achievements")
@@ -39,15 +52,17 @@ export async function execute(
       interaction.client,
     );
 
-    const userAchievements = await achievementsService.getUserAchievements(
-      targetUser.id,
-    );
+    const [userAchievements, progress] = await Promise.all([
+      achievementsService.getUserAchievements(targetUser.id),
+      achievementsService.getUnearnedAccoladeProgress(targetUser.id, 5),
+    ]);
 
-    if (
-      !userAchievements ||
-      (userAchievements.accolades.length === 0 &&
-        userAchievements.achievements.length === 0)
-    ) {
+    const hasBadges =
+      !!userAchievements &&
+      (userAchievements.accolades.length > 0 ||
+        userAchievements.achievements.length > 0);
+
+    if (!hasBadges && progress.length === 0) {
       await interaction.reply({
         content: `${targetUser.username} hasn't earned any badges yet. Keep participating in voice channels!`,
         ephemeral: true,
@@ -62,7 +77,7 @@ export async function execute(
       .setTimestamp();
 
     // Add accolades section
-    if (userAchievements.accolades.length > 0) {
+    if (userAchievements && userAchievements.accolades.length > 0) {
       const accoladesList = userAchievements.accolades
         .sort((a, b) => b.earnedAt.getTime() - a.earnedAt.getTime())
         .map((accolade) => {
@@ -126,7 +141,7 @@ export async function execute(
     }
 
     // Add achievements section (time-based)
-    if (userAchievements.achievements.length > 0) {
+    if (userAchievements && userAchievements.achievements.length > 0) {
       const achievementsList = userAchievements.achievements
         .sort((a, b) => b.earnedAt.getTime() - a.earnedAt.getTime())
         .slice(0, 10) // Limit to most recent 10
@@ -153,10 +168,34 @@ export async function execute(
       }
     }
 
+    // Add progress toward the nearest unearned accolades (#654)
+    if (progress.length > 0) {
+      const progressLines = progress.map((p) => {
+        const bar = formatProgressBar(p.percent);
+        const unit = p.unit ? ` ${p.unit}` : "";
+        return `${p.emoji} ${bar} **${p.name}** — ${p.current} / ${p.target}${unit}`;
+      });
+
+      // Each line is short; clamp the joined value to Discord's field limit.
+      let value = progressLines.join("\n");
+      if (value.length > 1024) {
+        value = `${value.slice(0, 1021)}...`;
+      }
+
+      embed.addFields({
+        name: "🎯 Almost There (Progress)",
+        value,
+        inline: false,
+      });
+    }
+
     // Add summary
+    const totalAccolades = userAchievements?.statistics.totalAccolades ?? 0;
+    const totalAchievements =
+      userAchievements?.statistics.totalAchievements ?? 0;
     embed.addFields({
       name: "📊 Summary",
-      value: `Total Accolades: ${userAchievements.statistics.totalAccolades}\nTotal Achievements: ${userAchievements.statistics.totalAchievements}`,
+      value: `Total Accolades: ${totalAccolades}\nTotal Achievements: ${totalAchievements}`,
       inline: false,
     });
 

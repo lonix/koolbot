@@ -8,7 +8,20 @@ import {
   VoiceChannelTracking,
   type IVoiceChannelTracking,
 } from "../models/voice-channel-tracking.js";
+import {
+  MessageActivityTracking,
+  type IMessageActivityTracking,
+} from "../models/message-activity-tracking.js";
+import {
+  ReactionActivityTracking,
+  type IReactionActivityTracking,
+} from "../models/reaction-activity-tracking.js";
+import {
+  PollParticipationTracking,
+  type IPollParticipationTracking,
+} from "../models/poll-participation-tracking.js";
 import { ConfigService } from "./config-service.js";
+import type { ConfigSchema } from "./config-schema.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import {
   dayOfWeekInZone,
@@ -48,6 +61,34 @@ interface BadgeLogic {
     userData: IVoiceChannelTracking | null,
     timeZone: string,
   ) => Promise<{ value?: number; description?: string; unit?: string }>;
+}
+
+/**
+ * A voice session clipped to the current week for the weekly_* achievement
+ * checks (#654). `startTime` is the later of the raw start and Monday 00:00
+ * UTC, and `duration` is recomputed from that clipped window, so weekly checks
+ * never count time that bled in from before the week.
+ */
+interface WeeklySession {
+  startTime: Date;
+  endTime: Date;
+  duration: number;
+  otherUsers: string[];
+}
+
+/**
+ * One row of the "closest unearned accolades" progress display (#654),
+ * surfaced under the earned list in `/achievements`.
+ */
+export interface AccoladeProgress {
+  type: AccoladeType;
+  emoji: string;
+  name: string;
+  current: number;
+  target: number;
+  unit: string;
+  /** Clamped 0-100 completion percentage (floored). */
+  percent: number;
 }
 
 interface BadgeDefinition extends BadgeLogic {
@@ -704,6 +745,99 @@ export class AchievementsService {
         };
       },
     },
+    // Engagement accolades for the now-tracked text/reaction/poll signals
+    // (#654). These read their own per-guild tracking collections (resolved
+    // via bootstrap GUILD_ID) and are gated behind their capture key in
+    // ACCOLADE_ENABLED_KEYS, so they stay dark while capture is off.
+    chatterbox: {
+      checkFunction: async (userId: string) => {
+        const doc = await this.getMessageTracking(userId);
+        return (doc?.totalCount ?? 0) >= 1000;
+      },
+      metadataFunction: async (userId: string) => {
+        const doc = await this.getMessageTracking(userId);
+        return {
+          value: doc?.totalCount ?? 0,
+          description: "1,000 messages sent",
+          unit: "msgs",
+        };
+      },
+    },
+    reactor: {
+      checkFunction: async (userId: string) => {
+        const doc = await this.getReactionTracking(userId);
+        return (doc?.totalGiven ?? 0) >= 500;
+      },
+      metadataFunction: async (userId: string) => {
+        const doc = await this.getReactionTracking(userId);
+        return {
+          value: doc?.totalGiven ?? 0,
+          description: "500 reactions given",
+          unit: "reactions",
+        };
+      },
+    },
+    poll_regular: {
+      checkFunction: async (userId: string) => {
+        const doc = await this.getPollTracking(userId);
+        return (doc?.totalVotes ?? 0) >= 25;
+      },
+      metadataFunction: async (userId: string) => {
+        const doc = await this.getPollTracking(userId);
+        return {
+          value: doc?.totalVotes ?? 0,
+          description: "25 poll votes cast",
+          unit: "votes",
+        };
+      },
+    },
+  };
+
+  // Numeric goal (in the unit returned by each accolade's metadataFunction)
+  // used to render progress bars for *unearned* threshold accolades (#654).
+  // Types absent here are excluded from the progress display.
+  // `first_hour` and `quotable` are intentionally omitted: their target is 1,
+  // and the progress display filters out both `current <= 0` and
+  // `current >= target`, so with no integer strictly between 0 and 1 they could
+  // never render — listing them would only add wasted evaluation (a quote
+  // lookup, in `quotable`'s case).
+  private static readonly ACCOLADE_PROGRESS_TARGETS: Partial<
+    Record<AccoladeType, number>
+  > = {
+    voice_veteran_100: 100,
+    voice_veteran_500: 500,
+    voice_veteran_1000: 1000,
+    voice_legend_8765: 8765,
+    marathon_runner: 4,
+    ultra_marathoner: 8,
+    social_butterfly: 10,
+    connector: 25,
+    night_owl: 50,
+    early_bird: 50,
+    weekend_warrior: 100,
+    weekday_warrior: 100,
+    consistent_week: 7,
+    consistent_fortnight: 14,
+    consistent_month: 30,
+    quote_master: 10,
+    quote_collector: 50,
+    quote_legend: 100,
+    widely_quoted: 25,
+    quote_icon: 50,
+    viral_quote: 10,
+    chatterbox: 1000,
+    reactor: 500,
+    poll_regular: 25,
+  };
+
+  // Capture key that must be true for an accolade to be awarded or shown as
+  // progress (#654). Accolades absent here are always active.
+  private static readonly ACCOLADE_ENABLED_KEYS: Partial<
+    Record<AccoladeType, keyof ConfigSchema>
+  > = {
+    chatterbox: "messagetracking.enabled",
+    reactor: "reactiontracking.enabled",
+    poll_regular: "polls.participation.enabled",
   };
 
   // Awarding logic per achievement (display metadata lives in
@@ -721,6 +855,85 @@ export class AchievementsService {
           value: Math.floor(weeklyTime / 3600),
           description: "Hours this week",
           unit: "hrs",
+        };
+      },
+    },
+    // #1 on this week's voice leaderboard (Monday-anchored UTC week, matching
+    // the achievement `period`). Evaluated at session end for the user whose
+    // session just ended, so the badge lands on whoever currently tops the week.
+    weekly_champion: {
+      checkFunction: async (userId: string) => {
+        const top = await this.getWeeklyTopUser();
+        return top.userId === userId && top.totalTime > 0;
+      },
+      metadataFunction: async () => {
+        const top = await this.getWeeklyTopUser();
+        return {
+          value: Math.floor(top.totalTime / 3600),
+          description: "Ranked #1 this week",
+          unit: "hrs",
+        };
+      },
+    },
+    weekly_night_owl: {
+      checkFunction: async (userId: string) => {
+        return (await this.getWeeklyLateNightSeconds(userId)) >= 18000; // 5h
+      },
+      metadataFunction: async (userId: string) => {
+        return {
+          value: Math.floor(
+            (await this.getWeeklyLateNightSeconds(userId)) / 3600,
+          ),
+          description: "Late-night hours this week",
+          unit: "hrs",
+        };
+      },
+    },
+    weekly_marathon: {
+      checkFunction: async (userId: string) => {
+        const sessions = await this.getWeeklySessions(userId);
+        return sessions.some((s) => (s.duration || 0) >= 14400); // 4h
+      },
+      metadataFunction: async (userId: string) => {
+        const sessions = await this.getWeeklySessions(userId);
+        const maxSession = sessions.reduce(
+          (max, s) => Math.max(max, s.duration || 0),
+          0,
+        );
+        return {
+          value: Math.floor(maxSession / 3600),
+          description: "Longest session this week",
+          unit: "hrs",
+        };
+      },
+    },
+    weekly_social_butterfly: {
+      checkFunction: async (userId: string) => {
+        const sessions = await this.getWeeklySessions(userId);
+        const unique = new Set(sessions.flatMap((s) => s.otherUsers || []));
+        return unique.size >= 5;
+      },
+      metadataFunction: async (userId: string) => {
+        const sessions = await this.getWeeklySessions(userId);
+        const unique = new Set(sessions.flatMap((s) => s.otherUsers || []));
+        return {
+          value: unique.size,
+          description: "Unique users this week",
+          unit: "users",
+        };
+      },
+    },
+    weekly_consistent: {
+      checkFunction: async (userId: string) => {
+        const sessions = await this.getWeeklySessions(userId);
+        return this.countQualifyingDays(sessions, "UTC") >= 5;
+      },
+      metadataFunction: async (userId: string) => {
+        const sessions = await this.getWeeklySessions(userId);
+        return {
+          value: this.countQualifyingDays(sessions, "UTC"),
+          description: "Active days this week",
+          unit: "days",
         };
       },
     },
@@ -943,6 +1156,171 @@ export class AchievementsService {
   }
 
   /**
+   * Start of the current week — Monday 00:00:00 UTC. Weekly achievements
+   * (#654) are bucketed in UTC to match the ISO-week `period` string.
+   */
+  private getStartOfWeekUtc(now: Date = new Date()): Date {
+    const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
+    const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Sunday → back 6 days
+    return new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate() - daysToMonday,
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+  }
+
+  /**
+   * This week's sessions for a user, clipped to the week boundary. A session
+   * counts when it ends on/after Monday 00:00 UTC; its leading edge is then
+   * clamped to that boundary (mirroring `getWeeklyTimeForUser`'s overlap
+   * handling) and its duration recomputed, so a session straddling the
+   * boundary contributes only its in-week portion to the weekly_* checks
+   * (late-night seconds, active-day bucketing, session length). Used by the
+   * weekly_* achievement checks (#654).
+   */
+  private async getWeeklySessions(userId: string): Promise<WeeklySession[]> {
+    const user = await VoiceChannelTracking.findOne({ userId });
+    if (!user?.sessions?.length) return [];
+    const startOfWeek = this.getStartOfWeekUtc();
+
+    const weekly: WeeklySession[] = [];
+    for (const session of user.sessions) {
+      if (!session.endTime) continue;
+      const end = new Date(session.endTime);
+      if (end < startOfWeek) continue;
+
+      const rawStart = new Date(session.startTime);
+      const start = rawStart < startOfWeek ? startOfWeek : rawStart;
+      const duration = Math.max(
+        0,
+        Math.floor((end.getTime() - start.getTime()) / 1000),
+      );
+      weekly.push({
+        startTime: start,
+        endTime: end,
+        duration,
+        otherUsers: session.otherUsers ?? [],
+      });
+    }
+    return weekly;
+  }
+
+  /**
+   * Sum a user's late-night seconds (10 PM - 6 AM, UTC) across this week's
+   * sessions, for the weekly_night_owl achievement (#654).
+   */
+  private async getWeeklyLateNightSeconds(userId: string): Promise<number> {
+    const sessions = await this.getWeeklySessions(userId);
+    let seconds = 0;
+    for (const session of sessions) {
+      if (session.startTime && session.endTime && session.duration) {
+        seconds += this.calculateLateNightDuration(
+          session.startTime,
+          session.endTime,
+          "UTC",
+        );
+      }
+    }
+    return seconds;
+  }
+
+  /**
+   * Count distinct days this week with at least `minDuration` seconds of
+   * voice (not necessarily consecutive), for the weekly_consistent
+   * achievement (#654).
+   */
+  private countQualifyingDays(
+    sessions: Array<{ startTime: Date; duration?: number }>,
+    timeZone: string,
+    minDuration: number = AchievementsService.MIN_DAILY_DURATION_SECONDS,
+  ): number {
+    const dayTotals = new Map<string, number>();
+    for (const session of sessions) {
+      if (session.startTime && session.duration) {
+        const dayKey = isoDateInZone(new Date(session.startTime), timeZone);
+        dayTotals.set(dayKey, (dayTotals.get(dayKey) || 0) + session.duration);
+      }
+    }
+    let count = 0;
+    for (const total of dayTotals.values()) {
+      if (total >= minDuration) count++;
+    }
+    return count;
+  }
+
+  /**
+   * The single top user on this week's voice leaderboard (Monday-anchored
+   * UTC week), for the weekly_champion achievement (#654). Aggregates the
+   * tracking collection directly to avoid a service dependency cycle with
+   * VoiceChannelTracker. Returns `{ userId: null, totalTime: 0 }` when there
+   * is no qualifying activity.
+   *
+   * Intentionally mirrors `VoiceChannelTracker.getTopUsers`' aggregation —
+   * bucket by `sessions.startTime` and sum full `sessions.duration`, no
+   * boundary clipping — so "champion" matches the leaderboard members actually
+   * see. Clipping here (unlike the per-user weekly_* checks) would make the
+   * award disagree with the displayed ranking.
+   */
+  private async getWeeklyTopUser(): Promise<{
+    userId: string | null;
+    totalTime: number;
+  }> {
+    try {
+      const startDate = this.getStartOfWeekUtc();
+      const rows = await VoiceChannelTracking.aggregate([
+        { $unwind: "$sessions" },
+        { $match: { "sessions.startTime": { $gte: startDate } } },
+        {
+          $group: {
+            _id: "$userId",
+            totalTime: { $sum: "$sessions.duration" },
+          },
+        },
+        { $sort: { totalTime: -1 } },
+        { $limit: 1 },
+      ]);
+      if (!rows.length) return { userId: null, totalTime: 0 };
+      return { userId: rows[0]._id, totalTime: rows[0].totalTime || 0 };
+    } catch (error) {
+      logger.error("Error computing weekly champion:", error);
+      return { userId: null, totalTime: 0 };
+    }
+  }
+
+  /** Resolve the bootstrap guild's message-activity doc for a user (#654). */
+  private async getMessageTracking(
+    userId: string,
+  ): Promise<IMessageActivityTracking | null> {
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) return null;
+    return MessageActivityTracking.findOne({ userId, guildId });
+  }
+
+  /** Resolve the bootstrap guild's reaction-activity doc for a user (#654). */
+  private async getReactionTracking(
+    userId: string,
+  ): Promise<IReactionActivityTracking | null> {
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) return null;
+    return ReactionActivityTracking.findOne({ userId, guildId });
+  }
+
+  /** Resolve the bootstrap guild's poll-participation doc for a user (#654). */
+  private async getPollTracking(
+    userId: string,
+  ): Promise<IPollParticipationTracking | null> {
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) return null;
+    return PollParticipationTracking.findOne({ userId, guildId });
+  }
+
+  /**
    * Get total voice time for a user this week
    */
   private async getWeeklyTimeForUser(userId: string): Promise<number> {
@@ -952,21 +1330,7 @@ export class AchievementsService {
         return 0;
       }
 
-      // Get start of this week (Monday at 00:00:00 UTC)
-      const now = new Date();
-      const dayOfWeek = now.getUTCDay(); // 0 = Sunday, 1 = Monday, etc.
-      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // If Sunday, go back 6 days
-      const startOfWeek = new Date(
-        Date.UTC(
-          now.getUTCFullYear(),
-          now.getUTCMonth(),
-          now.getUTCDate() - daysToMonday,
-          0,
-          0,
-          0,
-          0,
-        ),
-      );
+      const startOfWeek = this.getStartOfWeekUtc();
 
       // Calculate total time for sessions that overlap with this week
       let weeklyTime = 0;
@@ -1104,36 +1468,52 @@ export class AchievementsService {
       // out of the per-session inner loops — so it costs at most one lookup.
       const timeZone = await this.resolveUserTimezone(userId);
 
-      // Check each accolade type
+      // Check each accolade type. Each is evaluated in its own try/catch so a
+      // single failing check (e.g. a transient query error in one badge's
+      // data source) can't abort the whole sweep and starve the others.
       for (const type of Object.keys(ACCOLADE_METADATA) as AccoladeType[]) {
         if (existingAccoladeTypes.has(type)) {
           continue; // Already earned
         }
 
-        const logic = this.accoladeLogic[type];
-        const earned = await logic.checkFunction(
-          userId,
-          userTrackingData,
-          timeZone,
-        );
-        if (earned) {
-          const metadata = logic.metadataFunction
-            ? await logic.metadataFunction(userId, userTrackingData, timeZone)
-            : {};
+        try {
+          // Engagement accolades (#654) only award while their capture key is
+          // on; skip them entirely otherwise so they stay dark.
+          const enabledKey = AchievementsService.ACCOLADE_ENABLED_KEYS[type];
+          if (
+            enabledKey &&
+            !(await this.configService.getBoolean(enabledKey, false))
+          ) {
+            continue;
+          }
 
-          const accolade: IAccolade = {
-            type,
-            earnedAt: new Date(),
-            metadata,
-          };
-
-          newAccolades.push(accolade);
-          userAchievements.accolades.push(accolade);
-          userAchievements.statistics.totalAccolades += 1;
-
-          logger.info(
-            `User ${username} (${userId}) earned accolade: ${ACCOLADE_METADATA[type].name}`,
+          const logic = this.accoladeLogic[type];
+          const earned = await logic.checkFunction(
+            userId,
+            userTrackingData,
+            timeZone,
           );
+          if (earned) {
+            const metadata = logic.metadataFunction
+              ? await logic.metadataFunction(userId, userTrackingData, timeZone)
+              : {};
+
+            const accolade: IAccolade = {
+              type,
+              earnedAt: new Date(),
+              metadata,
+            };
+
+            newAccolades.push(accolade);
+            userAchievements.accolades.push(accolade);
+            userAchievements.statistics.totalAccolades += 1;
+
+            logger.info(
+              `User ${username} (${userId}) earned accolade: ${ACCOLADE_METADATA[type].name}`,
+            );
+          }
+        } catch (error) {
+          logger.error(`Error evaluating accolade "${type}":`, error);
         }
       }
 
@@ -1282,6 +1662,90 @@ export class AchievementsService {
     } catch (error) {
       logger.error("Error getting user achievements:", error);
       return null;
+    }
+  }
+
+  /**
+   * Progress toward the nearest *unearned* threshold accolades (#654), for
+   * the "so close" nudge under the earned list in `/achievements`.
+   *
+   * For each accolade with a numeric progress target that the user hasn't
+   * earned yet (and whose capture key, if any, is on), this reuses the
+   * accolade's own `metadataFunction` to read the current value, then sorts
+   * by completion percentage and returns at most `limit` rows. Accolades the
+   * user hasn't started (current <= 0) are omitted so the display only shows
+   * meaningful progress.
+   */
+  public async getUnearnedAccoladeProgress(
+    userId: string,
+    limit: number = 5,
+  ): Promise<AccoladeProgress[]> {
+    try {
+      await this.ensureConnection();
+
+      const userAchievements = await UserAchievements.findOne({ userId });
+      const earned = new Set(
+        (userAchievements?.accolades ?? []).map((a) => a.type),
+      );
+
+      // Fetch voice tracking once (shared by the voice-based metadata fns)
+      // and resolve the bucketing timezone once, mirroring the award flow.
+      const userTrackingData = await VoiceChannelTracking.findOne({ userId });
+      const timeZone = await this.resolveUserTimezone(userId);
+
+      const results: AccoladeProgress[] = [];
+
+      for (const type of Object.keys(ACCOLADE_METADATA) as AccoladeType[]) {
+        if (earned.has(type)) continue;
+
+        const target = AchievementsService.ACCOLADE_PROGRESS_TARGETS[type];
+        if (!target) continue; // no numeric target → not a progress accolade
+
+        // One accolade's metadata failing must not blank out the whole
+        // progress list, so evaluate each in isolation.
+        try {
+          const enabledKey = AchievementsService.ACCOLADE_ENABLED_KEYS[type];
+          if (
+            enabledKey &&
+            !(await this.configService.getBoolean(enabledKey, false))
+          ) {
+            continue;
+          }
+
+          const logic = this.accoladeLogic[type];
+          if (!logic.metadataFunction) continue;
+
+          const meta = await logic.metadataFunction(
+            userId,
+            userTrackingData,
+            timeZone,
+          );
+          const current = meta.value ?? 0;
+          // Only surface started-but-incomplete progress.
+          if (current <= 0 || current >= target) continue;
+
+          results.push({
+            type,
+            emoji: ACCOLADE_METADATA[type].emoji,
+            name: ACCOLADE_METADATA[type].name,
+            current,
+            target,
+            unit: meta.unit ?? "",
+            percent: Math.min(100, Math.floor((current / target) * 100)),
+          });
+        } catch (error) {
+          logger.error(
+            `Error computing progress for accolade "${type}":`,
+            error,
+          );
+        }
+      }
+
+      results.sort((a, b) => b.percent - a.percent);
+      return results.slice(0, Math.max(0, limit));
+    } catch (error) {
+      logger.error("Error computing accolade progress:", error);
+      return [];
     }
   }
 
