@@ -755,7 +755,7 @@ export class DigestService {
       )
       .addFields(fields)
       .setFooter({
-        text: `${footer}\nYou opted in to these. Manage them anytime on the web UI at /me/notifications.`,
+        text: `${footer}\nYou opted in to these. Run /config → Notifications to manage your preferences.`,
       })
       .setTimestamp(new Date());
   }

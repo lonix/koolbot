@@ -587,6 +587,9 @@ describe("AchievementsService", () => {
 
       expect(getPrefsSpy).toHaveBeenCalledWith("user123", "guild-1");
       expect(mockUser.send).not.toHaveBeenCalled();
+      // The opt-in gate runs before the Discord user fetch, so the common
+      // "opted out" case costs no REST call.
+      expect((mockClient.users as any).fetch).not.toHaveBeenCalled();
     });
   });
 

@@ -1784,16 +1784,12 @@ export class AchievementsService {
         return;
       }
 
-      const user = await this.client.users.fetch(userId);
-      if (!user) {
-        logger.warn(`Could not find user ${userId} to send DM`);
-        return;
-      }
-
       // Per-user opt-in (#686, #482). Single-guild bot: resolve guildId
       // from bootstrap config. Fail closed — an empty/unset GUILD_ID means
       // we can't look up the user's pref, so we must NOT send (a
-      // misconfiguration must never cause an unprompted DM).
+      // misconfiguration must never cause an unprompted DM). This gate runs
+      // before the Discord user fetch so the common "opted out" case (now
+      // the default) costs no REST call.
       const guildId = await this.configService.getString("GUILD_ID", "");
       if (!guildId) {
         logger.info(
@@ -1809,6 +1805,12 @@ export class AchievementsService {
         logger.info(
           `Skipping accolade DM for ${userId}: per-user achievements pref is off`,
         );
+        return;
+      }
+
+      const user = await this.client.users.fetch(userId);
+      if (!user) {
+        logger.warn(`Could not find user ${userId} to send DM`);
         return;
       }
 
