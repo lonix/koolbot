@@ -52,6 +52,7 @@ export interface ConfigSchema {
   "quotes.header_enabled": boolean; // Enable header post in quote channel
   "quotes.header_message_id": string; // Message ID of the header post
   "quotes.header_pin_enabled": boolean; // Pin the header post
+  "quotes.clear_on_sync": boolean; // Wipe and re-post the entire channel on quote sync
 
   // Rate Limiting
   "ratelimit.enabled": boolean;
@@ -216,6 +217,8 @@ export const defaultConfig: ConfigSchema = {
   "quotes.header_enabled": true, // Enable informational header post
   "quotes.header_message_id": "", // Stores header message ID
   "quotes.header_pin_enabled": true, // Pin header for easy access
+  // Destructive — off by default (rule 1: operator must explicitly opt in)
+  "quotes.clear_on_sync": false,
 
   // Rate Limiting defaults
   "ratelimit.enabled": false,
@@ -951,6 +954,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "quotes.header_pin_enabled": {
     label: "Pin header post",
     description: "Pin the header post in the quote channel.",
+    category: "quotes",
+    type: "boolean",
+  },
+  "quotes.clear_on_sync": {
+    label: "Clear channel on sync",
+    description:
+      "When enabled, the quote channel is wiped and all quotes are re-posted from scratch on each sync. " +
+      "This is destructive and slow on large quote collections; leave off unless you need a full rebuild.",
     category: "quotes",
     type: "boolean",
   },
