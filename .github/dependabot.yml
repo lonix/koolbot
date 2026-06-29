@@ -32,6 +32,11 @@ updates:
         dependency-type: "production"
         update-types:
           - "patch"
+      # Batch all simultaneous security fixes into a single PR
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
