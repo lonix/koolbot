@@ -144,6 +144,13 @@ Allowed types (kept in sync with `release-please-config.json` changelog sections
 "chore(main): release x.y.z" PR; merging it tags the release and updates `CHANGELOG.md` and
 `.release-please-manifest.json`.
 
+### Pull request workflow
+
+- **Always rebase onto the latest `main` before creating a PR** (`git fetch origin main && git rebase
+  origin/main`), resolving any conflicts, so the PR is up to date and merges cleanly.
+- **Always resolve review comments once they are handled** — after addressing a reviewer's comment, mark
+  the conversation as resolved so the thread reflects what is still outstanding.
+
 ## Conventions & pitfalls
 
 - ESM throughout: relative imports must use `.js` extensions even from `.ts` sources (NodeNext resolution).
