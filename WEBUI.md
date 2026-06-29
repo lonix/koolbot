@@ -825,7 +825,7 @@ window toggle selects the trailing date range over already-persisted data (it
 is not a config key); the default is 90 days so weekly patterns read clearly.
 Sessions are bucketed by their **start** hour/weekday in the **server**
 timezone and weighted by the whole session duration — no new data capture, no
-new writes, just an indexed aggregation over existing sessions. (The per-member
+new writes, just a single server-side aggregation over existing sessions. (The per-member
 Rewind heatmap is more precise, splitting each session across the hour/midnight
 boundaries it crosses; the guild aggregate keeps a single group-by to stay
 cheap across every member's full history.) The page is gated by

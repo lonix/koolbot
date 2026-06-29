@@ -53,6 +53,21 @@ describe("voice-activity-analytics (#675 Part B)", () => {
       expect(hm.peak).toEqual({ day: 6, hour: 23, minutes: 100 });
     });
 
+    it("peaks on the accumulated cell total, not a single row", () => {
+      // Two rows for Monday 9 AM sum to 120 min, beating the single 100-min
+      // Friday 10 PM cell — even though each individual Monday row is < 100.
+      const hm = buildGuildHeatmap(
+        [
+          { _id: { dow: 6, hour: 22 }, totalSeconds: 6000 }, // Fri 22:00 → 100
+          { _id: { dow: 2, hour: 9 }, totalSeconds: 3600 }, // Mon 09:00 → 60
+          { _id: { dow: 2, hour: 9 }, totalSeconds: 3600 }, // Mon 09:00 → +60
+        ],
+        "UTC",
+      );
+      expect(hm.matrix[1][9]).toBe(120);
+      expect(hm.peak).toEqual({ day: 1, hour: 9, minutes: 120 });
+    });
+
     it("skips out-of-range and non-positive rows defensively", () => {
       const hm = buildGuildHeatmap(
         [

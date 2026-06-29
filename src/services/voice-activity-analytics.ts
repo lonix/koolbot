@@ -12,9 +12,11 @@ import logger from "../utils/logger.js";
  * each session by its **start** hour/weekday in the supplied timezone and
  * weights the cell by the whole session duration. (Unlike the per-member
  * Rewind heatmap, which splits a session across the hour/midnight boundaries
- * it crosses, this guild aggregate keeps a single indexed group-by so it
- * stays cheap across every member's full session history — the start-bucket
- * approximation is fine for a scheduling aid.)
+ * it crosses, this guild aggregate does the bucketing in a single server-side
+ * group-by rather than pulling every session into memory — the start-bucket
+ * approximation is fine for a scheduling aid. Note the sessions array is not
+ * separately indexed on `startTime`, so the `$unwind`/`$match` is a collection
+ * scan; that's acceptable for an on-demand admin page over this dataset.)
  */
 
 const HOURS_PER_DAY = 24;
@@ -74,12 +76,16 @@ export function buildGuildHeatmap(
     if (hour < 0 || hour >= HOURS_PER_DAY) continue;
     const minutes = Math.round((row.totalSeconds ?? 0) / SECONDS_PER_MINUTE);
     if (minutes <= 0) continue;
-    result.matrix[day][hour] += minutes;
+    // Compare the peak against the accumulated cell total, not this row's
+    // contribution. The `$group` stage yields one row per (day, hour) so the
+    // two are equal in practice, but folding pre-summed or duplicate rows
+    // would otherwise pick a peak smaller than the true busiest cell.
+    const cellTotal = (result.matrix[day][hour] += minutes);
     result.byDay[day] += minutes;
     result.byHour[hour] += minutes;
     result.totalMinutes += minutes;
-    if (!result.peak || minutes > result.peak.minutes) {
-      result.peak = { day, hour, minutes };
+    if (!result.peak || cellTotal > result.peak.minutes) {
+      result.peak = { day, hour, minutes: cellTotal };
     }
   }
   return result;
