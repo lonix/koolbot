@@ -587,7 +587,46 @@ function renderSelectionSummary(
   );
 }
 
+/**
+ * Render a setting's value control, plus — when the control is
+ * dependency-locked (#666) — a hidden input that round-trips its current value.
+ * A `disabled` control isn't submitted by the browser, and the per-section Save
+ * handler coerces a missing value to `false`/`""` (see `coerceConfigValue` in
+ * write-routes), so without this a dep-locked boolean would be silently flipped
+ * off (and other types blanked) whenever its section is saved while the lock is
+ * active. The same-section / master-off case is already protected by the
+ * cascade-skip in `save-section`, but a cross-section dependent (e.g.
+ * `digest.include_achievements` under an enabled digest section) is not.
+ *
+ * Cron is skipped: it already submits via its own non-disabled `.cron-hidden`
+ * input, which carries the `value_<key>` name. The disabled visible control
+ * keeps the same name but isn't submitted, so only the hidden value is sent.
+ */
 function renderSettingControl(
+  r: SettingRow,
+  pickers: {
+    textChannels: ChannelOption[];
+    voiceChannels: ChannelOption[];
+    categoryChannels: ChannelOption[];
+    roles: RoleOption[];
+  },
+  isCascadeMaster = false,
+  depLocked = false,
+): string {
+  const control = renderControlInput(r, pickers, isCascadeMaster, depLocked);
+  if (!depLocked || r.type === "cron") return control;
+  const primitive = coerceToDisplayValue(r.current);
+  const roundTrip =
+    r.type === "boolean"
+      ? primitive === true
+        ? "true"
+        : "false"
+      : escapeHtml(primitive);
+  const valueName = escapeHtml(settingValueFieldName(r.key));
+  return `<input type="hidden" name="${valueName}" value="${roundTrip}">${control}`;
+}
+
+function renderControlInput(
   r: SettingRow,
   pickers: {
     textChannels: ChannelOption[];
@@ -605,7 +644,9 @@ function renderSettingControl(
   // can't be edited before its requirement is on — the same rule the write-time
   // validator (#663) enforces. `data-dep-locked` tells the cascade-disable
   // script (admin-layout) never to re-enable it when a section master is on, so
-  // a dependency lock survives an enabled parent section.
+  // a dependency lock survives an enabled parent section. The current value is
+  // round-tripped via a sibling hidden input in `renderSettingControl` so the
+  // disabled (and therefore unsubmitted) control can't be clobbered on Save.
   const lockAttr = depLocked ? " disabled data-dep-locked" : "";
 
   // Fixed-options keys render as a single-select dropdown regardless of

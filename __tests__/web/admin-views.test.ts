@@ -819,6 +819,85 @@ describe("renderSettingsPage", () => {
     );
   });
 
+  it("round-trips a dep-locked control's current value via a hidden input so a section Save can't clobber it (#666)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+        {
+          category: "achievements",
+          rows: [
+            {
+              key: "achievements.enabled",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "achievements",
+            },
+          ],
+        },
+        {
+          category: "digest",
+          rows: [
+            // Section master is ON (depends only on voice tracking, which is
+            // on), so the cascade-skip in save-section does NOT protect the
+            // dependent below — it's the cross-section case the hidden
+            // round-trip exists for.
+            {
+              key: "digest.enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "digest",
+            },
+            // Dep-locked: depends on achievements.enabled, which is off. Its
+            // disabled checkbox wouldn't be submitted, so a hidden input must
+            // round-trip the stored `true` or Save would flip it to false.
+            {
+              key: "digest.include_achievements",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "digest",
+            },
+          ],
+        },
+      ],
+    });
+    // Hidden input carries the current value so the disabled (unsubmitted)
+    // checkbox can't be clobbered on Save.
+    expect(html).toContain(
+      '<input type="hidden" name="value_digest.include_achievements" value="true">',
+    );
+    // The visible checkbox is still disabled + dep-locked.
+    expect(html).toMatch(
+      /type="checkbox" name="value_digest\.include_achievements"[^>]*\bdisabled\b[^>]*data-dep-locked/,
+    );
+    // The master toggle (dependency met) is neither locked nor round-tripped
+    // with a hidden value field.
+    expect(html).not.toMatch(
+      /name="value_digest\.enabled"[^>]*data-dep-locked/,
+    );
+    expect(html).not.toContain(
+      '<input type="hidden" name="value_digest.enabled"',
+    );
+  });
+
   it("leaves the control editable once its dependency is enabled", () => {
     const html = renderSettingsPage({
       ...COMMON,
