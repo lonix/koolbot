@@ -146,8 +146,8 @@ Allowed types (kept in sync with `release-please-config.json` changelog sections
 
 ### Pull request workflow
 
-- **Always rebase onto the latest `main` before creating a PR** (`git fetch origin main && git rebase
-  origin/main`), resolving any conflicts, so the PR is up to date and merges cleanly.
+- **Always rebase onto the latest `main` before creating a PR** — run `git fetch origin main && git rebase origin/main`,
+  resolve any conflicts, so the PR is up to date and merges cleanly.
 - **Always resolve review comments once they are handled** — after addressing a reviewer's comment, mark
   the conversation as resolved so the thread reflects what is still outstanding.
 
