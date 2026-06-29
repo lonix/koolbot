@@ -259,6 +259,27 @@ describe("RewindNudgeService", () => {
       expect(mockUserSend).not.toHaveBeenCalled();
     });
 
+    it("sends no DM for a user with no prefs row (opt-in default off, #686)", async () => {
+      // A missing UserNotificationPrefs row resolves to DEFAULT_PREFS
+      // (all false), so an unconfigured user is never DM'd.
+      mockTrackingAggregate.mockResolvedValueOnce([
+        { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },
+      ]);
+      mockGetPrefs.mockResolvedValue({
+        achievements: false,
+        digest: false,
+        rewind: false,
+      });
+
+      const svc: ServiceInstance = RewindNudgeService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result).not.toBeNull();
+      expect(result!.sent).toBe(0);
+      expect(result!.skippedOptOut).toBe(1);
+      expect(mockUserSend).not.toHaveBeenCalled();
+    });
+
     it("sends a DM when prefs.rewind is true and writes the delivery marker", async () => {
       mockTrackingAggregate.mockResolvedValueOnce([
         { _id: "u1", username: "u1", totalTime: 60 * 60 * 5 },

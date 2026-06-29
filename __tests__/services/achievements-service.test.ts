@@ -532,7 +532,9 @@ describe("AchievementsService", () => {
       expect(sent).toContain("Manage notifications: run `/config`");
     });
 
-    it("falls through and DMs when GUILD_ID is unset (no prefs lookup possible)", async () => {
+    it("fails closed and skips the DM when GUILD_ID is unset (#686)", async () => {
+      // With no guildId we can't confirm the user opted in, so the
+      // privacy-by-default posture is to stay silent rather than DM.
       const { service, mockConfigService } =
         createAchievementsService(mockClient);
       mockConfigService.getBoolean.mockResolvedValue(true);
@@ -554,7 +556,37 @@ describe("AchievementsService", () => {
       ]);
 
       expect(getPrefsSpy).not.toHaveBeenCalled();
-      expect(mockUser.send).toHaveBeenCalledTimes(1);
+      expect(mockUser.send).not.toHaveBeenCalled();
+    });
+
+    it("skips the DM for a user with no prefs row (opt-in default off, #686)", async () => {
+      // A brand-new user has no UserNotificationPrefs row, so getPrefs
+      // resolves to DEFAULT_PREFS (all false) and no DM is sent.
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.getString.mockResolvedValue("guild-1");
+
+      const mockUser = {
+        username: "TestUser",
+        send: jest.fn().mockResolvedValue(undefined),
+      };
+      (mockClient.users as any).fetch = jest.fn().mockResolvedValue(mockUser);
+
+      const getPrefsSpy = jest
+        .spyOn(UserNotificationPrefsService.prototype, "getPrefs")
+        .mockResolvedValue({
+          achievements: false,
+          digest: false,
+          rewind: false,
+        });
+
+      await service.notifyUserOfAccolades("user123", [
+        { type: "first_hour", earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(getPrefsSpy).toHaveBeenCalledWith("user123", "guild-1");
+      expect(mockUser.send).not.toHaveBeenCalled();
     });
   });
 

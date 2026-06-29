@@ -419,7 +419,7 @@ Persistent accolade system to encourage voice channel participation.
 | --- | --- | --- |
 | `achievements.enabled` | `false` | Enable/disable achievements system |
 | `achievements.announcements.enabled` | `true` | Include new accolades in weekly announcements |
-| `achievements.dm_notifications.enabled` | `true` | Send DM to users when they earn accolades |
+| `achievements.dm_notifications.enabled` | `true` | Server-wide switch for accolade DMs. Even when on, each user must opt in per-user on `/me/notifications` (off by default) — Koolbot never DMs a member who has not opted in |
 
 **Features:**
 
@@ -456,9 +456,10 @@ accolade list and usage.
 
 A loud, server-wide shout-out the first time **anyone** crosses a
 _marquee_ accolade — the rare, top-tier crossings worth cheering as a
-community. Every accolade still gets its usual personal DM and weekly
-round-up; this adds a single extra announcement in a dedicated channel
-for just the headline milestones.
+community. Every accolade still gets its usual personal DM (for users
+who have opted in on `/me/notifications`) and weekly round-up; this adds
+a single extra announcement in a dedicated channel for just the headline
+milestones.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -493,8 +494,10 @@ for just the headline milestones.
 ## 📬 Weekly Digest
 
 Per-user weekly DM that summarises voice activity, leaderboard rank,
-streak, and achievements earned in the last 7 days. Opt-out lives on
-the user's **/me/notifications** page (no slash command).
+streak, and achievements earned in the last 7 days. The digest DM is
+**opt-in (off by default)**: a user receives it only after enabling it
+on their **/me/notifications** page (no slash command). Koolbot never
+DMs a member who has not opted in.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -508,8 +511,9 @@ the user's **/me/notifications** page (no slash command).
 
 - Requires `voicetracking.enabled = true` so the underlying weekly stats
   exist.
-- Per-user opt-out is honoured before each send via the
-  `prefs.digest` field set on `/me/notifications`.
+- Per-user opt-in is required before each send: the `prefs.digest`
+  field set on `/me/notifications` must be `true` (it defaults to off),
+  and a missing row or read error fails closed (no DM).
 - Users with DMs closed are silently skipped (same pattern the
   `AchievementsService` already uses).
 - A summary row (qualifying / sent / opted-out / DMs closed / failed)
@@ -578,8 +582,9 @@ expose the page.
   data to exist; when off, only that section is empty — the page itself
   still renders (see the graceful-degradation table above). The end-of-year
   nudge, however, is voice-based and still keys off annual voice minutes.
-- Per-user opt-out is honoured before sending each nudge via the
-  `prefs.rewind` field set on `/me/notifications`.
+- Per-user opt-in is required before sending each nudge: the
+  `prefs.rewind` field set on `/me/notifications` must be `true` (it
+  defaults to off), and a missing row or read error fails closed (no DM).
 - Users with DMs closed are silently skipped (same pattern the digest
   and `AchievementsService` already use).
 - Aggregation is on-demand and not cached in v1. If real data shows

@@ -41,7 +41,7 @@ export interface DigestPreviewEntry {
   description: string;
   /** The embed fields exactly as they would appear in the DM'd embed. */
   fields: Array<{ name: string; value: string; inline: boolean }>;
-  /** Embed footer text (motivational line + opt-out hint). */
+  /** Embed footer text (motivational line + manage-notifications hint). */
   footer: string;
 }
 
@@ -336,7 +336,7 @@ export class DigestService {
 
       for (const user of qualifying) {
         try {
-          // One read for both the opt-out flag and the display timezone
+          // One read for both the opt-in flag and the display timezone
           // (used for the week range), so the cron loop stays at a single
           // prefs query per user even for large guilds (#524).
           const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
@@ -755,7 +755,7 @@ export class DigestService {
       )
       .addFields(fields)
       .setFooter({
-        text: `${footer}\nDon't want these? Run /config to manage your notifications.`,
+        text: `${footer}\nYou opted in to these. Manage them anytime on the web UI at /me/notifications.`,
       })
       .setTimestamp(new Date());
   }

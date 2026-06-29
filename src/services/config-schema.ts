@@ -654,12 +654,12 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   digest: {
     title: "Weekly Digest",
     description:
-      "Personalised weekly DM summarising each user's voice activity, rank, streak, and new achievements. Opt-out lives on the user's /me/notifications page.",
+      "Personalised weekly DM summarising each user's voice activity, rank, streak, and new achievements. Opt-in (off by default) on the user's /me/notifications page.",
   },
   rewind: {
     title: "Rewind (Year-in-Review)",
     description:
-      "Personalised end-of-year recap at /me/rewind plus a one-shot DM nudge in late December. Opt-out lives on the user's /me/notifications page.",
+      "Personalised end-of-year recap at /me/rewind plus a one-shot DM nudge in late December. The nudge is opt-in (off by default) on the user's /me/notifications page.",
   },
   birthdays: {
     title: "Birthdays",

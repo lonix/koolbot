@@ -1790,23 +1790,26 @@ export class AchievementsService {
         return;
       }
 
-      // Per-user opt-out (#482). Single-guild bot: resolve guildId from
-      // bootstrap config so this guard works whether or not the caller
-      // threaded it through. An empty/unset GUILD_ID falls through to the
-      // legacy "always send when global toggle is on" behaviour so a
-      // misconfiguration doesn't silence every DM.
+      // Per-user opt-in (#686, #482). Single-guild bot: resolve guildId
+      // from bootstrap config. Fail closed — an empty/unset GUILD_ID means
+      // we can't look up the user's pref, so we must NOT send (a
+      // misconfiguration must never cause an unprompted DM).
       const guildId = await this.configService.getString("GUILD_ID", "");
-      if (guildId) {
-        const prefs = await UserNotificationPrefsService.getInstance().getPrefs(
-          userId,
-          guildId,
+      if (!guildId) {
+        logger.info(
+          `Skipping accolade DM for ${userId}: GUILD_ID unset, cannot confirm opt-in`,
         );
-        if (!prefs.achievements) {
-          logger.info(
-            `Skipping accolade DM for ${userId}: per-user achievements pref is off`,
-          );
-          return;
-        }
+        return;
+      }
+      const prefs = await UserNotificationPrefsService.getInstance().getPrefs(
+        userId,
+        guildId,
+      );
+      if (!prefs.achievements) {
+        logger.info(
+          `Skipping accolade DM for ${userId}: per-user achievements pref is off`,
+        );
+        return;
       }
 
       const messages = accolades

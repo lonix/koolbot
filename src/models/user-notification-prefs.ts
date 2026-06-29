@@ -3,8 +3,10 @@ import mongoose, { Document, Schema } from "mongoose";
 /**
  * Per-user notification preferences (#482).
  *
- * A missing row means "all defaults true" — see
- * `UserNotificationPrefsService.getPrefs`. Storage is per `(userId, guildId)`.
+ * Notification DMs are opt-in (#686): a missing row means "all defaults
+ * false" — see `UserNotificationPrefsService.getPrefs` — so Koolbot never
+ * DMs a member who has not explicitly enabled a channel via the web UI.
+ * Storage is per `(userId, guildId)`.
  *
  * The `digest` (#483) and `rewind` (#484) fields ship from day one with
  * defaulting writes so the schema is stable across all three sub-issues:
@@ -29,9 +31,12 @@ const UserNotificationPrefsSchema = new Schema<IUserNotificationPrefs>(
   {
     userId: { type: String, required: true },
     guildId: { type: String, required: true },
-    achievements: { type: Boolean, required: true, default: true },
-    digest: { type: Boolean, required: true, default: true },
-    rewind: { type: Boolean, required: true, default: true },
+    // Opt-in (#686): default false so a row created as a side effect of
+    // setting an unrelated field (e.g. timezone via setDefaultsOnInsert)
+    // never silently opts the user into DMs.
+    achievements: { type: Boolean, required: true, default: false },
+    digest: { type: Boolean, required: true, default: false },
+    rewind: { type: Boolean, required: true, default: false },
     // Optional IANA zone (e.g. "Europe/Berlin"); absent → server timezone.
     timezone: { type: String, required: false },
     updatedAt: { type: Date, required: true, default: Date.now },

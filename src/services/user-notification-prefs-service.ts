@@ -24,19 +24,25 @@ export const NOTIFICATION_PREF_KEYS: readonly NotificationPrefKey[] = [
   "rewind",
 ];
 
+/**
+ * Notification DMs are opt-in (#686): every channel defaults to `false`,
+ * so a user who has never opened `/me/notifications` receives nothing.
+ * This is also the fail-closed posture for read errors and missing ids —
+ * a transient failure can never cause an unprompted DM.
+ */
 export const DEFAULT_PREFS: NotificationPrefs = {
-  achievements: true,
-  digest: true,
-  rewind: true,
+  achievements: false,
+  digest: false,
+  rewind: false,
 };
 
 /**
  * Per-user notification preferences service (#482).
  *
  * Backed by `UserNotificationPrefs` (one row per `(userId, guildId)`).
- * A missing row is treated as "all defaults true", so guards in DM-send
- * paths can call `getPrefs` unconditionally without first checking
- * whether the user has ever opened `/me/notifications`.
+ * DMs are opt-in (#686): a missing row is treated as "all defaults false",
+ * so guards in DM-send paths can call `getPrefs` unconditionally and a
+ * member who has never opened `/me/notifications` is never DM'd.
  */
 export class UserNotificationPrefsService {
   private static instance: UserNotificationPrefsService | null = null;
@@ -53,8 +59,9 @@ export class UserNotificationPrefsService {
 
   /**
    * Read the prefs for a user in a guild. Missing row → defaults
-   * (everything enabled). DB errors are logged and also collapse to
-   * defaults so a transient failure can't accidentally silence every DM.
+   * (everything off, #686). DB errors are logged and also collapse to
+   * defaults so a transient failure fails closed (stays silent) rather
+   * than sending an unprompted DM.
    */
   public async getPrefs(
     userId: string,
@@ -76,7 +83,7 @@ export class UserNotificationPrefsService {
    * notably the weekly digest cron, which renders the week range in the
    * user's zone — use this to avoid a second `findOne` per user. Same
    * defaulting rules as `getPrefs`/`getTimezone` (missing row / error →
-   * all-defaults + null zone).
+   * all-off defaults + null zone, i.e. fail closed, #686).
    */
   public async getPrefsWithTimezone(
     userId: string,
@@ -187,9 +194,11 @@ export class UserNotificationPrefsService {
 }
 
 function rowToPrefs(row: IUserNotificationPrefs): NotificationPrefs {
+  // Opt-in (#686): only an explicit stored `true` enables a channel. A
+  // missing/undefined field reads as off (fail closed), matching DEFAULT_PREFS.
   return {
-    achievements: row.achievements !== false,
-    digest: row.digest !== false,
-    rewind: row.rewind !== false,
+    achievements: row.achievements === true,
+    digest: row.digest === true,
+    rewind: row.rewind === true,
   };
 }

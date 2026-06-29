@@ -12,8 +12,9 @@ single `/config` launcher.
 sign-in link it DMs you lands on the surface that matches your
 permissions: administrators get the **admin panel** (`/admin/`) plus
 their own **personal preferences** (`/me/`), while everyone else gets
-the personal self-service surface (`/me/`) only — opt out of DM
-notifications, view your Rewind, and manage your own settings. There are
+the personal self-service surface (`/me/`) only — opt in to DM
+notifications (off by default), view your Rewind, and manage your own
+settings. There are
 deliberately **no per-feature slash commands** (no `/notifications`,
 `/digest`, `/rewind`); those preferences live behind `/config` → `/me/`.
 See [WEBUI.md](WEBUI.md) for the full surface breakdown.
@@ -480,8 +481,9 @@ permissions:
   can jump to their own **personal preferences** (`/me/`) from a header
   link without re-running `/config`.
 - **Everyone else** reaches the **personal self-service surface**
-  (`/me/`) — opt out of DM notifications, view their Rewind, and manage
-  their own per-user settings. They never see the admin panel.
+  (`/me/`) — opt in to DM notifications (off by default), view their
+  Rewind, and manage their own per-user settings. They never see the
+  admin panel.
 
 **Permission:** Open to **every guild member**. `/config` is no longer
 registered with `setDefaultMemberPermissions(Administrator)` — any member
@@ -799,7 +801,7 @@ reach it from a header link on any admin page):
 | Page          | What it does                                                                        |
 | ------------- | ----------------------------------------------------------------------------------- |
 | Overview      | `/me/` index linking to your per-user pages                                         |
-| Notifications | `/me/notifications` — opt in/out of DM nudges (achievements, weekly digest, Rewind) |
+| Notifications | `/me/notifications` — opt in to DM nudges; off by default                           |
 | Rewind        | `/me/rewind` — personal year-in-review (voice time, top channels, rank journey, …)  |
 
 ---

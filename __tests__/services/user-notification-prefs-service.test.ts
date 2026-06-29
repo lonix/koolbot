@@ -1,10 +1,11 @@
 /**
- * Unit tests for UserNotificationPrefsService (#482).
+ * Unit tests for UserNotificationPrefsService (#482, opt-in #686).
  *
  * Covers:
- *  - missing row → all defaults true
- *  - DB error → all defaults true (so a transient outage cannot
- *    silence every DM by misreporting "user opted out")
+ *  - DMs are opt-in: DEFAULT_PREFS is all-false
+ *  - missing row → all defaults (off), so an unconfigured user is never DM'd
+ *  - DB error → all defaults (off) so a transient outage fails closed
+ *    (stays silent) rather than sending an unprompted DM
  *  - setPrefs writes a row via findOneAndUpdate + upsert and returns
  *    the merged result
  *  - setPrefs ignores non-boolean keys in the patch
@@ -50,8 +51,16 @@ describe("UserNotificationPrefsService", () => {
     ).instance = null;
   });
 
+  it("defaults every channel to off so DMs are opt-in (#686)", () => {
+    expect(DEFAULT_PREFS).toEqual({
+      achievements: false,
+      digest: false,
+      rewind: false,
+    });
+  });
+
   describe("getPrefs", () => {
-    it("returns all defaults when no row exists", async () => {
+    it("returns all defaults (off) when no row exists", async () => {
       findOne.mockResolvedValueOnce(null);
       const prefs = await UserNotificationPrefsService.getInstance().getPrefs(
         "u1",
@@ -81,7 +90,7 @@ describe("UserNotificationPrefsService", () => {
       });
     });
 
-    it("collapses to defaults on DB error so a transient outage cannot silence DMs", async () => {
+    it("collapses to defaults (off) on DB error so a transient outage fails closed", async () => {
       findOne.mockRejectedValueOnce(new Error("mongo down"));
       const prefs = await UserNotificationPrefsService.getInstance().getPrefs(
         "u1",
