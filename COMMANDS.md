@@ -260,10 +260,19 @@ Earned: 2026-01-12
 Voiced with 10+ unique users
 Earned: 2026-01-14
 
+🎯 Almost There (Progress)
+🎖️ ▰▰▰▰▰▰▰▰▱▱ Voice Veteran — 90 / 100 hrs
+🦋 ▰▰▰▰▰▰▱▱▱▱ Social Butterfly — 6 / 10 users
+
 📊 Summary
 Total Accolades: 4
 Total Achievements: 0
 ```
+
+The **Almost There (Progress)** section lists the nearest unearned
+threshold accolades (sorted by completion, up to five) with a `current /
+target` bar — the "so close" nudge. It appears as soon as you've made any
+progress toward an accolade, even before you've earned your first badge.
 
 **Available accolades:**
 
@@ -290,6 +299,26 @@ Total Achievements: 0
 - ⭐ **Widely Quoted** — Been quoted 25 times
 - 💫 **Quote Icon** — Been quoted 50 times
 - 🔥 **Viral Quote** — Have a quote with 10+ likes
+- 🗨️ **Chatterbox** — Sent 1,000 messages
+  (only while `messagetracking.enabled` is on)
+- 👍 **Reactor** — Gave 500 reactions
+  (only while `reactiontracking.enabled` is on)
+- 🗳️ **Poll Regular** — Cast 25 poll votes
+  (only while `polls.participation.enabled` is on)
+
+The last three engagement accolades only award (and only show progress)
+while their capture key is enabled; they stay dark when capture is off.
+
+**Weekly achievements (time-based):**
+
+Re-evaluated each week and shown under **Recent Achievements**:
+
+- ⚡ **Active** — 10+ hours in voice chat this week
+- 👑 **Weekly Champion** — finished #1 on the weekly voice leaderboard
+- 🦉 **Night Owl** — 5+ late-night hours this week (10 PM - 6 AM)
+- 🏃 **Marathoner** — a 4+ hour voice session this week
+- 🦋 **Social Butterfly** — voiced with 5+ unique users this week
+- 🔥 **Consistent** — connected on 5+ days this week (5+ min/day)
 
 **Notes on time-based accolades:**
 

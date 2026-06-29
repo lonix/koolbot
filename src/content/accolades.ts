@@ -125,6 +125,24 @@ export const ACCOLADE_METADATA = {
     name: "Viral Quote",
     description: "Have a quote with 10+ likes",
   },
+  // Engagement accolades for the now-tracked text/reaction/poll signals.
+  // Each is gated behind its capture key (see ACCOLADE_ENABLED_KEYS in
+  // achievements-service.ts) so it stays dark while capture is off.
+  chatterbox: {
+    emoji: "🗨️",
+    name: "Chatterbox",
+    description: "Sent 1,000 messages",
+  },
+  reactor: {
+    emoji: "👍",
+    name: "Reactor",
+    description: "Gave 500 reactions",
+  },
+  poll_regular: {
+    emoji: "🗳️",
+    name: "Poll Regular",
+    description: "Cast 25 poll votes",
+  },
 } as const;
 
 export type AccoladeType = keyof typeof ACCOLADE_METADATA;

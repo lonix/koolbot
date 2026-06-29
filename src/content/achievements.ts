@@ -15,6 +15,31 @@ export const ACHIEVEMENT_METADATA = {
     name: "Active",
     description: "Reached 10 hours in voice chat this week",
   },
+  weekly_champion: {
+    emoji: "👑",
+    name: "Weekly Champion",
+    description: "Finished #1 on the weekly voice leaderboard",
+  },
+  weekly_night_owl: {
+    emoji: "🦉",
+    name: "Night Owl",
+    description: "Logged 5+ late-night hours this week (10 PM - 6 AM)",
+  },
+  weekly_marathon: {
+    emoji: "🏃",
+    name: "Marathoner",
+    description: "Completed a 4+ hour voice session this week",
+  },
+  weekly_social_butterfly: {
+    emoji: "🦋",
+    name: "Social Butterfly",
+    description: "Voiced with 5+ unique users this week",
+  },
+  weekly_consistent: {
+    emoji: "🔥",
+    name: "Consistent",
+    description: "Connected on 5+ days this week (5+ min/day)",
+  },
 } as const;
 
 export type AchievementType =
