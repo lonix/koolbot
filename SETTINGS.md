@@ -36,6 +36,7 @@ Complete configuration reference for all KoolBot settings.
 - [Reaction Tracking](#-reaction-tracking)
 - [Announcements](#-announcements)
 - [Achievements System](#-achievements-system)
+- [Milestone Celebrations](#-milestone-celebrations)
 - [Weekly Digest](#-weekly-digest)
 - [Rewind (Year-in-Review)](#-rewind-year-in-review)
 - [Reaction Roles](#-reaction-roles)
@@ -451,6 +452,44 @@ accolade list and usage.
 
 ---
 
+## 🎊 Milestone Celebrations
+
+A loud, server-wide shout-out the first time **anyone** crosses a
+_marquee_ accolade — the rare, top-tier crossings worth cheering as a
+community. Every accolade still gets its usual personal DM and weekly
+round-up; this adds a single extra announcement in a dedicated channel
+for just the headline milestones.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `celebrations.enabled` | `false` | Master switch — posts a celebration when a marquee accolade is first earned. Requires `achievements.enabled` |
+| `celebrations.channel_id` | `""` | Channel where milestone celebrations are posted. Leave empty to disable the post (the accolade is still awarded) |
+
+**Which accolades are "marquee":**
+
+- 🏆 **Voice Master** — 1000 hours in voice (`voice_veteran_1000`)
+- 👑 **Voice Legend** — a full year, 8765 hours, in voice (`voice_legend_8765`)
+- 💀 **No-Lifer** — a 30-day connection streak (`consistent_month`)
+- 🏆 **Quote Legend** — 100 quotes added (`quote_legend`)
+
+**Notes:**
+
+- Reuses the existing accolade award detection (after each voice session
+  ends) — nothing new is tracked, and a celebration never fires twice for
+  the same user/accolade because accolades are awarded once.
+- The post pings the member. Failures (missing channel, missing
+  permissions) are logged and never break the underlying award flow.
+- The curated marquee list lives in `src/content/accolades.ts`
+  (`MILESTONE_ACCOLADES`).
+
+**Requirements:**
+
+- Requires `achievements.enabled = true` (which in turn requires
+  `voicetracking.enabled = true`). The celebration is inert without the
+  achievements award path that detects the crossing.
+
+---
+
 ## 📬 Weekly Digest
 
 Per-user weekly DM that summarises voice activity, leaderboard rank,
@@ -493,7 +532,7 @@ longest session, longest streak, badges earned, annual rank, a
 first/best/last weekly-rank journey, text activity, and reaction activity
 (given / received). Year picker bottom-anchored to years with data.
 
-**Graceful degradation (#665):** Rewind is an *aggregator* — every section
+**Graceful degradation (#665):** Rewind is an _aggregator_ — every section
 is gated on its own source feature and degrades independently, so the page
 renders whatever subset of sources happens to be on and simply hides the
 rest. It is never blocked or rejected because a source is off (this is the
@@ -529,7 +568,7 @@ expose the page.
 
 - **Upgrade note (#608):** before this change, the single `rewind.enabled`
   key only controlled the nudge and the page was always live. The key now
-  gates the *feature*; the nudge moved to `rewind.nudge.enabled`. Installs
+  gates the _feature_; the nudge moved to `rewind.nudge.enabled`. Installs
   that had set `rewind.enabled = true` keep both the page and the nudge on
   (the nudge reads `rewind.nudge.enabled`, falling back to the old
   `rewind.enabled` value when unset). Installs that never enabled it now
@@ -962,6 +1001,7 @@ Current hard dependencies:
 | `digest.enabled` | `voicetracking.enabled` |
 | `digest.include_achievements` | `achievements.enabled` |
 | `achievements.enabled` | `voicetracking.enabled` |
+| `celebrations.enabled` | `achievements.enabled` |
 | `voicetracking.announcements.enabled` | `voicetracking.enabled` |
 
 **Write-time enforcement.** Every config write surface — `ConfigService.set`,
@@ -970,9 +1010,9 @@ wizard apply — validates these dependencies before persisting, so the rule
 holds no matter how a value is changed:
 
 - **Enabling** a key whose dependency is off is **rejected** with a message
-  naming the unmet dependency (e.g. *"Cannot enable Achievements: requires
+  naming the unmet dependency (e.g. _"Cannot enable Achievements: requires
   Voice Tracking enabled (`voicetracking.enabled`) to be enabled. Enable it
-  first."*). Enabling a feature **and** its dependency together in one wizard
+  first."_). Enabling a feature **and** its dependency together in one wizard
   run or one section save is allowed — the batch is validated as a whole.
 - **Disabling** a key while another enabled feature still depends on it is
   **blocked** (not silently cascade-disabled), with a message naming the
@@ -1055,6 +1095,11 @@ leave the graph in a broken state.
 - `achievements.enabled` (bool, default: false)
 - `achievements.announcements.enabled` (bool, default: true)
 - `achievements.dm_notifications.enabled` (bool, default: true)
+
+#### Milestone Celebrations
+
+- `celebrations.enabled` (bool, default: false)
+- `celebrations.channel_id` (string, default: "")
 
 #### Weekly Digest
 
