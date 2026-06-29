@@ -856,7 +856,7 @@ existing achievements award detection. `celebrations.enabled` depends on
 | Page                                    | What it's for                                                                                                                                              |
 | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                       |
-| **Notifications** (`/me/notifications`) | Opt in or out of DM nudges from Koolbot (achievements, weekly digest, Rewind nudge). Each toggle records a `WebAuditLog` row.                              |
+| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.      |
 | **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.            |
 | **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row.  |
 | **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |

@@ -228,6 +228,27 @@ describe("DigestService", () => {
       expect(mockDigestStateFindOneAndUpdate).not.toHaveBeenCalled();
     });
 
+    it("sends no DM for a user with no prefs row (opt-in default off, #686)", async () => {
+      // A missing UserNotificationPrefs row resolves to DEFAULT_PREFS
+      // (all false), so an unconfigured user is never DM'd.
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 60 * 60 },
+      ]);
+      mockGetPrefsWithTimezone.mockResolvedValue({
+        prefs: { achievements: false, digest: false, rewind: false },
+        timezone: null,
+      });
+
+      const svc: ServiceInstance = DigestService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result).not.toBeNull();
+      expect(result!.sent).toBe(0);
+      expect(result!.skippedOptOut).toBe(1);
+      expect(mockUserSend).not.toHaveBeenCalled();
+      expect(mockDigestStateFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
     it("sends a DM and persists DigestState when prefs.digest is true", async () => {
       mockGetTopUsers.mockResolvedValue([
         { userId: "u1", username: "u1", totalTime: 60 * 60 },

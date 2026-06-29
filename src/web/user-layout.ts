@@ -1020,7 +1020,7 @@ export function renderUserNotificationsBody(
     .join("");
   return [
     "<h1>Notifications</h1>",
-    `<p class="subtitle">Choose which DMs Koolbot may send you on this server. Untoggling a row stops the matching DM immediately.</p>`,
+    `<p class="subtitle">Choose which DMs Koolbot may send you on this server. Every channel is off until you turn it on — Koolbot never DMs you unprompted. Untoggling a row stops the matching DM immediately.</p>`,
     '<form method="POST" action="/me/notifications">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
@@ -1032,7 +1032,7 @@ export function renderUserNotificationsBody(
     "</tbody></table>",
     '<div class="form-actions">',
     '<button class="btn" type="submit">Save preferences</button>',
-    '<span class="muted">Missing record on first save → defaults to all-enabled.</span>',
+    '<span class="muted">DMs are opt-in: every channel starts off until you enable it here.</span>',
     "</div>",
     "</div>",
     "</form>",
