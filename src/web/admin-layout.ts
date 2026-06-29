@@ -278,6 +278,10 @@ const STYLE = [
   ".field-row .help{font-size:.75rem;color:#6b7280;margin-top:.15rem}",
   // Cascade greying: rows whose master `.enabled` toggle is off (#485).
   ".cascade-off{opacity:.5}",
+  // Dependency greying: rows whose hard `dependsOn` target is off (#666).
+  // A static class (not toggled by the cascade script) so an enabled section
+  // master can't strip the greying off a still-dependency-locked control.
+  ".dep-off{opacity:.5}",
   ".wizard-features{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.75rem;margin-bottom:1rem}",
   ".feature-card{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.75rem 1rem;display:flex;gap:.75rem;align-items:flex-start}",
   ".feature-card input{margin-top:.2rem;flex-shrink:0}",
@@ -417,6 +421,12 @@ const CRON_PICKER_SCRIPT =
 // inputs (csrf/keys/category) and buttons are left alone so the form still
 // submits correctly. Used by both the wizard step form and the per-section
 // Settings forms.
+//
+// Dependency locks (#666) win over the master: a control marked
+// `[data-dep-locked]` (its hard `dependsOn` target is off) stays disabled even
+// when the section master is on, and its row keeps the static `.dep-off`
+// greying. So `apply()` only ever *adds* disabling to such controls — it never
+// re-enables them.
 const CASCADE_DISABLE_SCRIPT =
   "(function(){" +
   "function wire(master){" +
@@ -424,7 +434,8 @@ const CASCADE_DISABLE_SCRIPT =
   "function apply(){var off=!master.checked;" +
   "scope.querySelectorAll('input,select,textarea').forEach(function(el){" +
   "if(el===master||el.type==='hidden')return;" +
-  "el.disabled=off;" +
+  "var locked=el.hasAttribute('data-dep-locked');" +
+  "el.disabled=off||locked;" +
   "var row=el.closest('.field-row,tr');" +
   "if(row)row.classList.toggle('cascade-off',off)})}" +
   "master.addEventListener('change',apply);apply()}" +

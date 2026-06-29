@@ -769,6 +769,16 @@ page renders a banner explaining the state with an inline **Enable** button
 (flips the flag via `/admin/settings/set` and returns you to the page) plus
 an **Open Settings** link.
 
+On the **Settings** page, a toggle whose feature declares a hard dependency
+(`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an
+inline *"Requires X enabled"* hint until every dependency is on — the hint names
+each unmet dependency by its human label and links to its section (#666). This is
+the friendly front for the write-time validator (#663): both read the same
+`dependsOn` graph, so the greyed control and the server-side rejection never
+disagree. The greying survives an enabled parent section (a dependency lock wins
+over the per-section cascade), and Rewind toggles are never greyed this way
+because Rewind is a graceful aggregator that declares no `dependsOn`.
+
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
 are in voice: the *empty*, *one user*, and *multiple users* pools. Each

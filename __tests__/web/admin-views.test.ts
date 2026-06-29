@@ -770,6 +770,138 @@ describe("renderSettingsPage", () => {
     );
     expect(html).not.toMatch(/value="(week|month|alltime)" selected/);
   });
+
+  // ---- Feature-dependency greying (#666) ----
+
+  it("greys + disables a control whose hard dependsOn target is off, with a 'requires X' hint", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.enabled",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+        {
+          category: "achievements",
+          rows: [
+            {
+              key: "achievements.enabled",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "achievements",
+            },
+          ],
+        },
+      ],
+    });
+    // The dependent control renders disabled and dep-locked so the cascade
+    // script can't re-enable it under an enabled section master.
+    expect(html).toMatch(
+      /name="value_achievements\.enabled"[^>]*\bdisabled\b[^>]*data-dep-locked/,
+    );
+    // Its row is greyed via the static dependency class.
+    expect(html).toContain('<tr class="dep-off">');
+    // The hint names the unmet dependency by its human label and links to its
+    // section, using the same dependsOn graph the write-time validator uses.
+    expect(html).toContain(
+      'Requires <a href="#section-voicetracking">Voice Tracking enabled</a> enabled',
+    );
+  });
+
+  it("leaves the control editable once its dependency is enabled", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.enabled",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+        {
+          category: "achievements",
+          rows: [
+            {
+              key: "achievements.enabled",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "achievements",
+            },
+          ],
+        },
+      ],
+    });
+    // Dependency met → the control isn't locked, greyed, or hinted. (The
+    // cascade script always mentions `data-dep-locked`, so assert against the
+    // specific control rather than the whole document.)
+    expect(html).not.toMatch(
+      /name="value_achievements\.enabled"[^>]*data-dep-locked/,
+    );
+    expect(html).not.toContain('<tr class="dep-off">');
+    expect(html).not.toContain("settings-dep-hint");
+  });
+
+  it("never greys rewind toggles for dependency reasons even when voice tracking is off", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.enabled",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "voicetracking",
+            },
+          ],
+        },
+        {
+          category: "rewind",
+          rows: [
+            {
+              key: "rewind.nudge.enabled",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "",
+              category: "rewind",
+            },
+          ],
+        },
+      ],
+    });
+    // Rewind declares no dependsOn, so its control is never dep-locked or
+    // dep-greyed regardless of voice-tracking state. (The cascade script always
+    // mentions `data-dep-locked`, so assert against the specific control.)
+    expect(html).not.toMatch(
+      /name="value_rewind\.nudge\.enabled"[^>]*data-dep-locked/,
+    );
+    expect(html).not.toContain('<tr class="dep-off">');
+    expect(html).not.toContain("settings-dep-hint");
+  });
 });
 
 describe("renderPermissionsPage", () => {

@@ -12,6 +12,10 @@ import {
 } from "./admin-layout.js";
 import {
   categoryMetadata,
+  getDependencies,
+  isEnabledValue,
+  settingsMetadata,
+  type ConfigSchema,
   type SettingOption,
 } from "../services/config-schema.js";
 import type { BotStatusPool } from "../content/statuses.js";
@@ -202,6 +206,69 @@ export interface SettingRow {
   channelKind?: "text" | "voice";
 }
 
+/**
+ * An unmet hard dependency for a settings row: a `dependsOn` target that
+ * isn't currently enabled. `key` is the dotted target key; `label` is its
+ * human name from `settingsMetadata`; `category` is its settings section so
+ * the hint can link to it. Computed inside {@link renderSettingsPage} from
+ * the `dependsOn` graph (#666) — the same graph the write-time validator
+ * (#663) enforces, so the UI hint and the server error never disagree.
+ */
+interface UnmetDependency {
+  key: string;
+  label: string;
+  category: string;
+}
+
+/**
+ * Compute which of `key`'s hard `dependsOn` targets are not currently enabled,
+ * given the page-wide enabled-state of every key. Returns an empty array when
+ * the key declares no dependencies or all of them are on. The enabled-state is
+ * derived from the same `current` values the page renders, so the "requires X"
+ * hint always matches the toggle states shown alongside it.
+ */
+function unmetDependenciesFor(
+  key: string,
+  enabledByKey: Map<string, boolean>,
+): UnmetDependency[] {
+  const unmet: UnmetDependency[] = [];
+  for (const target of getDependencies(key as keyof ConfigSchema)) {
+    if (enabledByKey.get(target) === true) continue;
+    const meta = settingsMetadata[target];
+    unmet.push({
+      key: target,
+      label: meta?.label ?? target,
+      category: meta?.category ?? "",
+    });
+  }
+  return unmet;
+}
+
+/**
+ * Render the inline "requires X enabled" hint shown under a control whose
+ * hard dependencies aren't all met (#666). Each unmet dependency links to its
+ * settings section so the operator can jump straight to the toggle that
+ * unlocks this one. Returns an empty string when nothing is unmet. Uses the
+ * dependency's human label from `settingsMetadata`, mirroring the greyed-nav
+ * treatment's muted styling.
+ */
+export function renderDependencyHint(unmet: UnmetDependency[]): string {
+  if (unmet.length === 0) return "";
+  const names = unmet
+    .map((d) => {
+      const label = escapeHtml(d.label);
+      return d.category
+        ? `<a href="#section-${escapeHtml(d.category)}">${label}</a>`
+        : label;
+    })
+    .join(", ");
+  // role="note" keeps this advisory out of the assertive live-region path; the
+  // muted-grey tone matches the greyed-nav treatment (admin-layout's
+  // `.nav-disabled` colour) so a dependency lock reads as a gentle "not
+  // available yet" rather than an error.
+  return `<div class="settings-dep-hint" role="note" style="margin-top:.4rem;color:#94a3b8;font-size:.85em">Requires ${names} enabled</div>`;
+}
+
 export interface SettingsProps extends CommonProps {
   groups: Array<{ category: string; rows: SettingRow[] }>;
   textChannels: ChannelOption[];
@@ -359,12 +426,21 @@ const WEEKDAY_NAMES = [
   "Saturday",
 ];
 
-function renderCronPicker(currentValue: string, valueName: string): string {
+function renderCronPicker(
+  currentValue: string,
+  valueName: string,
+  depLocked = false,
+): string {
   const state = parseCronToPickerState(currentValue);
   const pad = (n: number): string => String(n).padStart(2, "0");
   const timeAttr = `${pad(state.hour)}:${pad(state.minute)}`;
   const sel = (cond: boolean): string => (cond ? " selected" : "");
   const hidden = (cond: boolean): string => (cond ? " hidden" : "");
+  // When the key's dependency is unmet (#666) every interactive cron control
+  // renders disabled; `data-dep-locked` on the visible inputs keeps the cascade
+  // script from re-enabling them under an enabled section master. The hidden
+  // input is left editable-by-name so the row still round-trips its value.
+  const lockAttr = depLocked ? " disabled data-dep-locked" : "";
 
   const dowOptions = WEEKDAY_NAMES.map(
     (name, i) =>
@@ -378,23 +454,23 @@ function renderCronPicker(currentValue: string, valueName: string): string {
   return (
     `<div class="cron-picker" data-mode="${state.mode}">` +
     `<input type="hidden" class="cron-hidden" name="${escapeHtml(valueName)}" value="${escapeHtml(currentValue)}">` +
-    `<select class="cron-mode" aria-label="Schedule type">` +
+    `<select class="cron-mode" aria-label="Schedule type"${lockAttr}>` +
     `<option value="daily"${sel(state.mode === "daily")}>Daily</option>` +
     `<option value="weekly"${sel(state.mode === "weekly")}>Weekly</option>` +
     `<option value="monthly"${sel(state.mode === "monthly")}>Monthly</option>` +
     `<option value="custom"${sel(state.mode === "custom")}>Custom (cron)</option>` +
     `</select>` +
     `<span class="cron-time-wrap"${hidden(state.mode === "custom")}>` +
-    ` at <input type="time" class="cron-time" value="${timeAttr}">` +
+    ` at <input type="time" class="cron-time" value="${timeAttr}"${lockAttr}>` +
     `</span>` +
     `<span class="cron-dow-wrap"${hidden(state.mode !== "weekly")}>` +
-    ` on <select class="cron-dow" aria-label="Day of week">${dowOptions}</select>` +
+    ` on <select class="cron-dow" aria-label="Day of week"${lockAttr}>${dowOptions}</select>` +
     `</span>` +
     `<span class="cron-dom-wrap"${hidden(state.mode !== "monthly")}>` +
-    ` on day <input type="number" class="cron-dom" min="1" max="31" value="${state.dayOfMonth}" style="width:5rem">` +
+    ` on day <input type="number" class="cron-dom" min="1" max="31" value="${state.dayOfMonth}" style="width:5rem"${lockAttr}>` +
     `</span>` +
     `<span class="cron-custom-wrap"${hidden(state.mode !== "custom")}>` +
-    `<input type="text" class="cron-custom" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem">` +
+    `<input type="text" class="cron-custom" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem"${lockAttr}>` +
     `</span>` +
     `</div>`
   );
@@ -450,6 +526,7 @@ function renderOptionsSelect(
   valueName: string,
   options: SettingOption[],
   current: string,
+  extraAttr = "",
 ): string {
   const known = options.some((o) => o.value === current);
   const opts = options
@@ -463,7 +540,7 @@ function renderOptionsSelect(
     : `<option value="${escapeHtml(current)}" selected>${
         current === "" ? "(choose a value)" : `(unknown) ${escapeHtml(current)}`
       }</option>`;
-  return `<select name="${valueName}">${opts}${placeholder}</select>`;
+  return `<select name="${valueName}"${extraAttr}>${opts}${placeholder}</select>`;
 }
 
 /**
@@ -519,29 +596,36 @@ function renderSettingControl(
     roles: RoleOption[];
   },
   isCascadeMaster = false,
+  depLocked = false,
 ): string {
   const primitive = coerceToDisplayValue(r.current);
   const currentStr = typeof primitive === "string" ? primitive : "";
   const valueName = escapeHtml(settingValueFieldName(r.key));
+  // When a hard dependency is unmet (#666), the control renders disabled so it
+  // can't be edited before its requirement is on — the same rule the write-time
+  // validator (#663) enforces. `data-dep-locked` tells the cascade-disable
+  // script (admin-layout) never to re-enable it when a section master is on, so
+  // a dependency lock survives an enabled parent section.
+  const lockAttr = depLocked ? " disabled data-dep-locked" : "";
 
   // Fixed-options keys render as a single-select dropdown regardless of
   // their underlying `type`, so operators pick from the valid set instead
   // of typing a value the server will reject.
   if (r.options && r.options.length > 0) {
-    return renderOptionsSelect(valueName, r.options, currentStr);
+    return renderOptionsSelect(valueName, r.options, currentStr, lockAttr);
   }
   if (r.type === "boolean") {
     const checked = primitive === true ? " checked" : "";
     const masterAttr = isCascadeMaster ? " data-cascade-master" : "";
     return (
       `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
-      `<input type="checkbox" name="${valueName}" value="true"${checked}${masterAttr}> ` +
+      `<input type="checkbox" name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
       `<span class="mono">${primitive === true ? "true" : "false"}</span>` +
       `</label>`
     );
   }
   if (r.type === "number") {
-    return `<input type="number" name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem">`;
+    return `<input type="number" name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
   }
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
@@ -553,7 +637,7 @@ function renderSettingControl(
     const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
-      `<select name="${valueName}">` +
+      `<select name="${valueName}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, true) +
       `</select>`
     );
@@ -569,19 +653,23 @@ function renderSettingControl(
         .filter((v) => v !== ""),
     );
     return (
-      `<select name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}">` +
+      `<select name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, false) +
       `</select>` +
       renderSelectionSummary(options, selected, prefix)
     );
   }
   if (r.type === "cron") {
-    return renderCronPicker(currentStr, settingValueFieldName(r.key));
+    return renderCronPicker(
+      currentStr,
+      settingValueFieldName(r.key),
+      depLocked,
+    );
   }
   // string or unknown type → plain text input. The maxlength mirrors the
   // server-side `TEXT_LIMITS.configValue` cap in write-routes (#508) — kept as
   // a literal here to avoid a circular import (write-routes imports this file).
-  return `<input type="text" name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}">`;
+  return `<input type="text" name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
 }
 
 /**
@@ -642,6 +730,16 @@ export function renderSettingsPage(props: SettingsProps): string {
     categoryChannels: props.categoryChannels,
     roles: props.roles,
   };
+  // Page-wide enabled-state of every rendered key, derived from the same
+  // `current` values shown in the controls. Dependency hints (#666) read from
+  // this so they always agree with the toggle states on the page. A dependency
+  // target can live in any section, so this must span all groups, not just one.
+  const enabledByKey = new Map<string, boolean>();
+  for (const g of props.groups) {
+    for (const r of g.rows) {
+      enabledByKey.set(r.key, isEnabledValue(r.current));
+    }
+  }
   const sections = props.groups
     .map((g) => {
       const meta = categoryMetadata[g.category] ?? {
@@ -656,19 +754,26 @@ export function renderSettingsPage(props: SettingsProps): string {
       // they aren't clobbered (issue #485).
       const cascadeMasterKey = findCascadeMasterKey(g.rows);
       const rows = g.rows
-        .map(
-          (r) => `<tr>
+        .map((r) => {
+          // Grey + disable any control whose hard dependencies aren't all on
+          // (#666). `dep-off` is a static row class (not the cascade script's
+          // `.cascade-off`), so an enabled section master can't strip the
+          // greying off a still-dependency-locked control.
+          const unmet = unmetDependenciesFor(r.key, enabledByKey);
+          const depLocked = unmet.length > 0;
+          const rowClass = depLocked ? ' class="dep-off"' : "";
+          return `<tr${rowClass}>
 <td>
   <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey)}${renderResetButton(r.key)}${renderWarnBelow(r)}</td>
+<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey, depLocked)}${renderResetButton(r.key)}${renderWarnBelow(r)}${renderDependencyHint(unmet)}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td class="settings-default">${formatValue(r.defaultValue)}</td>
 <td class="muted">${escapeHtml(r.description)}</td>
-</tr>`,
-        )
+</tr>`;
+        })
         .join("");
       const descHtml = meta.description
         ? `<p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(meta.description)}</p>`
