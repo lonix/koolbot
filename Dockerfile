@@ -35,7 +35,7 @@ WORKDIR /app
 # /usr/local/lib/node_modules/npm and are independent of our own node_modules,
 # so only refreshing npm clears them. Runs as root before the USER switch below.
 # hadolint ignore=DL3016
-RUN npm install -g npm@latest && npm cache clean --force
+RUN npm install -g npm@latest --no-audit --no-fund && npm cache clean --force
 
 # Copy only runtime artifacts
 COPY --from=builder --chown=node:node /app/package*.json ./
