@@ -351,8 +351,7 @@ channel. All quotes are posted in a channel where users can react with
 
 - `quotes.enabled = true`
 - `quotes.channel_id = <channel-id>`
-- (Optional) `quotes.cooldown`, `quotes.max_length`, `quotes.add_roles`,
-  `quotes.delete_roles`
+- (Optional) `quotes.cooldown`, `quotes.max_length`, `quotes.delete_roles`
 
 Then reload commands.
 

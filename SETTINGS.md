@@ -194,7 +194,6 @@ Configure the quote management system.
 | `quotes.channel_id` | `""` | Channel ID for quote messages (empty = use command channel) |
 | `quotes.cooldown` | `60` | Seconds between quote additions (per user) |
 | `quotes.max_length` | `1000` | Maximum character length for quotes |
-| `quotes.add_roles` | `""` | Role IDs allowed to add quotes (comma-separated, empty = all) |
 | `quotes.delete_roles` | `""` | Role IDs allowed to delete quotes (comma-separated, empty = admins only) |
 | `quotes.header_enabled` | `true` | Show informational header post in quote channel |
 | `quotes.header_pin_enabled` | `true` | Pin the header post for easy access |
@@ -1056,7 +1055,6 @@ leave the graph in a broken state.
 - `quotes.channel_id` (string, default: "")
 - `quotes.cooldown` (number, default: 60)
 - `quotes.max_length` (number, default: 1000)
-- `quotes.add_roles` (string, default: "")
 - `quotes.delete_roles` (string, default: "")
 - `quotes.header_enabled` (bool, default: true)
 - `quotes.header_pin_enabled` (bool, default: true)
