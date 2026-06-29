@@ -128,3 +128,38 @@ export const ACCOLADE_METADATA = {
 } as const;
 
 export type AccoladeType = keyof typeof ACCOLADE_METADATA;
+
+/**
+ * The curated subset of "marquee" accolades whose first earning is loud
+ * enough to warrant a shared, server-wide celebration post (#657, Part 2)
+ * — not just the per-user DM + weekly round-up every accolade already
+ * gets. These are the rare, top-tier crossings (a full year in voice, a
+ * thousand hours, a month-long streak, a hundred quotes) where the whole
+ * server would want to cheer. Gated behind `celebrations.enabled`; the
+ * announcement reuses the existing session-end award detection rather than
+ * tracking anything new.
+ *
+ * Keep this list short and genuinely rare: every entry here means another
+ * announcement in the celebrations channel.
+ */
+export const MILESTONE_ACCOLADES = [
+  "voice_veteran_1000", // Voice Master — 1000 hours in voice
+  "voice_legend_8765", // Voice Legend — a full year (8765 hours) in voice
+  "consistent_month", // No-Lifer — a 30-day connection streak
+  "quote_legend", // Quote Legend — 100 quotes added
+] as const satisfies readonly AccoladeType[];
+
+export type MilestoneAccolade = (typeof MILESTONE_ACCOLADES)[number];
+
+const MILESTONE_ACCOLADE_SET: ReadonlySet<AccoladeType> = new Set(
+  MILESTONE_ACCOLADES,
+);
+
+/**
+ * Whether an accolade type is a marquee milestone (see
+ * {@link MILESTONE_ACCOLADES}). Accepts a plain string so callers can pass
+ * a stored `IAccolade.type` without a cast.
+ */
+export function isMilestoneAccolade(type: string): boolean {
+  return MILESTONE_ACCOLADE_SET.has(type as AccoladeType);
+}

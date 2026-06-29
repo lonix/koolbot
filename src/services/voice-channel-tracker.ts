@@ -504,6 +504,14 @@ export class VoiceChannelTracker {
         if (newAccolades.length > 0) {
           // Send DM notification for accolades
           await achievementsService.notifyUserOfAccolades(userId, newAccolades);
+          // Loud, server-wide shout-out for any marquee crossings (#657,
+          // Part 2). Reuses this same detection point; gated/no-ops unless
+          // celebrations are enabled and a channel is configured.
+          await achievementsService.announceMilestones(
+            userId,
+            user.username,
+            newAccolades,
+          );
         }
 
         // Check for weekly achievements (these are NOT sent as DM notifications)

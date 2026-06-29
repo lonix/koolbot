@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { Client } from "discord.js";
+import { type Client, TextChannel } from "discord.js";
 
 // Do NOT override the global mongoose mock from setup.ts — rely on it for stable jest.fn() instances.
 
@@ -555,6 +555,146 @@ describe("AchievementsService", () => {
 
       expect(getPrefsSpy).not.toHaveBeenCalled();
       expect(mockUser.send).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("announceMilestones (#657, Part 2)", () => {
+    // A stand-in that passes `channel instanceof TextChannel` without
+    // constructing the real (heavy) discord.js channel.
+    function makeTextChannel() {
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        send: jest.Mock;
+      };
+      channel.send = jest.fn().mockResolvedValue(undefined as never) as never;
+      return channel as unknown as TextChannel & { send: jest.Mock };
+    }
+
+    // Wire a service whose client + config resolve a usable celebrations
+    // channel. `celebrations.enabled` is the only boolean read.
+    function wireCelebrations(
+      service: AchievementsService,
+      mockConfigService: ReturnType<
+        typeof createAchievementsService
+      >["mockConfigService"],
+      opts: { enabled?: boolean; channelId?: string; guildId?: string } = {},
+    ) {
+      const { enabled = true, channelId = "chan-1", guildId = "guild-1" } = opts;
+      mockConfigService.getBoolean.mockResolvedValue(enabled);
+      (mockConfigService.getString as jest.Mock).mockImplementation(
+        (key: unknown) => {
+          if (key === "celebrations.channel_id")
+            return Promise.resolve(channelId);
+          if (key === "GUILD_ID") return Promise.resolve(guildId);
+          return Promise.resolve("");
+        },
+      );
+      const channel = makeTextChannel();
+      const channelsFetch = jest.fn().mockResolvedValue(channel as never);
+      (service as never)["client"] = {
+        guilds: {
+          fetch: jest
+            .fn()
+            .mockResolvedValue({ channels: { fetch: channelsFetch } } as never),
+        },
+      };
+      return { channel };
+    }
+
+    it("posts a celebration for a flagged marquee accolade", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      const { channel } = wireCelebrations(service, mockConfigService);
+
+      await service.announceMilestones("user1", "User1", [
+        { type: "voice_legend_8765", earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(channel.send).toHaveBeenCalledTimes(1);
+      const arg = (channel.send as jest.Mock).mock.calls[0][0] as {
+        content: string;
+        allowedMentions: { users: string[] };
+      };
+      expect(arg.content).toContain("<@user1>");
+      expect(arg.content).toContain("Voice Legend");
+      expect(arg.allowedMentions).toEqual({ users: ["user1"] });
+    });
+
+    it("does nothing when celebrations are disabled", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      const { channel } = wireCelebrations(service, mockConfigService, {
+        enabled: false,
+      });
+
+      await service.announceMilestones("user1", "User1", [
+        { type: "voice_legend_8765", earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(channel.send).not.toHaveBeenCalled();
+    });
+
+    it("does nothing for a non-marquee accolade", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      const { channel } = wireCelebrations(service, mockConfigService);
+
+      await service.announceMilestones("user1", "User1", [
+        { type: "first_hour", earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(channel.send).not.toHaveBeenCalled();
+    });
+
+    it("does nothing when the accolade list is empty", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      const { channel } = wireCelebrations(service, mockConfigService);
+
+      await service.announceMilestones("user1", "User1", []);
+
+      expect(channel.send).not.toHaveBeenCalled();
+    });
+
+    it("skips (and warns) when no celebrations channel is configured", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      wireCelebrations(service, mockConfigService, { channelId: "" });
+
+      await expect(
+        service.announceMilestones("user1", "User1", [
+          { type: "quote_legend", earnedAt: new Date(), metadata: {} },
+        ]),
+      ).resolves.not.toThrow();
+      expect(warnSpy).toHaveBeenCalled();
+    });
+
+    it("posts once per marquee accolade and ignores non-marquee ones in the batch", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      const { channel } = wireCelebrations(service, mockConfigService);
+
+      await service.announceMilestones("user1", "User1", [
+        { type: "voice_veteran_1000", earnedAt: new Date(), metadata: {} },
+        { type: "first_hour", earnedAt: new Date(), metadata: {} },
+        { type: "quote_legend", earnedAt: new Date(), metadata: {} },
+      ]);
+
+      expect(channel.send).toHaveBeenCalledTimes(2);
+    });
+
+    it("never throws when posting fails", async () => {
+      const { service, mockConfigService } =
+        createAchievementsService(mockClient);
+      const { channel } = wireCelebrations(service, mockConfigService);
+      (channel.send as jest.Mock).mockRejectedValue(
+        new Error("Missing Permissions") as never,
+      );
+
+      await expect(
+        service.announceMilestones("user1", "User1", [
+          { type: "voice_legend_8765", earnedAt: new Date(), metadata: {} },
+        ]),
+      ).resolves.not.toThrow();
     });
   });
 

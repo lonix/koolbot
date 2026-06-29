@@ -815,6 +815,14 @@ streak/state updates; concurrent runs coalesce, so clicking it during a
 scheduled tick can't double-deliver. There is intentionally **no `/digest`
 slash command** — the Web UI is the admin surface.
 
+**Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
+configured entirely under **Settings** (`celebrations.enabled`,
+`celebrations.channel_id`). When enabled, the bot posts a loud, server-wide
+shout-out to the configured channel the first time anyone crosses a marquee
+accolade (Voice Legend, 1000 hours, a 30-day streak, 100 quotes), reusing the
+existing achievements award detection. `celebrations.enabled` depends on
+`achievements.enabled`, so Settings greys it until achievements are on.
+
 ### User self-service (`/me/*`, both admin and user roles)
 
 | Page                                    | What it's for                                                                                                                                              |

@@ -185,6 +185,7 @@ describe("Config Schema", () => {
       "digest.enabled": ["voicetracking.enabled"],
       "digest.include_achievements": ["achievements.enabled"],
       "achievements.enabled": ["voicetracking.enabled"],
+      "celebrations.enabled": ["achievements.enabled"],
       "voicetracking.announcements.enabled": ["voicetracking.enabled"],
     } satisfies Partial<Record<keyof ConfigSchema, (keyof ConfigSchema)[]>>;
 
@@ -243,15 +244,16 @@ describe("Config Schema", () => {
       );
     });
 
-    it("follows a single edge for a leaf dependency", () => {
-      expect(getDependents("achievements.enabled")).toEqual([
-        "digest.include_achievements",
-      ]);
+    it("lists every key that declares achievements.enabled as a dependency", () => {
+      expect(new Set(getDependents("achievements.enabled"))).toEqual(
+        new Set(["digest.include_achievements", "celebrations.enabled"]),
+      );
     });
 
     it("returns an empty array for keys nothing depends on", () => {
       expect(getDependents("quotes.enabled")).toEqual([]);
       expect(getDependents("digest.include_achievements")).toEqual([]);
+      expect(getDependents("celebrations.enabled")).toEqual([]);
     });
   });
 
@@ -412,6 +414,7 @@ describe("Config Schema", () => {
       "ratelimit.enabled": false,
       "announcements.enabled": false,
       "achievements.enabled": false,
+      "celebrations.enabled": false,
       "digest.enabled": false,
       "rewind.enabled": false,
       "birthdays.enabled": false,

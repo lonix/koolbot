@@ -19,6 +19,7 @@ jest.mock("../../src/services/achievements-service.js", () => ({
       checkAndAwardAccolades: jest.fn().mockResolvedValue([]),
       checkAndAwardAchievements: jest.fn().mockResolvedValue(undefined),
       notifyUserOfAccolades: jest.fn().mockResolvedValue(undefined),
+      announceMilestones: jest.fn().mockResolvedValue(undefined),
     })),
   },
 }));

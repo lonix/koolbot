@@ -1,4 +1,4 @@
-import { Client } from "discord.js";
+import { Client, TextChannel } from "discord.js";
 import {
   UserAchievements,
   IAccolade,
@@ -20,11 +20,16 @@ import {
 import logger from "../utils/logger.js";
 import mongoose from "mongoose";
 import { quoteService } from "./quote-service.js";
-import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
+import {
+  ACCOLADE_METADATA,
+  isMilestoneAccolade,
+  type AccoladeType,
+} from "../content/accolades.js";
 import {
   ACHIEVEMENT_METADATA,
   type AchievementType,
 } from "../content/achievements.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 export type { AccoladeType, AchievementType };
 
@@ -1371,6 +1376,97 @@ export class AchievementsService {
     } catch (error) {
       logger.error("Error sending accolade notification DM:", error);
       // Don't throw - DM failures shouldn't break the flow
+    }
+  }
+
+  /**
+   * Post a loud, server-wide celebration for any *marquee* accolades the
+   * user just earned (#657, Part 2). This is the shared shout-out that
+   * complements — and never replaces — the personal DM
+   * ({@link notifyUserOfAccolades}) and the weekly round-up: only the
+   * curated, rare crossings listed in `MILESTONE_ACCOLADES` are loud
+   * enough to warrant pinging the whole channel.
+   *
+   * Reuses the existing session-end award detection — `accolades` is the
+   * exact `newAccolades` array the caller already has — so nothing extra is
+   * tracked. Gated behind `celebrations.enabled` (off by default) and a
+   * configured `celebrations.channel_id`; when either is missing it no-ops.
+   * Failures are swallowed: a celebration must never break the award flow.
+   */
+  public async announceMilestones(
+    userId: string,
+    username: string,
+    accolades: IAccolade[],
+  ): Promise<void> {
+    try {
+      if (accolades.length === 0) return;
+
+      const enabled = await this.configService.getBoolean(
+        "celebrations.enabled",
+        false,
+      );
+      if (!enabled) return;
+
+      // Of the freshly-earned accolades, keep only the marquee ones.
+      const milestones = accolades.filter((a) => isMilestoneAccolade(a.type));
+      if (milestones.length === 0) return;
+
+      const channelId = await this.configService.getString(
+        "celebrations.channel_id",
+        "",
+      );
+      if (!channelId) {
+        logger.warn(
+          "Milestone celebration skipped: celebrations.channel_id not configured",
+        );
+        return;
+      }
+
+      const guildId = await this.configService.getString("GUILD_ID", "");
+      if (!guildId) {
+        logger.warn("Milestone celebration skipped: GUILD_ID not configured");
+        return;
+      }
+
+      const guild = await this.client.guilds.fetch(guildId);
+      if (!guild) {
+        logger.error(
+          `Milestone celebration skipped: guild ${sanitizeForLog(guildId)} not found`,
+        );
+        return;
+      }
+
+      const channel = await guild.channels.fetch(channelId);
+      if (!channel || !(channel instanceof TextChannel)) {
+        logger.error(
+          `Milestone celebration skipped: channel ${sanitizeForLog(channelId)} not found or not a text channel`,
+        );
+        return;
+      }
+
+      for (const accolade of milestones) {
+        const definition = this.getAccoladeDefinition(accolade.type);
+        if (!definition) continue;
+
+        const message = [
+          `${definition.emoji} **Milestone unlocked!** ${definition.emoji}`,
+          "",
+          `🎉 <@${userId}> just earned **${definition.name}** — ${definition.description}!`,
+          "",
+          "Huge congratulations from the whole server! 🥳",
+        ].join("\n");
+
+        await channel.send({
+          content: message,
+          allowedMentions: { users: [userId] },
+        });
+        logger.info(
+          `Announced milestone celebration for ${username} (${userId}): ${definition.name}`,
+        );
+      }
+    } catch (error) {
+      logger.error("Error announcing milestone celebration:", error);
+      // Don't throw — a celebration failure must not break the award flow.
     }
   }
 

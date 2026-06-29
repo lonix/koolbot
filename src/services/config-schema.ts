@@ -67,6 +67,10 @@ export interface ConfigSchema {
   "achievements.announcements.enabled": boolean;
   "achievements.dm_notifications.enabled": boolean;
 
+  // Marquee Milestone Celebrations (#657, Part 2)
+  "celebrations.enabled": boolean;
+  "celebrations.channel_id": string; // Channel for server-wide milestone shout-outs
+
   // Weekly Personal Voice-Activity Digest (#483)
   "digest.enabled": boolean;
   "digest.cron": string; // Cron schedule, default Monday 09:00
@@ -230,6 +234,15 @@ export const defaultConfig: ConfigSchema = {
   "achievements.enabled": false,
   "achievements.announcements.enabled": true,
   "achievements.dm_notifications.enabled": true,
+
+  // Marquee milestone celebrations (#657, Part 2). Master gate off,
+  // follows rule 1 — when on, the bot posts a loud, server-wide shout-out
+  // to `celebrations.channel_id` the first time anyone crosses a curated
+  // rare accolade (Voice Legend, 1000 hours, etc.). Reuses the existing
+  // session-end award detection, so it's inert without achievements
+  // (hard dependency below) and stays silent until a channel is set.
+  "celebrations.enabled": false,
+  "celebrations.channel_id": "",
 
   // Weekly digest defaults (#483). Master gate off, follows rule 1. The
   // achievements sub-toggle defaults on so an operator who flips the
@@ -630,6 +643,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     description:
       "Award badges based on voice activity, optionally with channel and DM notifications.",
   },
+  celebrations: {
+    title: "Milestone Celebrations",
+    description:
+      "Post a loud, server-wide shout-out the first time anyone crosses a marquee accolade (Voice Legend, 1000 hours, a month-long streak, 100 quotes). Reuses the achievements award path; no extra tracking.",
+  },
   digest: {
     title: "Weekly Digest",
     description:
@@ -1008,6 +1026,23 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "DM users when they earn a new achievement.",
     category: "achievements",
     type: "boolean",
+  },
+
+  // Marquee Milestone Celebrations (#657, Part 2)
+  "celebrations.enabled": {
+    label: "Milestone celebrations enabled",
+    description:
+      "Post a server-wide celebration in a configured channel the first time anyone crosses a marquee accolade (Voice Legend, 1000 hours, a 30-day streak, 100 quotes). Reuses the existing accolade award detection; requires achievements to be enabled.",
+    category: "celebrations",
+    type: "boolean",
+    dependsOn: ["achievements.enabled"],
+  },
+  "celebrations.channel_id": {
+    label: "Celebrations channel",
+    description:
+      "Channel where marquee milestone celebrations are posted. Leave empty to disable the announcement (the underlying accolade is still awarded).",
+    category: "celebrations",
+    type: "channel",
   },
 
   // Weekly Personal Voice-Activity Digest (#483)
