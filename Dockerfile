@@ -29,6 +29,14 @@ FROM node:24-alpine
 
 WORKDIR /app
 
+# Refresh the npm bundled in the base image. node:24-alpine ships an npm whose
+# bundled undici/tar carry known advisories (Trivy #142-#146); upgrading to the
+# latest npm pulls in patched tar (>= 7.5.16) and undici. These live under
+# /usr/local/lib/node_modules/npm and are independent of our own node_modules,
+# so only refreshing npm clears them. Runs as root before the USER switch below.
+# hadolint ignore=DL3016
+RUN npm install -g npm@latest && npm cache clean --force
+
 # Copy only runtime artifacts
 COPY --from=builder --chown=node:node /app/package*.json ./
 COPY --from=builder --chown=node:node /app/dist ./dist
