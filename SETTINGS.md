@@ -532,7 +532,7 @@ longest session, longest streak, badges earned, annual rank, a
 first/best/last weekly-rank journey, text activity, and reaction activity
 (given / received). Year picker bottom-anchored to years with data.
 
-**Graceful degradation (#665):** Rewind is an *aggregator* — every section
+**Graceful degradation (#665):** Rewind is an _aggregator_ — every section
 is gated on its own source feature and degrades independently, so the page
 renders whatever subset of sources happens to be on and simply hides the
 rest. It is never blocked or rejected because a source is off (this is the

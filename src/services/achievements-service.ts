@@ -1461,7 +1461,7 @@ export class AchievementsService {
           allowedMentions: { users: [userId] },
         });
         logger.info(
-          `Announced milestone celebration for ${username} (${userId}): ${definition.name}`,
+          `Announced milestone celebration for ${sanitizeForLog(username)} (${sanitizeForLog(userId)}): ${definition.name}`,
         );
       }
     } catch (error) {
