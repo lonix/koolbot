@@ -976,28 +976,33 @@ describe("/me/rewind", () => {
     expect(out.body).toContain("Could not load your year-in-review");
   });
 
-  it("returns a 404 disabled state and does not query data when rewind.enabled is off (#608)", async () => {
+  it("renders a consistent disabled banner (200) and skips data work when rewind.enabled is off (#709)", async () => {
     const out = await dispatchRewind({
       pathSuffix: "",
       summary: makeSummary(),
       rewindEnabled: false,
     });
-    expect(out.statusCode).toBe(404);
-    expect(out.body).toContain("Rewind) feature is currently disabled");
-    // The gate short-circuits before any data work.
+    // No longer a 404 — the gated page renders like every other /me/*
+    // surface, with the shared "off" banner instead of a hard error (#709).
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("hasn't enabled the year-in-review (Rewind)");
+    // The banner short-circuits before any data work.
     expect(out.getSummary).not.toHaveBeenCalled();
     expect(out.getDefaultRewindYear).not.toHaveBeenCalled();
-    // And the disabled feature drops out of the page nav.
-    expect(out.body).not.toContain('href="/me/rewind"');
+    // The nav link stays visible (greyed with an "off" badge) rather than
+    // being suppressed.
+    expect(out.body).toContain('href="/me/rewind"');
+    expect(out.body).toContain('class="nav-badge">off</span>');
   });
 
-  it("gates the explicit :year deep-link too when disabled (#608)", async () => {
+  it("shows the banner on the explicit :year deep-link too when disabled (#709)", async () => {
     const out = await dispatchRewind({
       pathSuffix: "/2024",
       summary: makeSummary({ year: 2024 }),
       rewindEnabled: false,
     });
-    expect(out.statusCode).toBe(404);
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("hasn't enabled the year-in-review (Rewind)");
     expect(out.getSummary).not.toHaveBeenCalled();
   });
 });
@@ -1182,11 +1187,33 @@ describe("/me/voice (#656)", () => {
     expect(out.body).toContain("Preview:");
   });
 
-  it("returns a 404 disabled state when presets are off, and hides the nav link", async () => {
+  it("renders the editable page with a consistent banner (200) when presets are off, keeping the nav link (#709)", async () => {
     const out = await dispatch({ method: "GET", presetsEnabled: false });
-    expect(out.statusCode).toBe(404);
-    expect(out.body).toContain("voice presets are currently disabled");
-    expect(out.body).not.toContain('href="/me/voice"');
+    // No longer a 404 — the member can still pre-set their name pattern and
+    // manage presets, so the form renders with the shared "off" banner (#709).
+    expect(out.statusCode).toBe(200);
+    expect(out.body).toContain("hasn't enabled voice presets");
+    // The editable form is still present.
+    expect(out.body).toContain('action="/me/voice/name-pattern"');
+    // The nav link stays visible (greyed with an "off" badge).
+    expect(out.body).toContain('href="/me/voice"');
+    expect(out.body).toContain('class="nav-badge">off</span>');
+  });
+
+  it("still saves the name pattern when presets are off, so pre-setting works (#709)", async () => {
+    const setNamePattern = jest
+      .fn<(u: string, raw: string) => Promise<string | null>>()
+      .mockResolvedValue("{username} HQ");
+    const out = await dispatch({
+      method: "POST",
+      url: "/voice/name-pattern",
+      presetsEnabled: false,
+      body: { namePattern: "{username} HQ" },
+      csrfHeader: "csrf-1",
+      serviceImpl: { setNamePattern },
+    });
+    expect(setNamePattern).toHaveBeenCalledWith("user-1", "{username} HQ");
+    expect(out.redirectedTo).toMatch(/^\/me\/voice\?/);
   });
 
   it("saves the name pattern and audits it", async () => {

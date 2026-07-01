@@ -752,7 +752,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
 | **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
-| **Voice Channels** | `/vc force-reload` (single **Force VC cleanup** button)                                             |
+| **Voice Channels** | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**  | (new — **Preview** the weekly digest dry-run, plus a **Send now** button)                           |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
@@ -862,6 +862,17 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.      |
 
+**Disabled-feature handling is uniform across `/me/*` (#709).** A
+feature-gated page whose feature an admin has turned off is never hidden
+behind a 404 or silently dropped: the nav link stays visible (greyed with
+an "off" badge, mirroring the admin nav), the Overview lists its card with
+an "off" tag, and opening the page shows one consistent banner — *"Your
+server admin hasn't enabled X yet."* Settings pages (Voice, Birthday) keep
+their editable form so members can pre-set a choice that applies the moment
+the feature is enabled; the read-only Rewind page simply shows the banner in
+place of the recap. This makes "not enabled yet, but my choice is
+remembered" clearly distinguishable from "broken".
+
 When `polls.participation.enabled` is on and you have voted on at least
 one poll, the **Overview** page also shows a read-only **Poll
 participation** card — lifetime votes, this-year votes, and when you last
@@ -885,9 +896,11 @@ announcement itself is evaluated in the member's `/me/timezone`
 preference so it fires on their local day (`#524`).
 
 The whole feature is gated by `rewind.enabled` (`#608`). When it is off
-the route returns a 404 "feature disabled" state and the nav link is
-suppressed on every `/me/*` page; the end-of-year DM nudge is a separate
-toggle (`rewind.nudge.enabled`).
+the route renders the shared "off" banner (HTTP 200) instead of the recap
+and skips the data work — Rewind is read-only, so there is nothing to
+pre-set — while the nav link stays visible, greyed with an "off" badge
+(`#709`); the end-of-year DM nudge is a separate toggle
+(`rewind.nudge.enabled`).
 
 The **Voice** page (`/me/voice`, `#656`) lets a member manage the
 per-user voice preferences that back the Discord control panel's
@@ -903,8 +916,12 @@ your next lobby spawn), and **delete**. Every write goes through the same
 max-per-user cap, name/limit/bitrate bounds, and name-pattern length are
 identical on both surfaces — and records a `WebAuditLog` row
 (`user.voice.namepattern.set`, `user.voice.preset.edit|default|delete`).
-The whole page is gated by `voicechannels.presets.enabled`: when off it
-returns a 404 "feature disabled" state and its nav link is suppressed.
+The whole page is gated by `voicechannels.presets.enabled`, but stays
+reachable when off: the editable form still renders (so a member can
+pre-set their name pattern and manage presets before an admin enables the
+feature) above the shared "off" banner, and its nav link stays visible,
+greyed with an "off" badge (`#709`) — mirroring how the Birthday page has
+always let members pre-set their date.
 
 The bare **Rewind** page (`/me/rewind`) lands on the most recent year you
 actually have data for, so visiting right after the year rolls over shows

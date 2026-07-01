@@ -638,10 +638,17 @@ function renderControlInput(
   },
   isCascadeMaster = false,
   depLocked = false,
+  // Optional DOM id stamped onto the primary control element so a caller can
+  // associate a `<label for>` with it (the wizard does this — issue #703). The
+  // Settings page omits it (it labels rows with a `<strong>`, not a `<label>`),
+  // so it defaults to "" and adds nothing there. The cron picker manages its
+  // own inputs and is left unstamped.
+  controlId = "",
 ): string {
   const primitive = coerceToDisplayValue(r.current);
   const currentStr = typeof primitive === "string" ? primitive : "";
   const valueName = escapeHtml(settingValueFieldName(r.key));
+  const idAttr = controlId ? ` id="${escapeHtml(controlId)}"` : "";
   // When a hard dependency is unmet (#666), the control renders disabled so it
   // can't be edited before its requirement is on — the same rule the write-time
   // validator (#663) enforces. `data-dep-locked` tells the cascade-disable
@@ -655,20 +662,25 @@ function renderControlInput(
   // their underlying `type`, so operators pick from the valid set instead
   // of typing a value the server will reject.
   if (r.options && r.options.length > 0) {
-    return renderOptionsSelect(valueName, r.options, currentStr, lockAttr);
+    return renderOptionsSelect(
+      valueName,
+      r.options,
+      currentStr,
+      lockAttr + idAttr,
+    );
   }
   if (r.type === "boolean") {
     const checked = primitive === true ? " checked" : "";
     const masterAttr = isCascadeMaster ? " data-cascade-master" : "";
     return (
       `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
-      `<input type="checkbox" name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
+      `<input type="checkbox"${idAttr} name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
       `<span class="mono">${primitive === true ? "true" : "false"}</span>` +
       `</label>`
     );
   }
   if (r.type === "number") {
-    return `<input type="number" name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
+    return `<input type="number"${idAttr} name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
   }
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
@@ -680,7 +692,7 @@ function renderControlInput(
     const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
-      `<select name="${valueName}"${lockAttr}>` +
+      `<select${idAttr} name="${valueName}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, true) +
       `</select>`
     );
@@ -696,7 +708,7 @@ function renderControlInput(
         .filter((v) => v !== ""),
     );
     return (
-      `<select name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
+      `<select${idAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, false) +
       `</select>` +
       renderSelectionSummary(options, selected, prefix)
@@ -712,7 +724,7 @@ function renderControlInput(
   // string or unknown type → plain text input. The maxlength mirrors the
   // server-side `TEXT_LIMITS.configValue` cap in write-routes (#508) — kept as
   // a literal here to avoid a circular import (write-routes imports this file).
-  return `<input type="text" name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
+  return `<input type="text"${idAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
 }
 
 /**
@@ -1191,9 +1203,26 @@ export interface WizardStepPageProps extends CommonProps {
   currentValues: Record<string, unknown>;
   metadata: Record<
     string,
-    { description: string; category: string; options?: SettingOption[] }
+    {
+      description: string;
+      category: string;
+      options?: SettingOption[];
+      // The schema `type` (e.g. `channel`, `category`, `role`, `cron`) drives
+      // which control the shared renderer produces; falls back to the runtime
+      // type of the default when a key isn't in the schema. `channelKind`
+      // selects the text- vs voice-channel picker list (issue #703).
+      type?: string;
+      channelKind?: "text" | "voice";
+    }
   >;
   defaultValues: Record<string, unknown>;
+  // Guild picker option lists, threaded through so `channel`/`category`/`role`
+  // keys render as real selectors — the same lists the Settings page feeds to
+  // `renderControlInput` (issue #703).
+  textChannels: ChannelOption[];
+  voiceChannels: ChannelOption[];
+  categoryChannels: ChannelOption[];
+  roles: RoleOption[];
   flash?: FlashMessage | null;
 }
 
@@ -1210,45 +1239,66 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   // dependents, not masters.
   const masterKey = `${props.featureKey}.enabled`;
 
+  const pickers = {
+    textChannels: props.textChannels,
+    voiceChannels: props.voiceChannels,
+    categoryChannels: props.categoryChannels,
+    roles: props.roles,
+  };
+
   const fields = props.settingKeys
     .map((k) => {
       const current = props.currentValues[k];
       const meta = props.metadata[k];
       const defaultVal = props.defaultValues[k];
+      // The schema `type` is authoritative — it's what makes `channel` /
+      // `category` / `role` (and `cron`) keys render as their proper pickers
+      // instead of a free-text box (issue #703). Fall back to the runtime type
+      // of the default for keys the schema doesn't declare.
       const type =
-        typeof defaultVal === "boolean"
+        meta?.type ??
+        (typeof defaultVal === "boolean"
           ? "boolean"
           : typeof defaultVal === "number"
             ? "number"
-            : "string";
+            : "string");
       const desc = meta?.description ?? "";
+
+      // Route the value control through the same renderer the Settings page
+      // uses (`renderControlInput`) so the two surfaces can't drift: pickers
+      // become dropdowns, fixed-options become selects, cron gets its picker.
+      // The submitted field name is therefore `value_<key>` (as on the
+      // Settings page), which the wizard step handler reads back. The label
+      // isn't consumed by the control renderer, so the raw-key display label
+      // (tracked separately in #702) is unaffected here.
       const inputId = `wiz-${k}`;
-      const display =
-        typeof current === "boolean" ||
-        typeof current === "number" ||
-        typeof current === "string"
-          ? current
-          : "";
+      const row: SettingRow = {
+        key: k,
+        label: k,
+        current,
+        defaultValue: defaultVal,
+        type,
+        description: desc,
+        category: meta?.category ?? "",
+        options: meta?.options,
+        channelKind: meta?.channelKind,
+      };
+      const control = renderControlInput(
+        row,
+        pickers,
+        k === masterKey,
+        false,
+        inputId,
+      );
 
-      let control: string;
-      if (meta?.options && meta.options.length > 0) {
-        // Fixed-options keys render as a dropdown in the wizard too, so the
-        // value posted back is always one the server will accept.
-        const currentStr = typeof current === "string" ? current : "";
-        control = renderOptionsSelect(escapeHtml(k), meta.options, currentStr);
-      } else if (type === "boolean") {
-        const checked = current === true ? " checked" : "";
-        const masterAttr = k === masterKey ? " data-cascade-master" : "";
-        control = `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="true"${checked}${masterAttr}> Enable</label>`;
-      } else if (type === "number") {
-        control = `<input type="number" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="${escapeHtml(display)}">`;
-      } else {
-        // maxlength mirrors TEXT_LIMITS.configValue in write-routes (#508).
-        control = `<input type="text" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" maxlength="2000" value="${escapeHtml(display)}">`;
-      }
-
+      // The cron picker renders several inputs of its own rather than a single
+      // control, so it takes no id; its label is left unassociated (a `for`
+      // pointing at nothing is worse than none). Every other type stamps
+      // `inputId` onto its control, so `for` restores screen-reader
+      // association and click-to-focus.
+      const labelFor = type === "cron" ? "" : ` for="${escapeHtml(inputId)}"`;
       return `<div class="field-row">
-  <label for="${escapeHtml(inputId)}">${escapeHtml(k)}</label>
+  <label${labelFor}>${escapeHtml(k)}</label>
   ${control}
   <div class="help">${escapeHtml(desc)}</div>
 </div>`;
@@ -2519,7 +2569,68 @@ export interface VoiceChannelsProps extends CommonProps {
   totalEmpty: number;
   channels: VoiceChannelRow[];
   categoryFound: boolean;
+  /**
+   * The editable `voicechannels.*` settings rendered in-place on the feature
+   * page (#705). Built from the config schema the same way the Settings page
+   * builds its rows, so the shared control renderer produces a category
+   * picker, text fields, toggles, etc.
+   */
+  settingRows: SettingRow[];
+  /** Category options backing the `voicechannels.category_id` picker. */
+  categoryChannels: ChannelOption[];
   flash?: FlashMessage | null;
+}
+
+/**
+ * The editable settings card on the Voice Channels feature page (#705). Renders
+ * the `voicechannels.*` keys with the same control renderer the Settings page
+ * uses, so category is a picker, lobby names / prefix / suffix are text fields,
+ * and the control-panel / presets flags are toggles. Posts through the shared
+ * `/admin/settings/save-section` route with `redirect` back to this page and
+ * `no_cascade` set — this form has no section master toggle (that is
+ * `voicechannels.enabled`, owned by the enable notice above), so every
+ * submitted key must be written rather than skipped by the cascade rule.
+ */
+function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
+  if (props.settingRows.length === 0) return "";
+  const pickers = {
+    textChannels: [] as ChannelOption[],
+    voiceChannels: [] as ChannelOption[],
+    categoryChannels: props.categoryChannels,
+    roles: [] as RoleOption[],
+  };
+  const rows = props.settingRows
+    .map(
+      (r) => `<tr>
+<td>
+  <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
+  <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
+  <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
+</td>
+<td class="settings-value">${renderControlInput(r, pickers)}${renderResetButton(r.key)}${renderWarnBelow(r)}</td>
+<td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
+<td class="muted">${escapeHtml(r.description)}</td>
+</tr>`,
+    )
+    .join("");
+  return `
+<div class="card">
+  <h2>Settings</h2>
+  <p class="muted" style="margin:.25rem 0 .75rem">Change voice-channel settings here without leaving the page. Saved through the shared settings route.</p>
+  <form method="POST" action="/admin/settings/save-section">
+    <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+    <input type="hidden" name="category" value="voicechannels">
+    <input type="hidden" name="redirect" value="/admin/voice-channels">
+    <input type="hidden" name="no_cascade" value="1">
+    <table>
+      <thead><tr><th>Setting</th><th>Edit</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="actions" style="margin-top:.75rem">
+      <button type="submit" class="btn btn-primary">Save settings</button>
+    </div>
+  </form>
+</div>`;
 }
 
 export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
@@ -2571,6 +2682,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels",
     <dt>Empty channels</dt><dd>${props.totalEmpty}</dd>
   </dl>
 </div>
+${renderVoiceChannelsSettings(props)}
 <div class="card">
   <h2>Cleanup actions</h2>
   <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of ALL unmanaged channels in the category and re-create lobby channels?');">

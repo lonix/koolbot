@@ -77,6 +77,7 @@ import {
   settingValueFieldName,
   type ImportDiffRow,
 } from "./admin-views.js";
+import { fetchChannelData, fetchRoleData } from "./read-only-routes.js";
 
 type Flash = { type: "ok" | "warn" | "err"; text: string };
 
@@ -145,12 +146,13 @@ function respondSectionFlash(
   req: AuthenticatedRequest,
   res: Response,
   flash: Flash,
+  redirectTo = "/admin/settings",
 ): void {
   if (wantsJson(req)) {
     res.status(200).json({ type: flash.type, text: truncateFlash(flash.text) });
     return;
   }
-  flashRedirect(res, "/admin/settings", flash);
+  flashRedirect(res, redirectTo, flash);
 }
 
 function getString(req: AuthenticatedRequest, name: string): string {
@@ -624,6 +626,10 @@ export function createWriteRouter(
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const key = getString(req, "key");
+      // Feature pages that reuse the settings controls (e.g. Voice Channels,
+      // #705) pass their own page so a per-key Reset lands back where it was
+      // clicked; allowlisted the same way as /settings/set and save-section.
+      const redirectTo = safeAdminRedirect(getString(req, "redirect"));
       if (!(key in defaultConfig)) {
         await recordAudit(session, {
           action: "setting.reset",
@@ -631,7 +637,7 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: "unknown key",
         });
-        flashRedirect(res, "/admin/settings", {
+        flashRedirect(res, redirectTo, {
           type: "err",
           text: `Unknown setting: ${key || "(empty)"}.`,
         });
@@ -656,7 +662,7 @@ export function createWriteRouter(
           },
           result: "success",
         });
-        flashRedirect(res, "/admin/settings", {
+        flashRedirect(res, redirectTo, {
           type: "ok",
           text: `Reset ${key} to default.`,
         });
@@ -669,7 +675,7 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: text,
         });
-        flashRedirect(res, "/admin/settings", {
+        flashRedirect(res, redirectTo, {
           type: "err",
           text: `Failed to reset ${key}: ${text}`,
         });
@@ -807,6 +813,18 @@ export function createWriteRouter(
       const session = requireSessionContext(req);
       const body = (req.body as Record<string, unknown> | undefined) ?? {};
       const category = getString(req, "category");
+      // Where to land after the save. Defaults to /admin/settings (this route's
+      // historical target); a feature page that reuses this route to edit its
+      // own `*.` keys in place passes its own page so the operator returns
+      // there (#705), allowlisted the same way as /settings/set.
+      const redirectTo = safeAdminRedirect(getString(req, "redirect"));
+      // Section forms carry an implicit master toggle (the section's shortest
+      // `.enabled` key) whose cascade skips dependents when off. A feature page
+      // reusing this route has no such master — its master lives elsewhere
+      // (e.g. `voicechannels.enabled`, owned by the enable notice) and is not
+      // among the submitted keys — so it opts out with `no_cascade`, meaning
+      // every submitted key is written rather than skipped.
+      const noCascade = getCheckbox(req, "no_cascade");
 
       const rawKeys = body.keys;
       const keys: string[] = Array.isArray(rawKeys)
@@ -822,10 +840,15 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: "no keys submitted",
         });
-        respondSectionFlash(req, res, {
-          type: "err",
-          text: `No settings submitted for section ${category || "(unknown)"}.`,
-        });
+        respondSectionFlash(
+          req,
+          res,
+          {
+            type: "err",
+            text: `No settings submitted for section ${category || "(unknown)"}.`,
+          },
+          redirectTo,
+        );
         return;
       }
 
@@ -836,7 +859,7 @@ export function createWriteRouter(
       // untouched, so disabling a feature can't silently clobber its
       // sub-settings (an absent number field would otherwise be rejected, an
       // absent string blanked).
-      const masterKey = findSectionMasterKey(keys);
+      const masterKey = noCascade ? null : findSectionMasterKey(keys);
       const masterOff =
         masterKey !== null &&
         body[settingValueFieldName(masterKey)] !== "true" &&
@@ -897,10 +920,15 @@ export function createWriteRouter(
           errorMessage: rejected.map((r) => `${r.key}: ${r.reason}`).join("; "),
         });
         const detail = rejected.map((r) => `${r.key} (${r.reason})`).join(", ");
-        respondSectionFlash(req, res, {
-          type: "err",
-          text: `No changes saved — ${rejected.length} invalid value${rejected.length === 1 ? "" : "s"} in ${category || "section"}: ${detail}.`,
-        });
+        respondSectionFlash(
+          req,
+          res,
+          {
+            type: "err",
+            text: `No changes saved — ${rejected.length} invalid value${rejected.length === 1 ? "" : "s"} in ${category || "section"}: ${detail}.`,
+          },
+          redirectTo,
+        );
         return;
       }
 
@@ -965,17 +993,27 @@ export function createWriteRouter(
 
       const label = category || "section";
       if (failed.length === 0) {
-        respondSectionFlash(req, res, {
-          type: "ok",
-          text: `Saved ${applied.length} setting${applied.length === 1 ? "" : "s"} in ${label}.`,
-        });
+        respondSectionFlash(
+          req,
+          res,
+          {
+            type: "ok",
+            text: `Saved ${applied.length} setting${applied.length === 1 ? "" : "s"} in ${label}.`,
+          },
+          redirectTo,
+        );
         return;
       }
       const firstError = failed[0];
-      respondSectionFlash(req, res, {
-        type: applied.length > 0 ? "warn" : "err",
-        text: `Saved ${applied.length}/${applied.length + failed.length} in ${label}. Failed: ${firstError.key} (${firstError.reason})${failed.length > 1 ? ` and ${failed.length - 1} more` : ""}.`,
-      });
+      respondSectionFlash(
+        req,
+        res,
+        {
+          type: applied.length > 0 ? "warn" : "err",
+          text: `Saved ${applied.length}/${applied.length + failed.length} in ${label}. Failed: ${firstError.key} (${firstError.reason})${failed.length > 1 ? ` and ${failed.length - 1} more` : ""}.`,
+        },
+        redirectTo,
+      );
     }),
   );
 
@@ -1437,6 +1475,16 @@ export function createWriteRouter(
               }
             }
           }
+          // Guild picker lists so channel/category/role keys render as real
+          // selectors, exactly like the Settings page (issue #703). Two guild
+          // fetches run in parallel — one for channels/categories, one for
+          // roles; both helpers swallow their own errors and return empty
+          // lists, so a picker just falls back to an empty dropdown rather
+          // than failing the step.
+          const [chData, roleData] = await Promise.all([
+            fetchChannelData(client, session.guildId),
+            fetchRoleData(client, session.guildId),
+          ]);
           res.type("text/html").send(
             renderWizardStepPage({
               csrfToken,
@@ -1452,6 +1500,10 @@ export function createWriteRouter(
                 string,
                 unknown
               >,
+              textChannels: chData.textChannels,
+              voiceChannels: chData.voiceChannels,
+              categoryChannels: chData.categoryChannels,
+              roles: roleData.roles,
               flash,
             }),
           );
@@ -1557,17 +1609,23 @@ export function createWriteRouter(
       // = false` and skip the rest, so absent dependents don't surface as
       // bogus "invalid input" drops (a missing number field would otherwise
       // fail coercion).
+      // The step form submits each value under `value_<key>` — the same field
+      // naming the Settings page uses, now that the wizard renders through the
+      // shared control renderer (issue #703).
       const masterKey = `${featureKey}.enabled`;
       const masterOff =
         settingKeys.includes(masterKey) &&
-        (req.body as Record<string, unknown> | undefined)?.[masterKey] !==
-          "true";
+        (req.body as Record<string, unknown> | undefined)?.[
+          settingValueFieldName(masterKey)
+        ] !== "true";
 
       const saved: Record<string, unknown> = {};
       const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
         if (masterOff && k !== masterKey) continue;
-        const raw = (req.body as Record<string, unknown> | undefined)?.[k];
+        const raw = (req.body as Record<string, unknown> | undefined)?.[
+          settingValueFieldName(k)
+        ];
         const coerced = coerceConfigValue(k, raw);
         if (coerced.ok) {
           wizard.addConfiguration(

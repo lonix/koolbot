@@ -194,8 +194,6 @@ export interface SeededNotificationPrefsDoc {
 export interface SeededVoicePrefsDoc {
   userId: string;
   namePattern: string;
-  userLimit: number;
-  bitrate: number;
   presets: Array<{
     name: string;
     channelName?: string;
@@ -520,8 +518,6 @@ export function generateVoicePreferences(
       "🎮 {username}",
       "{username} HQ",
     ]),
-    userLimit: faker.helpers.arrayElement([0, 2, 4, 6, 10]),
-    bitrate: faker.helpers.arrayElement([64, 96, 128]),
     presets: [
       {
         name: "Squad night",

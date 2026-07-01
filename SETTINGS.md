@@ -575,7 +575,7 @@ expose the page.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `rewind.enabled` | `false` | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, the page returns a 404 disabled state and is not linked |
+| `rewind.enabled` | `false` | Master switch for the Rewind feature: the `/me/rewind` page, its data aggregation, and the nav link. When off, the page shows a consistent "off" banner (HTTP 200) in place of the recap and its nav link is greyed with an "off" badge (#709) |
 | `rewind.nudge.enabled` | `false` | Send the one-shot end-of-year DM nudge linking eligible users to `/me/rewind`. Independent of `rewind.enabled` |
 | `rewind.cron` | `"0 10 30 12 *"` | Cron schedule for the nudge (default: Dec 30 at 10:00 host timezone) |
 | `rewind.min_minutes` | `60` | Minimum annual voice minutes a user needs to receive the nudge |

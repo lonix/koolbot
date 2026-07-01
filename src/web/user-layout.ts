@@ -22,12 +22,21 @@ interface UserNavItem {
   href: string;
   label: string;
   /**
-   * When set, the item is only advertised in the nav while the named
-   * feature is enabled. Mirrors the admin layout's `featureKey` gate
-   * (#608): a disabled feature drops out of the nav but the URL stays
-   * reachable by direct navigation (the route itself enforces the gate).
+   * When set, the item is feature-gated. A disabled feature is NOT hidden:
+   * the link stays visible but is greyed with an "off" badge (#709),
+   * mirroring the admin nav's `featureKey` treatment (#610). Its page stays
+   * reachable so members can pre-set their choice before an admin flips the
+   * feature on — the same "let users pre-set" intent the birthday page has
+   * always followed.
    */
-  feature?: "rewind" | "voice";
+  feature?: "rewind" | "voice" | "birthday";
+  /**
+   * Whether the gated page lets the member pre-set a choice (Voice, Birthday)
+   * versus being read-only (Rewind). Drives the disabled tooltip copy so a
+   * read-only page doesn't claim a "choice is saved" it never had (#709).
+   * Only meaningful alongside `feature`; defaults to read-only.
+   */
+  presettable?: boolean;
 }
 
 /**
@@ -40,10 +49,39 @@ export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/", label: "Overview" },
   { href: "/me/notifications", label: "Notifications" },
   { href: "/me/timezone", label: "Timezone" },
-  { href: "/me/voice", label: "Voice", feature: "voice" },
-  { href: "/me/birthday", label: "Birthday" },
+  { href: "/me/voice", label: "Voice", feature: "voice", presettable: true },
+  {
+    href: "/me/birthday",
+    label: "Birthday",
+    feature: "birthday",
+    presettable: true,
+  },
   { href: "/me/rewind", label: "Rewind", feature: "rewind" },
 ];
+
+/**
+ * Enabled-state of every feature-gated `/me/*` surface, threaded from the
+ * routes into the layout so the nav and overview cards can render a
+ * consistent "off" treatment (#709). Each flag defaults to enabled
+ * (`undefined` → treated as on) so non-gating callers and tests that don't
+ * care about gating render every item as a plain link.
+ */
+export interface UserFeatureFlags {
+  rewindEnabled?: boolean;
+  presetsEnabled?: boolean;
+  birthdayEnabled?: boolean;
+}
+
+/** Whether a given nav item's feature is disabled per the supplied flags. */
+function isNavItemDisabled(
+  item: UserNavItem,
+  flags: UserFeatureFlags,
+): boolean {
+  if (item.feature === "rewind") return flags.rewindEnabled === false;
+  if (item.feature === "voice") return flags.presetsEnabled === false;
+  if (item.feature === "birthday") return flags.birthdayEnabled === false;
+  return false;
+}
 
 export interface UserFlashMessage {
   type: "ok" | "warn" | "err";
@@ -71,17 +109,24 @@ export interface UserPageOptions {
   flash?: UserFlashMessage | null;
   /**
    * Enabled-state of the feature-gated Rewind page (#608). When `false`,
-   * the Rewind nav link is suppressed. Omitted/`undefined` keeps the link
-   * visible, so direct callers and tests that don't care about gating work
-   * unchanged.
+   * the Rewind nav link is greyed with an "off" badge rather than hidden
+   * (#709). Omitted/`undefined` keeps the link plain, so direct callers and
+   * tests that don't care about gating work unchanged.
    */
   rewindEnabled?: boolean;
   /**
    * Enabled-state of the feature-gated Voice-preferences page (#656). When
-   * `false`, the Voice nav link is suppressed. Omitted/`undefined` keeps the
-   * link visible, mirroring `rewindEnabled`.
+   * `false`, the Voice nav link is greyed with an "off" badge, mirroring
+   * `rewindEnabled` (#709).
    */
   presetsEnabled?: boolean;
+  /**
+   * Enabled-state of the feature-gated Birthday page (#657). When `false`,
+   * the Birthday nav link is greyed with an "off" badge, mirroring
+   * `rewindEnabled`/`presetsEnabled` (#709). The page itself stays reachable
+   * either way so members can pre-set their date.
+   */
+  birthdayEnabled?: boolean;
 }
 
 const STYLE = [
@@ -111,6 +156,9 @@ const STYLE = [
   ".pill{background:#374151;color:#d1d5db;padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
   ".tag{display:inline-block;padding:.1rem .45rem;border-radius:4px;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em}",
   ".tag-info{background:#1e3a8a;color:#bfdbfe}",
+  // Disabled-feature "off" tag on the overview cards, mirroring the admin
+  // Settings palette (#709).
+  ".tag-off{background:#4b1e1e;color:#fecaca}",
   ".notice{padding:.6rem .8rem;border-radius:6px;margin:0 0 1rem}",
   ".notice.info{background:#1d2a44;color:#bfdbfe}",
   ".notice.ok{background:#14532d;color:#bbf7d0}",
@@ -146,6 +194,13 @@ const STYLE = [
   ".page-nav a{padding:.35rem .75rem;border-radius:4px;background:#161a22;border:1px solid #2d3748;color:#cbd5e1;font-size:.85rem;font-weight:600}",
   ".page-nav a:hover{background:#1f2937;text-decoration:none;color:#fff}",
   ".page-nav a.active{background:#1e3a8a;border-color:#1e3a8a;color:#fff}",
+  // Feature-gated pages whose feature is off are shown but greyed with an
+  // "off" badge so they stay discoverable and pre-settable (#709), mirroring
+  // the admin side nav (#610). The active page keeps its highlight even when
+  // disabled, so the greying only applies while inactive.
+  ".page-nav a.nav-disabled:not(.active){color:#6b7280;border-style:dashed}",
+  ".page-nav a.nav-disabled:not(.active):hover{color:#94a3b8}",
+  ".page-nav a .nav-badge{font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#cbd5e1;background:#374151;border-radius:4px;padding:.05rem .3rem;margin-left:.35rem}",
   ".rw-hero{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%);border:1px solid #4338ca;border-radius:8px;padding:1.5rem;margin:0 0 1rem;text-align:center}",
   ".rw-hero .total{font-size:2.5rem;font-weight:700;color:#fff;line-height:1.1}",
   ".rw-hero .compare{margin-top:.4rem;color:#c7d2fe;font-size:1rem}",
@@ -258,33 +313,39 @@ export function renderUserPage(opts: UserPageOptions): string {
     '<button type="submit">Finish</button>',
     "</form></div></div>",
     '<div class="shell">',
-    `<main>${renderPageNav(opts.active, opts.rewindEnabled, opts.presetsEnabled)}${renderFlash(opts.flash)}${opts.body}</main></div>`,
+    `<main>${renderPageNav(opts.active, {
+      rewindEnabled: opts.rewindEnabled,
+      presetsEnabled: opts.presetsEnabled,
+      birthdayEnabled: opts.birthdayEnabled,
+    })}${renderFlash(opts.flash)}${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }
 
-function renderPageNav(
-  active: string,
-  rewindEnabled?: boolean,
-  presetsEnabled?: boolean,
-): string {
-  const items = USER_NAV_ITEMS.filter((item) => {
-    // A feature-gated item only shows while its feature is enabled.
-    // `undefined` is treated as enabled so non-gating callers are
-    // unaffected (#608/#656).
-    if (item.feature === "rewind") return rewindEnabled !== false;
-    if (item.feature === "voice") return presetsEnabled !== false;
-    return true;
-  })
-    .map((item) => {
-      const isActive =
-        item.href === active ||
-        (item.href === "/me/" && (active === "/me" || active === "/me/"));
-      const cls = isActive ? ' class="active"' : "";
-      return `<a href="${escapeHtml(item.href)}"${cls}>${escapeHtml(item.label)}</a>`;
-    })
-    .join("");
+function renderPageNav(active: string, flags: UserFeatureFlags): string {
+  // Every item always renders (#709): a feature-gated page whose feature is
+  // off is greyed with an "off" badge rather than hidden, so it stays
+  // discoverable and its choice stays pre-settable. `undefined` flags are
+  // treated as enabled so non-gating callers/tests render plain links.
+  const items = USER_NAV_ITEMS.map((item) => {
+    const isActive =
+      item.href === active ||
+      (item.href === "/me/" && (active === "/me" || active === "/me/"));
+    const disabled = isNavItemDisabled(item, flags);
+    const classes = [isActive ? "active" : "", disabled ? "nav-disabled" : ""]
+      .filter(Boolean)
+      .join(" ");
+    const cls = classes ? ` class="${classes}"` : "";
+    // Read-only pages (Rewind) have no choice to save, so don't claim one.
+    const title = disabled
+      ? item.presettable
+        ? ' title="Your server admin hasn\'t enabled this yet — your choice is still saved"'
+        : ' title="Your server admin hasn\'t enabled this yet"'
+      : "";
+    const badge = disabled ? '<span class="nav-badge">off</span>' : "";
+    return `<a href="${escapeHtml(item.href)}"${cls}${title}>${escapeHtml(item.label)}${badge}</a>`;
+  }).join("");
   return `<nav class="page-nav">${items}</nav>`;
 }
 
@@ -296,6 +357,33 @@ function renderFlash(flash?: UserFlashMessage | null): string {
 }
 
 /**
+ * The single, consistent "this feature is off" banner shown on every gated
+ * `/me/*` page when its feature is disabled (#709). Replaces the old mix of
+ * hard 404s, bespoke per-page notices, and silent omissions with one
+ * predictable message. Members can't enable features (that's admin-only), so
+ * the banner is purely informational — no action button.
+ *
+ * `label` names the feature (e.g. "Voice presets"). When `presettable` is
+ * true the copy reassures the member their choice is saved and will apply
+ * once an admin turns the feature on; when false (read-only surfaces like
+ * Rewind, where there is nothing to pre-set) it simply says the content will
+ * appear once the feature is enabled. Returns "" when `enabled` is true so
+ * callers can drop it in unconditionally.
+ */
+export function renderUserFeatureDisabledNotice(opts: {
+  enabled: boolean;
+  label: string;
+  presettable: boolean;
+}): string {
+  if (opts.enabled) return "";
+  const label = escapeHtml(opts.label);
+  const tail = opts.presettable
+    ? "Your choice is saved and will apply automatically once they turn it on."
+    : "Once they enable it, it'll show up here.";
+  return `<div class="notice info"><strong>Your server admin hasn't enabled ${label} yet.</strong> ${tail}</div>`;
+}
+
+/**
  * Page body for `/me/`. Self-contained — the layout supplies the chrome,
  * this function supplies just the inner HTML. The Notifications card
  * landed in #482; later cards (#484 Rewind, etc.) bolt on as they ship.
@@ -304,12 +392,16 @@ export function renderUserIndexBody(opts: {
   discordUserId: string;
   guildId: string;
   isAdmin: boolean;
-  // Whether the feature-gated Rewind page is enabled (#608). When false,
-  // its card is omitted so the overview never links to a disabled page.
+  // Whether the feature-gated Rewind page is enabled (#608). When false, its
+  // card is still shown but tagged "off" (#709) so the overview lists every
+  // manageable surface consistently rather than making some vanish.
   rewindEnabled?: boolean;
-  // Whether the feature-gated Voice page is enabled (#656). When false,
-  // its card is omitted so the overview never links to a disabled page.
+  // Whether the feature-gated Voice page is enabled (#656). When false, its
+  // card is shown tagged "off" (#709), mirroring `rewindEnabled`.
   presetsEnabled?: boolean;
+  // Whether the feature-gated Birthday page is enabled (#657). When false,
+  // its card is shown tagged "off" (#709), mirroring `rewindEnabled`.
+  birthdayEnabled?: boolean;
   // The member's poll-participation summary (#655), or null/undefined when
   // poll-participation capture is off or the member has never voted. When
   // present, a small read-only "Poll participation" card surfaces their
@@ -324,16 +416,36 @@ export function renderUserIndexBody(opts: {
   const greeting = opts.isAdmin
     ? `<p class="subtitle">Signed in as an administrator viewing your own preferences. Use the <em>Back to admin panel</em> link above to manage the server.</p>`
     : `<p class="subtitle">These pages are scoped to <strong>you</strong> — what you see and change here only affects your own data on this server.</p>`;
-  const rewindCard =
-    opts.rewindEnabled === false
-      ? ""
-      : '<li><span class="feature-name"><a href="/me/rewind">Rewind</a></span>' +
-        '<span class="feature-desc">Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.</span></li>';
-  const voiceCard =
-    opts.presetsEnabled === false
-      ? ""
-      : '<li><span class="feature-name"><a href="/me/voice">Voice</a></span>' +
-        '<span class="feature-desc">Manage your channel name pattern and saved voice-channel presets.</span></li>';
+  // Each manageable surface is always listed (#709); a disabled feature is
+  // tagged "off" rather than dropped, so the overview reads the same whether
+  // or not an admin has flipped the feature on.
+  const offTag = ' <span class="tag tag-off">off</span>';
+  const featureCard = (
+    href: string,
+    label: string,
+    desc: string,
+    enabled: boolean,
+  ): string =>
+    `<li><span class="feature-name"><a href="${href}">${label}</a>${enabled ? "" : offTag}</span>` +
+    `<span class="feature-desc">${desc}</span></li>`;
+  const voiceCard = featureCard(
+    "/me/voice",
+    "Voice",
+    "Manage your channel name pattern and saved voice-channel presets.",
+    opts.presetsEnabled !== false,
+  );
+  const birthdayCard = featureCard(
+    "/me/birthday",
+    "Birthday",
+    "Set your birthday (the year is optional) so Koolbot can celebrate it on the day — in your own timezone.",
+    opts.birthdayEnabled !== false,
+  );
+  const rewindCard = featureCard(
+    "/me/rewind",
+    "Rewind",
+    "Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.",
+    opts.rewindEnabled !== false,
+  );
   // Read-only poll-participation summary (#655). Only rendered when the
   // route supplies a summary (capture on + the member has a tracking row).
   const poll = opts.pollParticipation;
@@ -369,8 +481,7 @@ export function renderUserIndexBody(opts: {
     '<li><span class="feature-name"><a href="/me/timezone">Timezone</a></span>' +
       '<span class="feature-desc">Choose the timezone Koolbot uses when it shows you times in digests, Rewind, and voicestats.</span></li>',
     voiceCard,
-    '<li><span class="feature-name"><a href="/me/birthday">Birthday</a></span>' +
-      '<span class="feature-desc">Set your birthday (the year is optional) so Koolbot can celebrate it on the day — in your own timezone.</span></li>',
+    birthdayCard,
     rewindCard,
     "</ul>",
     "</div>",
@@ -883,9 +994,11 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
   const month = opts.selected?.month ?? null;
   const day = opts.selected?.day ?? null;
   const year = opts.selected?.year ?? null;
-  const disabledNotice = opts.featureEnabled
-    ? ""
-    : "<div class=\"notice info\">Birthday announcements aren't enabled on this server yet, but you can set your date now — it'll be ready the moment an admin turns the feature on.</div>";
+  const disabledNotice = renderUserFeatureDisabledNotice({
+    enabled: opts.featureEnabled,
+    label: "birthday announcements",
+    presettable: true,
+  });
   const hasBirthday = opts.selected !== null;
   return [
     "<h1>Birthday</h1>",
@@ -1092,6 +1205,13 @@ export interface VoicePageBodyOptions {
   presets: VoicePresetView[];
   /** Configured max presets per user (shown as guidance). */
   maxPerUser: number;
+  /**
+   * Whether the voice-presets feature is enabled on the server. When off the
+   * page still renders the editable form (so a member can pre-set their name
+   * pattern and manage presets) but shows the shared "off" banner (#709),
+   * mirroring the birthday page's pre-set affordance.
+   */
+  featureEnabled: boolean;
 }
 
 function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
@@ -1157,6 +1277,11 @@ export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
   return [
     "<h1>Voice preferences</h1>",
     '<p class="subtitle">Manage how your dynamic voice channels are named and the presets you can apply to them.</p>',
+    renderUserFeatureDisabledNotice({
+      enabled: opts.featureEnabled,
+      label: "voice presets",
+      presettable: true,
+    }),
     // ---- Name pattern ----
     '<form method="POST" action="/me/voice/name-pattern">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
