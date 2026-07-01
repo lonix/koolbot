@@ -1474,10 +1474,11 @@ export function createWriteRouter(
             }
           }
           // Guild picker lists so channel/category/role keys render as real
-          // selectors, exactly like the Settings page (issue #703). One guild
-          // fetch, four lists; both helpers swallow their own errors and
-          // return empty lists, so a picker just falls back to an empty
-          // dropdown rather than failing the step.
+          // selectors, exactly like the Settings page (issue #703). Two guild
+          // fetches run in parallel — one for channels/categories, one for
+          // roles; both helpers swallow their own errors and return empty
+          // lists, so a picker just falls back to an empty dropdown rather
+          // than failing the step.
           const [chData, roleData] = await Promise.all([
             fetchChannelData(client, session.guildId),
             fetchRoleData(client, session.guildId),

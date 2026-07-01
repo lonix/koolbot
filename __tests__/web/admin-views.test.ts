@@ -1988,6 +1988,11 @@ describe("renderWizardStepPage", () => {
     );
     expect(html).toContain('value="Lobby"');
     expect(html).toContain("Enable VC");
+    // Each field label is associated with its control via matching for/id so
+    // screen readers and click-to-focus keep working (issue #703 review).
+    expect(html).toContain('<label for="wiz-voicechannels.enabled">');
+    expect(html).toMatch(/type="checkbox" id="wiz-voicechannels.enabled"/);
+    expect(html).toMatch(/type="number" id="wiz-quotes.max_length"/);
   });
 
   it("renders an options-backed key as a <select> and pre-selects the current value", () => {
@@ -2013,8 +2018,14 @@ describe("renderWizardStepPage", () => {
       },
     });
     // The wizard renders through the shared control renderer, so the select
-    // carries the `value_`-prefixed field name (issue #703).
-    expect(html).toContain('<select name="value_leaderboard_roles.period">');
+    // carries the `value_`-prefixed field name and an id the label points at
+    // (issue #703).
+    expect(html).toMatch(
+      /<select name="value_leaderboard_roles.period" id="wiz-leaderboard_roles.period">/,
+    );
+    expect(html).toContain(
+      '<label for="wiz-leaderboard_roles.period">leaderboard_roles.period</label>',
+    );
     expect(html).toContain(
       '<option value="month" selected>This month</option>',
     );
@@ -2200,19 +2211,27 @@ describe("renderWizardStepPage", () => {
         },
       },
     });
-    // Channel key → text-channel dropdown with the current value selected.
+    // Channel key → text-channel dropdown with the current value selected,
+    // carrying an id its label points at (issue #703).
     expect(html).toMatch(
-      /<select name="value_reactionroles.message_channel_id">/,
+      /<select id="wiz-reactionroles.message_channel_id" name="value_reactionroles.message_channel_id">/,
+    );
+    expect(html).toContain(
+      '<label for="wiz-reactionroles.message_channel_id">reactionroles.message_channel_id</label>',
     );
     expect(html).toContain(
       '<option value="chan-1" selected>#announcements</option>',
     );
     expect(html).toContain('<option value="chan-2">#general</option>');
     // Category key → category dropdown.
-    expect(html).toMatch(/<select name="value_voicechannels.category_id">/);
+    expect(html).toMatch(
+      /<select id="wiz-voicechannels.category_id" name="value_voicechannels.category_id">/,
+    );
     expect(html).toContain('<option value="cat-1">#Voice Channels</option>');
     // Role key → role dropdown with the `@` prefix.
-    expect(html).toMatch(/<select name="value_leaderboard_roles.some_role">/);
+    expect(html).toMatch(
+      /<select id="wiz-leaderboard_roles.some_role" name="value_leaderboard_roles.some_role">/,
+    );
     expect(html).toContain('<option value="role-1">@Moderator</option>');
     // No raw free-text input is emitted for any of these picker keys.
     expect(html).not.toContain('<input type="text"');

@@ -638,10 +638,17 @@ function renderControlInput(
   },
   isCascadeMaster = false,
   depLocked = false,
+  // Optional DOM id stamped onto the primary control element so a caller can
+  // associate a `<label for>` with it (the wizard does this — issue #703). The
+  // Settings page omits it (it labels rows with a `<strong>`, not a `<label>`),
+  // so it defaults to "" and adds nothing there. The cron picker manages its
+  // own inputs and is left unstamped.
+  controlId = "",
 ): string {
   const primitive = coerceToDisplayValue(r.current);
   const currentStr = typeof primitive === "string" ? primitive : "";
   const valueName = escapeHtml(settingValueFieldName(r.key));
+  const idAttr = controlId ? ` id="${escapeHtml(controlId)}"` : "";
   // When a hard dependency is unmet (#666), the control renders disabled so it
   // can't be edited before its requirement is on — the same rule the write-time
   // validator (#663) enforces. `data-dep-locked` tells the cascade-disable
@@ -655,20 +662,25 @@ function renderControlInput(
   // their underlying `type`, so operators pick from the valid set instead
   // of typing a value the server will reject.
   if (r.options && r.options.length > 0) {
-    return renderOptionsSelect(valueName, r.options, currentStr, lockAttr);
+    return renderOptionsSelect(
+      valueName,
+      r.options,
+      currentStr,
+      lockAttr + idAttr,
+    );
   }
   if (r.type === "boolean") {
     const checked = primitive === true ? " checked" : "";
     const masterAttr = isCascadeMaster ? " data-cascade-master" : "";
     return (
       `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
-      `<input type="checkbox" name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
+      `<input type="checkbox"${idAttr} name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
       `<span class="mono">${primitive === true ? "true" : "false"}</span>` +
       `</label>`
     );
   }
   if (r.type === "number") {
-    return `<input type="number" name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
+    return `<input type="number"${idAttr} name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
   }
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
@@ -680,7 +692,7 @@ function renderControlInput(
     const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
-      `<select name="${valueName}"${lockAttr}>` +
+      `<select${idAttr} name="${valueName}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, true) +
       `</select>`
     );
@@ -696,7 +708,7 @@ function renderControlInput(
         .filter((v) => v !== ""),
     );
     return (
-      `<select name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
+      `<select${idAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, false) +
       `</select>` +
       renderSelectionSummary(options, selected, prefix)
@@ -712,7 +724,7 @@ function renderControlInput(
   // string or unknown type → plain text input. The maxlength mirrors the
   // server-side `TEXT_LIMITS.configValue` cap in write-routes (#508) — kept as
   // a literal here to avoid a circular import (write-routes imports this file).
-  return `<input type="text" name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
+  return `<input type="text"${idAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
 }
 
 /**
@@ -1259,6 +1271,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       // Settings page), which the wizard step handler reads back. The label
       // isn't consumed by the control renderer, so the raw-key display label
       // (tracked separately in #702) is unaffected here.
+      const inputId = `wiz-${k}`;
       const row: SettingRow = {
         key: k,
         label: k,
@@ -1270,10 +1283,22 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
         options: meta?.options,
         channelKind: meta?.channelKind,
       };
-      const control = renderControlInput(row, pickers, k === masterKey);
+      const control = renderControlInput(
+        row,
+        pickers,
+        k === masterKey,
+        false,
+        inputId,
+      );
 
+      // The cron picker renders several inputs of its own rather than a single
+      // control, so it takes no id; its label is left unassociated (a `for`
+      // pointing at nothing is worse than none). Every other type stamps
+      // `inputId` onto its control, so `for` restores screen-reader
+      // association and click-to-focus.
+      const labelFor = type === "cron" ? "" : ` for="${escapeHtml(inputId)}"`;
       return `<div class="field-row">
-  <label>${escapeHtml(k)}</label>
+  <label${labelFor}>${escapeHtml(k)}</label>
   ${control}
   <div class="help">${escapeHtml(desc)}</div>
 </div>`;
