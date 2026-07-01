@@ -38,6 +38,7 @@ import {
   renderUserIndexBody,
   renderUserNotificationsBody,
   renderUserPage,
+  renderUserFeatureDisabledNotice,
   renderUserRewindBody,
   renderUserTimezoneBody,
   renderUserVoiceBody,
@@ -238,6 +239,25 @@ async function isBirthdayFeatureEnabled(): Promise<boolean> {
 }
 
 /**
+ * Resolve the enabled-state of every feature-gated `/me/*` surface in one
+ * shot (#709). Threaded into `renderUserPage` (and the overview body) on
+ * every page so the nav renders a consistent "off" badge for whichever
+ * features are disabled — regardless of which page you're on.
+ */
+async function readUserFeatureFlags(): Promise<{
+  rewindEnabled: boolean;
+  presetsEnabled: boolean;
+  birthdayEnabled: boolean;
+}> {
+  const [rewindEnabled, presetsEnabled, birthdayEnabled] = await Promise.all([
+    isRewindFeatureEnabled(),
+    isVoicePresetsEnabled(),
+    isBirthdayFeatureEnabled(),
+  ]);
+  return { rewindEnabled, presetsEnabled, birthdayEnabled };
+}
+
+/**
  * Resolve the session user's display name for the name-pattern preview.
  * Best-effort: falls back to the raw user id when the member can't be
  * fetched (e.g. left the guild), so the page still renders.
@@ -339,8 +359,7 @@ export function createUserRouter(
         res.status(500).type("text/plain").send("session missing");
         return;
       }
-      const rewindEnabled = await isRewindFeatureEnabled();
-      const presetsEnabled = await isVoicePresetsEnabled();
+      const flags = await readUserFeatureFlags();
 
       // Read-only poll-participation summary for the overview card (#655).
       // Only fetched when capture is on; a member who has never voted has no
@@ -359,8 +378,7 @@ export function createUserRouter(
             discordUserId: session.discordUserId,
             guildId: session.guildId,
             isAdmin: session.role === "admin",
-            rewindEnabled,
-            presetsEnabled,
+            ...flags,
             pollParticipation: pollParticipation
               ? {
                   totalVotes: pollParticipation.totalVotes,
@@ -374,8 +392,7 @@ export function createUserRouter(
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
-          rewindEnabled,
-          presetsEnabled,
+          ...flags,
         }),
       );
     }),
@@ -411,8 +428,7 @@ export function createUserRouter(
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           flash,
-          rewindEnabled: await isRewindFeatureEnabled(),
-          presetsEnabled: await isVoicePresetsEnabled(),
+          ...(await readUserFeatureFlags()),
         }),
       );
     }),
@@ -533,8 +549,7 @@ export function createUserRouter(
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           flash,
-          rewindEnabled: await isRewindFeatureEnabled(),
-          presetsEnabled: await isVoicePresetsEnabled(),
+          ...(await readUserFeatureFlags()),
         }),
       );
     }),
@@ -629,6 +644,7 @@ export function createUserRouter(
         guildId,
       );
       const flash = readFlashFromQuery(req);
+      const flags = await readUserFeatureFlags();
       res.type("text/html").send(
         renderUserPage({
           title: "Birthday",
@@ -636,13 +652,13 @@ export function createUserRouter(
           body: renderUserBirthdayBody({
             csrfToken: getCsrfToken(req),
             selected,
-            featureEnabled: await isBirthdayFeatureEnabled(),
+            featureEnabled: flags.birthdayEnabled,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           flash,
-          rewindEnabled: await isRewindFeatureEnabled(),
+          ...flags,
         }),
       );
     }),
@@ -740,30 +756,32 @@ export function createUserRouter(
       userId: session.discordUserId,
       guildId: session.guildId,
     });
-    const presetsEnabled = await isVoicePresetsEnabled();
+    const flags = await readUserFeatureFlags();
 
-    // Feature gate (#608): when Rewind is disabled the page is not served
-    // (and the nav link is already suppressed). Return a friendly disabled
-    // state with 404 so the route can't be used to reach the recap while
-    // off, mirroring how the nav advertisement is hidden.
-    if (!(await isRewindFeatureEnabled())) {
-      res
-        .status(404)
-        .type("text/html")
-        .send(
-          renderUserPage({
-            title: "Rewind",
-            active: "/me/rewind",
-            body:
-              "<h1>Rewind</h1>" +
-              '<div class="notice info">The year-in-review (Rewind) feature is currently disabled on this server.</div>',
-            csrfToken: getCsrfToken(req),
-            remainingMs: getDisplayedRemainingMs(session),
-            isAdmin: session.role === "admin",
-            rewindEnabled: false,
-            presetsEnabled,
-          }),
-        );
+    // Feature gate (#608/#709): when Rewind is disabled the recap can't be
+    // computed (there's nothing to pre-set here — it's a read-only view), so
+    // we render the consistent "off" banner instead of the recap and skip the
+    // data work. Unlike the old 404 this returns 200 and keeps the nav link
+    // visible (greyed), matching every other gated `/me/*` surface.
+    if (!flags.rewindEnabled) {
+      res.type("text/html").send(
+        renderUserPage({
+          title: "Rewind",
+          active: "/me/rewind",
+          body:
+            "<h1>Rewind</h1>" +
+            '<p class="subtitle">Your personal year-in-review.</p>' +
+            renderUserFeatureDisabledNotice({
+              enabled: false,
+              label: "the year-in-review (Rewind) feature",
+              presettable: false,
+            }),
+          csrfToken: getCsrfToken(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          ...flags,
+        }),
+      );
       return;
     }
 
@@ -808,8 +826,7 @@ export function createUserRouter(
             csrfToken: getCsrfToken(req),
             remainingMs: getDisplayedRemainingMs(session),
             isAdmin: session.role === "admin",
-            rewindEnabled: true,
-            presetsEnabled,
+            ...flags,
           }),
         );
       return;
@@ -881,8 +898,7 @@ export function createUserRouter(
         csrfToken: getCsrfToken(req),
         remainingMs: getDisplayedRemainingMs(session),
         isAdmin: session.role === "admin",
-        rewindEnabled: true,
-        presetsEnabled,
+        ...flags,
       }),
     );
   });
@@ -897,31 +913,11 @@ export function createUserRouter(
   // Discord (snapshot of a live channel); the web surface edits, sets the
   // default, and deletes the ones you already have.
 
-  // Helper shared by every voice route: 404 with a friendly disabled
-  // state when the feature is off (mirrors the Rewind gate, #608).
-  const renderVoiceDisabled = async (
-    req: AuthenticatedRequest,
-    res: Response,
-    session: WebSessionContext,
-  ): Promise<void> => {
-    res
-      .status(404)
-      .type("text/html")
-      .send(
-        renderUserPage({
-          title: "Voice preferences",
-          active: "/me/voice",
-          body:
-            "<h1>Voice preferences</h1>" +
-            '<div class="notice info">Per-user voice presets are currently disabled on this server.</div>',
-          csrfToken: getCsrfToken(req),
-          remainingMs: getDisplayedRemainingMs(session),
-          isAdmin: session.role === "admin",
-          rewindEnabled: await isRewindFeatureEnabled(),
-          presetsEnabled: false,
-        }),
-      );
-  };
+  // The page and its POST routes stay reachable even when the feature is off
+  // (#709): a member can pre-set their name pattern and manage presets before
+  // an admin flips `voicechannels.presets.enabled` on, mirroring the birthday
+  // page. The GET renders the shared "off" banner via `featureEnabled`; the
+  // POSTs persist regardless, exactly like the birthday POST.
 
   router.get(
     "/voice",
@@ -929,10 +925,6 @@ export function createUserRouter(
       const session = req.webSession;
       if (!session) {
         res.status(500).type("text/plain").send("session missing");
-        return;
-      }
-      if (!(await isVoicePresetsEnabled())) {
-        await renderVoiceDisabled(req, res, session);
         return;
       }
       const { userId } = assertSelfScope(session, {
@@ -952,6 +944,7 @@ export function createUserRouter(
         3,
       );
       const flash = readFlashFromQuery(req);
+      const flags = await readUserFeatureFlags();
 
       res.type("text/html").send(
         renderUserPage({
@@ -963,13 +956,13 @@ export function createUserRouter(
             displayName,
             presets: toPresetViews(prefs.presets),
             maxPerUser,
+            featureEnabled: flags.presetsEnabled,
           }),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           flash,
-          rewindEnabled: await isRewindFeatureEnabled(),
-          presetsEnabled: true,
+          ...flags,
         }),
       );
     }),
@@ -982,10 +975,6 @@ export function createUserRouter(
       const session = req.webSession;
       if (!session) {
         res.status(500).type("text/plain").send("session missing");
-        return;
-      }
-      if (!(await isVoicePresetsEnabled())) {
-        await renderVoiceDisabled(req, res, session);
         return;
       }
       const { userId } = assertSelfScope(session, {
@@ -1055,10 +1044,6 @@ export function createUserRouter(
       const session = req.webSession;
       if (!session) {
         res.status(500).type("text/plain").send("session missing");
-        return;
-      }
-      if (!(await isVoicePresetsEnabled())) {
-        await renderVoiceDisabled(req, res, session);
         return;
       }
       const { userId } = assertSelfScope(session, {
