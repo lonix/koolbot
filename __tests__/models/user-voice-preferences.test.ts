@@ -20,14 +20,15 @@ describe("UserVoicePreferences Model Schema", () => {
       const testDoc = {
         userId: "test-user-123",
         namePattern: "{username}'s Room",
-        userLimit: 10,
-        bitrate: 96,
+        presets: [
+          { name: "Squad", channelName: "Squad HQ", userLimit: 10, bitrate: 96 },
+        ],
       };
 
       expect(testDoc.userId).toBe("test-user-123");
       expect(testDoc.namePattern).toBe("{username}'s Room");
-      expect(testDoc.userLimit).toBe(10);
-      expect(testDoc.bitrate).toBe(96);
+      expect(testDoc.presets[0].userLimit).toBe(10);
+      expect(testDoc.presets[0].bitrate).toBe(96);
     });
   });
 });
