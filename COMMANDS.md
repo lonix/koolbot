@@ -35,6 +35,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/seen](#seen)
   - [/achievements](#achievements)
   - [/quote](#quote)
+  - [/event](#event)
 - [Web UI launcher](#-web-ui-launcher)
   - [/config](#config)
 - [Voice Channel Control Panel](#voice-channel-control-panel)
@@ -462,6 +463,87 @@ and is auto-recreated if deleted.
 
 ---
 
+### `/event`
+
+Schedule server events backed by a **temporary voice channel**. For servers
+that don't run static voice channels: instead of pre-creating a channel by
+hand, you schedule an event and KoolBot spins up a voice channel shortly
+before it starts, collects RSVPs, reminds attendees beforehand, and deletes
+the channel once the event ends and empties.
+
+Gated by the `events.enabled` feature flag. The `create`, `cancel`, and
+`start` subcommands require the **Administrator** permission; `list` is open
+to everyone.
+
+Configure the channel category, announcement channel, timezone, and timing
+windows under **Settings → Events** (or the `/admin/events` page). See
+[SETTINGS.md](SETTINGS.md#events).
+
+#### `/event create` (admin)
+
+Schedule a new event.
+
+```text
+/event create title:"Game Night" date:2026-07-04 time:20:00
+/event create title:"Movie Night" date:2026-07-05 time:21:30 description:"Bring snacks" duration:180 timezone:Europe/London
+```
+
+**Options:**
+
+- `title` (required) — event title (also used to name the voice channel)
+- `date` (required) — start date, `YYYY-MM-DD`
+- `time` (required) — start time, 24-hour `HH:MM`
+- `description` (optional) — shown on the RSVP message
+- `duration` (optional) — length in minutes (1–1440); defaults to
+  `events.default_duration_minutes`
+- `timezone` (optional) — IANA zone the date/time is interpreted in
+  (e.g. `Europe/London`); defaults to `events.timezone`
+
+On creation the bot posts an RSVP message in the configured announcement
+channel with **Going / Maybe / Can't** buttons and a live attendee count.
+
+#### `/event list`
+
+List upcoming and in-progress events with their RSVP tallies and IDs.
+
+```text
+/event list
+```
+
+#### `/event cancel` (admin)
+
+Cancel an event and remove its voice channel (if already created). The RSVP
+message is updated to show the event as cancelled.
+
+```text
+/event cancel id:697bdfe2808f7d245289392c
+```
+
+#### `/event start` (admin)
+
+Spin up the event's voice channel immediately, ahead of its scheduled
+creation window.
+
+```text
+/event start id:697bdfe2808f7d245289392c
+```
+
+**How it works:**
+
+1. Admin schedules an event via `/event create` or the `/admin/events` page
+2. Bot posts an RSVP message with Going / Maybe / Can't buttons
+3. A reminder is posted `events.reminder_minutes` before start, pinging
+   members who RSVP'd Going or Maybe
+4. The temporary voice channel is created `events.create_lead_minutes`
+   before start (or immediately via `/event start`)
+5. Once the event's duration elapses it is marked ended; the empty channel
+   is removed after `events.channel_grace_minutes`
+
+The whole lifecycle is driven by a once-a-minute scan, so it is
+restart-safe — progress is tracked on the stored event, not in memory.
+
+---
+
 ## 🔧 Web UI launcher
 
 KoolBot has exactly one Web UI slash command. It does one thing: mint a
@@ -702,13 +784,15 @@ button to admit them. **🗑️ Remove Waiting Room** deletes it.
 
 ### User command permissions
 
-| Command         | Permission Level | Additional Requirements                    |
-| --------------- | ---------------- | ------------------------------------------ |
-| `/ping`         | Everyone\*       | Command must be enabled                    |
-| `/voicestats`   | Everyone\*       | Voice tracking enabled                     |
-| `/achievements` | Everyone\*       | Achievements enabled                       |
-| `/seen`         | Everyone\*       | Voice tracking + seen enabled              |
-| `/quote`        | Everyone\*       | Quotes enabled                             |
+| Command                        | Permission Level | Additional Requirements       |
+| ------------------------------ | ---------------- | ----------------------------- |
+| `/ping`                        | Everyone\*       | Command must be enabled       |
+| `/voicestats`                  | Everyone\*       | Voice tracking enabled        |
+| `/achievements`                | Everyone\*       | Achievements enabled          |
+| `/seen`                        | Everyone\*       | Voice tracking + seen enabled |
+| `/quote`                       | Everyone\*       | Quotes enabled                |
+| `/event list`                  | Everyone\*       | Events enabled                |
+| `/event` create/cancel/start   | Administrator    | Events enabled                |
 
 \* Per-command role gating can be added in the Web UI's **Permissions** page.
 
@@ -768,6 +852,8 @@ The bot needs these Discord permissions:
 /seen user:@User                    # Last-seen lookup
 /quote add text:"..." author:@User  # Add a quote
 /quote edit id:"..." [text:"..."] [author:@User]
+/event list                         # List upcoming events
+/event create title:"..." date:YYYY-MM-DD time:HH:MM  # (admin) schedule an event
 ```
 
 ### Web UI launcher
@@ -789,6 +875,7 @@ Once in the admin Web UI (admin sessions):
 | Permissions    | `/permissions set/add/remove/clear/list/view`                              |
 | Setup Wizard   | `/setup wizard`                                                            |
 | Announcements  | `/announce create/list/delete`, `/announce-vc-stats`                       |
+| Events         | `/event create/list/cancel/start`                                          |
 | Polls          | `/poll create/list/add-item/delete/delete-item/test/list-items`            |
 | Reaction Roles | `/reactrole create/archive/unarchive/delete/list/status`                   |
 | Notices        | `/notice add/edit/delete/sync`                                             |

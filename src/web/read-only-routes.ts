@@ -20,6 +20,11 @@ import { defaultConfig, settingsMetadata } from "../services/config-schema.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import { ScheduledAnnouncement } from "../models/scheduled-announcement.js";
+import {
+  EventService,
+  formatEventWhen,
+  countRsvps,
+} from "../services/event-service.js";
 import { PollService } from "../services/poll-service.js";
 import { PollSchedule } from "../models/poll-schedule.js";
 import { PollItem } from "../models/poll-item.js";
@@ -44,7 +49,7 @@ import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
-import { getServerTimezone } from "../utils/timezone.js";
+import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
 import { getEnv } from "../config/env.js";
 import {
@@ -67,6 +72,7 @@ import {
   renderDashboardPage,
   renderDatabasePage,
   renderDigestPage,
+  renderEventsPage,
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
@@ -597,6 +603,52 @@ export function createReadOnlyRouter(
           enabled,
           rows,
           textChannels: channelData.textChannels,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Events ----------
+  router.get(
+    "/events",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const service = EventService.getInstance(client);
+      const config = ConfigService.getInstance();
+      const [enabled, categoryId, announcementChannelId, tz, events] =
+        await Promise.all([
+          config.getBoolean("events.enabled", false),
+          config.getString("events.category_id", ""),
+          config.getString("events.announcement_channel_id", ""),
+          config.getString("events.timezone", ""),
+          service.listEvents(common.guildId),
+        ]);
+
+      const rows = events.map((e) => {
+        const counts = countRsvps(e.rsvps);
+        return {
+          id: String(e._id),
+          title: e.title,
+          when: formatEventWhen(e),
+          state: e.state,
+          going: counts.going,
+          maybe: counts.maybe,
+          cant: counts.cant,
+          channelId: e.channelId,
+        };
+      });
+
+      res.type("text/html").send(
+        renderEventsPage({
+          ...common,
+          enabled,
+          categoryConfigured: categoryId.length > 0,
+          announcementConfigured: announcementChannelId.length > 0,
+          // Resolve to a usable zone (falls back to server tz on an invalid
+          // value) so the UI shows exactly what event parsing will use.
+          timezone: resolveTimezone(tz),
+          rows,
           flash: readFlash(req),
         }),
       );

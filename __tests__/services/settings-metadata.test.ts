@@ -44,6 +44,7 @@ describe("settingsMetadata", () => {
       "quotes",
       "core",
       "digest",
+      "events",
       "rewind",
       "ratelimit",
       "announcements",

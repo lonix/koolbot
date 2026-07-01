@@ -44,6 +44,7 @@ import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
 import { DigestService } from "./services/digest-service.js";
 import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { BirthdayService } from "./services/birthday-service.js";
+import { EventService } from "./services/event-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
@@ -496,6 +497,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         digestService.destroy();
         rewindNudgeService.destroy();
         birthdayService.destroy();
+        eventService.destroy();
         WizardService.getInstance().shutdown();
         // Persist any metrics still buffered in memory before the DB
         // connection closes below, then stop the flush/logging timers.
@@ -562,6 +564,7 @@ let leaderboardRoleService: LeaderboardRoleService;
 let digestService: DigestService;
 let rewindNudgeService: RewindNudgeService;
 let birthdayService: BirthdayService;
+let eventService: EventService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
@@ -589,6 +592,7 @@ try {
   digestService = DigestService.getInstance(client);
   rewindNudgeService = RewindNudgeService.getInstance(client);
   birthdayService = BirthdayService.getInstance(client);
+  eventService = EventService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
@@ -700,6 +704,7 @@ async function initializeServices(): Promise<void> {
     // date on /me/birthday; this schedules the recurring "is it anyone's
     // birthday today (in their timezone)?" check.
     await birthdayService.start();
+    await eventService.start();
 
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();
@@ -786,6 +791,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleVCPresetButton } =
           await import("./handlers/vc-preset-handler.js");
         await handleVCPresetButton(interaction);
+      } else if (interaction.customId.startsWith("event_rsvp_")) {
+        const { handleEventRsvpButton } =
+          await import("./handlers/event-rsvp-handler.js");
+        await handleEventRsvpButton(interaction);
       } else {
         logger.debug(
           `Ignoring button interaction with unrecognized customId: ${interaction.customId}`,

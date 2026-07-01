@@ -418,6 +418,7 @@ describe("Config Schema", () => {
       "digest.enabled": false,
       "rewind.enabled": false,
       "birthdays.enabled": false,
+      "events.enabled": false,
       "reactionroles.enabled": false,
       "notices.enabled": false,
       "polls.enabled": false,
