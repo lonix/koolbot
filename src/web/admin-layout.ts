@@ -573,7 +573,14 @@ function renderNav(
   // always shown, so a group only renders empty if it genuinely has no items
   // — no dangling header (#613).
   return NAV_GROUP_ORDER.map((group) => {
-    const items = NAV_ITEMS.filter((item) => item.group === group);
+    // Sort enabled/on features to the top and let disabled/off ones sink to the
+    // bottom, preserving the fixed NAV_ITEMS order as a stable secondary sort
+    // within each group (Array.prototype.sort is stable). Non-feature items are
+    // never disabled, so other groups are unaffected. Pure display-order change
+    // (#706).
+    const items = NAV_ITEMS.filter((item) => item.group === group).sort(
+      (a, b) => Number(isDisabled(a)) - Number(isDisabled(b)),
+    );
     if (items.length === 0) return "";
     return (
       `<div class="nav-group">` +

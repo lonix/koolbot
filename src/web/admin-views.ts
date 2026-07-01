@@ -1133,7 +1133,15 @@ export function renderWizardPage(props: WizardPageProps): string {
   // on — admins re-tick what they want, untick what they don't. `featureStatus`
   // only feeds the ON/OFF indicator so the admin can see what
   // state they're about to override.
-  const cards = props.featureOrder
+  // Sort enabled/on features to the top and let disabled/off ones sink to the
+  // bottom, keeping `featureOrder` as a stable secondary sort within each group
+  // (Array.prototype.sort is stable). Pure display-order change (#706).
+  const orderedKeys = [...props.featureOrder].sort(
+    (a, b) =>
+      Number(Boolean(props.featureStatus[b])) -
+      Number(Boolean(props.featureStatus[a])),
+  );
+  const cards = orderedKeys
     .map((fk) => {
       const info = WIZARD_FEATURE_LABELS[fk] ?? { name: fk, desc: "" };
       const currentlyOn = Boolean(props.featureStatus[fk]);

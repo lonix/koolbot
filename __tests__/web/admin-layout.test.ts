@@ -305,6 +305,38 @@ describe("renderAdminPage grouped sidebar (#613)", () => {
     expect(html).toContain('href="/admin/announcements" class="nav-disabled"');
   });
 
+  it("sorts enabled Features nav items above disabled ones, stable within the group (#706)", () => {
+    // reactionroles + voicechannels on; announcements + polls + notices off.
+    const html = render({
+      "announcements.enabled": false,
+      "polls.enabled": false,
+      "reactionroles.enabled": true,
+      "notices.enabled": false,
+      "voicechannels.enabled": true,
+      "digest.enabled": false,
+      "voicetracking.enabled": false,
+    });
+    // Enabled items sink no lower than any disabled item. Enabled hrefs
+    // (reaction-roles, voice-channels) and disabled hrefs (announcements,
+    // polls, notices, digest, analytics) partition cleanly.
+    const pos = (href: string): number => html.indexOf(`href="${href}"`);
+    const enabled = ["/admin/reaction-roles", "/admin/voice-channels"].map(pos);
+    const disabled = [
+      "/admin/announcements",
+      "/admin/polls",
+      "/admin/notices",
+      "/admin/digest",
+      "/admin/analytics",
+    ].map(pos);
+    for (const p of [...enabled, ...disabled]) expect(p).toBeGreaterThan(-1);
+    expect(Math.max(...enabled)).toBeLessThan(Math.min(...disabled));
+    // Enabled items preserve their fixed NAV_ITEMS order (reaction-roles
+    // precedes voice-channels), confirming the stable secondary sort.
+    expect(pos("/admin/reaction-roles")).toBeLessThan(
+      pos("/admin/voice-channels"),
+    );
+  });
+
   it("ships muted CSS for the group heading consistent with the sidebar", () => {
     expect(render()).toContain("nav.side .nav-group-heading{");
   });
