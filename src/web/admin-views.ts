@@ -16,6 +16,7 @@ import {
   isEnabledValue,
   settingsMetadata,
   type ConfigSchema,
+  type SettingMetadata,
   type SettingOption,
 } from "../services/config-schema.js";
 import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
@@ -614,8 +615,15 @@ function renderSettingControl(
   },
   isCascadeMaster = false,
   depLocked = false,
+  controlId = "",
 ): string {
-  const control = renderControlInput(r, pickers, isCascadeMaster, depLocked);
+  const control = renderControlInput(
+    r,
+    pickers,
+    isCascadeMaster,
+    depLocked,
+    controlId,
+  );
   if (!depLocked || r.type === "cron") return control;
   const primitive = coerceToDisplayValue(r.current);
   const roundTrip =
@@ -1201,28 +1209,26 @@ export interface WizardStepPageProps extends CommonProps {
   featureKey: string;
   settingKeys: string[];
   currentValues: Record<string, unknown>;
-  metadata: Record<
-    string,
-    {
-      description: string;
-      category: string;
-      options?: SettingOption[];
-      // The schema `type` (e.g. `channel`, `category`, `role`, `cron`) drives
-      // which control the shared renderer produces; falls back to the runtime
-      // type of the default when a key isn't in the schema. `channelKind`
-      // selects the text- vs voice-channel picker list (issue #703).
-      type?: string;
-      channelKind?: "text" | "voice";
-    }
-  >;
+  metadata: Record<string, SettingMetadata>;
   defaultValues: Record<string, unknown>;
-  // Guild picker option lists, threaded through so `channel`/`category`/`role`
-  // keys render as real selectors — the same lists the Settings page feeds to
-  // `renderControlInput` (issue #703).
+  /**
+   * Guild channel/role option lists that back the picker dropdowns, shared
+   * verbatim with the Settings page's `renderControlInput` so a channel/role/
+   * category key gets a real selector in the wizard instead of a free-text ID
+   * box (#702 / #703).
+   */
   textChannels: ChannelOption[];
   voiceChannels: ChannelOption[];
   categoryChannels: ChannelOption[];
   roles: RoleOption[];
+  /**
+   * Enabled-state of every key on this step *plus* the cross-feature
+   * dependency targets those keys reference (e.g. `achievements.enabled`
+   * depends on `voicetracking.enabled`, which lives on another step). The
+   * shared dependency-hint / lock logic (#666) reads this so the wizard greys
+   * out the same controls the Settings page does.
+   */
+  enabledByKey: Record<string, boolean>;
   flash?: FlashMessage | null;
 }
 
@@ -1233,12 +1239,6 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     desc: "",
   };
 
-  // The feature's top-level `.enabled` toggle is the "master" for this step:
-  // when it's off, every other control greys out and is ignored on submit
-  // (issue #485). Sub-toggles like `voicetracking.announcements.enabled` are
-  // dependents, not masters.
-  const masterKey = `${props.featureKey}.enabled`;
-
   const pickers = {
     textChannels: props.textChannels,
     voiceChannels: props.voiceChannels,
@@ -1246,61 +1246,85 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
     roles: props.roles,
   };
 
-  const fields = props.settingKeys
-    .map((k) => {
-      const current = props.currentValues[k];
-      const meta = props.metadata[k];
-      const defaultVal = props.defaultValues[k];
-      // The schema `type` is authoritative — it's what makes `channel` /
-      // `category` / `role` (and `cron`) keys render as their proper pickers
-      // instead of a free-text box (issue #703). Fall back to the runtime type
-      // of the default for keys the schema doesn't declare.
-      const type =
-        meta?.type ??
-        (typeof defaultVal === "boolean"
-          ? "boolean"
-          : typeof defaultVal === "number"
-            ? "number"
-            : "string");
-      const desc = meta?.description ?? "";
+  // Build the same `SettingRow` shape the Settings page feeds to
+  // `renderControlInput`, so the wizard reuses its rich channel/role/category
+  // selectors, multi-selects, fixed-option dropdowns, cron picker and
+  // dependency handling instead of the old free-text boxes (#702). Metadata is
+  // authoritative for the control type; the runtime type of the default value
+  // is only a fallback for keys the schema doesn't describe.
+  const rows: SettingRow[] = props.settingKeys.map((k) => {
+    const meta = props.metadata[k];
+    const defaultVal = props.defaultValues[k];
+    const fallbackType =
+      typeof defaultVal === "boolean"
+        ? "boolean"
+        : typeof defaultVal === "number"
+          ? "number"
+          : "string";
+    return {
+      key: k,
+      label: meta?.label ?? k,
+      current: props.currentValues[k],
+      defaultValue: defaultVal,
+      type: meta?.type ?? fallbackType,
+      description: meta?.description ?? "",
+      category: meta?.category ?? props.featureKey,
+      options: meta?.options,
+      warnBelow: meta?.warnBelow,
+      channelKind: meta?.channelKind,
+    };
+  });
 
-      // Route the value control through the same renderer the Settings page
-      // uses (`renderControlInput`) so the two surfaces can't drift: pickers
-      // become dropdowns, fixed-options become selects, cron gets its picker.
-      // The submitted field name is therefore `value_<key>` (as on the
-      // Settings page), which the wizard step handler reads back. The label
-      // isn't consumed by the control renderer, so the raw-key display label
-      // (tracked separately in #702) is unaffected here.
-      const inputId = `wiz-${k}`;
-      const row: SettingRow = {
-        key: k,
-        label: k,
-        current,
-        defaultValue: defaultVal,
-        type,
-        description: desc,
-        category: meta?.category ?? "",
-        options: meta?.options,
-        channelKind: meta?.channelKind,
-      };
-      const control = renderControlInput(
-        row,
+  // The feature's top-level `.enabled` toggle is the cascade "master" for this
+  // step: when it's off, every other control greys out and is ignored on submit
+  // (issue #485). Picked the same way as the Settings page (shortest `.enabled`
+  // boolean) so both surfaces cascade identically.
+  const masterKey = findCascadeMasterKey(rows);
+
+  // Enabled-state map for the shared dependency-hint / lock logic (#666). The
+  // route supplies it (covering cross-feature targets); fall back to this
+  // step's own current values so within-feature dependencies still resolve.
+  const enabledByKey = new Map<string, boolean>(
+    Object.entries(props.enabledByKey),
+  );
+  for (const r of rows) {
+    if (!enabledByKey.has(r.key)) {
+      enabledByKey.set(r.key, isEnabledValue(r.current));
+    }
+  }
+
+  const fields = rows
+    .map((r) => {
+      // Grey + disable any control whose hard dependencies aren't all on
+      // (#666), mirroring the Settings page's `dep-off` treatment.
+      const unmet = unmetDependenciesFor(r.key, enabledByKey);
+      const depLocked = unmet.length > 0;
+      const rowClass = depLocked ? " dep-off" : "";
+      // Stamp an id onto the primary control so the human-readable label can
+      // associate with it via `for` (#703). The cron picker manages its own
+      // inputs and takes no id, so its label is left unassociated rather than
+      // pointing `for` at nothing.
+      const inputId = `wiz-${r.key}`;
+      const control = renderSettingControl(
+        r,
         pickers,
-        k === masterKey,
-        false,
+        r.key === masterKey,
+        depLocked,
         inputId,
       );
-
-      // The cron picker renders several inputs of its own rather than a single
-      // control, so it takes no id; its label is left unassociated (a `for`
-      // pointing at nothing is worse than none). Every other type stamps
-      // `inputId` onto its control, so `for` restores screen-reader
-      // association and click-to-focus.
-      const labelFor = type === "cron" ? "" : ` for="${escapeHtml(inputId)}"`;
-      return `<div class="field-row">
-  <label${labelFor}>${escapeHtml(k)}</label>
+      const labelFor = r.type === "cron" ? "" : ` for="${escapeHtml(inputId)}"`;
+      // Human-readable label (#702) with the raw dotted key demoted to
+      // monospace helper text — the same treatment the Settings page gives its
+      // rows, wrapped in a `<label>` so the whole caption stays clickable.
+      return `<div class="field-row${rowClass}">
+  <label class="field-label"${labelFor}>
+    <strong>${escapeHtml(r.label)}</strong>
+    <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
+  </label>
   ${control}
-  <div class="help">${escapeHtml(desc)}</div>
+  ${renderWarnBelow(r)}
+  ${renderDependencyHint(unmet)}
+  <div class="help">${escapeHtml(r.description)}</div>
 </div>`;
     })
     .join("");
