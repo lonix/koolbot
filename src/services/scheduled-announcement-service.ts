@@ -1,4 +1,4 @@
-import { Client, TextChannel, EmbedBuilder } from "discord.js";
+import { Client, Guild, TextChannel, EmbedBuilder } from "discord.js";
 import { CronJob, CronTime } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -12,6 +12,19 @@ interface ScheduledJob {
   announcement: IScheduledAnnouncement;
   job: CronJob;
 }
+
+/**
+ * The subset of an announcement needed to actually render + send it. Every
+ * persisted `IScheduledAnnouncement` satisfies this, but a one-off "send once"
+ * (which is never stored) can supply just these fields.
+ */
+export type AnnouncementContent = Pick<
+  IScheduledAnnouncement,
+  "guildId" | "channelId" | "message" | "placeholders"
+> & {
+  _id?: unknown;
+  embedData?: IScheduledAnnouncement["embedData"];
+};
 
 export class ScheduledAnnouncementService {
   private static instance: ScheduledAnnouncementService;
@@ -135,26 +148,79 @@ export class ScheduledAnnouncementService {
     });
   }
 
-  private async processPlaceholders(
-    text: string,
-    guildId: string,
-  ): Promise<string> {
-    await this.waitForClientReady();
-
-    const guild = await this.client.guilds.fetch(guildId);
-    if (!guild) return text;
-
+  /**
+   * Resolve every placeholder token to its value once per announcement. The
+   * async/expensive work (member-cache scan, `fetchOwner()` API call, random
+   * pick) happens here a single time; `applyPlaceholders` then substitutes the
+   * cached map into each text field synchronously. This avoids re-doing the
+   * work (and the owner API call) for every embed field/title/footer, which
+   * matters for the immediate "post now"/"post once" paths.
+   */
+  private async buildPlaceholderMap(
+    guild: Guild,
+  ): Promise<Record<string, string>> {
     const now = new Date();
-    const replacements: Record<string, string> = {
+
+    // Members currently online — best effort. Requires the GUILD_PRESENCES
+    // intent and a populated member cache; when presence data is unavailable
+    // this counts 0 rather than throwing.
+    let onlineCount = 0;
+    try {
+      onlineCount = guild.members.cache.filter(
+        (m) => m.presence != null && m.presence.status !== "offline",
+      ).size;
+    } catch {
+      onlineCount = 0;
+    }
+
+    // Server owner mention. fetchOwner can reject if the owner is uncached or
+    // temporarily unavailable — degrade to an empty string rather than fail
+    // the whole announcement.
+    let ownerMention = "";
+    try {
+      const owner = await guild.fetchOwner();
+      ownerMention = owner.toString();
+    } catch {
+      ownerMention = "";
+    }
+
+    // Random member mention for fun/engagement — best effort from the cache.
+    // Picked once so a single announcement references the same member across
+    // all of its text fields.
+    let randomMember = "";
+    const members = [...guild.members.cache.values()];
+    if (members.length > 0) {
+      const picked = members[Math.floor(Math.random() * members.length)];
+      if (picked) randomMember = picked.toString();
+    }
+
+    return {
       "{server_name}": guild.name,
       "{member_count}": guild.memberCount.toString(),
+      "{online_count}": onlineCount.toString(),
+      "{owner}": ownerMention,
+      "{boost_count}": (guild.premiumSubscriptionCount ?? 0).toString(),
+      "{boost_tier}": guild.premiumTier.toString(),
+      "{channel_count}": guild.channels.cache.size.toString(),
+      "{role_count}": guild.roles.cache.size.toString(),
+      "{random_member}": randomMember,
       "{date}": now.toLocaleDateString(),
       "{time}": now.toLocaleTimeString(),
       "{day}": now.toLocaleDateString(undefined, { weekday: "long" }),
       "{month}": now.toLocaleDateString(undefined, { month: "long" }),
       "{year}": now.getFullYear().toString(),
+      // Locale-independent ISO 8601 forms for operators who want a stable,
+      // unambiguous format instead of the locale-implicit {date}/{time}.
+      "{date_iso}": now.toISOString().slice(0, 10),
+      "{time_iso}": now.toISOString().slice(11, 19),
+      "{datetime_iso}": now.toISOString(),
     };
+  }
 
+  private applyPlaceholders(
+    text: string,
+    replacements: Record<string, string>,
+  ): string {
     let result = text;
     for (const [placeholder, value] of Object.entries(replacements)) {
       // Use split-join pattern for compatibility with older JS versions
@@ -164,100 +230,10 @@ export class ScheduledAnnouncementService {
   }
 
   private async makeAnnouncement(
-    announcement: IScheduledAnnouncement,
+    announcement: AnnouncementContent,
   ): Promise<void> {
     try {
-      await this.waitForClientReady();
-
-      const guild = await this.client.guilds.fetch(announcement.guildId);
-      if (!guild) {
-        logger.error(
-          `Guild not found with ID: ${announcement.guildId} for announcement ${announcement._id}`,
-        );
-        return;
-      }
-
-      const channel = await guild.channels.fetch(announcement.channelId);
-      if (!channel || !(channel instanceof TextChannel)) {
-        logger.error(
-          `Channel not found or not a text channel: ${announcement.channelId} for announcement ${announcement._id}`,
-        );
-        return;
-      }
-
-      let message = announcement.message;
-      if (announcement.placeholders) {
-        message = await this.processPlaceholders(message, announcement.guildId);
-      }
-
-      if (announcement.embedData) {
-        const embed = new EmbedBuilder();
-
-        if (announcement.embedData.title) {
-          let title = announcement.embedData.title;
-          if (announcement.placeholders) {
-            title = await this.processPlaceholders(title, announcement.guildId);
-          }
-          embed.setTitle(title);
-        }
-
-        if (announcement.embedData.description) {
-          let description = announcement.embedData.description;
-          if (announcement.placeholders) {
-            description = await this.processPlaceholders(
-              description,
-              announcement.guildId,
-            );
-          }
-          embed.setDescription(description);
-        }
-
-        if (announcement.embedData.color) {
-          embed.setColor(announcement.embedData.color);
-        }
-
-        if (announcement.embedData.fields) {
-          for (const field of announcement.embedData.fields) {
-            let name = field.name;
-            let value = field.value;
-            if (announcement.placeholders) {
-              name = await this.processPlaceholders(name, announcement.guildId);
-              value = await this.processPlaceholders(
-                value,
-                announcement.guildId,
-              );
-            }
-            embed.addFields({ name, value, inline: field.inline });
-          }
-        }
-
-        if (announcement.embedData.footer) {
-          let footerText = announcement.embedData.footer.text;
-          if (announcement.placeholders) {
-            footerText = await this.processPlaceholders(
-              footerText,
-              announcement.guildId,
-            );
-          }
-          embed.setFooter({
-            text: footerText,
-            iconURL: announcement.embedData.footer.iconUrl,
-          });
-        }
-
-        if (announcement.embedData.thumbnail) {
-          embed.setThumbnail(announcement.embedData.thumbnail);
-        }
-
-        if (announcement.embedData.image) {
-          embed.setImage(announcement.embedData.image);
-        }
-
-        await channel.send({ content: message, embeds: [embed] });
-      } else {
-        await channel.send(message);
-      }
-
+      await this.dispatchAnnouncement(announcement);
       logger.info(
         `Scheduled announcement ${announcement._id} sent successfully to channel ${announcement.channelId}`,
       );
@@ -267,6 +243,129 @@ export class ScheduledAnnouncementService {
         error,
       );
     }
+  }
+
+  /**
+   * Render + send an announcement, throwing on any failure (guild/channel
+   * missing, Discord send error). `makeAnnouncement` wraps this to swallow
+   * errors for fire-and-forget cron jobs; the immediate "post now"/"send once"
+   * paths call it directly so the WebUI can surface failures to the operator.
+   */
+  private async dispatchAnnouncement(
+    announcement: AnnouncementContent,
+  ): Promise<void> {
+    await this.waitForClientReady();
+
+    const guild = await this.client.guilds.fetch(announcement.guildId);
+    if (!guild) {
+      throw new Error(
+        `Guild not found with ID: ${announcement.guildId} for announcement ${announcement._id}`,
+      );
+    }
+
+    const channel = await guild.channels.fetch(announcement.channelId);
+    if (!channel || !(channel instanceof TextChannel)) {
+      throw new Error(
+        `Channel not found or not a text channel: ${announcement.channelId} for announcement ${announcement._id}`,
+      );
+    }
+
+    // Resolve placeholders once for the whole announcement, then substitute the
+    // cached map into each field synchronously. `expand` is a no-op when the
+    // announcement has placeholders disabled.
+    const placeholderMap = announcement.placeholders
+      ? await this.buildPlaceholderMap(guild)
+      : null;
+    const expand = (text: string): string =>
+      placeholderMap ? this.applyPlaceholders(text, placeholderMap) : text;
+
+    const message = expand(announcement.message);
+
+    if (announcement.embedData) {
+      const embed = new EmbedBuilder();
+
+      if (announcement.embedData.title) {
+        embed.setTitle(expand(announcement.embedData.title));
+      }
+
+      if (announcement.embedData.description) {
+        embed.setDescription(expand(announcement.embedData.description));
+      }
+
+      if (announcement.embedData.color) {
+        embed.setColor(announcement.embedData.color);
+      }
+
+      if (announcement.embedData.fields) {
+        for (const field of announcement.embedData.fields) {
+          embed.addFields({
+            name: expand(field.name),
+            value: expand(field.value),
+            inline: field.inline,
+          });
+        }
+      }
+
+      if (announcement.embedData.footer) {
+        embed.setFooter({
+          text: expand(announcement.embedData.footer.text),
+          iconURL: announcement.embedData.footer.iconUrl,
+        });
+      }
+
+      if (announcement.embedData.thumbnail) {
+        embed.setThumbnail(announcement.embedData.thumbnail);
+      }
+
+      if (announcement.embedData.image) {
+        embed.setImage(announcement.embedData.image);
+      }
+
+      await channel.send({ content: message, embeds: [embed] });
+    } else {
+      await channel.send(message);
+    }
+  }
+
+  /**
+   * Fire an existing scheduled announcement once, immediately, without waiting
+   * for its cron to elapse. Reuses the announcement's channel/message/embed/
+   * placeholder config. Returns false when the announcement is missing or
+   * belongs to another guild; throws if the send itself fails so the caller
+   * can report the reason.
+   */
+  public async postAnnouncementNow(
+    announcementId: string,
+    guildId?: string,
+  ): Promise<boolean> {
+    const announcement = await ScheduledAnnouncement.findById(announcementId);
+    if (!announcement) {
+      return false;
+    }
+    if (guildId && announcement.guildId !== guildId) {
+      logger.warn(
+        `Attempted to post announcement ${sanitizeForLog(announcementId)} from wrong guild. Expected: ${sanitizeForLog(announcement.guildId)}, Got: ${sanitizeForLog(guildId)}`,
+      );
+      return false;
+    }
+
+    await this.dispatchAnnouncement(announcement);
+    logger.info(
+      `Posted announcement ${sanitizeForLog(announcementId)} on demand to channel ${announcement.channelId}`,
+    );
+    return true;
+  }
+
+  /**
+   * Compose-and-send-once: dispatch an ad-hoc announcement immediately without
+   * persisting a cron schedule. Throws if the send fails so the WebUI can
+   * surface the error.
+   */
+  public async postOnce(announcement: AnnouncementContent): Promise<void> {
+    await this.dispatchAnnouncement(announcement);
+    logger.info(
+      `Posted one-off announcement to channel ${announcement.channelId}`,
+    );
   }
 
   private scheduleAnnouncement(

@@ -401,9 +401,14 @@ page).
 
 - Schedule custom messages to any channel
 - Cron expressions for the schedule
+- One-off "Post now" (fire an existing schedule immediately) and a
+  "Compose & send once" form (post ad-hoc without storing a cron schedule)
 - Embed support with customizable colors
-- Dynamic placeholders (`{server_name}`, `{member_count}`, `{date}`,
-  `{time}`, `{day}`, `{month}`, `{year}`)
+- Dynamic placeholders — server/date tokens (`{server_name}`, `{member_count}`,
+  `{online_count}`, `{owner}`, `{boost_count}`, `{boost_tier}`,
+  `{channel_count}`, `{role_count}`, `{random_member}`, `{date}`, `{time}`,
+  `{day}`, `{month}`, `{year}`) plus locale-independent ISO forms
+  (`{date_iso}`, `{time_iso}`, `{datetime_iso}`)
 - Persistent across bot restarts
 
 CRUD operations happen on the Announcements page.
