@@ -1761,6 +1761,42 @@ describe("renderWizardPage", () => {
       /Polls\s*<span class="fc-current"><span class="tag tag-off">OFF<\/span><\/span>/,
     );
   });
+
+  it("sorts enabled features above disabled ones, stable within each group", () => {
+    const html = renderWizardPage({
+      ...COMMON,
+      featureOrder: [
+        "voicechannels",
+        "voicetracking",
+        "quotes",
+        "achievements",
+        "reactionroles",
+        "announcements",
+      ],
+      featureStatus: {
+        voicechannels: true,
+        voicetracking: false,
+        quotes: true,
+        achievements: false,
+        reactionroles: true,
+        announcements: false,
+      },
+    });
+    // Enabled (voicechannels, quotes, reactionroles) keep their relative order
+    // and precede disabled (voicetracking, achievements, announcements), which
+    // also keep their relative order.
+    const order = [
+      "voicechannels",
+      "quotes",
+      "reactionroles",
+      "voicetracking",
+      "achievements",
+      "announcements",
+    ].map((fk) => html.indexOf(`id="feat-${fk}"`));
+    for (const idx of order) expect(idx).toBeGreaterThanOrEqual(0);
+    const sorted = [...order].sort((a, b) => a - b);
+    expect(order).toEqual(sorted);
+  });
 });
 
 describe("renderWizardStepPage", () => {
