@@ -1669,7 +1669,7 @@ export function renderEventsPage(props: EventsProps): string {
       const actions = finished
         ? '<span class="muted">—</span>'
         : `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel event ${escapeHtml(e.title)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Cancel</button></form>`;
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel event \\'${escapeJsInAttr(e.title)}\\'?');">${csrfInput}<button type="submit" class="btn btn-danger">Cancel</button></form>`;
       const channelCell = e.channelId
         ? `<span class="mono">${escapeHtml(e.channelId)}</span>`
         : '<span class="muted">—</span>';

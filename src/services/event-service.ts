@@ -40,6 +40,10 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 const TICK_CRON = "* * * * *"; // every minute
 const MS_PER_MINUTE = 60 * 1000;
+// Cap the reminder's inline pings: ~22 chars per `<@id>` keeps the body well
+// under Discord's 2000-char message limit, and Discord only pings up to 100
+// users per message anyway. Extra RSVPs are summarised as "…and N more".
+const MAX_REMINDER_MENTIONS = 50;
 const DISCORD_UNKNOWN_MESSAGE = 10008;
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
@@ -687,8 +691,16 @@ export class EventService {
     const interested = event.rsvps
       .filter((r) => r.status === "going" || r.status === "maybe")
       .map((r) => r.userId);
+    // Cap the ping list so the message body can't blow Discord's 2000-char
+    // limit (each `<@id>` is ~22 chars) and so the mention text matches the
+    // ids we actually allow to ping. Any overflow is summarised, not listed.
+    const pinged = interested.slice(0, MAX_REMINDER_MENTIONS);
+    const overflow = interested.length - pinged.length;
     const mentions =
-      interested.length > 0 ? interested.map((id) => `<@${id}>`).join(" ") : "";
+      pinged.length > 0
+        ? pinged.map((id) => `<@${id}>`).join(" ") +
+          (overflow > 0 ? ` …and ${overflow} more` : "")
+        : "";
     const where = event.channelId ? ` Join here: <#${event.channelId}>.` : "";
 
     const content =
@@ -697,7 +709,7 @@ export class EventService {
 
     await channel.send({
       content,
-      allowedMentions: { users: interested.slice(0, 100) },
+      allowedMentions: { users: pinged },
     });
   }
 

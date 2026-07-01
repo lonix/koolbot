@@ -18,9 +18,9 @@ import logger from "../utils/logger.js";
 export const data = new SlashCommandBuilder()
   .setName("event")
   .setDescription("Schedule and manage server events")
-  // Admin-gated by default; /event list is still reachable via the shared
-  // command but the mutating subcommands re-check below.
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+  // No command-wide permission default: `/event list` is open to everyone,
+  // while create/cancel/start enforce an Administrator check at runtime
+  // (setDefaultMemberPermissions would hide the whole command, list included).
   .addSubcommand((sub) =>
     sub
       .setName("create")
