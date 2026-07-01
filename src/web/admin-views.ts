@@ -1476,7 +1476,7 @@ const PLACEHOLDER_REFERENCE_HTML = `
   <ul class="mono">
     <li><code>{server_name}</code> — guild name</li>
     <li><code>{member_count}</code> — total members</li>
-    <li><code>{online_count}</code> — members currently online</li>
+    <li><code>{online_count}</code> — members currently online (best effort; shows 0 without presence data)</li>
     <li><code>{owner}</code> — server owner mention</li>
     <li><code>{boost_count}</code> — active Nitro boosts</li>
     <li><code>{boost_tier}</code> — Nitro boost tier (0–3)</li>

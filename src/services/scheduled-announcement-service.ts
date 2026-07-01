@@ -1,4 +1,4 @@
-import { Client, TextChannel, EmbedBuilder } from "discord.js";
+import { Client, Guild, TextChannel, EmbedBuilder } from "discord.js";
 import { CronJob, CronTime } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -148,15 +148,17 @@ export class ScheduledAnnouncementService {
     });
   }
 
-  private async processPlaceholders(
-    text: string,
-    guildId: string,
-  ): Promise<string> {
-    await this.waitForClientReady();
-
-    const guild = await this.client.guilds.fetch(guildId);
-    if (!guild) return text;
-
+  /**
+   * Resolve every placeholder token to its value once per announcement. The
+   * async/expensive work (member-cache scan, `fetchOwner()` API call, random
+   * pick) happens here a single time; `applyPlaceholders` then substitutes the
+   * cached map into each text field synchronously. This avoids re-doing the
+   * work (and the owner API call) for every embed field/title/footer, which
+   * matters for the immediate "post now"/"post once" paths.
+   */
+  private async buildPlaceholderMap(
+    guild: Guild,
+  ): Promise<Record<string, string>> {
     const now = new Date();
 
     // Members currently online — best effort. Requires the GUILD_PRESENCES
@@ -183,6 +185,8 @@ export class ScheduledAnnouncementService {
     }
 
     // Random member mention for fun/engagement — best effort from the cache.
+    // Picked once so a single announcement references the same member across
+    // all of its text fields.
     let randomMember = "";
     const members = [...guild.members.cache.values()];
     if (members.length > 0) {
@@ -190,7 +194,7 @@ export class ScheduledAnnouncementService {
       if (picked) randomMember = picked.toString();
     }
 
-    const replacements: Record<string, string> = {
+    return {
       "{server_name}": guild.name,
       "{member_count}": guild.memberCount.toString(),
       "{online_count}": onlineCount.toString(),
@@ -211,7 +215,12 @@ export class ScheduledAnnouncementService {
       "{time_iso}": now.toISOString().slice(11, 19),
       "{datetime_iso}": now.toISOString(),
     };
+  }
 
+  private applyPlaceholders(
+    text: string,
+    replacements: Record<string, string>,
+  ): string {
     let result = text;
     for (const [placeholder, value] of Object.entries(replacements)) {
       // Use split-join pattern for compatibility with older JS versions
@@ -261,31 +270,26 @@ export class ScheduledAnnouncementService {
       );
     }
 
-    let message = announcement.message;
-    if (announcement.placeholders) {
-      message = await this.processPlaceholders(message, announcement.guildId);
-    }
+    // Resolve placeholders once for the whole announcement, then substitute the
+    // cached map into each field synchronously. `expand` is a no-op when the
+    // announcement has placeholders disabled.
+    const placeholderMap = announcement.placeholders
+      ? await this.buildPlaceholderMap(guild)
+      : null;
+    const expand = (text: string): string =>
+      placeholderMap ? this.applyPlaceholders(text, placeholderMap) : text;
+
+    const message = expand(announcement.message);
 
     if (announcement.embedData) {
       const embed = new EmbedBuilder();
 
       if (announcement.embedData.title) {
-        let title = announcement.embedData.title;
-        if (announcement.placeholders) {
-          title = await this.processPlaceholders(title, announcement.guildId);
-        }
-        embed.setTitle(title);
+        embed.setTitle(expand(announcement.embedData.title));
       }
 
       if (announcement.embedData.description) {
-        let description = announcement.embedData.description;
-        if (announcement.placeholders) {
-          description = await this.processPlaceholders(
-            description,
-            announcement.guildId,
-          );
-        }
-        embed.setDescription(description);
+        embed.setDescription(expand(announcement.embedData.description));
       }
 
       if (announcement.embedData.color) {
@@ -294,26 +298,17 @@ export class ScheduledAnnouncementService {
 
       if (announcement.embedData.fields) {
         for (const field of announcement.embedData.fields) {
-          let name = field.name;
-          let value = field.value;
-          if (announcement.placeholders) {
-            name = await this.processPlaceholders(name, announcement.guildId);
-            value = await this.processPlaceholders(value, announcement.guildId);
-          }
-          embed.addFields({ name, value, inline: field.inline });
+          embed.addFields({
+            name: expand(field.name),
+            value: expand(field.value),
+            inline: field.inline,
+          });
         }
       }
 
       if (announcement.embedData.footer) {
-        let footerText = announcement.embedData.footer.text;
-        if (announcement.placeholders) {
-          footerText = await this.processPlaceholders(
-            footerText,
-            announcement.guildId,
-          );
-        }
         embed.setFooter({
-          text: footerText,
+          text: expand(announcement.embedData.footer.text),
           iconURL: announcement.embedData.footer.iconUrl,
         });
       }
@@ -349,7 +344,7 @@ export class ScheduledAnnouncementService {
     }
     if (guildId && announcement.guildId !== guildId) {
       logger.warn(
-        `Attempted to post announcement ${sanitizeForLog(announcementId)} from wrong guild. Expected: ${announcement.guildId}, Got: ${sanitizeForLog(guildId)}`,
+        `Attempted to post announcement ${sanitizeForLog(announcementId)} from wrong guild. Expected: ${sanitizeForLog(announcement.guildId)}, Got: ${sanitizeForLog(guildId)}`,
       );
       return false;
     }
