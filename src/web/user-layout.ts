@@ -845,11 +845,39 @@ function renderMonthOptions(selected: number | null): string {
   return blank + months;
 }
 
+function renderDayOptions(selected: number | null): string {
+  const blank = `<option value=""${selected === null ? " selected" : ""}>— Day —</option>`;
+  const days = Array.from({ length: 31 }, (_, i) => {
+    const value = i + 1;
+    const sel = value === selected ? " selected" : "";
+    return `<option value="${value}"${sel}>${value}</option>`;
+  }).join("");
+  return blank + days;
+}
+
+// Keeps the Day dropdown consistent with the chosen Month: options past the
+// selected month's length are disabled (Feb → 29, Apr/Jun/Sep/Nov → 30) so
+// impossible combinations like Feb 30 can't be picked. Feb allows 29 since
+// the year is optional and may be a leap year. With no JS the full 1–31 list
+// still submits and the server-side calendar check catches invalid dates.
+const BIRTHDAY_DAY_SCRIPT =
+  "(function(){var m=document.getElementById('bd-month');" +
+  "var d=document.getElementById('bd-day');if(!m||!d)return;" +
+  "var max=[31,29,31,30,31,30,31,31,30,31,30,31];" +
+  "function sync(){var mv=parseInt(m.value,10);" +
+  "var lim=mv>=1&&mv<=12?max[mv-1]:31;" +
+  "for(var i=0;i<d.options.length;i++){var o=d.options[i];" +
+  "var dv=parseInt(o.value,10);if(!dv)continue;" +
+  "var bad=dv>lim;o.disabled=bad;o.hidden=bad;}" +
+  "var cur=parseInt(d.value,10);if(cur>lim)d.value=''}" +
+  "m.addEventListener('change',sync);sync()})();";
+
 /**
- * Inner HTML for `GET /me/birthday` (#657). Month dropdown + day/year
- * number inputs, one POST. Year is optional (privacy): leave it blank to
- * share the date without the age. A second "Remove" button clears the
- * stored birthday.
+ * Inner HTML for `GET /me/birthday` (#657). Month + day dropdowns (the day
+ * list reacts to the selected month, see BIRTHDAY_DAY_SCRIPT) plus an
+ * optional year number input, one POST. Year is optional (privacy): leave it
+ * blank to share the date without the age. A second "Remove" button clears
+ * the stored birthday.
  */
 export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
   const month = opts.selected?.month ?? null;
@@ -870,7 +898,7 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
     '<div><label for="bd-month"><strong>Month</strong></label>' +
       `<div style="margin-top:.35rem"><select id="bd-month" name="month" class="tz-select" style="max-width:12rem">${renderMonthOptions(month)}</select></div></div>`,
     '<div><label for="bd-day"><strong>Day</strong></label>' +
-      `<div style="margin-top:.35rem"><input id="bd-day" name="day" type="number" min="1" max="31" class="tz-select" style="max-width:6rem" value="${day ?? ""}"></div></div>`,
+      `<div style="margin-top:.35rem"><select id="bd-day" name="day" class="tz-select" style="max-width:6rem">${renderDayOptions(day)}</select></div></div>`,
     '<div><label for="bd-year"><strong>Year</strong> <span class="muted">(optional)</span></label>' +
       `<div style="margin-top:.35rem"><input id="bd-year" name="year" type="number" min="1900" placeholder="—" class="tz-select" style="max-width:8rem" value="${year ?? ""}"></div></div>`,
     "</div>",
@@ -882,6 +910,7 @@ export function renderUserBirthdayBody(opts: BirthdayPageBodyOptions): string {
     "</div>",
     "</div>",
     "</form>",
+    `<script>${BIRTHDAY_DAY_SCRIPT}</script>`,
   ].join("");
 }
 
