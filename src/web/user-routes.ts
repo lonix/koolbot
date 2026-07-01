@@ -681,7 +681,7 @@ export function createUserRouter(
         if (clearing) {
           after = await service.setBirthday(userId, guildId, null);
         } else if (month === null || day === null) {
-          throw new Error("Please choose a month and enter a day.");
+          throw new Error("Please choose a month and a day.");
         } else {
           after = await service.setBirthday(userId, guildId, {
             month,
