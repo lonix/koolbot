@@ -239,7 +239,7 @@ export async function fetchChannelData(
  * Fetch the guild's roles cache once and return both the id→name map
  * and the picker option list (with @everyone filtered out).
  */
-async function fetchRoleData(
+export async function fetchRoleData(
   client: Client,
   guildId: string,
 ): Promise<RoleData> {

@@ -1191,9 +1191,26 @@ export interface WizardStepPageProps extends CommonProps {
   currentValues: Record<string, unknown>;
   metadata: Record<
     string,
-    { description: string; category: string; options?: SettingOption[] }
+    {
+      description: string;
+      category: string;
+      options?: SettingOption[];
+      // The schema `type` (e.g. `channel`, `category`, `role`, `cron`) drives
+      // which control the shared renderer produces; falls back to the runtime
+      // type of the default when a key isn't in the schema. `channelKind`
+      // selects the text- vs voice-channel picker list (issue #703).
+      type?: string;
+      channelKind?: "text" | "voice";
+    }
   >;
   defaultValues: Record<string, unknown>;
+  // Guild picker option lists, threaded through so `channel`/`category`/`role`
+  // keys render as real selectors — the same lists the Settings page feeds to
+  // `renderControlInput` (issue #703).
+  textChannels: ChannelOption[];
+  voiceChannels: ChannelOption[];
+  categoryChannels: ChannelOption[];
+  roles: RoleOption[];
   flash?: FlashMessage | null;
 }
 
@@ -1210,45 +1227,53 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   // dependents, not masters.
   const masterKey = `${props.featureKey}.enabled`;
 
+  const pickers = {
+    textChannels: props.textChannels,
+    voiceChannels: props.voiceChannels,
+    categoryChannels: props.categoryChannels,
+    roles: props.roles,
+  };
+
   const fields = props.settingKeys
     .map((k) => {
       const current = props.currentValues[k];
       const meta = props.metadata[k];
       const defaultVal = props.defaultValues[k];
+      // The schema `type` is authoritative — it's what makes `channel` /
+      // `category` / `role` (and `cron`) keys render as their proper pickers
+      // instead of a free-text box (issue #703). Fall back to the runtime type
+      // of the default for keys the schema doesn't declare.
       const type =
-        typeof defaultVal === "boolean"
+        meta?.type ??
+        (typeof defaultVal === "boolean"
           ? "boolean"
           : typeof defaultVal === "number"
             ? "number"
-            : "string";
+            : "string");
       const desc = meta?.description ?? "";
-      const inputId = `wiz-${k}`;
-      const display =
-        typeof current === "boolean" ||
-        typeof current === "number" ||
-        typeof current === "string"
-          ? current
-          : "";
 
-      let control: string;
-      if (meta?.options && meta.options.length > 0) {
-        // Fixed-options keys render as a dropdown in the wizard too, so the
-        // value posted back is always one the server will accept.
-        const currentStr = typeof current === "string" ? current : "";
-        control = renderOptionsSelect(escapeHtml(k), meta.options, currentStr);
-      } else if (type === "boolean") {
-        const checked = current === true ? " checked" : "";
-        const masterAttr = k === masterKey ? " data-cascade-master" : "";
-        control = `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer"><input type="checkbox" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="true"${checked}${masterAttr}> Enable</label>`;
-      } else if (type === "number") {
-        control = `<input type="number" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" value="${escapeHtml(display)}">`;
-      } else {
-        // maxlength mirrors TEXT_LIMITS.configValue in write-routes (#508).
-        control = `<input type="text" id="${escapeHtml(inputId)}" name="${escapeHtml(k)}" maxlength="2000" value="${escapeHtml(display)}">`;
-      }
+      // Route the value control through the same renderer the Settings page
+      // uses (`renderControlInput`) so the two surfaces can't drift: pickers
+      // become dropdowns, fixed-options become selects, cron gets its picker.
+      // The submitted field name is therefore `value_<key>` (as on the
+      // Settings page), which the wizard step handler reads back. The label
+      // isn't consumed by the control renderer, so the raw-key display label
+      // (tracked separately in #702) is unaffected here.
+      const row: SettingRow = {
+        key: k,
+        label: k,
+        current,
+        defaultValue: defaultVal,
+        type,
+        description: desc,
+        category: meta?.category ?? "",
+        options: meta?.options,
+        channelKind: meta?.channelKind,
+      };
+      const control = renderControlInput(row, pickers, k === masterKey);
 
       return `<div class="field-row">
-  <label for="${escapeHtml(inputId)}">${escapeHtml(k)}</label>
+  <label>${escapeHtml(k)}</label>
   ${control}
   <div class="help">${escapeHtml(desc)}</div>
 </div>`;
