@@ -2382,7 +2382,68 @@ export interface VoiceChannelsProps extends CommonProps {
   totalEmpty: number;
   channels: VoiceChannelRow[];
   categoryFound: boolean;
+  /**
+   * The editable `voicechannels.*` settings rendered in-place on the feature
+   * page (#705). Built from the config schema the same way the Settings page
+   * builds its rows, so the shared control renderer produces a category
+   * picker, text fields, toggles, etc.
+   */
+  settingRows: SettingRow[];
+  /** Category options backing the `voicechannels.category_id` picker. */
+  categoryChannels: ChannelOption[];
   flash?: FlashMessage | null;
+}
+
+/**
+ * The editable settings card on the Voice Channels feature page (#705). Renders
+ * the `voicechannels.*` keys with the same control renderer the Settings page
+ * uses, so category is a picker, lobby names / prefix / suffix are text fields,
+ * and the control-panel / presets flags are toggles. Posts through the shared
+ * `/admin/settings/save-section` route with `redirect` back to this page and
+ * `no_cascade` set — this form has no section master toggle (that is
+ * `voicechannels.enabled`, owned by the enable notice above), so every
+ * submitted key must be written rather than skipped by the cascade rule.
+ */
+function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
+  if (props.settingRows.length === 0) return "";
+  const pickers = {
+    textChannels: [] as ChannelOption[],
+    voiceChannels: [] as ChannelOption[],
+    categoryChannels: props.categoryChannels,
+    roles: [] as RoleOption[],
+  };
+  const rows = props.settingRows
+    .map(
+      (r) => `<tr>
+<td>
+  <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
+  <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
+  <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
+</td>
+<td class="settings-value">${renderControlInput(r, pickers)}${renderResetButton(r.key)}${renderWarnBelow(r)}</td>
+<td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
+<td class="muted">${escapeHtml(r.description)}</td>
+</tr>`,
+    )
+    .join("");
+  return `
+<div class="card">
+  <h2>Settings</h2>
+  <p class="muted" style="margin:.25rem 0 .75rem">Change voice-channel settings here without leaving the page. Saved through the shared settings route.</p>
+  <form method="POST" action="/admin/settings/save-section">
+    <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+    <input type="hidden" name="category" value="voicechannels">
+    <input type="hidden" name="redirect" value="/admin/voice-channels">
+    <input type="hidden" name="no_cascade" value="1">
+    <table>
+      <thead><tr><th>Setting</th><th>Edit</th><th>Type</th><th>Description</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div class="actions" style="margin-top:.75rem">
+      <button type="submit" class="btn btn-primary">Save settings</button>
+    </div>
+  </form>
+</div>`;
 }
 
 export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
@@ -2434,6 +2495,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels",
     <dt>Empty channels</dt><dd>${props.totalEmpty}</dd>
   </dl>
 </div>
+${renderVoiceChannelsSettings(props)}
 <div class="card">
   <h2>Cleanup actions</h2>
   <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of ALL unmanaged channels in the category and re-create lobby channels?');">

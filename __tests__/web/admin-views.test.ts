@@ -1548,6 +1548,8 @@ describe("renderVoiceChannelsPage", () => {
       totalEmpty: 0,
       channels: [],
       categoryFound: false,
+      settingRows: [],
+      categoryChannels: [],
     });
     expect(html).toContain("Voice channel category not found");
   });
@@ -1582,6 +1584,8 @@ describe("renderVoiceChannelsPage", () => {
         },
       ],
       categoryFound: true,
+      settingRows: [],
+      categoryChannels: [],
     });
     expect(html).toContain('class="tag tag-info">lobby');
     expect(html).toContain('class="tag tag-warn">dynamic');
@@ -1604,11 +1608,105 @@ describe("renderVoiceChannelsPage", () => {
       totalEmpty: 0,
       channels: [],
       categoryFound: false,
+      settingRows: [],
+      categoryChannels: [],
     });
     expect(html).toMatch(
       /<button[^>]*type="submit"[^>]*disabled[^>]*>Force VC cleanup<\/button>/,
     );
     expect(html).not.toContain("Clean up empty channels");
+  });
+
+  it("renders editable voicechannels settings that post through save-section", () => {
+    const html = renderVoiceChannelsPage({
+      ...COMMON,
+      enabled: true,
+      controlPanelEnabled: true,
+      categoryName: "Voice",
+      lobbyName: "Lobby",
+      offlineLobbyName: "Offline Lobby",
+      prefix: "🎮",
+      totalManaged: 0,
+      totalEmpty: 0,
+      channels: [],
+      categoryFound: true,
+      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      settingRows: [
+        {
+          key: "voicechannels.category_id",
+          label: "Managed category",
+          current: "cat-1",
+          defaultValue: "",
+          type: "category",
+          description: "The managed category.",
+          category: "voicechannels",
+        },
+        {
+          key: "voicechannels.lobby.name",
+          label: "Lobby channel display name",
+          current: "Lobby",
+          defaultValue: "Lobby",
+          type: "string",
+          description: "Lobby name.",
+          category: "voicechannels",
+        },
+        {
+          key: "voicechannels.controlpanel.enabled",
+          label: "In-channel control panel enabled",
+          current: true,
+          defaultValue: true,
+          type: "boolean",
+          description: "Control panel.",
+          category: "voicechannels",
+        },
+      ],
+    });
+    // Posts through the shared settings route, back to this page, cascade off.
+    expect(html).toContain(
+      '<form method="POST" action="/admin/settings/save-section">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/voice-channels">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="no_cascade" value="1">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="voicechannels">',
+    );
+    // The category key renders as a picker sourced from categoryChannels.
+    expect(html).toContain(
+      '<option value="cat-1" selected>#Voice Channels</option>',
+    );
+    // The lobby name renders as a text input carrying its current value.
+    expect(html).toContain('name="value_voicechannels.lobby.name"');
+    // The control-panel flag renders as a checkbox.
+    expect(html).toContain('name="value_voicechannels.controlpanel.enabled"');
+    expect(html).toContain(">Save settings</button>");
+  });
+
+  it("omits the settings card when there are no editable rows", () => {
+    const html = renderVoiceChannelsPage({
+      ...COMMON,
+      enabled: true,
+      controlPanelEnabled: true,
+      categoryName: "Voice",
+      lobbyName: "Lobby",
+      offlineLobbyName: "Offline Lobby",
+      prefix: "🎮",
+      totalManaged: 0,
+      totalEmpty: 0,
+      channels: [],
+      categoryFound: true,
+      settingRows: [],
+      categoryChannels: [],
+    });
+    // No settings form is emitted (the substring in the shared AJAX script
+    // doesn't count — assert on this page's own form markup instead).
+    expect(html).not.toContain(
+      '<form method="POST" action="/admin/settings/save-section">',
+    );
+    expect(html).not.toContain(">Save settings</button>");
   });
 });
 

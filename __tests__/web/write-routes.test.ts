@@ -458,6 +458,22 @@ describe("findSectionMasterKey", () => {
   it("returns null for an unknown key that merely ends with .enabled", () => {
     expect(findSectionMasterKey(["bogus.feature.enabled"])).toBeNull();
   });
+
+  it("picks a sub-feature toggle when the true master is absent (#705)", () => {
+    // The Voice Channels feature page (#705) submits its `voicechannels.*`
+    // keys WITHOUT `voicechannels.enabled` (the enable notice owns that). The
+    // shortest `.enabled` among the submitted keys is then a sub-feature
+    // toggle, so unchecking it would wrongly cascade-skip the other keys —
+    // which is exactly why that form opts out of the cascade via `no_cascade`.
+    expect(
+      findSectionMasterKey([
+        "voicechannels.category_id",
+        "voicechannels.lobby.name",
+        "voicechannels.controlpanel.enabled",
+        "voicechannels.presets.enabled",
+      ]),
+    ).toBe("voicechannels.controlpanel.enabled");
+  });
 });
 
 describe("safeAdminRedirect (#610)", () => {
