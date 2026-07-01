@@ -30,7 +30,12 @@ import { PermissionsService } from "../services/permissions-service.js";
 import { WizardService } from "../services/wizard-service.js";
 import { BotStatusService } from "../services/bot-status-service.js";
 import { CommandManager } from "../services/command-manager.js";
-import { defaultConfig, settingsMetadata } from "../services/config-schema.js";
+import {
+  defaultConfig,
+  settingsMetadata,
+  getDependencies,
+  isEnabledValue,
+} from "../services/config-schema.js";
 import type { IScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import type { IPollSchedule } from "../models/poll-schedule.js";
 import type { IPollItem } from "../models/poll-item.js";
@@ -1455,30 +1460,52 @@ export function createWriteRouter(
           const featureKey = features[step];
           const settingKeys = WIZARD_FEATURE_SETTINGS[featureKey] ?? [];
           const config = ConfigService.getInstance();
-          const currentValues: Record<string, unknown> = {};
-          for (const k of settingKeys) {
+
+          // Resolve a key's effective current value: prefer what the admin
+          // already entered earlier in this wizard run, then the persisted
+          // config, then the schema default. Used for both the visible fields
+          // and the cross-feature dependency targets below.
+          const resolveCurrent = async (k: string): Promise<unknown> => {
             const fromWizard = wizard.getConfiguration(
               session.discordUserId,
               session.guildId,
               k,
             );
-            if (fromWizard !== undefined) {
-              currentValues[k] = fromWizard;
-            } else {
-              try {
-                currentValues[k] = await config.get(k);
-              } catch {
-                currentValues[k] =
-                  defaultConfig[k as keyof typeof defaultConfig];
-              }
+            if (fromWizard !== undefined) return fromWizard;
+            try {
+              return await config.get(k);
+            } catch {
+              return defaultConfig[k as keyof typeof defaultConfig];
+            }
+          };
+
+          const currentValues: Record<string, unknown> = {};
+          for (const k of settingKeys) {
+            currentValues[k] = await resolveCurrent(k);
+          }
+
+          // Enabled-state of this step's keys plus any dependency targets they
+          // reference on other steps (e.g. `achievements.enabled` depends on
+          // `voicetracking.enabled`), so the shared dependency-lock logic knows
+          // whether a cross-feature requirement is actually satisfied (#666).
+          const enabledByKey: Record<string, boolean> = {};
+          for (const k of settingKeys) {
+            enabledByKey[k] = isEnabledValue(currentValues[k]);
+          }
+          for (const k of settingKeys) {
+            for (const dep of getDependencies(
+              k as keyof typeof defaultConfig,
+            )) {
+              if (dep in enabledByKey) continue;
+              enabledByKey[dep] = isEnabledValue(await resolveCurrent(dep));
             }
           }
           // Guild picker lists so channel/category/role keys render as real
-          // selectors, exactly like the Settings page (issue #703). Two guild
-          // fetches run in parallel — one for channels/categories, one for
-          // roles; both helpers swallow their own errors and return empty
-          // lists, so a picker just falls back to an empty dropdown rather
-          // than failing the step.
+          // selectors, exactly like the Settings page (issues #702 / #703).
+          // Two guild fetches run in parallel — one for channels/categories,
+          // one for roles; both helpers swallow their own errors and return
+          // empty lists, so a picker just falls back to an empty dropdown
+          // rather than failing the step.
           const [chData, roleData] = await Promise.all([
             fetchChannelData(client, session.guildId),
             fetchRoleData(client, session.guildId),
@@ -1502,6 +1529,7 @@ export function createWriteRouter(
               voiceChannels: chData.voiceChannels,
               categoryChannels: chData.categoryChannels,
               roles: roleData.roles,
+              enabledByKey,
               flash,
             }),
           );
@@ -1607,23 +1635,21 @@ export function createWriteRouter(
       // = false` and skip the rest, so absent dependents don't surface as
       // bogus "invalid input" drops (a missing number field would otherwise
       // fail coercion).
-      // The step form submits each value under `value_<key>` — the same field
-      // naming the Settings page uses, now that the wizard renders through the
-      // shared control renderer (issue #703).
+      // The wizard now renders each control through the shared
+      // `renderControlInput`, which names every value field `value_<key>`
+      // (`settingValueFieldName`) exactly like the Settings page — read the
+      // same field names back here (issues #702 / #703).
+      const body = req.body as Record<string, unknown> | undefined;
       const masterKey = `${featureKey}.enabled`;
       const masterOff =
         settingKeys.includes(masterKey) &&
-        (req.body as Record<string, unknown> | undefined)?.[
-          settingValueFieldName(masterKey)
-        ] !== "true";
+        body?.[settingValueFieldName(masterKey)] !== "true";
 
       const saved: Record<string, unknown> = {};
       const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
         if (masterOff && k !== masterKey) continue;
-        const raw = (req.body as Record<string, unknown> | undefined)?.[
-          settingValueFieldName(k)
-        ];
+        const raw = body?.[settingValueFieldName(k)];
         const coerced = coerceConfigValue(k, raw);
         if (coerced.ok) {
           wizard.addConfiguration(

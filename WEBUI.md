@@ -779,6 +779,16 @@ disagree. The greying survives an enabled parent section (a dependency lock wins
 over the per-section cascade), and Rewind toggles are never greyed this way
 because Rewind is a graceful aggregator that declares no `dependsOn`.
 
+The **Setup Wizard** (`/admin/wizard`) renders each step's fields through the
+same shared control renderer the Settings page uses (#702), so a channel /
+role / category key gets a real picker dropdown instead of a raw-ID text box,
+fixed-option keys get a `<select>`, and each field is titled by its
+human-readable label (`SettingMetadata.label`) with the dotted config key kept
+only as monospace helper text. The cascade-disable behaviour and the
+*"Requires X enabled"* dependency hints/locks (including cross-feature targets
+that live on another wizard step) carry over as well, so the two surfaces stay
+in lockstep and can't drift apart.
+
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
 are in voice: the *empty*, *one user*, and *multiple users* pools. Each
