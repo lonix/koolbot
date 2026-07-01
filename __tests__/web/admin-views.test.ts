@@ -9,6 +9,7 @@ import {
   renderDashboardPage,
   renderDatabasePage,
   renderDigestPage,
+  renderEventsPage,
   renderImportDiffPage,
   renderNoticesPage,
   renderPermissionsPage,
@@ -1150,6 +1151,95 @@ describe("renderAnnouncementsPage", () => {
   });
 });
 
+describe("renderEventsPage", () => {
+  const EVENTS_COMMON = {
+    ...COMMON,
+    categoryConfigured: true,
+    announcementConfigured: true,
+    timezone: "UTC",
+  };
+
+  it("shows the empty state and disabled notice", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: false,
+      rows: [],
+    });
+    expect(html).toContain("No events scheduled yet.");
+    expect(html).toContain("Events are disabled");
+  });
+
+  it("renders a scheduled event row with RSVP counts and actions", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [
+        {
+          id: "e1",
+          title: "Game <Night>",
+          when: "2026-07-04 20:00 (UTC)",
+          state: "scheduled",
+          going: 3,
+          maybe: 1,
+          cant: 0,
+          channelId: null,
+        },
+      ],
+    });
+    // Title is HTML-escaped.
+    expect(html).toContain("Game &lt;Night&gt;");
+    expect(html).toContain("✅ 3");
+    expect(html).toContain("/admin/events/e1/start-now");
+    expect(html).toContain("/admin/events/e1/cancel");
+  });
+
+  it("hides actions for a finished (cancelled) event", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [
+        {
+          id: "e2",
+          title: "Old Event",
+          when: "2026-01-01 12:00 (UTC)",
+          state: "cancelled",
+          going: 0,
+          maybe: 0,
+          cant: 0,
+          channelId: null,
+        },
+      ],
+    });
+    expect(html).not.toContain("/admin/events/e2/start-now");
+    expect(html).toContain("cancelled");
+  });
+
+  it("warns when the category or announcement channel is unset", () => {
+    const html = renderEventsPage({
+      ...COMMON,
+      enabled: true,
+      categoryConfigured: false,
+      announcementConfigured: false,
+      timezone: "UTC",
+      rows: [],
+    });
+    expect(html).toContain("events.category_id");
+    expect(html).toContain("events.announcement_channel_id");
+  });
+
+  it("renders the create form", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [],
+    });
+    expect(html).toContain("/admin/events/create");
+    expect(html).toContain('name="title"');
+    expect(html).toContain('name="date"');
+    expect(html).toContain('name="time"');
+  });
+});
+
 describe("renderPollsPage", () => {
   it("shows empty state for both schedules and items", () => {
     const html = renderPollsPage({
@@ -1669,7 +1759,11 @@ describe("renderDigestPage", () => {
             title: "📊 Your weekly voice digest",
             description: "Here's a snapshot, alice.",
             fields: [
-              { name: "This week", value: "5h\n▲ 1h vs last week", inline: true },
+              {
+                name: "This week",
+                value: "5h\n▲ 1h vs last week",
+                inline: true,
+              },
               { name: "Rank", value: "#1", inline: true },
             ],
             footer: "Keep it up!\nDon't want these? Run /config.",

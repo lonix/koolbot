@@ -1379,6 +1379,26 @@ export interface AnnouncementsProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
+export interface EventRow {
+  id: string;
+  title: string;
+  when: string;
+  state: string;
+  going: number;
+  maybe: number;
+  cant: number;
+  channelId: string | null;
+}
+
+export interface EventsProps extends CommonProps {
+  enabled: boolean;
+  categoryConfigured: boolean;
+  announcementConfigured: boolean;
+  timezone: string;
+  rows: EventRow[];
+  flash?: FlashMessage | null;
+}
+
 function renderFlash(flash?: FlashMessage | null): string {
   if (!flash) return "";
   const cls =
@@ -1619,6 +1639,123 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", 
   return renderAdminPage({
     title: "Announcements",
     active: "/admin/announcements",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
+// ---------- Events ----------
+
+function eventStateTag(state: string): string {
+  const cls =
+    state === "active"
+      ? "tag-on"
+      : state === "cancelled"
+        ? "tag-off"
+        : state === "ended"
+          ? "tag-info"
+          : "tag-info";
+  return `<span class="tag ${cls}">${escapeHtml(state)}</span>`;
+}
+
+export function renderEventsPage(props: EventsProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+
+  const tableRows = props.rows
+    .map((e) => {
+      const finished = e.state === "cancelled" || e.state === "ended";
+      const actions = finished
+        ? '<span class="muted">—</span>'
+        : `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel event ${escapeHtml(e.title)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Cancel</button></form>`;
+      const channelCell = e.channelId
+        ? `<span class="mono">${escapeHtml(e.channelId)}</span>`
+        : '<span class="muted">—</span>';
+      return `<tr>
+<td>${escapeHtml(e.title)}</td>
+<td class="mono">${escapeHtml(e.when)}</td>
+<td>${eventStateTag(e.state)}</td>
+<td>✅ ${e.going} · 🤔 ${e.maybe} · 🚫 ${e.cant}</td>
+<td>${channelCell}</td>
+<td class="mono">${escapeHtml(e.id)}</td>
+<td class="actions">${actions}</td>
+</tr>`;
+    })
+    .join("");
+
+  const tableHtml =
+    props.rows.length > 0
+      ? `<table class="data">
+<thead><tr><th>Title</th><th>When</th><th>State</th><th>RSVPs</th><th>Channel</th><th>ID</th><th>Actions</th></tr></thead>
+<tbody>${tableRows}</tbody>
+</table>`
+      : '<p class="muted">No events scheduled yet.</p>';
+
+  const categoryWarn = props.categoryConfigured
+    ? ""
+    : `<div class="notice warn">No <code>events.category_id</code> is set — event channels won't be created until you pick a category in Settings.</div>`;
+  const announcementWarn = props.announcementConfigured
+    ? ""
+    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — RSVP messages and reminders won't be posted until you pick a channel in Settings.</div>`;
+
+  const body = `
+<h1>Events</h1>
+<p class="subtitle">Schedule events that spin up a temporary voice channel shortly before they start, collect RSVPs, remind attendees, and clean themselves up afterward.</p>
+${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({
+  enabled: props.enabled,
+  label: "Events",
+  featureKey: "events.enabled",
+  returnTo: "/admin/events",
+  csrfToken: props.csrfToken,
+})}
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
+    <dt>Channel category</dt><dd>${tagOnOff(props.categoryConfigured, "set", "not set")}</dd>
+    <dt>Announcement channel</dt><dd>${tagOnOff(props.announcementConfigured, "set", "not set")}</dd>
+    <dt>Timezone</dt><dd class="mono">${escapeHtml(props.timezone)}</dd>
+    <dt>Scheduled events</dt><dd>${props.rows.length}</dd>
+  </dl>
+  ${categoryWarn}
+  ${announcementWarn}
+</div>
+<div class="card">
+  <h2>Events</h2>${tableHtml}
+</div>
+<div class="card">
+  <h2>Schedule a new event</h2>
+  <form method="POST" action="/admin/events/create" class="stack">
+    ${csrfInput}
+    <label>Title
+      <input type="text" name="title" required maxlength="100" placeholder="Game Night">
+    </label>
+    <label>Description
+      <textarea name="description" rows="3" maxlength="1000" placeholder="What's happening?"></textarea>
+    </label>
+    <label>Date (YYYY-MM-DD)
+      <input type="text" name="date" required pattern="\\d{4}-\\d{2}-\\d{2}" placeholder="2026-07-04">
+    </label>
+    <label>Time (24h HH:MM)
+      <input type="text" name="time" required pattern="\\d{2}:\\d{2}" placeholder="20:00">
+    </label>
+    <label>Duration (minutes, optional)
+      <input type="number" name="duration" min="1" max="1440" placeholder="120">
+    </label>
+    <label>Timezone (IANA, optional — defaults to <code>${escapeHtml(props.timezone)}</code>)
+      <input type="text" name="timezone" placeholder="Europe/London">
+    </label>
+    <button type="submit" class="btn btn-primary">Schedule event</button>
+  </form>
+</div>
+`;
+
+  return renderAdminPage({
+    title: "Events",
+    active: "/admin/events",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

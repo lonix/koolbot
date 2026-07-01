@@ -113,6 +113,12 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "announcements.enabled",
   },
   {
+    href: "/admin/events",
+    label: "Events",
+    group: "Features",
+    featureKey: "events.enabled",
+  },
+  {
     href: "/admin/polls",
     label: "Polls",
     group: "Features",

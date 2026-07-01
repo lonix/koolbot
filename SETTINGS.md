@@ -39,6 +39,8 @@ Complete configuration reference for all KoolBot settings.
 - [Milestone Celebrations](#-milestone-celebrations)
 - [Weekly Digest](#-weekly-digest)
 - [Rewind (Year-in-Review)](#-rewind-year-in-review)
+- [Birthdays](#-birthdays)
+- [Events](#-events)
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
 - [Rate Limiting](#-rate-limiting)
@@ -638,6 +640,46 @@ optional for privacy); there is no slash command.
 - A summary row (announced / roles granted / roles removed / failed) is
   posted to the configured cron log channel after a run that did
   anything (empty hourly ticks are silent).
+
+---
+
+## 📅 Events
+
+Schedule server events backed by a **temporary voice channel** — for
+servers that don't run static voice channels. Instead of pre-creating a
+channel by hand, an admin schedules an event and KoolBot spins up a voice
+channel shortly before it starts, collects RSVPs via **Going / Maybe /
+Can't** buttons with a live attendee count, posts a reminder beforehand,
+and deletes the channel once the event ends and empties.
+
+Manage events from the **`/admin/events`** page or the **`/event`** slash
+command (see [COMMANDS.md](COMMANDS.md#event)).
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `events.enabled` | `false` | Master switch — enables the feature, the `/event` command, and the `/admin/events` page |
+| `events.category_id` | `""` | Category the temporary event voice channels are created under (**required** for channels to spin up) |
+| `events.announcement_channel_id` | `""` | Text channel where the RSVP message and the pre-start reminder are posted |
+| `events.timezone` | `""` | IANA zone used to interpret an event's wall-clock start time (e.g. `Europe/London`). Empty falls back to the host/server timezone |
+| `events.channel_prefix` | `"📅"` | Prefix prepended to the event title when naming the voice channel |
+| `events.reminder_minutes` | `30` | How long before start the reminder is posted. Set to `0` to disable reminders |
+| `events.create_lead_minutes` | `15` | How long before start the temporary voice channel is created |
+| `events.default_duration_minutes` | `120` | Duration applied to an event when the organiser doesn't specify one |
+| `events.channel_grace_minutes` | `15` | How long after an event ends the bot waits before deleting its (now empty) channel |
+
+**Notes:**
+
+- The lifecycle is driven by a once-a-minute scan that decides each
+  transition from the stored event (`state`, `reminderSent`, `channelId`),
+  so it is **restart-safe** — no work is lost if the bot restarts mid-event.
+- Event start times are stored as absolute UTC instants; `events.timezone`
+  (or a per-event `timezone` option) only affects how the entered
+  wall-clock time is interpreted and displayed.
+- The temporary channel is a plain managed voice channel; if voice
+  tracking is enabled, time spent in it is tracked like any other channel.
+- Only administrators can create, cancel, or start events; `/event list`
+  is open to everyone. A configurable creator role is a possible future
+  enhancement. Recurring events are not yet supported.
 
 ---
 

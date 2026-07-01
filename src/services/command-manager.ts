@@ -90,6 +90,7 @@ export class CommandManager {
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
+        { name: "event", configKey: "events.enabled", file: "event" },
         { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher
       ];
 
@@ -312,6 +313,7 @@ export class CommandManager {
           file: "achievements",
         },
         { name: "quote", configKey: "quotes.enabled", file: "quote" },
+        { name: "event", configKey: "events.enabled", file: "event" },
         { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher
       ];
 

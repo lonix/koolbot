@@ -94,6 +94,17 @@ export interface ConfigSchema {
   "birthdays.role_id": string; // Optional temporary "birthday" role
   "birthdays.role_duration_hours": number; // How long the temp role is held
 
+  // Events — scheduled/temporary voice channels (#708)
+  "events.enabled": boolean;
+  "events.category_id": string; // Category the temp event voice channels are created under
+  "events.announcement_channel_id": string; // Channel where RSVP + reminder messages post
+  "events.timezone": string; // IANA zone used to interpret event start times (empty → server tz)
+  "events.channel_prefix": string; // Prefix for auto-created event channel names
+  "events.reminder_minutes": number; // How long before start the reminder is posted
+  "events.create_lead_minutes": number; // How long before start the temp channel is created
+  "events.default_duration_minutes": number; // Default event length when none is given
+  "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
+
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
@@ -278,6 +289,17 @@ export const defaultConfig: ConfigSchema = {
   "birthdays.mention": true,
   "birthdays.role_id": "", // Empty → no temporary role granted
   "birthdays.role_duration_hours": 24,
+
+  // Events (#708) — feature gate off by default (rule 1)
+  "events.enabled": false,
+  "events.category_id": "",
+  "events.announcement_channel_id": "",
+  "events.timezone": "", // Empty → host/server timezone
+  "events.channel_prefix": "📅",
+  "events.reminder_minutes": 30,
+  "events.create_lead_minutes": 15,
+  "events.default_duration_minutes": 120,
+  "events.channel_grace_minutes": 15,
 
   // Reaction Roles defaults
   "reactionroles.enabled": false,
@@ -665,6 +687,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Birthdays",
     description:
       "Celebrate members' birthdays with a daily announcement in their own timezone, optionally granting a temporary birthday role. Members set their date on /me/birthday.",
+  },
+  events: {
+    title: "Events",
+    description:
+      "Schedule server events that spin up a temporary voice channel shortly before they start, let members RSVP with buttons, post a reminder beforehand, and tear the channel down once it ends. For servers without static voice channels. Manage from /admin/events or the /event command.",
   },
   reactionroles: {
     title: "Reaction Roles",
@@ -1172,6 +1199,69 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "How long the temporary birthday role is held before the daily sweep removes it.",
     category: "birthdays",
+    type: "number",
+  },
+  "events.enabled": {
+    label: "Events enabled",
+    description:
+      "Enable scheduled events, the /event command, and the /admin/events page. Events create a temporary voice channel shortly before they start and remove it once they end.",
+    category: "events",
+    type: "boolean",
+  },
+  "events.category_id": {
+    label: "Event channel category",
+    description:
+      "Category under which temporary event voice channels are created. Required for channels to spin up.",
+    category: "events",
+    type: "category",
+  },
+  "events.announcement_channel_id": {
+    label: "Event announcement channel",
+    description:
+      "Text channel where the RSVP message and the pre-start reminder are posted.",
+    category: "events",
+    type: "channel",
+  },
+  "events.timezone": {
+    label: "Event timezone (IANA)",
+    description:
+      "IANA timezone (e.g. Europe/London) used to interpret the wall-clock start time entered for an event. Empty falls back to the host/server timezone.",
+    category: "events",
+    type: "string",
+  },
+  "events.channel_prefix": {
+    label: "Event channel name prefix",
+    description:
+      "Prefix prepended to the event title when naming the temporary voice channel.",
+    category: "events",
+    type: "string",
+  },
+  "events.reminder_minutes": {
+    label: "Reminder lead time (minutes)",
+    description:
+      "How many minutes before an event starts the reminder is posted in the announcement channel. Set to 0 to disable reminders.",
+    category: "events",
+    type: "number",
+  },
+  "events.create_lead_minutes": {
+    label: "Channel creation lead time (minutes)",
+    description:
+      "How many minutes before an event starts its temporary voice channel is created.",
+    category: "events",
+    type: "number",
+  },
+  "events.default_duration_minutes": {
+    label: "Default event duration (minutes)",
+    description:
+      "Duration applied to an event when the organiser doesn't specify one.",
+    category: "events",
+    type: "number",
+  },
+  "events.channel_grace_minutes": {
+    label: "Channel cleanup grace (minutes)",
+    description:
+      "How long after an event ends the bot waits before deleting its (now empty) voice channel.",
+    category: "events",
     type: "number",
   },
   "reactionroles.enabled": {

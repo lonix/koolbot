@@ -15,6 +15,7 @@ export const CONFIG_CATEGORIES = [
   "birthdays",
   "core",
   "digest",
+  "events",
   "fun", // Kept for backward compatibility; key removed but legacy rows may exist
   "gamification", // Kept for backward compatibility during migration
   "help",
