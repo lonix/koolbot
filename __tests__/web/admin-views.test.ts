@@ -23,6 +23,15 @@ import {
 
 const COMMON = { csrfToken: "csrf", remainingMs: 60_000 };
 
+// Empty guild picker lists for wizard-step tests that don't exercise the
+// channel/category/role dropdowns (issue #703).
+const EMPTY_PICKERS = {
+  textChannels: [],
+  voiceChannels: [],
+  categoryChannels: [],
+  roles: [],
+};
+
 describe("renderDashboardPage", () => {
   it("renders feature toggles with status tags", () => {
     const html = renderDashboardPage({
@@ -1767,7 +1776,11 @@ describe("renderDigestPage", () => {
             title: "📊 Your weekly voice digest",
             description: "Here's a snapshot, alice.",
             fields: [
-              { name: "This week", value: "5h\n▲ 1h vs last week", inline: true },
+              {
+                name: "This week",
+                value: "5h\n▲ 1h vs last week",
+                inline: true,
+              },
               { name: "Rank", value: "#1", inline: true },
             ],
             footer: "Keep it up!\nDon't want these? Run /config.",
@@ -1939,6 +1952,7 @@ describe("renderWizardStepPage", () => {
   it("renders boolean/number/string inputs with the current value", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 0,
       totalSteps: 2,
       featureKey: "voicechannels",
@@ -1964,19 +1978,27 @@ describe("renderWizardStepPage", () => {
     expect(html).toContain("Step 1 of 2");
     expect(html).toContain('action="/admin/wizard/step/0"');
     expect(html).toContain("Voice Channels");
+    // The wizard now renders through the shared control renderer, so value
+    // fields carry the `value_`-prefixed name (issue #703).
     expect(html).toMatch(
-      /type="checkbox"[^>]*name="voicechannels.enabled"[^>]*value="true" checked/,
+      /type="checkbox"[^>]*name="value_voicechannels.enabled"[^>]*value="true" checked/,
     );
     expect(html).toMatch(
-      /type="number"[^>]*name="quotes.max_length"[^>]*value="500"/,
+      /type="number"[^>]*name="value_quotes.max_length"[^>]*value="500"/,
     );
     expect(html).toContain('value="Lobby"');
     expect(html).toContain("Enable VC");
+    // Each field label is associated with its control via matching for/id so
+    // screen readers and click-to-focus keep working (issue #703 review).
+    expect(html).toContain('<label for="wiz-voicechannels.enabled">');
+    expect(html).toMatch(/type="checkbox" id="wiz-voicechannels.enabled"/);
+    expect(html).toMatch(/type="number" id="wiz-quotes.max_length"/);
   });
 
-  it("renders an options-backed key as a <select> using the raw key name and pre-selects the current value", () => {
+  it("renders an options-backed key as a <select> and pre-selects the current value", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 0,
       totalSteps: 1,
       featureKey: "leaderboard_roles",
@@ -1995,22 +2017,27 @@ describe("renderWizardStepPage", () => {
         },
       },
     });
-    // The wizard posts raw key names (not the value_-prefixed settings form
-    // field), so the select must carry the bare key.
-    expect(html).toContain('<select name="leaderboard_roles.period">');
+    // The wizard renders through the shared control renderer, so the select
+    // carries the `value_`-prefixed field name and an id the label points at
+    // (issue #703).
+    expect(html).toMatch(
+      /<select name="value_leaderboard_roles.period" id="wiz-leaderboard_roles.period">/,
+    );
+    expect(html).toContain(
+      '<label for="wiz-leaderboard_roles.period">leaderboard_roles.period</label>',
+    );
     expect(html).toContain(
       '<option value="month" selected>This month</option>',
     );
     expect(html).toContain('<option value="week">This week</option>');
     // No free-text input for an options key.
-    expect(html).not.toContain(
-      '<input type="text" id="wiz-leaderboard_roles.period"',
-    );
+    expect(html).not.toContain('<input type="text"');
   });
 
   it("surfaces an out-of-range options value in the wizard as a selected `(unknown)` option", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 0,
       totalSteps: 1,
       featureKey: "leaderboard_roles",
@@ -2038,6 +2065,7 @@ describe("renderWizardStepPage", () => {
   it("renders a flash banner when coercion drops fields", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 0,
       totalSteps: 1,
       featureKey: "quotes",
@@ -2057,6 +2085,7 @@ describe("renderWizardStepPage", () => {
   it("changes the submit label on the final step", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 1,
       totalSteps: 2,
       featureKey: "polls",
@@ -2072,6 +2101,7 @@ describe("renderWizardStepPage", () => {
   it("omits the Previous button on the first step (#485)", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 0,
       totalSteps: 3,
       featureKey: "quotes",
@@ -2086,6 +2116,7 @@ describe("renderWizardStepPage", () => {
   it("shows a Previous button linking to the prior step on later steps (#485)", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 2,
       totalSteps: 3,
       featureKey: "quotes",
@@ -2101,6 +2132,7 @@ describe("renderWizardStepPage", () => {
   it("marks the feature master toggle and form scope for cascading disable (#485)", () => {
     const html = renderWizardStepPage({
       ...COMMON,
+      ...EMPTY_PICKERS,
       stepIndex: 0,
       totalSteps: 1,
       featureKey: "voicetracking",
@@ -2126,11 +2158,83 @@ describe("renderWizardStepPage", () => {
     // Only the top-level feature toggle is the master; the sub-toggle is a
     // dependent (no data-cascade-master attribute).
     expect(html).toMatch(
-      /name="voicetracking.enabled"[^>]*value="true"[^>]*data-cascade-master/,
+      /name="value_voicetracking.enabled"[^>]*value="true"[^>]*data-cascade-master/,
     );
     expect(html).not.toMatch(
-      /name="voicetracking.announcements.enabled"[^>]*data-cascade-master/,
+      /name="value_voicetracking.announcements.enabled"[^>]*data-cascade-master/,
     );
+  });
+
+  it("renders channel/category/role picker keys as dropdowns from the guild lists (issue #703)", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      textChannels: [
+        { id: "chan-1", name: "announcements" },
+        { id: "chan-2", name: "general" },
+      ],
+      voiceChannels: [],
+      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      roles: [{ id: "role-1", name: "Moderator" }],
+      stepIndex: 0,
+      totalSteps: 1,
+      featureKey: "reactionroles",
+      settingKeys: [
+        "reactionroles.message_channel_id",
+        "voicechannels.category_id",
+        "leaderboard_roles.some_role",
+      ],
+      currentValues: {
+        "reactionroles.message_channel_id": "chan-1",
+        "voicechannels.category_id": "",
+        "leaderboard_roles.some_role": "",
+      },
+      defaultValues: {
+        "reactionroles.message_channel_id": "",
+        "voicechannels.category_id": "",
+        "leaderboard_roles.some_role": "",
+      },
+      metadata: {
+        "reactionroles.message_channel_id": {
+          description: "Message channel",
+          category: "reactionroles",
+          type: "channel",
+        },
+        "voicechannels.category_id": {
+          description: "Voice channel category",
+          category: "voicechannels",
+          type: "category",
+        },
+        "leaderboard_roles.some_role": {
+          description: "A role",
+          category: "leaderboard_roles",
+          type: "role",
+        },
+      },
+    });
+    // Channel key → text-channel dropdown with the current value selected,
+    // carrying an id its label points at (issue #703).
+    expect(html).toMatch(
+      /<select id="wiz-reactionroles.message_channel_id" name="value_reactionroles.message_channel_id">/,
+    );
+    expect(html).toContain(
+      '<label for="wiz-reactionroles.message_channel_id">reactionroles.message_channel_id</label>',
+    );
+    expect(html).toContain(
+      '<option value="chan-1" selected>#announcements</option>',
+    );
+    expect(html).toContain('<option value="chan-2">#general</option>');
+    // Category key → category dropdown.
+    expect(html).toMatch(
+      /<select id="wiz-voicechannels.category_id" name="value_voicechannels.category_id">/,
+    );
+    expect(html).toContain('<option value="cat-1">#Voice Channels</option>');
+    // Role key → role dropdown with the `@` prefix.
+    expect(html).toMatch(
+      /<select id="wiz-leaderboard_roles.some_role" name="value_leaderboard_roles.some_role">/,
+    );
+    expect(html).toContain('<option value="role-1">@Moderator</option>');
+    // No raw free-text input is emitted for any of these picker keys.
+    expect(html).not.toContain('<input type="text"');
   });
 });
 

@@ -75,6 +75,7 @@ import {
   settingValueFieldName,
   type ImportDiffRow,
 } from "./admin-views.js";
+import { fetchChannelData, fetchRoleData } from "./read-only-routes.js";
 
 type Flash = { type: "ok" | "warn" | "err"; text: string };
 
@@ -1472,6 +1473,16 @@ export function createWriteRouter(
               }
             }
           }
+          // Guild picker lists so channel/category/role keys render as real
+          // selectors, exactly like the Settings page (issue #703). Two guild
+          // fetches run in parallel — one for channels/categories, one for
+          // roles; both helpers swallow their own errors and return empty
+          // lists, so a picker just falls back to an empty dropdown rather
+          // than failing the step.
+          const [chData, roleData] = await Promise.all([
+            fetchChannelData(client, session.guildId),
+            fetchRoleData(client, session.guildId),
+          ]);
           res.type("text/html").send(
             renderWizardStepPage({
               csrfToken,
@@ -1487,6 +1498,10 @@ export function createWriteRouter(
                 string,
                 unknown
               >,
+              textChannels: chData.textChannels,
+              voiceChannels: chData.voiceChannels,
+              categoryChannels: chData.categoryChannels,
+              roles: roleData.roles,
               flash,
             }),
           );
@@ -1592,17 +1607,23 @@ export function createWriteRouter(
       // = false` and skip the rest, so absent dependents don't surface as
       // bogus "invalid input" drops (a missing number field would otherwise
       // fail coercion).
+      // The step form submits each value under `value_<key>` — the same field
+      // naming the Settings page uses, now that the wizard renders through the
+      // shared control renderer (issue #703).
       const masterKey = `${featureKey}.enabled`;
       const masterOff =
         settingKeys.includes(masterKey) &&
-        (req.body as Record<string, unknown> | undefined)?.[masterKey] !==
-          "true";
+        (req.body as Record<string, unknown> | undefined)?.[
+          settingValueFieldName(masterKey)
+        ] !== "true";
 
       const saved: Record<string, unknown> = {};
       const dropped: Array<{ key: string; reason: string }> = [];
       for (const k of settingKeys) {
         if (masterOff && k !== masterKey) continue;
-        const raw = (req.body as Record<string, unknown> | undefined)?.[k];
+        const raw = (req.body as Record<string, unknown> | undefined)?.[
+          settingValueFieldName(k)
+        ];
         const coerced = coerceConfigValue(k, raw);
         if (coerced.ok) {
           wizard.addConfiguration(
