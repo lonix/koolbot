@@ -959,7 +959,6 @@ export function createReadOnlyRouter(
         offlineLobbyName,
         prefix,
         stored,
-        channelData,
       ] = await Promise.all([
         config.getBoolean("voicechannels.enabled", false),
         config.getBoolean("voicechannels.controlpanel.enabled", true),
@@ -967,7 +966,6 @@ export function createReadOnlyRouter(
         config.getString("voicechannels.lobby.offlinename", "Offline Lobby"),
         config.getString("voicechannels.channel.prefix", "🎮"),
         config.getAll().catch(() => []),
-        fetchChannelData(client, common.guildId),
       ]);
       // Editable `voicechannels.*` settings rendered in place on this page
       // (#705), built the same way the Settings page builds its rows.
@@ -980,6 +978,11 @@ export function createReadOnlyRouter(
       let categoryFound = false;
       let totalManaged = 0;
       let totalEmpty = 0;
+      // Category picker options for the editable `voicechannels.category_id`
+      // control (#705). Derived from the same guild fetch that builds the
+      // managed-channel table below, so the page fetches the guild/channels
+      // once rather than paying for a second round-trip.
+      const categoryChannels: ChannelOption[] = [];
       const channels: Array<{
         name: string;
         isLobby: boolean;
@@ -992,6 +995,12 @@ export function createReadOnlyRouter(
       try {
         const guild = await client.guilds.fetch(common.guildId);
         await guild.channels.fetch();
+        for (const ch of guild.channels.cache.values()) {
+          if (ch?.type === ChannelType.GuildCategory) {
+            categoryChannels.push({ id: ch.id, name: ch.name ?? ch.id });
+          }
+        }
+        categoryChannels.sort((a, b) => a.name.localeCompare(b.name));
         const category = await resolveManagedCategory(guild);
 
         if (category) {
@@ -1033,7 +1042,7 @@ export function createReadOnlyRouter(
           channels,
           categoryFound,
           settingRows,
-          categoryChannels: channelData.categoryChannels,
+          categoryChannels,
           flash: readFlash(req),
         }),
       );
