@@ -30,6 +30,13 @@ interface UserNavItem {
    * always followed.
    */
   feature?: "rewind" | "voice" | "birthday";
+  /**
+   * Whether the gated page lets the member pre-set a choice (Voice, Birthday)
+   * versus being read-only (Rewind). Drives the disabled tooltip copy so a
+   * read-only page doesn't claim a "choice is saved" it never had (#709).
+   * Only meaningful alongside `feature`; defaults to read-only.
+   */
+  presettable?: boolean;
 }
 
 /**
@@ -42,8 +49,13 @@ export const USER_NAV_ITEMS: UserNavItem[] = [
   { href: "/me/", label: "Overview" },
   { href: "/me/notifications", label: "Notifications" },
   { href: "/me/timezone", label: "Timezone" },
-  { href: "/me/voice", label: "Voice", feature: "voice" },
-  { href: "/me/birthday", label: "Birthday", feature: "birthday" },
+  { href: "/me/voice", label: "Voice", feature: "voice", presettable: true },
+  {
+    href: "/me/birthday",
+    label: "Birthday",
+    feature: "birthday",
+    presettable: true,
+  },
   { href: "/me/rewind", label: "Rewind", feature: "rewind" },
 ];
 
@@ -325,8 +337,11 @@ function renderPageNav(active: string, flags: UserFeatureFlags): string {
       .filter(Boolean)
       .join(" ");
     const cls = classes ? ` class="${classes}"` : "";
+    // Read-only pages (Rewind) have no choice to save, so don't claim one.
     const title = disabled
-      ? ' title="Your server admin hasn\'t enabled this yet — your choice is still saved"'
+      ? item.presettable
+        ? ' title="Your server admin hasn\'t enabled this yet — your choice is still saved"'
+        : ' title="Your server admin hasn\'t enabled this yet"'
       : "";
     const badge = disabled ? '<span class="nav-badge">off</span>' : "";
     return `<a href="${escapeHtml(item.href)}"${cls}${title}>${escapeHtml(item.label)}${badge}</a>`;

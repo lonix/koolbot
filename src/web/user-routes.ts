@@ -42,6 +42,7 @@ import {
   renderUserRewindBody,
   renderUserTimezoneBody,
   renderUserVoiceBody,
+  type UserFeatureFlags,
   type UserFlashMessage,
   type VoicePresetView,
 } from "./user-layout.js";
@@ -244,11 +245,7 @@ async function isBirthdayFeatureEnabled(): Promise<boolean> {
  * every page so the nav renders a consistent "off" badge for whichever
  * features are disabled — regardless of which page you're on.
  */
-async function readUserFeatureFlags(): Promise<{
-  rewindEnabled: boolean;
-  presetsEnabled: boolean;
-  birthdayEnabled: boolean;
-}> {
+async function readUserFeatureFlags(): Promise<Required<UserFeatureFlags>> {
   const [rewindEnabled, presetsEnabled, birthdayEnabled] = await Promise.all([
     isRewindFeatureEnabled(),
     isVoicePresetsEnabled(),
