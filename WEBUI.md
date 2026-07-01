@@ -752,7 +752,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
 | **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
-| **Voice Channels** | `/vc force-reload` (single **Force VC cleanup** button)                                             |
+| **Voice Channels** | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**  | (new — **Preview** the weekly digest dry-run, plus a **Send now** button)                           |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |

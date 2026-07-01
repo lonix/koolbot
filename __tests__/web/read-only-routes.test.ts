@@ -1,6 +1,10 @@
 import { describe, it, expect } from "@jest/globals";
 import { ChannelType } from "discord.js";
-import { fetchChannelData } from "../../src/web/read-only-routes.js";
+import {
+  buildSettingRows,
+  fetchChannelData,
+  VOICE_CHANNELS_SETTING_KEYS,
+} from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
 
 /**
@@ -74,5 +78,44 @@ describe("fetchChannelData (#611)", () => {
     expect(data.voiceChannels).toEqual([]);
     expect(data.textChannels).toEqual([]);
     expect(data.categoryChannels).toEqual([]);
+  });
+});
+
+describe("buildSettingRows (#705)", () => {
+  it("derives label/type/description from the config schema", () => {
+    const rows = buildSettingRows(
+      ["voicechannels.category_id", "voicechannels.presets.max_per_user"],
+      [],
+    );
+    expect(rows).toHaveLength(2);
+    const [category, maxPerUser] = rows;
+    expect(category.key).toBe("voicechannels.category_id");
+    expect(category.type).toBe("category");
+    expect(category.label).toBe("Managed category");
+    // No stored row → current falls back to the schema default.
+    expect(category.current).toBe("");
+    expect(maxPerUser.type).toBe("number");
+    expect(maxPerUser.current).toBe(3);
+  });
+
+  it("prefers a stored DB value over the schema default", () => {
+    const rows = buildSettingRows(
+      ["voicechannels.lobby.name"],
+      [
+        {
+          key: "voicechannels.lobby.name",
+          value: "General",
+          description: "custom",
+          category: "voicechannels",
+        },
+      ],
+    );
+    expect(rows[0].current).toBe("General");
+    expect(rows[0].description).toBe("custom");
+  });
+
+  it("excludes the feature master voicechannels.enabled from the key list", () => {
+    expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
+    expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");
   });
 });

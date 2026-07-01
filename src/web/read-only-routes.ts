@@ -96,6 +96,57 @@ function describeType(value: unknown): string {
   return typeof value;
 }
 
+/**
+ * The `voicechannels.*` keys surfaced as editable controls on the Voice
+ * Channels feature page (#705). The feature master `voicechannels.enabled`
+ * is intentionally excluded — it is owned by the enable/disable notice.
+ */
+export const VOICE_CHANNELS_SETTING_KEYS = [
+  "voicechannels.category_id",
+  "voicechannels.lobby.name",
+  "voicechannels.lobby.offlinename",
+  "voicechannels.channel.prefix",
+  "voicechannels.channel.suffix",
+  "voicechannels.controlpanel.enabled",
+  "voicechannels.presets.enabled",
+  "voicechannels.presets.max_per_user",
+] as const;
+
+/**
+ * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
+ * the Settings page derives label/type/description from `settingsMetadata` with
+ * a stored DB row taking precedence. Lets a feature page render its own keys
+ * with the shared control renderer (#705).
+ */
+export function buildSettingRows(
+  keys: readonly string[],
+  stored: ReadonlyArray<{
+    key: string;
+    value: unknown;
+    description?: string;
+    category?: string;
+  }>,
+): SettingRow[] {
+  const storedByKey = new Map(stored.map((s) => [s.key, s]));
+  return keys.map((key) => {
+    const dbEntry = storedByKey.get(key);
+    const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+    const defaultValue = defaultConfig[key as keyof typeof defaultConfig];
+    return {
+      key,
+      label: meta?.label ?? key,
+      current: dbEntry ? dbEntry.value : defaultValue,
+      defaultValue,
+      type: meta?.type ?? describeType(defaultValue),
+      description: dbEntry?.description ?? meta?.description ?? "",
+      category: dbEntry?.category ?? meta?.category ?? deriveCategory(key),
+      options: meta?.options,
+      warnBelow: meta?.warnBelow,
+      channelKind: meta?.channelKind,
+    };
+  });
+}
+
 function getCsrfToken(req: Request): string {
   return (req as Request & { csrfToken?: string }).csrfToken ?? "";
 }
@@ -907,13 +958,20 @@ export function createReadOnlyRouter(
         lobbyName,
         offlineLobbyName,
         prefix,
+        stored,
+        channelData,
       ] = await Promise.all([
         config.getBoolean("voicechannels.enabled", false),
         config.getBoolean("voicechannels.controlpanel.enabled", true),
         config.getString("voicechannels.lobby.name", "Lobby"),
         config.getString("voicechannels.lobby.offlinename", "Offline Lobby"),
         config.getString("voicechannels.channel.prefix", "🎮"),
+        config.getAll().catch(() => []),
+        fetchChannelData(client, common.guildId),
       ]);
+      // Editable `voicechannels.*` settings rendered in place on this page
+      // (#705), built the same way the Settings page builds its rows.
+      const settingRows = buildSettingRows(VOICE_CHANNELS_SETTING_KEYS, stored);
       // Resolved below from the configured `voicechannels.category_id`;
       // falls back to "(not configured)" so the renderer always has
       // a string to show.
@@ -974,6 +1032,8 @@ export function createReadOnlyRouter(
           totalEmpty,
           channels,
           categoryFound,
+          settingRows,
+          categoryChannels: channelData.categoryChannels,
           flash: readFlash(req),
         }),
       );
