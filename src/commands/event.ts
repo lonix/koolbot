@@ -91,11 +91,24 @@ export const data = new SlashCommandBuilder()
 
 function isAdmin(interaction: ChatInputCommandInteraction): boolean {
   const member = interaction.member;
-  if (!member || !("permissions" in member)) return false;
-  const perms = (member as GuildMember).permissions;
-  return (
-    typeof perms === "object" && perms.has(PermissionFlagsBits.Administrator)
-  );
+  if (!member) return false;
+  // Cached members are `GuildMember`; non-cached interactions surface an
+  // `APIInteractionGuildMember` whose `permissions` field is a string
+  // bitfield. Mirror the gating used by /config and /quote so real admins
+  // aren't blocked on the uncached path.
+  if (member instanceof GuildMember) {
+    return member.permissions.has(PermissionFlagsBits.Administrator);
+  }
+  const raw = (member as { permissions?: unknown }).permissions;
+  if (typeof raw !== "string") return false;
+  try {
+    return (
+      (BigInt(raw) & PermissionFlagsBits.Administrator) ===
+      PermissionFlagsBits.Administrator
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function execute(

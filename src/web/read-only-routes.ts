@@ -49,7 +49,7 @@ import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
-import { getServerTimezone } from "../utils/timezone.js";
+import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
 import { getEnv } from "../config/env.js";
 import {
@@ -645,7 +645,9 @@ export function createReadOnlyRouter(
           enabled,
           categoryConfigured: categoryId.length > 0,
           announcementConfigured: announcementChannelId.length > 0,
-          timezone: tz || getServerTimezone(),
+          // Resolve to a usable zone (falls back to server tz on an invalid
+          // value) so the UI shows exactly what event parsing will use.
+          timezone: resolveTimezone(tz),
           rows,
           flash: readFlash(req),
         }),
