@@ -249,18 +249,25 @@ function unmetDependenciesFor(
 
 /**
  * Render the inline "requires X enabled" hint shown under a control whose
- * hard dependencies aren't all met (#666). Each unmet dependency links to its
- * settings section so the operator can jump straight to the toggle that
- * unlocks this one. Returns an empty string when nothing is unmet. Uses the
- * dependency's human label from `settingsMetadata`, mirroring the greyed-nav
- * treatment's muted styling.
+ * hard dependencies aren't all met (#666). Returns an empty string when nothing
+ * is unmet. Uses the dependency's human label from `settingsMetadata`, mirroring
+ * the greyed-nav treatment's muted styling.
+ *
+ * `linkSections` controls whether each dependency name becomes an in-page
+ * `#section-<category>` anchor. The Settings page (default) renders those
+ * sections, so the link jumps straight to the toggle that unlocks this one. The
+ * wizard renders no such anchors, so it passes `false` to emit plain text —
+ * otherwise the link would point at a non-existent section (PR #715 review).
  */
-export function renderDependencyHint(unmet: UnmetDependency[]): string {
+export function renderDependencyHint(
+  unmet: UnmetDependency[],
+  linkSections = true,
+): string {
   if (unmet.length === 0) return "";
   const names = unmet
     .map((d) => {
       const label = escapeHtml(d.label);
-      return d.category
+      return linkSections && d.category
         ? `<a href="#section-${escapeHtml(d.category)}">${label}</a>`
         : label;
     })
@@ -1323,7 +1330,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
   </label>
   ${control}
   ${renderWarnBelow(r)}
-  ${renderDependencyHint(unmet)}
+  ${renderDependencyHint(unmet, false)}
   <div class="help">${escapeHtml(r.description)}</div>
 </div>`;
     })

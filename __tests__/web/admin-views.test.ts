@@ -2360,6 +2360,10 @@ describe("renderWizardStepPage", () => {
     });
     expect(html).toContain("dep-off");
     expect(html).toContain("Requires");
+    // The wizard renders no `#section-*` anchors, so the dependency hint must be
+    // plain text rather than a link that points at a non-existent section
+    // (PR #715 review).
+    expect(html).not.toContain('href="#section-');
     // The disabled control round-trips its value via a sibling hidden input.
     expect(html).toMatch(
       /type="checkbox"[^>]*name="value_achievements.enabled"[^>]*disabled/,
