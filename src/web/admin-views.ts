@@ -1476,11 +1476,21 @@ const PLACEHOLDER_REFERENCE_HTML = `
   <ul class="mono">
     <li><code>{server_name}</code> — guild name</li>
     <li><code>{member_count}</code> — total members</li>
+    <li><code>{online_count}</code> — members currently online (best effort; shows 0 without presence data)</li>
+    <li><code>{owner}</code> — server owner mention</li>
+    <li><code>{boost_count}</code> — active Nitro boosts</li>
+    <li><code>{boost_tier}</code> — Nitro boost tier (0–3)</li>
+    <li><code>{channel_count}</code> — number of channels</li>
+    <li><code>{role_count}</code> — number of roles</li>
+    <li><code>{random_member}</code> — a random member mention</li>
     <li><code>{date}</code> — current date</li>
     <li><code>{time}</code> — current time</li>
     <li><code>{day}</code> — current weekday</li>
     <li><code>{month}</code> — current month</li>
     <li><code>{year}</code> — current year</li>
+    <li><code>{date_iso}</code> — ISO date (YYYY-MM-DD)</li>
+    <li><code>{time_iso}</code> — ISO time (HH:MM:SS, UTC)</li>
+    <li><code>{datetime_iso}</code> — full ISO 8601 timestamp (UTC)</li>
   </ul>
   <p class="muted">Tick "Process placeholders" on the announcement to expand them at send time.</p>
 </details>`;
@@ -1499,6 +1509,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 <td>${a.placeholders ? '<span class="tag tag-info">yes</span>' : '<span class="muted">no</span>'}</td>
 <td class="muted">${escapeHtml(a.createdAt)}</td>
 <td class="actions">
+  <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/post-now">${csrfInput}<button type="submit" class="btn btn-primary">Post now</button></form>
   <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/toggle">${csrfInput}<button type="submit" class="btn">${a.enabled ? "Disable" : "Enable"}</button></form>
   <form method="POST" action="/admin/announcements/${escapeHtml(a.id)}/delete" onsubmit="return confirm('Delete announcement ${escapeHtml(a.id)}?');">${csrfInput}<button type="submit" class="btn btn-danger">Delete</button></form>
 </td>
@@ -1563,6 +1574,37 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", 
       </label>
     </fieldset>
     <button type="submit" class="btn btn-primary">Create announcement</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Compose &amp; send once</h2>
+  <p class="subtitle">Post a one-off announcement immediately — no cron schedule is stored.</p>
+  <form method="POST" action="/admin/announcements/post-once" class="stack">
+    ${csrfInput}
+    <label>Channel
+      <select name="channelId" required>${channelOptionsHtml(props.textChannels)}</select>
+    </label>
+    <label>Message
+      <textarea name="message" rows="4" required maxlength="2000" placeholder="Hello {server_name}!"></textarea>
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="placeholders" value="1">
+      Process placeholders (replace <code>{server_name}</code>, <code>{date}</code>, etc.)
+    </label>
+    ${PLACEHOLDER_REFERENCE_HTML}
+    <fieldset>
+      <legend>Optional embed</legend>
+      <label>Title
+        <input type="text" name="embedTitle" maxlength="256">
+      </label>
+      <label>Description
+        <textarea name="embedDescription" rows="3" maxlength="4000"></textarea>
+      </label>
+      <label>Colour (hex, e.g. <code>#5865F2</code>)
+        <input type="text" name="embedColor" pattern="^#?[0-9A-Fa-f]{6}$" placeholder="#5865F2">
+      </label>
+    </fieldset>
+    <button type="submit" class="btn btn-primary">Post now</button>
   </form>
 </div>
 `;

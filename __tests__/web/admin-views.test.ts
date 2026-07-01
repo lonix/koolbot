@@ -1110,6 +1110,44 @@ describe("renderAnnouncementsPage", () => {
     expect(html).toContain("Created announcement abc.");
     expect(html).toContain('class="notice ok"');
   });
+
+  it("renders a per-row Post now action", () => {
+    const html = renderAnnouncementsPage({
+      ...COMMON,
+      enabled: true,
+      rows: [
+        {
+          id: "a1",
+          channelName: "general",
+          cron: "0 9 * * *",
+          enabled: true,
+          messagePreview: "hi",
+          embedTitle: null,
+          placeholders: false,
+          createdAt: "2026-05-08T00:00:00.000Z",
+        },
+      ],
+      textChannels: [{ id: "c1", name: "general" }],
+    });
+    expect(html).toContain("/admin/announcements/a1/post-now");
+    expect(html).toContain(">Post now<");
+  });
+
+  it("renders the compose & send-once form and expanded placeholders", () => {
+    const html = renderAnnouncementsPage({
+      ...COMMON,
+      enabled: true,
+      rows: [],
+      textChannels: [{ id: "c1", name: "general" }],
+    });
+    expect(html).toContain("/admin/announcements/post-once");
+    expect(html).toContain("Compose &amp; send once");
+    // New placeholder tokens surfaced in the reference help.
+    expect(html).toContain("{online_count}");
+    expect(html).toContain("{boost_count}");
+    expect(html).toContain("{random_member}");
+    expect(html).toContain("{datetime_iso}");
+  });
 });
 
 describe("renderPollsPage", () => {
