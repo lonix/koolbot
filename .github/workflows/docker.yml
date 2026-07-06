@@ -84,7 +84,7 @@ jobs:
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@v6.1.0
         env:
           # Emit OCI annotations on both the per-platform manifests and the
           # image index. GHCR reads the package description from the index
