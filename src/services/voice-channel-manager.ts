@@ -470,6 +470,9 @@ export class VoiceChannelManager {
       },
       5 * 60 * 1000,
     );
+
+    // Don't keep the event loop alive solely for this background cleanup.
+    this.cleanupInterval.unref?.();
   }
 
   private startHealthChecks(): void {
@@ -482,6 +485,9 @@ export class VoiceChannelManager {
       },
       15 * 60 * 1000, // 15 minutes
     );
+
+    // Don't keep the event loop alive solely for this background health check.
+    this.healthCheckInterval.unref?.();
   }
 
   public async initialize(guildId: string): Promise<void> {

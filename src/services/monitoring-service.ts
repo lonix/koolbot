@@ -420,6 +420,9 @@ export class MonitoringService {
         logger.error("Periodic command-metrics flush failed:", error);
       });
     }, FLUSH_INTERVAL_MS);
+
+    // Don't keep the event loop alive solely for this background flush.
+    this.flushInterval.unref?.();
   }
 
   /**
