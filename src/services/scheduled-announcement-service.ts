@@ -144,6 +144,9 @@ export class ScheduledAnnouncementService {
         }
       }, pollIntervalMs);
 
+      // Don't keep the event loop alive solely for this readiness poll.
+      intervalId.unref?.();
+
       this.client.once("ready", onReady);
     });
   }
