@@ -130,6 +130,16 @@ describe("mapAuditLogEntry", () => {
   });
 });
 
+describe("ModerationService.isEnabled", () => {
+  it("reads the moderation.enabled config key", async () => {
+    getBooleanMock.mockResolvedValueOnce(true);
+    const service = freshService();
+
+    await expect(service.isEnabled()).resolves.toBe(true);
+    expect(getBooleanMock).toHaveBeenCalledWith("moderation.enabled", false);
+  });
+});
+
 describe("ModerationService.logWarn", () => {
   it("writes a warn row with source=command", async () => {
     createMock.mockResolvedValueOnce({ id: "row1" });

@@ -1421,44 +1421,66 @@ export function createReadOnlyRouter(
         : undefined;
       const userFilter = String(req.query.user ?? "").trim() || undefined;
 
-      const [enabled, total, docs] = await Promise.all([
-        config.getBoolean("moderation.enabled", false),
-        moderationService
-          .countRecent(common.guildId, {
-            action: actionFilter,
-            userId: userFilter,
-          })
-          .catch(() => 0),
-        moderationService
-          .getRecent(common.guildId, {
-            action: actionFilter,
-            userId: userFilter,
-            limit: pageSize,
-            skip: (page - 1) * pageSize,
-          })
-          .catch(() => []),
-      ]);
+      // moderation.enabled is the master gate: when off, the page renders the
+      // disabled banner and an empty table without touching the DB, matching
+      // the "inert until opted in" contract in defaultConfig.
+      const enabled = await config.getBoolean("moderation.enabled", false);
+      const [total, docs] = enabled
+        ? await Promise.all([
+            moderationService
+              .countRecent(common.guildId, {
+                action: actionFilter,
+                userId: userFilter,
+              })
+              .catch(() => 0),
+            moderationService
+              .getRecent(common.guildId, {
+                action: actionFilter,
+                userId: userFilter,
+                limit: pageSize,
+                skip: (page - 1) * pageSize,
+              })
+              .catch(() => []),
+          ])
+        : [0, []];
 
-      // Resolve user + moderator labels from the guild member cache so the
-      // table shows names rather than raw snowflakes.
+      // Resolve user + moderator labels to display names. Look in the member
+      // cache first and batch the misses into a single `fetch({ user: [...] })`
+      // request rather than one awaited fetch per id — a page of 50 rows can
+      // reference up to ~100 distinct ids, and per-id fetches would be slow and
+      // rate-limit-prone. Ids that stay unresolved (member left the guild) fall
+      // back to the raw snowflake at render time.
       const idsOnPage = new Set<string>();
       for (const d of docs) {
         idsOnPage.add(d.userId);
         if (d.moderatorId) idsOnPage.add(d.moderatorId);
       }
       const labels = new Map<string, string>();
-      try {
-        const guild = await client.guilds.fetch(common.guildId);
-        for (const id of idsOnPage) {
-          try {
-            const member = await guild.members.fetch(id);
-            labels.set(id, member.displayName ?? member.user.username);
-          } catch {
-            // Member left the guild or fetch failed; fall back to ID.
+      if (idsOnPage.size > 0) {
+        try {
+          const guild = await client.guilds.fetch(common.guildId);
+          const missing: string[] = [];
+          for (const id of idsOnPage) {
+            const cached = guild.members.cache.get(id);
+            if (cached) {
+              labels.set(id, cached.displayName ?? cached.user.username);
+            } else {
+              missing.push(id);
+            }
           }
+          if (missing.length > 0) {
+            const fetched = await guild.members
+              .fetch({ user: missing })
+              .catch(() => null);
+            if (fetched) {
+              for (const [id, member] of fetched) {
+                labels.set(id, member.displayName ?? member.user.username);
+              }
+            }
+          }
+        } catch (err) {
+          logger.debug("moderation page member-label fetch failed", err);
         }
-      } catch (err) {
-        logger.debug("moderation page member-label fetch failed", err);
       }
 
       const rows: ModerationRow[] = docs.map((d) => ({

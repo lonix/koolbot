@@ -63,6 +63,18 @@ export async function execute(
     const requestedPage = interaction.options.getInteger("page") ?? 1;
 
     const moderationService = ModerationService.getInstance(interaction.client);
+
+    // Runtime gate: moderation.enabled is the documented master switch, so a
+    // stale command registration must not keep serving history after the
+    // feature is turned off.
+    if (!(await moderationService.isEnabled())) {
+      await interaction.reply({
+        content: "The moderation log is currently disabled.",
+        ephemeral: true,
+      });
+      return;
+    }
+
     const total = await moderationService.countHistory(
       interaction.guildId,
       targetUser.id,

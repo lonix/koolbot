@@ -62,6 +62,19 @@ export async function execute(
     }
 
     const moderationService = ModerationService.getInstance(interaction.client);
+
+    // Runtime gate: the command is only registered while moderation.enabled is
+    // true, but Discord keeps a stale registration until the next reload, so an
+    // operator who toggles the feature off expects new writes to stop
+    // immediately. Return a clear message instead of recording a warning.
+    if (!(await moderationService.isEnabled())) {
+      await interaction.reply({
+        content: "The moderation log is currently disabled.",
+        ephemeral: true,
+      });
+      return;
+    }
+
     await moderationService.logWarn({
       guildId: interaction.guildId,
       userId: targetUser.id,
