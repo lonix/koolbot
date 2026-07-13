@@ -21,6 +21,7 @@ export const CONFIG_CATEGORIES = [
   "help",
   "leaderboard_roles",
   "messagetracking",
+  "moderation",
   "notices",
   "ping",
   "polls",

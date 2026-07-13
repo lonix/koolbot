@@ -36,6 +36,9 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/achievements](#achievements)
   - [/quote](#quote)
   - [/event](#event)
+- [Moderation commands](#-moderation-commands)
+  - [/warn](#warn)
+  - [/modlog](#modlog)
 - [Web UI launcher](#-web-ui-launcher)
   - [/config](#config)
 - [Voice Channel Control Panel](#voice-channel-control-panel)
@@ -544,6 +547,55 @@ restart-safe — progress is tracked on the stored event, not in memory.
 
 ---
 
+## 🚨 Moderation commands
+
+A lightweight, queryable **moderation log**. KoolBot records warnings issued
+with `/warn` and mirrors native kick / ban / unban / timeout actions from the
+guild audit log into one place, so you can answer "has this person been
+warned before / what's their history?" without scrolling Discord's native
+audit log (which only retains ~45 days and has no per-user warn concept).
+
+Gated by the `moderation.enabled` feature flag. Both commands default to
+members with the **Moderate Members** permission (and administrators);
+additional roles can be granted from the Web UI's **Permissions** page.
+Server-wide history is also viewable on the `/admin/moderation` page.
+
+Capturing native actions requires the bot to have the **View Audit Log**
+permission. See [SETTINGS.md](SETTINGS.md#moderation).
+
+### `/warn`
+
+Record a warning against a member. Warnings are KoolBot's own record —
+Discord has no native warning action — so this is the only place they exist.
+The confirmation is shown only to you (ephemeral); the warned member is not
+DM'd.
+
+```text
+/warn user:@SomeMember reason:"Spamming in #general"
+```
+
+**Options:**
+
+- `user` (required) — the member to warn
+- `reason` (required) — why the member is being warned (up to 512 characters)
+
+### `/modlog`
+
+View a member's moderation history (warnings plus mirrored native actions),
+newest first, paginated 10 per page. The reply is ephemeral.
+
+```text
+/modlog user:@SomeMember
+/modlog user:@SomeMember page:2
+```
+
+**Options:**
+
+- `user` (required) — the member whose history to view
+- `page` (optional) — page of history to view (10 per page; defaults to 1)
+
+---
+
 ## 🔧 Web UI launcher
 
 KoolBot has exactly one Web UI slash command. It does one thing: mint a
@@ -793,8 +845,12 @@ button to admit them. **🗑️ Remove Waiting Room** deletes it.
 | `/quote`                       | Everyone\*       | Quotes enabled                |
 | `/event list`                  | Everyone\*       | Events enabled                |
 | `/event` create/cancel/start   | Administrator    | Events enabled                |
+| `/warn`                        | Moderate Members | Moderation log enabled        |
+| `/modlog`                      | Moderate Members | Moderation log enabled        |
 
 \* Per-command role gating can be added in the Web UI's **Permissions** page.
+`/warn` and `/modlog` default to members with the **Moderate Members**
+permission (and administrators); grant additional roles from the same page.
 
 ### Web UI launcher permissions
 
@@ -837,6 +893,11 @@ The bot needs these Discord permissions:
 
 - Manage Roles (same hierarchy rule as above)
 
+**For the moderation log:**
+
+- View Audit Log (so native kick / ban / timeout actions can be mirrored
+  into the log; `/warn` works without it)
+
 ---
 
 ## 📚 Quick Command Reference
@@ -854,6 +915,8 @@ The bot needs these Discord permissions:
 /quote edit id:"..." [text:"..."] [author:@User]
 /event list                         # List upcoming events
 /event create title:"..." date:YYYY-MM-DD time:HH:MM  # (admin) schedule an event
+/warn user:@User reason:"..."       # (mod) record a warning
+/modlog user:@User [page:N]         # (mod) view a member's moderation history
 ```
 
 ### Web UI launcher

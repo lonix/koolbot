@@ -47,6 +47,8 @@ import {
 } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
+import { ModerationService } from "../services/moderation-service.js";
+import type { ModerationAction } from "../models/moderation-log.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
@@ -76,11 +78,13 @@ import {
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
+  renderModerationPage,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
   type ChannelOption,
   type CommandAuditRow,
+  type ModerationRow,
   type DbTrunkHistoryRow,
   type DigestPreviewView,
   type FlashMessage,
@@ -1380,6 +1384,135 @@ export function createReadOnlyRouter(
             result: resultFilter,
             from: fromFilter,
             to: toFilter,
+          },
+          rows,
+          total,
+          page,
+          pageSize,
+        }),
+      );
+    }),
+  );
+
+  // ---------- Moderation log (#728) ----------
+  const MODERATION_ACTIONS: ModerationAction[] = [
+    "warn",
+    "kick",
+    "ban",
+    "unban",
+    "timeout",
+    "untimeout",
+  ];
+
+  router.get(
+    "/moderation",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+      const moderationService = ModerationService.getInstance(client);
+
+      const pageSize = 50;
+      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+      const actionRaw = String(req.query.action ?? "").trim();
+      const actionFilter = (MODERATION_ACTIONS as string[]).includes(actionRaw)
+        ? (actionRaw as ModerationAction)
+        : undefined;
+      const userFilter = String(req.query.user ?? "").trim() || undefined;
+
+      // moderation.enabled is the master gate: when off, the page renders the
+      // disabled banner and an empty table without touching the DB, matching
+      // the "inert until opted in" contract in defaultConfig.
+      const enabled = await config.getBoolean("moderation.enabled", false);
+      const [total, docs] = enabled
+        ? await Promise.all([
+            moderationService
+              .countRecent(common.guildId, {
+                action: actionFilter,
+                userId: userFilter,
+              })
+              .catch(() => 0),
+            moderationService
+              .getRecent(common.guildId, {
+                action: actionFilter,
+                userId: userFilter,
+                limit: pageSize,
+                skip: (page - 1) * pageSize,
+              })
+              .catch(() => []),
+          ])
+        : [0, []];
+
+      // Resolve user + moderator labels to display names. Look in the member
+      // cache first and batch the misses into a single `fetch({ user: [...] })`
+      // request rather than one awaited fetch per id — a page of 50 rows can
+      // reference up to ~100 distinct ids, and per-id fetches would be slow and
+      // rate-limit-prone. Ids that stay unresolved (member left the guild) fall
+      // back to the raw snowflake at render time.
+      const idsOnPage = new Set<string>();
+      for (const d of docs) {
+        idsOnPage.add(d.userId);
+        if (d.moderatorId) idsOnPage.add(d.moderatorId);
+      }
+      const labels = new Map<string, string>();
+      if (idsOnPage.size > 0) {
+        try {
+          const guild = await client.guilds.fetch(common.guildId);
+          const missing: string[] = [];
+          for (const id of idsOnPage) {
+            const cached = guild.members.cache.get(id);
+            if (cached) {
+              labels.set(id, cached.displayName ?? cached.user.username);
+            } else {
+              missing.push(id);
+            }
+          }
+          if (missing.length > 0) {
+            const fetched = await guild.members
+              .fetch({ user: missing })
+              .catch(() => null);
+            if (fetched) {
+              for (const [id, member] of fetched) {
+                labels.set(id, member.displayName ?? member.user.username);
+              }
+            }
+          }
+        } catch (err) {
+          logger.debug("moderation page member-label fetch failed", err);
+        }
+      }
+
+      const rows: ModerationRow[] = docs.map((d) => ({
+        createdAt:
+          d.createdAt instanceof Date
+            ? d.createdAt.toISOString()
+            : String(d.createdAt ?? ""),
+        userId: d.userId,
+        userLabel: labels.get(d.userId) ?? d.userId,
+        moderatorId: d.moderatorId ?? null,
+        moderatorLabel: d.moderatorId
+          ? (labels.get(d.moderatorId) ?? d.moderatorId)
+          : null,
+        action: d.action,
+        reason: d.reason ?? null,
+        source: d.source,
+      }));
+
+      // The user filter dropdown is seeded from the target users on this page.
+      const userOptions = Array.from(new Set(docs.map((d) => d.userId)))
+        .sort()
+        .map((id) => ({ id, label: labels.get(id) ?? id }));
+
+      res.type("text/html").send(
+        renderModerationPage({
+          ...common,
+          enabled,
+          actionOptions: MODERATION_ACTIONS,
+          userOptions,
+          filters: {
+            action: actionFilter ?? "",
+            userId: userFilter ?? "",
           },
           rows,
           total,

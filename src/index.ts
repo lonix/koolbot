@@ -45,6 +45,7 @@ import { DigestService } from "./services/digest-service.js";
 import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { BirthdayService } from "./services/birthday-service.js";
 import { EventService } from "./services/event-service.js";
+import { ModerationService } from "./services/moderation-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
@@ -107,6 +108,9 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
+    // Required to receive guildAuditLogEntryCreate events for the moderation
+    // log (#728) — mirrors native kick/ban/timeout actions into the log.
+    GatewayIntentBits.GuildModeration,
     // Required to receive messagePollVoteAdd events for poll-participation
     // tracking (#570). The events still only fire for guild polls.
     GatewayIntentBits.GuildMessagePolls,
@@ -565,6 +569,7 @@ let digestService: DigestService;
 let rewindNudgeService: RewindNudgeService;
 let birthdayService: BirthdayService;
 let eventService: EventService;
+let moderationService: ModerationService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
@@ -593,6 +598,7 @@ try {
   rewindNudgeService = RewindNudgeService.getInstance(client);
   birthdayService = BirthdayService.getInstance(client);
   eventService = EventService.getInstance(client);
+  moderationService = ModerationService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
@@ -705,6 +711,11 @@ async function initializeServices(): Promise<void> {
     // birthday today (in their timezone)?" check.
     await birthdayService.start();
     await eventService.start();
+
+    // Initialize the moderation log (#728). No timers to own — this just logs
+    // its enabled state; the /warn write path and the audit-log mirroring
+    // below both gate on `moderation.enabled` at call time.
+    await moderationService.initialize();
 
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();
@@ -959,6 +970,19 @@ client.on(Events.MessagePollVoteAdd, async (pollAnswer, userId) => {
     await pollParticipationTracker.handlePollVoteAdd(pollAnswer, userId);
   } catch (error) {
     logger.error("Error handling messagePollVoteAdd:", error);
+  }
+});
+
+// Mirror native moderation actions (kick/ban/unban/timeout) into the
+// moderation log (#728). Gating (enabled, action type, target present) lives
+// in the service. Requires the GuildModeration intent and the bot's View
+// Audit Log permission.
+client.on(Events.GuildAuditLogEntryCreate, async (auditLogEntry, guild) => {
+  recordDiscordEvent("guildAuditLogEntryCreate");
+  try {
+    await moderationService.handleAuditLogEntry(auditLogEntry, guild);
+  } catch (error) {
+    logger.error("Error handling guildAuditLogEntryCreate:", error);
   }
 });
 

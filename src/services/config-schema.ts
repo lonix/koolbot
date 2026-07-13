@@ -136,6 +136,9 @@ export interface ConfigSchema {
   // Persisted command metrics (issue #648)
   "monitoring.metrics_persistence.enabled": boolean;
   "monitoring.metrics_retention_days": number;
+
+  // Moderation log (issue #728)
+  "moderation.enabled": boolean;
 }
 
 /**
@@ -339,6 +342,11 @@ export const defaultConfig: ConfigSchema = {
   // Metrics dashboard out of the box; 30-day window matches the issue.
   "monitoring.metrics_persistence.enabled": true,
   "monitoring.metrics_retention_days": 30,
+
+  // Moderation log defaults (#728). Master gate off, follows rule 1 — the
+  // /warn + /modlog commands, the GuildAuditLogEntryCreate mirroring, and the
+  // /admin/moderation page are all inert until an operator opts in.
+  "moderation.enabled": false,
 };
 
 /**
@@ -717,6 +725,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Core",
     description:
       "Core bot infrastructure: audit logging, retention, and other cross-cutting concerns.",
+  },
+  moderation: {
+    title: "Moderation",
+    description:
+      "Lightweight moderation log: record warnings via /warn, mirror native kick/ban/timeout actions from the guild audit log, and query per-member history with /modlog or the admin page.",
   },
   other: {
     title: "Other",
@@ -1409,5 +1422,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Days to keep persisted command-metric buckets before MongoDB's TTL index prunes them.",
     category: "core",
     type: "number",
+  },
+
+  // Moderation log (#728)
+  "moderation.enabled": {
+    label: "Moderation log enabled",
+    description:
+      "Enable the moderation log: the /warn and /modlog commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the /admin/moderation page. Requires the bot to have the View Audit Log permission for native actions to be captured.",
+    category: "moderation",
+    type: "boolean",
   },
 };

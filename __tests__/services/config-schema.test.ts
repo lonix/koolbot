@@ -425,6 +425,7 @@ describe("Config Schema", () => {
       "leaderboard_roles.enabled": false,
       "messagetracking.enabled": false,
       "reactiontracking.enabled": false,
+      "moderation.enabled": false,
 
       // ─── Sub-features that default off (auxiliary opt-ins) ──────────
       "voicechannels.presets.enabled": false,
