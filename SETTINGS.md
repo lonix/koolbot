@@ -41,6 +41,7 @@ Complete configuration reference for all KoolBot settings.
 - [Rewind (Year-in-Review)](#-rewind-year-in-review)
 - [Birthdays](#-birthdays)
 - [Events](#-events)
+- [Moderation](#-moderation)
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
 - [Rate Limiting](#-rate-limiting)
@@ -704,6 +705,38 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 
 ---
 
+## 🚨 Moderation
+
+A lightweight, queryable **moderation log**. Records warnings issued with
+`/warn` and mirrors native kick / ban / unban / timeout actions from the
+guild audit log into one place, so moderators can answer "has this person
+been warned before / what's their history?" without scrolling Discord's
+native audit log (which only retains ~45 days and has no per-user warn
+concept).
+
+Query per-member history in Discord with **`/modlog`**, or browse
+server-wide history on the **`/admin/moderation`** page. Both `/warn` and
+`/modlog` default to members with the **Moderate Members** permission (and
+administrators); grant additional roles from the **Permissions** page. See
+[COMMANDS.md](COMMANDS.md#-moderation-commands).
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `moderation.enabled` | `false` | Master switch — enables the `/warn` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page |
+
+**Notes:**
+
+- Warnings are KoolBot's own record — Discord has no native warning action,
+  so `/warn` is the only place they exist. The warned member is **not** DM'd
+  (consistent with the opt-in-only DM posture).
+- Mirroring native actions requires the bot to have the **View Audit Log**
+  permission and the `GuildModeration` gateway intent (enabled by default in
+  the bot). `/warn` works without View Audit Log.
+- The log is an append-only history, not a case-management system: there are
+  no appeals, expiring warnings, or auto-moderation thresholds.
+
+---
+
 ## 🎭 Reaction Roles
 
 Self-assignable roles via message reactions. Users react to a message
@@ -1181,6 +1214,10 @@ leave the graph in a broken state.
 - `birthdays.mention` (bool, default: true)
 - `birthdays.role_id` (string, default: "")
 - `birthdays.role_duration_hours` (number, default: 24)
+
+#### Moderation
+
+- `moderation.enabled` (bool, default: false)
 
 #### Cleanup
 

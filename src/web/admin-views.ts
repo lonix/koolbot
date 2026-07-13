@@ -22,6 +22,7 @@ import {
 import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
 import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
+import type { ModerationAction } from "../models/moderation-log.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -3065,6 +3066,178 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
   return renderAdminPage({
     title: "Command audit",
     active: "/admin/audit/commands",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
+// ---------- Moderation log (issue #728) ----------
+
+export interface ModerationRow {
+  createdAt: string;
+  userId: string;
+  userLabel: string;
+  moderatorId: string | null;
+  moderatorLabel: string | null;
+  action: ModerationAction;
+  reason: string | null;
+  source: "command" | "audit";
+}
+
+export interface ModerationProps extends CommonProps {
+  enabled: boolean;
+  /** All action types — populates the filter dropdown. */
+  actionOptions: ModerationAction[];
+  /** Distinct target user IDs on the current page — populates the user filter. */
+  userOptions: Array<{ id: string; label: string }>;
+  filters: {
+    action: string;
+    userId: string;
+  };
+  rows: ModerationRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
+  warn: "warn",
+  kick: "kick",
+  ban: "ban",
+  unban: "unban",
+  timeout: "timeout",
+  untimeout: "untimeout",
+};
+
+function moderationActionTag(action: ModerationAction): string {
+  const label = MODERATION_ACTION_LABELS[action] ?? action;
+  // Warns/timeouts are cautionary (amber), kicks/bans are severe (red), and the
+  // "undo" actions (unban / untimeout) read as positive (green).
+  const cls =
+    action === "unban" || action === "untimeout"
+      ? "tag-on"
+      : action === "ban" || action === "kick"
+        ? "tag-off"
+        : "tag-warn";
+  return `<span class="tag ${cls}">${escapeHtml(label)}</span>`;
+}
+
+function buildModerationQueryString(
+  filters: ModerationProps["filters"],
+  page: number,
+): string {
+  const parts: string[] = [];
+  if (filters.action)
+    parts.push(`action=${encodeURIComponent(filters.action)}`);
+  if (filters.userId) parts.push(`user=${encodeURIComponent(filters.userId)}`);
+  if (page > 1) parts.push(`page=${page}`);
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
+export function renderModerationPage(props: ModerationProps): string {
+  const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
+  const page = Math.min(Math.max(1, props.page), totalPages);
+
+  const actionOptionsHtml = props.actionOptions
+    .map((a) => {
+      const sel = a === props.filters.action ? " selected" : "";
+      return `<option value="${escapeHtml(a)}"${sel}>${escapeHtml(
+        MODERATION_ACTION_LABELS[a] ?? a,
+      )}</option>`;
+    })
+    .join("");
+  const userOptionsHtml = props.userOptions
+    .map((u) => {
+      const sel = u.id === props.filters.userId ? " selected" : "";
+      return `<option value="${escapeHtml(u.id)}"${sel}>${escapeHtml(u.label)}</option>`;
+    })
+    .join("");
+
+  const rowsHtml =
+    props.rows.length === 0
+      ? `<div class="empty">No moderation actions match the current filters.</div>`
+      : `<table>
+<thead><tr>
+<th>When</th><th>User</th><th>Action</th><th>Moderator</th>
+<th>Reason</th><th>Source</th>
+</tr></thead>
+<tbody>${props.rows
+          .map((r) => {
+            const moderator = r.moderatorId
+              ? `<span title="${escapeHtml(r.moderatorId)}">${escapeHtml(
+                  r.moderatorLabel ?? r.moderatorId,
+                )}</span>`
+              : '<span class="muted">Unknown</span>';
+            return `<tr>
+<td class="muted mono">${escapeHtml(r.createdAt)}</td>
+<td title="${escapeHtml(r.userId)}">${escapeHtml(r.userLabel)}</td>
+<td>${moderationActionTag(r.action)}</td>
+<td>${moderator}</td>
+<td class="muted">${r.reason ? escapeHtml(r.reason.slice(0, 200)) : "—"}</td>
+<td class="muted">${escapeHtml(r.source)}</td>
+</tr>`;
+          })
+          .join("")}</tbody></table>`;
+
+  const prevLink =
+    page > 1
+      ? `<a class="btn btn-sm" href="/admin/moderation${buildModerationQueryString(props.filters, page - 1)}">← Prev</a>`
+      : `<button class="btn btn-sm" disabled>← Prev</button>`;
+  const nextLink =
+    page < totalPages
+      ? `<a class="btn btn-sm" href="/admin/moderation${buildModerationQueryString(props.filters, page + 1)}">Next →</a>`
+      : `<button class="btn btn-sm" disabled>Next →</button>`;
+
+  const body = `
+<h1>Moderation log</h1>
+<p class="subtitle">Warnings recorded via <code>/warn</code> plus native kick/ban/timeout actions mirrored from the guild audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
+
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
+
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Moderation log</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
+    <dt>Actions matched</dt><dd>${props.total}</dd>
+  </dl>
+  <p class="muted">Native actions require the bot to have the <strong>View Audit Log</strong> permission.</p>
+</div>
+
+<div class="card">
+  <h2>Filters</h2>
+  <form method="GET" action="/admin/moderation" class="inline-form">
+    <label>Action
+      <select name="action">
+        <option value="">— any —</option>
+        ${actionOptionsHtml}
+      </select>
+    </label>
+    <label>User
+      <select name="user">
+        <option value="">— any —</option>
+        ${userOptionsHtml}
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <a class="btn btn-sm" href="/admin/moderation">Reset</a>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Actions (page ${page} of ${totalPages})</h2>
+  ${rowsHtml}
+  <div class="inline-form" style="margin-top:.75rem">
+    ${prevLink}
+    ${nextLink}
+    <span class="muted">${props.pageSize} per page</span>
+  </div>
+</div>
+`;
+  return renderAdminPage({
+    title: "Moderation log",
+    active: "/admin/moderation",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

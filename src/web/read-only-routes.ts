@@ -47,6 +47,8 @@ import {
 } from "../services/voice-channel-manager.js";
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
+import { ModerationService } from "../services/moderation-service.js";
+import type { ModerationAction } from "../models/moderation-log.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
@@ -76,11 +78,13 @@ import {
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
+  renderModerationPage,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
   type ChannelOption,
   type CommandAuditRow,
+  type ModerationRow,
   type DbTrunkHistoryRow,
   type DigestPreviewView,
   type FlashMessage,
@@ -1380,6 +1384,113 @@ export function createReadOnlyRouter(
             result: resultFilter,
             from: fromFilter,
             to: toFilter,
+          },
+          rows,
+          total,
+          page,
+          pageSize,
+        }),
+      );
+    }),
+  );
+
+  // ---------- Moderation log (#728) ----------
+  const MODERATION_ACTIONS: ModerationAction[] = [
+    "warn",
+    "kick",
+    "ban",
+    "unban",
+    "timeout",
+    "untimeout",
+  ];
+
+  router.get(
+    "/moderation",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+      const moderationService = ModerationService.getInstance(client);
+
+      const pageSize = 50;
+      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+      const actionRaw = String(req.query.action ?? "").trim();
+      const actionFilter = (MODERATION_ACTIONS as string[]).includes(actionRaw)
+        ? (actionRaw as ModerationAction)
+        : undefined;
+      const userFilter = String(req.query.user ?? "").trim() || undefined;
+
+      const [enabled, total, docs] = await Promise.all([
+        config.getBoolean("moderation.enabled", false),
+        moderationService
+          .countRecent(common.guildId, {
+            action: actionFilter,
+            userId: userFilter,
+          })
+          .catch(() => 0),
+        moderationService
+          .getRecent(common.guildId, {
+            action: actionFilter,
+            userId: userFilter,
+            limit: pageSize,
+            skip: (page - 1) * pageSize,
+          })
+          .catch(() => []),
+      ]);
+
+      // Resolve user + moderator labels from the guild member cache so the
+      // table shows names rather than raw snowflakes.
+      const idsOnPage = new Set<string>();
+      for (const d of docs) {
+        idsOnPage.add(d.userId);
+        if (d.moderatorId) idsOnPage.add(d.moderatorId);
+      }
+      const labels = new Map<string, string>();
+      try {
+        const guild = await client.guilds.fetch(common.guildId);
+        for (const id of idsOnPage) {
+          try {
+            const member = await guild.members.fetch(id);
+            labels.set(id, member.displayName ?? member.user.username);
+          } catch {
+            // Member left the guild or fetch failed; fall back to ID.
+          }
+        }
+      } catch (err) {
+        logger.debug("moderation page member-label fetch failed", err);
+      }
+
+      const rows: ModerationRow[] = docs.map((d) => ({
+        createdAt:
+          d.createdAt instanceof Date
+            ? d.createdAt.toISOString()
+            : String(d.createdAt ?? ""),
+        userId: d.userId,
+        userLabel: labels.get(d.userId) ?? d.userId,
+        moderatorId: d.moderatorId ?? null,
+        moderatorLabel: d.moderatorId
+          ? (labels.get(d.moderatorId) ?? d.moderatorId)
+          : null,
+        action: d.action,
+        reason: d.reason ?? null,
+        source: d.source,
+      }));
+
+      // The user filter dropdown is seeded from the target users on this page.
+      const userOptions = Array.from(new Set(docs.map((d) => d.userId)))
+        .sort()
+        .map((id) => ({ id, label: labels.get(id) ?? id }));
+
+      res.type("text/html").send(
+        renderModerationPage({
+          ...common,
+          enabled,
+          actionOptions: MODERATION_ACTIONS,
+          userOptions,
+          filters: {
+            action: actionFilter ?? "",
+            userId: userFilter ?? "",
           },
           rows,
           total,
