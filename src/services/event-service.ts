@@ -437,9 +437,8 @@ export class EventService {
 
     // 2. Create the temp channel shortly before start.
     if (shouldCreateChannel(event, now, windows.leadMs)) {
-      const channel = await this.createEventChannel(event, guild);
+      const channel = await this.claimEventChannel(event, guild);
       if (channel) {
-        event.channelId = channel.id;
         if (event.state === "scheduled") event.state = "active";
         changed = true;
         await this.updateAnnouncement(event);
@@ -542,13 +541,17 @@ export class EventService {
         .fetch(event.guildId)
         .catch(() => null);
       if (!guild) return null;
-      const channel = await this.createEventChannel(event, guild);
-      if (!channel) return null;
-      event.channelId = channel.id;
-      event.state = "active";
-      await event.save();
-      await this.updateAnnouncement(event);
-      logger.info(`Started event ${sanitizeForLog(String(event._id))} now`);
+      const channel = await this.claimEventChannel(event, guild);
+      if (channel) {
+        event.state = "active";
+        await event.save();
+        await this.updateAnnouncement(event);
+        logger.info(`Started event ${sanitizeForLog(String(event._id))} now`);
+      } else if (!event.channelId) {
+        // Channel creation genuinely failed (e.g. no category configured);
+        // a lost race instead leaves event.channelId set to the winner's id.
+        return null;
+      }
     }
     return event;
   }
@@ -716,6 +719,55 @@ export class EventService {
   // ---------------------------------------------------------------
   // Channel plumbing
   // ---------------------------------------------------------------
+
+  /**
+   * Create the temp channel and atomically claim it on the event row.
+   *
+   * Both the cron scan (`processEvent`) and the manual "start now" path
+   * (`startEventNow`) can decide to create a channel for the same event at
+   * the same moment. Without a claim they each gate on their own in-memory
+   * copy of `channelId` and both call `guild.channels.create()`, producing
+   * two channels while the row can only reference one — the loser's channel
+   * is orphaned forever (see #730).
+   *
+   * The `findOneAndUpdate` with a `channelId: null` filter is an atomic
+   * compare-and-set: only the first caller to land its write matches the
+   * document and wins the claim (this also holds across multiple
+   * processes/replicas). A caller that loses the race deletes the redundant
+   * channel it just created and adopts the winner's `channelId`, so no
+   * orphan is left behind.
+   *
+   * Returns the channel when THIS call won the claim, otherwise `null`. On a
+   * lost race `event.channelId` is refreshed to the winner's id; on an
+   * outright creation failure it stays `null`, so callers can tell the two
+   * apart.
+   */
+  private async claimEventChannel(
+    event: IEvent,
+    guild: Guild,
+  ): Promise<VoiceChannel | null> {
+    const channel = await this.createEventChannel(event, guild);
+    if (!channel) return null;
+
+    const claimed = await Event.findOneAndUpdate(
+      { _id: event._id, channelId: null },
+      { $set: { channelId: channel.id } },
+    );
+    if (!claimed) {
+      // Another path claimed the channel first — tear ours down and adopt
+      // the winner's id so we don't leak a channel.
+      logger.warn(
+        `Lost event-channel creation race for event ${sanitizeForLog(String(event._id))}; removing redundant channel`,
+      );
+      await this.deleteEventChannel(guild, channel.id);
+      const fresh = await Event.findById(event._id).catch(() => null);
+      event.channelId = fresh?.channelId ?? event.channelId;
+      return null;
+    }
+
+    event.channelId = channel.id;
+    return channel;
+  }
 
   private async createEventChannel(
     event: IEvent,
