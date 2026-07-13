@@ -47,7 +47,7 @@ export class ReactionRoleService {
         if (this.client.isReady()) {
           resolve();
         } else {
-          setTimeout(checkReady, 100);
+          setTimeout(checkReady, 100).unref?.();
         }
       };
       checkReady();
