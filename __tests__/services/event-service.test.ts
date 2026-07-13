@@ -1,4 +1,5 @@
-import { describe, it, expect, jest } from "@jest/globals";
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { ChannelType } from "discord.js";
 
 // The event-service module registers a config reload callback and touches a
 // Mongoose model at import time. Mock the heavy dependencies so the pure
@@ -32,7 +33,14 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
+const { Event } = await import("../../src/models/event.js");
+const EventMock = Event as unknown as jest.Mock & {
+  findById: jest.Mock;
+  findOneAndUpdate: jest.Mock;
+};
+
 const {
+  EventService,
   computeEndTime,
   parseEventDateTime,
   countRsvps,
@@ -229,5 +237,136 @@ describe("formatEventWhen", () => {
       timezone: "America/New_York",
     };
     expect(formatEventWhen(event)).toBe("2026-07-04 20:00 (America/New_York)");
+  });
+});
+
+// Regression tests for #730: cron and "start now" must not both create a
+// channel for the same event. Channel creation is guarded by an atomic
+// `findOneAndUpdate({ channelId: null })` claim, exercised here through
+// `startEventNow`.
+describe("claimEventChannel (start-now path)", () => {
+  const CATEGORY_ID = "cat-1";
+
+  function buildService(opts: {
+    findOneAndUpdate?: unknown;
+    claimError?: Error;
+    createdChannelId: string;
+    deletableChannel?: { delete: jest.Mock };
+    refreshedEvent?: unknown;
+  }): {
+    service: InstanceType<typeof EventService>;
+    event: {
+      _id: string;
+      guildId: string;
+      state: string;
+      channelId: string | null;
+      categoryId: string;
+      save: jest.Mock;
+      announcementChannelId: null;
+      announcementMessageId: null;
+      title: string;
+    };
+    createChannel: jest.Mock;
+  } {
+    const event = {
+      _id: "evt-1",
+      guildId: "guild-1",
+      state: "scheduled",
+      channelId: null as string | null,
+      categoryId: CATEGORY_ID,
+      title: "Game Night",
+      announcementChannelId: null,
+      announcementMessageId: null,
+      save: jest.fn(async () => undefined),
+    };
+
+    EventMock.findById = jest
+      .fn()
+      .mockReturnValueOnce(Promise.resolve(event))
+      .mockReturnValue(Promise.resolve(opts.refreshedEvent ?? null));
+    EventMock.findOneAndUpdate = jest.fn(async () => {
+      if (opts.claimError) throw opts.claimError;
+      return opts.findOneAndUpdate;
+    });
+
+    const createdChannel = { id: opts.createdChannelId };
+    const createChannel = jest.fn(async () => createdChannel);
+    const cache = new Map<string, unknown>();
+    cache.set(CATEGORY_ID, { type: ChannelType.GuildCategory });
+    if (opts.deletableChannel) {
+      cache.set(opts.createdChannelId, opts.deletableChannel);
+    }
+    const guild = { channels: { create: createChannel, cache } };
+    const client = {
+      guilds: { fetch: jest.fn(async () => guild) },
+    } as never;
+
+    const service = EventService.getInstance(client);
+    return { service, event, createChannel };
+  }
+
+  beforeEach(() => {
+    EventService.reset();
+  });
+
+  it("wins the claim, sets the channel and marks the event active", async () => {
+    const { service, event, createChannel } = buildService({
+      // Non-null pre-update doc => our compare-and-set matched.
+      findOneAndUpdate: { _id: "evt-1", channelId: null },
+      createdChannelId: "chan-win",
+    });
+
+    const result = await service.startEventNow("evt-1");
+
+    expect(createChannel).toHaveBeenCalledTimes(1);
+    expect(result?.channelId).toBe("chan-win");
+    expect(result?.state).toBe("active");
+    expect(event.save).toHaveBeenCalledTimes(1);
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "evt-1", channelId: null },
+      { $set: { channelId: "chan-win" } },
+    );
+  });
+
+  it("loses the claim, deletes the redundant channel and adopts the winner's id", async () => {
+    const deletableChannel = { delete: jest.fn(async () => undefined) };
+    const { service, event, createChannel } = buildService({
+      // Null => no document matched; another path already claimed a channel.
+      findOneAndUpdate: null,
+      createdChannelId: "chan-loser",
+      deletableChannel,
+      refreshedEvent: { channelId: "chan-winner" },
+    });
+
+    const result = await service.startEventNow("evt-1");
+
+    expect(createChannel).toHaveBeenCalledTimes(1);
+    // The redundant channel is torn down, not left orphaned.
+    expect(deletableChannel.delete).toHaveBeenCalledTimes(1);
+    // The in-memory event adopts the winner's id and is not re-saved.
+    expect(result?.channelId).toBe("chan-winner");
+    expect(event.state).toBe("scheduled");
+    expect(event.save).not.toHaveBeenCalled();
+  });
+
+  it("tears down the channel when the claim write throws, leaking nothing", async () => {
+    const deletableChannel = { delete: jest.fn(async () => undefined) };
+    const { service, event, createChannel } = buildService({
+      // Transient DB error while claiming, after the channel already exists.
+      claimError: new Error("connection reset"),
+      createdChannelId: "chan-orphan",
+      deletableChannel,
+    });
+
+    const result = await service.startEventNow("evt-1");
+
+    expect(createChannel).toHaveBeenCalledTimes(1);
+    // The just-created channel is removed rather than left unreferenced...
+    expect(deletableChannel.delete).toHaveBeenCalledTimes(1);
+    // ...and the failure surfaces as a no-op (channelId still null) instead
+    // of crashing the caller, so the next scan can retry cleanly.
+    expect(result).toBeNull();
+    expect(event.channelId).toBeNull();
+    expect(event.save).not.toHaveBeenCalled();
   });
 });
