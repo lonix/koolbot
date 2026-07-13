@@ -683,6 +683,7 @@ export class VoiceChannelManager {
           this.ownershipTransferTimers.delete(channel.id);
         }
       }, OWNERSHIP_TRANSFER_GRACE_SECONDS * 1000);
+      timer.unref?.();
 
       // Store the timer and original owner info
       this.ownershipTransferTimers.set(channel.id, {
