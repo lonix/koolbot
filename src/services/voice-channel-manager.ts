@@ -413,15 +413,13 @@ export class VoiceChannelManager {
       if (!waitingRoomId) return;
 
       const waitingRoom = this.client.channels.cache.get(waitingRoomId) as
-        | VoiceChannel
-        | undefined;
+        VoiceChannel | undefined;
 
       if (waitingRoom) {
         // Move waiting users to main channel or disconnect them
         if (waitingRoom.members.size > 0) {
           const mainChannel = this.client.channels.cache.get(channelId) as
-            | VoiceChannel
-            | undefined;
+            VoiceChannel | undefined;
 
           if (mainChannel) {
             for (const member of waitingRoom.members.values()) {
@@ -1014,8 +1012,7 @@ export class VoiceChannelManager {
   ): Promise<void> {
     try {
       const mainChannel = this.client.channels.cache.get(mainChannelId) as
-        | VoiceChannel
-        | undefined;
+        VoiceChannel | undefined;
       if (!mainChannel) return;
 
       // Find the owner
