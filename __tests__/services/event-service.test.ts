@@ -248,7 +248,8 @@ describe("claimEventChannel (start-now path)", () => {
   const CATEGORY_ID = "cat-1";
 
   function buildService(opts: {
-    findOneAndUpdate: unknown;
+    findOneAndUpdate?: unknown;
+    claimError?: Error;
     createdChannelId: string;
     deletableChannel?: { delete: jest.Mock };
     refreshedEvent?: unknown;
@@ -283,7 +284,10 @@ describe("claimEventChannel (start-now path)", () => {
       .fn()
       .mockReturnValueOnce(Promise.resolve(event))
       .mockReturnValue(Promise.resolve(opts.refreshedEvent ?? null));
-    EventMock.findOneAndUpdate = jest.fn(async () => opts.findOneAndUpdate);
+    EventMock.findOneAndUpdate = jest.fn(async () => {
+      if (opts.claimError) throw opts.claimError;
+      return opts.findOneAndUpdate;
+    });
 
     const createdChannel = { id: opts.createdChannelId };
     const createChannel = jest.fn(async () => createdChannel);
@@ -342,6 +346,27 @@ describe("claimEventChannel (start-now path)", () => {
     // The in-memory event adopts the winner's id and is not re-saved.
     expect(result?.channelId).toBe("chan-winner");
     expect(event.state).toBe("scheduled");
+    expect(event.save).not.toHaveBeenCalled();
+  });
+
+  it("tears down the channel when the claim write throws, leaking nothing", async () => {
+    const deletableChannel = { delete: jest.fn(async () => undefined) };
+    const { service, event, createChannel } = buildService({
+      // Transient DB error while claiming, after the channel already exists.
+      claimError: new Error("connection reset"),
+      createdChannelId: "chan-orphan",
+      deletableChannel,
+    });
+
+    const result = await service.startEventNow("evt-1");
+
+    expect(createChannel).toHaveBeenCalledTimes(1);
+    // The just-created channel is removed rather than left unreferenced...
+    expect(deletableChannel.delete).toHaveBeenCalledTimes(1);
+    // ...and the failure surfaces as a no-op (channelId still null) instead
+    // of crashing the caller, so the next scan can retry cleanly.
+    expect(result).toBeNull();
+    expect(event.channelId).toBeNull();
     expect(event.save).not.toHaveBeenCalled();
   });
 });

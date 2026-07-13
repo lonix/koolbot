@@ -735,12 +735,14 @@ export class EventService {
    * document and wins the claim (this also holds across multiple
    * processes/replicas). A caller that loses the race deletes the redundant
    * channel it just created and adopts the winner's `channelId`, so no
-   * orphan is left behind.
+   * orphan is left behind. If the claim write itself throws (transient
+   * DB/connectivity error) after the channel was created, the channel is
+   * likewise torn down so the failure can't leak one either.
    *
    * Returns the channel when THIS call won the claim, otherwise `null`. On a
    * lost race `event.channelId` is refreshed to the winner's id; on an
-   * outright creation failure it stays `null`, so callers can tell the two
-   * apart.
+   * outright creation failure or a failed claim it stays `null`, so callers
+   * can tell the two apart.
    */
   private async claimEventChannel(
     event: IEvent,
@@ -749,17 +751,39 @@ export class EventService {
     const channel = await this.createEventChannel(event, guild);
     if (!channel) return null;
 
-    const claimed = await Event.findOneAndUpdate(
-      { _id: event._id, channelId: null },
-      { $set: { channelId: channel.id } },
-    );
+    let claimed: IEvent | null;
+    try {
+      claimed = await Event.findOneAndUpdate(
+        { _id: event._id, channelId: null },
+        { $set: { channelId: channel.id } },
+      );
+    } catch (error) {
+      // The claim write failed after the channel was already created — tear
+      // it down so we don't leak an unreferenced channel, and let the next
+      // scan retry cleanly (channelId is still null in the row).
+      logger.error(
+        `Failed to claim event channel for event ${sanitizeForLog(String(event._id))}; removing unclaimed channel:`,
+        error,
+      );
+      await this.deleteEventChannel(
+        guild,
+        channel.id,
+        "Event channel claim failed",
+      );
+      return null;
+    }
+
     if (!claimed) {
       // Another path claimed the channel first — tear ours down and adopt
       // the winner's id so we don't leak a channel.
       logger.warn(
         `Lost event-channel creation race for event ${sanitizeForLog(String(event._id))}; removing redundant channel`,
       );
-      await this.deleteEventChannel(guild, channel.id);
+      await this.deleteEventChannel(
+        guild,
+        channel.id,
+        "Redundant event channel (creation race)",
+      );
       const fresh = await Event.findById(event._id).catch(() => null);
       event.channelId = fresh?.channelId ?? event.channelId;
       return null;
@@ -816,12 +840,13 @@ export class EventService {
   private async deleteEventChannel(
     guild: Guild,
     channelId: string,
+    reason = "Event ended",
   ): Promise<void> {
     try {
       const channel =
         guild.channels.cache.get(channelId) ??
         (await guild.channels.fetch(channelId).catch(() => null));
-      if (channel) await channel.delete("Event ended");
+      if (channel) await channel.delete(reason);
     } catch (error) {
       if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) return;
       logger.error("Error deleting event channel:", error);
