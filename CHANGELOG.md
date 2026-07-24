@@ -1,5 +1,84 @@
 # Changelog
 
+## [2.0.0](https://github.com/lonix/koolbot/compare/v1.2.2...v2.0.0) (2026-07-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **polls:** drop URL import in favour of file/paste-only import ([#652](https://github.com/lonix/koolbot/issues/652))
+
+### 🚀 Features
+
+* **achievements:** add progress indicators and activate reserved weekly achievements ([#685](https://github.com/lonix/koolbot/issues/685)) ([b8528be](https://github.com/lonix/koolbot/commit/b8528be0ad000821a77f72eec6420bcda4824cb5))
+* **announcements:** one-off "post now" sends + expanded placeholder set ([#712](https://github.com/lonix/koolbot/issues/712)) ([34f2568](https://github.com/lonix/koolbot/commit/34f2568583118e826c6d9565a7aa4d1111f8e4c8))
+* **birthdays:** celebrate member birthdays in their own timezone ([#670](https://github.com/lonix/koolbot/issues/670)) ([5325a3a](https://github.com/lonix/koolbot/commit/5325a3a70e40d1b30677c3cdbc5f6c5ec3cbe9fd))
+* **celebrations:** announce marquee accolade milestones server-wide ([#657](https://github.com/lonix/koolbot/issues/657)) ([#683](https://github.com/lonix/koolbot/issues/683)) ([9e25697](https://github.com/lonix/koolbot/commit/9e256976e0dabba3c38848fa251e9830dceec907))
+* declare feature dependencies via dependsOn in SettingMetadata ([#669](https://github.com/lonix/koolbot/issues/669)) ([1bc4f5c](https://github.com/lonix/koolbot/commit/1bc4f5cec1bf14931b19c054e6c26fa88c42bdae))
+* **digest:** add Web UI digest preview and send-now page ([#668](https://github.com/lonix/koolbot/issues/668)) ([a90821e](https://github.com/lonix/koolbot/commit/a90821eea1d07843cf5b06923272e1635a657426))
+* enforce feature dependencies on write ([#672](https://github.com/lonix/koolbot/issues/672)) ([7ca3c5f](https://github.com/lonix/koolbot/commit/7ca3c5f3f31d588ee8238eff9e36589b7d2250c1))
+* **events:** scheduled events with temporary voice channels and RSVPs ([#717](https://github.com/lonix/koolbot/issues/717)) ([890e156](https://github.com/lonix/koolbot/commit/890e156194fc79abf0b5dac2df79769dbc318007))
+* make time-of-day and day-of-week accolades timezone-aware ([#660](https://github.com/lonix/koolbot/issues/660)) ([b8a4190](https://github.com/lonix/koolbot/commit/b8a41900b235c24ce48642c34f28deb6b44ccaa6))
+* **moderation:** add lightweight moderation log with /warn, /modlog, and admin page ([#740](https://github.com/lonix/koolbot/issues/740)) ([aa8d822](https://github.com/lonix/koolbot/commit/aa8d822d638b61e68f7fbc1d22e6a49d6f062b34))
+* **monitoring:** persist command metrics to MongoDB with admin dashboard ([#651](https://github.com/lonix/koolbot/issues/651)) ([5487e15](https://github.com/lonix/koolbot/commit/5487e15ff4d07a7493b0997b0bd9f48d182d3361))
+* **polls:** drop URL import in favour of file/paste-only import ([#652](https://github.com/lonix/koolbot/issues/652)) ([81034a1](https://github.com/lonix/koolbot/commit/81034a15e4e6c8d39e98993d4c42510bf7d0045c))
+* **polls:** surface poll participation on Rewind, /me overview, and accolades ([#697](https://github.com/lonix/koolbot/issues/697)) ([3fccd20](https://github.com/lonix/koolbot/commit/3fccd201336cb202362f46bce7373b50790fcc2b))
+* **privacy:** never DM users unprompted — make notification DMs opt-in (default off) ([#699](https://github.com/lonix/koolbot/issues/699)) ([eb91e7a](https://github.com/lonix/koolbot/commit/eb91e7a1335f05768b785a86cd440078e68aaac3))
+* **rewind:** gate voice and achievements sections on their source feature ([#679](https://github.com/lonix/koolbot/issues/679)) ([9fdee79](https://github.com/lonix/koolbot/commit/9fdee795966d2399a4068a6ecbe2b747a45851f6))
+* **rewind:** split rewind.enabled into feature and nudge gates ([#624](https://github.com/lonix/koolbot/issues/624)) ([48781e1](https://github.com/lonix/koolbot/commit/48781e17a5d3026d56448577de58e3d7c7cbf3e2))
+* **rewind:** voice activity heatmap — hour-of-day & day-of-week patterns ([#698](https://github.com/lonix/koolbot/issues/698)) ([7ef23df](https://github.com/lonix/koolbot/commit/7ef23dfab495b27b78fffefdbf399120897708b8))
+* **scripts:** add sample-data seeder for dev/test databases ([#671](https://github.com/lonix/koolbot/issues/671)) ([f431e0f](https://github.com/lonix/koolbot/commit/f431e0fd247d2d9131618b9e5ec69ca8571278d1))
+* surface reaction activity on Rewind year-in-review ([#677](https://github.com/lonix/koolbot/issues/677)) ([91f6d3a](https://github.com/lonix/koolbot/commit/91f6d3a54f2e0cf8856291ef3fd78bdd72627e7a))
+* **voice:** apply user name pattern and add /me/voice preset management ([#661](https://github.com/lonix/koolbot/issues/661)) ([3865ff5](https://github.com/lonix/koolbot/commit/3865ff5cb35dfbed195a926e5551febeae49b219))
+* **web:** bring setup wizard to parity with the Settings page controls ([#715](https://github.com/lonix/koolbot/issues/715)) ([2bc0cc2](https://github.com/lonix/koolbot/commit/2bc0cc20ddb6b02635b0c980900ebb57c2bfc556))
+* **web:** sort enabled features above disabled in wizard and nav ([#710](https://github.com/lonix/koolbot/issues/710)) ([29d6c1a](https://github.com/lonix/koolbot/commit/29d6c1a38a8ca6a13cb8a0b6d7ff3af6eb8617b5)), closes [#706](https://github.com/lonix/koolbot/issues/706)
+* **webui:** grey out settings toggles with unmet dependencies and a "requires X" hint ([#695](https://github.com/lonix/koolbot/issues/695)) ([e2e0f0b](https://github.com/lonix/koolbot/commit/e2e0f0b3fc07734ff5a0b188bf5a6c38a0ef7bdc))
+* **webui:** group admin sidebar nav into labelled sections ([#640](https://github.com/lonix/koolbot/issues/640)) ([8d63152](https://github.com/lonix/koolbot/commit/8d6315229b3f2ab85fa59834975a52b6b7281e29))
+* **webui:** make disabled-feature handling consistent across /me/* pages ([#716](https://github.com/lonix/koolbot/issues/716)) ([8244713](https://github.com/lonix/koolbot/commit/8244713f22217a1882d06d0b1def590078bb7a99))
+* **webui:** make Voice Channels settings editable in place ([#714](https://github.com/lonix/koolbot/issues/714)) ([0980de2](https://github.com/lonix/koolbot/commit/0980de21f44f2fa9259ec7b45709e9bf6e451956))
+* **webui:** surface disabled feature pages in admin nav with enable prompt ([#643](https://github.com/lonix/koolbot/issues/643)) ([4f048fe](https://github.com/lonix/koolbot/commit/4f048fedf88c393c9af5887548259bb24d97d197))
+* wire up quotes.clear_on_sync to rebuild the quote channel on sync ([#676](https://github.com/lonix/koolbot/issues/676)) ([950146f](https://github.com/lonix/koolbot/commit/950146f414b04416449cdb4723f3729de7525dcd))
+
+
+### 🐛 Bug Fixes
+
+* adopt Prettier 3.9 cast formatting in voice-channel-manager ([#736](https://github.com/lonix/koolbot/issues/736)) ([a1aa3c5](https://github.com/lonix/koolbot/commit/a1aa3c5a787affc88bb54674994c483d52a7363c))
+* **deps:** bump undici to ^7.28.0 — clears 7 Trivy + 7 Dependabot alerts ([#694](https://github.com/lonix/koolbot/issues/694)) ([c0fc0de](https://github.com/lonix/koolbot/commit/c0fc0de99dc02f911c2e8458d1fcf3670c286085))
+* **deps:** force brace-expansion &gt;=5.0.6 to resolve GHSA-jxxr-4gwj-5jf2 ([#638](https://github.com/lonix/koolbot/issues/638)) ([0cb2b2c](https://github.com/lonix/koolbot/commit/0cb2b2ccafd8e51781536ddd5a6bff8e611b425a))
+* **deps:** refresh base-image npm to clear bundled undici/tar Trivy alerts ([#696](https://github.com/lonix/koolbot/issues/696)) ([f29666d](https://github.com/lonix/koolbot/commit/f29666d928b73259a49bcd6ed668cc6191c1350b))
+* **deps:** resolve remaining npm audit findings (ws / markdown-it / js-yaml / @babel/core toolchain) ([#641](https://github.com/lonix/koolbot/issues/641)) ([4666f89](https://github.com/lonix/koolbot/commit/4666f89a3b5289adc8fd21845033aecebc223b5b)), closes [#639](https://github.com/lonix/koolbot/issues/639)
+* **events:** atomically claim event channel to prevent duplicate/orphaned channels ([#737](https://github.com/lonix/koolbot/issues/737)) ([437cf5f](https://github.com/lonix/koolbot/commit/437cf5f5402e246e69f32e6fbb735d27db118888))
+* make birthday day a month-aware dropdown for consistent input ([#711](https://github.com/lonix/koolbot/issues/711)) ([ee1ac1b](https://github.com/lonix/koolbot/commit/ee1ac1bcf5e90dd31c780c395873d06fb3ec950b))
+* **monitoring:** unref periodic logging interval so it can't block shutdown ([#650](https://github.com/lonix/koolbot/issues/650)) ([7dbfbb0](https://github.com/lonix/koolbot/commit/7dbfbb079f1552cc3c4ff87c23ad1ebf2f5dc907)), closes [#647](https://github.com/lonix/koolbot/issues/647)
+* unref periodic interval timers so they can't block process exit ([#726](https://github.com/lonix/koolbot/issues/726)) ([b581eb8](https://github.com/lonix/koolbot/commit/b581eb840d7686a734e67c3c3ae7d905dd3527d5)), closes [#718](https://github.com/lonix/koolbot/issues/718)
+* unref remaining readiness-poll and ownership-transfer timers ([#738](https://github.com/lonix/koolbot/issues/738)) ([f0f1e4c](https://github.com/lonix/koolbot/commit/f0f1e4c2031a7668a12fa84ed5483ca373df560d)), closes [#729](https://github.com/lonix/koolbot/issues/729)
+* **voice:** re-create lobby immediately after rename deletes the old one ([#632](https://github.com/lonix/koolbot/issues/632)) ([469d057](https://github.com/lonix/koolbot/commit/469d057ecbe8800dd392c1e2be7776b211c1b555)), closes [#631](https://github.com/lonix/koolbot/issues/631)
+* warn and short-circuit when leaderboard/digest/achievements run with voice tracking disabled ([#678](https://github.com/lonix/koolbot/issues/678)) ([6722fac](https://github.com/lonix/koolbot/commit/6722fac43bb37798b426f3e45f3fb0d45ebeafcf))
+* **wizard:** correct interval type and harden cleanup timer ([#649](https://github.com/lonix/koolbot/issues/649)) ([c41137f](https://github.com/lonix/koolbot/commit/c41137f77bfff6102ebe5dd40fecb488b79f97be)), closes [#645](https://github.com/lonix/koolbot/issues/645)
+* **wizard:** render channel/category/role keys as proper selectors ([#713](https://github.com/lonix/koolbot/issues/713)) ([ae5871a](https://github.com/lonix/koolbot/commit/ae5871a65b3a6328e067fab2d87b7496bbfff257))
+
+
+### 📚 Documentation
+
+* note benign glob deprecation warning from Jest toolchain ([#636](https://github.com/lonix/koolbot/issues/636)) ([b9685ae](https://github.com/lonix/koolbot/commit/b9685aed5d5d3933d59336356b83d5a969a5720e)), closes [#605](https://github.com/lonix/koolbot/issues/605)
+* remove undocumented quotes.add_roles config key references ([#701](https://github.com/lonix/koolbot/issues/701)) ([796b6d5](https://github.com/lonix/koolbot/commit/796b6d54cf1723b7438ffaf7ecd909b31e03e3d3)), closes [#680](https://github.com/lonix/koolbot/issues/680)
+* require rebase before PR and resolving handled review comments ([#700](https://github.com/lonix/koolbot/issues/700)) ([1f19053](https://github.com/lonix/koolbot/commit/1f19053e497419f343518232d91231e564bdd835))
+
+
+### 🏗️ Build
+
+* **deps:** bump Docker base image to node:24-alpine ([#634](https://github.com/lonix/koolbot/issues/634)) ([4881f06](https://github.com/lonix/koolbot/commit/4881f06d0b01abc897296fe412b08c0a24c9bc79))
+* **docker:** drop no-op OpenSSL stopgap now node:24-alpine is patched ([#642](https://github.com/lonix/koolbot/issues/642)) ([b44a72f](https://github.com/lonix/koolbot/commit/b44a72f129071ffd2e1be6c92439d3815c014700)), closes [#604](https://github.com/lonix/koolbot/issues/604)
+
+
+### ⚙️ CI/CD
+
+* **deps:** add Dependabot security-updates group for npm ([#687](https://github.com/lonix/koolbot/issues/687)) ([bc284dd](https://github.com/lonix/koolbot/commit/bc284ddc8e8cb57146af8d344cae34e5bae5f512)), closes [#684](https://github.com/lonix/koolbot/issues/684)
+
+
+### 🔧 Maintenance
+
+* **deps:** bump lagging direct dependencies to latest in-range ([#637](https://github.com/lonix/koolbot/issues/637)) ([e800727](https://github.com/lonix/koolbot/commit/e800727ab63586ac378958b055409a00d16ae359)), closes [#602](https://github.com/lonix/koolbot/issues/602)
+
 ## [1.2.2](https://github.com/lonix/koolbot/compare/v1.2.1...v1.2.2) (2026-06-15)
 
 
