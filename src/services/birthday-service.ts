@@ -573,7 +573,14 @@ export class BirthdayService {
         // Clear the marker regardless: if the role is already gone or the
         // member left, there's nothing more to sweep.
         row.roleAssignedAt = undefined;
-        await row.save().catch(() => undefined);
+        await row
+          .save()
+          .catch((error) =>
+            logger.warn(
+              `Failed to clear roleAssignedAt for ${sanitizeForLog(row.userId)}:`,
+              error,
+            ),
+          );
       }
     }
     return removed;
