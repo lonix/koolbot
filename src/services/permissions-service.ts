@@ -48,6 +48,14 @@ export class PermissionsService {
   private permissionsCache: Map<string, string[]> = new Map();
   private cacheInitialized = false;
   private cacheInitializing: Promise<void> | null = null;
+  /**
+   * Error from the most recent failed cache load, cleared on success.
+   * Lets `checkCommandPermission` (in `onUnavailable: "throw"` mode) tell
+   * "cache empty because nothing is configured" apart from "cache empty
+   * because loading it failed" — the latter must not fall through to the
+   * default-open branch and silently authorize (#795 review).
+   */
+  private cacheLoadError: unknown = null;
 
   private constructor(client: Client) {
     this.client = client;
@@ -97,10 +105,12 @@ export class PermissionsService {
         }
 
         this.cacheInitialized = true;
+        this.cacheLoadError = null;
         logger.info(
           `Permissions cache initialized with ${permissions.length} entries`,
         );
       } catch (error) {
+        this.cacheLoadError = error;
         logger.error("Error initializing permissions cache:", error);
       } finally {
         this.cacheInitializing = null;
@@ -161,6 +171,23 @@ export class PermissionsService {
         return true;
       }
 
+      // Everything below depends on the permissions cache. If the cache
+      // failed to load (e.g. a Mongo blip) we cannot know whether role
+      // gating is configured, so in throw mode surface "couldn't check"
+      // instead of falling through to the default-open branch and
+      // silently authorizing. Admins are unaffected: their short-circuit
+      // above rests on live Discord data, not the cache.
+      if (
+        options.onUnavailable === "throw" &&
+        !this.cacheInitialized &&
+        this.cacheLoadError !== null
+      ) {
+        throw new PermissionCheckError(
+          `Permission check for ${commandName} could not be completed: permissions cache failed to load`,
+          this.cacheLoadError,
+        );
+      }
+
       // Check if there are any permissions set for this command
       const cacheKey = `${guildId}:${commandName}`;
       const allowedRoleIds = this.permissionsCache.get(cacheKey);
@@ -178,6 +205,9 @@ export class PermissionsService {
 
       return hasPermission;
     } catch (error) {
+      if (error instanceof PermissionCheckError) {
+        throw error;
+      }
       if (isUnknownTargetError(error)) {
         logger.warn(
           `Permission check for ${sanitizeForLog(commandName)}: guild ${guildId} or member ${userId} not found`,
