@@ -444,16 +444,30 @@ describe("PollService", () => {
   });
 
   describe("getSchedule", () => {
-    it("returns null instead of throwing when findById rejects on a malformed id", async () => {
+    it("returns null instead of throwing when findById rejects with a CastError (malformed id)", async () => {
       // Mongoose throws a CastError for a non-ObjectId id; the web toggle/test
       // routes rely on null to take their audited "not found" path (#758).
+      const castError = new Error("Cast to ObjectId failed");
+      castError.name = "CastError";
       mockPollScheduleFindById.mockImplementation(() =>
-        Promise.reject(new Error("Cast to ObjectId failed")),
+        Promise.reject(castError),
       );
 
       const service = PollService.getInstance({} as never);
 
       await expect(service.getSchedule("not-an-id")).resolves.toBeNull();
+    });
+
+    it("propagates non-CastError failures instead of masking them as not-found", async () => {
+      mockPollScheduleFindById.mockImplementation(() =>
+        Promise.reject(new Error("connection timed out")),
+      );
+
+      const service = PollService.getInstance({} as never);
+
+      await expect(service.getSchedule("sched-1")).rejects.toThrow(
+        "connection timed out",
+      );
     });
   });
 

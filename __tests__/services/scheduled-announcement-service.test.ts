@@ -57,12 +57,12 @@ describe("ScheduledAnnouncementService.getAnnouncement", () => {
     await expect(service.getAnnouncement("a1")).resolves.toBe(announcement);
   });
 
-  it("returns null instead of throwing when findById rejects on a malformed id", async () => {
+  it("returns null instead of throwing when findById rejects with a CastError (malformed id)", async () => {
     // Mongoose throws a CastError for a non-ObjectId id; the web toggle route
     // relies on null to take its audited "not found" path (#758).
-    findById.mockImplementation(() =>
-      Promise.reject(new Error("Cast to ObjectId failed")),
-    );
+    const castError = new Error("Cast to ObjectId failed");
+    castError.name = "CastError";
+    findById.mockImplementation(() => Promise.reject(castError));
     const { ScheduledAnnouncementService } = await import(
       "../../src/services/scheduled-announcement-service.js"
     );
@@ -71,5 +71,21 @@ describe("ScheduledAnnouncementService.getAnnouncement", () => {
     );
 
     await expect(service.getAnnouncement("not-an-id")).resolves.toBeNull();
+  });
+
+  it("propagates non-CastError failures instead of masking them as not-found", async () => {
+    findById.mockImplementation(() =>
+      Promise.reject(new Error("connection timed out")),
+    );
+    const { ScheduledAnnouncementService } = await import(
+      "../../src/services/scheduled-announcement-service.js"
+    );
+    const service = ScheduledAnnouncementService.getInstance(
+      mockClient as Client,
+    );
+
+    await expect(service.getAnnouncement("a1")).rejects.toThrow(
+      "connection timed out",
+    );
   });
 });
