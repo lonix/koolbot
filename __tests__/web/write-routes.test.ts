@@ -14,9 +14,11 @@ import {
   safeAdminRedirect,
   truncateFlash,
   wantsJson,
+  wizardApplyFailureMessage,
   TEXT_LIMITS,
   type ResetConfigStore,
 } from "../../src/web/write-routes.js";
+import type { WizardApplyResult } from "../../src/services/wizard-service.js";
 import {
   BOOTSTRAP_VARS,
   PROTECTED_KEYS,
@@ -493,6 +495,87 @@ describe("safeAdminRedirect (#610)", () => {
     expect(safeAdminRedirect("https://evil.example/")).toBe("/admin/settings");
     expect(safeAdminRedirect("//evil.example")).toBe("/admin/settings");
     expect(safeAdminRedirect("/etc/passwd")).toBe("/admin/settings");
+  });
+});
+
+describe("wizardApplyFailureMessage (#780)", () => {
+  const base: WizardApplyResult = {
+    success: false,
+    appliedKeys: [],
+    rolledBackKeys: [],
+    revertFailedKeys: [],
+  };
+
+  it("reports a fully rolled-back batch as no changes applied", () => {
+    const msg = wizardApplyFailureMessage({
+      ...base,
+      failedKey: "quotes.delete_roles",
+      errorMessage: "mongo write failed",
+      appliedKeys: ["quotes.enabled", "quotes.channel_id"],
+      rolledBackKeys: ["quotes.channel_id", "quotes.enabled"],
+    });
+    expect(msg).toContain("quotes.delete_roles failed (mongo write failed)");
+    expect(msg).toContain("2 settings written before the failure were rolled back");
+    expect(msg).toContain("no changes were applied");
+  });
+
+  it("uses singular wording for a single rolled-back key", () => {
+    const msg = wizardApplyFailureMessage({
+      ...base,
+      failedKey: "quotes.channel_id",
+      errorMessage: "boom",
+      appliedKeys: ["quotes.enabled"],
+      rolledBackKeys: ["quotes.enabled"],
+    });
+    expect(msg).toContain("1 setting written before the failure was rolled back");
+  });
+
+  it("names keys that could not be rolled back and says they are in effect", () => {
+    const msg = wizardApplyFailureMessage({
+      ...base,
+      failedKey: "quotes.channel_id",
+      errorMessage: "boom",
+      appliedKeys: ["quotes.enabled"],
+      revertFailedKeys: ["quotes.enabled"],
+    });
+    expect(msg).toContain("Could not roll back quotes.enabled");
+    expect(msg).toContain("saved and now in effect");
+  });
+
+  it("does not claim un-reverted keys are in effect when the reload also failed", () => {
+    const msg = wizardApplyFailureMessage({
+      ...base,
+      failedKey: "quotes.channel_id",
+      errorMessage: "boom",
+      appliedKeys: ["quotes.enabled"],
+      revertFailedKeys: ["quotes.enabled"],
+      reloadFailed: true,
+    });
+    expect(msg).toContain("Could not roll back quotes.enabled");
+    expect(msg).not.toContain("now in effect");
+    expect(msg).toContain("run /config reload");
+  });
+
+  it("reports a failure before any write as safe to retry", () => {
+    const msg = wizardApplyFailureMessage({
+      ...base,
+      failedKey: "quotes.enabled",
+      errorMessage: "boom",
+    });
+    expect(msg).toContain("No changes were applied");
+    expect(msg).toContain("You can retry");
+  });
+
+  it("passes through the reload-failure explanation after a fully persisted batch", () => {
+    const msg = wizardApplyFailureMessage({
+      ...base,
+      appliedKeys: ["quotes.enabled", "quotes.channel_id"],
+      errorMessage:
+        "All settings were saved, but the configuration reload failed — run /config reload to apply them",
+    });
+    expect(msg).toContain("All settings were saved");
+    expect(msg).toContain("run /config reload");
+    expect(msg).not.toContain("rolled back");
   });
 });
 

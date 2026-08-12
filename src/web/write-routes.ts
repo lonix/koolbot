@@ -29,7 +29,10 @@ import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { DigestService } from "../services/digest-service.js";
 import { ConfigService } from "../services/config-service.js";
 import { PermissionsService } from "../services/permissions-service.js";
-import { WizardService } from "../services/wizard-service.js";
+import {
+  WizardService,
+  type WizardApplyResult,
+} from "../services/wizard-service.js";
 import { BotStatusService } from "../services/bot-status-service.js";
 import { CommandManager } from "../services/command-manager.js";
 import {
@@ -130,6 +133,36 @@ export function firstLengthError(
     }
   }
   return null;
+}
+
+/**
+ * Build the operator-facing flash message for a failed wizard apply (#780).
+ * Pure and exported so each wording branch — full rollback, keys left in
+ * effect, reload failure — can be unit-tested without Express or Mongo.
+ */
+export function wizardApplyFailureMessage(result: WizardApplyResult): string {
+  const reason = result.failedKey
+    ? `${result.failedKey} failed (${result.errorMessage ?? "unknown error"})`
+    : (result.errorMessage ?? "unknown error");
+  if (result.revertFailedKeys.length > 0) {
+    const kept = `Wizard apply failed: ${reason}. Could not roll back ${result.revertFailedKeys.join(", ")} — these settings are saved`;
+    // When the follow-up reload also failed, the persisted keys have NOT
+    // taken effect for callback-driven services yet — say so instead of
+    // claiming they're live.
+    return result.reloadFailed
+      ? `${kept}, and the configuration reload failed — run /config reload to apply them.`
+      : `${kept} and now in effect.`;
+  }
+  if (result.rolledBackKeys.length > 0) {
+    const n = result.rolledBackKeys.length;
+    return `Wizard apply failed: ${reason}. The ${n} setting${n === 1 ? "" : "s"} written before the failure ${n === 1 ? "was" : "were"} rolled back — no changes were applied. You can retry.`;
+  }
+  if (result.appliedKeys.length === 0) {
+    return `Wizard apply failed: ${reason}. No changes were applied. You can retry.`;
+  }
+  // Every write persisted but the reload failed; the reason already says
+  // what to do (/config reload).
+  return `Wizard apply failed: ${reason}.`;
 }
 
 function flashRedirect(res: Response, path: string, flash: Flash): void {
@@ -1744,23 +1777,45 @@ export function createWriteRouter(
 
       const pendingKeys = Object.keys(state.configuration);
       try {
-        const applied = await wizard.applyConfiguration(
+        const result = await wizard.applyConfiguration(
           session.discordUserId,
           session.guildId,
         );
         await recordAudit(session, {
           action: "wizard.apply",
-          details: { keys: pendingKeys, count: pendingKeys.length },
-          result: applied ? "success" : "failure",
-          errorMessage: applied ? null : "applyConfiguration returned false",
+          details: {
+            keys: pendingKeys,
+            count: pendingKeys.length,
+            appliedKeys: result.appliedKeys,
+            failedKey: result.failedKey ?? null,
+            rolledBackKeys: result.rolledBackKeys,
+            revertFailedKeys: result.revertFailedKeys,
+            reloadFailed: result.reloadFailed ?? false,
+          },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success
+            ? null
+            : (result.errorMessage ?? "applyConfiguration failed"),
         });
-        wizard.endSession(session.discordUserId, session.guildId);
-        flashRedirect(res, "/admin/settings", {
-          type: applied ? "ok" : "err",
-          text: applied
-            ? `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}.`
-            : "Wizard failed to apply some settings. Check the bot logs.",
-        });
+        if (result.success) {
+          wizard.endSession(session.discordUserId, session.guildId);
+          flashRedirect(res, "/admin/settings", {
+            type: "ok",
+            text: `Wizard applied ${pendingKeys.length} setting${pendingKeys.length === 1 ? "" : "s"}.`,
+          });
+          return;
+        }
+        // The apply failed. Tell the operator exactly what state the config
+        // is in (#780) — which write failed, what was rolled back, and which
+        // keys (if any) could not be reverted and are therefore live — and
+        // keep the session so they can retry from the confirm step instead
+        // of losing their input.
+        const qs = new globalThis.URLSearchParams({
+          step: "confirm",
+          flash: "err",
+          msg: truncateFlash(wizardApplyFailureMessage(result)),
+        }).toString();
+        res.redirect(303, `/admin/wizard?${qs}`);
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
         logger.error("Wizard apply failed", err);
