@@ -24,24 +24,8 @@ import { MessageActivityTracking } from "../../src/models/message-activity-track
 
 // Attach methods the global mongoose mock doesn't provide.
 (MessageActivityTracking as unknown as { find: jest.Mock }).find = jest.fn();
-(MessageActivityTracking as unknown as { updateOne: jest.Mock }).updateOne =
+(MessageActivityTracking as unknown as { updateMany: jest.Mock }).updateMany =
   jest.fn();
-
-// Mimics the streaming `find({}).lean(false).cursor()` chain the cleanup
-// service uses, yielding each doc one at a time.
-function findCursor(docs: unknown[]) {
-  return {
-    lean: () => ({
-      cursor: () => ({
-        async *[Symbol.asyncIterator]() {
-          for (const doc of docs) {
-            yield doc;
-          }
-        },
-      }),
-    }),
-  };
-}
 
 function createService() {
   const service = MessageActivityCleanupService.getInstance({} as Client);
@@ -64,14 +48,19 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 describe("MessageActivityCleanupService", () => {
   let find: jest.Mock;
-  let updateOne: jest.Mock;
+  let updateMany: jest.Mock;
+  let aggregate: jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
     find = (MessageActivityTracking as unknown as { find: jest.Mock }).find;
-    updateOne = (MessageActivityTracking as unknown as { updateOne: jest.Mock })
-      .updateOne;
-    updateOne.mockResolvedValue({ matchedCount: 1 });
+    updateMany = (
+      MessageActivityTracking as unknown as { updateMany: jest.Mock }
+    ).updateMany;
+    aggregate = (MessageActivityTracking as unknown as { aggregate: jest.Mock })
+      .aggregate;
+    aggregate.mockResolvedValue([]);
+    updateMany.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
     (
       MessageActivityCleanupService as unknown as { instance: unknown }
     ).instance = undefined;
@@ -83,84 +72,58 @@ describe("MessageActivityCleanupService", () => {
     expect(a).toBe(b);
   });
 
-  it("prunes recentMessages older than retention and preserves totals", async () => {
+  it("prunes old recentMessages with a scoped atomic $pull and preserves totals", async () => {
     const { service } = createService();
 
-    const now = Date.now();
-    const oldEntry = { sentAt: new Date(now - 500 * DAY_MS), channelId: "c1" };
-    const recentEntry = {
-      sentAt: new Date(now - 10 * DAY_MS),
-      channelId: "c1",
-    };
-
-    const userDoc = {
-      _id: "id1",
-      username: "User1",
-      totalCount: 42,
-      channels: [{ channelId: "c1", count: 42 }],
-      recentMessages: [oldEntry, recentEntry],
-    };
-
-    find.mockReturnValue(findCursor([userDoc]));
+    aggregate.mockResolvedValue([{ _id: null, messages: 3 }]);
+    updateMany.mockResolvedValue({ matchedCount: 2, modifiedCount: 2 });
 
     const stats = await service.runCleanup();
 
-    expect(stats.messagesPruned).toBe(1);
-    expect(stats.usersProcessed).toBe(1);
+    expect(stats.messagesPruned).toBe(3);
+    expect(stats.usersProcessed).toBe(2);
 
-    // The update only rewrites recentMessages — it must not touch
-    // channels[] or totalCount.
-    expect(updateOne).toHaveBeenCalledTimes(1);
-    const [filter, update] = updateOne.mock.calls[0];
-    expect(filter).toEqual({ _id: "id1" });
-    expect(update.$set.recentMessages).toEqual([recentEntry]);
-    expect(update.$set.recentMessages).toHaveLength(1);
-    expect(update.$set).not.toHaveProperty("channels");
-    expect(update.$set).not.toHaveProperty("totalCount");
+    // A single collection-wide update, scoped to expired entries. Rewriting
+    // the whole array from an in-memory snapshot would race with the
+    // tracker's concurrent $push appends (#755).
+    expect(updateMany).toHaveBeenCalledTimes(1);
+    const [filter, update] = updateMany.mock.calls[0] as [
+      Record<string, unknown>,
+      { $pull: Record<string, unknown>; $set: Record<string, unknown> },
+    ];
+    expect(filter).toEqual({
+      "recentMessages.sentAt": { $lt: expect.any(Date) },
+    });
+    expect(update.$pull).toEqual({
+      recentMessages: { sentAt: { $lt: expect.any(Date) } },
+    });
+    // The update must only pull expired entries and stamp the cleanup date —
+    // it must not rewrite recentMessages wholesale or touch the all-time
+    // channels[] / totalCount fields.
+    expect(update.$set).toEqual({ lastCleanupDate: expect.any(Date) });
+
+    // The cutoff honours the configured retention window (400 days).
+    const cutoff = (
+      update.$pull.recentMessages as { sentAt: { $lt: Date } }
+    ).sentAt.$lt;
+    const expectedCutoff = Date.now() - 400 * DAY_MS;
+    expect(Math.abs(cutoff.getTime() - expectedCutoff)).toBeLessThan(60_000);
+
+    // No read-then-write snapshot of user documents.
+    expect(find).not.toHaveBeenCalled();
   });
 
-  it("does not write when nothing is beyond retention", async () => {
+  it("reports zeros when nothing is beyond retention", async () => {
     const { service } = createService();
 
-    const recentEntry = {
-      sentAt: new Date(Date.now() - 5 * DAY_MS),
-      channelId: "c1",
-    };
-    find.mockReturnValue(
-      findCursor([
-        {
-          _id: "id1",
-          username: "User1",
-          totalCount: 1,
-          channels: [{ channelId: "c1", count: 1 }],
-          recentMessages: [recentEntry],
-        },
-      ]),
-    );
+    aggregate.mockResolvedValue([]);
+    updateMany.mockResolvedValue({ matchedCount: 0, modifiedCount: 0 });
 
     const stats = await service.runCleanup();
 
     expect(stats.messagesPruned).toBe(0);
     expect(stats.usersProcessed).toBe(0);
-    expect(updateOne).not.toHaveBeenCalled();
-  });
-
-  it("streams via a cursor and never materialises the whole collection", async () => {
-    const { service } = createService();
-
-    const cursor = jest.fn(() => ({
-      async *[Symbol.asyncIterator]() {},
-    }));
-    const lean = jest.fn(() => ({ cursor }));
-    find.mockReturnValue({ lean });
-
-    await service.runCleanup();
-
-    // The cleanup must page through the collection with a cursor rather than
-    // awaiting an unbounded `.find({}).exec()` that loads every document.
-    expect(find).toHaveBeenCalledTimes(1);
-    expect(cursor).toHaveBeenCalledTimes(1);
-    expect(find.mock.results[0].value).not.toHaveProperty("exec");
+    expect(stats.errors).toEqual([]);
   });
 
   it("skips when the cleanup job is disabled", async () => {
@@ -169,6 +132,6 @@ describe("MessageActivityCleanupService", () => {
 
     const stats = await service.runCleanup();
     expect(stats.errors.length).toBeGreaterThan(0);
-    expect(find).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
   });
 });

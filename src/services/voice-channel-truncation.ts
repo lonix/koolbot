@@ -361,53 +361,50 @@ export class VoiceChannelTruncationService {
       // Get retention configuration
       const retentionConfig = await this.getRetentionConfig();
 
-      // Stream users one at a time via a cursor instead of loading the whole
-      // (append-heavy) collection into memory. The loop only reads fields and
-      // writes back via `updateOne`, so `.lean()` avoids hydration overhead.
-      const cursor = VoiceChannelTracking.find({}).lean().cursor();
+      const cutoffDate = new Date();
+      cutoffDate.setDate(
+        cutoffDate.getDate() - retentionConfig.detailedSessionsDays,
+      );
 
-      for await (const user of cursor) {
-        try {
-          if (user.sessions && user.sessions.length > 0) {
-            const cutoffDate = new Date();
-            cutoffDate.setDate(
-              cutoffDate.getDate() - retentionConfig.detailedSessionsDays,
-            );
-
-            // Separate recent and old sessions
-            const recentSessions = user.sessions.filter(
-              (session) => session.startTime >= cutoffDate,
-            );
-            const oldSessions = user.sessions.filter(
-              (session) => session.startTime < cutoffDate,
-            );
-
-            if (oldSessions.length > 0) {
-              // Update user document: remove old sessions, keep recent ones
-              await VoiceChannelTracking.updateOne(
-                { _id: user._id },
-                {
-                  $set: {
-                    sessions: recentSessions,
-                    lastCleanupDate: new Date(),
+      // Count the sessions about to be pruned, for reporting only. The
+      // deletion below is keyed on the same criterion — not on this count —
+      // so a write landing between the two just makes the stats off by one.
+      const [pruneCounts] = await VoiceChannelTracking.aggregate<{
+        sessions: number;
+      }>([
+        { $match: { "sessions.startTime": { $lt: cutoffDate } } },
+        {
+          $group: {
+            _id: null,
+            sessions: {
+              $sum: {
+                $size: {
+                  $filter: {
+                    input: "$sessions",
+                    cond: { $lt: ["$$this.startTime", cutoffDate] },
                   },
                 },
-              );
+              },
+            },
+          },
+        },
+      ]);
 
-              sessionsRemoved += oldSessions.length;
-              dataAggregated += 1;
+      // Prune expired sessions with a scoped, atomic $pull. Reading a
+      // snapshot, filtering in memory, and $set-ing the whole array back
+      // races with the tracker's concurrent `$push` appends — a session
+      // recorded mid-sweep would be silently overwritten (#755). `$pull`
+      // is applied atomically per document, so concurrent appends survive.
+      const result = await VoiceChannelTracking.updateMany(
+        { "sessions.startTime": { $lt: cutoffDate } },
+        {
+          $pull: { sessions: { startTime: { $lt: cutoffDate } } },
+          $set: { lastCleanupDate: new Date() },
+        },
+      );
 
-              logger.debug(
-                `Cleaned up ${oldSessions.length} old sessions for user ${user.username}, kept ${recentSessions.length} recent sessions`,
-              );
-            }
-          }
-        } catch (userError) {
-          const errorMessage = `Error processing user ${user.username}: ${userError instanceof Error ? userError.message : String(userError)}`;
-          errors.push(errorMessage);
-          logger.error(errorMessage, userError);
-        }
-      }
+      sessionsRemoved = pruneCounts?.sessions ?? 0;
+      dataAggregated = result.modifiedCount;
 
       logger.info(
         `Cleanup completed: ${sessionsRemoved} sessions removed, ${dataAggregated} users processed`,
