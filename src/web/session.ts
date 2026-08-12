@@ -2,7 +2,10 @@ import { Buffer } from "buffer";
 import { Client } from "discord.js";
 import { Request, RequestHandler, Response, NextFunction } from "express";
 import logger from "../utils/logger.js";
-import { PermissionsService } from "../services/permissions-service.js";
+import {
+  PermissionsService,
+  PermissionCheckError,
+} from "../services/permissions-service.js";
 import { WebSessionService } from "../services/web-session-service.js";
 import type { IWebSession, WebSessionRole } from "../models/web-session.js";
 import {
@@ -180,7 +183,9 @@ function readSessionCookie(req: Request): CookiePayload | null {
  * inactivity window, hard-caps the session to its server-side expiresAt,
  * and re-checks the user's command permission on every request via
  * PermissionsService (admins always pass; otherwise the configured roles
- * for "config" must allow the user).
+ * for "config" must allow the user). Only a definitive denial revokes
+ * the session; if the check itself fails transiently the request gets a
+ * 503 and the session survives (#781).
  */
 export function createSessionMiddleware(
   client: Client,
@@ -209,11 +214,16 @@ export function createSessionMiddleware(
       const permissions = PermissionsService.getInstance(client);
       // checkCommandPermission already short-circuits to true for
       // Administrators and to true when no role gating is configured for
-      // the command, so we can rely on its boolean directly.
+      // the command, so we can rely on its boolean directly. With
+      // `onUnavailable: "throw"` a transient internal failure (Discord
+      // API hiccup, rate limit, network blip) surfaces as a
+      // PermissionCheckError instead of being conflated with a `false`
+      // denial — only a genuine denial may revoke the session (#781).
       const allowed = await permissions.checkCommandPermission(
         payload.uid,
         payload.gid,
         "config",
+        { onUnavailable: "throw" },
       );
       if (!allowed) {
         clearSessionCookie(res);
@@ -222,9 +232,20 @@ export function createSessionMiddleware(
         return;
       }
     } catch (err) {
-      logger.warn("Failed to revalidate web session permissions", err);
-      clearSessionCookie(res);
-      respondUnauthorized(res);
+      // The permission could not be *checked* — that is not a denial.
+      // Fail only this request, leaving the cookie and the DB session
+      // untouched, so the very next request succeeds once the transient
+      // condition clears. Revoking here would force every active user to
+      // redeem a brand-new magic link after any brief Discord outage.
+      if (err instanceof PermissionCheckError) {
+        logger.warn(
+          "Web session permission re-check unavailable, failing request softly",
+          err,
+        );
+      } else {
+        logger.warn("Failed to revalidate web session permissions", err);
+      }
+      respondServiceUnavailable(res);
       return;
     }
 
@@ -345,6 +366,27 @@ export function createSessionPingHandler(): RequestHandler {
 
 function respondPingUnauthorized(res: Response): void {
   res.status(401).json({ error: "unauthorized" });
+}
+
+/**
+ * 503 used when the per-request permission re-check could not be
+ * performed (e.g. Discord API outage or rate limit). Deliberately does
+ * NOT clear the session cookie or revoke the DB session — the session is
+ * still valid, we just couldn't verify it right now (#781).
+ */
+function respondServiceUnavailable(res: Response): void {
+  res.setHeader("Retry-After", "10");
+  res
+    .status(503)
+    .type("text/html")
+    .send(
+      `<!doctype html><html><head><meta charset="utf-8"><title>Temporarily unavailable</title></head>` +
+        `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
+        `<h1>Temporarily unavailable</h1>` +
+        `<p>Your sign-in could not be verified because Discord did not respond. ` +
+        `Your session is still valid &mdash; refresh the page to try again.</p>` +
+        `</body></html>`,
+    );
 }
 
 function respondUnauthorized(res: Response): void {

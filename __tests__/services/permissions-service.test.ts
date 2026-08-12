@@ -1,5 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { PermissionsService } from "../../src/services/permissions-service.js";
+import {
+  PermissionsService,
+  PermissionCheckError,
+} from "../../src/services/permissions-service.js";
 import { CommandPermission } from "../../src/models/command-permissions.js";
 
 // Mock dependencies
@@ -476,6 +479,91 @@ describe("PermissionsService", () => {
       );
 
       expect(result).toBe(true);
+    });
+
+    // #781 — transient internal failures must be distinguishable from a
+    // genuine denial when the caller opts in via onUnavailable: "throw".
+    describe("internal failure handling (#781)", () => {
+      function makeServiceWithFailingFetch(
+        fetchError: unknown,
+      ): PermissionsService {
+        const mockGuild = {
+          members: {
+            fetch: jest.fn().mockRejectedValue(fetchError as never),
+          },
+        };
+        mockClient.guilds.fetch = jest.fn().mockResolvedValue(mockGuild);
+
+        const mockConfigService = {
+          getString: jest.fn().mockResolvedValue("guild123" as never),
+        };
+
+        (PermissionsService as unknown as { instance: unknown }).instance =
+          undefined;
+        const serviceWithMocks = PermissionsService.getInstance(
+          mockClient as never,
+        );
+        (serviceWithMocks as never)["configService"] = mockConfigService;
+        return serviceWithMocks;
+      }
+
+      it("returns false on a transient error by default (legacy behavior)", async () => {
+        const serviceWithMocks = makeServiceWithFailingFetch(
+          new Error("Discord API timeout"),
+        );
+
+        const result = await serviceWithMocks.checkCommandPermission(
+          "user123",
+          "guild123",
+          "quote",
+        );
+
+        expect(result).toBe(false);
+      });
+
+      it("throws PermissionCheckError on a transient error when onUnavailable is 'throw'", async () => {
+        const underlying = new Error("Discord API timeout");
+        const serviceWithMocks = makeServiceWithFailingFetch(underlying);
+
+        await expect(
+          serviceWithMocks.checkCommandPermission(
+            "user123",
+            "guild123",
+            "quote",
+            { onUnavailable: "throw" },
+          ),
+        ).rejects.toThrow(PermissionCheckError);
+
+        try {
+          await serviceWithMocks.checkCommandPermission(
+            "user123",
+            "guild123",
+            "quote",
+            { onUnavailable: "throw" },
+          );
+          throw new Error("expected checkCommandPermission to throw");
+        } catch (err) {
+          expect(err).toBeInstanceOf(PermissionCheckError);
+          expect((err as PermissionCheckError).cause).toBe(underlying);
+        }
+      });
+
+      it("returns false (genuine denial) for Unknown Member even when onUnavailable is 'throw'", async () => {
+        // Shaped like a DiscordAPIError: 10007 = Unknown Member.
+        const unknownMember = Object.assign(new Error("Unknown Member"), {
+          code: 10007,
+        });
+        const serviceWithMocks = makeServiceWithFailingFetch(unknownMember);
+
+        const result = await serviceWithMocks.checkCommandPermission(
+          "user123",
+          "guild123",
+          "quote",
+          { onUnavailable: "throw" },
+        );
+
+        expect(result).toBe(false);
+      });
     });
   });
 });

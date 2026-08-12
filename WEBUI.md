@@ -169,6 +169,9 @@ Key properties:
   no longer matches the user's roles. With no explicit gating configured,
   a re-check after demotion still passes — the magic-link gate at
   `/admin/s/<token>` is the primary defense, not this revalidation.
+  If the check itself cannot be performed (Discord API hiccup, rate
+  limit), the request fails with a 503 and the session is left intact —
+  only a definitive denial revokes it.
 - **No persistent OAuth.** The bot is the trust anchor. If you can run
   `/config` in Discord, you can configure the bot — no separate login.
 

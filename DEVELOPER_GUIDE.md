@@ -104,7 +104,10 @@ is never created and `/admin/*` returns 404.
      their existing session — the magic-link gate at `/admin/s/<token>`
      is the primary defense, not this revalidation. If you want demotions
      to log existing sessions out, configure Permissions → `config` to
-     an admin-only role.
+     an admin-only role. A transient failure of the check itself (Discord
+     API hiccup, rate limit) is not a denial: the middleware responds 503
+     without revoking the session or clearing the cookie, so the next
+     request succeeds once the blip clears.
 4. `POST /admin/finish` revokes the session in MongoDB, clears the cookie.
 
 The cookie value carries `sid`, `uid`, `gid`, `iat`, `act` — all
