@@ -41,6 +41,24 @@ export class VoiceChannelTruncationService {
     this.client = client;
     this.configService = ConfigService.getInstance();
     this.discordLogger = DiscordLogger.getInstance(client);
+
+    // Apply config changes at runtime (e.g. after /config reload) so the
+    // cron is (re)started, rescheduled, or stopped without a bot restart —
+    // matching message-activity-cleanup-service and digest-service.
+    this.configService.registerReloadCallback(async () => {
+      try {
+        logger.info("Voice cleanup configuration changed, reloading...");
+        // Tear down any existing schedule, then re-evaluate from config.
+        // startScheduledCleanup() is a no-op when the feature is disabled.
+        this.destroy();
+        await this.startScheduledCleanup();
+      } catch (error) {
+        logger.error(
+          "Error reloading voice cleanup service after configuration change:",
+          error,
+        );
+      }
+    });
   }
 
   public static getInstance(client: Client): VoiceChannelTruncationService {
