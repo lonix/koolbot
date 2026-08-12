@@ -736,10 +736,9 @@ administrators); grant additional roles from the **Permissions** page. See
 - The log is an append-only history, not a case-management system: there are
   no appeals, expiring warnings, or auto-moderation thresholds.
 - Retention: a daily cleanup job (03:30 server time) prunes rows older than
-  `moderation.retention_days`. The default of one year deliberately keeps
-  moderation history longer than the voice/message activity trackers keep
-  their detail data; set it to `0` if the log should never be pruned. The
-  job only runs while `moderation.enabled` is on.
+  `moderation.retention_days` (default: one year). Set it to `0` if the log
+  should never be pruned. The job only runs while `moderation.enabled` is
+  on.
 
 ---
 

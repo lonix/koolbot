@@ -347,10 +347,8 @@ export const defaultConfig: ConfigSchema = {
   // Moderation log defaults (#728). Master gate off, follows rule 1 — the
   // /warn + /modlog commands, the GuildAuditLogEntryCreate mirroring, and the
   // /admin/moderation page are all inert until an operator opts in.
-  // Retention (#742) defaults to a year — moderation history plausibly wants
-  // to outlive routine activity data (voice/message detail defaults to 400
-  // days) — and 0 disables pruning entirely for operators who want the log
-  // kept forever.
+  // Retention (#742) defaults to a year, the value proposed in the issue;
+  // 0 disables pruning entirely for operators who want the log kept forever.
   "moderation.enabled": false,
   "moderation.retention_days": 365,
 };

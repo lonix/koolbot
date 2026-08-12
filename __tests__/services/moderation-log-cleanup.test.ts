@@ -28,16 +28,35 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
+// Observable CronJob mock: records every constructed job so the tests can
+// assert on the schedule expression and start/stop lifecycle.
+interface MockCronJob {
+  expression: string;
+  started: boolean;
+  stopped: boolean;
+}
+const cronInstances: MockCronJob[] = [];
+
 jest.unstable_mockModule("cron", () => ({
-  CronJob: class {
-    start(): void {}
-    stop(): void {}
+  CronJob: class implements MockCronJob {
+    expression: string;
+    started = false;
+    stopped = false;
+    constructor(expression: string) {
+      this.expression = expression;
+      cronInstances.push(this);
+    }
+    start(): void {
+      this.started = true;
+    }
+    stop(): void {
+      this.stopped = true;
+    }
   },
 }));
 
-const { ModerationLogCleanupService } = await import(
-  "../../src/services/moderation-log-cleanup.js"
-);
+const { ModerationLogCleanupService } =
+  await import("../../src/services/moderation-log-cleanup.js");
 
 describe("ModerationLogCleanupService", () => {
   beforeEach(() => {
@@ -45,6 +64,28 @@ describe("ModerationLogCleanupService", () => {
     mockGetBoolean.mockReset();
     mockGetNumber.mockReset();
     mockDeleteMany.mockReset();
+    cronInstances.length = 0;
+  });
+
+  it("schedules a daily job at 03:30 and start() is idempotent", () => {
+    const service = ModerationLogCleanupService.getInstance();
+    service.start();
+    expect(cronInstances).toHaveLength(1);
+    expect(cronInstances[0]?.expression).toBe("30 3 * * *");
+    expect(cronInstances[0]?.started).toBe(true);
+    // A second start() while a job exists must not schedule a duplicate.
+    service.start();
+    expect(cronInstances).toHaveLength(1);
+  });
+
+  it("destroy() stops the scheduled job and allows a later restart", () => {
+    const service = ModerationLogCleanupService.getInstance();
+    service.start();
+    service.destroy();
+    expect(cronInstances[0]?.stopped).toBe(true);
+    service.start();
+    expect(cronInstances).toHaveLength(2);
+    expect(cronInstances[1]?.started).toBe(true);
   });
 
   it("is a no-op when the moderation feature is disabled", async () => {
