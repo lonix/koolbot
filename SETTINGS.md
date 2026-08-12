@@ -723,6 +723,7 @@ administrators); grant additional roles from the **Permissions** page. See
 | Setting | Default | Description |
 | --- | --- | --- |
 | `moderation.enabled` | `false` | Master switch — enables the `/warn` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page |
+| `moderation.retention_days` | `365` | Days to keep moderation-log rows before the daily cleanup prunes them. Set to `0` to keep history forever |
 
 **Notes:**
 
@@ -734,6 +735,11 @@ administrators); grant additional roles from the **Permissions** page. See
   the bot). `/warn` works without View Audit Log.
 - The log is an append-only history, not a case-management system: there are
   no appeals, expiring warnings, or auto-moderation thresholds.
+- Retention: a daily cleanup job (03:30 server time) prunes rows older than
+  `moderation.retention_days`. The default of one year deliberately keeps
+  moderation history longer than the voice/message activity trackers keep
+  their detail data; set it to `0` if the log should never be pruned. The
+  job only runs while `moderation.enabled` is on.
 
 ---
 
@@ -1218,6 +1224,7 @@ leave the graph in a broken state.
 #### Moderation
 
 - `moderation.enabled` (bool, default: false)
+- `moderation.retention_days` (number, default: 365)
 
 #### Cleanup
 
