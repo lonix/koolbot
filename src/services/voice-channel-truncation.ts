@@ -41,6 +41,26 @@ export class VoiceChannelTruncationService {
     this.client = client;
     this.configService = ConfigService.getInstance();
     this.discordLogger = DiscordLogger.getInstance(client);
+
+    // Apply config changes at runtime (e.g. after /config reload) so the
+    // cron is (re)started, rescheduled, or stopped without a bot restart —
+    // matching message-activity-cleanup-service and digest-service.
+    this.configService.registerReloadCallback(async () => {
+      try {
+        logger.info("Voice cleanup configuration changed, reloading...");
+        // Tear down only the schedule (not the run state — an in-flight
+        // cleanup must keep runCleanup()'s overlap guard armed), then
+        // re-evaluate from config. startScheduledCleanup() is a no-op when
+        // the feature is disabled.
+        this.stopScheduledCleanup();
+        await this.startScheduledCleanup();
+      } catch (error) {
+        logger.error(
+          "Error reloading voice cleanup service after configuration change:",
+          error,
+        );
+      }
+    });
   }
 
   public static getInstance(client: Client): VoiceChannelTruncationService {
@@ -441,15 +461,23 @@ export class VoiceChannelTruncationService {
   }
 
   /**
-   * Destroy the cleanup service and stop the cron job
+   * Stop the scheduled cron job without touching the run state, so a
+   * cleanup already in progress keeps runCleanup()'s overlap guard armed.
    */
-  public destroy(): void {
+  private stopScheduledCleanup(): void {
     if (this.cleanupJob) {
       this.cleanupJob.stop();
       this.cleanupJob = null;
     }
-    this.isRunning = false;
     this.isScheduled = false;
+  }
+
+  /**
+   * Destroy the cleanup service and stop the cron job
+   */
+  public destroy(): void {
+    this.stopScheduledCleanup();
+    this.isRunning = false;
     this.isConnected = false;
   }
 }
