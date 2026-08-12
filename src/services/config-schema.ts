@@ -139,6 +139,7 @@ export interface ConfigSchema {
 
   // Moderation log (issue #728)
   "moderation.enabled": boolean;
+  "moderation.retention_days": number; // 0 = keep history forever (issue #742)
 }
 
 /**
@@ -346,7 +347,10 @@ export const defaultConfig: ConfigSchema = {
   // Moderation log defaults (#728). Master gate off, follows rule 1 — the
   // /warn + /modlog commands, the GuildAuditLogEntryCreate mirroring, and the
   // /admin/moderation page are all inert until an operator opts in.
+  // Retention (#742) defaults to a year, the value proposed in the issue;
+  // 0 disables pruning entirely for operators who want the log kept forever.
   "moderation.enabled": false,
+  "moderation.retention_days": 365,
 };
 
 /**
@@ -1431,5 +1435,12 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Enable the moderation log: the /warn and /modlog commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the /admin/moderation page. Requires the bot to have the View Audit Log permission for native actions to be captured.",
     category: "moderation",
     type: "boolean",
+  },
+  "moderation.retention_days": {
+    label: "Moderation log retention (days)",
+    description:
+      "Days to keep moderation-log rows before the daily cleanup job prunes them. Set to 0 to keep moderation history forever.",
+    category: "moderation",
+    type: "number",
   },
 };

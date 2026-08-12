@@ -30,6 +30,7 @@ import { MessageActivityCleanupService } from "./services/message-activity-clean
 import { ReactionActivityTracker } from "./services/reaction-activity-tracker.js";
 import { PollParticipationTracker } from "./services/poll-participation-tracker.js";
 import { CommandAuditCleanupService } from "./services/command-audit-cleanup.js";
+import { ModerationLogCleanupService } from "./services/moderation-log-cleanup.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
@@ -495,6 +496,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         voiceChannelTruncation.destroy();
         messageActivityCleanup.destroy();
         CommandAuditCleanupService.getInstance().destroy();
+        ModerationLogCleanupService.getInstance().destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
         leaderboardRoleService.destroy();
@@ -719,6 +721,10 @@ async function initializeServices(): Promise<void> {
 
     // Start the slash-command audit log cleanup cron (#459)
     CommandAuditCleanupService.getInstance().start();
+
+    // Start the moderation-log retention cleanup cron (#742). Gates on
+    // `moderation.enabled` and `moderation.retention_days` at run time.
+    ModerationLogCleanupService.getInstance().start();
 
     // Initialize permissions service and set up default permissions
     const permissionsService = PermissionsService.getInstance(client);
