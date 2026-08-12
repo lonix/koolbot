@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { setImmediate } from "node:timers";
 import type { Client } from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
@@ -161,6 +162,49 @@ describe("MessageActivityCleanupService", () => {
     expect(find).toHaveBeenCalledTimes(1);
     expect(cursor).toHaveBeenCalledTimes(1);
     expect(find.mock.results[0].value).not.toHaveProperty("exec");
+  });
+
+  it("keeps the mutual-exclusion guard intact when destroy() fires mid-run (issue #779)", async () => {
+    const { service } = createService();
+
+    let releaseCursor!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseCursor = resolve;
+    });
+
+    // A cursor whose iteration blocks until the test releases it, holding
+    // performCleanup() in flight.
+    find.mockReturnValue({
+      lean: () => ({
+        cursor: () => ({
+          async *[Symbol.asyncIterator]() {
+            await gate;
+            yield* [];
+          },
+        }),
+      }),
+    });
+
+    const firstRun = service.runCleanup();
+    // Let runCleanup() pass its guard and enter performCleanup().
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(service.getStatus().isRunning).toBe(true);
+
+    // The config-reload callback tears the schedule down while the pass is
+    // still executing — it must not reset the in-flight flag.
+    service.destroy();
+    expect(service.getStatus().isRunning).toBe(true);
+    expect(service.getStatus().isScheduled).toBe(false);
+
+    // A second run (next cron tick, or a web UI "run now") stays blocked.
+    await expect(service.runCleanup()).rejects.toThrow(
+      "Message cleanup is already running",
+    );
+
+    releaseCursor();
+    await firstRun;
+    // The finally block in runCleanup() — not destroy() — clears the flag.
+    expect(service.getStatus().isRunning).toBe(false);
   });
 
   it("skips when the cleanup job is disabled", async () => {
