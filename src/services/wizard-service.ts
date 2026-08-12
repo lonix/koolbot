@@ -25,8 +25,15 @@ export interface WizardApplyResult {
   errorMessage?: string;
   /** Keys that were persisted and then successfully restored to their prior state. */
   rolledBackKeys: string[];
-  /** Keys that were persisted but could not be restored — they remain in effect. */
+  /**
+   * Keys that were persisted but could not be restored — they remain in the
+   * store. Includes keys skipped because a concurrent writer changed them
+   * after this apply wrote them (rolling those back would clobber the newer
+   * value).
+   */
   revertFailedKeys: string[];
+  /** True when a config reload was needed (keys remain persisted) but failed to run. */
+  reloadFailed?: boolean;
 }
 
 export interface DetectedResources {
@@ -362,6 +369,7 @@ export class WizardService {
           appliedKeys,
           rolledBackKeys: [],
           revertFailedKeys: [],
+          reloadFailed: true,
           errorMessage:
             "All settings were saved, but the configuration reload failed — run /config reload to apply them",
         };
@@ -383,6 +391,19 @@ export class WizardService {
     const revertFailedKeys: string[] = [];
     for (const key of [...appliedKeys].reverse()) {
       try {
+        // Only restore a key that still holds the value this apply wrote.
+        // Another writer (settings page, /config set — all in-process, so
+        // the ConfigService cache reflects the latest write) may have
+        // updated it after the snapshot; rolling back would clobber their
+        // newer value, so leave it and report the key as not reverted.
+        const current = await this.configService.get(key);
+        if (current !== state.configuration[key]) {
+          revertFailedKeys.push(key);
+          logger.warn(
+            `Skipping rollback of wizard setting ${key}: it was changed concurrently after this apply wrote it`,
+          );
+          continue;
+        }
         const prior = priorRows.get(key);
         if (prior) {
           await this.configService.set(
@@ -402,6 +423,7 @@ export class WizardService {
       }
     }
 
+    let reloadFailed = false;
     if (revertFailedKeys.length > 0) {
       // Some writes could not be undone, so the DB has changed. Reload so
       // services pick those values up immediately instead of diverging from
@@ -409,6 +431,7 @@ export class WizardService {
       try {
         await this.configService.triggerReload();
       } catch (reloadError) {
+        reloadFailed = true;
         logger.error(
           "Error reloading configuration after partial wizard apply:",
           reloadError,
@@ -423,6 +446,7 @@ export class WizardService {
       errorMessage,
       rolledBackKeys,
       revertFailedKeys,
+      ...(reloadFailed ? { reloadFailed } : {}),
     };
   }
 

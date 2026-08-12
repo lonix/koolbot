@@ -181,13 +181,22 @@ describe("WizardService", () => {
     const mockGuildId = "guild-456";
 
     let mockConfigService: any;
+    // Simulates the ConfigService cache: set/delete keep it in step, and
+    // get reads it, matching how the real service behaves in-process.
+    let cache: Map<string, unknown>;
 
     beforeEach(() => {
+      cache = new Map();
       mockConfigService = {
         findDependencyIssues: jest.fn(async () => [] as any[]),
         getAll: jest.fn(async () => [] as any[]),
-        set: jest.fn(async () => undefined),
-        delete: jest.fn(async () => undefined),
+        get: jest.fn(async (key: string) => cache.get(key)),
+        set: jest.fn(async (key: string, value: unknown) => {
+          cache.set(key, value);
+        }),
+        delete: jest.fn(async (key: string) => {
+          cache.delete(key);
+        }),
         triggerReload: jest.fn(async () => undefined),
       };
       // The ConfigService module is auto-mocked, so inject a controllable
@@ -244,11 +253,14 @@ describe("WizardService", () => {
           category: "quotes",
         },
       ] as any);
-      mockConfigService.set.mockImplementation(async (key: string) => {
-        if (key === "quotes.delete_roles") {
-          throw new Error("mongo write failed");
-        }
-      });
+      mockConfigService.set.mockImplementation(
+        async (key: string, value: unknown) => {
+          if (key === "quotes.delete_roles") {
+            throw new Error("mongo write failed");
+          }
+          cache.set(key, value);
+        },
+      );
 
       const result = await service.applyConfiguration(mockUserId, mockGuildId);
 
@@ -281,11 +293,14 @@ describe("WizardService", () => {
     });
 
     it("reloads and reports keys whose rollback failed", async () => {
-      mockConfigService.set.mockImplementation(async (key: string) => {
-        if (key === "quotes.channel_id") {
-          throw new Error("write failed");
-        }
-      });
+      mockConfigService.set.mockImplementation(
+        async (key: string, value: unknown) => {
+          if (key === "quotes.channel_id") {
+            throw new Error("write failed");
+          }
+          cache.set(key, value);
+        },
+      );
       mockConfigService.delete.mockRejectedValue(new Error("delete failed"));
 
       const result = await service.applyConfiguration(mockUserId, mockGuildId);
@@ -296,7 +311,81 @@ describe("WizardService", () => {
       expect(result.rolledBackKeys).toEqual([]);
       expect(result.revertFailedKeys).toEqual(["quotes.enabled"]);
       // A key stayed persisted, so the reload must run to keep services in
-      // sync with the DB.
+      // sync with the DB — and it succeeded here.
+      expect(mockConfigService.triggerReload).toHaveBeenCalledTimes(1);
+      expect(result.reloadFailed).toBeUndefined();
+    });
+
+    it("flags reloadFailed when rollback failure is followed by a reload failure", async () => {
+      mockConfigService.set.mockImplementation(
+        async (key: string, value: unknown) => {
+          if (key === "quotes.channel_id") {
+            throw new Error("write failed");
+          }
+          cache.set(key, value);
+        },
+      );
+      mockConfigService.delete.mockRejectedValue(new Error("delete failed"));
+      mockConfigService.triggerReload.mockRejectedValue(
+        new Error("reload failed"),
+      );
+
+      const result = await service.applyConfiguration(mockUserId, mockGuildId);
+
+      expect(result.success).toBe(false);
+      expect(result.revertFailedKeys).toEqual(["quotes.enabled"]);
+      // The persisted key has NOT taken effect for callback-driven services;
+      // the result must say so rather than only logging it.
+      expect(result.reloadFailed).toBe(true);
+      expect(result.errorMessage).toBe("write failed");
+    });
+
+    it("skips rolling back a key changed concurrently after the wizard wrote it", async () => {
+      mockConfigService.getAll.mockResolvedValue([
+        {
+          key: "quotes.enabled",
+          value: false,
+          description: "old description",
+          category: "quotes",
+        },
+      ] as any);
+      mockConfigService.set.mockImplementation(
+        async (key: string, value: unknown) => {
+          if (key === "quotes.delete_roles") {
+            throw new Error("mongo write failed");
+          }
+          cache.set(key, value);
+        },
+      );
+      // Simulate another writer updating quotes.enabled between this apply's
+      // write and its rollback.
+      mockConfigService.get.mockImplementation(async (key: string) =>
+        key === "quotes.enabled" ? "someone-elses-value" : cache.get(key),
+      );
+
+      const result = await service.applyConfiguration(mockUserId, mockGuildId);
+
+      expect(result.success).toBe(false);
+      // quotes.channel_id still held our value → rolled back (deleted);
+      // quotes.enabled was changed concurrently → left alone, reported.
+      expect(result.rolledBackKeys).toEqual(["quotes.channel_id"]);
+      expect(result.revertFailedKeys).toEqual(["quotes.enabled"]);
+      expect(mockConfigService.delete).toHaveBeenCalledWith(
+        "quotes.channel_id",
+      );
+      expect(mockConfigService.delete).not.toHaveBeenCalledWith(
+        "quotes.enabled",
+      );
+      // The snapshot restore for quotes.enabled must NOT have run — that
+      // would clobber the concurrent writer's newer value.
+      expect(mockConfigService.set).not.toHaveBeenCalledWith(
+        "quotes.enabled",
+        false,
+        "old description",
+        "quotes",
+        { skipDependencyCheck: true },
+      );
+      // A key stayed persisted → reload runs.
       expect(mockConfigService.triggerReload).toHaveBeenCalledTimes(1);
     });
 
@@ -312,6 +401,7 @@ describe("WizardService", () => {
       expect(result.appliedKeys).toHaveLength(3);
       expect(result.rolledBackKeys).toEqual([]);
       expect(result.revertFailedKeys).toEqual([]);
+      expect(result.reloadFailed).toBe(true);
       expect(result.errorMessage).toContain("/config reload");
       // Nothing is rolled back — the writes themselves all succeeded.
       expect(mockConfigService.delete).not.toHaveBeenCalled();
