@@ -54,10 +54,12 @@ jest.unstable_mockModule("../../src/models/user-birthday.js", () => ({
   },
 }));
 
+const mockLoggerWarn = jest.fn();
+
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: jest.fn(),
-    warn: jest.fn(),
+    warn: mockLoggerWarn,
     error: jest.fn(),
     debug: jest.fn(),
   },
@@ -362,6 +364,123 @@ describe("BirthdayService", () => {
         svc.setBirthday("u1", "g1", { month: 6, day: 16, year: 1800 }),
       ).rejects.toThrow(/valid birth year/);
       expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("sweepExpiredRoles", () => {
+    const MS_PER_HOUR = 60 * 60 * 1000;
+    const now = new Date("2026-06-16T12:00:00Z");
+    const expiredAt = new Date(now.getTime() - 48 * MS_PER_HOUR);
+
+    type SweepFn = (
+      guild: unknown,
+      guildId: string,
+      roleId: string,
+      durationMs: number,
+      now: Date,
+    ) => Promise<number>;
+
+    function sweep(svc: ServiceInstance): SweepFn {
+      return (
+        svc as unknown as { sweepExpiredRoles: SweepFn }
+      ).sweepExpiredRoles.bind(svc);
+    }
+
+    function makeGuild(member: unknown): unknown {
+      return { members: { fetch: jest.fn().mockResolvedValue(member) } };
+    }
+
+    function makeMember(): unknown {
+      return {
+        roles: {
+          cache: { has: jest.fn(() => true) },
+          remove: jest.fn().mockResolvedValue(undefined),
+        },
+      };
+    }
+
+    it("logs a warning with the sanitized user id when clearing roleAssignedAt fails to save", async () => {
+      const saveError = new Error("mongo down");
+      const row = {
+        userId: "user-1\nforged log line",
+        roleAssignedAt: expiredAt as Date | undefined,
+        save: jest.fn().mockRejectedValue(saveError),
+      };
+      mockBirthdayFind.mockResolvedValue([row]);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      const removed = await sweep(svc)(
+        makeGuild(makeMember()),
+        "guild-1",
+        "role-1",
+        24 * MS_PER_HOUR,
+        now,
+      );
+
+      // The role removal itself still counts and the marker is cleared
+      // in memory; only the persistence failed.
+      expect(removed).toBe(1);
+      expect(row.roleAssignedAt).toBeUndefined();
+
+      // The save failure must be logged (regression: it used to be
+      // swallowed by a bare `.catch(() => undefined)`), with the user id
+      // sanitized so it cannot forge log lines.
+      expect(mockLoggerWarn).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to clear roleAssignedAt"),
+        saveError,
+      );
+      const [message] = mockLoggerWarn.mock.calls.find(
+        ([msg]) => typeof msg === "string" && msg.includes("roleAssignedAt"),
+      ) as [string, unknown];
+      expect(message).toContain("user-1 forged log line");
+      expect(message).not.toContain("\n");
+    });
+
+    it("does not warn when the save succeeds", async () => {
+      const row = {
+        userId: "user-2",
+        roleAssignedAt: expiredAt as Date | undefined,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockBirthdayFind.mockResolvedValue([row]);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      const removed = await sweep(svc)(
+        makeGuild(makeMember()),
+        "guild-1",
+        "role-1",
+        24 * MS_PER_HOUR,
+        now,
+      );
+
+      expect(removed).toBe(1);
+      expect(row.roleAssignedAt).toBeUndefined();
+      expect(row.save).toHaveBeenCalledTimes(1);
+      expect(mockLoggerWarn).not.toHaveBeenCalled();
+    });
+
+    it("leaves unexpired grants untouched", async () => {
+      const row = {
+        userId: "user-3",
+        roleAssignedAt: new Date(now.getTime() - 1 * MS_PER_HOUR) as
+          | Date
+          | undefined,
+        save: jest.fn().mockResolvedValue(undefined),
+      };
+      mockBirthdayFind.mockResolvedValue([row]);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      const removed = await sweep(svc)(
+        makeGuild(makeMember()),
+        "guild-1",
+        "role-1",
+        24 * MS_PER_HOUR,
+        now,
+      );
+
+      expect(removed).toBe(0);
+      expect(row.roleAssignedAt).toBeDefined();
+      expect(row.save).not.toHaveBeenCalled();
     });
   });
 });
