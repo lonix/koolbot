@@ -1,10 +1,32 @@
 import { TextChannel, VoiceChannel, CategoryChannel } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
-import { DependencyError } from "./config-schema.js";
+import { DependencyError, hasOwn } from "./config-schema.js";
+import type { IConfig } from "../models/config.js";
 
 export interface WizardConfiguration {
   [key: string]: string | number | boolean;
+}
+
+/**
+ * Outcome of a wizard apply (#780). A plain boolean can't describe a batch
+ * that failed partway through, so the result reports exactly which keys were
+ * written, which were restored to their prior state, and which (if any) could
+ * not be restored and are therefore live in the config store.
+ */
+export interface WizardApplyResult {
+  /** True when every setting persisted and the config reload ran. */
+  success: boolean;
+  /** Keys persisted by this call, in apply order (includes keys that were later rolled back). */
+  appliedKeys: string[];
+  /** The key whose write failed, when a per-key write threw. */
+  failedKey?: string;
+  /** Human-readable reason for a failure (per-key write, reload, or missing session). */
+  errorMessage?: string;
+  /** Keys that were persisted and then successfully restored to their prior state. */
+  rolledBackKeys: string[];
+  /** Keys that were persisted but could not be restored — they remain in effect. */
+  revertFailedKeys: string[];
 }
 
 export interface DetectedResources {
@@ -247,13 +269,29 @@ export class WizardService {
   }
 
   /**
-   * Apply all configuration changes from wizard
+   * Apply all configuration changes from wizard.
+   *
+   * The batch is atomic in effect (#780): prior values are snapshotted before
+   * anything is written, and a mid-batch write failure triggers a best-effort
+   * rollback of the keys already persisted. If any rollback itself fails, the
+   * config reload still runs so services on registered reload callbacks pick
+   * up what actually persisted rather than silently lagging behind the DB,
+   * and the returned result names the keys left in effect.
    */
-  async applyConfiguration(userId: string, guildId: string): Promise<boolean> {
+  async applyConfiguration(
+    userId: string,
+    guildId: string,
+  ): Promise<WizardApplyResult> {
     const state = this.getSession(userId, guildId);
     if (!state) {
       logger.error(`No wizard session found for user ${userId}`);
-      return false;
+      return {
+        success: false,
+        appliedKeys: [],
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+        errorMessage: "No active wizard session",
+      };
     }
 
     // Validate the whole proposed batch against the feature dependency graph
@@ -269,34 +307,123 @@ export class WizardService {
       throw new DependencyError(issues);
     }
 
-    try {
-      logger.info(
-        `Applying wizard configuration for user ${userId}: ${Object.keys(state.configuration).length} settings`,
-      );
+    const entries = Object.entries(state.configuration);
+    logger.info(
+      `Applying wizard configuration for user ${userId}: ${entries.length} settings`,
+    );
 
-      // Apply each configuration setting. The batch was already validated
-      // above, so per-key dependency checks are skipped to avoid spurious
-      // ordering-dependent rejections within the batch.
-      for (const [key, value] of Object.entries(state.configuration)) {
-        const category = key.split(".")[0];
-        const description = this.getSettingDescription(key);
+    // Snapshot the stored rows for the batch's keys before writing anything,
+    // so a mid-batch failure can restore each written key to its exact prior
+    // state — a key with no stored row is deleted on rollback rather than
+    // left behind with a wizard-supplied value.
+    const priorRows = new Map<string, IConfig>();
+    for (const row of await this.configService.getAll()) {
+      if (hasOwn(state.configuration, row.key)) {
+        priorRows.set(row.key, row);
+      }
+    }
+
+    // Apply each configuration setting. The batch was already validated
+    // above, so per-key dependency checks are skipped to avoid spurious
+    // ordering-dependent rejections within the batch.
+    const appliedKeys: string[] = [];
+    let failedKey: string | undefined;
+    let errorMessage: string | undefined;
+    for (const [key, value] of entries) {
+      const category = key.split(".")[0];
+      const description = this.getSettingDescription(key);
+      try {
         await this.configService.set(key, value, description, category, {
           skipDependencyCheck: true,
         });
+        appliedKeys.push(key);
         logger.debug(`Set ${key} = ${value}`);
+      } catch (error) {
+        failedKey = key;
+        errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error(`Error applying wizard configuration at ${key}:`, error);
+        break;
       }
+    }
 
-      // Trigger reload to apply changes
-      await this.configService.triggerReload();
+    if (failedKey === undefined) {
+      try {
+        await this.configService.triggerReload();
+      } catch (error) {
+        // Every key persisted (and is cached), but the reload didn't run, so
+        // callback-driven services are still on their old config. Surface
+        // that precisely instead of pretending nothing was written.
+        logger.error(
+          "Error reloading configuration after wizard apply:",
+          error,
+        );
+        return {
+          success: false,
+          appliedKeys,
+          rolledBackKeys: [],
+          revertFailedKeys: [],
+          errorMessage:
+            "All settings were saved, but the configuration reload failed — run /config reload to apply them",
+        };
+      }
       logger.info(
         `Successfully applied wizard configuration for user ${userId}`,
       );
-
-      return true;
-    } catch (error) {
-      logger.error("Error applying wizard configuration:", error);
-      return false;
+      return {
+        success: true,
+        appliedKeys,
+        rolledBackKeys: [],
+        revertFailedKeys: [],
+      };
     }
+
+    // A write failed partway through the batch: best-effort revert of the
+    // keys persisted before the failure, newest first.
+    const rolledBackKeys: string[] = [];
+    const revertFailedKeys: string[] = [];
+    for (const key of [...appliedKeys].reverse()) {
+      try {
+        const prior = priorRows.get(key);
+        if (prior) {
+          await this.configService.set(
+            key,
+            prior.value,
+            prior.description,
+            prior.category,
+            { skipDependencyCheck: true },
+          );
+        } else {
+          await this.configService.delete(key);
+        }
+        rolledBackKeys.push(key);
+      } catch (error) {
+        revertFailedKeys.push(key);
+        logger.error(`Failed to roll back wizard setting ${key}:`, error);
+      }
+    }
+
+    if (revertFailedKeys.length > 0) {
+      // Some writes could not be undone, so the DB has changed. Reload so
+      // services pick those values up immediately instead of diverging from
+      // the store until the next /config reload or restart.
+      try {
+        await this.configService.triggerReload();
+      } catch (reloadError) {
+        logger.error(
+          "Error reloading configuration after partial wizard apply:",
+          reloadError,
+        );
+      }
+    }
+
+    return {
+      success: false,
+      appliedKeys,
+      failedKey,
+      errorMessage,
+      rolledBackKeys,
+      revertFailedKeys,
+    };
   }
 
   /**

@@ -176,6 +176,165 @@ describe("WizardService", () => {
     });
   });
 
+  describe("applyConfiguration", () => {
+    const mockUserId = "user-123";
+    const mockGuildId = "guild-456";
+
+    let mockConfigService: any;
+
+    beforeEach(() => {
+      mockConfigService = {
+        findDependencyIssues: jest.fn(async () => [] as any[]),
+        getAll: jest.fn(async () => [] as any[]),
+        set: jest.fn(async () => undefined),
+        delete: jest.fn(async () => undefined),
+        triggerReload: jest.fn(async () => undefined),
+      };
+      // The ConfigService module is auto-mocked, so inject a controllable
+      // instance directly.
+      (service as any).configService = mockConfigService;
+
+      service.createSession(mockUserId, mockGuildId);
+      service.addConfiguration(mockUserId, mockGuildId, "quotes.enabled", true);
+      service.addConfiguration(
+        mockUserId,
+        mockGuildId,
+        "quotes.channel_id",
+        "123",
+      );
+      service.addConfiguration(
+        mockUserId,
+        mockGuildId,
+        "quotes.delete_roles",
+        "role-1",
+      );
+    });
+
+    it("applies every key and reloads on success", async () => {
+      const result = await service.applyConfiguration(mockUserId, mockGuildId);
+
+      expect(result.success).toBe(true);
+      expect(result.appliedKeys).toEqual([
+        "quotes.enabled",
+        "quotes.channel_id",
+        "quotes.delete_roles",
+      ]);
+      expect(result.rolledBackKeys).toEqual([]);
+      expect(result.revertFailedKeys).toEqual([]);
+      expect(mockConfigService.set).toHaveBeenCalledTimes(3);
+      expect(mockConfigService.triggerReload).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns a failure result when no session exists", async () => {
+      const result = await service.applyConfiguration("nobody", "nowhere");
+
+      expect(result.success).toBe(false);
+      expect(result.appliedKeys).toEqual([]);
+      expect(result.errorMessage).toContain("No active wizard session");
+      expect(mockConfigService.set).not.toHaveBeenCalled();
+    });
+
+    it("rolls back already-written keys when a mid-batch write fails", async () => {
+      // quotes.enabled had a stored row; quotes.channel_id did not.
+      mockConfigService.getAll.mockResolvedValue([
+        {
+          key: "quotes.enabled",
+          value: false,
+          description: "old description",
+          category: "quotes",
+        },
+      ] as any);
+      mockConfigService.set.mockImplementation(async (key: string) => {
+        if (key === "quotes.delete_roles") {
+          throw new Error("mongo write failed");
+        }
+      });
+
+      const result = await service.applyConfiguration(mockUserId, mockGuildId);
+
+      expect(result.success).toBe(false);
+      expect(result.failedKey).toBe("quotes.delete_roles");
+      expect(result.errorMessage).toBe("mongo write failed");
+      expect(result.appliedKeys).toEqual([
+        "quotes.enabled",
+        "quotes.channel_id",
+      ]);
+      // Rolled back newest-first: the unsaved key is deleted, the
+      // previously-stored key is restored with its prior row verbatim.
+      expect(result.rolledBackKeys).toEqual([
+        "quotes.channel_id",
+        "quotes.enabled",
+      ]);
+      expect(result.revertFailedKeys).toEqual([]);
+      expect(mockConfigService.delete).toHaveBeenCalledWith(
+        "quotes.channel_id",
+      );
+      expect(mockConfigService.set).toHaveBeenCalledWith(
+        "quotes.enabled",
+        false,
+        "old description",
+        "quotes",
+        { skipDependencyCheck: true },
+      );
+      // Full rollback → nothing changed → no reload.
+      expect(mockConfigService.triggerReload).not.toHaveBeenCalled();
+    });
+
+    it("reloads and reports keys whose rollback failed", async () => {
+      mockConfigService.set.mockImplementation(async (key: string) => {
+        if (key === "quotes.channel_id") {
+          throw new Error("write failed");
+        }
+      });
+      mockConfigService.delete.mockRejectedValue(new Error("delete failed"));
+
+      const result = await service.applyConfiguration(mockUserId, mockGuildId);
+
+      expect(result.success).toBe(false);
+      expect(result.failedKey).toBe("quotes.channel_id");
+      expect(result.appliedKeys).toEqual(["quotes.enabled"]);
+      expect(result.rolledBackKeys).toEqual([]);
+      expect(result.revertFailedKeys).toEqual(["quotes.enabled"]);
+      // A key stayed persisted, so the reload must run to keep services in
+      // sync with the DB.
+      expect(mockConfigService.triggerReload).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports a reload failure after all keys persisted", async () => {
+      mockConfigService.triggerReload.mockRejectedValue(
+        new Error("reload broke"),
+      );
+
+      const result = await service.applyConfiguration(mockUserId, mockGuildId);
+
+      expect(result.success).toBe(false);
+      expect(result.failedKey).toBeUndefined();
+      expect(result.appliedKeys).toHaveLength(3);
+      expect(result.rolledBackKeys).toEqual([]);
+      expect(result.revertFailedKeys).toEqual([]);
+      expect(result.errorMessage).toContain("/config reload");
+      // Nothing is rolled back — the writes themselves all succeeded.
+      expect(mockConfigService.delete).not.toHaveBeenCalled();
+    });
+
+    it("throws DependencyError before writing anything when the batch is inconsistent", async () => {
+      mockConfigService.findDependencyIssues.mockResolvedValue([
+        {
+          key: "quotes.channel_id",
+          dependency: "quotes.enabled",
+          kind: "missing-dependency",
+          message: "quotes.channel_id requires quotes.enabled",
+        },
+      ] as any);
+
+      await expect(
+        service.applyConfiguration(mockUserId, mockGuildId),
+      ).rejects.toThrow();
+      expect(mockConfigService.set).not.toHaveBeenCalled();
+      expect(mockConfigService.triggerReload).not.toHaveBeenCalled();
+    });
+  });
+
   describe("shutdown", () => {
     it("should shutdown without errors", () => {
       service.shutdown();
