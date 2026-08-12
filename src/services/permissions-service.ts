@@ -7,6 +7,40 @@ import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
+/**
+ * Thrown by `checkCommandPermission` (only with `onUnavailable: "throw"`)
+ * when the check could not be completed — a Discord API hiccup, rate
+ * limit, or network blip. Distinct from a `false` result so callers can
+ * tell "checked and denied" apart from "couldn't check" (#781).
+ */
+export class PermissionCheckError extends Error {
+  public readonly cause?: unknown;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "PermissionCheckError";
+    this.cause = cause;
+  }
+}
+
+/**
+ * Discord API error codes that are a definitive "the target doesn't
+ * exist" answer rather than a transient failure: 10004 Unknown Guild,
+ * 10007 Unknown Member, 10013 Unknown User. A permission check that hits
+ * one of these is a genuine denial (the user/guild is gone), never an
+ * outage.
+ */
+const UNKNOWN_TARGET_ERROR_CODES = new Set<unknown>([10004, 10007, 10013]);
+
+function isUnknownTargetError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    UNKNOWN_TARGET_ERROR_CODES.has((error as { code: unknown }).code)
+  );
+}
+
 export class PermissionsService {
   private static instance: PermissionsService;
   private client: Client;
@@ -14,6 +48,14 @@ export class PermissionsService {
   private permissionsCache: Map<string, string[]> = new Map();
   private cacheInitialized = false;
   private cacheInitializing: Promise<void> | null = null;
+  /**
+   * Error from the most recent failed cache load, cleared on success.
+   * Lets `checkCommandPermission` (in `onUnavailable: "throw"` mode) tell
+   * "cache empty because nothing is configured" apart from "cache empty
+   * because loading it failed" — the latter must not fall through to the
+   * default-open branch and silently authorize (#795 review).
+   */
+  private cacheLoadError: unknown = null;
 
   private constructor(client: Client) {
     this.client = client;
@@ -63,10 +105,12 @@ export class PermissionsService {
         }
 
         this.cacheInitialized = true;
+        this.cacheLoadError = null;
         logger.info(
           `Permissions cache initialized with ${permissions.length} entries`,
         );
       } catch (error) {
+        this.cacheLoadError = error;
         logger.error("Error initializing permissions cache:", error);
       } finally {
         this.cacheInitializing = null;
@@ -89,12 +133,20 @@ export class PermissionsService {
    * @param userId - Discord user ID
    * @param guildId - Discord guild ID
    * @param commandName - Name of the command
+   * @param options - `onUnavailable` controls what an *internal* failure
+   *   (Discord API hiccup, rate limit, network blip) maps to: `"deny"`
+   *   (default) keeps the legacy behavior of returning `false`, while
+   *   `"throw"` raises a `PermissionCheckError` so the caller can react
+   *   differently to "couldn't check" than to a genuine denial. A
+   *   definitive Unknown Guild/Member answer from Discord is a real
+   *   denial and returns `false` in both modes.
    * @returns True if user has permission, false otherwise
    */
   public async checkCommandPermission(
     userId: string,
     guildId: string,
     commandName: string,
+    options: { onUnavailable?: "deny" | "throw" } = {},
   ): Promise<boolean> {
     try {
       // Ensure cache is initialized
@@ -119,6 +171,23 @@ export class PermissionsService {
         return true;
       }
 
+      // Everything below depends on the permissions cache. If the cache
+      // failed to load (e.g. a Mongo blip) we cannot know whether role
+      // gating is configured, so in throw mode surface "couldn't check"
+      // instead of falling through to the default-open branch and
+      // silently authorizing. Admins are unaffected: their short-circuit
+      // above rests on live Discord data, not the cache.
+      if (
+        options.onUnavailable === "throw" &&
+        !this.cacheInitialized &&
+        this.cacheLoadError !== null
+      ) {
+        throw new PermissionCheckError(
+          `Permission check for ${commandName} could not be completed: permissions cache failed to load`,
+          this.cacheLoadError,
+        );
+      }
+
       // Check if there are any permissions set for this command
       const cacheKey = `${guildId}:${commandName}`;
       const allowedRoleIds = this.permissionsCache.get(cacheKey);
@@ -136,7 +205,22 @@ export class PermissionsService {
 
       return hasPermission;
     } catch (error) {
+      if (error instanceof PermissionCheckError) {
+        throw error;
+      }
+      if (isUnknownTargetError(error)) {
+        logger.warn(
+          `Permission check for ${sanitizeForLog(commandName)}: guild ${guildId} or member ${userId} not found`,
+        );
+        return false;
+      }
       logger.error("Error checking command permission:", error);
+      if (options.onUnavailable === "throw") {
+        throw new PermissionCheckError(
+          `Permission check for ${commandName} could not be completed`,
+          error,
+        );
+      }
       return false;
     }
   }
