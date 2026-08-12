@@ -249,7 +249,6 @@ describe("LeaderboardRoleService", () => {
         return "";
       });
 
-      // Largest tier (5) drives how many top users to fetch
       mockGetTopUsers.mockResolvedValue([
         { userId: "u1", username: "u1", totalTime: 100 },
         { userId: "u2", username: "u2", totalTime: 90 },
@@ -271,8 +270,43 @@ describe("LeaderboardRoleService", () => {
       expect(result).not.toBeNull();
       // Only "1:111" and "5:222" parse successfully → 2 tiers reconciled
       expect(result!.tiers.map((t) => t.topN).sort()).toEqual([1, 5]);
-      // getTopUsers should be called with the widest tier (5)
-      expect(mockGetTopUsers).toHaveBeenCalledWith(5, "alltime");
+      // Full ranking is fetched with the "all ranked users" sentinel (0);
+      // per-tier cutoffs happen in reconcileTier.
+      expect(mockGetTopUsers).toHaveBeenCalledWith(0, "alltime");
+    });
+  });
+
+  describe("ranking fetch", () => {
+    it("fetches all ranked users so tiers wider than leaderboard_max_results are not truncated", async () => {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        // Tier wider than the default leaderboard_max_results cap (50).
+        if (k === "leaderboard_roles.tiers") return "100:99999100";
+        if (k === "leaderboard_roles.period") return "week";
+        return "";
+      });
+      // With the sentinel, the tracker returns every ranked user (60 > 50).
+      const allRanked = Array.from({ length: 60 }, (_, i) => ({
+        userId: `u${i + 1}`,
+        username: `u${i + 1}`,
+        totalTime: 1000 - i,
+      }));
+      mockGetTopUsers.mockResolvedValue(allRanked);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999100", roleName: "Top 100" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result).not.toBeNull();
+      // Never passes a positive limit that would be clamped server-side.
+      expect(mockGetTopUsers).toHaveBeenCalledWith(0, "week");
+      // All 60 ranked users fall within the top-100 tier and get the role.
+      expect(result!.tiers[0].added).toHaveLength(60);
+      expect(result!.tiers[0].added).toContain("u60");
     });
   });
 
