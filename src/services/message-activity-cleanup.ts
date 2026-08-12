@@ -300,41 +300,47 @@ export class MessageActivityCleanupService {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 
-      // Stream users one at a time via a cursor instead of loading the whole
-      // (append-heavy) collection into memory. The loop only reads fields and
-      // writes back via `updateOne`, so `.lean()` avoids hydration overhead.
-      const cursor = MessageActivityTracking.find({}).lean().cursor();
-
-      for await (const user of cursor) {
-        try {
-          if (user.recentMessages && user.recentMessages.length > 0) {
-            const recent = user.recentMessages.filter(
-              (entry) => entry.sentAt >= cutoffDate,
-            );
-            const prunedCount = user.recentMessages.length - recent.length;
-
-            if (prunedCount > 0) {
-              // Only touch recentMessages — channels[] and totalCount are
-              // all-time and intentionally preserved.
-              await MessageActivityTracking.updateOne(
-                { _id: user._id },
-                {
-                  $set: {
-                    recentMessages: recent,
-                    lastCleanupDate: new Date(),
+      // Count the entries about to be pruned, for reporting only. The
+      // deletion below is keyed on the same criterion — not on this count —
+      // so a write landing between the two just makes the stats off by one.
+      const [pruneCounts] = await MessageActivityTracking.aggregate<{
+        messages: number;
+      }>([
+        { $match: { "recentMessages.sentAt": { $lt: cutoffDate } } },
+        {
+          $group: {
+            _id: null,
+            messages: {
+              $sum: {
+                $size: {
+                  $filter: {
+                    input: "$recentMessages",
+                    cond: { $lt: ["$$this.sentAt", cutoffDate] },
                   },
                 },
-              );
-              messagesPruned += prunedCount;
-              usersProcessed += 1;
-            }
-          }
-        } catch (userError) {
-          const errorMessage = `Error processing user ${user.username}: ${userError instanceof Error ? userError.message : String(userError)}`;
-          errors.push(errorMessage);
-          logger.error(errorMessage, userError);
-        }
-      }
+              },
+            },
+          },
+        },
+      ]);
+
+      // Prune expired entries with a scoped, atomic $pull. Reading a
+      // snapshot, filtering in memory, and $set-ing the whole array back
+      // races with the tracker's concurrent `$push` appends — a message
+      // recorded mid-sweep would be silently overwritten (#755). `$pull`
+      // is applied atomically per document, so concurrent appends survive.
+      // Only recentMessages is touched — channels[] and totalCount are
+      // all-time and intentionally preserved.
+      const result = await MessageActivityTracking.updateMany(
+        { "recentMessages.sentAt": { $lt: cutoffDate } },
+        {
+          $pull: { recentMessages: { sentAt: { $lt: cutoffDate } } },
+          $set: { lastCleanupDate: new Date() },
+        },
+      );
+
+      messagesPruned = pruneCounts?.messages ?? 0;
+      usersProcessed = result.modifiedCount;
     } catch (error) {
       const errorMessage = `General message cleanup error: ${error instanceof Error ? error.message : String(error)}`;
       errors.push(errorMessage);
