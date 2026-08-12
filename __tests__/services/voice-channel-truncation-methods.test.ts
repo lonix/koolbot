@@ -14,8 +14,14 @@ jest.mock("../../src/models/voice-channel-tracking.js", () => ({
 
 import { VoiceChannelTracking } from "../../src/models/voice-channel-tracking.js";
 
-// Attach methods the global mongoose mock doesn't provide.
+// Under ESM the jest.mock factory above is not hoisted, so the import
+// actually resolves to the global mongoose mock from __tests__/setup.ts.
+// Attach the methods that mock doesn't provide, and pin `aggregate`
+// explicitly so this file doesn't silently depend on the global mock's
+// method set.
 (VoiceChannelTracking as unknown as { updateMany: jest.Mock }).updateMany =
+  jest.fn();
+(VoiceChannelTracking as unknown as { aggregate: jest.Mock }).aggregate =
   jest.fn();
 
 describe("VoiceChannelTruncationService Methods", () => {
