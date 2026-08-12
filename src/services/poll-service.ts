@@ -613,21 +613,25 @@ export class PollService {
     schedule.enabled = enabled;
     await schedule.save();
 
-    const existing = this.jobs.get(scheduleId);
+    // Key off the canonical `_id` (not the raw `scheduleId` argument) for both
+    // the lookup and the re-insert so a non-canonical id can't leave the old
+    // job running while a second one is scheduled for the same row.
+    const canonicalId = schedule._id.toString();
+    const existing = this.jobs.get(canonicalId);
     if (existing) {
       existing.job.stop();
-      this.jobs.delete(scheduleId);
+      this.jobs.delete(canonicalId);
     }
 
     if (this.isInitialized && enabled) {
       const job = this.schedulePoll(schedule);
       if (job) {
-        this.jobs.set(schedule._id.toString(), { schedule, job });
+        this.jobs.set(canonicalId, { schedule, job });
       }
     }
 
     logger.info(
-      `${enabled ? "Enabled" : "Disabled"} poll schedule: ${sanitizeForLog(schedule._id.toString())}`,
+      `${enabled ? "Enabled" : "Disabled"} poll schedule: ${sanitizeForLog(canonicalId)}`,
     );
     return schedule;
   }
@@ -683,15 +687,19 @@ export class PollService {
       return false;
     }
 
-    // Stop the job if it's running
-    const scheduledJob = this.jobs.get(scheduleId);
+    // Stop the job if it's running. Key off the canonical `_id` (not the raw
+    // `scheduleId` argument) so a non-canonical id can't miss the entry and
+    // leave the job posting from its stale in-memory schedule after the row
+    // is deleted.
+    const canonicalId = schedule._id.toString();
+    const scheduledJob = this.jobs.get(canonicalId);
     if (scheduledJob) {
       scheduledJob.job.stop();
-      this.jobs.delete(scheduleId);
+      this.jobs.delete(canonicalId);
     }
 
-    await PollSchedule.findByIdAndDelete(scheduleId);
-    logger.info(`Deleted poll schedule: ${sanitizeForLog(scheduleId)}`);
+    await PollSchedule.findByIdAndDelete(canonicalId);
+    logger.info(`Deleted poll schedule: ${sanitizeForLog(canonicalId)}`);
     return true;
   }
 

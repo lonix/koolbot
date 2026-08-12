@@ -5,6 +5,7 @@ const mockPollItemFindOne = jest.fn();
 const mockPollItemCreate = jest.fn();
 const mockPollItemFindById = jest.fn();
 const mockPollScheduleFindById = jest.fn();
+const mockPollScheduleFindByIdAndDelete = jest.fn();
 const mockRegisterReloadCallback = jest.fn();
 const mockConfigGetBoolean = jest.fn();
 const mockConfigGetNumber = jest.fn();
@@ -30,6 +31,7 @@ jest.unstable_mockModule("../../src/models/poll-item.js", () => ({
 jest.unstable_mockModule("../../src/models/poll-schedule.js", () => ({
   PollSchedule: {
     findById: mockPollScheduleFindById,
+    findByIdAndDelete: mockPollScheduleFindByIdAndDelete,
   },
 }));
 
@@ -54,6 +56,7 @@ describe("PollService", () => {
     mockPollItemCreate.mockResolvedValue({});
     mockPollItemFindById.mockResolvedValue(null);
     mockPollScheduleFindById.mockResolvedValue(null);
+    mockPollScheduleFindByIdAndDelete.mockResolvedValue(null);
     // Imports never touch the network (#646); a stub lets the paste-path tests
     // assert fetch is never called.
     global.fetch = mockFetch as unknown as typeof fetch;
@@ -369,6 +372,117 @@ describe("PollService", () => {
 
       expect(result).toBeNull();
       expect(save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("setScheduleEnabled", () => {
+    it("stops the job keyed by the canonical _id even when called with a non-canonical id", async () => {
+      const save = jest.fn<() => Promise<void>>().mockResolvedValue();
+      const schedule = {
+        _id: { toString: () => "sched-1" },
+        guildId: "guild-1",
+        enabled: true,
+        save,
+      };
+      // findById resolves via Mongo's ObjectId comparison, so a non-canonical
+      // id string still finds the row.
+      mockPollScheduleFindById.mockResolvedValue(schedule);
+
+      const service = PollService.getInstance({} as never);
+      const stop = jest.fn();
+      const internals = service as unknown as {
+        jobs: Map<string, { schedule: unknown; job: { stop: () => void } }>;
+      };
+      internals.jobs.set("sched-1", { schedule, job: { stop } });
+
+      const result = await service.setScheduleEnabled(
+        "SCHED-1",
+        false,
+        "guild-1",
+      );
+
+      expect(result).toBe(schedule);
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(schedule.enabled).toBe(false);
+      // The canonically-keyed job must be found, stopped, and removed.
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(internals.jobs.has("sched-1")).toBe(false);
+    });
+
+    it("re-arms the job under the canonical _id when enabling with a non-canonical id", async () => {
+      const save = jest.fn<() => Promise<void>>().mockResolvedValue();
+      const schedule = {
+        _id: { toString: () => "sched-1" },
+        guildId: "guild-1",
+        channelId: "chan-1",
+        cronSchedule: "0 9 * * *",
+        enabled: false,
+        save,
+      };
+      mockPollScheduleFindById.mockResolvedValue(schedule);
+
+      const service = PollService.getInstance({} as never);
+      const internals = service as unknown as {
+        isInitialized: boolean;
+        jobs: Map<string, { schedule: unknown; job: { stop: () => void } }>;
+      };
+      internals.isInitialized = true;
+
+      const result = await service.setScheduleEnabled(
+        "SCHED-1",
+        true,
+        "guild-1",
+      );
+
+      expect(result).toBe(schedule);
+      expect(schedule.enabled).toBe(true);
+      expect(internals.jobs.has("sched-1")).toBe(true);
+
+      // Stop the real CronJob so it does not leak a live timer.
+      service.destroy();
+    });
+  });
+
+  describe("deleteSchedule", () => {
+    it("stops the job keyed by the canonical _id even when called with a non-canonical id", async () => {
+      const schedule = {
+        _id: { toString: () => "sched-1" },
+        guildId: "guild-1",
+      };
+      mockPollScheduleFindById.mockResolvedValue(schedule);
+
+      const service = PollService.getInstance({} as never);
+      const stop = jest.fn();
+      const internals = service as unknown as {
+        jobs: Map<string, { schedule: unknown; job: { stop: () => void } }>;
+      };
+      internals.jobs.set("sched-1", { schedule, job: { stop } });
+
+      const result = await service.deleteSchedule("SCHED-1", "guild-1");
+
+      expect(result).toBe(true);
+      // The canonically-keyed job must be found, stopped, and removed —
+      // otherwise the deleted schedule keeps posting from its stale in-memory
+      // copy (findById returns null after deletion and the cron closure falls
+      // back to the captured schedule object).
+      expect(stop).toHaveBeenCalledTimes(1);
+      expect(internals.jobs.has("sched-1")).toBe(false);
+      expect(mockPollScheduleFindByIdAndDelete).toHaveBeenCalledWith("sched-1");
+    });
+
+    it("refuses to delete a schedule belonging to another guild", async () => {
+      const schedule = {
+        _id: { toString: () => "sched-1" },
+        guildId: "other-guild",
+      };
+      mockPollScheduleFindById.mockResolvedValue(schedule);
+
+      const service = PollService.getInstance({} as never);
+
+      const result = await service.deleteSchedule("sched-1", "guild-1");
+
+      expect(result).toBe(false);
+      expect(mockPollScheduleFindByIdAndDelete).not.toHaveBeenCalled();
     });
   });
 });
