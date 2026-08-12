@@ -42,8 +42,11 @@ describe("Ping Command", () => {
       mockInteraction = {
         createdTimestamp: 900,
         client: mockClient as Client,
+        replied: false,
+        deferred: false,
         reply: jest.fn().mockResolvedValue(mockMessage),
         editReply: jest.fn().mockResolvedValue(undefined),
+        followUp: jest.fn().mockResolvedValue(undefined),
       };
     });
 
@@ -97,6 +100,39 @@ describe("Ping Command", () => {
       expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.stringContaining("Bot Latency: 1ms"),
       );
+    });
+
+    it("should follow up with an error message when editReply fails after the reply succeeded", async () => {
+      (mockInteraction.reply as jest.Mock).mockImplementation(async () => {
+        (mockInteraction as any).replied = true;
+        return mockMessage;
+      });
+      (mockInteraction.editReply as jest.Mock).mockRejectedValue(
+        new Error("editReply failed") as never,
+      );
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.followUp).toHaveBeenCalledWith({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+      expect(mockInteraction.reply).toHaveBeenCalledTimes(1);
+    });
+
+    it("should reply with an error message when the initial reply fails", async () => {
+      (mockInteraction.reply as jest.Mock)
+        .mockRejectedValueOnce(new Error("reply failed") as never)
+        .mockResolvedValueOnce(undefined as never);
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.reply).toHaveBeenCalledTimes(2);
+      expect(mockInteraction.reply).toHaveBeenLastCalledWith({
+        content: "There was an error while executing this command!",
+        ephemeral: true,
+      });
+      expect(mockInteraction.followUp).not.toHaveBeenCalled();
     });
   });
 });
