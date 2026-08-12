@@ -589,7 +589,11 @@ export class ScheduledAnnouncementService {
   public async getAnnouncement(
     announcementId: string,
   ): Promise<IScheduledAnnouncement | null> {
-    return await ScheduledAnnouncement.findById(announcementId);
+    // A malformed (non-ObjectId) id makes Mongoose throw a CastError —
+    // treat it as "not found" so callers get their audited failure path.
+    return await ScheduledAnnouncement.findById(announcementId).catch(
+      () => null,
+    );
   }
 
   public async reload(): Promise<void> {

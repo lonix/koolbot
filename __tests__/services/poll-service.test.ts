@@ -443,6 +443,20 @@ describe("PollService", () => {
     });
   });
 
+  describe("getSchedule", () => {
+    it("returns null instead of throwing when findById rejects on a malformed id", async () => {
+      // Mongoose throws a CastError for a non-ObjectId id; the web toggle/test
+      // routes rely on null to take their audited "not found" path (#758).
+      mockPollScheduleFindById.mockImplementation(() =>
+        Promise.reject(new Error("Cast to ObjectId failed")),
+      );
+
+      const service = PollService.getInstance({} as never);
+
+      await expect(service.getSchedule("not-an-id")).resolves.toBeNull();
+    });
+  });
+
   describe("deleteSchedule", () => {
     it("stops the job keyed by the canonical _id even when called with a non-canonical id", async () => {
       const schedule = {
