@@ -73,7 +73,17 @@ describe("VoiceChannelTruncationService", () => {
       return { svc, mockConfigService, getReloadCallback: () => reloadCallback };
     }
 
-    it("registers a reload callback that rebuilds the cleanup schedule", async () => {
+    function getCleanupJob(
+      svc: VoiceChannelTruncationService,
+    ): { isActive: boolean; cronTime: { source: unknown } } | null {
+      return (
+        svc as unknown as {
+          cleanupJob: { isActive: boolean; cronTime: { source: unknown } } | null;
+        }
+      ).cleanupJob;
+    }
+
+    it("registers a reload callback that replaces the old cron job with the new schedule", async () => {
       const { svc, mockConfigService, getReloadCallback } =
         createServiceWithCapturedReload(true);
 
@@ -81,8 +91,35 @@ describe("VoiceChannelTruncationService", () => {
       const reloadCallback = getReloadCallback();
       expect(reloadCallback).toBeDefined();
 
+      // First reload schedules with cron expression A.
+      mockConfigService.getString.mockResolvedValue("0 1 * * *");
       await reloadCallback!();
 
+      const oldJob = getCleanupJob(svc);
+      expect(svc.getStatus().isScheduled).toBe(true);
+      expect(oldJob?.isActive).toBe(true);
+      expect(oldJob?.cronTime.source).toBe("0 1 * * *");
+
+      // Admin changes the schedule to B, then runs /config reload.
+      mockConfigService.getString.mockResolvedValue("0 2 * * *");
+      await reloadCallback!();
+
+      const newJob = getCleanupJob(svc);
+      expect(oldJob?.isActive).toBe(false);
+      expect(newJob).not.toBe(oldJob);
+      expect(newJob?.isActive).toBe(true);
+      expect(newJob?.cronTime.source).toBe("0 2 * * *");
+      expect(svc.getStatus().isScheduled).toBe(true);
+      svc.destroy();
+    });
+
+    it("does not clear the overlap guard of an in-flight cleanup when reloading", async () => {
+      const { svc, getReloadCallback } = createServiceWithCapturedReload(true);
+
+      (svc as unknown as { isRunning: boolean }).isRunning = true;
+      await getReloadCallback()!();
+
+      expect(svc.getStatus().isRunning).toBe(true);
       expect(svc.getStatus().isScheduled).toBe(true);
       svc.destroy();
     });
