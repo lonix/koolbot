@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   ButtonInteraction,
   StringSelectMenuInteraction,
@@ -27,17 +28,32 @@ import {
 
 const configService = ConfigService.getInstance();
 
+/**
+ * Short fingerprint of a preset name, embedded in preset-targeting custom
+ * IDs. The full name can't ride in the ID itself — it may contain the `_`
+ * delimiter, and 50 name chars next to two snowflakes would overflow
+ * Discord's 100-char custom-ID limit — so panels embed this tag at render
+ * time and action handlers verify it against the preset currently at the
+ * index. This is the Discord-surface counterpart of the `expectedName`
+ * guard the web forms thread through `UserVoicePrefsService`.
+ */
+export function presetNameTag(name: string): string {
+  return createHash("sha256").update(name).digest("hex").slice(0, 8);
+}
+
 type ParsedId = {
   action: string;
   presetIndex: number | null;
+  nameTag: string | null;
   channelId: string;
   ownerId: string;
 };
 
 function parseCustomId(customId: string): ParsedId | null {
   // Forms:
-  //   vc_preset_{action}_{channelId}_{ownerId}                    (5 parts)
-  //   vc_preset_{action}_{presetIndex}_{channelId}_{ownerId}      (6 parts)
+  //   vc_preset_{action}_{channelId}_{ownerId}                            (5 parts)
+  //   vc_preset_{action}_{presetIndex}_{channelId}_{ownerId}              (6 parts, legacy in-flight panels)
+  //   vc_preset_{action}_{presetIndex}_{nameTag}_{channelId}_{ownerId}    (7 parts)
   const parts = customId.split("_");
   if (parts[0] !== "vc" || parts[1] !== "preset") return null;
 
@@ -48,18 +64,21 @@ function parseCustomId(customId: string): ParsedId | null {
     return {
       action,
       presetIndex: null,
+      nameTag: null,
       channelId: parts[3],
       ownerId: parts[4],
     };
   }
-  if (parts.length === 6) {
+  if (parts.length === 6 || parts.length === 7) {
     const idx = Number(parts[3]);
     if (!Number.isInteger(idx) || idx < 0) return null;
+    const hasTag = parts.length === 7;
     return {
       action,
       presetIndex: idx,
-      channelId: parts[4],
-      ownerId: parts[5],
+      nameTag: hasTag ? parts[4] : null,
+      channelId: parts[hasTag ? 5 : 4],
+      ownerId: parts[hasTag ? 6 : 5],
     };
   }
   return null;
@@ -191,22 +210,26 @@ function buildManagePanel(
 
   const idx = selectedIndex ?? 0;
   const disabled = selected === null;
+  // The tag pins each action button to the preset name shown when this
+  // panel rendered; "0" is a placeholder for the disabled (no selection)
+  // state and never reaches an action handler.
+  const tag = selected ? presetNameTag(selected.name) : "0";
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId(`vc_preset_default_${idx}_${channelId}_${ownerId}`)
+        .setCustomId(`vc_preset_default_${idx}_${tag}_${channelId}_${ownerId}`)
         .setLabel(selected?.isDefault ? "Unset default" : "Set as default")
         .setStyle(ButtonStyle.Primary)
         .setEmoji("⭐")
         .setDisabled(disabled),
       new ButtonBuilder()
-        .setCustomId(`vc_preset_rename_${idx}_${channelId}_${ownerId}`)
+        .setCustomId(`vc_preset_rename_${idx}_${tag}_${channelId}_${ownerId}`)
         .setLabel("Rename")
         .setStyle(ButtonStyle.Secondary)
         .setEmoji("✏️")
         .setDisabled(disabled),
       new ButtonBuilder()
-        .setCustomId(`vc_preset_delete_${idx}_${channelId}_${ownerId}`)
+        .setCustomId(`vc_preset_delete_${idx}_${tag}_${channelId}_${ownerId}`)
         .setLabel("Delete")
         .setStyle(ButtonStyle.Danger)
         .setEmoji("🗑️")
@@ -440,6 +463,34 @@ async function openSaveModal(
   await interaction.showModal(modal);
 }
 
+/**
+ * Re-load the preset a preset-targeting component points at and verify its
+ * name still matches the fingerprint captured when the panel rendered.
+ * Replies with a staleness error and returns null when the list shifted
+ * underneath the panel (preset deleted/renamed via another panel, device,
+ * or the web UI) so the action can't silently hit the wrong preset.
+ */
+async function resolveTargetPreset(
+  interaction: ButtonInteraction,
+  parsed: ParsedId,
+): Promise<IChannelPreset | null> {
+  const prefs = await loadPrefs(parsed.ownerId);
+  const preset =
+    parsed.presetIndex !== null ? prefs.presets[parsed.presetIndex] : undefined;
+  if (
+    !preset ||
+    (parsed.nameTag !== null && presetNameTag(preset.name) !== parsed.nameTag)
+  ) {
+    await interaction.reply({
+      content:
+        "❌ Your presets changed since this panel was opened — reopen it and try again.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return null;
+  }
+  return preset;
+}
+
 async function openRenameModal(
   interaction: ButtonInteraction,
   parsed: ParsedId,
@@ -451,19 +502,12 @@ async function openRenameModal(
     });
     return;
   }
-  const prefs = await loadPrefs(parsed.ownerId);
-  const preset = prefs.presets[parsed.presetIndex];
-  if (!preset) {
-    await interaction.reply({
-      content: "❌ Preset no longer exists.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
+  const preset = await resolveTargetPreset(interaction, parsed);
+  if (!preset) return;
 
   const modal = new ModalBuilder()
     .setCustomId(
-      `vc_modal_renamepreset_${parsed.presetIndex}_${parsed.channelId}_${parsed.ownerId}`,
+      `vc_modal_renamepreset_${parsed.presetIndex}_${presetNameTag(preset.name)}_${parsed.channelId}_${parsed.ownerId}`,
     )
     .setTitle("Rename preset");
   const nameInput = new TextInputBuilder()
@@ -485,11 +529,16 @@ async function toggleDefault(
   parsed: ParsedId,
 ): Promise<void> {
   if (parsed.presetIndex === null) return;
+  const target = await resolveTargetPreset(interaction, parsed);
+  if (!target) return;
   let result: { name: string; isDefault: boolean };
   try {
+    // Passing the just-verified name as expectedName lets the service
+    // re-check it at write time, closing the read→write race window.
     result = await UserVoicePrefsService.getInstance().setDefault(
       parsed.ownerId,
       parsed.presetIndex,
+      target.name,
     );
   } catch (error) {
     // Only the known "missing preset" validation case becomes a friendly
@@ -519,11 +568,14 @@ async function deletePreset(
   parsed: ParsedId,
 ): Promise<void> {
   if (parsed.presetIndex === null) return;
+  const target = await resolveTargetPreset(interaction, parsed);
+  if (!target) return;
   let removed: { name: string; remaining: number };
   try {
     removed = await UserVoicePrefsService.getInstance().deletePreset(
       parsed.ownerId,
       parsed.presetIndex,
+      target.name,
     );
   } catch (error) {
     // As in toggleDefault: translate only the known validation/missing case;

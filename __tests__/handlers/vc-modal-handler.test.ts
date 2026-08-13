@@ -13,6 +13,9 @@ jest.mock("../../src/services/voice-channel-manager.js");
 
 // Import after mocks
 import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
+import { ConfigService } from "../../src/services/config-service.js";
+import { UserVoicePrefsService } from "../../src/services/user-voice-prefs-service.js";
+import { presetNameTag } from "../../src/handlers/vc-preset-handler.js";
 import { handleVCModal } from "../../src/handlers/vc-modal-handler.js";
 
 const mockVoiceChannelManager = VoiceChannelManager as jest.Mocked<
@@ -126,6 +129,104 @@ describe("VCModalHandler - Custom Name Tracking", () => {
         content: "❌ Channel name cannot be empty.",
         ephemeral: true,
       });
+    });
+  });
+
+  describe("Rename preset staleness guard", () => {
+    let mockService: { getPrefs: jest.Mock; renamePreset: jest.Mock };
+
+    beforeEach(() => {
+      // The feature gate reads real ConfigService (backed by mocked mongoose,
+      // whose schema default disables presets) — force it on for these tests.
+      jest
+        .spyOn(ConfigService.prototype, "getBoolean")
+        .mockResolvedValue(true);
+      mockService = {
+        getPrefs: jest.fn(),
+        renamePreset: jest.fn(),
+      };
+      jest
+        .spyOn(UserVoicePrefsService, "getInstance")
+        .mockReturnValue(mockService as unknown as UserVoicePrefsService);
+      mockInteraction.fields = {
+        getTextInputValue: jest.fn().mockReturnValue("Renamed Preset"),
+      } as any;
+    });
+
+    it("renames and passes the verified name as expectedName when the tag matches", async () => {
+      mockService.getPrefs.mockResolvedValue({
+        presets: [{ name: "Squad Night", isDefault: false }],
+      } as never);
+      mockService.renamePreset.mockResolvedValue({
+        oldName: "Squad Night",
+        newName: "Renamed Preset",
+      } as never);
+      mockInteraction.customId = `vc_modal_renamepreset_0_${presetNameTag("Squad Night")}_test-channel-id_test-user-id`;
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(mockService.renamePreset).toHaveBeenCalledWith(
+        "test-user-id",
+        0,
+        "Renamed Preset",
+        "Squad Night",
+      );
+      expect(mockInteraction.reply).toHaveBeenCalledWith({
+        content: "✏️ Preset **Squad Night** renamed to **Renamed Preset**.",
+        ephemeral: true,
+      });
+    });
+
+    it("refuses when the preset at the index changed since the modal opened", async () => {
+      mockService.getPrefs.mockResolvedValue({
+        presets: [{ name: "Other Preset", isDefault: false }],
+      } as never);
+      mockInteraction.customId = `vc_modal_renamepreset_0_${presetNameTag("Squad Night")}_test-channel-id_test-user-id`;
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(mockService.renamePreset).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith({
+        content:
+          "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
+        ephemeral: true,
+      });
+    });
+
+    it("refuses when the preset index no longer exists", async () => {
+      mockService.getPrefs.mockResolvedValue({ presets: [] } as never);
+      mockInteraction.customId = `vc_modal_renamepreset_0_${presetNameTag("Squad Night")}_test-channel-id_test-user-id`;
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(mockService.renamePreset).not.toHaveBeenCalled();
+      expect(mockInteraction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content:
+            "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
+        }),
+      );
+    });
+
+    it("still renames via legacy tag-less modal IDs, guarded by the current name", async () => {
+      mockService.getPrefs.mockResolvedValue({
+        presets: [{ name: "Squad Night", isDefault: false }],
+      } as never);
+      mockService.renamePreset.mockResolvedValue({
+        oldName: "Squad Night",
+        newName: "Renamed Preset",
+      } as never);
+      mockInteraction.customId =
+        "vc_modal_renamepreset_0_test-channel-id_test-user-id";
+
+      await handleVCModal(mockInteraction as ModalSubmitInteraction);
+
+      expect(mockService.renamePreset).toHaveBeenCalledWith(
+        "test-user-id",
+        0,
+        "Renamed Preset",
+        "Squad Night",
+      );
     });
   });
 });
