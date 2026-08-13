@@ -17,6 +17,7 @@ import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
 import { ConfigService } from "./services/config-service.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
+import { runReactionRoleMigrations } from "./services/reaction-role-migrator.js";
 import { CommandManager } from "./services/command-manager.js";
 import {
   VoiceChannelManager,
@@ -679,6 +680,11 @@ async function initializeServices(): Promise<void> {
     // or channel names) into IDs before services that consume them start
     // up. One-shot, idempotent, no-op on already-migrated deployments.
     await runNameToIdMigrations(client, guildId, configService);
+
+    // Backfill the autoCreated flag on legacy reaction-role mappings so their
+    // delete semantics survive the #813 schema change. Idempotent no-op once
+    // every row carries the field.
+    await runReactionRoleMigrations();
 
     // Initialize voice channel services
     await voiceChannelManager.initialize(guildId);

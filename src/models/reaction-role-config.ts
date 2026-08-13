@@ -20,12 +20,30 @@ export const REACTION_ROLE_STYLES: ReactionRoleStyle[] = [
 export interface IReactionRoleConfig extends Document {
   guildId: string;
   messageId: string;
-  channelId: string;
+  /**
+   * The private text channel created for an auto-created reaction role.
+   * Optional: mappings that bind to an existing role (or opt out of the
+   * private category/channel) have no owned channel.
+   */
+  channelId?: string;
   roleId: string;
-  categoryId: string;
+  /**
+   * The private category created for an auto-created reaction role.
+   * Optional for the same reasons as {@link channelId}.
+   */
+  categoryId?: string;
   emoji: string;
   roleName: string;
   style: ReactionRoleStyle;
+  /**
+   * True when the bot created the role (and, when present, its category and
+   * channel) as part of this mapping and therefore owns their lifecycle.
+   * When false the mapping merely points at a pre-existing role, so deleting
+   * the mapping must never delete the role. Legacy rows created before this
+   * field existed are all auto-created; the startup migration backfills them
+   * with `true` (see reaction-role-migrator.ts).
+   */
+  autoCreated: boolean;
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -46,7 +64,7 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
     },
     channelId: {
       type: String,
-      required: true,
+      required: false,
     },
     roleId: {
       type: String,
@@ -55,7 +73,7 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
     },
     categoryId: {
       type: String,
-      required: true,
+      required: false,
     },
     emoji: {
       type: String,
@@ -74,6 +92,11 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
       required: true,
       index: true,
     },
+    autoCreated: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
     isArchived: {
       type: Boolean,
       default: false,
@@ -89,10 +112,18 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
   },
 );
 
-// Compound index for efficient queries
-ReactionRoleConfigSchema.index({ guildId: 1, messageId: 1, emoji: 1 });
+// A single message can now carry many emoji→role mappings, but a given emoji
+// on a given message must still resolve to exactly one mapping — otherwise the
+// reaction handlers wouldn't know which role to grant. This unique compound
+// index enforces that and replaces the former `{ guildId, roleName }` unique
+// index, which wrongly assumed a role could only ever appear on one picker.
+ReactionRoleConfigSchema.index(
+  { guildId: 1, messageId: 1, emoji: 1 },
+  { unique: true },
+);
 ReactionRoleConfigSchema.index({ guildId: 1, roleId: 1 });
-ReactionRoleConfigSchema.index({ guildId: 1, roleName: 1 }, { unique: true });
+// Non-unique: the same role name may appear across multiple pickers/messages.
+ReactionRoleConfigSchema.index({ guildId: 1, roleName: 1 });
 
 export const ReactionRoleConfig = mongoose.model<IReactionRoleConfig>(
   "ReactionRoleConfig",

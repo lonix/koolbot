@@ -743,22 +743,28 @@ export function createReadOnlyRouter(
       const channelNames = channelData.names;
 
       const active = all.filter((rr) => !rr.isArchived);
+      // Bound mappings (#813) have no owned category/channel, so those ids may
+      // be absent — fall back to an em dash so the table renders cleanly.
+      const resolveChannel = (id?: string | null): string =>
+        id ? (channelNames.get(id) ?? id) : "—";
       const shape = (rr: {
         emoji: string;
         roleName: string;
         roleId: string;
-        categoryId: string;
-        channelId: string;
+        categoryId?: string | null;
+        channelId?: string | null;
         messageId: string;
+        autoCreated?: boolean;
         isArchived: boolean;
         archivedAt?: Date | null;
       }): ReactionRoleRow => ({
         emoji: rr.emoji,
         roleName: rr.roleName,
         roleId: rr.roleId,
-        categoryName: channelNames.get(rr.categoryId) ?? rr.categoryId,
-        channelName: channelNames.get(rr.channelId) ?? rr.channelId,
+        categoryName: resolveChannel(rr.categoryId),
+        channelName: resolveChannel(rr.channelId),
         messageId: rr.messageId,
+        autoCreated: rr.autoCreated ?? true,
         isArchived: rr.isArchived,
         archivedAt: rr.archivedAt
           ? new Date(rr.archivedAt).toISOString()

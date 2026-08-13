@@ -2085,6 +2085,12 @@ export interface ReactionRoleRow {
   categoryName: string;
   channelName: string;
   messageId: string;
+  /**
+   * Whether the bot auto-created the role + category + channel for this
+   * mapping. Bound mappings (issue #813) point at a pre-existing role and set
+   * this false. Optional/undefined is treated as `true` for legacy rows.
+   */
+  autoCreated?: boolean;
   isArchived: boolean;
   archivedAt: string | null;
 }
@@ -2100,18 +2106,38 @@ export interface ReactionRolesProps extends CommonProps {
 function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
   const escapedName = escapeHtml(rr.roleName);
   const jsName = escapeJsInAttr(rr.roleName);
-  const actions = rr.isArchived
-    ? `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Unarchive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`
-    : `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Archive</button></form>
+  // Legacy rows lack the flag; treat undefined as managed (auto-created).
+  const managed = rr.autoCreated ?? true;
+  const escapedEmoji = escapeHtml(rr.emoji);
+  const escapedMessageId = escapeHtml(rr.messageId);
+
+  let actions: string;
+  if (!managed) {
+    // Bound mappings point at a pre-existing role and may share a picker
+    // message, so they are removed per-mapping (message + emoji) and never
+    // archived — that would delete a message other mappings still use.
+    actions = `<form method="POST" action="/admin/reaction-roles/remove-mapping" onsubmit="return confirm('Remove the ${escapeJsInAttr(rr.emoji)} → ${jsName} mapping? The existing role is left untouched.');">${csrfInput}<input type="hidden" name="messageId" value="${escapedMessageId}"><input type="hidden" name="emoji" value="${escapedEmoji}"><button type="submit" class="btn btn-danger">Remove</button></form>`;
+  } else if (rr.isArchived) {
+    actions = `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Unarchive</button></form>
   <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+  } else {
+    actions = `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Archive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+  }
+
+  const typeTag = managed
+    ? `<span class="tag tag-on">managed</span>`
+    : `<span class="tag">bound</span>`;
+  const channelCell =
+    rr.channelName === "—" ? "—" : `#${escapeHtml(rr.channelName)}`;
 
   return `<tr>
-<td class="mono">${escapeHtml(rr.emoji)}</td>
+<td class="mono">${escapedEmoji}</td>
 <td>${escapedName} <span class="muted mono">${escapeHtml(rr.roleId)}</span></td>
+<td>${typeTag}</td>
 <td>${escapeHtml(rr.categoryName)}</td>
-<td>#${escapeHtml(rr.channelName)}</td>
-<td class="mono">${escapeHtml(rr.messageId)}</td>
+<td>${channelCell}</td>
+<td class="mono">${escapedMessageId}</td>
 <td><span class="tag ${rr.isArchived ? "tag-off" : "tag-on"}">${rr.isArchived ? "archived" : "active"}</span></td>
 <td class="muted">${escapeHtml(rr.archivedAt ?? "")}</td>
 <td class="actions">${actions}</td>
@@ -2149,12 +2175,12 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
   ${
     props.active.length === 0
       ? `<div class="empty">No active reaction-role mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
+      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
   }
 </div>
 <div class="card">
   <h2>Create a reaction role</h2>
-  <p class="muted">Creates a Discord role + category + text channel, posts a reaction-role message to the configured channel, and adds the reaction. The new channel preview is <code>${escapeHtml(props.configChannel?.name ?? "(unset)")}</code>.</p>
+  <p class="muted">Creates a new Discord role, posts a reaction-role message to the configured channel, and adds the reaction. Tick <em>Create a private channel</em> to also mint a private category + text channel locked to the new role. Untick it for a plain self-assign role.</p>
   <form method="POST" action="/admin/reaction-roles/create" class="stack">
     ${csrfInput}
     <label>Role name
@@ -2163,7 +2189,25 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
     <label>Emoji (Unicode or <code>&lt;:name:id&gt;</code>)
       <input type="text" name="emoji" required maxlength="100" placeholder="🎮">
     </label>
+    <label class="inline"><input type="checkbox" name="createChannel" value="1" checked> Create a private category + channel for this role</label>
     <button type="submit" class="btn btn-primary">Create reaction role</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Bind an existing role</h2>
+  <p class="muted">Maps an emoji to a role you already manage — no new role, category, or channel is created. Leave <em>Message ID</em> blank to post a fresh message to the configured channel, or paste an existing reaction-role message ID to add this mapping to it (one message can carry many emoji→role mappings).</p>
+  <form method="POST" action="/admin/reaction-roles/bind" class="stack">
+    ${csrfInput}
+    <label>Role ID
+      <input type="text" name="roleId" required maxlength="30" placeholder="123456789012345678">
+    </label>
+    <label>Emoji (Unicode or <code>&lt;:name:id&gt;</code>)
+      <input type="text" name="emoji" required maxlength="100" placeholder="🎨">
+    </label>
+    <label>Message ID <span class="muted">(optional — add to an existing picker message)</span>
+      <input type="text" name="messageId" maxlength="30" placeholder="(new message)">
+    </label>
+    <button type="submit" class="btn btn-primary">Bind existing role</button>
   </form>
 </div>
 <div class="card">
@@ -2171,7 +2215,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
   ${
     props.archived.length === 0
       ? `<div class="empty">No archived mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
+      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
   }
 </div>
 `;
