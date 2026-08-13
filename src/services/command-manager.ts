@@ -143,21 +143,29 @@ export class CommandManager {
     return this.loadCommandsDynamically();
   }
 
-  // Helper function to make Discord API calls with timeout and retry logic
-  private async makeDiscordApiCall<T>(
+  // Helper function to make Discord API calls with timeout and retry logic.
+  // Public so other services (e.g. ReactionRoleService's startup
+  // reconciliation) can reuse the shared timeout + backoff behaviour for bulk
+  // REST work, per CLAUDE.md's resilience guidance.
+  public async makeDiscordApiCall<T>(
     apiCall: () => Promise<T>,
     operationName: string,
     timeoutMs: number = 30000,
     maxRetries: number = 3,
   ): Promise<T> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // Track the timeout handle so it can be cleared once the race settles —
+      // otherwise a fast-resolving apiCall leaves the timer pending, keeping
+      // the event loop alive (and tripping Jest's open-handle warning).
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
       try {
         // Create a timeout promise
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(
+          timeoutHandle = setTimeout(
             () => reject(new Error(`Discord API timeout after ${timeoutMs}ms`)),
             timeoutMs,
           );
+          timeoutHandle.unref?.();
         });
 
         // Race the API call against the timeout
@@ -212,6 +220,10 @@ export class CommandManager {
           throw new Error(
             `Failed to ${operationName} after ${maxRetries} attempts`,
           );
+        }
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
         }
       }
     }

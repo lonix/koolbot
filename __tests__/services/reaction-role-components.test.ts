@@ -20,6 +20,7 @@ jest.unstable_mockModule("../../src/models/reaction-role-config.js", () => ({
     find: mockFind,
   },
   REACTION_ROLE_STYLES: ["reaction", "button", "select"],
+  REACTION_ROLE_MODES: ["toggle", "sticky", "unique"],
 }));
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -29,6 +30,9 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
     error: jest.fn(),
     debug: jest.fn(),
   },
+  // reaction-role-service now transitively imports CommandManager, which pulls
+  // in the named `isDebugMode` export — the native ESM mock must provide it.
+  isDebugMode: jest.fn(() => false),
 }));
 
 const { ReactionRoleService } =

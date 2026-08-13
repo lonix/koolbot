@@ -756,6 +756,8 @@ export function createReadOnlyRouter(
         channelId?: string | null;
         messageId: string;
         autoCreated?: boolean;
+        mode?: string;
+        groupId?: string | null;
         isArchived: boolean;
         archivedAt?: Date | null;
       }): ReactionRoleRow => ({
@@ -767,6 +769,8 @@ export function createReadOnlyRouter(
         channelName: resolveChannel(rr.channelId),
         messageId: rr.messageId,
         autoCreated: rr.autoCreated ?? true,
+        mode: rr.mode ?? "toggle",
+        groupId: rr.groupId ?? null,
         isArchived: rr.isArchived,
         archivedAt: rr.archivedAt
           ? new Date(rr.archivedAt).toISOString()

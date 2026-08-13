@@ -23,6 +23,7 @@ import { isValidTimezone, resolveTimezone } from "../utils/timezone.js";
 import { PollService } from "../services/poll-service.js";
 import { VoiceChannelAnnouncer } from "../services/voice-channel-announcer.js";
 import { ReactionRoleService } from "../services/reaction-role-service.js";
+import type { ReactionRoleMode } from "../models/reaction-role-config.js";
 import { NoticesChannelManager } from "../services/notices-channel-manager.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
@@ -3063,6 +3064,11 @@ export function createWriteRouter(
       }
 
       const createChannel = getCheckbox(req, "createChannel");
+      // Assignment mode (#814): toggle (default) / sticky. Anything else falls
+      // back to toggle so a bad form value can't reach the DB enum. (unique is
+      // offered on the role-group form, not the single-role form.)
+      const modeRaw = getString(req, "mode");
+      const mode: ReactionRoleMode = modeRaw === "sticky" ? modeRaw : "toggle";
 
       const service = ReactionRoleService.getInstance(client);
       try {
@@ -3070,7 +3076,7 @@ export function createWriteRouter(
           session.guildId,
           name,
           emoji,
-          { createChannel },
+          { createChannel, mode },
         );
         await recordAudit(session, {
           action: "reactionrole.create",
@@ -3079,6 +3085,7 @@ export function createWriteRouter(
             roleName: name,
             emoji,
             createChannel,
+            mode,
             categoryId: result.categoryId,
             channelId: result.channelId,
             messageId: result.messageId,
@@ -3355,6 +3362,141 @@ export function createWriteRouter(
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
           text: `Failed to delete reaction role: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // Create a one-of-set role group (#814): one shared message with several
+  // role options. The form posts parallel roleName[]/emoji[] arrays.
+  router.post(
+    "/reaction-roles/group/create",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const groupName = getString(req, "groupName");
+
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const toArray = (raw: unknown): string[] =>
+        Array.isArray(raw)
+          ? raw.map(String)
+          : typeof raw === "string"
+            ? [raw]
+            : [];
+      const roleNames = toArray(body["roleName"]);
+      const emojis = toArray(body["emoji"]);
+
+      // Pair positionally and drop rows where either half is blank.
+      const entries: Array<{ roleName: string; emoji: string }> = [];
+      for (let i = 0; i < Math.max(roleNames.length, emojis.length); i++) {
+        const roleName = (roleNames[i] ?? "").trim();
+        const emoji = (emojis[i] ?? "").trim();
+        if (roleName && emoji) {
+          entries.push({ roleName, emoji });
+        }
+      }
+
+      const modeRaw = getString(req, "mode");
+      const mode: ReactionRoleMode =
+        modeRaw === "sticky" || modeRaw === "toggle" ? modeRaw : "unique";
+
+      if (!groupName) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Group name is required.",
+        });
+        return;
+      }
+      if (entries.length < 2) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "A role group needs at least two role/emoji options.",
+        });
+        return;
+      }
+
+      const service = ReactionRoleService.getInstance(client);
+      try {
+        const result = await service.createReactionRoleGroup(
+          session.guildId,
+          groupName,
+          entries,
+          mode,
+        );
+        await recordAudit(session, {
+          action: "reactionrole.group.create",
+          targetId: result.groupId ?? null,
+          details: {
+            groupName,
+            mode,
+            count: entries.length,
+            roleIds: result.roleIds,
+            messageId: result.messageId,
+          },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success ? null : result.message,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: result.success ? "ok" : "err",
+          text: result.message,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Create reaction role group failed", err);
+        await recordAudit(session, {
+          action: "reactionrole.group.create",
+          details: { groupName, mode, count: entries.length },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: `Failed to create role group: ${text}`,
+        });
+      }
+    }),
+  );
+
+  router.post(
+    "/reaction-roles/group/delete",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const groupId = getString(req, "groupId");
+      if (!groupId) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Group id is required.",
+        });
+        return;
+      }
+      const service = ReactionRoleService.getInstance(client);
+      try {
+        const result = await service.deleteReactionRoleGroup(
+          session.guildId,
+          groupId,
+        );
+        await recordAudit(session, {
+          action: "reactionrole.group.delete",
+          targetId: groupId,
+          details: { groupId },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success ? null : result.message,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: result.success ? "ok" : "err",
+          text: result.message,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Delete reaction role group failed", err);
+        await recordAudit(session, {
+          action: "reactionrole.group.delete",
+          targetId: groupId,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: `Failed to delete role group: ${text}`,
         });
       }
     }),

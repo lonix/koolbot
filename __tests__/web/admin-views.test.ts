@@ -1474,6 +1474,8 @@ describe("renderReactionRolesPage", () => {
           channelName: "roles",
           messageId: "m1",
           autoCreated: true,
+          mode: "sticky",
+          groupId: null,
           isArchived: false,
           archivedAt: null,
         },
@@ -1484,6 +1486,7 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain("Gamer");
     expect(html).toContain("#roles");
     expect(html).toContain('class="tag tag-on">active');
+    expect(html).toContain("sticky");
     expect(html).toContain("/admin/reaction-roles/create");
     expect(html).toContain("/admin/reaction-roles/archive");
     expect(html).toContain("/admin/reaction-roles/delete");
@@ -1491,6 +1494,9 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain(
       '<input type="hidden" name="mappingId" value="aaaaaaaaaaaaaaaaaaaaaaaa">',
     );
+    // The one-of-set group creation form is offered.
+    expect(html).toContain("/admin/reaction-roles/group/create");
+    expect(html).toContain("Create a role group");
   });
 
   it("renders a bound mapping with a remove-mapping control and bound tag", () => {
@@ -1508,6 +1514,7 @@ describe("renderReactionRolesPage", () => {
           channelName: "—",
           messageId: "m9",
           autoCreated: false,
+          mode: "toggle",
           isArchived: false,
           archivedAt: null,
         },
@@ -1517,6 +1524,35 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain("/admin/reaction-roles/remove-mapping");
     expect(html).toContain(">bound<");
     // Bound rows do not offer archive.
+    expect(html).not.toContain("/admin/reaction-roles/archive");
+  });
+
+  it("renders a group-delete control for grouped rows instead of per-role controls", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: { name: "roles", id: "c1" },
+      active: [
+        {
+          mappingId: "dddddddddddddddddddddddd",
+          emoji: "🔴",
+          roleName: "Red",
+          roleId: "r1",
+          categoryName: "Colour",
+          channelName: "colour",
+          messageId: "grp1",
+          autoCreated: true,
+          mode: "unique",
+          groupId: "grp1",
+          isArchived: false,
+          archivedAt: null,
+        },
+      ],
+      archived: [],
+    });
+    expect(html).toContain("/admin/reaction-roles/group/delete");
+    expect(html).toContain('name="groupId" value="grp1"');
+    // Grouped rows must not expose the per-role archive control.
     expect(html).not.toContain("/admin/reaction-roles/archive");
   });
 
@@ -1536,6 +1572,8 @@ describe("renderReactionRolesPage", () => {
           channelName: "old",
           messageId: "m2",
           autoCreated: true,
+          mode: "toggle",
+          groupId: null,
           isArchived: true,
           archivedAt: "2026-05-08T00:00:00.000Z",
         },
