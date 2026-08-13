@@ -243,18 +243,18 @@ async function handleEdit(
     return;
   }
 
+  // Normalize IDs from existing quote (handles legacy mention formats)
+  const normalizedExistingAuthorId = normalizeUserId(existingQuote.authorId);
+  const normalizedAddedById = normalizeUserId(existingQuote.addedById);
+
   // Check if user has permission to edit (only the person who added it can edit)
-  if (existingQuote.addedById !== interaction.user.id) {
+  if (normalizedAddedById !== interaction.user.id) {
     await interaction.reply({
       content: "❌ You can only edit quotes that you added.",
       ephemeral: true,
     });
     return;
   }
-
-  // Normalize authorId from existing quote (handles legacy formats)
-  const normalizedExistingAuthorId = normalizeUserId(existingQuote.authorId);
-  const normalizedAddedById = normalizeUserId(existingQuote.addedById);
 
   const finalContent = newText ?? existingQuote.content;
   const finalAuthorId = newAuthor?.id ?? normalizedExistingAuthorId;
