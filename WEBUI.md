@@ -878,7 +878,7 @@ category / announcement channel / timezone themselves live under **Settings**
 
 The **Moderation** page (`/admin/moderation`) is a read-only, server-wide
 history of moderation actions — the Web UI counterpart to per-user `/modlog`.
-Each row shows the timestamp, target user, acting moderator, action, reason, and
+Each row shows the timestamp, target user, action, acting moderator, reason, and
 source; user and moderator snowflakes are resolved to display names when the
 members are still in the guild (a page of 50 rows is resolved with a single
 batched member fetch rather than one request per id) and fall back to the raw id
