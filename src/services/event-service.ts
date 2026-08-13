@@ -12,6 +12,7 @@ import {
   VoiceChannel,
 } from "discord.js";
 import { CronJob, CronTime } from "cron";
+import { isValidObjectId } from "mongoose";
 import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
 import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
@@ -116,22 +117,6 @@ export function countRsvps(rsvps: Array<{ status: RsvpStatus }>): RsvpCounts {
     else if (r.status === "cant") counts.cant += 1;
   }
   return counts;
-}
-
-/**
- * Set a member's RSVP, replacing any previous response. Pure — returns a
- * new array and never mutates the input.
- */
-export function upsertRsvp<
-  T extends { userId: string; status: RsvpStatus; respondedAt: Date },
->(
-  rsvps: T[],
-  userId: string,
-  status: RsvpStatus,
-  now: Date,
-): Array<{ userId: string; status: RsvpStatus; respondedAt: Date }> {
-  const others = rsvps.filter((r) => r.userId !== userId);
-  return [...others, { userId, status, respondedAt: now }];
 }
 
 interface LifecycleView {
@@ -557,23 +542,45 @@ export class EventService {
   }
 
   /** Record a member's RSVP. Returns the updated event, or null when the
-   * event is missing or already finished. */
+   * event is missing or already finished.
+   *
+   * RSVP clicks are the highest-concurrency write in the feature — one
+   * announcement ping draws many button presses in the same tick, so a
+   * fetch/modify/save of the whole `rsvps` array would let the last save
+   * silently overwrite RSVPs recorded in between (lost update). Instead
+   * the upsert runs server-side as a single atomic `findOneAndUpdate`
+   * (the same lost-update defence as `claimEventChannel`'s
+   * compare-and-set): the pipeline drops any previous entry for this
+   * user and appends the new one in one document update, and the state
+   * filter doubles as the finished/missing guard. */
   public async setRsvp(
     eventId: string,
     userId: string,
     status: RsvpStatus,
   ): Promise<IEvent | null> {
-    const event = await this.getEvent(eventId);
-    if (!event) return null;
-    if (event.state === "cancelled" || event.state === "ended") return null;
-    event.rsvps = upsertRsvp(
-      event.rsvps,
-      userId,
-      status,
-      new Date(),
-    ) as IEvent["rsvps"];
-    await event.save();
-    return event;
+    if (!isValidObjectId(eventId)) return null;
+    return Event.findOneAndUpdate(
+      { _id: eventId, state: { $nin: ["cancelled", "ended"] } },
+      [
+        {
+          $set: {
+            rsvps: {
+              $concatArrays: [
+                {
+                  $filter: {
+                    input: "$rsvps",
+                    as: "rsvp",
+                    cond: { $ne: ["$$rsvp.userId", userId] },
+                  },
+                },
+                [{ userId, status, respondedAt: new Date() }],
+              ],
+            },
+          },
+        },
+      ],
+      { new: true },
+    );
   }
 
   // ---------------------------------------------------------------

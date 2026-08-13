@@ -44,7 +44,6 @@ const {
   computeEndTime,
   parseEventDateTime,
   countRsvps,
-  upsertRsvp,
   shouldCreateChannel,
   shouldSendReminder,
   shouldEndEvent,
@@ -119,26 +118,6 @@ describe("countRsvps", () => {
   });
   it("returns zeros for an empty list", () => {
     expect(countRsvps([])).toEqual({ going: 0, maybe: 0, cant: 0 });
-  });
-});
-
-describe("upsertRsvp", () => {
-  const now = new Date("2026-07-01T00:00:00Z");
-  it("adds a new RSVP without mutating the input", () => {
-    const original = [
-      { userId: "a", status: "going" as const, respondedAt: now },
-    ];
-    const next = upsertRsvp(original, "b", "maybe", now);
-    expect(next).toHaveLength(2);
-    expect(original).toHaveLength(1);
-  });
-  it("replaces an existing member's response", () => {
-    const original = [
-      { userId: "a", status: "going" as const, respondedAt: now },
-    ];
-    const next = upsertRsvp(original, "a", "cant", now);
-    expect(next).toHaveLength(1);
-    expect(next[0]).toMatchObject({ userId: "a", status: "cant" });
   });
 });
 
@@ -237,6 +216,83 @@ describe("formatEventWhen", () => {
       timezone: "America/New_York",
     };
     expect(formatEventWhen(event)).toBe("2026-07-04 20:00 (America/New_York)");
+  });
+});
+
+// Regression tests for #768: an RSVP must be recorded as one atomic
+// server-side update, not a fetch/modify/save of the whole document —
+// two members clicking buttons in the same tick would otherwise clobber
+// each other's RSVP (lost update).
+describe("setRsvp", () => {
+  const EVENT_ID = "0123456789abcdef01234567"; // valid ObjectId shape
+
+  beforeEach(() => {
+    EventService.reset();
+  });
+
+  function buildService(): InstanceType<typeof EventService> {
+    return EventService.getInstance({} as never);
+  }
+
+  it("upserts via a single atomic findOneAndUpdate and returns the updated event", async () => {
+    const updated = {
+      _id: EVENT_ID,
+      rsvps: [{ userId: "user-1", status: "going" }],
+    };
+    EventMock.findOneAndUpdate = jest.fn(async () => updated);
+
+    const result = await buildService().setRsvp(EVENT_ID, "user-1", "going");
+
+    expect(result).toBe(updated);
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
+    expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+      // The state filter doubles as the finished-event guard.
+      { _id: EVENT_ID, state: { $nin: ["cancelled", "ended"] } },
+      // Pipeline update: drop any previous entry for the user, append the
+      // new one — both inside one atomic document update.
+      [
+        {
+          $set: {
+            rsvps: {
+              $concatArrays: [
+                {
+                  $filter: {
+                    input: "$rsvps",
+                    as: "rsvp",
+                    cond: { $ne: ["$$rsvp.userId", "user-1"] },
+                  },
+                },
+                [
+                  {
+                    userId: "user-1",
+                    status: "going",
+                    respondedAt: expect.any(Date),
+                  },
+                ],
+              ],
+            },
+          },
+        },
+      ],
+      { new: true },
+    );
+  });
+
+  it("returns null when the event is missing, ended or cancelled", async () => {
+    EventMock.findOneAndUpdate = jest.fn(async () => null);
+
+    const result = await buildService().setRsvp(EVENT_ID, "user-1", "maybe");
+
+    expect(result).toBeNull();
+  });
+
+  it("returns null for a malformed event id without touching the database", async () => {
+    EventMock.findOneAndUpdate = jest.fn(async () => null);
+
+    const result = await buildService().setRsvp("not-an-id", "user-1", "cant");
+
+    expect(result).toBeNull();
+    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
 
