@@ -628,9 +628,18 @@ export class QuoteChannelManager {
 
       const message = await channel.send({ embeds: [embed] });
 
-      // Add reaction buttons
-      await message.react("👍");
-      await message.react("👎");
+      // Add reaction buttons. A failure here must not discard the
+      // successfully-posted message id — otherwise the message is orphaned in
+      // the channel and its messageId is never persisted (see issue #776).
+      try {
+        await message.react("👍");
+        await message.react("👎");
+      } catch (reactionError) {
+        logger.error(
+          `Posted quote ${quoteId} as message ${message.id} but failed to add reactions:`,
+          reactionError,
+        );
+      }
 
       logger.info(
         `Posted quote ${quoteId} to channel as message ${message.id}`,
