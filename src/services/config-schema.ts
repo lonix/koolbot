@@ -133,6 +133,9 @@ export interface ConfigSchema {
   "core.command_audit.enabled": boolean;
   "core.command_audit.retention_days": number;
 
+  // WebUI audit log retention (issue #756)
+  "core.web_audit.retention_days": number; // 0 = keep history forever
+
   // Persisted command metrics (issue #648)
   "monitoring.metrics_persistence.enabled": boolean;
   "monitoring.metrics_retention_days": number;
@@ -337,6 +340,12 @@ export const defaultConfig: ConfigSchema = {
   // matches the proposal in the issue (90 days).
   "core.command_audit.enabled": true,
   "core.command_audit.retention_days": 90,
+
+  // WebUI audit log retention default (#756). WebAuditLog rows are written
+  // unconditionally on every state-changing WebUI request, so there's no
+  // enabled toggle — retention alone governs pruning. 90 days matches
+  // command_audit; set to 0 to keep history forever.
+  "core.web_audit.retention_days": 90,
 
   // Persisted command metrics defaults (#648). On by default so fresh
   // installs get historical command analytics in the Admin → Command
@@ -1410,6 +1419,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Slash-command audit retention (days)",
     description:
       "Days to keep slash-command audit rows before the cleanup job prunes them.",
+    category: "core",
+    type: "number",
+  },
+  "core.web_audit.retention_days": {
+    label: "WebUI audit retention (days)",
+    description:
+      "Days to keep WebUI audit-log rows before the daily cleanup job prunes them. Set to 0 to keep history forever.",
     category: "core",
     type: "number",
   },

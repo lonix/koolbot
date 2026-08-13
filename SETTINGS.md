@@ -1260,6 +1260,23 @@ batched (every few minutes, never per-invocation) and pruned by a TTL index.
 - `monitoring.metrics_retention_days` (number, default: 30) — days to keep
   persisted daily buckets before the TTL index prunes them.
 
+#### Audit Logs (operator visibility)
+
+Two audit trails record who did what and when. Both are cross-cutting
+operator-visibility features rather than user-facing toggles, so they record
+by default; each has a daily cleanup job that prunes rows past its retention
+window (staggered at 03:00 / 03:15 server time to avoid contention).
+
+- `core.command_audit.enabled` (bool, default: true) — record one row per
+  Discord slash-command invocation (who, what, when, outcome). Raw command
+  arguments are never stored.
+- `core.command_audit.retention_days` (number, default: 90) — days to keep
+  slash-command audit rows before the daily cleanup (03:00) prunes them.
+- `core.web_audit.retention_days` (number, default: 90) — days to keep WebUI
+  audit-log rows (one per state-changing WebUI request) before the daily
+  cleanup (03:15) prunes them. Set to `0` to keep history forever. WebUI
+  audit rows are always written, so there is no separate enable toggle.
+
 ### Bootstrap env vars (read-only in Web UI)
 
 - `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `MONGODB_URI`
