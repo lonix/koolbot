@@ -1651,10 +1651,13 @@ export class AchievementsService {
    * The year component is the ISO week-year, not the calendar year — near
    * year boundaries they differ (e.g. Dec 30, 2024 is "2025-W01"), and
    * using the calendar year would collide with an unrelated week.
+   * Buckets by the UTC calendar date so the key stays consistent with the
+   * Monday-anchored UTC week window (getStartOfWeekUtc) regardless of the
+   * host timezone.
    */
   private getWeekPeriod(date: Date): string {
     const d = new Date(
-      Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
+      Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
     );
     const dayNum = d.getUTCDay() || 7;
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);

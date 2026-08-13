@@ -395,30 +395,43 @@ describe("AchievementsService", () => {
         service as unknown as { getWeekPeriod: (d: Date) => string }
       ).getWeekPeriod(date);
 
-    // Dates are built with local-time components because getWeekPeriod reads
-    // the local calendar date, keeping these assertions timezone-independent.
+    // Dates are built with UTC components because getWeekPeriod buckets by
+    // the UTC calendar date (matching the Monday-anchored UTC week window),
+    // keeping these assertions timezone-independent.
     it("uses the ISO week-year when a late-December date falls in week 1 of the next year", () => {
       const { service } = createAchievementsService(mockClient);
       // Mon Dec 30, 2024 is in ISO week 1 of 2025 — the calendar year (2024)
       // would collide with the real 2024-W01 (Jan 1-7, 2024).
-      expect(getWeekPeriod(service, new Date(2024, 11, 30))).toBe("2025-W01");
-      expect(getWeekPeriod(service, new Date(2024, 11, 31))).toBe("2025-W01");
+      expect(getWeekPeriod(service, new Date(Date.UTC(2024, 11, 30)))).toBe(
+        "2025-W01",
+      );
+      expect(getWeekPeriod(service, new Date(Date.UTC(2024, 11, 31)))).toBe(
+        "2025-W01",
+      );
     });
 
     it("uses the ISO week-year when an early-January date falls in the last week of the previous year", () => {
       const { service } = createAchievementsService(mockClient);
       // Fri Jan 1, 2021 is in ISO week 53 of 2020.
-      expect(getWeekPeriod(service, new Date(2021, 0, 1))).toBe("2020-W53");
+      expect(getWeekPeriod(service, new Date(Date.UTC(2021, 0, 1)))).toBe(
+        "2020-W53",
+      );
       // Sun Jan 3, 2021 is still in ISO week 53 of 2020.
-      expect(getWeekPeriod(service, new Date(2021, 0, 3))).toBe("2020-W53");
+      expect(getWeekPeriod(service, new Date(Date.UTC(2021, 0, 3)))).toBe(
+        "2020-W53",
+      );
     });
 
     it("matches the calendar year for mid-year dates", () => {
       const { service } = createAchievementsService(mockClient);
       // Mon Jan 29, 2024 is in ISO week 5 of 2024.
-      expect(getWeekPeriod(service, new Date(2024, 0, 29))).toBe("2024-W05");
+      expect(getWeekPeriod(service, new Date(Date.UTC(2024, 0, 29)))).toBe(
+        "2024-W05",
+      );
       // Wed Jul 15, 2026 is in ISO week 29 of 2026.
-      expect(getWeekPeriod(service, new Date(2026, 6, 15))).toBe("2026-W29");
+      expect(getWeekPeriod(service, new Date(Date.UTC(2026, 6, 15)))).toBe(
+        "2026-W29",
+      );
     });
   });
 
