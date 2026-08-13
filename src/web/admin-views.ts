@@ -2094,6 +2094,7 @@ export interface ReactionRoleRow {
    */
   autoCreated?: boolean;
   mode: string;
+  groupId: string | null;
   isArchived: boolean;
   archivedAt: string | null;
 }
@@ -2116,7 +2117,12 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
   const escapedMappingId = escapeHtml(rr.mappingId);
 
   let actions: string;
-  if (!managed) {
+  if (rr.groupId) {
+    // Grouped mappings share a message/category/channel, so they can only be
+    // torn down as a unit — offer a single group-delete instead of the
+    // per-mapping archive/delete controls.
+    actions = `<form method="POST" action="/admin/reaction-roles/group/delete" onsubmit="return confirm('Permanently delete the whole role group ${jsName} belongs to? This removes every role in the group and its shared category/channel.');">${csrfInput}<input type="hidden" name="groupId" value="${escapeHtml(rr.groupId)}"><button type="submit" class="btn btn-danger">Delete group</button></form>`;
+  } else if (!managed) {
     // Bound mappings point at a pre-existing role and may share a picker
     // message, so they are removed per-mapping (message + emoji) and never
     // archived — that would delete a message other mappings still use.
@@ -2137,6 +2143,10 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
   const channelCell =
     rr.channelName === "—" ? "—" : `#${escapeHtml(rr.channelName)}`;
 
+  const modeCell = rr.groupId
+    ? `${escapeHtml(rr.mode)} <span class="tag">group</span>`
+    : escapeHtml(rr.mode);
+
   return `<tr>
 <td class="mono">${escapedEmoji}</td>
 <td>${escapedName} <span class="muted mono">${escapeHtml(rr.roleId)}</span></td>
@@ -2144,7 +2154,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 <td>${escapeHtml(rr.categoryName)}</td>
 <td>${channelCell}</td>
 <td class="mono">${escapedMessageId}</td>
-<td>${escapeHtml(rr.mode)}</td>
+<td>${modeCell}</td>
 <td><span class="tag ${rr.isArchived ? "tag-off" : "tag-on"}">${rr.isArchived ? "archived" : "active"}</span></td>
 <td class="muted">${escapeHtml(rr.archivedAt ?? "")}</td>
 <td class="actions">${actions}</td>
@@ -2201,9 +2211,9 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
       <select name="mode">
         <option value="toggle" selected>Toggle — react to add, unreact to remove (default)</option>
         <option value="sticky">Sticky — react to add; removing the reaction keeps the role</option>
-        <option value="unique">Unique — reacting clears the other roles on the same message</option>
       </select>
     </label>
+    <p class="muted">For one-of-set (pick exactly one) behaviour, use <strong>Create a role group</strong> below — a single message can't enforce "unique" against itself.</p>
     <button type="submit" class="btn btn-primary">Create reaction role</button>
   </form>
 </div>
@@ -2222,6 +2232,32 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
       <input type="text" name="messageId" maxlength="30" placeholder="(new message)">
     </label>
     <button type="submit" class="btn btn-primary">Bind existing role</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Create a role group</h2>
+  <p class="muted">Posts one message offering several roles at once. With <strong>Unique</strong> mode, reacting to one option clears the others (e.g. pick exactly one colour). All options share a single category/channel; delete the group as a unit. Fill at least two rows; blank rows are ignored.</p>
+  <form method="POST" action="/admin/reaction-roles/group/create" class="stack">
+    ${csrfInput}
+    <label>Group name
+      <input type="text" name="groupName" required maxlength="100" placeholder="Colour">
+    </label>
+    <label>Group mode
+      <select name="mode">
+        <option value="unique" selected>Unique — pick exactly one (reacting swaps your choice)</option>
+        <option value="sticky">Sticky — add-only, reactions never revoke</option>
+        <option value="toggle">Toggle — independent add/remove per option</option>
+      </select>
+    </label>
+    ${Array.from(
+      { length: 6 },
+      (_unused, i) =>
+        `<div class="inline-form">
+      <input type="text" name="roleName" maxlength="100" placeholder="Role name${i < 2 ? " (required)" : ""}">
+      <input type="text" name="emoji" maxlength="100" placeholder="Emoji${i < 2 ? " (required)" : ""}">
+    </div>`,
+    ).join("")}
+    <button type="submit" class="btn btn-primary">Create role group</button>
   </form>
 </div>
 <div class="card">

@@ -60,6 +60,10 @@ export interface IReactionRoleConfig extends Document {
    */
   autoCreated: boolean;
   mode: ReactionRoleMode;
+  // Correlates the mappings that share one message as a one-of-set group
+  // (#814). Populated only for grouped mappings; single mappings leave it
+  // undefined. Equal to the group's anchor message id at creation time.
+  groupId?: string;
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -118,6 +122,11 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
       enum: REACTION_ROLE_MODES,
       default: "toggle",
       required: true,
+    },
+    groupId: {
+      type: String,
+      required: false,
+      index: true,
     },
     isArchived: {
       type: Boolean,

@@ -1601,6 +1601,359 @@ export class ReactionRoleService {
     }
   }
 
+  /**
+   * Create a one-of-set role group (#814): one shared reaction message carries
+   * several role options, and each option's mapping shares the message id (and
+   * a `groupId`) so `unique` mode has real siblings to clear. All options live
+   * under a single shared category/channel gated to any of the group's roles.
+   *
+   * Reaction-surface only — `unique` is a reaction concept, and mixing button/
+   * select components with one-of-set semantics is out of scope here.
+   *
+   * Fully transactional: on any failure every created role/channel/category/
+   * message is rolled back so a partial group never lingers.
+   */
+  public async createReactionRoleGroup(
+    guildId: string,
+    groupName: string,
+    entries: Array<{ roleName: string; emoji: string }>,
+    mode: ReactionRoleMode = "unique",
+  ): Promise<{
+    success: boolean;
+    message: string;
+    groupId?: string;
+    messageId?: string;
+    roleIds?: string[];
+  }> {
+    // Validate the group shape before touching Discord.
+    if (entries.length < 2) {
+      return {
+        success: false,
+        message: "A role group needs at least two role options.",
+      };
+    }
+    if (entries.length > 20) {
+      return {
+        success: false,
+        message: "A role group can have at most 20 role options.",
+      };
+    }
+    const names = entries.map((e) => e.roleName.trim());
+    if (names.some((n) => n.length === 0)) {
+      return { success: false, message: "Every role option needs a name." };
+    }
+    if (names.some((n) => n.length > 100)) {
+      return {
+        success: false,
+        message: "Role names must be 100 characters or fewer.",
+      };
+    }
+    const lowerNames = names.map((n) => n.toLowerCase());
+    if (new Set(lowerNames).size !== lowerNames.length) {
+      return {
+        success: false,
+        message: "Role names within a group must be unique.",
+      };
+    }
+    const emojis = entries.map((e) => this.normalizeEmoji(e.emoji.trim()));
+    if (emojis.some((e) => e.length === 0)) {
+      return { success: false, message: "Every role option needs an emoji." };
+    }
+    if (new Set(emojis).size !== emojis.length) {
+      return {
+        success: false,
+        message: "Emojis within a group must be unique.",
+      };
+    }
+
+    const createdRoles: Role[] = [];
+    let category: CategoryChannel | null = null;
+    let channel: TextChannel | null = null;
+    let message: Message | null = null;
+
+    try {
+      // A group is always one-of-set; anything else is meaningless for a shared
+      // message, so coerce to `unique` unless a caller explicitly picks another
+      // valid mode (e.g. sticky opt-in sets).
+      const normalizedMode: ReactionRoleMode = REACTION_ROLE_MODES.includes(
+        mode,
+      )
+        ? mode
+        : "unique";
+
+      // Reject if any target role name already exists (roleName is unique).
+      const clash = await ReactionRoleConfig.findOne({
+        guildId,
+        roleName: { $in: names },
+      });
+      if (clash) {
+        return {
+          success: false,
+          message: `A reaction role named **${clash.roleName}** already exists in this server.`,
+        };
+      }
+
+      const guild = await this.client.guilds.fetch(guildId);
+
+      const messageChannelId = await this.configService.getString(
+        "reactionroles.message_channel_id",
+        "",
+      );
+      if (!messageChannelId) {
+        throw new Error(
+          "Reaction role message channel not configured. Set reactionroles.message_channel_id",
+        );
+      }
+      const messageChannel = (await guild.channels.fetch(
+        messageChannelId,
+      )) as TextChannel;
+      if (!messageChannel || !messageChannel.isTextBased()) {
+        throw new Error(
+          `Message channel ${messageChannelId} not found or is not a text channel`,
+        );
+      }
+
+      // Create every role first so we can gate the shared category to all of
+      // them at once.
+      for (const name of names) {
+        const role = await guild.roles.create({
+          name,
+          reason: `Reaction role group created: ${groupName}`,
+        });
+        createdRoles.push(role);
+        logger.info(`Created role: ${role.name} (${role.id})`);
+      }
+
+      // One shared category, visible only to members of any role in the group.
+      category = (await guild.channels.create({
+        name: groupName,
+        type: ChannelType.GuildCategory,
+        reason: `Category for reaction role group: ${groupName}`,
+      })) as CategoryChannel;
+      await category.permissionOverwrites.edit(guild.roles.everyone, {
+        ViewChannel: false,
+      });
+      for (const role of createdRoles) {
+        await category.permissionOverwrites.edit(role, { ViewChannel: true });
+      }
+      const botMember = guild.members.me;
+      if (botMember) {
+        await category.permissionOverwrites.edit(botMember, {
+          ViewChannel: true,
+          ManageChannels: true,
+          ManageRoles: true,
+        });
+      } else {
+        logger.warn(
+          `Unable to set category permissions for bot user in guild ${guild.id} - guild.members.me is null`,
+        );
+      }
+
+      const sanitizedName =
+        groupName
+          .toLowerCase()
+          .replace(/\s+/g, "-")
+          .replace(/[^a-z0-9-_]/g, "")
+          .substring(0, 100) || "role-group";
+      channel = (await guild.channels.create({
+        name: sanitizedName,
+        type: ChannelType.GuildText,
+        parent: category.id,
+        reason: `Channel for reaction role group: ${groupName}`,
+      })) as TextChannel;
+
+      // One message listing every option; unreact behaviour follows the mode.
+      const optionLines = entries.map(
+        (e, i) => `${emojis[i]} — **${names[i]}**`,
+      );
+      const footer =
+        normalizedMode === "unique"
+          ? "Pick one — reacting swaps you to that role"
+          : normalizedMode === "sticky"
+            ? "React to opt in — removing your reaction keeps the role"
+            : "React to add a role, remove your reaction to lose it";
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(groupName)
+        .setDescription(
+          `React to choose your **${groupName}** role:\n\n${optionLines.join("\n")}`,
+        )
+        .setFooter({ text: footer })
+        .setTimestamp();
+      message = await messageChannel.send({ embeds: [embed] });
+
+      // React with each option's emoji in order so the picker is ready to use.
+      for (const emoji of emojis) {
+        await message.react(emoji);
+      }
+
+      // groupId anchors the set; equal to the message id at creation.
+      const groupId = message.id;
+
+      // Persist one mapping per option, all sharing message/category/channel.
+      const docs = entries.map((_, i) => ({
+        guildId,
+        messageId: message!.id,
+        channelId: channel!.id,
+        roleId: createdRoles[i].id,
+        categoryId: category!.id,
+        emoji: emojis[i],
+        roleName: names[i],
+        style: "reaction" as ReactionRoleStyle,
+        // The bot creates every role/category/channel in a group, so it owns
+        // their lifecycle (#824's autoCreated model); group delete tears down.
+        autoCreated: true,
+        mode: normalizedMode,
+        groupId,
+        isArchived: false,
+      }));
+      await ReactionRoleConfig.insertMany(docs);
+
+      logger.info(
+        `Created reaction role group ${sanitizeForLog(groupName)} (${docs.length} roles, mode ${normalizedMode})`,
+      );
+
+      return {
+        success: true,
+        message: `Successfully created role group **${groupName}** with ${docs.length} roles.`,
+        groupId,
+        messageId: message.id,
+        roleIds: createdRoles.map((r) => r.id),
+      };
+    } catch (error) {
+      logger.error("Error creating reaction role group, rolling back:", error);
+
+      if (message) {
+        await message
+          .delete()
+          .catch((err) =>
+            logger.warn("Could not delete group message during rollback:", err),
+          );
+      }
+      if (channel) {
+        await channel
+          .delete()
+          .catch((err) =>
+            logger.warn("Could not delete group channel during rollback:", err),
+          );
+      }
+      if (category) {
+        await category
+          .delete()
+          .catch((err) =>
+            logger.warn(
+              "Could not delete group category during rollback:",
+              err,
+            ),
+          );
+      }
+      for (const role of createdRoles) {
+        await role
+          .delete()
+          .catch((err) =>
+            logger.warn("Could not delete group role during rollback:", err),
+          );
+      }
+
+      return {
+        success: false,
+        message: `Failed to create role group: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
+  /**
+   * Fully delete a role group (#814): every role in the group, the shared
+   * category + channel, the shared message, and all the group's config rows.
+   * Best-effort per resource so one failure never leaves the DB inconsistent.
+   */
+  public async deleteReactionRoleGroup(
+    guildId: string,
+    groupId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      const configs = await ReactionRoleConfig.find({ guildId, groupId });
+      if (configs.length === 0) {
+        return { success: false, message: `Role group not found.` };
+      }
+
+      const guild = await this.client.guilds.fetch(guildId);
+      const first = configs[0];
+
+      // Delete the shared message.
+      try {
+        const messageChannelId = await this.configService.getString(
+          "reactionroles.message_channel_id",
+          "",
+        );
+        if (messageChannelId) {
+          const messageChannel = (await guild.channels.fetch(
+            messageChannelId,
+          )) as TextChannel;
+          if (messageChannel) {
+            const message = await messageChannel.messages.fetch(
+              first.messageId,
+            );
+            if (message) {
+              await message.delete();
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn("Could not delete group message:", error);
+      }
+
+      // Delete the shared category (and its child channels).
+      try {
+        const category = first.categoryId
+          ? await guild.channels.fetch(first.categoryId)
+          : null;
+        if (category) {
+          const categoryChannel = category as CategoryChannel;
+          for (const [, child] of categoryChannel.children.cache) {
+            await child
+              .delete()
+              .catch((err) =>
+                logger.warn(`Could not delete channel ${child.id}:`, err),
+              );
+          }
+          await category.delete();
+        }
+      } catch (error) {
+        logger.warn("Could not delete group category:", error);
+      }
+
+      // Delete every role in the group.
+      for (const config of configs) {
+        try {
+          const role = await guild.roles.fetch(config.roleId);
+          if (role) {
+            await role.delete();
+          }
+        } catch (error) {
+          logger.warn(`Could not delete role ${config.roleId}:`, error);
+        }
+      }
+
+      await ReactionRoleConfig.deleteMany({ guildId, groupId });
+
+      logger.info(
+        `Fully deleted reaction role group ${groupId} (${configs.length} roles)`,
+      );
+
+      return {
+        success: true,
+        message: `Successfully deleted role group and its ${configs.length} roles.`,
+      };
+    } catch (error) {
+      logger.error("Error deleting reaction role group:", error);
+      return {
+        success: false,
+        message: `Failed to delete role group: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
   public async archiveReactionRole(
     guildId: string,
     mappingId: string,
@@ -1626,6 +1979,15 @@ export class ReactionRoleService {
       }
 
       const roleName = config.roleName;
+
+      // Group members share one message/category/channel; archiving a single
+      // member would orphan the rest, so require the group-level operation.
+      if (config.groupId) {
+        return {
+          success: false,
+          message: `**${roleName}** belongs to a role group; archive or delete the whole group instead.`,
+        };
+      }
 
       // Mark as archived
       config.isArchived = true;
@@ -1697,6 +2059,15 @@ export class ReactionRoleService {
       }
 
       const roleName = config.roleName;
+
+      // Unarchiving one group member would recreate a single-role message
+      // detached from its siblings; group lifecycle is managed as a unit.
+      if (config.groupId) {
+        return {
+          success: false,
+          message: `**${roleName}** belongs to a role group and cannot be unarchived individually.`,
+        };
+      }
 
       const guild = await this.client.guilds.fetch(guildId);
 
@@ -1833,6 +2204,16 @@ export class ReactionRoleService {
       }
 
       const roleName = config.roleName;
+
+      // Group members share resources; deleting one alone would tear down the
+      // shared category/channel/message and orphan the siblings. Route the
+      // caller to the group-level delete instead.
+      if (config.groupId) {
+        return {
+          success: false,
+          message: `**${roleName}** belongs to a role group; delete the whole group instead.`,
+        };
+      }
 
       const guild = await this.client.guilds.fetch(guildId);
 

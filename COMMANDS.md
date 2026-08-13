@@ -901,6 +901,14 @@ Each mapping has an **assignment mode** chosen at creation
 - **unique**: reacting clears the other roles mapped on the same message,
   so a member ends up with at most one from the set.
 
+Because a normal reaction role is created on its own message, `unique`
+only has siblings to clear inside a **role group** — one message that
+offers several roles at once (created via **Create a role group** on
+`/admin/reaction-roles`, e.g. a pick-one-colour set). A group shares a
+single category/channel and is deleted as a unit; the per-role
+archive/delete actions are disabled for its members. Toggle and sticky
+mode also work for groups (each option acts independently / add-only).
+
 On startup the bot reconciles each active mapping — archiving any whose
 message or role was deleted while it was offline, and re-adding its own
 base reaction if it went missing. It also archives a mapping automatically
