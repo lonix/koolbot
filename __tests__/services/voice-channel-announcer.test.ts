@@ -4,6 +4,8 @@ import { VoiceChannelAnnouncer } from "../../src/services/voice-channel-announce
 // Mock dependencies
 jest.mock("../../src/services/config-service.js");
 jest.mock("../../src/services/voice-channel-tracker.js");
+jest.mock("../../src/services/quote-service.js");
+jest.mock("../../src/services/poll-participation-tracker.js");
 jest.mock("../../src/utils/logger.js");
 
 describe("VoiceChannelAnnouncer", () => {

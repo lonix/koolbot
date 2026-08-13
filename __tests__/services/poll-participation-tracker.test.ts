@@ -18,6 +18,9 @@ import { PollParticipationTracking } from "../../src/models/poll-participation-t
   jest.fn();
 (PollParticipationTracking as unknown as { findOne: jest.Mock }).findOne =
   jest.fn();
+(
+  PollParticipationTracking as unknown as { countDocuments: jest.Mock }
+).countDocuments = jest.fn();
 
 // Mirror the model's `findOne(...).lean()` chain used by
 // `getParticipationSummary`.
@@ -205,6 +208,38 @@ describe("PollParticipationTracker", () => {
 
       const summary = await tracker.getParticipationSummary("voter1", "guild1");
       expect(summary).toBeNull();
+    });
+  });
+
+  describe("getRecentVoterCount (#777)", () => {
+    let countDocuments: jest.Mock;
+
+    beforeEach(() => {
+      countDocuments = (
+        PollParticipationTracking as unknown as { countDocuments: jest.Mock }
+      ).countDocuments;
+    });
+
+    it("counts members whose last vote falls within the window", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      countDocuments.mockResolvedValue(4);
+      const since = new Date("2026-08-06T00:00:00Z");
+
+      const count = await tracker.getRecentVoterCount("guild1", since);
+
+      expect(countDocuments).toHaveBeenCalledWith({
+        guildId: "guild1",
+        lastVoteAt: { $gte: since },
+      });
+      expect(count).toBe(4);
+    });
+
+    it("degrades to 0 on a DB error", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      countDocuments.mockRejectedValue(new Error("DB error"));
+
+      const count = await tracker.getRecentVoterCount("guild1", new Date());
+      expect(count).toBe(0);
     });
   });
 });

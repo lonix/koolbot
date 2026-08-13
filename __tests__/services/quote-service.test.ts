@@ -78,4 +78,31 @@ describe("QuoteService", () => {
       expect(quoteService.getAllQuotes.length).toBe(0);
     });
   });
+
+  describe("getTopQuoteSince (#777)", () => {
+    it("queries most-liked quote added since the window, likes > 0", async () => {
+      const sort = jest.fn().mockResolvedValue({ content: "hi", likes: 5 });
+      const findOne = jest.fn().mockReturnValue({ sort });
+      (quoteService as never)["model"] = { findOne };
+
+      const since = new Date("2026-08-06T00:00:00Z");
+      const result = await quoteService.getTopQuoteSince(since);
+
+      expect(findOne).toHaveBeenCalledWith({
+        createdAt: { $gte: since },
+        likes: { $gt: 0 },
+      });
+      expect(sort).toHaveBeenCalledWith({ likes: -1 });
+      expect(result).toEqual({ content: "hi", likes: 5 });
+    });
+
+    it("returns null when no qualifying quote exists", async () => {
+      const sort = jest.fn().mockResolvedValue(null);
+      const findOne = jest.fn().mockReturnValue({ sort });
+      (quoteService as never)["model"] = { findOne };
+
+      const result = await quoteService.getTopQuoteSince(new Date());
+      expect(result).toBeNull();
+    });
+  });
 });

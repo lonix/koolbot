@@ -21,6 +21,13 @@ export interface ConfigSchema {
   "voicetracking.announcements.enabled": boolean;
   "voicetracking.announcements.schedule": string; // Cron schedule
   "voicetracking.announcements.channel_id": string; // Channel ID for voice-stats announcements
+  // Weekly recap section toggles (#777) — admins can turn each part of the
+  // scheduled recap on/off independently. A section also stays hidden unless
+  // the feature that produces its data is itself enabled.
+  "voicetracking.announcements.include_voice_stats": boolean;
+  "voicetracking.announcements.include_accolades": boolean;
+  "voicetracking.announcements.include_quote_of_week": boolean;
+  "voicetracking.announcements.include_poll_turnout": boolean;
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": boolean;
@@ -202,6 +209,11 @@ export const defaultConfig: ConfigSchema = {
   "voicetracking.announcements.enabled": false,
   "voicetracking.announcements.schedule": "0 16 * * 5", // Every Friday at 16:00
   "voicetracking.announcements.channel_id": "",
+  // Recap sections default on; each is inert until its own feature is enabled.
+  "voicetracking.announcements.include_voice_stats": true,
+  "voicetracking.announcements.include_accolades": true,
+  "voicetracking.announcements.include_quote_of_week": true,
+  "voicetracking.announcements.include_poll_turnout": true,
 
   // Voice Channel Cleanup
   "voicetracking.cleanup.enabled": false,
@@ -862,8 +874,9 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     channelKind: "voice",
   },
   "voicetracking.announcements.enabled": {
-    label: "Scheduled voice-stats announcements enabled",
-    description: "Enable scheduled voice-stats announcements.",
+    label: "Scheduled weekly recap enabled",
+    description:
+      "Enable the scheduled weekly recap posted to a channel (top voice-time members plus, when their features are enabled, accolades earned, quote of the week, and poll turnout). Sections are toggled individually below.",
     category: "voicetracking",
     type: "boolean",
     dependsOn: ["voicetracking.enabled"],
@@ -876,10 +889,37 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
   "voicetracking.announcements.channel_id": {
     label: "Announcement channel",
-    description:
-      "Discord channel ID where voice-stats announcements are posted.",
+    description: "Discord channel ID where the weekly recap is posted.",
     category: "voicetracking",
     type: "channel",
+  },
+  "voicetracking.announcements.include_voice_stats": {
+    label: "Recap: top voice-time members",
+    description:
+      "Include the weekly top voice-time leaderboard in the scheduled recap.",
+    category: "voicetracking",
+    type: "boolean",
+  },
+  "voicetracking.announcements.include_accolades": {
+    label: "Recap: accolades earned",
+    description:
+      "Include accolades earned in the last week in the scheduled recap (also requires achievements and achievement announcements to be enabled).",
+    category: "voicetracking",
+    type: "boolean",
+  },
+  "voicetracking.announcements.include_quote_of_week": {
+    label: "Recap: quote of the week",
+    description:
+      "Include the most-liked quote added in the last week in the scheduled recap (also requires the quotes feature to be enabled).",
+    category: "voicetracking",
+    type: "boolean",
+  },
+  "voicetracking.announcements.include_poll_turnout": {
+    label: "Recap: poll participation",
+    description:
+      "Include how many members voted in polls in the last week in the scheduled recap (also requires poll participation tracking to be enabled).",
+    category: "voicetracking",
+    type: "boolean",
   },
 
   // Voice Channel Cleanup (dbtrunk)

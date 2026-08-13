@@ -378,6 +378,24 @@ export class QuoteService {
   }
 
   /**
+   * Return the most-liked quote added since `since`, for the public weekly
+   * recap (#777). Only quotes with at least one like qualify, so a quiet week
+   * surfaces nothing rather than an arbitrary zero-vote quote. Scoped by
+   * `createdAt` (when the quote was added) because vote events are not
+   * timestamped — "top-voted this week" can only be approximated as
+   * "most-liked among quotes added this week". Returns null when nothing
+   * qualifies.
+   */
+  async getTopQuoteSince(since: Date): Promise<IQuote | null> {
+    return this.model
+      .findOne({
+        createdAt: { $gte: since },
+        likes: { $gt: 0 },
+      })
+      .sort({ likes: -1 });
+  }
+
+  /**
    * Get the count of quotes added by a specific user
    * Handles legacy quote data with various ID formats (<@123>, <@!123>, @123, 123)
    */
