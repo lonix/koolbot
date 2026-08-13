@@ -2093,6 +2093,7 @@ export interface ReactionRoleRow {
    * this false. Optional/undefined is treated as `true` for legacy rows.
    */
   autoCreated?: boolean;
+  mode: string;
   isArchived: boolean;
   archivedAt: string | null;
 }
@@ -2143,6 +2144,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 <td>${escapeHtml(rr.categoryName)}</td>
 <td>${channelCell}</td>
 <td class="mono">${escapedMessageId}</td>
+<td>${escapeHtml(rr.mode)}</td>
 <td><span class="tag ${rr.isArchived ? "tag-off" : "tag-on"}">${rr.isArchived ? "archived" : "active"}</span></td>
 <td class="muted">${escapeHtml(rr.archivedAt ?? "")}</td>
 <td class="actions">${actions}</td>
@@ -2180,7 +2182,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
   ${
     props.active.length === 0
       ? `<div class="empty">No active reaction-role mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
+      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Mode</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
   }
 </div>
 <div class="card">
@@ -2195,6 +2197,13 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
       <input type="text" name="emoji" required maxlength="100" placeholder="🎮">
     </label>
     <label class="inline"><input type="checkbox" name="createChannel" value="1" checked> Create a private category + channel for this role</label>
+    <label>Assignment mode
+      <select name="mode">
+        <option value="toggle" selected>Toggle — react to add, unreact to remove (default)</option>
+        <option value="sticky">Sticky — react to add; removing the reaction keeps the role</option>
+        <option value="unique">Unique — reacting clears the other roles on the same message</option>
+      </select>
+    </label>
     <button type="submit" class="btn btn-primary">Create reaction role</button>
   </form>
 </div>
@@ -2220,7 +2229,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
   ${
     props.archived.length === 0
       ? `<div class="empty">No archived mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
+      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Mode</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
   }
 </div>
 `;

@@ -1028,6 +1028,36 @@ client.on(Events.MessageReactionRemove, async (reaction, user) => {
   }
 });
 
+// Self-heal reaction-role configs when their backing Discord objects are
+// deleted out from under the bot (#814). Each handler archives the affected
+// config(s) so the DB stops drifting from reality; gating lives in the service.
+client.on(Events.MessageDelete, async (message) => {
+  recordDiscordEvent("messageDelete");
+  try {
+    await reactionRoleService.handleMessageDelete(message);
+  } catch (error) {
+    logger.error("Error handling messageDelete:", error);
+  }
+});
+
+client.on(Events.GuildRoleDelete, async (role) => {
+  recordDiscordEvent("roleDelete");
+  try {
+    await reactionRoleService.handleRoleDelete(role);
+  } catch (error) {
+    logger.error("Error handling roleDelete:", error);
+  }
+});
+
+client.on(Events.ChannelDelete, async (channel) => {
+  recordDiscordEvent("channelDelete");
+  try {
+    await reactionRoleService.handleChannelDelete(channel);
+  } catch (error) {
+    logger.error("Error handling channelDelete:", error);
+  }
+});
+
 // Handle native-poll votes for per-user participation tracking (#570).
 // Gating (enabled, DM/bot) lives in the tracker.
 client.on(Events.MessagePollVoteAdd, async (pollAnswer, userId) => {

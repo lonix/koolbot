@@ -23,6 +23,7 @@ import { isValidTimezone, resolveTimezone } from "../utils/timezone.js";
 import { PollService } from "../services/poll-service.js";
 import { VoiceChannelAnnouncer } from "../services/voice-channel-announcer.js";
 import { ReactionRoleService } from "../services/reaction-role-service.js";
+import type { ReactionRoleMode } from "../models/reaction-role-config.js";
 import { NoticesChannelManager } from "../services/notices-channel-manager.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
@@ -3063,6 +3064,11 @@ export function createWriteRouter(
       }
 
       const createChannel = getCheckbox(req, "createChannel");
+      // Assignment mode (#814): toggle (default) / sticky. Anything else falls
+      // back to toggle so a bad form value can't reach the DB enum. (unique is
+      // offered on the role-group form, not the single-role form.)
+      const modeRaw = getString(req, "mode");
+      const mode: ReactionRoleMode = modeRaw === "sticky" ? modeRaw : "toggle";
 
       const service = ReactionRoleService.getInstance(client);
       try {
@@ -3070,7 +3076,7 @@ export function createWriteRouter(
           session.guildId,
           name,
           emoji,
-          { createChannel },
+          { createChannel, mode },
         );
         await recordAudit(session, {
           action: "reactionrole.create",
@@ -3079,6 +3085,7 @@ export function createWriteRouter(
             roleName: name,
             emoji,
             createChannel,
+            mode,
             categoryId: result.categoryId,
             channelId: result.channelId,
             messageId: result.messageId,

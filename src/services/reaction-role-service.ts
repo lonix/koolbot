@@ -19,9 +19,13 @@ import {
   StringSelectMenuInteraction,
   ComponentEmojiResolvable,
   MessageCreateOptions,
+  PartialMessage,
+  DMChannel,
+  NonThreadGuildBasedChannel,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
+import { CommandManager } from "./command-manager.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
@@ -29,6 +33,8 @@ import {
   IReactionRoleConfig,
   ReactionRoleStyle,
   REACTION_ROLE_STYLES,
+  ReactionRoleMode,
+  REACTION_ROLE_MODES,
 } from "../models/reaction-role-config.js";
 
 /**
@@ -101,12 +107,228 @@ export class ReactionRoleService {
 
       // Gateway reaction events are routed from src/index.ts into
       // handleReactionAdd/handleReactionRemove; the service no longer
-      // subscribes to the client directly.
+      // subscribes to the client directly. messageDelete / roleDelete /
+      // channelDelete are likewise routed in to the handle*Delete methods.
+
+      // Self-heal after downtime: verify each active config still points at a
+      // live message + role, archive the ones that don't, and re-add the bot's
+      // own base reaction if it went missing while offline.
+      await this.reconcileConfigs();
+
       logger.info("Reaction role service initialized successfully");
     } catch (error) {
       logger.error("Error initializing reaction role service:", error);
       // Reset initialization flag on error to allow retry
       this.isInitialized = false;
+    }
+  }
+
+  /**
+   * Startup reconciliation (#814). For every active reaction-role config,
+   * confirm the reaction message and the target role still exist; archive the
+   * config when either is gone, and otherwise re-add the bot's own base
+   * reaction if a member (or Discord) cleared it while the bot was offline.
+   *
+   * Best-effort and defensive: a failure on one config is logged and never
+   * aborts the pass or crashes startup. Bulk REST work goes through
+   * `CommandManager.makeDiscordApiCall` for shared timeout + backoff.
+   */
+  public async reconcileConfigs(): Promise<void> {
+    let configs: IReactionRoleConfig[];
+    try {
+      configs = await ReactionRoleConfig.find({ isArchived: false });
+    } catch (error) {
+      logger.error(
+        "Reaction role reconciliation: failed to load configs",
+        error,
+      );
+      return;
+    }
+
+    if (configs.length === 0) {
+      logger.debug("Reaction role reconciliation: no active configs");
+      return;
+    }
+
+    const messageChannelId = await this.configService.getString(
+      "reactionroles.message_channel_id",
+      "",
+    );
+    const commandManager = CommandManager.getInstance(this.client);
+
+    let archived = 0;
+    let repaired = 0;
+
+    for (const config of configs) {
+      try {
+        const guild = await this.client.guilds.fetch(config.guildId);
+
+        // Verify the target role still exists.
+        const role = await guild.roles.fetch(config.roleId).catch(() => null);
+        if (!role) {
+          await this.archiveConfig(
+            config,
+            `role ${config.roleId} no longer exists`,
+          );
+          archived++;
+          continue;
+        }
+
+        // Verify the reaction message still exists in the configured channel.
+        if (!messageChannelId) {
+          continue;
+        }
+        const messageChannel = (await guild.channels
+          .fetch(messageChannelId)
+          .catch(() => null)) as TextChannel | null;
+        if (!messageChannel || !messageChannel.isTextBased()) {
+          continue;
+        }
+
+        const message = await messageChannel.messages
+          .fetch(config.messageId)
+          .catch(() => null);
+        if (!message) {
+          await this.archiveConfig(
+            config,
+            `reaction message ${config.messageId} no longer exists`,
+          );
+          archived++;
+          continue;
+        }
+
+        // Re-add the bot's own base reaction if it went missing.
+        const hasOwnReaction = message.reactions.cache.some(
+          (r) => this.buildEmojiIdentifier(r) === config.emoji && r.me,
+        );
+        if (!hasOwnReaction) {
+          await commandManager.makeDiscordApiCall(
+            () => message.react(config.emoji),
+            `re-add reaction ${config.emoji} on message ${config.messageId}`,
+          );
+          repaired++;
+          logger.info(
+            `Reaction role reconciliation: re-added base reaction for ${sanitizeForLog(config.roleName)}`,
+          );
+        }
+      } catch (error) {
+        logger.warn(
+          `Reaction role reconciliation: error processing config ${config._id}`,
+          error,
+        );
+      }
+    }
+
+    logger.info(
+      `Reaction role reconciliation complete: ${configs.length} checked, ${archived} archived, ${repaired} reaction(s) repaired`,
+    );
+  }
+
+  /**
+   * Archive a config as part of self-healing (stale message/role/channel).
+   * Idempotent and swallows write errors so cleanup never crashes a caller.
+   */
+  private async archiveConfig(
+    config: IReactionRoleConfig,
+    reason: string,
+  ): Promise<void> {
+    if (config.isArchived) {
+      return;
+    }
+    try {
+      config.isArchived = true;
+      config.archivedAt = new Date();
+      await config.save();
+      logger.info(
+        `Archived reaction role ${sanitizeForLog(config.roleName)}: ${reason}`,
+      );
+    } catch (error) {
+      logger.error(
+        `Failed to archive reaction role ${sanitizeForLog(config.roleName)}:`,
+        error,
+      );
+    }
+  }
+
+  /**
+   * Handle a `messageDelete` event routed from `src/index.ts`. If the deleted
+   * message backed one or more active reaction-role configs, archive them so
+   * the config table stops drifting from reality (#814).
+   */
+  public async handleMessageDelete(
+    message: Message | PartialMessage,
+  ): Promise<void> {
+    try {
+      const configs = await ReactionRoleConfig.find({
+        messageId: message.id,
+        isArchived: false,
+      });
+      for (const config of configs) {
+        await this.archiveConfig(
+          config,
+          `reaction message ${message.id} was deleted`,
+        );
+      }
+    } catch (error) {
+      logger.error("Error handling reaction-role message delete:", error);
+    }
+  }
+
+  /**
+   * Handle a `roleDelete` event routed from `src/index.ts`. Archive any active
+   * config that granted the now-deleted role (#814).
+   */
+  public async handleRoleDelete(role: Role): Promise<void> {
+    try {
+      const configs = await ReactionRoleConfig.find({
+        guildId: role.guild.id,
+        roleId: role.id,
+        isArchived: false,
+      });
+      for (const config of configs) {
+        await this.archiveConfig(config, `role ${role.id} was deleted`);
+      }
+    } catch (error) {
+      logger.error("Error handling reaction-role role delete:", error);
+    }
+  }
+
+  /**
+   * Handle a `channelDelete` event routed from `src/index.ts`. Archive any
+   * active config whose backing category/channel — or whose reaction message
+   * channel — was deleted (#814).
+   */
+  public async handleChannelDelete(
+    channel: DMChannel | NonThreadGuildBasedChannel,
+  ): Promise<void> {
+    try {
+      // DM channels can never back a reaction role.
+      if (!("guild" in channel) || !channel.guild) {
+        return;
+      }
+
+      const messageChannelId = await this.configService.getString(
+        "reactionroles.message_channel_id",
+        "",
+      );
+
+      const configs = await ReactionRoleConfig.find({
+        guildId: channel.guild.id,
+        isArchived: false,
+        $or: [
+          { channelId: channel.id },
+          { categoryId: channel.id },
+          ...(messageChannelId === channel.id
+            ? [{ channelId: { $exists: true } }]
+            : []),
+        ],
+      });
+
+      for (const config of configs) {
+        await this.archiveConfig(config, `channel ${channel.id} was deleted`);
+      }
+    } catch (error) {
+      logger.error("Error handling reaction-role channel delete:", error);
     }
   }
 
@@ -176,15 +398,65 @@ export class ReactionRoleService {
         return;
       }
 
-      if (member.roles.cache.has(config.roleId)) {
+      if (!member.roles.cache.has(config.roleId)) {
+        await member.roles.add(role);
+        logger.info(`Added role ${role.name} to user ${user.tag}`);
+      } else {
         logger.debug(`User ${user.tag} already has role ${role.name}`);
-        return;
       }
 
-      await member.roles.add(role);
-      logger.info(`Added role ${role.name} to user ${user.tag}`);
+      // `unique` (one-of-set): reacting to one option clears the sibling
+      // roles configured on the same message, so a member ends up with at
+      // most one role from the group (e.g. exactly one colour role).
+      if (config.mode === "unique") {
+        await this.applyUniqueMode(reaction, member, config);
+      }
     } catch (error) {
       logger.error("Error adding role from reaction:", error);
+    }
+  }
+
+  /**
+   * Enforce `unique` mode: remove every sibling role configured on the same
+   * message (any active config with the same `messageId` but a different
+   * `roleId`) and, best-effort, clear the member's reaction on those sibling
+   * emojis so the visible reactions match the single active choice.
+   */
+  private async applyUniqueMode(
+    reaction: MessageReaction,
+    member: GuildMember,
+    config: IReactionRoleConfig,
+  ): Promise<void> {
+    const siblings = await ReactionRoleConfig.find({
+      messageId: config.messageId,
+      isArchived: false,
+      roleId: { $ne: config.roleId },
+    });
+
+    for (const sibling of siblings) {
+      try {
+        if (member.roles.cache.has(sibling.roleId)) {
+          await member.roles.remove(sibling.roleId);
+          logger.info(
+            `Removed sibling role ${sibling.roleName} from user ${member.id} (unique mode)`,
+          );
+        }
+
+        // Best-effort: drop the member's reaction on the sibling emoji so the
+        // message reflects the single active choice. Requires ManageMessages;
+        // failures are non-fatal.
+        const siblingReaction = reaction.message.reactions?.cache?.find(
+          (r) => this.buildEmojiIdentifier(r) === sibling.emoji,
+        );
+        if (siblingReaction) {
+          await siblingReaction.users.remove(member.id);
+        }
+      } catch (error) {
+        logger.warn(
+          `Could not clear sibling reaction role ${sibling.roleName} in unique mode:`,
+          error,
+        );
+      }
     }
   }
 
@@ -215,6 +487,15 @@ export class ReactionRoleService {
       });
 
       if (!config) {
+        return;
+      }
+
+      // `sticky` (add-only): reacting grants the role, but removing the
+      // reaction never revokes it. Good for opt-in cosmetic roles.
+      if (config.mode === "sticky") {
+        logger.debug(
+          `Ignoring reaction removal for sticky reaction role ${config.roleName}`,
+        );
         return;
       }
 
@@ -672,7 +953,7 @@ export class ReactionRoleService {
     guildId: string,
     roleName: string,
     emoji: string,
-    options: { createChannel?: boolean } = {},
+    options: { createChannel?: boolean; mode?: ReactionRoleMode } = {},
   ): Promise<{
     success: boolean;
     message: string;
@@ -686,6 +967,12 @@ export class ReactionRoleService {
     let category: CategoryChannel | null = null;
     let channel: TextChannel | null = null;
     let message: Message | null = null;
+
+    // Guard against unexpected mode values reaching the DB enum validator.
+    const mode: ReactionRoleMode = options.mode ?? "toggle";
+    const normalizedMode: ReactionRoleMode = REACTION_ROLE_MODES.includes(mode)
+      ? mode
+      : "toggle";
 
     try {
       // Check if a reaction role with this name already exists
@@ -845,6 +1132,7 @@ export class ReactionRoleService {
         roleName,
         style,
         autoCreated: true,
+        mode: normalizedMode,
         isArchived: false,
       });
 

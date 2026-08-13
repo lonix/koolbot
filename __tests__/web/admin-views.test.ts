@@ -1474,6 +1474,7 @@ describe("renderReactionRolesPage", () => {
           channelName: "roles",
           messageId: "m1",
           autoCreated: true,
+          mode: "sticky",
           isArchived: false,
           archivedAt: null,
         },
@@ -1484,6 +1485,7 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain("Gamer");
     expect(html).toContain("#roles");
     expect(html).toContain('class="tag tag-on">active');
+    expect(html).toContain("sticky");
     expect(html).toContain("/admin/reaction-roles/create");
     expect(html).toContain("/admin/reaction-roles/archive");
     expect(html).toContain("/admin/reaction-roles/delete");
@@ -1508,6 +1510,7 @@ describe("renderReactionRolesPage", () => {
           channelName: "—",
           messageId: "m9",
           autoCreated: false,
+          mode: "toggle",
           isArchived: false,
           archivedAt: null,
         },
@@ -1536,6 +1539,7 @@ describe("renderReactionRolesPage", () => {
           channelName: "old",
           messageId: "m2",
           autoCreated: true,
+          mode: "toggle",
           isArchived: true,
           archivedAt: "2026-05-08T00:00:00.000Z",
         },

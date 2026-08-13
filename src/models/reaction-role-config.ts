@@ -17,6 +17,21 @@ export const REACTION_ROLE_STYLES: ReactionRoleStyle[] = [
   "select",
 ];
 
+/**
+ * Assignment behaviour for a reaction role (#814):
+ * - `toggle` (default, back-compat): react = add, unreact = remove.
+ * - `sticky`: react grants the role; removing the reaction does NOT revoke it.
+ * - `unique`: reacting removes the sibling roles configured on the same
+ *   message (one-of-set / pick exactly one).
+ */
+export type ReactionRoleMode = "toggle" | "sticky" | "unique";
+
+export const REACTION_ROLE_MODES: readonly ReactionRoleMode[] = [
+  "toggle",
+  "sticky",
+  "unique",
+];
+
 export interface IReactionRoleConfig extends Document {
   guildId: string;
   messageId: string;
@@ -44,6 +59,7 @@ export interface IReactionRoleConfig extends Document {
    * with `true` (see reaction-role-migrator.ts).
    */
   autoCreated: boolean;
+  mode: ReactionRoleMode;
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -96,6 +112,12 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
       type: Boolean,
       default: true,
       index: true,
+    },
+    mode: {
+      type: String,
+      enum: REACTION_ROLE_MODES,
+      default: "toggle",
+      required: true,
     },
     isArchived: {
       type: Boolean,

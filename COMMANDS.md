@@ -888,6 +888,23 @@ The bot needs these Discord permissions:
 **For reaction roles:**
 
 - Manage Roles (the bot's highest role must sit above any role it grants)
+- Manage Messages (only for the `unique` assignment mode, so the bot can
+  clear a member's reaction on the sibling options it deselects)
+
+Each mapping has an **assignment mode** chosen at creation
+(`/admin/reaction-roles`):
+
+- **toggle** (default): react to add the role, remove the reaction to
+  lose it.
+- **sticky**: react to add the role; removing the reaction keeps it (good
+  for opt-in cosmetic roles).
+- **unique**: reacting clears the other roles mapped on the same message,
+  so a member ends up with at most one from the set.
+
+On startup the bot reconciles each active mapping — archiving any whose
+message or role was deleted while it was offline, and re-adding its own
+base reaction if it went missing. It also archives a mapping automatically
+when its message, role, category, or channel is deleted.
 
 **For leaderboard role rewards:**
 
