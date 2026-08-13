@@ -130,22 +130,18 @@ describe("MessageActivityCleanupService", () => {
   it("keeps the mutual-exclusion guard intact when destroy() fires mid-run (issue #779)", async () => {
     const { service } = createService();
 
-    let releaseCursor!: () => void;
+    let releaseAggregate!: () => void;
     const gate = new Promise<void>((resolve) => {
-      releaseCursor = resolve;
+      releaseAggregate = resolve;
     });
 
-    // A cursor whose iteration blocks until the test releases it, holding
-    // performCleanup() in flight.
-    find.mockReturnValue({
-      lean: () => ({
-        cursor: () => ({
-          async *[Symbol.asyncIterator]() {
-            await gate;
-            yield* [];
-          },
-        }),
-      }),
+    // An aggregate call that blocks until the test releases it, holding
+    // performCleanup() in flight. The sweep pipeline starts with this count
+    // (since the atomic-$pull rewrite for #755 it no longer iterates a
+    // find() cursor), so gating it keeps the pass mid-run.
+    aggregate.mockImplementation(async () => {
+      await gate;
+      return [];
     });
 
     const firstRun = service.runCleanup();
@@ -164,7 +160,7 @@ describe("MessageActivityCleanupService", () => {
       "Message cleanup is already running",
     );
 
-    releaseCursor();
+    releaseAggregate();
     await firstRun;
     // The finally block in runCleanup() — not destroy() — clears the flag.
     expect(service.getStatus().isRunning).toBe(false);
