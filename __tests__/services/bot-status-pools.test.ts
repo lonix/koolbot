@@ -60,8 +60,7 @@ describe("BotStatusService status pools", () => {
   const presenceName = (): string | undefined => {
     const calls = setPresence.mock.calls;
     const last = calls[calls.length - 1]?.[0] as
-      | { activities?: Array<{ name?: string }> }
-      | undefined;
+      { activities?: Array<{ name?: string }> } | undefined;
     return last?.activities?.[0]?.name;
   };
 

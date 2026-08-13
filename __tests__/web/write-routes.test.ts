@@ -515,7 +515,9 @@ describe("wizardApplyFailureMessage (#780)", () => {
       rolledBackKeys: ["quotes.channel_id", "quotes.enabled"],
     });
     expect(msg).toContain("quotes.delete_roles failed (mongo write failed)");
-    expect(msg).toContain("2 settings written before the failure were rolled back");
+    expect(msg).toContain(
+      "2 settings written before the failure were rolled back",
+    );
     expect(msg).toContain("no changes were applied");
   });
 
@@ -527,7 +529,9 @@ describe("wizardApplyFailureMessage (#780)", () => {
       appliedKeys: ["quotes.enabled"],
       rolledBackKeys: ["quotes.enabled"],
     });
-    expect(msg).toContain("1 setting written before the failure was rolled back");
+    expect(msg).toContain(
+      "1 setting written before the failure was rolled back",
+    );
   });
 
   it("names keys that could not be rolled back and says they are in effect", () => {

@@ -209,14 +209,14 @@ export class PollParticipationTracker {
 
   /**
    * Count distinct members who cast at least one poll vote since `since`, for
-   * the public weekly recap (#777). Uses each member's `lastVoteAt` — the only
-   * time-scoped signal this tracker keeps. The lifetime totals and per-year
-   * buckets cannot answer "this week", and a member whose most recent vote
-   * predates the window is excluded even if they voted earlier in the period.
-   * This is therefore a distinct-recent-voter count, not a per-poll turnout:
-   * "how many polls ran this week" is not recorded anywhere (see the follow-up
-   * tracking issue referenced from #777). Best-effort — returns 0 on any DB
-   * error so the recap never fails on this section.
+   * the public weekly recap (#777). `lastVoteAt` is each member's most recent
+   * vote, so `lastVoteAt >= since` is true for exactly the members who voted at
+   * least once inside the window — this is an *exact* distinct-member count for
+   * captured votes, not an approximation. What this tracker cannot provide is
+   * how many polls ran or how many votes each member cast (there is no per-poll
+   * record and no weekly frequency bucket; see the follow-up tracking issue
+   * referenced from #777). Best-effort — returns 0 on any DB error so the recap
+   * never fails on this section.
    */
   public async getRecentVoterCount(
     guildId: string,

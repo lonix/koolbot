@@ -155,18 +155,48 @@ describe("birthday pure helpers", () => {
 
   describe("isBirthdayToday", () => {
     it("matches the exact month/day", () => {
-      expect(isBirthdayToday({ month: 3, day: 14 }, { year: 2026, month: 3, day: 14 })).toBe(true);
-      expect(isBirthdayToday({ month: 3, day: 14 }, { year: 2026, month: 3, day: 15 })).toBe(false);
+      expect(
+        isBirthdayToday(
+          { month: 3, day: 14 },
+          { year: 2026, month: 3, day: 14 },
+        ),
+      ).toBe(true);
+      expect(
+        isBirthdayToday(
+          { month: 3, day: 14 },
+          { year: 2026, month: 3, day: 15 },
+        ),
+      ).toBe(false);
     });
     it("celebrates a Feb 29 birthday on Mar 1 in non-leap years", () => {
       // 2026 is not a leap year.
-      expect(isBirthdayToday({ month: 2, day: 29 }, { year: 2026, month: 3, day: 1 })).toBe(true);
-      expect(isBirthdayToday({ month: 2, day: 29 }, { year: 2026, month: 2, day: 28 })).toBe(false);
+      expect(
+        isBirthdayToday(
+          { month: 2, day: 29 },
+          { year: 2026, month: 3, day: 1 },
+        ),
+      ).toBe(true);
+      expect(
+        isBirthdayToday(
+          { month: 2, day: 29 },
+          { year: 2026, month: 2, day: 28 },
+        ),
+      ).toBe(false);
     });
     it("celebrates a Feb 29 birthday on Feb 29 in leap years (not Mar 1)", () => {
       // 2028 is a leap year.
-      expect(isBirthdayToday({ month: 2, day: 29 }, { year: 2028, month: 2, day: 29 })).toBe(true);
-      expect(isBirthdayToday({ month: 2, day: 29 }, { year: 2028, month: 3, day: 1 })).toBe(false);
+      expect(
+        isBirthdayToday(
+          { month: 2, day: 29 },
+          { year: 2028, month: 2, day: 29 },
+        ),
+      ).toBe(true);
+      expect(
+        isBirthdayToday(
+          { month: 2, day: 29 },
+          { year: 2028, month: 3, day: 1 },
+        ),
+      ).toBe(false);
     });
   });
 
@@ -175,17 +205,26 @@ describe("birthday pure helpers", () => {
     it("announces when it's the birthday and not yet announced this year", () => {
       expect(shouldAnnounceBirthday({ month: 5, day: 10 }, local)).toBe(true);
       expect(
-        shouldAnnounceBirthday({ month: 5, day: 10, lastAnnouncedYear: 2025 }, local),
+        shouldAnnounceBirthday(
+          { month: 5, day: 10, lastAnnouncedYear: 2025 },
+          local,
+        ),
       ).toBe(true);
     });
     it("suppresses a second announcement in the same local year", () => {
       expect(
-        shouldAnnounceBirthday({ month: 5, day: 10, lastAnnouncedYear: 2026 }, local),
+        shouldAnnounceBirthday(
+          { month: 5, day: 10, lastAnnouncedYear: 2026 },
+          local,
+        ),
       ).toBe(false);
     });
     it("does not announce when it isn't the birthday regardless of guard", () => {
       expect(
-        shouldAnnounceBirthday({ month: 5, day: 11, lastAnnouncedYear: 2025 }, local),
+        shouldAnnounceBirthday(
+          { month: 5, day: 11, lastAnnouncedYear: 2025 },
+          local,
+        ),
       ).toBe(false);
     });
   });
@@ -231,15 +270,19 @@ describe("BirthdayService", () => {
       if (k === "birthdays.mention") return true;
       return false;
     });
-    mockConfigGetString.mockImplementation(async (key: unknown, def: unknown) => {
-      const k = key as string;
-      if (k === "GUILD_ID") return "guild-1";
-      if (k === "birthdays.cron") return "0 * * * *";
-      return (def as string) ?? "";
-    });
-    mockConfigGetNumber.mockImplementation(async (key: unknown, def: unknown) => {
-      return (def as number) ?? 0;
-    });
+    mockConfigGetString.mockImplementation(
+      async (key: unknown, def: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "birthdays.cron") return "0 * * * *";
+        return (def as string) ?? "";
+      },
+    );
+    mockConfigGetNumber.mockImplementation(
+      async (key: unknown, def: unknown) => {
+        return (def as number) ?? 0;
+      },
+    );
     mockGetTimezone.mockResolvedValue(null);
   });
 
@@ -463,8 +506,7 @@ describe("BirthdayService", () => {
       const row = {
         userId: "user-3",
         roleAssignedAt: new Date(now.getTime() - 1 * MS_PER_HOUR) as
-          | Date
-          | undefined,
+          Date | undefined,
         save: jest.fn().mockResolvedValue(undefined),
       };
       mockBirthdayFind.mockResolvedValue([row]);

@@ -150,18 +150,18 @@ describe("UserVoicePrefsService preset CRUD", () => {
       presets: [{ name: "a" }, { name: "b" }, { name: "c" }],
     });
     stubGetPrefs(doc);
-    await expect(
-      service.savePreset("u1", "d", {}, 3),
-    ).rejects.toBeInstanceOf(VoicePrefsValidationError);
+    await expect(service.savePreset("u1", "d", {}, 3)).rejects.toBeInstanceOf(
+      VoicePrefsValidationError,
+    );
     expect(doc.save).not.toHaveBeenCalled();
   });
 
   it("savePreset rejects an empty name", async () => {
     const doc = makeDoc();
     stubGetPrefs(doc);
-    await expect(
-      service.savePreset("u1", "   ", {}, 3),
-    ).rejects.toBeInstanceOf(VoicePrefsValidationError);
+    await expect(service.savePreset("u1", "   ", {}, 3)).rejects.toBeInstanceOf(
+      VoicePrefsValidationError,
+    );
   });
 
   it("editPreset validates bounds and updates fields", async () => {

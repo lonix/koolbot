@@ -6,9 +6,8 @@ jest.unstable_mockModule("../../src/models/voice-channel-tracking.js", () => ({
   VoiceChannelTracking: { aggregate: jest.fn() },
 }));
 
-const { buildGuildHeatmap, emptyGuildHeatmap } = await import(
-  "../../src/services/voice-activity-analytics.js"
-);
+const { buildGuildHeatmap, emptyGuildHeatmap } =
+  await import("../../src/services/voice-activity-analytics.js");
 
 describe("voice-activity-analytics (#675 Part B)", () => {
   describe("emptyGuildHeatmap", () => {

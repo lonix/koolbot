@@ -10,6 +10,21 @@ import { PollParticipationTracker } from "./poll-participation-tracker.js";
 /** One week, in milliseconds — the window every recap section covers. */
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * Resolve a quote's stored author id to a bare Discord snowflake, but only when
+ * the whole string is exactly one of the supported formats (`<@id>`, `<@!id>`,
+ * `@id`, or a plain numeric id). Anything else returns null so the recap emits
+ * no mention. This is deliberately strict rather than "strip non-digits":
+ * the returned id is allowlisted in `allowedMentions`, so assembling a
+ * snowflake out of malformed or imported author data could otherwise ping an
+ * unrelated member.
+ */
+function resolveAuthorMentionId(authorId: string): string | null {
+  const match = authorId.match(/^(?:<@!?(\d+)>|@?(\d+))$/);
+  if (!match) return null;
+  return match[1] ?? match[2] ?? null;
+}
+
 export class VoiceChannelAnnouncer {
   private static instance: VoiceChannelAnnouncer;
   private client: Client;
@@ -214,48 +229,53 @@ export class VoiceChannelAnnouncer {
 
   /** Recap section: the weekly top voice-time leaderboard. */
   private async announceVoiceStats(channel: TextChannel): Promise<void> {
-    const include = await this.configService.getBoolean(
-      "voicetracking.announcements.include_voice_stats",
-      true,
-    );
-    if (!include) return;
+    try {
+      const include = await this.configService.getBoolean(
+        "voicetracking.announcements.include_voice_stats",
+        true,
+      );
+      if (!include) return;
 
-    const tracker = VoiceChannelTracker.getInstance(this.client);
-    const topUsers = await tracker.getTopUsers(10, "week");
+      const tracker = VoiceChannelTracker.getInstance(this.client);
+      const topUsers = await tracker.getTopUsers(10, "week");
 
-    if (topUsers.length === 0) {
-      await channel.send("No voice channel activity recorded this week.");
-      return;
+      if (topUsers.length === 0) {
+        await channel.send("No voice channel activity recorded this week.");
+        return;
+      }
+
+      const formatTime = (seconds: number): string => {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}h ${minutes}m`;
+      };
+
+      const message = [
+        "🎙️ **Weekly Voice Channel Activity Report** 🎙️",
+        "",
+        "**Top 10 Most Active Members This Week:**",
+        ...topUsers.map((user, index) => {
+          const rank = index + 1;
+          const medal =
+            rank === 1
+              ? "🥇"
+              : rank === 2
+                ? "🥈"
+                : rank === 3
+                  ? "🥉"
+                  : `${rank}.`;
+          const mention = rank <= 3 ? `<@${user.userId}>` : user.username;
+          return `${medal} ${mention}: ${formatTime(user.totalTime)}`;
+        }),
+        "",
+        "Keep up the great conversations! 🎮",
+      ].join("\n");
+
+      await channel.send(message);
+    } catch (error) {
+      logger.error("Error announcing voice stats:", error);
+      // Isolated like every other section: never break the rest of the recap.
     }
-
-    const formatTime = (seconds: number): string => {
-      const hours = Math.floor(seconds / 3600);
-      const minutes = Math.floor((seconds % 3600) / 60);
-      return `${hours}h ${minutes}m`;
-    };
-
-    const message = [
-      "🎙️ **Weekly Voice Channel Activity Report** 🎙️",
-      "",
-      "**Top 10 Most Active Members This Week:**",
-      ...topUsers.map((user, index) => {
-        const rank = index + 1;
-        const medal =
-          rank === 1
-            ? "🥇"
-            : rank === 2
-              ? "🥈"
-              : rank === 3
-                ? "🥉"
-                : `${rank}.`;
-        const mention = rank <= 3 ? `<@${user.userId}>` : user.username;
-        return `${medal} ${mention}: ${formatTime(user.totalTime)}`;
-      }),
-      "",
-      "Keep up the great conversations! 🎮",
-    ].join("\n");
-
-    await channel.send(message);
   }
 
   /** Recap section: accolades earned in the last week. */
@@ -333,10 +353,12 @@ export class VoiceChannelAnnouncer {
       const topQuote = await quoteService.getTopQuoteSince(since);
       if (!topQuote) return;
 
-      // Author IDs may be stored in legacy formats (<@123>, @123, 123); keep
-      // only the digits to build a clean mention. Restrict allowed mentions so
-      // untrusted quote text can never ping @everyone/@here or arbitrary roles.
-      const authorId = topQuote.authorId.replace(/\D/g, "");
+      // Author IDs may be stored in legacy formats (<@123>, <@!123>, @123,
+      // 123). Only resolve a mention when the whole value is exactly one of
+      // those, so malformed data can't assemble an unrelated snowflake — and
+      // restrict allowed mentions so untrusted quote text can never ping
+      // @everyone/@here or arbitrary roles.
+      const authorId = resolveAuthorMentionId(topQuote.authorId);
       const author = authorId ? `<@${authorId}>` : "someone";
       const likeLabel = topQuote.likes === 1 ? "like" : "likes";
 

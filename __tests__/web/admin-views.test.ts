@@ -1769,9 +1769,7 @@ describe("renderVoiceChannelsPage", () => {
     expect(html).toContain(
       '<input type="hidden" name="redirect" value="/admin/voice-channels">',
     );
-    expect(html).toContain(
-      '<input type="hidden" name="no_cascade" value="1">',
-    );
+    expect(html).toContain('<input type="hidden" name="no_cascade" value="1">');
     expect(html).toContain(
       '<input type="hidden" name="category" value="voicechannels">',
     );

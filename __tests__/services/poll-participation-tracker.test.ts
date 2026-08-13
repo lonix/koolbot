@@ -141,9 +141,8 @@ describe("PollParticipationTracker", () => {
     let findOne: jest.Mock;
 
     beforeEach(() => {
-      findOne = (
-        PollParticipationTracking as unknown as { findOne: jest.Mock }
-      ).findOne;
+      findOne = (PollParticipationTracking as unknown as { findOne: jest.Mock })
+        .findOne;
     });
 
     it("returns lifetime, this-year, and last-voted from the row", async () => {
