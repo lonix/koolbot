@@ -272,10 +272,13 @@ export class LeaderboardRoleService {
         return null;
       }
 
-      // The widest tier (largest topN) defines how many top users we need to fetch.
-      const maxTopN = Math.max(...tiers.map((t) => t.topN));
+      // Fetch the full ranking with the documented "all ranked users"
+      // sentinel (0). A positive limit would be clamped to
+      // voicetracking.stats.leaderboard_max_results, silently truncating
+      // tiers wider than that cap; the per-tier cutoff happens in
+      // reconcileTier via rankedUserIds.slice(0, tier.topN).
       const tracker = VoiceChannelTracker.getInstance(this.client);
-      const topUsers = await tracker.getTopUsers(maxTopN, period);
+      const topUsers = await tracker.getTopUsers(0, period);
       const rankedUserIds: string[] = topUsers.map((u) => u.userId);
 
       const summary: LeaderboardRoleRunSummary = {
