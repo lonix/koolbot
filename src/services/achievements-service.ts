@@ -1589,9 +1589,7 @@ export class AchievementsService {
       }
 
       // Get current week period string (e.g., "2026-W05")
-      const now = new Date();
-      const weekNumber = this.getWeekNumber(now);
-      const currentPeriod = `${now.getFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+      const currentPeriod = this.getWeekPeriod(new Date());
 
       // Check if user already has this week's achievements
       const existingAchievementTypes = userAchievements.achievements
@@ -1649,16 +1647,22 @@ export class AchievementsService {
   }
 
   /**
-   * Get ISO week number for a date
+   * Get the ISO-8601 week period string for a date (e.g., "2026-W05").
+   * The year component is the ISO week-year, not the calendar year — near
+   * year boundaries they differ (e.g. Dec 30, 2024 is "2025-W01"), and
+   * using the calendar year would collide with an unrelated week.
    */
-  private getWeekNumber(date: Date): number {
+  private getWeekPeriod(date: Date): string {
     const d = new Date(
       Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
     );
     const dayNum = d.getUTCDay() || 7;
     d.setUTCDate(d.getUTCDate() + 4 - dayNum);
     const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-    return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+    const weekNumber = Math.ceil(
+      ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+    );
+    return `${d.getUTCFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
   }
 
   /**
