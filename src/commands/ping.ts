@@ -21,9 +21,14 @@ export async function execute(
     );
   } catch (error) {
     logger.error("Error in ping command:", error);
-    await interaction.reply({
+    const payload = {
       content: "There was an error while executing this command!",
       ephemeral: true,
-    });
+    };
+    if (interaction.replied || interaction.deferred) {
+      await interaction.followUp(payload);
+    } else {
+      await interaction.reply(payload);
+    }
   }
 }
