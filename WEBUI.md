@@ -751,6 +751,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
 | **Setup Wizard**   | `/setup wizard`                                                                                     |
 | **Announcements**  | `/announce create`, `list`, `delete`                                                                |
+| **Events**         | `/event create`, `list`, `cancel`, `start`                                                          |
 | **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items`                   |
 | **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
@@ -760,6 +761,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Command Metrics**| (new — historical per-command usage / error-rate / latency dashboard)                               |
+| **Moderation**     | `/modlog` (read-only, server-wide; also surfaces `/warn` entries)                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
 Feature pages (Announcements, Polls, Reaction Roles, Notices, Voice
@@ -855,6 +857,39 @@ cheap across every member's full history.) The page is gated by
 `voicetracking.enabled` (the #610 disabled-feature pattern): when tracking is
 off the page still renders but shows a notice and only whatever was captured
 before it was disabled.
+
+The **Events** page (`/admin/events`) is the Web UI surface for the event
+scheduler (`/event create`, `list`, `cancel`, `start`) — events that spin up a
+temporary voice channel shortly before they start, collect RSVPs, remind
+attendees, and clean themselves up afterward. A status card shows whether the
+feature, the `events.category_id` channel category, and the
+`events.announcement_channel_id` are configured (with inline warnings when a
+category or announcement channel is missing, since event channels and RSVP
+messages won't be created without them) plus the resolved event timezone. The
+events table lists each event's title, start time, lifecycle state
+(*scheduled* / *active* / *ended* / *cancelled*), live RSVP tallies (✅ going ·
+🤔 maybe · 🚫 can't), channel, and id. Events that are still open get two
+lifecycle controls — **Start now** (spin the event up immediately) and
+**Cancel** (a confirm-guarded stop) — while finished events show no actions. A
+**Schedule a new event** form creates events without leaving the page. The page
+is gated by `events.enabled` (the #610 disabled-feature pattern), and the
+category / announcement channel / timezone themselves live under **Settings**
+(`events.*`).
+
+The **Moderation** page (`/admin/moderation`) is a read-only, server-wide
+history of moderation actions — the Web UI counterpart to per-user `/modlog`.
+Each row shows the timestamp, target user, acting moderator, action, reason, and
+source; user and moderator snowflakes are resolved to display names when the
+members are still in the guild (a page of 50 rows is resolved with a single
+batched member fetch rather than one request per id) and fall back to the raw id
+otherwise. `warn` rows are KoolBot's own record written by `/warn`, while
+`kick` / `ban` / `unban` / `timeout` / `untimeout` rows are mirrored from the
+guild audit log — so the `source` column reads `command` or `audit` accordingly.
+Two filters narrow the view — an **action** dropdown (warn, kick, ban, unban,
+timeout, untimeout) and a **user** filter — and results are paginated 50 rows
+per page. The page is gated by `moderation.enabled` (the #610 disabled-feature
+pattern): when moderation is off it renders the disabled banner and an empty
+table without touching the database.
 
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
