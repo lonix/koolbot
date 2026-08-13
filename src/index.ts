@@ -963,14 +963,47 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// Handle reactions for per-user given/received activity tracking (#570).
-// Gating (enabled, bot/DM, excluded channels) lives in the tracker.
+// Handle reactions, fanning out to the activity tracker (#570) and the
+// reaction-role service (#810) — mirroring how voice presence fans out to two
+// services. Partial resolution and the bot guard happen once here; per-feature
+// gating (enabled, DM, excluded channels) lives in each service.
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   recordDiscordEvent("messageReactionAdd");
   try {
+    if (reaction.partial) {
+      reaction = await reaction.fetch();
+    }
+    if (user.partial) {
+      user = await user.fetch();
+    }
+    if (user.bot) {
+      return;
+    }
     await reactionActivityTracker.handleReactionAdd(reaction, user);
+    await reactionRoleService.handleReactionAdd(reaction, user);
   } catch (error) {
     logger.error("Error handling messageReactionAdd:", error);
+  }
+});
+
+// Handle reaction removals for the reaction-role service (#810). Partial
+// resolution and the bot guard happen once here; enablement gating lives in
+// the service.
+client.on(Events.MessageReactionRemove, async (reaction, user) => {
+  recordDiscordEvent("messageReactionRemove");
+  try {
+    if (reaction.partial) {
+      reaction = await reaction.fetch();
+    }
+    if (user.partial) {
+      user = await user.fetch();
+    }
+    if (user.bot) {
+      return;
+    }
+    await reactionRoleService.handleReactionRemove(reaction, user);
+  } catch (error) {
+    logger.error("Error handling messageReactionRemove:", error);
   }
 });
 
