@@ -9,6 +9,7 @@ import {
   PartialMessageReaction,
   PartialUser,
   Role,
+  GuildMember,
   Message,
   ActionRowBuilder,
   ButtonBuilder,
@@ -342,7 +343,8 @@ export class ReactionRoleService {
 
       const button = new ButtonBuilder()
         .setCustomId(`${REACTION_ROLE_BUTTON_PREFIX}${roleId}`)
-        .setLabel(roleName)
+        // Discord caps button labels at 80 chars; role names may be up to 100.
+        .setLabel(roleName.slice(0, 80))
         .setStyle(ButtonStyle.Primary);
       const componentEmoji = this.resolveComponentEmoji(emoji);
       if (componentEmoji) {
@@ -364,7 +366,8 @@ export class ReactionRoleService {
         .setTimestamp();
 
       const option = {
-        label: roleName,
+        // Discord caps select-option labels at 100 chars.
+        label: roleName.slice(0, 100),
         value: roleId,
         description: `Toggle the ${roleName} role`.slice(0, 100),
       } as {
@@ -404,26 +407,17 @@ export class ReactionRoleService {
   }
 
   /**
-   * Add or remove a role on a member and return a human-readable, ephemeral
-   * confirmation line. Shared by the button and select component handlers.
+   * Add or remove a role on an already-fetched member and return a
+   * human-readable, ephemeral confirmation line. The caller resolves the guild,
+   * member and role once and reuses them, so a multi-role message only pays for
+   * a single guild/member fetch. Shared by the button and select handlers.
    */
-  private async applyRoleToggle(
-    guildId: string,
-    userId: string,
-    roleId: string,
+  private async applyRoleToggleForMember(
+    member: GuildMember,
+    role: Role,
     desired: "add" | "remove",
   ): Promise<string> {
-    const guild = await this.client.guilds.fetch(guildId);
-    const member = await guild.members.fetch(userId);
-    const role =
-      guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId));
-
-    if (!role) {
-      logger.error(`Role ${roleId} not found while applying self-assign role`);
-      return `⚠️ That role no longer exists.`;
-    }
-
-    const hasRole = member.roles.cache.has(roleId);
+    const hasRole = member.roles.cache.has(role.id);
 
     if (desired === "add") {
       if (hasRole) {
@@ -488,16 +482,26 @@ export class ReactionRoleService {
         return;
       }
 
-      const hasRole = await this.memberHasRole(
-        interaction.guildId,
-        interaction.user.id,
-        roleId,
-      );
-      const message = await this.applyRoleToggle(
-        interaction.guildId,
-        interaction.user.id,
-        roleId,
-        hasRole ? "remove" : "add",
+      const guild = await this.client.guilds.fetch(interaction.guildId);
+      const member = await guild.members.fetch(interaction.user.id);
+      const role =
+        guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId));
+      if (!role) {
+        logger.error(
+          `Role ${roleId} not found while toggling self-assign role`,
+        );
+        await interaction.reply({
+          content: "⚠️ That role no longer exists.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const desired = member.roles.cache.has(roleId) ? "remove" : "add";
+      const message = await this.applyRoleToggleForMember(
+        member,
+        role,
+        desired,
       );
 
       await interaction.reply({ content: message, ephemeral: true });
@@ -556,26 +560,30 @@ export class ReactionRoleService {
         interaction.values.filter((v) => managedRoleIds.has(v)),
       );
 
+      // Fetch the guild and member once, then reason about every managed role
+      // against the member's cached roles — no per-role REST fetches.
+      const guild = await this.client.guilds.fetch(interaction.guildId);
+      const member = await guild.members.fetch(interaction.user.id);
+
       const lines: string[] = [];
       for (const roleId of managedRoleIds) {
         const desired = selected.has(roleId) ? "add" : "remove";
-        const hasRole = await this.memberHasRole(
-          interaction.guildId,
-          interaction.user.id,
-          roleId,
-        );
+        const hasRole = member.roles.cache.has(roleId);
         // Only act (and report) when the selection actually changes state.
         if (
           (desired === "add" && !hasRole) ||
           (desired === "remove" && hasRole)
         ) {
+          const role =
+            guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId));
+          if (!role) {
+            logger.error(
+              `Role ${roleId} not found while toggling self-assign role`,
+            );
+            continue;
+          }
           lines.push(
-            await this.applyRoleToggle(
-              interaction.guildId,
-              interaction.user.id,
-              roleId,
-              desired,
-            ),
+            await this.applyRoleToggleForMember(member, role, desired),
           );
         }
       }
@@ -588,17 +596,6 @@ export class ReactionRoleService {
       logger.error("Error handling reaction-role select menu:", error);
       await this.safeErrorReply(interaction);
     }
-  }
-
-  /** Whether a guild member currently holds a role (cache-first, then fetch). */
-  private async memberHasRole(
-    guildId: string,
-    userId: string,
-    roleId: string,
-  ): Promise<boolean> {
-    const guild = await this.client.guilds.fetch(guildId);
-    const member = await guild.members.fetch(userId);
-    return member.roles.cache.has(roleId);
   }
 
   /** Reply (or follow up) with a generic error without throwing again. */
