@@ -60,7 +60,12 @@ export function createWebRouter(client: Client): Router {
           res.status(404).type("text/html").send(renderInvalidLink());
           return;
         }
-        res.status(200).type("text/html").send(renderConsent({ token }));
+        const csrfToken =
+          (req as Request & { csrfToken?: string }).csrfToken ?? "";
+        res
+          .status(200)
+          .type("text/html")
+          .send(renderConsent({ token, csrfToken }));
       } catch (err) {
         logger.error("Error peeking web session token", err);
         res.status(500).type("text/plain").send("Internal Server Error");
@@ -71,16 +76,23 @@ export function createWebRouter(client: Client): Router {
   // POST consumes the token, marks it used, writes the session cookie,
   // and redirects into the admin app.
   //
-  // No CSRF check here: the URL-bound token IS the credential, exactly
-  // like an OAuth authorization-code redemption. An attacker who has the
-  // token can already consume it directly; an attacker without it can't
-  // construct a meaningful POST (path won't match any session). The
-  // attacker also has no pre-existing session at this point to leverage.
-  // CSRF on /finish and write routes still applies because those run
-  // against an already-authenticated cookie.
+  // CSRF is required here even though the URL-bound token already gates
+  // access to *a* valid identity. The token check defends against an
+  // attacker *stealing/replaying a victim's* token; it does nothing against
+  // the inverse — login CSRF (#771) — where an attacker auto-submits a
+  // cross-site POST carrying *their own* valid token from the victim's
+  // browser, coercing the browser into adopting the attacker-chosen
+  // session (and silently writing the victim's `/me/*` edits to the
+  // attacker's account, or laundering admin actions through the attacker's
+  // audit identity). The double-submit token stops that: a cross-site
+  // auto-submit can't read the victim's koolbot_csrf cookie to forge a
+  // matching `_csrf`, and SameSite=Lax withholds that cookie from a
+  // cross-site POST entirely. The consent page (rendered on GET above)
+  // mirrors the token into the form, so the same-site sign-in click passes.
   router.post(
     "/s/:token",
     redeemLimiter,
+    requireCsrf,
     async (req: Request, res: Response): Promise<void> => {
       try {
         const token = String(req.params.token || "");
