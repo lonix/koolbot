@@ -1466,12 +1466,14 @@ describe("renderReactionRolesPage", () => {
       configChannel: { name: "roles", id: "c1" },
       active: [
         {
+          mappingId: "aaaaaaaaaaaaaaaaaaaaaaaa",
           emoji: "🎮",
           roleName: "Gamer",
           roleId: "r1",
           categoryName: "Roles",
           channelName: "roles",
           messageId: "m1",
+          autoCreated: true,
           isArchived: false,
           archivedAt: null,
         },
@@ -1485,6 +1487,37 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain("/admin/reaction-roles/create");
     expect(html).toContain("/admin/reaction-roles/archive");
     expect(html).toContain("/admin/reaction-roles/delete");
+    // Managed rows key their actions on the stable mapping id, not roleName.
+    expect(html).toContain(
+      '<input type="hidden" name="mappingId" value="aaaaaaaaaaaaaaaaaaaaaaaa">',
+    );
+  });
+
+  it("renders a bound mapping with a remove-mapping control and bound tag", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: { name: "roles", id: "c1" },
+      active: [
+        {
+          mappingId: "bbbbbbbbbbbbbbbbbbbbbbbb",
+          emoji: "🎨",
+          roleName: "Artist",
+          roleId: "r9",
+          categoryName: "—",
+          channelName: "—",
+          messageId: "m9",
+          autoCreated: false,
+          isArchived: false,
+          archivedAt: null,
+        },
+      ],
+      archived: [],
+    });
+    expect(html).toContain("/admin/reaction-roles/remove-mapping");
+    expect(html).toContain(">bound<");
+    // Bound rows do not offer archive.
+    expect(html).not.toContain("/admin/reaction-roles/archive");
   });
 
   it("renders unarchive control for archived rows", () => {
@@ -1495,12 +1528,14 @@ describe("renderReactionRolesPage", () => {
       active: [],
       archived: [
         {
+          mappingId: "cccccccccccccccccccccccc",
           emoji: "📦",
           roleName: "Old",
           roleId: "r2",
           categoryName: "Roles",
           channelName: "old",
           messageId: "m2",
+          autoCreated: true,
           isArchived: true,
           archivedAt: "2026-05-08T00:00:00.000Z",
         },

@@ -774,6 +774,20 @@ page renders a banner explaining the state with an inline **Enable** button
 (flips the flag via `/admin/settings/set` and returns you to the page) plus
 an **Open Settings** link.
 
+The **Reaction Roles** page offers two ways to add a mapping (#813). *Create a
+reaction role* mints a brand-new Discord role and posts a picker message; the
+*Create a private category + channel* checkbox is on by default (preserving the
+original behaviour) — untick it to opt out and get a plain self-assign role with
+no attached channel. *Bind an existing role* maps an
+emoji to a role you already manage (no role/category/channel is created) and,
+when given an existing message ID, adds the mapping to that message — so one
+picker message can carry many emoji→role mappings. Both paths validate the role
+hierarchy up front (the bot needs **Manage Roles** and a role ranked above the
+target) and surface an actionable error instead of silently failing at reaction
+time. Rows are tagged **managed** (bot-created; delete tears down the role +
+category + channel) or **bound** (points at a pre-existing role; *Remove* only
+unbinds the mapping and never deletes the role).
+
 On the **Settings** page, a toggle whose feature declares a hard dependency
 (`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an
 inline *"Requires X enabled"* hint until every dependency is on — the hint names

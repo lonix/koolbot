@@ -9,6 +9,8 @@ import {
   Role,
   GuildMember,
   Message,
+  Guild,
+  PermissionFlagsBits,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -18,6 +20,7 @@ import {
   ComponentEmojiResolvable,
   MessageCreateOptions,
 } from "discord.js";
+import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -580,10 +583,96 @@ export class ReactionRoleService {
     }
   }
 
+  /**
+   * Normalize an emoji into the format stored in the database. Custom emojis
+   * are kept as their full `<:name:id>` / `<a:name:id>` markup; standard
+   * emojis are stored as their Unicode character unchanged.
+   */
+  private normalizeEmoji(emoji: string): string {
+    const customEmojiMatch = emoji.match(/<a?:(\w+):(\d+)>/);
+    return customEmojiMatch ? customEmojiMatch[0] : emoji;
+  }
+
+  /**
+   * Resolve a role reference to its snowflake. Accepts a raw id, a role mention
+   * (`<@&123>`), or an id with surrounding whitespace, so the bind path honours
+   * the "accept a role id/mention" contract (#813). Returns the trimmed input
+   * unchanged when no snowflake is found, letting `roles.fetch` reject it with a
+   * clear "not found" message.
+   */
+  private normalizeRoleId(roleRef: string): string {
+    const match = roleRef.match(/(\d{17,20})/);
+    return match ? match[1] : roleRef.trim();
+  }
+
+  /**
+   * Validate up front that the bot can actually assign `role` before we wire a
+   * reaction to it. `member.roles.add()` fails at runtime when the bot lacks
+   * Manage Roles, when the target role sits at or above the bot's highest
+   * role, or when the role is integration-managed — historically this only
+   * surfaced as a `logger.error` deep inside `handleReactionAdd`. Surfacing it
+   * at create/bind time turns a silent no-op into an actionable message.
+   */
+  private async validateRoleAssignable(
+    guild: Guild,
+    role: Role,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    const botMember =
+      guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+
+    if (!botMember) {
+      return {
+        ok: false,
+        message: "I couldn't resolve my own membership in this server.",
+      };
+    }
+
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      return {
+        ok: false,
+        message:
+          "I need the **Manage Roles** permission to assign roles from reactions.",
+      };
+    }
+
+    if (role.id === guild.roles.everyone.id) {
+      return {
+        ok: false,
+        message: "The @everyone role can't be used as a reaction role.",
+      };
+    }
+
+    if (role.managed) {
+      return {
+        ok: false,
+        message: `**${role.name}** is managed by an integration or bot and can't be assigned manually.`,
+      };
+    }
+
+    if (botMember.roles.highest.comparePositionTo(role) <= 0) {
+      return {
+        ok: false,
+        message: `My highest role must be above **${role.name}** in the role list. Move my role higher under Server Settings → Roles, then try again.`,
+      };
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * Create a brand-new role (and, unless opted out, a private category +
+   * channel) and post a single-emoji reaction-role message for it. This is the
+   * original, heavily-opinionated flow, preserved for backward compatibility.
+   *
+   * @param options.createChannel When `true` (default) the bot also creates a
+   *   private category + text channel locked to the new role. Set `false` to
+   *   create a self-assign role with no attached channel (issue #813).
+   */
   public async createReactionRole(
     guildId: string,
     roleName: string,
     emoji: string,
+    options: { createChannel?: boolean } = {},
   ): Promise<{
     success: boolean;
     message: string;
@@ -592,6 +681,7 @@ export class ReactionRoleService {
     channelId?: string;
     messageId?: string;
   }> {
+    const createChannel = options.createChannel ?? true;
     let role: Role | null = null;
     let category: CategoryChannel | null = null;
     let channel: TextChannel | null = null;
@@ -613,16 +703,20 @@ export class ReactionRoleService {
 
       const guild = await this.client.guilds.fetch(guildId);
 
-      // Parse emoji to determine if it's custom or standard
-      // Custom emoji format: <:name:id> or <a:name:id>
-      // Store the emoji as-is for both standard (Unicode) and custom (full format)
-      let normalizedEmoji: string = emoji;
-      const customEmojiMatch = emoji.match(/<a?:(\w+):(\d+)>/);
-      if (customEmojiMatch) {
-        // For custom emojis, store the full markup to preserve name and animated flag
-        normalizedEmoji = customEmojiMatch[0];
+      // Verify up front that the bot can manage roles at all — otherwise we'd
+      // create a role, category, and channel only for `member.roles.add()` to
+      // fail silently at reaction time (#813).
+      const botMemberEarly =
+        guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+      if (!botMemberEarly?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+        return {
+          success: false,
+          message:
+            "I need the **Manage Roles** permission to create reaction roles.",
+        };
       }
-      // For standard emojis, normalizedEmoji is already set to the Unicode character
+
+      const normalizedEmoji = this.normalizeEmoji(emoji);
 
       // Create the role
       role = await guild.roles.create({
@@ -632,60 +726,62 @@ export class ReactionRoleService {
 
       logger.info(`Created role: ${role.name} (${role.id})`);
 
-      // Create category
-      category = (await guild.channels.create({
-        name: roleName,
-        type: ChannelType.GuildCategory,
-        reason: `Category for reaction role: ${roleName}`,
-      })) as CategoryChannel;
+      if (createChannel) {
+        // Create category
+        category = (await guild.channels.create({
+          name: roleName,
+          type: ChannelType.GuildCategory,
+          reason: `Category for reaction role: ${roleName}`,
+        })) as CategoryChannel;
 
-      logger.info(`Created category: ${category.name} (${category.id})`);
+        logger.info(`Created category: ${category.name} (${category.id})`);
 
-      // Set category permissions - only role members can view
-      await category.permissionOverwrites.edit(guild.roles.everyone, {
-        ViewChannel: false,
-      });
-
-      await category.permissionOverwrites.edit(role, {
-        ViewChannel: true,
-      });
-
-      // Ensure the bot can always manage this category and its channels
-      const botMember = guild.members.me;
-      if (botMember) {
-        await category.permissionOverwrites.edit(botMember, {
-          ViewChannel: true,
-          ManageChannels: true,
-          ManageRoles: true,
+        // Set category permissions - only role members can view
+        await category.permissionOverwrites.edit(guild.roles.everyone, {
+          ViewChannel: false,
         });
-      } else {
-        logger.warn(
-          `Unable to set category permissions for bot user in guild ${guild.id} - guild.members.me is null`,
-        );
+
+        await category.permissionOverwrites.edit(role, {
+          ViewChannel: true,
+        });
+
+        // Ensure the bot can always manage this category and its channels
+        const botMember = guild.members.me;
+        if (botMember) {
+          await category.permissionOverwrites.edit(botMember, {
+            ViewChannel: true,
+            ManageChannels: true,
+            ManageRoles: true,
+          });
+        } else {
+          logger.warn(
+            `Unable to set category permissions for bot user in guild ${guild.id} - guild.members.me is null`,
+          );
+        }
+
+        // Create text channel in the category with sanitized name
+        // Discord channel names: lowercase, no spaces, 1-100 chars, alphanumeric + hyphens/underscores
+        const sanitizedName = roleName
+          .toLowerCase()
+          .replace(/\s+/g, "-") // Replace spaces with hyphens
+          .replace(/[^a-z0-9-_]/g, "") // Remove special characters
+          .substring(0, 100); // Limit to 100 characters
+
+        if (!sanitizedName) {
+          throw new Error(
+            "Role name must contain at least one alphanumeric character for channel creation",
+          );
+        }
+
+        channel = (await guild.channels.create({
+          name: sanitizedName,
+          type: ChannelType.GuildText,
+          parent: category.id,
+          reason: `Channel for reaction role: ${roleName}`,
+        })) as TextChannel;
+
+        logger.info(`Created channel: ${channel.name} (${channel.id})`);
       }
-
-      // Create text channel in the category with sanitized name
-      // Discord channel names: lowercase, no spaces, 1-100 chars, alphanumeric + hyphens/underscores
-      const sanitizedName = roleName
-        .toLowerCase()
-        .replace(/\s+/g, "-") // Replace spaces with hyphens
-        .replace(/[^a-z0-9-_]/g, "") // Remove special characters
-        .substring(0, 100); // Limit to 100 characters
-
-      if (!sanitizedName) {
-        throw new Error(
-          "Role name must contain at least one alphanumeric character for channel creation",
-        );
-      }
-
-      channel = (await guild.channels.create({
-        name: sanitizedName,
-        type: ChannelType.GuildText,
-        parent: category.id,
-        reason: `Channel for reaction role: ${roleName}`,
-      })) as TextChannel;
-
-      logger.info(`Created channel: ${channel.name} (${channel.id})`);
 
       // Get the configured message channel
       const messageChannelId = await this.configService.getString(
@@ -742,12 +838,13 @@ export class ReactionRoleService {
       const reactionRoleConfig = new ReactionRoleConfig({
         guildId,
         messageId: message.id,
-        channelId: channel.id,
+        channelId: channel?.id,
         roleId: role.id,
-        categoryId: category.id,
+        categoryId: category?.id,
         emoji: normalizedEmoji,
         roleName,
         style,
+        autoCreated: true,
         isArchived: false,
       });
 
@@ -764,8 +861,8 @@ export class ReactionRoleService {
         success: true,
         message: `Successfully created reaction role **${roleName}**!`,
         roleId: role.id,
-        categoryId: category.id,
-        channelId: channel.id,
+        categoryId: category?.id,
+        channelId: channel?.id,
         messageId: message.id,
       };
     } catch (error) {
@@ -815,23 +912,364 @@ export class ReactionRoleService {
     }
   }
 
-  public async archiveReactionRole(
+  /**
+   * Bind an emoji reaction to an **existing** role, without creating a role,
+   * category, or channel (issue #813). When `options.messageId` is supplied
+   * the mapping is added to that existing message — letting one picker message
+   * carry many emoji→role mappings — otherwise a fresh single-mapping message
+   * is posted to the configured reaction-role channel.
+   *
+   * The role hierarchy is validated up front so binding to an unassignable
+   * role fails fast with an actionable message rather than silently no-opping
+   * at reaction time.
+   */
+  public async bindReactionRole(
     guildId: string,
-    roleName: string,
+    roleId: string,
+    emoji: string,
+    options: { messageId?: string; messageChannelId?: string } = {},
+  ): Promise<{
+    success: boolean;
+    message: string;
+    roleId?: string;
+    messageId?: string;
+  }> {
+    let postedMessage: Message | null = null;
+
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+
+      // Accept a role id or a `<@&id>` mention.
+      const resolvedRoleId = this.normalizeRoleId(roleId);
+      const role = await guild.roles.fetch(resolvedRoleId).catch(() => null);
+      if (!role) {
+        return {
+          success: false,
+          message: `Role \`${roleId}\` was not found in this server.`,
+        };
+      }
+
+      // Up-front hierarchy / permission validation (#813).
+      const assignable = await this.validateRoleAssignable(guild, role);
+      if (!assignable.ok) {
+        return { success: false, message: assignable.message };
+      }
+
+      const normalizedEmoji = this.normalizeEmoji(emoji);
+
+      // Resolve the channel that owns (or will own) the reaction message.
+      const messageChannelId =
+        options.messageChannelId ||
+        (await this.configService.getString(
+          "reactionroles.message_channel_id",
+          "",
+        ));
+
+      if (!messageChannelId) {
+        return {
+          success: false,
+          message:
+            "Reaction role message channel not configured. Set reactionroles.message_channel_id",
+        };
+      }
+
+      const messageChannel = (await guild.channels
+        .fetch(messageChannelId)
+        .catch(() => null)) as TextChannel | null;
+
+      if (!messageChannel || !messageChannel.isTextBased()) {
+        return {
+          success: false,
+          message: `Message channel ${messageChannelId} not found or is not a text channel.`,
+        };
+      }
+
+      let targetMessage: Message;
+
+      if (options.messageId) {
+        // Add a mapping to an existing picker message.
+        const existingMessage = await messageChannel.messages
+          .fetch(options.messageId)
+          .catch(() => null);
+        if (!existingMessage) {
+          return {
+            success: false,
+            message: `Message \`${options.messageId}\` was not found in <#${messageChannelId}>.`,
+          };
+        }
+
+        // Reject a duplicate emoji on the same message: the reaction handlers
+        // resolve one role per (message, emoji), so a collision is ambiguous.
+        const duplicate = await ReactionRoleConfig.findOne({
+          guildId,
+          messageId: options.messageId,
+          emoji: normalizedEmoji,
+        });
+        if (duplicate) {
+          return {
+            success: false,
+            message: `That emoji is already mapped to a role on message \`${options.messageId}\`.`,
+          };
+        }
+
+        targetMessage = existingMessage;
+      } else {
+        // Post a fresh single-mapping message for this existing role.
+        const embed = new EmbedBuilder()
+          .setColor(0x5865f2)
+          .setTitle(`${emoji} ${role.name}`)
+          .setDescription(
+            `React with ${emoji} to get the **${role.name}** role!`,
+          )
+          .setFooter({ text: "Remove your reaction to lose the role" })
+          .setTimestamp();
+        postedMessage = await messageChannel.send({ embeds: [embed] });
+        targetMessage = postedMessage;
+      }
+
+      try {
+        await targetMessage.react(emoji);
+      } catch (reactionError) {
+        logger.error("Failed to add reaction to message:", reactionError);
+        // Only clean up a message we ourselves just posted.
+        if (postedMessage) {
+          await postedMessage.delete().catch((err) => {
+            logger.warn("Could not delete message after reaction error:", err);
+          });
+        }
+        return {
+          success: false,
+          message:
+            "Failed to add reaction. The emoji might be invalid or inaccessible.",
+        };
+      }
+
+      const reactionRoleConfig = new ReactionRoleConfig({
+        guildId,
+        messageId: targetMessage.id,
+        roleId: role.id,
+        emoji: normalizedEmoji,
+        roleName: role.name,
+        autoCreated: false,
+        isArchived: false,
+      });
+
+      try {
+        await reactionRoleConfig.save();
+      } catch (dbError) {
+        logger.error("Failed to save reaction role binding:", dbError);
+        // Roll back the reaction we just added so users can't react to a
+        // mapping that was never persisted (e.g. a duplicate lost the unique
+        // index race). A freshly posted message is deleted outright, taking its
+        // reaction with it; on an existing picker message we only remove the
+        // bot's reaction and leave the message intact.
+        if (postedMessage) {
+          await postedMessage.delete().catch((err) => {
+            logger.warn("Could not delete message after DB error:", err);
+          });
+        } else {
+          await this.removeBotReaction(targetMessage, normalizedEmoji);
+        }
+        return {
+          success: false,
+          message: "Failed to save configuration to database.",
+        };
+      }
+
+      logger.info(
+        `Bound reaction ${normalizedEmoji} → existing role ${sanitizeForLog(role.name)} on message ${targetMessage.id}`,
+      );
+
+      return {
+        success: true,
+        message: `Bound ${emoji} to existing role **${role.name}**.`,
+        roleId: role.id,
+        messageId: targetMessage.id,
+      };
+    } catch (error) {
+      logger.error("Error binding reaction role:", error);
+      if (postedMessage) {
+        await postedMessage.delete().catch((err) => {
+          logger.warn("Could not delete message during rollback:", err);
+        });
+      }
+      return {
+        success: false,
+        message: `Failed to bind reaction role: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
+  /**
+   * Remove a single emoji→role mapping identified by its message + emoji.
+   * Unlike {@link deleteReactionRole} (which tears down an entire auto-created
+   * role + category + channel), this only unbinds one mapping: it removes the
+   * bot's reaction and deletes the DB row, and deletes the underlying Discord
+   * role/category/channel only when this mapping auto-created them and no other
+   * mapping still references them.
+   */
+  public async removeReactionRoleMapping(
+    guildId: string,
+    messageId: string,
+    emoji: string,
   ): Promise<{ success: boolean; message: string }> {
     try {
+      const normalizedEmoji = this.normalizeEmoji(emoji);
       const config = await ReactionRoleConfig.findOne({
         guildId,
-        roleName,
+        messageId,
+        emoji: normalizedEmoji,
+      });
+
+      if (!config) {
+        return {
+          success: false,
+          message: `No mapping found for that emoji on message \`${messageId}\`.`,
+        };
+      }
+
+      const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+
+      // Best-effort: remove the bot's own reaction so the picker stays tidy.
+      if (guild) {
+        try {
+          const messageChannelId = await this.configService.getString(
+            "reactionroles.message_channel_id",
+            "",
+          );
+          if (messageChannelId) {
+            const channel = (await guild.channels
+              .fetch(messageChannelId)
+              .catch(() => null)) as TextChannel | null;
+            const message = await channel?.messages
+              .fetch(messageId)
+              .catch(() => null);
+            if (message) {
+              await this.removeBotReaction(message, normalizedEmoji);
+            }
+          }
+        } catch (err) {
+          logger.warn("Could not remove bot reaction while unbinding:", err);
+        }
+      }
+
+      // Tear down auto-created Discord resources only when no other mapping
+      // still references the same role. Checking the reference count *before*
+      // touching the category or role means a role shared across several
+      // pickers keeps its private channels until the last mapping is removed.
+      // Bound (non-auto-created) mappings never delete their role.
+      if (guild && config.autoCreated && config.roleId) {
+        const stillUsed = await ReactionRoleConfig.countDocuments({
+          guildId,
+          roleId: config.roleId,
+          _id: { $ne: config._id },
+        });
+        if (stillUsed === 0) {
+          if (config.categoryId) {
+            await this.deleteCategoryTree(guild, config.categoryId);
+          }
+          try {
+            const role = await guild.roles.fetch(config.roleId);
+            if (role) {
+              await role.delete();
+              logger.info(`Deleted role ${config.roleId}`);
+            }
+          } catch (err) {
+            logger.warn("Could not delete role while unbinding:", err);
+          }
+        }
+      }
+
+      await ReactionRoleConfig.deleteOne({ _id: config._id });
+
+      logger.info(
+        `Removed reaction-role mapping ${normalizedEmoji} on message ${messageId} (${sanitizeForLog(config.roleName)})`,
+      );
+
+      return {
+        success: true,
+        message: `Removed the ${emoji} → **${config.roleName}** mapping.`,
+      };
+    } catch (error) {
+      logger.error("Error removing reaction role mapping:", error);
+      return {
+        success: false,
+        message: `Failed to remove mapping: ${error instanceof Error ? error.message : "Unknown error"}`,
+      };
+    }
+  }
+
+  /**
+   * Best-effort removal of the bot's own reaction for a stored emoji from a
+   * message. Used both to tidy a picker after unbinding and to roll back a
+   * reaction whose mapping failed to persist.
+   */
+  private async removeBotReaction(
+    message: Message,
+    normalizedEmoji: string,
+  ): Promise<void> {
+    try {
+      const reaction = message.reactions.cache.find(
+        (r) => this.buildEmojiIdentifier(r) === normalizedEmoji,
+      );
+      await reaction?.users.remove(this.client.user?.id);
+    } catch (err) {
+      logger.warn("Could not remove bot reaction:", err);
+    }
+  }
+
+  /**
+   * Delete a category and every channel nested under it. Shared by the
+   * full-delete and unbind paths.
+   */
+  private async deleteCategoryTree(
+    guild: Guild,
+    categoryId: string,
+  ): Promise<void> {
+    try {
+      const category = await guild.channels.fetch(categoryId).catch(() => null);
+      if (category) {
+        const categoryChannel = category as CategoryChannel;
+        for (const [, channel] of categoryChannel.children.cache) {
+          try {
+            await channel.delete();
+          } catch (err) {
+            logger.warn(`Could not delete channel ${channel.id}:`, err);
+          }
+        }
+        await category.delete();
+        logger.info(`Deleted category ${categoryId}`);
+      }
+    } catch (error) {
+      logger.warn("Could not delete category:", error);
+    }
+  }
+
+  public async archiveReactionRole(
+    guildId: string,
+    mappingId: string,
+  ): Promise<{ success: boolean; message: string }> {
+    try {
+      // Identify the mapping by its stable `_id`: role names are no longer
+      // unique (#813), so keying on the name could archive the wrong picker.
+      if (!isValidObjectId(mappingId)) {
+        return { success: false, message: "Reaction role mapping not found." };
+      }
+
+      const config = await ReactionRoleConfig.findOne({
+        _id: mappingId,
+        guildId,
         isArchived: false,
       });
 
       if (!config) {
         return {
           success: false,
-          message: `Reaction role **${roleName}** not found or already archived`,
+          message: "Reaction role mapping not found or already archived.",
         };
       }
+
+      const roleName = config.roleName;
 
       // Mark as archived
       config.isArchived = true;
@@ -879,21 +1317,30 @@ export class ReactionRoleService {
 
   public async unarchiveReactionRole(
     guildId: string,
-    roleName: string,
+    mappingId: string,
   ): Promise<{ success: boolean; message: string }> {
     try {
+      if (!isValidObjectId(mappingId)) {
+        return {
+          success: false,
+          message: "Archived reaction role mapping not found.",
+        };
+      }
+
       const config = await ReactionRoleConfig.findOne({
+        _id: mappingId,
         guildId,
-        roleName,
         isArchived: true,
       });
 
       if (!config) {
         return {
           success: false,
-          message: `Archived reaction role **${roleName}** not found`,
+          message: "Archived reaction role mapping not found.",
         };
       }
+
+      const roleName = config.roleName;
 
       const guild = await this.client.guilds.fetch(guildId);
 
@@ -1009,75 +1456,91 @@ export class ReactionRoleService {
 
   public async deleteReactionRole(
     guildId: string,
-    roleName: string,
+    mappingId: string,
   ): Promise<{ success: boolean; message: string }> {
     try {
+      if (!isValidObjectId(mappingId)) {
+        return { success: false, message: "Reaction role mapping not found." };
+      }
+
       const config = await ReactionRoleConfig.findOne({
+        _id: mappingId,
         guildId,
-        roleName,
       });
 
       if (!config) {
         return {
           success: false,
-          message: `Reaction role **${roleName}** not found`,
+          message: "Reaction role mapping not found.",
         };
       }
 
+      const roleName = config.roleName;
+
       const guild = await this.client.guilds.fetch(guildId);
 
-      // Delete message
-      try {
-        const messageChannelId = await this.configService.getString(
-          "reactionroles.message_channel_id",
-          "",
-        );
-        if (messageChannelId) {
-          const messageChannel = (await guild.channels.fetch(
-            messageChannelId,
-          )) as TextChannel;
-          if (messageChannel) {
-            const message = await messageChannel.messages.fetch(
-              config.messageId,
-            );
-            if (message) {
-              await message.delete();
+      // Delete the reaction message only for auto-created mappings, which each
+      // own a dedicated single-emoji message. Bound mappings may live on a
+      // shared picker message alongside other mappings, so deleting it would
+      // wipe those too — leave it in place (#813).
+      if (config.autoCreated) {
+        try {
+          const messageChannelId = await this.configService.getString(
+            "reactionroles.message_channel_id",
+            "",
+          );
+          if (messageChannelId) {
+            const messageChannel = (await guild.channels.fetch(
+              messageChannelId,
+            )) as TextChannel;
+            if (messageChannel) {
+              const message = await messageChannel.messages.fetch(
+                config.messageId,
+              );
+              if (message) {
+                await message.delete();
+              }
             }
           }
+        } catch (error) {
+          logger.warn("Could not delete reaction message:", error);
         }
-      } catch (error) {
-        logger.warn("Could not delete reaction message:", error);
       }
 
-      // Delete category (which will handle all child channels)
-      try {
-        const category = await guild.channels.fetch(config.categoryId);
-        if (category) {
-          // Delete all channels in category first
-          const categoryChannel = category as CategoryChannel;
-          for (const [, channel] of categoryChannel.children.cache) {
-            try {
-              await channel.delete();
-            } catch (err) {
-              logger.warn(`Could not delete channel ${channel.id}:`, err);
-            }
+      // Only tear down the underlying Discord resources for mappings the bot
+      // auto-created, and only when no other mapping still references the same
+      // role. Now that a role can appear on more than one picker (#813),
+      // deleting it here while another mapping points at it would leave that
+      // mapping dangling and silently break its reactions — so gate the
+      // category + role teardown on the reference count. Bound mappings never
+      // delete their role.
+      if (config.autoCreated) {
+        const stillUsed = await ReactionRoleConfig.countDocuments({
+          guildId,
+          roleId: config.roleId,
+          _id: { $ne: config._id },
+        });
+        if (stillUsed === 0) {
+          // Delete category (which will handle all child channels)
+          if (config.categoryId) {
+            await this.deleteCategoryTree(guild, config.categoryId);
           }
-          await category.delete();
-          logger.info(`Deleted category ${config.categoryId}`);
-        }
-      } catch (error) {
-        logger.warn("Could not delete category:", error);
-      }
 
-      // Delete role
-      try {
-        const role = await guild.roles.fetch(config.roleId);
-        if (role) {
-          await role.delete();
-          logger.info(`Deleted role ${config.roleId}`);
+          // Delete role
+          try {
+            const role = await guild.roles.fetch(config.roleId);
+            if (role) {
+              await role.delete();
+              logger.info(`Deleted role ${config.roleId}`);
+            }
+          } catch (error) {
+            logger.warn("Could not delete role:", error);
+          }
+        } else {
+          logger.info(
+            `Kept role ${config.roleId}: still referenced by ${stillUsed} other mapping(s)`,
+          );
         }
-      } catch (error) {
-        logger.warn("Could not delete role:", error);
       }
 
       // Delete from database
@@ -1087,7 +1550,9 @@ export class ReactionRoleService {
 
       return {
         success: true,
-        message: `Successfully deleted reaction role **${roleName}** and all associated resources.`,
+        message: config.autoCreated
+          ? `Successfully deleted reaction role **${roleName}** and all associated resources.`
+          : `Removed the reaction-role mapping for **${roleName}**. The existing role was left untouched.`,
       };
     } catch (error) {
       logger.error("Error deleting reaction role:", error);
