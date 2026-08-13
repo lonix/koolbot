@@ -33,6 +33,11 @@ class MockSchema {
   }
 }
 
+// Pure helper, safe to mirror the real behaviour (24 hex chars or a
+// 12-char string), so id-validation guards work under the global mock.
+const mockIsValidObjectId = (id: unknown): boolean =>
+  typeof id === "string" && (/^[0-9a-fA-F]{24}$/.test(id) || id.length === 12);
+
 // Mock mongoose globally to prevent DB connections
 jest.mock("mongoose", () => ({
   default: {
@@ -42,6 +47,7 @@ jest.mock("mongoose", () => ({
       close: jest.fn().mockResolvedValue(undefined),
       readyState: 1,
     },
+    isValidObjectId: mockIsValidObjectId,
     Schema: MockSchema,
     model: jest.fn().mockReturnValue({
       find: jest.fn().mockResolvedValue([]),
@@ -59,6 +65,7 @@ jest.mock("mongoose", () => ({
     close: jest.fn().mockResolvedValue(undefined),
     readyState: 1,
   },
+  isValidObjectId: mockIsValidObjectId,
   Schema: MockSchema,
   model: jest.fn().mockReturnValue({
     find: jest.fn().mockResolvedValue([]),
