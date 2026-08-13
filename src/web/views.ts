@@ -53,12 +53,19 @@ export function renderSignedOut(): string {
   );
 }
 
-export function renderConsent(opts: { token: string }): string {
+export function renderConsent(opts: {
+  token: string;
+  csrfToken: string;
+}): string {
   const action = `/admin/s/${encodeURIComponent(opts.token)}`;
   const body = [
     "<h1>Sign in to Koolbot Admin</h1>",
     "<p>Click <strong>Continue</strong> to start your admin session in this browser. Your single-use sign-in link will be consumed when you do.</p>",
     `<form method="POST" action="${escapeHtml(action)}">`,
+    // Double-submit CSRF token: mirrors the koolbot_csrf cookie so the POST
+    // redemption can reject a cross-site login-CSRF forgery (issue #771). A
+    // cross-site auto-submit can't read the victim's cookie to forge a match.
+    `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<button type="submit">Continue</button>',
     "</form>",
   ].join("");
