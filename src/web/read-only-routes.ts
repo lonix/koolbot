@@ -748,6 +748,7 @@ export function createReadOnlyRouter(
       const resolveChannel = (id?: string | null): string =>
         id ? (channelNames.get(id) ?? id) : "—";
       const shape = (rr: {
+        _id?: unknown;
         emoji: string;
         roleName: string;
         roleId: string;
@@ -758,6 +759,7 @@ export function createReadOnlyRouter(
         isArchived: boolean;
         archivedAt?: Date | null;
       }): ReactionRoleRow => ({
+        mappingId: String(rr._id ?? ""),
         emoji: rr.emoji,
         roleName: rr.roleName,
         roleId: rr.roleId,

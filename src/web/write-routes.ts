@@ -3226,11 +3226,11 @@ export function createWriteRouter(
     "/reaction-roles/archive",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const roleName = getString(req, "roleName");
-      if (!roleName) {
+      const mappingId = getString(req, "mappingId");
+      if (!mappingId) {
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
-          text: "Role name is required.",
+          text: "Mapping id is required.",
         });
         return;
       }
@@ -3238,12 +3238,12 @@ export function createWriteRouter(
       try {
         const result = await service.archiveReactionRole(
           session.guildId,
-          roleName,
+          mappingId,
         );
         await recordAudit(session, {
           action: "reactionrole.archive",
-          targetId: roleName,
-          details: { roleName },
+          targetId: mappingId,
+          details: { mappingId },
           result: result.success ? "success" : "failure",
           errorMessage: result.success ? null : result.message,
         });
@@ -3256,13 +3256,13 @@ export function createWriteRouter(
         logger.error("Archive reaction role failed", err);
         await recordAudit(session, {
           action: "reactionrole.archive",
-          targetId: roleName,
+          targetId: mappingId,
           result: "failure",
           errorMessage: text,
         });
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
-          text: `Failed to archive ${roleName}: ${text}`,
+          text: `Failed to archive reaction role: ${text}`,
         });
       }
     }),
@@ -3272,11 +3272,11 @@ export function createWriteRouter(
     "/reaction-roles/unarchive",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const roleName = getString(req, "roleName");
-      if (!roleName) {
+      const mappingId = getString(req, "mappingId");
+      if (!mappingId) {
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
-          text: "Role name is required.",
+          text: "Mapping id is required.",
         });
         return;
       }
@@ -3284,12 +3284,12 @@ export function createWriteRouter(
       try {
         const result = await service.unarchiveReactionRole(
           session.guildId,
-          roleName,
+          mappingId,
         );
         await recordAudit(session, {
           action: "reactionrole.unarchive",
-          targetId: roleName,
-          details: { roleName },
+          targetId: mappingId,
+          details: { mappingId },
           result: result.success ? "success" : "failure",
           errorMessage: result.success ? null : result.message,
         });
@@ -3302,13 +3302,13 @@ export function createWriteRouter(
         logger.error("Unarchive reaction role failed", err);
         await recordAudit(session, {
           action: "reactionrole.unarchive",
-          targetId: roleName,
+          targetId: mappingId,
           result: "failure",
           errorMessage: text,
         });
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
-          text: `Failed to unarchive ${roleName}: ${text}`,
+          text: `Failed to unarchive reaction role: ${text}`,
         });
       }
     }),
@@ -3318,11 +3318,11 @@ export function createWriteRouter(
     "/reaction-roles/delete",
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
-      const roleName = getString(req, "roleName");
-      if (!roleName) {
+      const mappingId = getString(req, "mappingId");
+      if (!mappingId) {
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
-          text: "Role name is required.",
+          text: "Mapping id is required.",
         });
         return;
       }
@@ -3330,12 +3330,12 @@ export function createWriteRouter(
       try {
         const result = await service.deleteReactionRole(
           session.guildId,
-          roleName,
+          mappingId,
         );
         await recordAudit(session, {
           action: "reactionrole.delete",
-          targetId: roleName,
-          details: { roleName },
+          targetId: mappingId,
+          details: { mappingId },
           result: result.success ? "success" : "failure",
           errorMessage: result.success ? null : result.message,
         });
@@ -3348,13 +3348,13 @@ export function createWriteRouter(
         logger.error("Delete reaction role failed", err);
         await recordAudit(session, {
           action: "reactionrole.delete",
-          targetId: roleName,
+          targetId: mappingId,
           result: "failure",
           errorMessage: text,
         });
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
-          text: `Failed to delete ${roleName}: ${text}`,
+          text: `Failed to delete reaction role: ${text}`,
         });
       }
     }),

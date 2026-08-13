@@ -776,8 +776,9 @@ an **Open Settings** link.
 
 The **Reaction Roles** page offers two ways to add a mapping (#813). *Create a
 reaction role* mints a brand-new Discord role and posts a picker message; the
-*Create a private category + channel* checkbox is now opt-in — untick it for a
-plain self-assign role with no attached channel. *Bind an existing role* maps an
+*Create a private category + channel* checkbox is on by default (preserving the
+original behaviour) — untick it to opt out and get a plain self-assign role with
+no attached channel. *Bind an existing role* maps an
 emoji to a role you already manage (no role/category/channel is created) and,
 when given an existing message ID, adds the mapping to that message — so one
 picker message can carry many emoji→role mappings. Both paths validate the role

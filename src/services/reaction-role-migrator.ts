@@ -16,12 +16,22 @@ import { ReactionRoleConfig } from "../models/reaction-role-config.js";
  * `autoCreated: true` on any row missing the field, restoring the original
  * delete semantics for pre-#813 data.
  *
- * It is idempotent: once every row carries the field, the `$exists: false`
- * filter matches nothing and the migration is a no-op on subsequent starts.
- * Runs after the Mongo connection is established and before services that
- * consume reaction-role configs initialise.
+ * It is idempotent: once every row carries the field and the legacy index is
+ * gone, both steps become no-ops on subsequent starts. Runs after the Mongo
+ * connection is established and before services that consume reaction-role
+ * configs initialise.
  */
+const LEGACY_ROLE_NAME_INDEX = "guildId_1_roleName_1";
+
 export async function runReactionRoleMigrations(): Promise<void> {
+  await backfillAutoCreated();
+  await dropLegacyRoleNameIndex();
+}
+
+/**
+ * Backfill `autoCreated: true` on rows written before the field existed.
+ */
+async function backfillAutoCreated(): Promise<void> {
   try {
     const legacyCount = await ReactionRoleConfig.countDocuments({
       autoCreated: { $exists: false },
@@ -47,5 +57,45 @@ export async function runReactionRoleMigrations(): Promise<void> {
     // in the schema for any row written afterwards, and delete paths tolerate
     // missing category/channel ids.
     logger.error("Reaction-role migration failed:", error);
+  }
+}
+
+/**
+ * Drop the deployed `{ guildId, roleName }` unique index. Changing the schema
+ * declaration alone does not remove an index already built in MongoDB, so the
+ * old unique constraint would keep rejecting the same role name across multiple
+ * pickers — exactly what #813 needs to allow. Mongoose recreates the new
+ * (non-unique roleName + unique messageId/emoji) indexes on model init, so we
+ * only have to remove the stale one. Idempotent: a missing index is ignored.
+ */
+async function dropLegacyRoleNameIndex(): Promise<void> {
+  try {
+    const collection = ReactionRoleConfig.collection;
+    // Guarded for environments where the driver collection isn't available
+    // (e.g. the mocked model used in unit tests).
+    if (!collection || typeof collection.indexes !== "function") {
+      return;
+    }
+
+    const indexes = await collection.indexes();
+    const stale = indexes.find(
+      (idx: { name?: string; unique?: boolean }) =>
+        idx.name === LEGACY_ROLE_NAME_INDEX && idx.unique,
+    );
+    if (!stale) {
+      return;
+    }
+
+    await collection.dropIndex(LEGACY_ROLE_NAME_INDEX);
+    logger.info(
+      `Reaction-role migration: dropped stale unique index ${LEGACY_ROLE_NAME_INDEX}`,
+    );
+  } catch (error) {
+    // Non-fatal: worst case the new declaration and the old index coexist until
+    // an operator drops it manually; log so it's visible.
+    logger.warn(
+      "Reaction-role migration: could not drop legacy roleName index:",
+      error,
+    );
   }
 }

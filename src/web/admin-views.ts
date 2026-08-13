@@ -2079,6 +2079,8 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureK
 // ---------- Reaction Roles ----------
 
 export interface ReactionRoleRow {
+  /** Stable mapping identity (`_id`); role names are no longer unique (#813). */
+  mappingId: string;
   emoji: string;
   roleName: string;
   roleId: string;
@@ -2110,6 +2112,7 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
   const managed = rr.autoCreated ?? true;
   const escapedEmoji = escapeHtml(rr.emoji);
   const escapedMessageId = escapeHtml(rr.messageId);
+  const escapedMappingId = escapeHtml(rr.mappingId);
 
   let actions: string;
   if (!managed) {
@@ -2118,11 +2121,13 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
     // archived — that would delete a message other mappings still use.
     actions = `<form method="POST" action="/admin/reaction-roles/remove-mapping" onsubmit="return confirm('Remove the ${escapeJsInAttr(rr.emoji)} → ${jsName} mapping? The existing role is left untouched.');">${csrfInput}<input type="hidden" name="messageId" value="${escapedMessageId}"><input type="hidden" name="emoji" value="${escapedEmoji}"><button type="submit" class="btn btn-danger">Remove</button></form>`;
   } else if (rr.isArchived) {
-    actions = `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Unarchive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+    // Managed rows are keyed by their stable mapping id, not roleName, so
+    // identically named pickers can't collide (#813).
+    actions = `<form method="POST" action="/admin/reaction-roles/unarchive">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Unarchive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   } else {
-    actions = `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn">Archive</button></form>
-  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="roleName" value="${escapedName}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
+    actions = `<form method="POST" action="/admin/reaction-roles/archive" onsubmit="return confirm('Archive reaction role ${jsName}? The reaction message will be removed but the role/channels are preserved.');">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn">Archive</button></form>
+  <form method="POST" action="/admin/reaction-roles/delete" onsubmit="return confirm('Permanently delete reaction role ${jsName}? This removes the Discord role, category, and channel.');">${csrfInput}<input type="hidden" name="mappingId" value="${escapedMappingId}"><button type="submit" class="btn btn-danger">Delete</button></form>`;
   }
 
   const typeTag = managed

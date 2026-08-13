@@ -69,7 +69,9 @@ function buildGuild(opts: BuildOpts) {
       fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(role),
     },
     channels: {
-      fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(messageChannel),
+      fetch: jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue(messageChannel),
     },
   };
   return { guild, messageChannel, newMessage, botMember };
@@ -225,7 +227,9 @@ describe("ReactionRoleService.createReactionRole channel opt-out", () => {
     const guild = {
       id: "guild1",
       members: {
-        me: { permissions: { has: jest.fn().mockReturnValue(botHasManageRoles) } },
+        me: {
+          permissions: { has: jest.fn().mockReturnValue(botHasManageRoles) },
+        },
         fetchMe: jest.fn(),
       },
       roles: { create: rolesCreate, everyone: { id: "guild1" } },
