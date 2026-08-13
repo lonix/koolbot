@@ -87,6 +87,23 @@ Prometheus metrics at `src/web/metrics.ts`). It is gated by env/config — see `
 **Static content (`src/content/`)** holds achievement/accolade/status/notice definitions; `examples/`
 holds example poll libraries.
 
+### Admin surface: Web UI only (design decision — read before proposing a new command)
+
+**From v1.0 onward the Web UI is the _only_ admin surface.** Slash commands are reserved for day-to-day
+moderation and member self-service (e.g. `/warn`, `/modlog`, `/quote`, `/seen`, `/voicestats`,
+`/achievements`, plus `/config`, which just DMs a one-time Web UI sign-in link). Everything that
+_configures or manages_ a feature lives in `src/web/` — the admin management commands that used to exist
+(`/permissions`, `/setup`, `/announce`, `/poll`, `/reactrole`, `/notice`, `/dbtrunk`, `/vc`, `/botstats`)
+were **deliberately retired** in the Web UI migration, not lost. See `WEBUI.md` and the "Replaces (legacy
+slash command)" table in `COMMANDS.md`.
+
+Do **not** re-add an admin management command as a slash command "for parity" — that reverses the
+decision. If a config-schema description, doc, or UI string still advertises a retired command, the fix is
+to correct the stale text, not to ship the command. (This is why issue #812, "add `/reactrole`", was closed
+as not-planned: reaction-role management is configuration and belongs to the Reaction Roles Web UI page.)
+New slash commands are appropriate only when the interaction is genuinely day-to-day
+moderation/self-service that a member or moderator runs in Discord — not admin setup.
+
 ### The command pattern (read before adding a command)
 
 Each file in `src/commands/` exports `data: SlashCommandBuilder` and `execute(interaction)`. Registration
