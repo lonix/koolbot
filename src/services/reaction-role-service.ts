@@ -6,8 +6,6 @@ import {
   CategoryChannel,
   MessageReaction,
   User,
-  PartialMessageReaction,
-  PartialUser,
   Role,
   Message,
 } from "discord.js";
@@ -76,73 +74,15 @@ export class ReactionRoleService {
         return;
       }
 
-      // Setup reaction handlers
-      this.setupReactionHandlers();
-
+      // Gateway reaction events are routed from src/index.ts into
+      // handleReactionAdd/handleReactionRemove; the service no longer
+      // subscribes to the client directly.
       logger.info("Reaction role service initialized successfully");
     } catch (error) {
       logger.error("Error initializing reaction role service:", error);
       // Reset initialization flag on error to allow retry
       this.isInitialized = false;
     }
-  }
-
-  private setupReactionHandlers(): void {
-    // Listen for reactions added
-    this.client.on(
-      "messageReactionAdd",
-      async (
-        reaction: MessageReaction | PartialMessageReaction,
-        user: User | PartialUser,
-      ) => {
-        if (user.bot) return;
-
-        try {
-          // Fetch partial data if needed
-          if (reaction.partial) {
-            await reaction.fetch();
-          }
-          if (user.partial) {
-            await user.fetch();
-          }
-
-          await this.handleReactionAdd(
-            reaction as MessageReaction,
-            user as User,
-          );
-        } catch (error) {
-          logger.error("Error handling reaction add:", error);
-        }
-      },
-    );
-
-    // Listen for reactions removed
-    this.client.on(
-      "messageReactionRemove",
-      async (
-        reaction: MessageReaction | PartialMessageReaction,
-        user: User | PartialUser,
-      ) => {
-        if (user.bot) return;
-
-        try {
-          // Fetch partial data if needed
-          if (reaction.partial) {
-            await reaction.fetch();
-          }
-          if (user.partial) {
-            await user.fetch();
-          }
-
-          await this.handleReactionRemove(
-            reaction as MessageReaction,
-            user as User,
-          );
-        } catch (error) {
-          logger.error("Error handling reaction remove:", error);
-        }
-      },
-    );
   }
 
   /**
@@ -163,11 +103,24 @@ export class ReactionRoleService {
     return reaction.emoji.name || "";
   }
 
-  private async handleReactionAdd(
+  /**
+   * Handle a `messageReactionAdd` event routed from `src/index.ts`. The caller
+   * resolves partials and skips bot reactors before invoking this method.
+   * Writes are gated on `reactionroles.enabled = true`.
+   */
+  public async handleReactionAdd(
     reaction: MessageReaction,
     user: User,
   ): Promise<void> {
     try {
+      const enabled = await this.configService.getBoolean(
+        "reactionroles.enabled",
+        false,
+      );
+      if (!enabled) {
+        return;
+      }
+
       const emojiToMatch = this.buildEmojiIdentifier(reaction);
 
       const config = await ReactionRoleConfig.findOne({
@@ -210,11 +163,24 @@ export class ReactionRoleService {
     }
   }
 
-  private async handleReactionRemove(
+  /**
+   * Handle a `messageReactionRemove` event routed from `src/index.ts`. The
+   * caller resolves partials and skips bot reactors before invoking this
+   * method. Writes are gated on `reactionroles.enabled = true`.
+   */
+  public async handleReactionRemove(
     reaction: MessageReaction,
     user: User,
   ): Promise<void> {
     try {
+      const enabled = await this.configService.getBoolean(
+        "reactionroles.enabled",
+        false,
+      );
+      if (!enabled) {
+        return;
+      }
+
       const emojiToMatch = this.buildEmojiIdentifier(reaction);
 
       const config = await ReactionRoleConfig.findOne({
