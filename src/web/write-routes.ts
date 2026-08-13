@@ -331,7 +331,11 @@ const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "achievements.announcements.enabled",
     "achievements.dm_notifications.enabled",
   ],
-  reactionroles: ["reactionroles.enabled", "reactionroles.message_channel_id"],
+  reactionroles: [
+    "reactionroles.enabled",
+    "reactionroles.message_channel_id",
+    "reactionroles.style",
+  ],
   announcements: ["announcements.enabled"],
   notices: ["notices.enabled", "notices.channel_id", "notices.header_enabled"],
   polls: [

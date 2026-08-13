@@ -10,6 +10,14 @@ import {
   PartialUser,
   Role,
   Message,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ButtonInteraction,
+  StringSelectMenuBuilder,
+  StringSelectMenuInteraction,
+  ComponentEmojiResolvable,
+  MessageCreateOptions,
 } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
@@ -17,7 +25,20 @@ import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
   ReactionRoleConfig,
   IReactionRoleConfig,
+  ReactionRoleStyle,
+  REACTION_ROLE_STYLES,
 } from "../models/reaction-role-config.js";
+
+/**
+ * customId prefixes for component-backed self-assign roles. Buttons encode the
+ * target roleId (`reactrole:btn:<roleId>`) so a single click maps to exactly
+ * one config; select menus carry roleIds as their option values and use a
+ * static customId (`reactrole:sel`). Both resolve the concrete config from the
+ * interaction's own message id, so no privileged reaction intents or partials
+ * are involved.
+ */
+export const REACTION_ROLE_BUTTON_PREFIX = "reactrole:btn:";
+export const REACTION_ROLE_SELECT_ID = "reactrole:sel";
 
 export class ReactionRoleService {
   private static instance: ReactionRoleService;
@@ -257,6 +278,345 @@ export class ReactionRoleService {
     }
   }
 
+  /**
+   * Resolve the configured default surface style for newly created role
+   * messages. Falls back to the legacy `reaction` surface for any unknown value
+   * so a mistyped config can never break message creation.
+   */
+  private async resolveDefaultStyle(): Promise<ReactionRoleStyle> {
+    const raw = await this.configService.getString(
+      "reactionroles.style",
+      "reaction",
+    );
+    return REACTION_ROLE_STYLES.includes(raw as ReactionRoleStyle)
+      ? (raw as ReactionRoleStyle)
+      : "reaction";
+  }
+
+  /**
+   * Convert a stored emoji string into a component-emoji resolvable.
+   * Custom emojis are stored as `<a?:name:id>`; components need the id (and the
+   * animated flag). Standard emojis are passed through as the Unicode string.
+   * Returns undefined when there is nothing usable, so the button/option simply
+   * renders without an emoji instead of throwing.
+   */
+  private resolveComponentEmoji(
+    emoji: string,
+  ): ComponentEmojiResolvable | undefined {
+    if (!emoji) {
+      return undefined;
+    }
+    const customMatch = emoji.match(/<(a?):(\w+):(\d+)>/);
+    if (customMatch) {
+      return {
+        animated: customMatch[1] === "a",
+        name: customMatch[2],
+        id: customMatch[3],
+      };
+    }
+    return emoji;
+  }
+
+  /**
+   * Build the message payload (embed + optional components) for a self-assign
+   * role message given its style. Used by both create and unarchive so the two
+   * paths never drift.
+   */
+  private buildRoleMessagePayload(config: {
+    emoji: string;
+    roleName: string;
+    roleId: string;
+    style: ReactionRoleStyle;
+  }): MessageCreateOptions {
+    const { emoji, roleName, roleId, style } = config;
+
+    if (style === "button") {
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`${emoji} ${roleName}`)
+        .setDescription(
+          `Click the button below to toggle the **${roleName}** role and its channels.`,
+        )
+        .setFooter({ text: "Click again to remove the role" })
+        .setTimestamp();
+
+      const button = new ButtonBuilder()
+        .setCustomId(`${REACTION_ROLE_BUTTON_PREFIX}${roleId}`)
+        .setLabel(roleName)
+        .setStyle(ButtonStyle.Primary);
+      const componentEmoji = this.resolveComponentEmoji(emoji);
+      if (componentEmoji) {
+        button.setEmoji(componentEmoji);
+      }
+
+      const row = new ActionRowBuilder<ButtonBuilder>().addComponents(button);
+      return { embeds: [embed], components: [row] };
+    }
+
+    if (style === "select") {
+      const embed = new EmbedBuilder()
+        .setColor(0x5865f2)
+        .setTitle(`${emoji} ${roleName}`)
+        .setDescription(
+          `Use the menu below to give yourself the **${roleName}** role and its channels.`,
+        )
+        .setFooter({ text: "Deselect to remove the role" })
+        .setTimestamp();
+
+      const option = {
+        label: roleName,
+        value: roleId,
+        description: `Toggle the ${roleName} role`.slice(0, 100),
+      } as {
+        label: string;
+        value: string;
+        description: string;
+        emoji?: ComponentEmojiResolvable;
+      };
+      const componentEmoji = this.resolveComponentEmoji(emoji);
+      if (componentEmoji) {
+        option.emoji = componentEmoji;
+      }
+
+      const menu = new StringSelectMenuBuilder()
+        .setCustomId(REACTION_ROLE_SELECT_ID)
+        .setPlaceholder(`Pick to toggle ${roleName}`.slice(0, 150))
+        .setMinValues(0)
+        .setMaxValues(1)
+        .addOptions(option);
+
+      const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        menu,
+      );
+      return { embeds: [embed], components: [row] };
+    }
+
+    // Default: legacy reaction surface. The caller adds the reaction after send.
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`${emoji} ${roleName}`)
+      .setDescription(
+        `React with ${emoji} to get access to the **${roleName}** role and channels!`,
+      )
+      .setFooter({ text: "Remove your reaction to lose access" })
+      .setTimestamp();
+    return { embeds: [embed] };
+  }
+
+  /**
+   * Add or remove a role on a member and return a human-readable, ephemeral
+   * confirmation line. Shared by the button and select component handlers.
+   */
+  private async applyRoleToggle(
+    guildId: string,
+    userId: string,
+    roleId: string,
+    desired: "add" | "remove",
+  ): Promise<string> {
+    const guild = await this.client.guilds.fetch(guildId);
+    const member = await guild.members.fetch(userId);
+    const role =
+      guild.roles.cache.get(roleId) ?? (await guild.roles.fetch(roleId));
+
+    if (!role) {
+      logger.error(`Role ${roleId} not found while applying self-assign role`);
+      return `⚠️ That role no longer exists.`;
+    }
+
+    const hasRole = member.roles.cache.has(roleId);
+
+    if (desired === "add") {
+      if (hasRole) {
+        return `You already have **${role.name}**.`;
+      }
+      await member.roles.add(role);
+      logger.info(`Added role ${role.name} to user ${member.user.tag}`);
+      return `✅ You now have **${role.name}**.`;
+    }
+
+    if (!hasRole) {
+      return `You don't have **${role.name}**.`;
+    }
+    await member.roles.remove(role);
+    logger.info(`Removed role ${role.name} from user ${member.user.tag}`);
+    return `➖ Removed **${role.name}**.`;
+  }
+
+  /**
+   * Handle a button click on a component-backed self-assign role message.
+   * customId format: `reactrole:btn:<roleId>`. Toggles the role for the acting
+   * member and replies ephemerally. Routed from the central interaction handler
+   * in `index.ts`, not a service-owned `client.on`.
+   */
+  public async handleButtonInteraction(
+    interaction: ButtonInteraction,
+  ): Promise<void> {
+    try {
+      const roleId = interaction.customId.slice(
+        REACTION_ROLE_BUTTON_PREFIX.length,
+      );
+      if (!roleId || !interaction.guildId) {
+        await interaction.reply({
+          content: "⚠️ This role button is invalid.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const enabled = await this.configService.getBoolean(
+        "reactionroles.enabled",
+        false,
+      );
+      if (!enabled) {
+        await interaction.reply({
+          content: "⚠️ Self-assign roles are currently disabled.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const config = await ReactionRoleConfig.findOne({
+        messageId: interaction.message.id,
+        roleId,
+        isArchived: false,
+      });
+      if (!config) {
+        await interaction.reply({
+          content: "⚠️ This role is no longer available.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const hasRole = await this.memberHasRole(
+        interaction.guildId,
+        interaction.user.id,
+        roleId,
+      );
+      const message = await this.applyRoleToggle(
+        interaction.guildId,
+        interaction.user.id,
+        roleId,
+        hasRole ? "remove" : "add",
+      );
+
+      await interaction.reply({ content: message, ephemeral: true });
+    } catch (error) {
+      logger.error("Error handling reaction-role button:", error);
+      await this.safeErrorReply(interaction);
+    }
+  }
+
+  /**
+   * Handle a selection on a component-backed self-assign role message.
+   * customId is the static `reactrole:sel`; the selected option values are
+   * roleIds. The set of roles this message manages is every non-archived
+   * select-style config bound to the message, so a deselect removes a role and
+   * a select adds one. Forward-compatible with multiple roles per message.
+   */
+  public async handleSelectInteraction(
+    interaction: StringSelectMenuInteraction,
+  ): Promise<void> {
+    try {
+      if (!interaction.guildId) {
+        await interaction.reply({
+          content: "⚠️ This menu is invalid.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const enabled = await this.configService.getBoolean(
+        "reactionroles.enabled",
+        false,
+      );
+      if (!enabled) {
+        await interaction.reply({
+          content: "⚠️ Self-assign roles are currently disabled.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const configs = await ReactionRoleConfig.find({
+        messageId: interaction.message.id,
+        style: "select",
+        isArchived: false,
+      });
+      if (configs.length === 0) {
+        await interaction.reply({
+          content: "⚠️ These roles are no longer available.",
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const managedRoleIds = new Set(configs.map((c) => c.roleId));
+      const selected = new Set(
+        interaction.values.filter((v) => managedRoleIds.has(v)),
+      );
+
+      const lines: string[] = [];
+      for (const roleId of managedRoleIds) {
+        const desired = selected.has(roleId) ? "add" : "remove";
+        const hasRole = await this.memberHasRole(
+          interaction.guildId,
+          interaction.user.id,
+          roleId,
+        );
+        // Only act (and report) when the selection actually changes state.
+        if (
+          (desired === "add" && !hasRole) ||
+          (desired === "remove" && hasRole)
+        ) {
+          lines.push(
+            await this.applyRoleToggle(
+              interaction.guildId,
+              interaction.user.id,
+              roleId,
+              desired,
+            ),
+          );
+        }
+      }
+
+      await interaction.reply({
+        content: lines.length > 0 ? lines.join("\n") : "No changes made.",
+        ephemeral: true,
+      });
+    } catch (error) {
+      logger.error("Error handling reaction-role select menu:", error);
+      await this.safeErrorReply(interaction);
+    }
+  }
+
+  /** Whether a guild member currently holds a role (cache-first, then fetch). */
+  private async memberHasRole(
+    guildId: string,
+    userId: string,
+    roleId: string,
+  ): Promise<boolean> {
+    const guild = await this.client.guilds.fetch(guildId);
+    const member = await guild.members.fetch(userId);
+    return member.roles.cache.has(roleId);
+  }
+
+  /** Reply (or follow up) with a generic error without throwing again. */
+  private async safeErrorReply(
+    interaction: ButtonInteraction | StringSelectMenuInteraction,
+  ): Promise<void> {
+    const content = "⚠️ Something went wrong updating your roles.";
+    try {
+      if (interaction.replied || interaction.deferred) {
+        await interaction.followUp({ content, ephemeral: true });
+      } else {
+        await interaction.reply({ content, ephemeral: true });
+      }
+    } catch {
+      // Nothing more we can do if the interaction can't be answered.
+    }
+  }
+
   public async createReactionRole(
     guildId: string,
     roleName: string,
@@ -386,30 +746,33 @@ export class ReactionRoleService {
         );
       }
 
-      // Create the reaction role message
-      const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
-        .setTitle(`${emoji} ${roleName}`)
-        .setDescription(
-          `React with ${emoji} to get access to the **${roleName}** role and channels!`,
-        )
-        .setFooter({ text: "Remove your reaction to lose access" })
-        .setTimestamp();
+      // Determine the surface style for this message from config.
+      const style = await this.resolveDefaultStyle();
 
-      message = await messageChannel.send({ embeds: [embed] });
+      // Create the self-assign role message with the appropriate surface.
+      message = await messageChannel.send(
+        this.buildRoleMessagePayload({
+          emoji,
+          roleName,
+          roleId: role.id,
+          style,
+        }),
+      );
 
-      // Try to add reaction
-      try {
-        await message.react(emoji);
-      } catch (reactionError) {
-        logger.error("Failed to add reaction to message:", reactionError);
-        throw new Error(
-          "Failed to add reaction. The emoji might be invalid or inaccessible.",
-        );
+      // Only the legacy reaction surface needs an actual reaction added.
+      if (style === "reaction") {
+        try {
+          await message.react(emoji);
+        } catch (reactionError) {
+          logger.error("Failed to add reaction to message:", reactionError);
+          throw new Error(
+            "Failed to add reaction. The emoji might be invalid or inaccessible.",
+          );
+        }
       }
 
       logger.info(
-        `Created reaction role message ${message.id} in channel ${messageChannel.name}`,
+        `Created ${style} self-assign role message ${message.id} in channel ${messageChannel.name}`,
       );
 
       // Save to database
@@ -421,6 +784,7 @@ export class ReactionRoleService {
         categoryId: category.id,
         emoji: normalizedEmoji,
         roleName,
+        style,
         isArchived: false,
       });
 
@@ -604,39 +968,42 @@ export class ReactionRoleService {
         };
       }
 
-      // Create a new reaction role message
-      const embed = new EmbedBuilder()
-        .setColor(0x5865f2)
-        .setTitle(`${config.emoji} ${config.roleName}`)
-        .setDescription(
-          `React with ${config.emoji} to get access to the **${config.roleName}** role and channels!`,
-        )
-        .setFooter({ text: "Remove your reaction to lose access" })
-        .setTimestamp();
+      // Recreate the message using the style the config was created with, so
+      // component-backed configs stay component-backed after unarchiving.
+      const style: ReactionRoleStyle = config.style ?? "reaction";
+      const message = await messageChannel.send(
+        this.buildRoleMessagePayload({
+          emoji: config.emoji,
+          roleName: config.roleName,
+          roleId: config.roleId,
+          style,
+        }),
+      );
 
-      const message = await messageChannel.send({ embeds: [embed] });
-
-      // Try to add reaction, if it fails, delete the message and abort
-      try {
-        await message.react(config.emoji);
-      } catch (reactionError) {
-        logger.error("Failed to add reaction to message:", reactionError);
+      // Only the legacy reaction surface needs an actual reaction added; if it
+      // fails, delete the message and abort.
+      if (style === "reaction") {
         try {
-          await message.delete();
-        } catch (deleteError) {
-          logger.error(
-            "Failed to delete message after reaction error:",
-            deleteError,
-          );
+          await message.react(config.emoji);
+        } catch (reactionError) {
+          logger.error("Failed to add reaction to message:", reactionError);
+          try {
+            await message.delete();
+          } catch (deleteError) {
+            logger.error(
+              "Failed to delete message after reaction error:",
+              deleteError,
+            );
+          }
+          return {
+            success: false,
+            message: `Failed to add reaction to message. The emoji might be invalid.`,
+          };
         }
-        return {
-          success: false,
-          message: `Failed to add reaction to message. The emoji might be invalid.`,
-        };
       }
 
       logger.info(
-        `Created new reaction role message ${message.id} for unarchived role ${sanitizeForLog(roleName)}`,
+        `Recreated ${style} self-assign role message ${message.id} for unarchived role ${sanitizeForLog(roleName)}`,
       );
 
       // Update database with error handling

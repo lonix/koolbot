@@ -818,6 +818,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleEventRsvpButton } =
           await import("./handlers/event-rsvp-handler.js");
         await handleEventRsvpButton(interaction);
+      } else if (interaction.customId.startsWith("reactrole:btn:")) {
+        await reactionRoleService.handleButtonInteraction(interaction);
       } else {
         logger.debug(
           `Ignoring button interaction with unrecognized customId: ${interaction.customId}`,
@@ -845,6 +847,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleVCPresetSelect } =
           await import("./handlers/vc-preset-handler.js");
         await handleVCPresetSelect(interaction);
+      } else if (interaction.customId === "reactrole:sel") {
+        await reactionRoleService.handleSelectInteraction(interaction);
       } else {
         logger.debug(
           `Ignoring select menu interaction with unrecognized customId: ${interaction.customId}`,

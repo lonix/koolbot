@@ -115,6 +115,7 @@ export interface ConfigSchema {
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
+  "reactionroles.style": string; // Surface style for new role messages: reaction | button | select
 
   // Notices System
   "notices.enabled": boolean;
@@ -323,6 +324,7 @@ export const defaultConfig: ConfigSchema = {
   // Reaction Roles defaults
   "reactionroles.enabled": false,
   "reactionroles.message_channel_id": "",
+  "reactionroles.style": "reaction",
 
   // Notices System defaults
   "notices.enabled": false,
@@ -729,7 +731,7 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   reactionroles: {
     title: "Reaction Roles",
     description:
-      "Let users self-assign roles by reacting to a configured message.",
+      "Let users self-assign roles from a configured message — via a classic emoji reaction, or modern button / select-menu components.",
   },
   notices: {
     title: "Notices",
@@ -1341,6 +1343,18 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description: "Channel ID where reaction-role messages are posted.",
     category: "reactionroles",
     type: "channel",
+  },
+  "reactionroles.style": {
+    label: "Self-assign surface style",
+    description:
+      "How new self-assign role messages let members pick a role. 'reaction' is the classic emoji reaction (legacy default). 'button' and 'select' post interactive components — no reaction intents or partials, and an ephemeral confirmation per click. Existing messages keep whichever style they were created with.",
+    category: "reactionroles",
+    type: "string",
+    options: [
+      { value: "reaction", label: "Emoji reaction (classic)" },
+      { value: "button", label: "Button" },
+      { value: "select", label: "Select menu" },
+    ],
   },
 
   // Notices System

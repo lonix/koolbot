@@ -1,5 +1,22 @@
 import mongoose, { Schema, Document } from "mongoose";
 
+/**
+ * Surface style used to self-assign the role:
+ * - `reaction`: classic emoji reaction on the message (legacy default).
+ * - `button`:   a clickable button component on the message.
+ * - `select`:   a string select-menu option on the message.
+ *
+ * `button` and `select` are component-backed and resolve the acting member
+ * directly from the interaction (no reaction intents/partials required).
+ */
+export type ReactionRoleStyle = "reaction" | "button" | "select";
+
+export const REACTION_ROLE_STYLES: ReactionRoleStyle[] = [
+  "reaction",
+  "button",
+  "select",
+];
+
 export interface IReactionRoleConfig extends Document {
   guildId: string;
   messageId: string;
@@ -8,6 +25,7 @@ export interface IReactionRoleConfig extends Document {
   categoryId: string;
   emoji: string;
   roleName: string;
+  style: ReactionRoleStyle;
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -46,6 +64,15 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
     roleName: {
       type: String,
       required: true,
+    },
+    style: {
+      type: String,
+      enum: REACTION_ROLE_STYLES,
+      // Existing documents predate this field; default to the legacy reaction
+      // surface so they keep behaving exactly as before.
+      default: "reaction",
+      required: true,
+      index: true,
     },
     isArchived: {
       type: Boolean,
