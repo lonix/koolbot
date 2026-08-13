@@ -22,6 +22,7 @@ import {
   PartialMessage,
   DMChannel,
   NonThreadGuildBasedChannel,
+  DiscordAPIError,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
@@ -163,8 +164,24 @@ export class ReactionRoleService {
       try {
         const guild = await this.client.guilds.fetch(config.guildId);
 
-        // Verify the target role still exists.
-        const role = await guild.roles.fetch(config.roleId).catch(() => null);
+        // Verify the target role still exists. Only a *confirmed* Unknown Role
+        // (10011) — or an explicit null from the manager — means the role was
+        // deleted; a transient network/permission error must not archive a
+        // healthy mapping, so we log and skip it for this pass instead.
+        let role: Role | null;
+        try {
+          role = await guild.roles.fetch(config.roleId);
+        } catch (error) {
+          if (this.isUnknownEntityError(error, 10011)) {
+            role = null;
+          } else {
+            logger.warn(
+              `Reaction role reconciliation: transient error fetching role ${config.roleId}, skipping`,
+              error,
+            );
+            continue;
+          }
+        }
         if (!role) {
           await this.archiveConfig(
             config,
@@ -178,16 +195,46 @@ export class ReactionRoleService {
         if (!messageChannelId) {
           continue;
         }
-        const messageChannel = (await guild.channels
-          .fetch(messageChannelId)
-          .catch(() => null)) as TextChannel | null;
+        let messageChannel: TextChannel | null;
+        try {
+          messageChannel = (await guild.channels.fetch(
+            messageChannelId,
+          )) as TextChannel | null;
+        } catch (error) {
+          // A deleted message channel takes every mapping's message with it,
+          // but that is handled live by handleChannelDelete; here we only skip
+          // (archiving all mappings off one shared-channel fetch would be too
+          // blunt, and the message-channel id is global rather than per-row).
+          logger.warn(
+            `Reaction role reconciliation: could not fetch message channel ${messageChannelId}, skipping`,
+            error,
+          );
+          continue;
+        }
         if (!messageChannel || !messageChannel.isTextBased()) {
           continue;
         }
 
-        const message = await messageChannel.messages
-          .fetch(config.messageId)
-          .catch(() => null);
+        // Only a confirmed Unknown Message (10008) means the reaction message
+        // was deleted; transient fetch failures skip rather than archive.
+        let message: Message | null;
+        try {
+          message = await messageChannel.messages.fetch(config.messageId);
+        } catch (error) {
+          if (this.isUnknownEntityError(error, 10008)) {
+            await this.archiveConfig(
+              config,
+              `reaction message ${config.messageId} no longer exists`,
+            );
+            archived++;
+            continue;
+          }
+          logger.warn(
+            `Reaction role reconciliation: transient error fetching message ${config.messageId}, skipping`,
+            error,
+          );
+          continue;
+        }
         if (!message) {
           await this.archiveConfig(
             config,
@@ -222,6 +269,16 @@ export class ReactionRoleService {
     logger.info(
       `Reaction role reconciliation complete: ${configs.length} checked, ${archived} archived, ${repaired} reaction(s) repaired`,
     );
+  }
+
+  /**
+   * True only for a Discord REST error whose numeric code confirms the entity
+   * is genuinely gone (e.g. 10008 Unknown Message, 10011 Unknown Role, 10003
+   * Unknown Channel) — as opposed to a transient network/timeout/permission
+   * failure, which must not be treated as a deletion.
+   */
+  private isUnknownEntityError(error: unknown, code: number): boolean {
+    return error instanceof DiscordAPIError && error.code === code;
   }
 
   /**
@@ -578,8 +635,9 @@ export class ReactionRoleService {
     roleName: string;
     roleId: string;
     style: ReactionRoleStyle;
+    mode?: ReactionRoleMode;
   }): MessageCreateOptions {
-    const { emoji, roleName, roleId, style } = config;
+    const { emoji, roleName, roleId, style, mode = "toggle" } = config;
 
     if (style === "button") {
       const embed = new EmbedBuilder()
@@ -645,13 +703,22 @@ export class ReactionRoleService {
     }
 
     // Default: legacy reaction surface. The caller adds the reaction after send.
+    // Description/footer track the assignment mode so a sticky mapping never
+    // tells members that unreacting removes the role (it doesn't).
+    let description = `React with ${emoji} to get access to the **${roleName}** role and channels!`;
+    let footer = "Remove your reaction to lose access";
+    if (mode === "sticky") {
+      footer = "Removing your reaction keeps the role";
+    } else if (mode === "unique") {
+      description = `React with ${emoji} to get the **${roleName}** role and its channels. This clears the other roles offered on this message.`;
+      footer = "Reacting here swaps you to this role";
+    }
+
     const embed = new EmbedBuilder()
       .setColor(0x5865f2)
       .setTitle(`${emoji} ${roleName}`)
-      .setDescription(
-        `React with ${emoji} to get access to the **${roleName}** role and channels!`,
-      )
-      .setFooter({ text: "Remove your reaction to lose access" })
+      .setDescription(description)
+      .setFooter({ text: footer })
       .setTimestamp();
     return { embeds: [embed] };
   }
@@ -1102,6 +1169,7 @@ export class ReactionRoleService {
           roleName,
           roleId: role.id,
           style,
+          mode: normalizedMode,
         }),
       );
 
@@ -1675,6 +1743,7 @@ export class ReactionRoleService {
           roleName: config.roleName,
           roleId: config.roleId,
           style,
+          mode: config.mode ?? "toggle",
         }),
       );
 

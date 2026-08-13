@@ -41,6 +41,9 @@ function makeReaction(opts: {
   rolesAdd: jest.Mock;
   rolesRemove: jest.Mock;
   emojiName?: string;
+  // Sibling reactions cached on the message, keyed by emoji name; each value's
+  // `users.remove` captures the per-member reaction-clear call (unique mode).
+  siblingReactions?: Array<{ name: string; usersRemove: jest.Mock }>;
 }): MessageReaction {
   const member = {
     id: "user1",
@@ -60,10 +63,19 @@ function makeReaction(opts: {
       },
     },
   };
+  const cachedReactions = (opts.siblingReactions ?? []).map((s) => ({
+    emoji: { id: null, name: s.name, animated: false },
+    users: { remove: s.usersRemove },
+  }));
+  const reactions = {
+    cache: {
+      find: (pred: (r: unknown) => boolean) => cachedReactions.find(pred),
+    },
+  };
   return {
     partial: false,
     emoji: { id: null, name: opts.emojiName ?? "🎮", animated: false },
-    message: { id: "msg1", guild },
+    message: { id: "msg1", guild, reactions },
   } as unknown as MessageReaction;
 }
 
@@ -219,6 +231,83 @@ describe("ReactionRoleService assignment modes", () => {
       );
 
       expect(rolesRemove).not.toHaveBeenCalled();
+    });
+
+    it("handleReactionAdd clears the member's reaction on sibling emojis", async () => {
+      const { service } = createService();
+      findOne.mockResolvedValue({
+        roleId: "role1",
+        roleName: "Cool",
+        messageId: "msg1",
+        emoji: "🎮",
+        mode: "unique",
+      });
+      find.mockResolvedValue([
+        { roleId: "role2", roleName: "Warm", emoji: "🔥" },
+      ]);
+      const rolesAdd = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue(undefined);
+      const rolesRemove = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue(undefined);
+      const usersRemove = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue(undefined);
+
+      await service.handleReactionAdd(
+        makeReaction({
+          heldRoles: new Set(["role2"]),
+          rolesAdd,
+          rolesRemove,
+          siblingReactions: [{ name: "🔥", usersRemove }],
+        }),
+        makeUser(),
+      );
+
+      // The sibling emoji reaction is cleared for this member (user1).
+      expect(usersRemove).toHaveBeenCalledWith("user1");
+    });
+
+    it("handleReactionAdd fails soft when clearing a sibling reaction throws", async () => {
+      const { service } = createService();
+      findOne.mockResolvedValue({
+        roleId: "role1",
+        roleName: "Cool",
+        messageId: "msg1",
+        emoji: "🎮",
+        mode: "unique",
+      });
+      find.mockResolvedValue([
+        { roleId: "role2", roleName: "Warm", emoji: "🔥" },
+      ]);
+      const rolesAdd = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue(undefined);
+      const rolesRemove = jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue(undefined);
+      // Simulate a missing Manage Messages permission — clearing the sibling
+      // reaction rejects, but the role mutation must still have happened and
+      // handleReactionAdd must not throw.
+      const usersRemove = jest
+        .fn<() => Promise<unknown>>()
+        .mockRejectedValue(new Error("Missing Permissions"));
+
+      await expect(
+        service.handleReactionAdd(
+          makeReaction({
+            heldRoles: new Set(["role2"]),
+            rolesAdd,
+            rolesRemove,
+            siblingReactions: [{ name: "🔥", usersRemove }],
+          }),
+          makeUser(),
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(rolesRemove).toHaveBeenCalledWith("role2");
+      expect(usersRemove).toHaveBeenCalledWith("user1");
     });
   });
 });

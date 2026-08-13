@@ -67,18 +67,33 @@ function createService() {
  * Wire the shared client's guild.fetch to return a guild whose role/message
  * lookups resolve to the supplied values.
  */
-function primeGuild(opts: { role: unknown; message: unknown }): void {
+function primeGuild(opts: {
+  role?: unknown;
+  message?: unknown;
+  roleError?: unknown;
+  messageError?: unknown;
+}): void {
+  const roleFetch = jest.fn<() => Promise<unknown>>();
+  if (opts.roleError !== undefined) {
+    roleFetch.mockRejectedValue(opts.roleError);
+  } else {
+    roleFetch.mockResolvedValue(opts.role);
+  }
+
+  const messageFetch = jest.fn<() => Promise<unknown>>();
+  if (opts.messageError !== undefined) {
+    messageFetch.mockRejectedValue(opts.messageError);
+  } else {
+    messageFetch.mockResolvedValue(opts.message);
+  }
+
   const messageChannel = {
     isTextBased: () => true,
-    messages: {
-      fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(opts.message),
-    },
+    messages: { fetch: messageFetch },
   };
   const guild = {
     id: "g1",
-    roles: {
-      fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(opts.role),
-    },
+    roles: { fetch: roleFetch },
     channels: {
       fetch: jest
         .fn<() => Promise<unknown>>()
@@ -161,6 +176,35 @@ describe("ReactionRoleService.reconcileConfigs", () => {
     await service.reconcileConfigs();
 
     expect(message.react).not.toHaveBeenCalled();
+    expect(config.save).not.toHaveBeenCalled();
+  });
+
+  it("does NOT archive on a transient role-fetch error", async () => {
+    const config = makeConfig();
+    find.mockResolvedValue([config]);
+    // A plain Error is not a confirmed Unknown Role (10011), so it must be
+    // treated as transient and skipped — never archived.
+    primeGuild({ roleError: new Error("network blip") });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(config.isArchived).toBe(false);
+    expect(config.save).not.toHaveBeenCalled();
+  });
+
+  it("does NOT archive on a transient message-fetch error", async () => {
+    const config = makeConfig();
+    find.mockResolvedValue([config]);
+    primeGuild({
+      role: { id: "role1", name: "Cool" },
+      messageError: new Error("504 gateway timeout"),
+    });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(config.isArchived).toBe(false);
     expect(config.save).not.toHaveBeenCalled();
   });
 
