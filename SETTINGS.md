@@ -379,13 +379,20 @@ Excluded channels won't count toward leaderboards or statistics.
 
 ### Voice channel statistics announcements
 
-Automated weekly voice channel statistics post.
+Automated weekly recap post. The top voice-time leaderboard is the core
+section; when their own features are enabled, the recap also includes accolades
+earned, the quote of the week, and poll turnout. Each section can be toggled
+independently.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `voicetracking.announcements.enabled` | `false` | Enable weekly stats announcements |
+| `voicetracking.announcements.enabled` | `false` | Enable the weekly recap |
 | `voicetracking.announcements.channel` | `"voice-stats"` | Channel name or ID for announcements |
 | `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM) |
+| `voicetracking.announcements.include_voice_stats` | `true` | Include the top voice-time leaderboard |
+| `voicetracking.announcements.include_accolades` | `true` | Include accolades earned this week (needs achievements + achievement announcements enabled) |
+| `voicetracking.announcements.include_quote_of_week` | `true` | Include the most-liked quote added this week (needs quotes enabled) |
+| `voicetracking.announcements.include_poll_turnout` | `true` | Include how many members voted in polls this week (needs poll participation tracking enabled) |
 
 To trigger one out of schedule, use the **Post weekly stats now** button
 on the Web UI's Announcements page (replaces the old
@@ -1182,6 +1189,10 @@ leave the graph in a broken state.
 - `voicetracking.announcements.enabled` (bool, default: false)
 - `voicetracking.announcements.channel` (string, default: "voice-stats")
 - `voicetracking.announcements.schedule` (string, default: `"0 16 * * 5"`)
+- `voicetracking.announcements.include_voice_stats` (bool, default: true)
+- `voicetracking.announcements.include_accolades` (bool, default: true)
+- `voicetracking.announcements.include_quote_of_week` (bool, default: true)
+- `voicetracking.announcements.include_poll_turnout` (bool, default: true)
 - `announcements.enabled` (bool, default: false)
 
 #### Achievements

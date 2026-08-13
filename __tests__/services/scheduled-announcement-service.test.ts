@@ -33,9 +33,8 @@ describe("ScheduledAnnouncementService.getAnnouncement", () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    const { ScheduledAnnouncementService } = await import(
-      "../../src/services/scheduled-announcement-service.js"
-    );
+    const { ScheduledAnnouncementService } =
+      await import("../../src/services/scheduled-announcement-service.js");
     ScheduledAnnouncementService.reset();
 
     mockClient = {
@@ -47,9 +46,8 @@ describe("ScheduledAnnouncementService.getAnnouncement", () => {
   it("returns the announcement when findById resolves", async () => {
     const announcement = { _id: "a1", guildId: "g1" };
     findById.mockResolvedValue(announcement);
-    const { ScheduledAnnouncementService } = await import(
-      "../../src/services/scheduled-announcement-service.js"
-    );
+    const { ScheduledAnnouncementService } =
+      await import("../../src/services/scheduled-announcement-service.js");
     const service = ScheduledAnnouncementService.getInstance(
       mockClient as Client,
     );
@@ -63,9 +61,8 @@ describe("ScheduledAnnouncementService.getAnnouncement", () => {
     const castError = new Error("Cast to ObjectId failed");
     castError.name = "CastError";
     findById.mockImplementation(() => Promise.reject(castError));
-    const { ScheduledAnnouncementService } = await import(
-      "../../src/services/scheduled-announcement-service.js"
-    );
+    const { ScheduledAnnouncementService } =
+      await import("../../src/services/scheduled-announcement-service.js");
     const service = ScheduledAnnouncementService.getInstance(
       mockClient as Client,
     );
@@ -77,9 +74,8 @@ describe("ScheduledAnnouncementService.getAnnouncement", () => {
     findById.mockImplementation(() =>
       Promise.reject(new Error("connection timed out")),
     );
-    const { ScheduledAnnouncementService } = await import(
-      "../../src/services/scheduled-announcement-service.js"
-    );
+    const { ScheduledAnnouncementService } =
+      await import("../../src/services/scheduled-announcement-service.js");
     const service = ScheduledAnnouncementService.getInstance(
       mockClient as Client,
     );

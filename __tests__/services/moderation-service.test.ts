@@ -53,9 +53,8 @@ jest.unstable_mockModule("../../src/utils/log-sanitize.js", () => ({
   sanitizeForLog: (v: unknown) => String(v),
 }));
 
-const { ModerationService, mapAuditLogEntry } = await import(
-  "../../src/services/moderation-service.js"
-);
+const { ModerationService, mapAuditLogEntry } =
+  await import("../../src/services/moderation-service.js");
 
 // A distinct fake client per test keeps the getInstance singleton from
 // leaking a stale client across the suite.
@@ -74,7 +73,9 @@ describe("mapAuditLogEntry", () => {
   const base = { reason: "spam", changes: [] as never[] };
 
   it("maps kick / ban / unban actions", () => {
-    expect(mapAuditLogEntry({ ...base, action: AuditLogEvent.MemberKick })).toEqual({
+    expect(
+      mapAuditLogEntry({ ...base, action: AuditLogEvent.MemberKick }),
+    ).toEqual({
       action: "kick",
       reason: "spam",
     });

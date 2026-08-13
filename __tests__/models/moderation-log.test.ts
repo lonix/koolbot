@@ -15,12 +15,7 @@ describe("ModerationLog model", () => {
       userId: "u1",
       moderatorId: "m1" as string | null,
       action: "warn" as
-        | "warn"
-        | "kick"
-        | "ban"
-        | "unban"
-        | "timeout"
-        | "untimeout",
+        "warn" | "kick" | "ban" | "unban" | "timeout" | "untimeout",
       reason: "spamming" as string | null,
       source: "command" as "command" | "audit",
       createdAt: new Date(),

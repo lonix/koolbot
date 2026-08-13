@@ -4,6 +4,26 @@ import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { AchievementsService } from "./achievements-service.js";
+import { quoteService } from "./quote-service.js";
+import { PollParticipationTracker } from "./poll-participation-tracker.js";
+
+/** One week, in milliseconds — the window every recap section covers. */
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Resolve a quote's stored author id to a bare Discord snowflake, but only when
+ * the whole string is exactly one of the supported formats (`<@id>`, `<@!id>`,
+ * `@id`, or a plain numeric id). Anything else returns null so the recap emits
+ * no mention. This is deliberately strict rather than "strip non-digits":
+ * the returned id is allowlisted in `allowedMentions`, so assembling a
+ * snowflake out of malformed or imported author data could otherwise ping an
+ * unrelated member.
+ */
+function resolveAuthorMentionId(authorId: string): string | null {
+  const match = authorId.match(/^(?:<@!?(\d+)>|@?(\d+))$/);
+  if (!match) return null;
+  return match[1] ?? match[2] ?? null;
+}
 
 export class VoiceChannelAnnouncer {
   private static instance: VoiceChannelAnnouncer;
@@ -190,6 +210,32 @@ export class VoiceChannelAnnouncer {
         return;
       }
 
+      const weekAgo = new Date(Date.now() - ONE_WEEK_MS);
+
+      // Each section is independently toggleable (#777) and self-contained:
+      // a section stays hidden unless both its recap toggle and the feature
+      // that produces its data are enabled, and a failure in one never breaks
+      // the others.
+      await this.announceVoiceStats(channel);
+      await this.announceAccolades(channel);
+      await this.announceQuoteOfWeek(channel, weekAgo);
+      await this.announcePollTurnout(channel, guildId, weekAgo);
+
+      logger.info("Weekly voice channel announcement sent successfully");
+    } catch (error) {
+      logger.error("Error making voice channel announcement:", error);
+    }
+  }
+
+  /** Recap section: the weekly top voice-time leaderboard. */
+  private async announceVoiceStats(channel: TextChannel): Promise<void> {
+    try {
+      const include = await this.configService.getBoolean(
+        "voicetracking.announcements.include_voice_stats",
+        true,
+      );
+      if (!include) return;
+
       const tracker = VoiceChannelTracker.getInstance(this.client);
       const topUsers = await tracker.getTopUsers(10, "week");
 
@@ -226,8 +272,21 @@ export class VoiceChannelAnnouncer {
       ].join("\n");
 
       await channel.send(message);
+    } catch (error) {
+      logger.error("Error announcing voice stats:", error);
+      // Isolated like every other section: never break the rest of the recap.
+    }
+  }
 
-      // Add accolades announcement if enabled
+  /** Recap section: accolades earned in the last week. */
+  private async announceAccolades(channel: TextChannel): Promise<void> {
+    try {
+      const include = await this.configService.getBoolean(
+        "voicetracking.announcements.include_accolades",
+        true,
+      );
+      if (!include) return;
+
       const achievementsEnabled = await this.configService.getBoolean(
         "achievements.enabled",
         false,
@@ -236,50 +295,124 @@ export class VoiceChannelAnnouncer {
         "achievements.announcements.enabled",
         true,
       );
+      if (!achievementsEnabled || !announcementsEnabled) return;
 
-      if (achievementsEnabled && announcementsEnabled) {
-        try {
-          const achievementsService = AchievementsService.getInstance(
-            this.client,
-          );
-          const newAccolades =
-            await achievementsService.getNewAccoladesSinceLastWeek();
+      const achievementsService = AchievementsService.getInstance(this.client);
+      const newAccolades =
+        await achievementsService.getNewAccoladesSinceLastWeek();
+      if (newAccolades.length === 0) return;
 
-          if (newAccolades.length > 0) {
-            const accoladeMessages = newAccolades
-              .flatMap((userAccolades) => {
-                return userAccolades.accolades
-                  .map((accolade) => {
-                    const definition =
-                      achievementsService.getAccoladeDefinition(accolade.type);
-                    if (!definition) return null;
+      const accoladeMessages = newAccolades
+        .flatMap((userAccolades) =>
+          userAccolades.accolades
+            .map((accolade) => {
+              const definition = achievementsService.getAccoladeDefinition(
+                accolade.type,
+              );
+              if (!definition) return null;
+              return `${definition.emoji} <@${userAccolades.userId}> earned **${definition.name}**!`;
+            })
+            .filter(Boolean),
+        )
+        .slice(0, 10); // Limit to 10 announcements
 
-                    return `${definition.emoji} <@${userAccolades.userId}> earned **${definition.name}**!`;
-                  })
-                  .filter(Boolean);
-              })
-              .slice(0, 10); // Limit to 10 announcements
-
-            if (accoladeMessages.length > 0) {
-              const accoladeAnnouncement = [
-                "",
-                "🏆 **New Accolades This Week** 🏆",
-                "",
-                ...accoladeMessages,
-              ].join("\n");
-
-              await channel.send(accoladeAnnouncement);
-            }
-          }
-        } catch (error) {
-          logger.error("Error announcing accolades:", error);
-          // Don't let accolade errors break the main announcement
-        }
+      if (accoladeMessages.length > 0) {
+        await channel.send(
+          [
+            "",
+            "🏆 **New Accolades This Week** 🏆",
+            "",
+            ...accoladeMessages,
+          ].join("\n"),
+        );
       }
-
-      logger.info("Weekly voice channel announcement sent successfully");
     } catch (error) {
-      logger.error("Error making voice channel announcement:", error);
+      logger.error("Error announcing accolades:", error);
+      // Don't let accolade errors break the main announcement
+    }
+  }
+
+  /** Recap section: the most-liked quote added in the last week (#777). */
+  private async announceQuoteOfWeek(
+    channel: TextChannel,
+    since: Date,
+  ): Promise<void> {
+    try {
+      const include = await this.configService.getBoolean(
+        "voicetracking.announcements.include_quote_of_week",
+        true,
+      );
+      if (!include) return;
+
+      const quotesEnabled = await this.configService.getBoolean(
+        "quotes.enabled",
+        false,
+      );
+      if (!quotesEnabled) return;
+
+      const topQuote = await quoteService.getTopQuoteSince(since);
+      if (!topQuote) return;
+
+      // Author IDs may be stored in legacy formats (<@123>, <@!123>, @123,
+      // 123). Only resolve a mention when the whole value is exactly one of
+      // those, so malformed data can't assemble an unrelated snowflake — and
+      // restrict allowed mentions so untrusted quote text can never ping
+      // @everyone/@here or arbitrary roles.
+      const authorId = resolveAuthorMentionId(topQuote.authorId);
+      const author = authorId ? `<@${authorId}>` : "someone";
+      const likeLabel = topQuote.likes === 1 ? "like" : "likes";
+
+      await channel.send({
+        content: [
+          "",
+          "💬 **Quote of the Week** 💬",
+          "",
+          `> ${topQuote.content}`,
+          `— ${author} · 👍 ${topQuote.likes} ${likeLabel}`,
+        ].join("\n"),
+        allowedMentions: authorId
+          ? { parse: [], users: [authorId] }
+          : { parse: [] },
+      });
+    } catch (error) {
+      logger.error("Error announcing quote of the week:", error);
+    }
+  }
+
+  /** Recap section: how many members voted in polls this week (#777). */
+  private async announcePollTurnout(
+    channel: TextChannel,
+    guildId: string,
+    since: Date,
+  ): Promise<void> {
+    try {
+      const include = await this.configService.getBoolean(
+        "voicetracking.announcements.include_poll_turnout",
+        true,
+      );
+      if (!include) return;
+
+      const participationEnabled = await this.configService.getBoolean(
+        "polls.participation.enabled",
+        false,
+      );
+      if (!participationEnabled) return;
+
+      const tracker = PollParticipationTracker.getInstance(this.client);
+      const voters = await tracker.getRecentVoterCount(guildId, since);
+      if (voters <= 0) return;
+
+      const memberLabel = voters === 1 ? "member" : "members";
+      await channel.send(
+        [
+          "",
+          "🗳️ **Poll Participation** 🗳️",
+          "",
+          `${voters} ${memberLabel} voted in polls this week. Thanks for weighing in!`,
+        ].join("\n"),
+      );
+    } catch (error) {
+      logger.error("Error announcing poll participation:", error);
     }
   }
 

@@ -33,9 +33,8 @@ describe("ScheduledAnnouncementService.postAnnouncementNow", () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    const { ScheduledAnnouncementService } = await import(
-      "../../src/services/scheduled-announcement-service.js"
-    );
+    const { ScheduledAnnouncementService } =
+      await import("../../src/services/scheduled-announcement-service.js");
     ScheduledAnnouncementService.reset();
 
     mockClient = {
@@ -46,9 +45,8 @@ describe("ScheduledAnnouncementService.postAnnouncementNow", () => {
 
   it("returns false when the announcement does not exist", async () => {
     findById.mockResolvedValue(null);
-    const { ScheduledAnnouncementService } = await import(
-      "../../src/services/scheduled-announcement-service.js"
-    );
+    const { ScheduledAnnouncementService } =
+      await import("../../src/services/scheduled-announcement-service.js");
     const service = ScheduledAnnouncementService.getInstance(
       mockClient as Client,
     );
@@ -68,9 +66,8 @@ describe("ScheduledAnnouncementService.postAnnouncementNow", () => {
       message: "hi",
       placeholders: false,
     });
-    const { ScheduledAnnouncementService } = await import(
-      "../../src/services/scheduled-announcement-service.js"
-    );
+    const { ScheduledAnnouncementService } =
+      await import("../../src/services/scheduled-announcement-service.js");
     const service = ScheduledAnnouncementService.getInstance(
       mockClient as Client,
     );

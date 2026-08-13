@@ -1891,9 +1891,7 @@ describe("RewindService reaction helpers (#653)", () => {
     });
 
     it("does not mark hasData when the requested year has no votes", async () => {
-      mockFindOnePoll.mockReturnValueOnce(
-        lean({ yearlyVotes: { "2024": 5 } }),
-      );
+      mockFindOnePoll.mockReturnValueOnce(lean({ yearlyVotes: { "2024": 5 } }));
 
       const summary = await makeSvc().getSummary("u1", "g1", 2026);
       expect(summary!.hasData).toBe(false);

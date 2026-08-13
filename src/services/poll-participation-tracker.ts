@@ -207,6 +207,33 @@ export class PollParticipationTracker {
     }
   }
 
+  /**
+   * Count distinct members who cast at least one poll vote since `since`, for
+   * the public weekly recap (#777). `lastVoteAt` is each member's most recent
+   * vote, so `lastVoteAt >= since` is true for exactly the members who voted at
+   * least once inside the window — this is an *exact* distinct-member count for
+   * captured votes, not an approximation. What this tracker cannot provide is
+   * how many polls ran or how many votes each member cast (there is no per-poll
+   * record and no weekly frequency bucket; see the follow-up tracking issue
+   * referenced from #777). Best-effort — returns 0 on any DB error so the recap
+   * never fails on this section.
+   */
+  public async getRecentVoterCount(
+    guildId: string,
+    since: Date,
+  ): Promise<number> {
+    try {
+      await this.ensureConnection();
+      return await PollParticipationTracking.countDocuments({
+        guildId,
+        lastVoteAt: { $gte: since },
+      });
+    } catch (error) {
+      logger.error("Error counting recent poll voters:", error);
+      return 0;
+    }
+  }
+
   public async initialize(): Promise<void> {
     try {
       await this.ensureConnection();

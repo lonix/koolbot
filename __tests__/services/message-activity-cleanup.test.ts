@@ -104,9 +104,8 @@ describe("MessageActivityCleanupService", () => {
     expect(update.$set).toEqual({ lastCleanupDate: expect.any(Date) });
 
     // The cutoff honours the configured retention window (400 days).
-    const cutoff = (
-      update.$pull.recentMessages as { sentAt: { $lt: Date } }
-    ).sentAt.$lt;
+    const cutoff = (update.$pull.recentMessages as { sentAt: { $lt: Date } })
+      .sentAt.$lt;
     const expectedCutoff = Date.now() - 400 * DAY_MS;
     expect(Math.abs(cutoff.getTime() - expectedCutoff)).toBeLessThan(60_000);
 

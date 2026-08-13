@@ -659,7 +659,11 @@ describe("AchievementsService", () => {
       >["mockConfigService"],
       opts: { enabled?: boolean; channelId?: string; guildId?: string } = {},
     ) {
-      const { enabled = true, channelId = "chan-1", guildId = "guild-1" } = opts;
+      const {
+        enabled = true,
+        channelId = "chan-1",
+        guildId = "guild-1",
+      } = opts;
       mockConfigService.getBoolean.mockResolvedValue(enabled);
       (mockConfigService.getString as jest.Mock).mockImplementation(
         (key: unknown) => {

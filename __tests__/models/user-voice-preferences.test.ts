@@ -21,7 +21,12 @@ describe("UserVoicePreferences Model Schema", () => {
         userId: "test-user-123",
         namePattern: "{username}'s Room",
         presets: [
-          { name: "Squad", channelName: "Squad HQ", userLimit: 10, bitrate: 96 },
+          {
+            name: "Squad",
+            channelName: "Squad HQ",
+            userLimit: 10,
+            bitrate: 96,
+          },
         ],
       };
 

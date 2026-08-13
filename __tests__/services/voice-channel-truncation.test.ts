@@ -54,9 +54,9 @@ describe("VoiceChannelTruncationService", () => {
       let reloadCallback: (() => Promise<void>) | undefined;
       const mockConfigService = {
         getString: jest.fn<() => Promise<string>>().mockResolvedValue(""),
-        getBoolean: jest.fn<() => Promise<boolean>>().mockResolvedValue(
-          enabled,
-        ),
+        getBoolean: jest
+          .fn<() => Promise<boolean>>()
+          .mockResolvedValue(enabled),
         getNumber: jest.fn<() => Promise<number>>().mockResolvedValue(400),
         get: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
         registerReloadCallback: jest.fn((cb: () => Promise<void>) => {
@@ -70,7 +70,11 @@ describe("VoiceChannelTruncationService", () => {
         VoiceChannelTruncationService as unknown as { instance: unknown }
       ).instance = undefined;
       const svc = VoiceChannelTruncationService.getInstance(mockClient);
-      return { svc, mockConfigService, getReloadCallback: () => reloadCallback };
+      return {
+        svc,
+        mockConfigService,
+        getReloadCallback: () => reloadCallback,
+      };
     }
 
     function getCleanupJob(
@@ -78,7 +82,10 @@ describe("VoiceChannelTruncationService", () => {
     ): { isActive: boolean; cronTime: { source: unknown } } | null {
       return (
         svc as unknown as {
-          cleanupJob: { isActive: boolean; cronTime: { source: unknown } } | null;
+          cleanupJob: {
+            isActive: boolean;
+            cronTime: { source: unknown };
+          } | null;
         }
       ).cleanupJob;
     }

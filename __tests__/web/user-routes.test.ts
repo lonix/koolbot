@@ -243,9 +243,8 @@ describe("createUserRouter / index page", () => {
   // their default-off). The real ConfigService is used here, so spy its
   // singleton to flip just the one key.
   async function enablePollParticipationGate(): Promise<void> {
-    const { ConfigService } = await import(
-      "../../src/services/config-service.js"
-    );
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
     jest.spyOn(ConfigService, "getInstance").mockReturnValue({
       getBoolean: async (key: string) => key === "polls.participation.enabled",
     } as never);
@@ -253,9 +252,8 @@ describe("createUserRouter / index page", () => {
 
   it("renders the poll-participation card when the member has a tracking row (#655)", async () => {
     await enablePollParticipationGate();
-    const { PollParticipationTracker } = await import(
-      "../../src/services/poll-participation-tracker.js"
-    );
+    const { PollParticipationTracker } =
+      await import("../../src/services/poll-participation-tracker.js");
     jest.spyOn(PollParticipationTracker, "getInstance").mockReturnValue({
       getParticipationSummary: async () => ({
         totalVotes: 42,
@@ -273,9 +271,8 @@ describe("createUserRouter / index page", () => {
 
   it("omits the poll-participation card when the member has never voted (#655)", async () => {
     await enablePollParticipationGate();
-    const { PollParticipationTracker } = await import(
-      "../../src/services/poll-participation-tracker.js"
-    );
+    const { PollParticipationTracker } =
+      await import("../../src/services/poll-participation-tracker.js");
     jest.spyOn(PollParticipationTracker, "getInstance").mockReturnValue({
       getParticipationSummary: async () => null,
     } as never);
@@ -1075,7 +1072,9 @@ describe("/me/voice (#656)", () => {
         opts.prefs ?? { namePattern: undefined, presets: [] },
       setNamePattern: jest
         .fn<(u: string, raw: string) => Promise<string | null>>()
-        .mockImplementation(async (_u, raw) => (raw.trim() === "" ? null : raw.trim())),
+        .mockImplementation(async (_u, raw) =>
+          raw.trim() === "" ? null : raw.trim(),
+        ),
       setDefault: jest
         .fn()
         .mockResolvedValue({ name: "Squad", isDefault: true } as never),
@@ -1157,8 +1156,7 @@ describe("/me/voice (#656)", () => {
     await new Promise((r) => setTimeout(r, 10));
 
     const auditCall = createSpy.mock.calls.at(-1)?.[0] as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     return { ...captured, audit: auditCall };
   }
 
@@ -1275,9 +1273,7 @@ describe("/me/voice (#656)", () => {
   });
 
   it("edits a preset's fields through the service", async () => {
-    const editPreset = jest
-      .fn()
-      .mockResolvedValue({ name: "Squad+" } as never);
+    const editPreset = jest.fn().mockResolvedValue({ name: "Squad+" } as never);
     const out = await dispatch({
       method: "POST",
       url: "/voice/preset/edit",
@@ -1488,8 +1484,7 @@ describe("/me/timezone (#524)", () => {
     // Spies accumulate across the suite, so read the most recent create
     // call — the one this dispatch produced.
     const auditCall = createSpy.mock.calls.at(-1)?.[0] as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     return { ...captured, audit: auditCall };
   }
 

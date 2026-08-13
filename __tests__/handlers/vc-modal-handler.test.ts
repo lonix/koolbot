@@ -138,9 +138,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
     beforeEach(() => {
       // The feature gate reads real ConfigService (backed by mocked mongoose,
       // whose schema default disables presets) — force it on for these tests.
-      jest
-        .spyOn(ConfigService.prototype, "getBoolean")
-        .mockResolvedValue(true);
+      jest.spyOn(ConfigService.prototype, "getBoolean").mockResolvedValue(true);
       mockService = {
         getPrefs: jest.fn(),
         renamePreset: jest.fn(),
