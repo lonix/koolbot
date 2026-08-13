@@ -361,7 +361,11 @@ export class MessageActivityCleanupService {
       this.cleanupJob.stop();
       this.cleanupJob = null;
     }
-    this.isRunning = false;
+    // Deliberately leave `isRunning` alone: it mirrors whether a cleanup
+    // pass is actually in flight and is owned by runCleanup()'s finally
+    // block. destroy() runs on every /config reload (see the constructor
+    // callback), and clearing the flag there would let a second pass start
+    // while performCleanup() is still iterating the collection.
     this.isScheduled = false;
   }
 }
