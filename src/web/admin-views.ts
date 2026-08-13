@@ -2132,7 +2132,7 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
 
   const body = `
 <h1>Reaction Roles</h1>
-<p class="subtitle">Per-message reaction-role mappings. Replaces <code>/reactrole create|archive|unarchive|delete|list|status</code>; the slash commands still work in parallel during migration.</p>
+<p class="subtitle">Per-message reaction-role mappings. This page is the admin surface for reaction roles; the legacy <code>/reactrole</code> slash command was retired in the Web UI migration.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles", featureKey: "reactionroles.enabled", returnTo: "/admin/reaction-roles", csrfToken: props.csrfToken })}
 <div class="card">

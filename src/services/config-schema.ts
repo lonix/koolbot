@@ -1332,7 +1332,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   },
   "reactionroles.enabled": {
     label: "Reaction roles enabled",
-    description: "Enable the reaction-role system and the /reactrole command.",
+    description:
+      "Enable the reaction-role system. Manage mappings from the admin Web UI (Reaction Roles page).",
     category: "reactionroles",
     type: "boolean",
   },
