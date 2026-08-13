@@ -714,7 +714,17 @@ export class PollService {
    * Get a specific poll schedule
    */
   public async getSchedule(scheduleId: string): Promise<IPollSchedule | null> {
-    return await PollSchedule.findById(scheduleId);
+    try {
+      return await PollSchedule.findById(scheduleId);
+    } catch (error) {
+      // A malformed (non-ObjectId) id makes Mongoose throw a CastError —
+      // treat it as "not found" so callers get their audited failure path.
+      // Other failures (connection loss, timeouts) still propagate.
+      if (error instanceof Error && error.name === "CastError") {
+        return null;
+      }
+      throw error;
+    }
   }
 
   /**
