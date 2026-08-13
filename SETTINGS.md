@@ -759,6 +759,7 @@ the Web UI's **Reaction Roles** page.
 | --- | --- | --- |
 | `reactionroles.enabled` | `false` | Enable reaction role system |
 | `reactionroles.message_channel_id` | `""` | Channel ID where reaction-role messages are posted |
+| `reactionroles.style` | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu) |
 
 ### How it works
 
@@ -768,12 +769,22 @@ the Web UI's **Reaction Roles** page.
    - A Discord role with the specified name
    - A category visible only to role members
    - A text channel inside the category
-   - A reaction message in `reactionroles.message_channel_id`
-3. Users react with the emoji to get the role; remove the reaction to
-   lose it.
-4. The Web UI lets you **Archive** (disable reactions but keep the role
-   and channels), **Unarchive** (re-enable), or **Delete** (remove
-   everything).
+   - A self-assign message in `reactionroles.message_channel_id`, using
+     the surface configured by `reactionroles.style`
+3. Users pick the role from the message:
+   - `reaction`: react with the emoji to get the role; remove the reaction
+     to lose it.
+   - `button`: click the button to toggle the role; an ephemeral "✅ You
+     now have @Role" reply confirms each click. No reaction intents or
+     partials required.
+   - `select`: pick the role from the menu to add it, or deselect to
+     remove it, with an ephemeral confirmation.
+4. `reactionroles.style` only affects **newly created** messages. Existing
+   messages keep whichever style they were created with, so switching the
+   setting never breaks live role pickers.
+5. The Web UI lets you **Archive** (disable the message but keep the role
+   and channels), **Unarchive** (re-enable, preserving the original
+   style), or **Delete** (remove everything).
 
 ### Use cases
 
@@ -1133,6 +1144,7 @@ leave the graph in a broken state.
 
 - `reactionroles.enabled` (bool, default: false)
 - `reactionroles.message_channel_id` (string, default: "")
+- `reactionroles.style` (string, default: "reaction"; one of: reaction, button, select)
 
 #### Leaderboard Role Rewards
 
