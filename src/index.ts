@@ -117,7 +117,14 @@ const client = new Client({
     // tracking (#570). The events still only fire for guild polls.
     GatewayIntentBits.GuildMessagePolls,
   ],
-  partials: [Partials.Message, Partials.Reaction],
+  // Partials.User is required for messageReactionAdd/Remove to fire for
+  // uncached users (#809). Without it, discord.js drops the event before any
+  // listener runs — so a member reacting to an old reaction-role message the
+  // bot hasn't cached (common right after a restart) silently gets no role.
+  // Partials.Message/Reaction only cover uncached messages/reactions, not
+  // uncached users. Both consumers (ReactionRoleService, ReactionActivityTracker)
+  // already resolve partial users via user.fetch().
+  partials: [Partials.Message, Partials.Reaction, Partials.User],
 });
 
 // Add commands collection to client
