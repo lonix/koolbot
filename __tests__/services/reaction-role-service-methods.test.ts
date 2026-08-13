@@ -73,6 +73,12 @@ function makeUser(): User {
 describe("ReactionRoleService reaction handlers", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // Reset the process-wide singleton so each test (and any other suite in
+    // the same worker) starts from a clean instance rather than inheriting
+    // this file's bare-client instance.
+    (
+      ReactionRoleService as unknown as { instance?: ReactionRoleService }
+    ).instance = undefined;
   });
 
   it("handleReactionAdd is a no-op when reactionroles.enabled is false", async () => {

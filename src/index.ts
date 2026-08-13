@@ -970,14 +970,16 @@ client.on(Events.MessageCreate, async (message) => {
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   recordDiscordEvent("messageReactionAdd");
   try {
+    // Bots are always ignored; `bot` is populated even on partial users, so
+    // guard first to avoid unnecessary fetches for bot reactions.
+    if (user.bot) {
+      return;
+    }
     if (reaction.partial) {
       reaction = await reaction.fetch();
     }
     if (user.partial) {
       user = await user.fetch();
-    }
-    if (user.bot) {
-      return;
     }
     await reactionActivityTracker.handleReactionAdd(reaction, user);
     await reactionRoleService.handleReactionAdd(reaction, user);
@@ -992,14 +994,16 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
 client.on(Events.MessageReactionRemove, async (reaction, user) => {
   recordDiscordEvent("messageReactionRemove");
   try {
+    // Bots are always ignored; `bot` is populated even on partial users, so
+    // guard first to avoid unnecessary fetches for bot reactions.
+    if (user.bot) {
+      return;
+    }
     if (reaction.partial) {
       reaction = await reaction.fetch();
     }
     if (user.partial) {
       user = await user.fetch();
-    }
-    if (user.bot) {
-      return;
     }
     await reactionRoleService.handleReactionRemove(reaction, user);
   } catch (error) {
