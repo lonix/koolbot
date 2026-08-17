@@ -3,6 +3,7 @@ import {
   formatDuration,
   formatTimeAgo,
   formatDateInTimezone,
+  getIsoWeekKey,
 } from "../../src/utils/time.js";
 
 describe("Time Utilities", () => {
@@ -121,6 +122,43 @@ describe("Time Utilities", () => {
       const date = new Date("2024-01-15T12:00:00Z");
       const result = formatDateInTimezone(date, "Europe/London");
       expect(result).toMatch(/2024-01-15 \d{2}:\d{2}:\d{2}/);
+    });
+  });
+
+  describe("getIsoWeekKey", () => {
+    it("returns the ISO week of a mid-year date", () => {
+      expect(getIsoWeekKey(new Date("2026-08-13T09:58:14Z"))).toBe("2026-W33");
+    });
+
+    it("zero-pads single-digit week numbers", () => {
+      expect(getIsoWeekKey(new Date("2026-01-08T00:00:00Z"))).toBe("2026-W02");
+    });
+
+    it("uses the ISO week-year, not the calendar year, at a boundary", () => {
+      // Dec 30 2024 is a Monday and belongs to ISO week 1 of 2025.
+      expect(getIsoWeekKey(new Date("2024-12-30T00:00:00Z"))).toBe("2025-W01");
+      // Jan 1 2027 is a Friday, still ISO week 53 of 2026.
+      expect(getIsoWeekKey(new Date("2027-01-01T00:00:00Z"))).toBe("2026-W53");
+    });
+
+    it("buckets by UTC, so a late-evening local time cannot shift the week", () => {
+      const sundayEnd = new Date("2026-08-16T23:59:59Z");
+      const mondayStart = new Date("2026-08-17T00:00:00Z");
+      expect(getIsoWeekKey(sundayEnd)).toBe("2026-W33");
+      expect(getIsoWeekKey(mondayStart)).toBe("2026-W34");
+    });
+
+    it("sorts lexicographically in chronological order (retention relies on it)", () => {
+      const keys = [
+        getIsoWeekKey(new Date("2026-01-05T00:00:00Z")),
+        getIsoWeekKey(new Date("2025-12-29T00:00:00Z")),
+        getIsoWeekKey(new Date("2026-11-30T00:00:00Z")),
+      ];
+      expect([...keys].sort()).toEqual([
+        "2026-W01",
+        "2026-W02",
+        "2026-W49",
+      ]);
     });
   });
 });

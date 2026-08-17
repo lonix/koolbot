@@ -11,16 +11,36 @@ jest.mock("../../src/utils/logger.js", () => ({
   isDebugMode: jest.fn(() => false),
 }));
 
-import { PollParticipationTracker } from "../../src/services/poll-participation-tracker.js";
-import { PollParticipationTracking } from "../../src/models/poll-participation-tracking.js";
+// The global mongoose mock in __tests__/setup.ts hands every `mongoose.model`
+// call the *same* stub object, so the two collections this tracker writes
+// would be indistinguishable. Mock the model modules themselves to keep the
+// participation counters and the per-poll turnout rows apart.
+const PollParticipationTracking = {
+  updateOne: jest.fn(),
+  findOne: jest.fn(),
+  countDocuments: jest.fn(),
+  find: jest.fn(),
+  bulkWrite: jest.fn(),
+};
+const PollTurnout = {
+  updateOne: jest.fn(),
+  countDocuments: jest.fn(),
+  find: jest.fn(),
+  deleteMany: jest.fn(),
+};
 
-(PollParticipationTracking as unknown as { updateOne: jest.Mock }).updateOne =
-  jest.fn();
-(PollParticipationTracking as unknown as { findOne: jest.Mock }).findOne =
-  jest.fn();
-(
-  PollParticipationTracking as unknown as { countDocuments: jest.Mock }
-).countDocuments = jest.fn();
+jest.unstable_mockModule(
+  "../../src/models/poll-participation-tracking.js",
+  () => ({ PollParticipationTracking }),
+);
+jest.unstable_mockModule("../../src/models/poll-turnout.js", () => ({
+  PollTurnout,
+}));
+
+const { PollParticipationTracker } = await import(
+  "../../src/services/poll-participation-tracker.js"
+);
+const { getIsoWeekKey } = await import("../../src/utils/time.js");
 
 // Mirror the model's `findOne(...).lean()` chain used by
 // `getParticipationSummary`.
@@ -54,12 +74,19 @@ function createTracker(voter: { username: string; bot: boolean } | null) {
   return { tracker, mockConfigService, usersFetch };
 }
 
-function makePollAnswer(guildId: string | null = "guild1"): PollAnswer {
+function makePollAnswer(
+  guildId: string | null = "guild1",
+  message: Record<string, unknown> = {},
+): PollAnswer {
   return {
     poll: {
       message: {
         guild: guildId ? { id: guildId } : null,
         guildId: guildId ?? null,
+        id: "msg1",
+        channelId: "chan1",
+        createdAt: new Date("2026-08-10T09:00:00Z"),
+        ...message,
       },
     },
   } as unknown as PollAnswer;
@@ -67,6 +94,7 @@ function makePollAnswer(guildId: string | null = "guild1"): PollAnswer {
 
 describe("PollParticipationTracker", () => {
   let updateOne: jest.Mock;
+  let turnoutUpdateOne: jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -74,6 +102,9 @@ describe("PollParticipationTracker", () => {
       PollParticipationTracking as unknown as { updateOne: jest.Mock }
     ).updateOne;
     updateOne.mockResolvedValue({ matchedCount: 1 });
+    turnoutUpdateOne = (PollTurnout as unknown as { updateOne: jest.Mock })
+      .updateOne;
+    turnoutUpdateOne.mockResolvedValue({ matchedCount: 1 });
     (PollParticipationTracker as unknown as { instance: unknown }).instance =
       undefined;
   });
@@ -124,6 +155,99 @@ describe("PollParticipationTracker", () => {
       expect(update.$inc[`yearlyVotes.${year}`]).toBe(1);
       expect(update.$set.username).toBe("Voter");
     });
+
+    it("records a per-ISO-week bucket alongside the yearly one (#816)", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      await tracker.handlePollVoteAdd(makePollAnswer(), "voter1");
+
+      const [, update] = updateOne.mock.calls[0];
+      const week = getIsoWeekKey(update.$set.lastVoteAt as Date);
+      expect(update.$inc[`weeklyVotes.${week}`]).toBe(1);
+    });
+
+    it("upserts the poll's turnout row, deduping the voter (#816)", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      await tracker.handlePollVoteAdd(
+        makePollAnswer("guild1", { poll: { question: { text: "Best map?" } } }),
+        "voter1",
+      );
+
+      expect(turnoutUpdateOne).toHaveBeenCalledTimes(1);
+      const [filter, update, options] = turnoutUpdateOne.mock.calls[0];
+      expect(filter).toEqual({ guildId: "guild1", messageId: "msg1" });
+      expect(update.$setOnInsert).toMatchObject({
+        guildId: "guild1",
+        messageId: "msg1",
+        channelId: "chan1",
+        question: "Best map?",
+        postedAt: new Date("2026-08-10T09:00:00Z"),
+      });
+      expect(update.$inc).toEqual({ votesCast: 1 });
+      expect(update.$addToSet).toEqual({ voterIds: "voter1" });
+      expect(options).toEqual({ upsert: true });
+    });
+
+    it("leaves the question null when the poll is not cached", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      await tracker.handlePollVoteAdd(makePollAnswer(), "voter1");
+
+      const [, update] = turnoutUpdateOne.mock.calls[0];
+      expect(update.$setOnInsert.question).toBeNull();
+    });
+
+    it("skips the turnout row when the message id is unknown", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      await tracker.handlePollVoteAdd(
+        makePollAnswer("guild1", { id: undefined }),
+        "voter1",
+      );
+
+      expect(updateOne).toHaveBeenCalledTimes(1);
+      expect(turnoutUpdateOne).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("recordPollPosted (#816)", () => {
+    const posted = {
+      guildId: "guild1",
+      messageId: "msg9",
+      channelId: "chan1",
+      question: "Pineapple on pizza?",
+      postedAt: new Date("2026-08-12T10:00:00Z"),
+    };
+
+    it("does not write when participation capture is off", async () => {
+      const { tracker, mockConfigService } = createTracker(null);
+      mockConfigService.getBoolean.mockResolvedValue(false);
+
+      await tracker.recordPollPosted(posted);
+      expect(turnoutUpdateOne).not.toHaveBeenCalled();
+    });
+
+    it("upserts the row with the question and exact post time", async () => {
+      const { tracker } = createTracker(null);
+
+      await tracker.recordPollPosted(posted);
+
+      const [filter, update, options] = turnoutUpdateOne.mock.calls[0];
+      expect(filter).toEqual({ guildId: "guild1", messageId: "msg9" });
+      // Posting is authoritative for these, so they overwrite whatever a
+      // racing vote capture guessed.
+      expect(update.$set).toEqual({
+        channelId: "chan1",
+        question: "Pineapple on pizza?",
+        postedAt: posted.postedAt,
+      });
+      expect(update.$setOnInsert).toMatchObject({ votesCast: 0, voterIds: [] });
+      expect(options).toEqual({ upsert: true });
+    });
+
+    it("swallows DB errors so poll posting never fails on bookkeeping", async () => {
+      const { tracker } = createTracker(null);
+      turnoutUpdateOne.mockRejectedValue(new Error("DB error"));
+
+      await expect(tracker.recordPollPosted(posted)).resolves.toBeUndefined();
+    });
   });
 
   describe("error handling", () => {
@@ -153,6 +277,7 @@ describe("PollParticipationTracker", () => {
         lean({
           totalVotes: 42,
           yearlyVotes: { [year]: 9, "2024": 5 },
+          weeklyVotes: { "2024-W01": 5 },
           lastVoteAt,
         }),
       );
@@ -161,6 +286,7 @@ describe("PollParticipationTracker", () => {
       expect(summary).toEqual({
         totalVotes: 42,
         thisYearVotes: 9,
+        thisWeekVotes: 0,
         lastVoteAt,
       });
     });
@@ -239,6 +365,252 @@ describe("PollParticipationTracker", () => {
 
       const count = await tracker.getRecentVoterCount("guild1", new Date());
       expect(count).toBe(0);
+    });
+  });
+  describe("weekly participation (#816)", () => {
+    let findOne: jest.Mock;
+
+    beforeEach(() => {
+      findOne = (PollParticipationTracking as unknown as { findOne: jest.Mock })
+        .findOne;
+    });
+
+    it("reads this-week votes from the current ISO-week bucket", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      const week = getIsoWeekKey(new Date());
+      findOne.mockReturnValue(
+        lean({
+          totalVotes: 12,
+          yearlyVotes: {},
+          weeklyVotes: { [week]: 4, "2024-W01": 99 },
+          lastVoteAt: null,
+        }),
+      );
+
+      const summary = await tracker.getParticipationSummary("voter1", "guild1");
+      expect(summary?.thisWeekVotes).toBe(4);
+    });
+
+    it("reads 0 for rows written before weekly buckets existed", async () => {
+      const { tracker } = createTracker({ username: "Voter", bot: false });
+      findOne.mockReturnValue(
+        lean({ totalVotes: 12, yearlyVotes: {}, lastVoteAt: null }),
+      );
+
+      const summary = await tracker.getParticipationSummary("voter1", "guild1");
+      expect(summary?.thisWeekVotes).toBe(0);
+    });
+  });
+
+  describe("getRecentPollCount (#816)", () => {
+    let turnoutCount: jest.Mock;
+
+    beforeEach(() => {
+      turnoutCount = (PollTurnout as unknown as { countDocuments: jest.Mock })
+        .countDocuments;
+    });
+
+    it("counts polls that drew a vote inside the window", async () => {
+      const { tracker } = createTracker(null);
+      turnoutCount.mockResolvedValue(3);
+      const since = new Date("2026-08-06T00:00:00Z");
+
+      const count = await tracker.getRecentPollCount("guild1", since);
+
+      expect(turnoutCount).toHaveBeenCalledWith({
+        guildId: "guild1",
+        lastVoteAt: { $gte: since },
+      });
+      expect(count).toBe(3);
+    });
+
+    it("degrades to 0 on a DB error", async () => {
+      const { tracker } = createTracker(null);
+      turnoutCount.mockRejectedValue(new Error("DB error"));
+
+      expect(await tracker.getRecentPollCount("guild1", new Date())).toBe(0);
+    });
+  });
+
+  describe("getRecentPollTurnout (#816)", () => {
+    let find: jest.Mock;
+
+    beforeEach(() => {
+      find = (PollTurnout as unknown as { find: jest.Mock }).find;
+    });
+
+    // Mirrors the model's find(...).sort(...).limit(...).lean() chain.
+    function chain<T>(value: T | Error) {
+      return {
+        sort: jest.fn().mockReturnValue({
+          limit: jest.fn().mockReturnValue({
+            lean: jest.fn(async () => {
+              if (value instanceof Error) throw value;
+              return value;
+            }),
+          }),
+        }),
+      };
+    }
+
+    it("derives the distinct voter count from the stored voter ids", async () => {
+      const { tracker } = createTracker(null);
+      const postedAt = new Date("2026-08-11T12:00:00Z");
+      find.mockReturnValue(
+        chain([
+          {
+            messageId: "msg1",
+            question: "Best map?",
+            postedAt,
+            voterIds: ["a", "b", "c"],
+            votesCast: 5,
+          },
+          { messageId: "msg2", postedAt, voterIds: [], votesCast: 0 },
+        ]),
+      );
+
+      const rows = await tracker.getRecentPollTurnout("guild1", postedAt);
+
+      expect(rows).toEqual([
+        {
+          messageId: "msg1",
+          question: "Best map?",
+          postedAt,
+          voterCount: 3,
+          votesCast: 5,
+        },
+        {
+          messageId: "msg2",
+          question: null,
+          postedAt,
+          voterCount: 0,
+          votesCast: 0,
+        },
+      ]);
+    });
+
+    it("degrades to an empty list on a DB error", async () => {
+      const { tracker } = createTracker(null);
+      find.mockReturnValue(chain(new Error("DB error")));
+
+      expect(await tracker.getRecentPollTurnout("guild1", new Date())).toEqual(
+        [],
+      );
+    });
+  });
+
+  describe("pruneExpiredData (#816)", () => {
+    let find: jest.Mock;
+    let bulkWrite: jest.Mock;
+    let deleteMany: jest.Mock;
+
+    beforeEach(() => {
+      find = (PollParticipationTracking as unknown as { find: jest.Mock }).find;
+      bulkWrite = (
+        PollParticipationTracking as unknown as { bulkWrite: jest.Mock }
+      ).bulkWrite;
+      deleteMany = (PollTurnout as unknown as { deleteMany: jest.Mock })
+        .deleteMany;
+      find.mockReturnValue({ lean: jest.fn(async () => []) });
+      bulkWrite.mockResolvedValue({});
+      deleteMany.mockResolvedValue({ deletedCount: 0 });
+    });
+
+    // Retention windows come from config; route each key to a fixed number.
+    function setRetention(
+      tracker: { configService?: unknown },
+      weeks: number,
+      days: number,
+    ): void {
+      (
+        tracker as unknown as {
+          configService: { getNumber: jest.Mock };
+        }
+      ).configService.getNumber = jest.fn(async (key: string) =>
+        key === "polls.participation.weekly_retention_weeks" ? weeks : days,
+      ) as unknown as jest.Mock;
+    }
+
+    it("unsets only the week buckets older than the cutoff", async () => {
+      const { tracker } = createTracker(null);
+      setRetention(tracker, 12, 90);
+      const fresh = getIsoWeekKey(new Date());
+      find.mockReturnValue({
+        lean: jest.fn(async () => [
+          { _id: "doc1", weeklyVotes: { "2020-W01": 3, [fresh]: 2 } },
+          { _id: "doc2", weeklyVotes: new Map([[fresh, 1]]) },
+        ]),
+      });
+
+      const result = await tracker.pruneExpiredData();
+
+      expect(result.weekBucketsPruned).toBe(1);
+      const [ops] = bulkWrite.mock.calls[0];
+      expect(ops).toHaveLength(1);
+      expect(ops[0].updateOne.filter).toEqual({ _id: "doc1" });
+      expect(ops[0].updateOne.update.$unset).toEqual({
+        "weeklyVotes.2020-W01": "",
+      });
+    });
+
+    it("does not touch Mongo when nothing is stale", async () => {
+      const { tracker } = createTracker(null);
+      setRetention(tracker, 12, 90);
+      find.mockReturnValue({
+        lean: jest.fn(async () => [
+          { _id: "doc1", weeklyVotes: { [getIsoWeekKey(new Date())]: 2 } },
+        ]),
+      });
+
+      const result = await tracker.pruneExpiredData();
+
+      expect(bulkWrite).not.toHaveBeenCalled();
+      expect(result.weekBucketsPruned).toBe(0);
+    });
+
+    it("deletes turnout rows posted before the retention cutoff", async () => {
+      const { tracker } = createTracker(null);
+      setRetention(tracker, 12, 90);
+      deleteMany.mockResolvedValue({ deletedCount: 7 });
+
+      const result = await tracker.pruneExpiredData();
+
+      const [filter] = deleteMany.mock.calls[0];
+      const cutoff = filter.postedAt.$lt as Date;
+      const days = (Date.now() - cutoff.getTime()) / (24 * 60 * 60 * 1000);
+      expect(days).toBeCloseTo(90, 1);
+      expect(result.turnoutRowsDeleted).toBe(7);
+    });
+
+    it("treats 0 as keep-forever for both windows", async () => {
+      const { tracker } = createTracker(null);
+      setRetention(tracker, 0, 0);
+      find.mockReturnValue({
+        lean: jest.fn(async () => [
+          { _id: "doc1", weeklyVotes: { "2020-W01": 3 } },
+        ]),
+      });
+
+      const result = await tracker.pruneExpiredData();
+
+      expect(bulkWrite).not.toHaveBeenCalled();
+      expect(deleteMany).not.toHaveBeenCalled();
+      expect(result).toEqual({ weekBucketsPruned: 0, turnoutRowsDeleted: 0 });
+    });
+
+    it("swallows DB errors so the daily interval survives a bad sweep", async () => {
+      const { tracker } = createTracker(null);
+      setRetention(tracker, 12, 90);
+      find.mockReturnValue({
+        lean: jest.fn(async () => {
+          throw new Error("DB error");
+        }),
+      });
+
+      await expect(tracker.pruneExpiredData()).resolves.toEqual({
+        weekBucketsPruned: 0,
+        turnoutRowsDeleted: 0,
+      });
     });
   });
 });

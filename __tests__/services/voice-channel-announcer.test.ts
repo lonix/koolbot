@@ -235,21 +235,144 @@ describe("VoiceChannelAnnouncer", () => {
         expect(channel.send).not.toHaveBeenCalled();
       });
 
-      it("renders the voter count when at least one member voted", async () => {
+      // Stub the tracker with the three reads the section makes. Defaults
+      // mirror an install with no turnout rows yet, so each test only states
+      // the counts it cares about.
+      function setTracker(overrides: {
+        voters?: number;
+        polls?: number;
+        turnout?: Array<{
+          question: string | null;
+          voterCount: number;
+          votesCast?: number;
+        }>;
+        voterCountError?: boolean;
+      }): void {
+        ((PollParticipationTracker as any).getInstance =
+          jest.fn()).mockReturnValue({
+          getRecentVoterCount: overrides.voterCountError
+            ? jest.fn<any>().mockRejectedValue(new Error("poll boom"))
+            : jest.fn<any>().mockResolvedValue(overrides.voters ?? 0),
+          getRecentPollCount: jest.fn<any>().mockResolvedValue(
+            overrides.polls ?? 0,
+          ),
+          getRecentPollTurnout: jest
+            .fn<any>()
+            .mockResolvedValue(overrides.turnout ?? []),
+        });
+      }
+
+      it("renders members across polls when turnout rows exist (#816)", async () => {
         setConfig({
           "voicetracking.announcements.include_poll_turnout": true,
           "polls.participation.enabled": true,
         });
-        ((PollParticipationTracker as any).getInstance =
-          jest.fn()).mockReturnValue({
-          getRecentVoterCount: jest.fn<any>().mockResolvedValue(3),
+        setTracker({ voters: 3, polls: 2, turnout: [] });
+
+        await (service as any).announcePollTurnout(channel, "g1", new Date());
+
+        const msg = channel.send.mock.calls[0][0].content as string;
+        expect(msg).toContain("Poll Participation");
+        expect(msg).toContain("3 members voted across 2 polls this week");
+      });
+
+      it("singularises a lone member and a lone poll", async () => {
+        setConfig({
+          "voicetracking.announcements.include_poll_turnout": true,
+          "polls.participation.enabled": true,
+        });
+        setTracker({ voters: 1, polls: 1 });
+
+        await (service as any).announcePollTurnout(channel, "g1", new Date());
+
+        const msg = channel.send.mock.calls[0][0].content as string;
+        expect(msg).toContain("1 member voted across 1 poll this week");
+      });
+
+      it("falls back to the member-only wording with no turnout rows", async () => {
+        setConfig({
+          "voicetracking.announcements.include_poll_turnout": true,
+          "polls.participation.enabled": true,
+        });
+        setTracker({ voters: 3, polls: 0 });
+
+        await (service as any).announcePollTurnout(channel, "g1", new Date());
+
+        const msg = channel.send.mock.calls[0][0].content as string;
+        expect(msg).toContain("3 members voted in polls this week");
+        expect(msg).not.toContain("across");
+      });
+
+      it("highlights the best-attended poll when several ran", async () => {
+        setConfig({
+          "voicetracking.announcements.include_poll_turnout": true,
+          "polls.participation.enabled": true,
+        });
+        setTracker({
+          voters: 7,
+          polls: 3,
+          turnout: [
+            { question: "Pineapple on pizza?", voterCount: 2 },
+            { question: "Best map?", voterCount: 6 },
+            { question: null, voterCount: 9 },
+          ],
         });
 
         await (service as any).announcePollTurnout(channel, "g1", new Date());
 
-        const msg = channel.send.mock.calls[0][0] as string;
-        expect(msg).toContain("Poll Participation");
-        expect(msg).toContain("3 members voted in polls this week");
+        const msg = channel.send.mock.calls[0][0].content as string;
+        // The 9-voter row has no question text, so the highlight falls to the
+        // best-attended poll we can actually name.
+        expect(msg).toContain("Best turnout: “Best map?” — 6 members.");
+      });
+
+      it("omits the highlight when only one poll ran", async () => {
+        setConfig({
+          "voicetracking.announcements.include_poll_turnout": true,
+          "polls.participation.enabled": true,
+        });
+        const tracker = {
+          getRecentVoterCount: jest.fn<any>().mockResolvedValue(4),
+          getRecentPollCount: jest.fn<any>().mockResolvedValue(1),
+          getRecentPollTurnout: jest.fn<any>().mockResolvedValue([]),
+        };
+        ((PollParticipationTracker as any).getInstance =
+          jest.fn()).mockReturnValue(tracker);
+
+        await (service as any).announcePollTurnout(channel, "g1", new Date());
+
+        expect(tracker.getRecentPollTurnout).not.toHaveBeenCalled();
+        expect(channel.send.mock.calls[0][0].content).not.toContain(
+          "Best turnout",
+        );
+      });
+
+      it("flattens and caps an untrusted poll question, and blocks mentions", async () => {
+        setConfig({
+          "voicetracking.announcements.include_poll_turnout": true,
+          "polls.participation.enabled": true,
+        });
+        setTracker({
+          voters: 5,
+          polls: 2,
+          turnout: [
+            {
+              question: `@everyone vote\nnow ${"x".repeat(200)}`,
+              voterCount: 5,
+            },
+          ],
+        });
+
+        await (service as any).announcePollTurnout(channel, "g1", new Date());
+
+        const payload = channel.send.mock.calls[0][0];
+        expect(payload.allowedMentions).toEqual({ parse: [] });
+        const highlight = (payload.content as string)
+          .split("\n")
+          .find((line: string) => line.startsWith("🏆"));
+        expect(highlight).toContain("@everyone vote now");
+        expect(highlight).not.toContain("\n");
+        expect(highlight).toContain("…");
       });
 
       it("skips when nobody voted", async () => {
@@ -257,10 +380,7 @@ describe("VoiceChannelAnnouncer", () => {
           "voicetracking.announcements.include_poll_turnout": true,
           "polls.participation.enabled": true,
         });
-        ((PollParticipationTracker as any).getInstance =
-          jest.fn()).mockReturnValue({
-          getRecentVoterCount: jest.fn<any>().mockResolvedValue(0),
-        });
+        setTracker({ voters: 0, polls: 2 });
 
         await (service as any).announcePollTurnout(channel, "g1", new Date());
         expect(channel.send).not.toHaveBeenCalled();
@@ -271,12 +391,7 @@ describe("VoiceChannelAnnouncer", () => {
           "voicetracking.announcements.include_poll_turnout": true,
           "polls.participation.enabled": true,
         });
-        ((PollParticipationTracker as any).getInstance =
-          jest.fn()).mockReturnValue({
-          getRecentVoterCount: jest
-            .fn<any>()
-            .mockRejectedValue(new Error("poll boom")),
-        });
+        setTracker({ voterCountError: true });
 
         await expect(
           (service as any).announcePollTurnout(channel, "g1", new Date()),

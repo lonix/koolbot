@@ -380,6 +380,7 @@ export function createUserRouter(
               ? {
                   totalVotes: pollParticipation.totalVotes,
                   thisYearVotes: pollParticipation.thisYearVotes,
+                  thisWeekVotes: pollParticipation.thisWeekVotes,
                   lastVoted: pollParticipation.lastVoteAt
                     ? pollParticipation.lastVoteAt.toISOString().slice(0, 10)
                     : null,

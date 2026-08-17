@@ -129,6 +129,8 @@ export interface ConfigSchema {
   "polls.default_duration_hours": number; // Default poll duration in hours (1-768)
   "polls.cooldown_days": number; // Minimum days between reusing same poll
   "polls.participation.enabled": boolean; // Capture per-user votes cast for a future Rewind (#570)
+  "polls.participation.weekly_retention_weeks": number; // Keep per-ISO-week vote buckets this long (0 = forever) (#816)
+  "polls.turnout.retention_days": number; // Keep per-poll turnout rows this long (0 = forever) (#816)
 
   // Leaderboard Role Rewards
   "leaderboard_roles.enabled": boolean;
@@ -341,6 +343,13 @@ export const defaultConfig: ConfigSchema = {
   // messagePollVoteAdd listener records per-user "votes cast" for a future
   // Rewind. Independent of whether the bot created the poll.
   "polls.participation.enabled": false,
+  // Retention for the two time-scoped participation stores (#816). 12 weeks
+  // of per-member week buckets comfortably covers the weekly recap plus a
+  // quarter of history; 90 days of per-poll turnout rows matches the other
+  // detail-level retention defaults and bounds how long the per-poll voter
+  // ids are kept. Either set to 0 keeps that store forever.
+  "polls.participation.weekly_retention_weeks": 12,
+  "polls.turnout.retention_days": 90,
 
   // Leaderboard Role Rewards defaults
   "leaderboard_roles.enabled": false,
@@ -1414,9 +1423,23 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "polls.participation.enabled": {
     label: "Poll participation tracking enabled",
     description:
-      "Record per-user 'votes cast' (lifetime + per-year) whenever a user votes on any guild poll. Data-capture foundation for a future Rewind stat; off by default.",
+      "Record per-user 'votes cast' (lifetime + per-year + per-week) and per-poll turnout whenever a user votes on any guild poll. Powers the Rewind stat, the poll accolades and the weekly recap's poll line; off by default.",
     category: "polls",
     type: "boolean",
+  },
+  "polls.participation.weekly_retention_weeks": {
+    label: "Weekly vote bucket retention (weeks)",
+    description:
+      "Weeks of per-member weekly vote counters to keep before the daily cleanup drops them. Lifetime and per-year totals are never pruned. Set to 0 to keep every week forever.",
+    category: "polls",
+    type: "number",
+  },
+  "polls.turnout.retention_days": {
+    label: "Poll turnout retention (days)",
+    description:
+      "Days to keep the per-poll turnout rows (which polls ran and who voted on them) that back the weekly recap's 'across M polls' line. Set to 0 to keep them forever.",
+    category: "polls",
+    type: "number",
   },
 
   // Leaderboard Role Rewards

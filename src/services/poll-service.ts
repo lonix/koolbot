@@ -4,6 +4,7 @@ import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { PollSchedule, IPollSchedule } from "../models/poll-schedule.js";
 import { PollItem, IPollItem } from "../models/poll-item.js";
+import { PollParticipationTracker } from "./poll-participation-tracker.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import yaml from "js-yaml";
 
@@ -243,10 +244,27 @@ export class PollService {
       }
 
       // Send the poll
-      await channel.send({
+      const sent = await channel.send({
         content: content || undefined,
         poll: pollData,
       });
+
+      // Log the poll run so the weekly recap can count how many polls ran and
+      // what turnout they drew (#816). Posting is the only moment we know the
+      // question text and the exact post time; the tracker no-ops when
+      // participation capture is off and swallows its own errors, but guard
+      // here too so nothing about turnout bookkeeping can break poll posting.
+      if (sent?.id) {
+        await PollParticipationTracker.getInstance(
+          this.client,
+        ).recordPollPosted({
+          guildId: schedule.guildId,
+          messageId: sent.id,
+          channelId: schedule.channelId,
+          question: pollItem.question,
+          postedAt: sent.createdAt ?? new Date(),
+        });
+      }
 
       // Update poll item usage statistics
       pollItem.usageCount += 1;
