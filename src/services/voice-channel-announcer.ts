@@ -465,29 +465,25 @@ export class VoiceChannelAnnouncer {
   }
 
   /**
-   * The most-voted poll of the window, or null when none of the rows carry a
-   * question (turnout captured from a vote event only knows the question when
-   * the poll was cached). Ties keep the first row, i.e. the most recent poll.
-   * Scans the accessor's page of most-recent rows rather than every poll ever
-   * run, which is the same set for any realistic week.
+   * The window's best-attended poll, ready to render, or null when there is
+   * nothing honest to show. The winner is picked by the tracker across every
+   * poll in the window; if that poll has no question text (turnout captured
+   * from a vote event only knows the question when the poll was cached) the
+   * highlight is dropped rather than handed to a runner-up — "Best turnout"
+   * naming the second-best poll would be wrong, not merely incomplete.
    */
   private async findTopPoll(
     tracker: PollParticipationTracker,
     guildId: string,
     since: Date,
   ): Promise<{ question: string; voterCount: number } | null> {
-    const rows = await tracker.getRecentPollTurnout(guildId, since);
-    let best: { question: string; voterCount: number } | null = null;
+    const top = await tracker.getTopPollTurnout(guildId, since);
+    if (!top?.question || top.voterCount <= 0) return null;
 
-    for (const row of rows) {
-      if (!row.question || row.voterCount <= 0) continue;
-      if (best && row.voterCount <= best.voterCount) continue;
-      const question = sanitizeRecapText(row.question);
-      if (!question) continue;
-      best = { question, voterCount: row.voterCount };
-    }
+    const question = sanitizeRecapText(top.question);
+    if (!question) return null;
 
-    return best;
+    return { question, voterCount: top.voterCount };
   }
 
   public destroy(): void {

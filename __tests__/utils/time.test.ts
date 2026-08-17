@@ -154,11 +154,7 @@ describe("Time Utilities", () => {
         getIsoWeekKey(new Date("2025-12-29T00:00:00Z")),
         getIsoWeekKey(new Date("2026-11-30T00:00:00Z")),
       ];
-      expect([...keys].sort()).toEqual([
-        "2026-W01",
-        "2026-W02",
-        "2026-W49",
-      ]);
+      expect([...keys].sort()).toEqual(["2026-W01", "2026-W02", "2026-W49"]);
     });
   });
 });

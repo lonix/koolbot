@@ -258,6 +258,7 @@ describe("createUserRouter / index page", () => {
       getParticipationSummary: async () => ({
         totalVotes: 42,
         thisYearVotes: 9,
+        thisWeekVotes: 3,
         lastVoteAt: new Date("2026-03-04T00:00:00Z"),
       }),
     } as never);
@@ -267,6 +268,31 @@ describe("createUserRouter / index page", () => {
     expect(html).toContain("Votes cast (all time)");
     expect(html).toContain("42");
     expect(html).toContain("2026-03-04");
+    // The weekly bucket (#816) is wired through the route, not just the
+    // tracker, so assert the rendered stat and its value.
+    expect(html).toContain("Votes cast this week");
+    expect(html).toContain(
+      '<div class="label">Votes cast this week</div><div class="value">3</div>',
+    );
+  });
+
+  it("renders a zero weekly count rather than hiding the stat (#816)", async () => {
+    await enablePollParticipationGate();
+    const { PollParticipationTracker } =
+      await import("../../src/services/poll-participation-tracker.js");
+    jest.spyOn(PollParticipationTracker, "getInstance").mockReturnValue({
+      getParticipationSummary: async () => ({
+        totalVotes: 42,
+        thisYearVotes: 9,
+        thisWeekVotes: 0,
+        lastVoteAt: null,
+      }),
+    } as never);
+
+    const html = await dispatchIndex("user");
+    expect(html).toContain(
+      '<div class="label">Votes cast this week</div><div class="value">0</div>',
+    );
   });
 
   it("omits the poll-participation card when the member has never voted (#655)", async () => {

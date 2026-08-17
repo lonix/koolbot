@@ -73,7 +73,9 @@ function makeCreateClient() {
         return {
           id: `role${roleSeq}`,
           name: `role${roleSeq}`,
-          delete: jest.fn<() => Promise<unknown>>().mockResolvedValue(undefined),
+          delete: jest
+            .fn<() => Promise<unknown>>()
+            .mockResolvedValue(undefined),
         };
       }),
     },
@@ -291,7 +293,9 @@ describe("ReactionRoleService single-role guards on group members", () => {
 
   it("deleteReactionRole refuses a grouped mapping", async () => {
     const guildFetch = jest.fn();
-    const { service } = createService({ guilds: { fetch: guildFetch } } as never);
+    const { service } = createService({
+      guilds: { fetch: guildFetch },
+    } as never);
     model.findOne.mockResolvedValue({
       roleName: "Red",
       groupId: "grp1",
@@ -306,7 +310,9 @@ describe("ReactionRoleService single-role guards on group members", () => {
   });
 
   it("archiveReactionRole refuses a grouped mapping", async () => {
-    const { service } = createService({ guilds: { fetch: jest.fn() } } as never);
+    const { service } = createService({
+      guilds: { fetch: jest.fn() },
+    } as never);
     model.findOne.mockResolvedValue({
       roleName: "Red",
       groupId: "grp1",

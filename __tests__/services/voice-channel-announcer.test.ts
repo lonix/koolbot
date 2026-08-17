@@ -241,11 +241,7 @@ describe("VoiceChannelAnnouncer", () => {
       function setTracker(overrides: {
         voters?: number;
         polls?: number;
-        turnout?: Array<{
-          question: string | null;
-          voterCount: number;
-          votesCast?: number;
-        }>;
+        top?: { question: string | null; voterCount: number } | null;
         voterCountError?: boolean;
       }): void {
         ((PollParticipationTracker as any).getInstance =
@@ -253,12 +249,12 @@ describe("VoiceChannelAnnouncer", () => {
           getRecentVoterCount: overrides.voterCountError
             ? jest.fn<any>().mockRejectedValue(new Error("poll boom"))
             : jest.fn<any>().mockResolvedValue(overrides.voters ?? 0),
-          getRecentPollCount: jest.fn<any>().mockResolvedValue(
-            overrides.polls ?? 0,
-          ),
-          getRecentPollTurnout: jest
+          getRecentPollCount: jest
             .fn<any>()
-            .mockResolvedValue(overrides.turnout ?? []),
+            .mockResolvedValue(overrides.polls ?? 0),
+          getTopPollTurnout: jest
+            .fn<any>()
+            .mockResolvedValue(overrides.top ?? null),
         });
       }
 
@@ -267,7 +263,7 @@ describe("VoiceChannelAnnouncer", () => {
           "voicetracking.announcements.include_poll_turnout": true,
           "polls.participation.enabled": true,
         });
-        setTracker({ voters: 3, polls: 2, turnout: [] });
+        setTracker({ voters: 3, polls: 2 });
 
         await (service as any).announcePollTurnout(channel, "g1", new Date());
 
@@ -311,19 +307,34 @@ describe("VoiceChannelAnnouncer", () => {
         setTracker({
           voters: 7,
           polls: 3,
-          turnout: [
-            { question: "Pineapple on pizza?", voterCount: 2 },
-            { question: "Best map?", voterCount: 6 },
-            { question: null, voterCount: 9 },
-          ],
+          top: { question: "Best map?", voterCount: 6 },
         });
 
         await (service as any).announcePollTurnout(channel, "g1", new Date());
 
         const msg = channel.send.mock.calls[0][0].content as string;
-        // The 9-voter row has no question text, so the highlight falls to the
-        // best-attended poll we can actually name.
         expect(msg).toContain("Best turnout: “Best map?” — 6 members.");
+      });
+
+      it("drops the highlight rather than crowning a runner-up", async () => {
+        setConfig({
+          "voicetracking.announcements.include_poll_turnout": true,
+          "polls.participation.enabled": true,
+        });
+        // The window's most-voted poll has no question text (it was only ever
+        // seen through a partial message). Naming the second-best poll "Best
+        // turnout" would be false, so nothing is highlighted.
+        setTracker({
+          voters: 7,
+          polls: 3,
+          top: { question: null, voterCount: 9 },
+        });
+
+        await (service as any).announcePollTurnout(channel, "g1", new Date());
+
+        const msg = channel.send.mock.calls[0][0].content as string;
+        expect(msg).toContain("7 members voted across 3 polls this week");
+        expect(msg).not.toContain("Best turnout");
       });
 
       it("omits the highlight when only one poll ran", async () => {
@@ -334,14 +345,14 @@ describe("VoiceChannelAnnouncer", () => {
         const tracker = {
           getRecentVoterCount: jest.fn<any>().mockResolvedValue(4),
           getRecentPollCount: jest.fn<any>().mockResolvedValue(1),
-          getRecentPollTurnout: jest.fn<any>().mockResolvedValue([]),
+          getTopPollTurnout: jest.fn<any>().mockResolvedValue(null),
         };
         ((PollParticipationTracker as any).getInstance =
           jest.fn()).mockReturnValue(tracker);
 
         await (service as any).announcePollTurnout(channel, "g1", new Date());
 
-        expect(tracker.getRecentPollTurnout).not.toHaveBeenCalled();
+        expect(tracker.getTopPollTurnout).not.toHaveBeenCalled();
         expect(channel.send.mock.calls[0][0].content).not.toContain(
           "Best turnout",
         );
@@ -355,12 +366,10 @@ describe("VoiceChannelAnnouncer", () => {
         setTracker({
           voters: 5,
           polls: 2,
-          turnout: [
-            {
-              question: `@everyone vote\nnow ${"x".repeat(200)}`,
-              voterCount: 5,
-            },
-          ],
+          top: {
+            question: `@everyone vote\nnow ${"x".repeat(200)}`,
+            voterCount: 5,
+          },
         });
 
         await (service as any).announcePollTurnout(channel, "g1", new Date());

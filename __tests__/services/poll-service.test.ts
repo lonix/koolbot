@@ -561,7 +561,9 @@ describe("PollService", () => {
         lastUsed: null as Date | null,
         save: jest.fn<any>().mockResolvedValue(undefined),
       };
-      mockPollItemFind.mockReturnValue({ sort: jest.fn(async () => [pollItem]) });
+      mockPollItemFind.mockReturnValue({
+        sort: jest.fn(async () => [pollItem]),
+      });
       const schedule = {
         _id: { toString: () => "sched-1" },
         guildId: "guild-1",
@@ -579,7 +581,10 @@ describe("PollService", () => {
 
     it("logs the posted poll so the recap can count it", async () => {
       const postedAt = new Date("2026-08-12T10:00:00Z");
-      const { channel } = await runTestSchedule({ id: "msg-42", createdAt: postedAt });
+      const { channel } = await runTestSchedule({
+        id: "msg-42",
+        createdAt: postedAt,
+      });
 
       expect(channel.send).toHaveBeenCalledTimes(1);
       expect(mockRecordPollPosted).toHaveBeenCalledWith({

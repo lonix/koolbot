@@ -22,10 +22,16 @@ import mongoose, { Schema, Document } from "mongoose";
  *   recap's member count is computed — it also counts votes on any guild
  *   poll — so the two halves of the sentence cover the same polls.
  *
+ * Because either writer can create the row, the vote path fills fields in on
+ * first sight rather than on insert: `firstVoteAt` is stamped by the first
+ * vote even when the row already existed (a scheduled poll that had not been
+ * voted on yet), and a `question` learned from a later cached vote fills a
+ * row first seen through a partial message. Whatever is already stored wins.
+ *
  * Distinct turnout needs to know *who* voted, so `voterIds` holds the set of
- * members seen voting on that poll (`$addToSet`); `votesCast` counts vote
- * events, which is higher on a multiselect poll where one member picks
- * several answers. Vote *removals* are not tracked (Discord's
+ * members seen voting on that poll; `votesCast` counts vote events, which is
+ * higher on a multiselect poll where one member picks several answers. Vote
+ * *removals* are not tracked (Discord's
  * `messagePollVoteRemove` would need its own bookkeeping to know whether a
  * member has any answers left), so a voter who later retracts still counts —
  * the same "votes cast" semantics the per-member counters already use.

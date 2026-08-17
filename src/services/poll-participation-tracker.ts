@@ -201,10 +201,19 @@ export class PollParticipationTracker {
    * which fire one event per chosen answer) fold into one row: `votesCast`
    * counts events while `voterIds` accumulates distinct members.
    *
+   * Written as an update *pipeline* rather than plain operators because two
+   * fields must be filled in on first sight rather than on insert:
+   * `recordPollPosted` may already have created the row for a scheduled poll
+   * (with no votes yet), so `$setOnInsert` would never fire and `firstVoteAt`
+   * would stay null forever. `question` behaves the same way in reverse — a
+   * member-created poll observed first through a partial message has no
+   * question text, and only a later cached vote can supply one. `$ifNull`
+   * gives both "keep what's there, otherwise take what we just learned"
+   * semantics in a single atomic write.
+   *
    * `postedAt` falls back to the message's creation time, which discord.js
    * derives from the snowflake and is therefore available even when the
-   * message is partial; the question text is only present on a fully cached
-   * poll, and stays null otherwise until/unless `recordPollPosted` fills it.
+   * message is partial.
    */
   private async recordTurnout(
     guildId: string,
@@ -228,19 +237,24 @@ export class PollParticipationTracker {
 
     await PollTurnout.updateOne(
       { guildId, messageId },
-      {
-        $setOnInsert: {
-          guildId,
-          messageId,
-          channelId: message.channelId ?? null,
-          question: question ?? null,
-          postedAt: message.createdAt ?? now,
-          firstVoteAt: now,
+      [
+        {
+          $set: {
+            guildId,
+            messageId,
+            channelId: { $ifNull: ["$channelId", message.channelId ?? null] },
+            question: { $ifNull: ["$question", question ?? null] },
+            postedAt: { $ifNull: ["$postedAt", message.createdAt ?? now] },
+            firstVoteAt: { $ifNull: ["$firstVoteAt", now] },
+            lastVoteAt: now,
+            votesCast: { $add: [{ $ifNull: ["$votesCast", 0] }, 1] },
+            // The pipeline equivalent of `$addToSet` for a whole array.
+            voterIds: {
+              $setUnion: [{ $ifNull: ["$voterIds", []] }, [userId]],
+            },
+          },
         },
-        $set: { lastVoteAt: now },
-        $inc: { votesCast: 1 },
-        $addToSet: { voterIds: userId },
-      },
+      ],
       { upsert: true },
     );
   }
@@ -407,53 +421,70 @@ export class PollParticipationTracker {
   }
 
   /**
-   * Per-poll turnout for a window, newest first — the aggregate view behind
-   * the recap line (how many members each poll drew). Distinct voters are
-   * computed from `voterIds` rather than stored, so the count can never drift
-   * from the set it summarises. Best-effort: returns [] on a DB error.
+   * The best-attended poll of a window, or null when none drew a vote — the
+   * "Best turnout" highlight on the recap. Distinct voters are computed from
+   * `voterIds` (`$size`) rather than stored, so the count can never drift
+   * from the set it summarises.
+   *
+   * Ranking happens in Mongo over *every* matching row, not over a page of
+   * them: reading "the most recent N polls" and picking the maximum client
+   * side would silently crown a runner-up in any week busier than N. Ties go
+   * to the most recently posted poll. Best-effort: returns null on a DB
+   * error, and the caller drops the highlight.
    */
-  public async getRecentPollTurnout(
+  public async getTopPollTurnout(
     guildId: string,
     since: Date,
-    limit = 25,
-  ): Promise<
-    Array<{
-      messageId: string;
-      question: string | null;
-      postedAt: Date;
-      voterCount: number;
-      votesCast: number;
-    }>
-  > {
+  ): Promise<{
+    messageId: string;
+    question: string | null;
+    postedAt: Date;
+    voterCount: number;
+    votesCast: number;
+  } | null> {
     try {
       await this.ensureConnection();
 
-      const docs = await PollTurnout.find(
-        { guildId, lastVoteAt: { $gte: since } },
-        { messageId: 1, question: 1, postedAt: 1, voterIds: 1, votesCast: 1 },
-      )
-        .sort({ postedAt: -1 })
-        .limit(limit)
-        .lean<
-          Array<{
-            messageId: string;
-            question?: string | null;
-            postedAt: Date;
-            voterIds?: string[];
-            votesCast?: number;
-          }>
-        >();
+      const rows = await PollTurnout.aggregate<{
+        messageId: string;
+        question?: string | null;
+        postedAt: Date;
+        voterCount?: number;
+        votesCast?: number;
+      }>([
+        { $match: { guildId, lastVoteAt: { $gte: since } } },
+        {
+          $addFields: {
+            voterCount: { $size: { $ifNull: ["$voterIds", []] } },
+          },
+        },
+        { $sort: { voterCount: -1, postedAt: -1 } },
+        { $limit: 1 },
+        {
+          $project: {
+            _id: 0,
+            messageId: 1,
+            question: 1,
+            postedAt: 1,
+            voterCount: 1,
+            votesCast: 1,
+          },
+        },
+      ]);
 
-      return docs.map((doc) => ({
-        messageId: doc.messageId,
-        question: doc.question ?? null,
-        postedAt: doc.postedAt,
-        voterCount: doc.voterIds?.length ?? 0,
-        votesCast: doc.votesCast ?? 0,
-      }));
+      const top = rows?.[0];
+      if (!top) return null;
+
+      return {
+        messageId: top.messageId,
+        question: top.question ?? null,
+        postedAt: top.postedAt,
+        voterCount: top.voterCount ?? 0,
+        votesCast: top.votesCast ?? 0,
+      };
     } catch (error) {
-      logger.error("Error reading recent poll turnout:", error);
-      return [];
+      logger.error("Error reading top poll turnout:", error);
+      return null;
     }
   }
 
@@ -518,21 +549,45 @@ export class PollParticipationTracker {
     return result;
   }
 
-  /** Unset week buckets older than the retention window. */
+  /**
+   * Unset week buckets older than the retention window.
+   *
+   * The stale-key filtering runs inside Mongo — `$objectToArray` turns the
+   * bucket map into entries, and only documents that still hold a key below
+   * the cutoff come back, carrying just those keys. Combined with a cursor
+   * that means neither the read side nor the write side scales with the size
+   * of the participation collection: a steady-state sweep transfers nothing
+   * at all, rather than every member's full bucket map. Keys are compared as
+   * strings, which is valid because ISO week keys sort chronologically.
+   */
   private async pruneWeekBuckets(retentionWeeks: number): Promise<number> {
     const cutoffKey = getIsoWeekKey(
       new Date(Date.now() - retentionWeeks * 7 * 24 * 60 * 60 * 1000),
     );
 
-    const docs = await PollParticipationTracking.find(
-      {},
-      { weeklyVotes: 1 },
-    ).lean<
-      Array<{
-        _id: mongoose.Types.ObjectId;
-        weeklyVotes?: Map<string, number> | Record<string, number>;
-      }>
-    >();
+    const cursor = PollParticipationTracking.aggregate<{
+      _id: mongoose.Types.ObjectId;
+      staleKeys: string[];
+    }>([
+      {
+        $project: {
+          staleKeys: {
+            $map: {
+              input: {
+                $filter: {
+                  input: {
+                    $objectToArray: { $ifNull: ["$weeklyVotes", {}] },
+                  },
+                  cond: { $lt: ["$$this.k", cutoffKey] },
+                },
+              },
+              in: "$$this.k",
+            },
+          },
+        },
+      },
+      { $match: { "staleKeys.0": { $exists: true } } },
+    ]).cursor();
 
     // The `$unset` paths are dotted Map keys, which the typed UpdateFilter
     // can't express, so the ops are assembled as the bulkWrite element type.
@@ -549,13 +604,8 @@ export class PollParticipationTracker {
       batch = [];
     };
 
-    for (const doc of docs) {
-      const buckets = doc.weeklyVotes;
-      const keys =
-        buckets instanceof Map
-          ? Array.from(buckets.keys())
-          : Object.keys(buckets ?? {});
-      const stale = keys.filter((key) => key < cutoffKey);
+    for await (const doc of cursor) {
+      const stale: string[] = doc.staleKeys ?? [];
       if (stale.length === 0) continue;
 
       pruned += stale.length;
