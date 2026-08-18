@@ -27,6 +27,7 @@ import mongoose from "mongoose";
 import { faker } from "@faker-js/faker";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
+import { getIsoWeekKey } from "../utils/time.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
 import { UserAchievements } from "../models/user-achievements.js";
@@ -369,19 +370,6 @@ export function generateMessageActivity(
   };
 }
 
-function isoWeek(date: Date): string {
-  const d = new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-  );
-  const dayNum = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(
-    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
-  );
-  return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
 /** Generate one user's achievements/accolades document. */
 export function generateUserAchievements(
   identity: SeedIdentity,
@@ -417,7 +405,7 @@ export function generateUserAchievements(
     return {
       type,
       earnedAt,
-      period: isoWeek(earnedAt),
+      period: getIsoWeekKey(earnedAt),
       rank: faker.number.int({ min: 1, max: 10 }),
       metadata: { value: faker.number.int({ min: 1, max: 50 }), unit: "hrs" },
     };

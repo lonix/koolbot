@@ -25,6 +25,26 @@ function resolveAuthorMentionId(authorId: string): string | null {
   return match[1] ?? match[2] ?? null;
 }
 
+/** Longest poll question the recap will quote before eliding it. */
+const MAX_RECAP_QUESTION_LENGTH = 120;
+
+/**
+ * Flatten a poll question for a single recap line. A question can come from a
+ * member-created poll, so it is collapsed to one line, capped in length, and
+ * stripped of the characters that would break out of the quoted text —
+ * backticks and the smart quotes used as delimiters. Mentions are neutralised
+ * separately by `allowedMentions`.
+ */
+function sanitizeRecapText(text: string): string {
+  const flattened = text
+    .replace(/[\r\n]+/g, " ")
+    .replace(/[`“”]/g, "'")
+    .trim();
+  return flattened.length > MAX_RECAP_QUESTION_LENGTH
+    ? `${flattened.slice(0, MAX_RECAP_QUESTION_LENGTH - 1)}…`
+    : flattened;
+}
+
 export class VoiceChannelAnnouncer {
   private static instance: VoiceChannelAnnouncer;
   private client: Client;
@@ -379,7 +399,14 @@ export class VoiceChannelAnnouncer {
     }
   }
 
-  /** Recap section: how many members voted in polls this week (#777). */
+  /**
+   * Recap section: how many members voted, across how many polls, this week
+   * (#777, #816). The poll count comes from the per-poll turnout rows, which
+   * only exist for polls voted on after #816 shipped — when there are none
+   * (an install that has been capturing votes for longer than it has been
+   * recording turnout) the line falls back to the original member-only
+   * wording rather than claiming "across 0 polls".
+   */
   private async announcePollTurnout(
     channel: TextChannel,
     guildId: string,
@@ -402,18 +429,61 @@ export class VoiceChannelAnnouncer {
       const voters = await tracker.getRecentVoterCount(guildId, since);
       if (voters <= 0) return;
 
+      const polls = await tracker.getRecentPollCount(guildId, since);
+
       const memberLabel = voters === 1 ? "member" : "members";
-      await channel.send(
-        [
-          "",
-          "🗳️ **Poll Participation** 🗳️",
-          "",
-          `${voters} ${memberLabel} voted in polls this week. Thanks for weighing in!`,
-        ].join("\n"),
-      );
+      const lines = [
+        "",
+        "🗳️ **Poll Participation** 🗳️",
+        "",
+        polls > 0
+          ? `${voters} ${memberLabel} voted across ${polls} ${polls === 1 ? "poll" : "polls"} this week. Thanks for weighing in!`
+          : `${voters} ${memberLabel} voted in polls this week. Thanks for weighing in!`,
+      ];
+
+      // Highlight the best-attended poll when there was more than one to
+      // choose between — the aggregate turnout is what makes "M polls" more
+      // than a bare number.
+      if (polls > 1) {
+        const top = await this.findTopPoll(tracker, guildId, since);
+        if (top) {
+          lines.push(
+            `🏆 Best turnout: “${top.question}” — ${top.voterCount} ${top.voterCount === 1 ? "member" : "members"}.`,
+          );
+        }
+      }
+
+      await channel.send({
+        content: lines.join("\n"),
+        // Poll questions can come from a member-created poll, so never let
+        // one resolve a mention.
+        allowedMentions: { parse: [] },
+      });
     } catch (error) {
       logger.error("Error announcing poll participation:", error);
     }
+  }
+
+  /**
+   * The window's best-attended poll, ready to render, or null when there is
+   * nothing honest to show. The winner is picked by the tracker across every
+   * poll in the window; if that poll has no question text (turnout captured
+   * from a vote event only knows the question when the poll was cached) the
+   * highlight is dropped rather than handed to a runner-up — "Best turnout"
+   * naming the second-best poll would be wrong, not merely incomplete.
+   */
+  private async findTopPoll(
+    tracker: PollParticipationTracker,
+    guildId: string,
+    since: Date,
+  ): Promise<{ question: string; voterCount: number } | null> {
+    const top = await tracker.getTopPollTurnout(guildId, since);
+    if (!top?.question || top.voterCount <= 0) return null;
+
+    const question = sanitizeRecapText(top.question);
+    if (!question) return null;
+
+    return { question, voterCount: top.voterCount };
   }
 
   public destroy(): void {

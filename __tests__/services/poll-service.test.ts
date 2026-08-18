@@ -4,6 +4,8 @@ const mockFetch = jest.fn<typeof fetch>();
 const mockPollItemFindOne = jest.fn();
 const mockPollItemCreate = jest.fn();
 const mockPollItemFindById = jest.fn();
+const mockPollItemFind = jest.fn();
+const mockRecordPollPosted = jest.fn();
 const mockPollScheduleFindById = jest.fn();
 const mockPollScheduleFindByIdAndDelete = jest.fn();
 const mockRegisterReloadCallback = jest.fn();
@@ -25,8 +27,20 @@ jest.unstable_mockModule("../../src/models/poll-item.js", () => ({
     findOne: mockPollItemFindOne,
     create: mockPollItemCreate,
     findById: mockPollItemFindById,
+    find: mockPollItemFind,
   },
 }));
+
+// Posting a poll logs a turnout row (#816); the tracker itself is covered by
+// its own suite, so here we only assert the hand-off.
+jest.unstable_mockModule(
+  "../../src/services/poll-participation-tracker.js",
+  () => ({
+    PollParticipationTracker: {
+      getInstance: jest.fn(() => ({ recordPollPosted: mockRecordPollPosted })),
+    },
+  }),
+);
 
 jest.unstable_mockModule("../../src/models/poll-schedule.js", () => ({
   PollSchedule: {
@@ -42,6 +56,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
     error: jest.fn(),
     debug: jest.fn(),
   },
+  isDebugMode: jest.fn(() => false),
 }));
 
 const { PollService } = await import("../../src/services/poll-service.js");
@@ -55,6 +70,8 @@ describe("PollService", () => {
     mockPollItemFindOne.mockResolvedValue(null);
     mockPollItemCreate.mockResolvedValue({});
     mockPollItemFindById.mockResolvedValue(null);
+    mockPollItemFind.mockReturnValue({ sort: jest.fn(async () => []) });
+    mockRecordPollPosted.mockResolvedValue(undefined);
     mockPollScheduleFindById.mockResolvedValue(null);
     mockPollScheduleFindByIdAndDelete.mockResolvedValue(null);
     // Imports never touch the network (#646); a stub lets the paste-path tests
@@ -511,6 +528,77 @@ describe("PollService", () => {
 
       expect(result).toBe(false);
       expect(mockPollScheduleFindByIdAndDelete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("posting a poll (#816)", () => {
+    // `postPoll` narrows on `instanceof TextChannel`, so the stub is built on
+    // the real prototype rather than a bare object literal.
+    async function makeTextChannel(sent: unknown) {
+      const { TextChannel } = await import("discord.js");
+      const channel = Object.create(TextChannel.prototype) as {
+        send: jest.Mock;
+      };
+      channel.send = jest.fn<any>().mockResolvedValue(sent);
+      return channel;
+    }
+
+    async function runTestSchedule(sent: unknown) {
+      const channel = await makeTextChannel(sent);
+      const client = {
+        isReady: () => true,
+        guilds: {
+          fetch: jest.fn<any>().mockResolvedValue({
+            channels: { fetch: jest.fn<any>().mockResolvedValue(channel) },
+          }),
+        },
+      };
+      const pollItem = {
+        question: "Best map?",
+        answers: ["A", "B"],
+        multiSelect: false,
+        usageCount: 0,
+        lastUsed: null as Date | null,
+        save: jest.fn<any>().mockResolvedValue(undefined),
+      };
+      mockPollItemFind.mockReturnValue({
+        sort: jest.fn(async () => [pollItem]),
+      });
+      const schedule = {
+        _id: { toString: () => "sched-1" },
+        guildId: "guild-1",
+        channelId: "chan-1",
+        pollDuration: 24,
+        roleIdToPing: null,
+        save: jest.fn<any>().mockResolvedValue(undefined),
+      };
+      mockPollScheduleFindById.mockResolvedValue(schedule);
+
+      const service = PollService.getInstance(client as never);
+      await service.testSchedule("sched-1");
+      return { channel, pollItem };
+    }
+
+    it("logs the posted poll so the recap can count it", async () => {
+      const postedAt = new Date("2026-08-12T10:00:00Z");
+      const { channel } = await runTestSchedule({
+        id: "msg-42",
+        createdAt: postedAt,
+      });
+
+      expect(channel.send).toHaveBeenCalledTimes(1);
+      expect(mockRecordPollPosted).toHaveBeenCalledWith({
+        guildId: "guild-1",
+        messageId: "msg-42",
+        channelId: "chan-1",
+        question: "Best map?",
+        postedAt,
+      });
+    });
+
+    it("skips the turnout row when the send returns no message id", async () => {
+      await runTestSchedule({});
+      expect(mockRecordPollPosted).not.toHaveBeenCalled();
     });
   });
 });

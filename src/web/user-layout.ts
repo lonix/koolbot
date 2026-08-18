@@ -410,6 +410,9 @@ export function renderUserIndexBody(opts: {
   pollParticipation?: {
     totalVotes: number;
     thisYearVotes: number;
+    // Votes cast in the current ISO week (#816). Optional so a caller that
+    // predates the weekly bucket can omit it; the stat is then hidden.
+    thisWeekVotes?: number;
     lastVoted: string | null;
   } | null;
 }): string {
@@ -460,6 +463,10 @@ export function renderUserIndexBody(opts: {
           `<div class="value">${poll.totalVotes}</div></div>`,
         '<div class="rw-stat"><div class="label">Votes cast this year</div>' +
           `<div class="value">${poll.thisYearVotes}</div></div>`,
+        typeof poll.thisWeekVotes === "number"
+          ? '<div class="rw-stat"><div class="label">Votes cast this week</div>' +
+            `<div class="value">${poll.thisWeekVotes}</div></div>`
+          : "",
         '<div class="rw-stat"><div class="label">Last voted</div>' +
           (poll.lastVoted
             ? `<div class="value">${escapeHtml(poll.lastVoted)}</div></div>`

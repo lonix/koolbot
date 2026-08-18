@@ -937,9 +937,12 @@ remembered" clearly distinguishable from "broken".
 
 When `polls.participation.enabled` is on and you have voted on at least
 one poll, the **Overview** page also shows a read-only **Poll
-participation** card — lifetime votes, this-year votes, and when you last
-voted (#655). The same per-year count surfaces on **Rewind** as the
-**Poll votes cast** stat, hidden in any year you cast no votes.
+participation** card — lifetime votes, this-year votes, this-week votes,
+and when you last voted (#655, #816). The same per-year count surfaces on
+**Rewind** as the **Poll votes cast** stat, hidden in any year you cast no
+votes. The weekly figure comes from per-ISO-week buckets kept for
+`polls.participation.weekly_retention_weeks`, so it reads 0 for a member
+whose only votes predate the weekly capture.
 
 Notification preferences are scoped per `(userId, guildId)`. The page
 lists every notification type with the current state and a checkbox;

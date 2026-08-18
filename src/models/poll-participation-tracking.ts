@@ -9,7 +9,15 @@ import mongoose, { Schema, Document } from "mongoose";
  * how many poll votes they have cast. As with reaction tracking we keep only
  * a lifetime total plus per-year buckets keyed by "YYYY", so a future Rewind
  * can read a single year's "votes cast" count without retaining per-vote
- * detail or needing a cleanup pass.
+ * detail.
+ *
+ * `weeklyVotes` (#816) adds the same idea at week granularity — per-ISO-week
+ * buckets keyed by "YYYY-Www" — so a member's *frequency* inside a recap
+ * window ("you voted 4 times this week") is answerable, which neither the
+ * lifetime total nor the single `lastVoteAt` timestamp can express. Unlike
+ * the yearly buckets these are pruned: `PollParticipationTracker` drops keys
+ * older than `polls.participation.weekly_retention_weeks` on a daily pass, so
+ * the map stays bounded however long a member keeps voting.
  *
  * Gated behind `polls.participation.enabled`; nothing is written while that
  * key is false. The captured counts are surfaced (#655) on the `/me/`
@@ -23,6 +31,9 @@ export interface IPollParticipationTracking extends Document {
   totalVotes: number;
   // Per-year vote counters keyed by "YYYY" (host-timezone year at capture).
   yearlyVotes: Map<string, number>;
+  // Per-ISO-week vote counters keyed by "YYYY-Www" (UTC week at capture),
+  // pruned to a retention window. See `getIsoWeekKey` in utils/time.
+  weeklyVotes: Map<string, number>;
   lastVoteAt: Date | null;
 }
 
@@ -32,6 +43,7 @@ const PollParticipationTrackingSchema = new Schema({
   username: { type: String, required: true },
   totalVotes: { type: Number, default: 0 },
   yearlyVotes: { type: Map, of: Number, default: {} },
+  weeklyVotes: { type: Map, of: Number, default: {} },
   lastVoteAt: { type: Date, default: null },
 });
 

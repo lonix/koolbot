@@ -509,6 +509,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         ModerationLogCleanupService.getInstance().destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
+        pollParticipationTracker.destroy();
         leaderboardRoleService.destroy();
         digestService.destroy();
         rewindNudgeService.destroy();

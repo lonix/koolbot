@@ -45,6 +45,33 @@ export function formatTimeAgo(date: Date): string {
 }
 
 /**
+ * Build the ISO-8601 week key for a date (e.g. "2026-W05").
+ *
+ * The year component is the ISO *week-year*, not the calendar year — near
+ * year boundaries the two differ (Dec 30, 2024 is "2025-W01"), and using the
+ * calendar year would collide with an unrelated week. Buckets by the UTC
+ * calendar date so a key stays stable regardless of the host timezone, and
+ * the two-digit zero-padded week number makes the keys sort
+ * lexicographically in chronological order — which is what lets retention
+ * passes prune "everything before week X" with a plain string compare.
+ *
+ * @param date The date to bucket
+ * @returns The ISO week key, e.g. "2026-W05"
+ */
+export function getIsoWeekKey(date: Date): string {
+  const d = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  const weekNumber = Math.ceil(
+    ((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7,
+  );
+  return `${d.getUTCFullYear()}-W${String(weekNumber).padStart(2, "0")}`;
+}
+
+/**
  * Formats a date to a specific timezone
  * @param date The date to format
  * @param timezone The timezone to use (e.g., "UTC", "America/New_York")

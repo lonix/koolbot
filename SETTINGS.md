@@ -264,7 +264,9 @@ on the Web UI's **Polls** page; the settings below are global defaults.
 | `polls.enabled` | `false` | Enable/disable the poll system |
 | `polls.default_duration_hours` | `24` | Default poll duration (1-768, max 32 days) |
 | `polls.cooldown_days` | `7` | Minimum days before reusing the same poll question |
-| `polls.participation.enabled` | `false` | Capture per-user "votes cast" (lifetime + per-year) when users vote on any guild poll. Surfaced (#655) on the `/me/` overview "Poll participation" card, the Rewind `Poll votes cast` stat, and the poll-participation accolades (Poll Regular / Poll Devotee) |
+| `polls.participation.enabled` | `false` | Capture per-user "votes cast" (lifetime + per-year + per-ISO-week) and per-poll turnout when users vote on any guild poll. Surfaced (#655) on the `/me/` overview "Poll participation" card, the Rewind `Poll votes cast` stat, the poll-participation accolades (Poll Regular / Poll Devotee), and the weekly recap's "N members voted across M polls this week" line (#816) |
+| `polls.participation.weekly_retention_weeks` | `12` | Weeks of per-member weekly vote counters to keep. Lifetime and per-year totals are never pruned; `0` keeps every week forever |
+| `polls.turnout.retention_days` | `90` | Days to keep the per-poll turnout rows (which polls ran, and who voted on them) behind the recap's "across M polls" line; `0` keeps them forever |
 
 **Features:**
 
@@ -392,7 +394,7 @@ independently.
 | `voicetracking.announcements.include_voice_stats` | `true` | Include the top voice-time leaderboard |
 | `voicetracking.announcements.include_accolades` | `true` | Include accolades earned this week (needs achievements + achievement announcements enabled) |
 | `voicetracking.announcements.include_quote_of_week` | `true` | Include the most-liked quote added this week (needs quotes enabled) |
-| `voicetracking.announcements.include_poll_turnout` | `true` | Include how many members voted in polls this week (needs poll participation tracking enabled) |
+| `voicetracking.announcements.include_poll_turnout` | `true` | Include how many members voted across how many polls this week, plus the best-attended poll when several ran (needs poll participation tracking enabled) |
 
 To trigger one out of schedule, use the **Post weekly stats now** button
 on the Web UI's Announcements page (replaces the old
@@ -1176,6 +1178,9 @@ leave the graph in a broken state.
 - `polls.enabled` (bool, default: false)
 - `polls.default_duration_hours` (number, default: 24)
 - `polls.cooldown_days` (number, default: 7)
+- `polls.participation.enabled` (bool, default: false)
+- `polls.participation.weekly_retention_weeks` (number, default: 12)
+- `polls.turnout.retention_days` (number, default: 90)
 
 #### Voice Channels
 
