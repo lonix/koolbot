@@ -352,8 +352,10 @@ export class ReactionRoleService {
 
   /**
    * Handle a `channelDelete` event routed from `src/index.ts`. Archive any
-   * active config whose backing category/channel — or whose reaction message
-   * channel — was deleted (#814).
+   * active config whose backing category/channel was deleted (#814) — or, when
+   * the deleted channel is the shared `reactionroles.message_channel_id`, every
+   * active config in the guild, since that channel holds every reaction-role
+   * message regardless of whether a mapping owns a channel of its own (#860).
    */
   public async handleChannelDelete(
     channel: DMChannel | NonThreadGuildBasedChannel,
@@ -369,20 +371,29 @@ export class ReactionRoleService {
         "",
       );
 
-      const configs = await ReactionRoleConfig.find({
-        guildId: channel.guild.id,
-        isArchived: false,
-        $or: [
-          { channelId: channel.id },
-          { categoryId: channel.id },
-          ...(messageChannelId === channel.id
-            ? [{ channelId: { $exists: true } }]
-            : []),
-        ],
-      });
+      // Deleting the shared message channel takes every reaction-role message
+      // with it, so *every* active mapping in the guild is invalidated — not
+      // just the ones that also own a dedicated channel. Bind-to-existing-role
+      // and `createChannel: false` mappings never set `channelId` at all, so a
+      // `channelId`-scoped clause would silently skip them (#860).
+      const filter =
+        messageChannelId === channel.id
+          ? { guildId: channel.guild.id, isArchived: false }
+          : {
+              guildId: channel.guild.id,
+              isArchived: false,
+              $or: [{ channelId: channel.id }, { categoryId: channel.id }],
+            };
+
+      const configs = await ReactionRoleConfig.find(filter);
+
+      const reason =
+        messageChannelId === channel.id
+          ? `reaction message channel ${channel.id} was deleted`
+          : `channel ${channel.id} was deleted`;
 
       for (const config of configs) {
-        await this.archiveConfig(config, `channel ${channel.id} was deleted`);
+        await this.archiveConfig(config, reason);
       }
     } catch (error) {
       logger.error("Error handling reaction-role channel delete:", error);

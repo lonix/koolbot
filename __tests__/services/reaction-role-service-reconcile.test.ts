@@ -31,6 +31,7 @@ interface FakeConfig {
   guildId: string;
   roleId: string;
   messageId: string;
+  channelId?: string;
   emoji: string;
   roleName: string;
   isArchived: boolean;
@@ -274,8 +275,39 @@ describe("ReactionRoleService stale-config cleanup handlers", () => {
       guild: { id: "g1" },
     } as never);
 
+    expect(find).toHaveBeenCalledWith({
+      guildId: "g1",
+      isArchived: false,
+      $or: [{ channelId: "chan1" }, { categoryId: "chan1" }],
+    });
     expect(config.isArchived).toBe(true);
     expect(config.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("handleChannelDelete archives every active config when the shared message channel is deleted (#860)", async () => {
+    // A bind-only mapping has no `channelId` of its own, so it must still be
+    // archived when the channel holding its reaction message goes away.
+    const bindOnly = makeConfig({ _id: "cfg-bind" });
+    const owned = makeConfig({ _id: "cfg-owned", channelId: "chan1" });
+    find.mockResolvedValue([bindOnly, owned]);
+    const { service, mockConfigService } = createService();
+    mockConfigService.getString.mockResolvedValue("msgchan1");
+
+    await service.handleChannelDelete({
+      id: "msgchan1",
+      guild: { id: "g1" },
+    } as never);
+
+    // Unconditional guild-wide query — no `channelId` predicate to skip
+    // mappings that never had one.
+    expect(find).toHaveBeenCalledWith({
+      guildId: "g1",
+      isArchived: false,
+    });
+    expect(bindOnly.isArchived).toBe(true);
+    expect(bindOnly.save).toHaveBeenCalledTimes(1);
+    expect(owned.isArchived).toBe(true);
+    expect(owned.save).toHaveBeenCalledTimes(1);
   });
 
   it("handleChannelDelete ignores DM channels (no guild)", async () => {
