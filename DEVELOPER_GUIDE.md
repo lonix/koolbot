@@ -679,10 +679,43 @@ Discord commands. They run against **compiled** output, so build first:
 
 ```bash
 npm run build
-npm run validate-config        # check required config is present
+npm run validate-config        # check the stored config against the schema
 npm run migrate-config         # migrate legacy config keys
 npm run seed-sample-data -- --yes   # populate a dev DB with fake activity
 ```
+
+### Configuration validator (`validate-config`)
+
+`src/scripts/validate-config.ts` is a **read-only** pre-flight check of a
+deployment's configuration. The settings it checks are derived from
+`services/config-schema.ts` (`defaultConfig` + `settingsMetadata`) rather than
+listed in the script, so a key rename either flows through automatically or
+fails the TypeScript build — the previous hand-maintained list had drifted
+entirely out of the schema and reported every setting as "using default"
+(#858).
+
+It reports:
+
+| Severity | Reported for |
+| --- | --- |
+| Error | a missing required environment variable |
+| Error | a stored value that can't be read as the schema's type (e.g. `"yes"` for a boolean) |
+| Error | a value outside a setting's fixed option list |
+| Error | an enabled feature whose hard `dependsOn` prerequisite is off |
+| Warning | an enabled feature missing the channel/category ID it needs to do anything |
+| Warning | a Discord ID setting holding something that isn't a snowflake (usually a leftover channel *name*) |
+| Warning | a numeric setting below its `warnBelow` recommendation |
+
+Settings left at their schema default are summarised as a count; pass
+`--verbose` to list them individually:
+
+```bash
+npm run validate-config -- --verbose
+```
+
+The script exits with code `1` when any error is reported, so it can gate a
+deploy. Secret environment variables (`DISCORD_TOKEN`, `MONGODB_URI`) are never
+echoed to the log. It never writes to the database.
 
 ### Sample-data seeder (`seed-sample-data`)
 

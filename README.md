@@ -657,7 +657,7 @@ npm run test:ci        # Run tests in CI mode
 npm run build                     # Compile TypeScript
 npm run start                     # Start production bot
 npm run dev                       # Development with hot reload
-npm run validate-config           # Validate configuration
+npm run validate-config           # Validate configuration (add -- --verbose for all keys)
 npm run migrate-config            # Migrate old settings
 npm run cleanup-global-commands   # Clean up Discord commands
 ```

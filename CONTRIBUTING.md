@@ -142,7 +142,7 @@ npm run check            # Run build + lint + format check
 npm run check:all        # Run all checks including tests
 
 # Utilities
-npm run validate-config  # Validate configuration schema
+npm run validate-config  # Validate stored config against the schema
 npm run migrate-config   # Migrate old configuration
 npm run cleanup-global-commands  # Clean up Discord commands
 ```
