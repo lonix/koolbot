@@ -43,6 +43,17 @@ describe("coerceToSchemaType", () => {
     expect(coerceToSchemaType("voicechannels.enabled", "false")).toBe(false);
   });
 
+  it("matches booleans leniently so a hand-edited .env still migrates", () => {
+    // The legacy code stored "TRUE" as the string "TRUE", which every read
+    // path then evaluated as false — the operator's intent was lost silently.
+    for (const raw of ["TRUE", "True", "true ", " true", "  TRUE  "]) {
+      expect(coerceToSchemaType("voicechannels.enabled", raw)).toBe(true);
+    }
+    for (const raw of ["FALSE", "False", "false ", " false"]) {
+      expect(coerceToSchemaType("voicechannels.enabled", raw)).toBe(false);
+    }
+  });
+
   it("rejects a non-boolean value for a boolean key", () => {
     expect(coerceToSchemaType("voicechannels.enabled", "1")).toBe(undefined);
     expect(coerceToSchemaType("voicechannels.enabled", "")).toBe(undefined);
@@ -51,6 +62,7 @@ describe("coerceToSchemaType", () => {
 
   it("coerces numeric values for a number key", () => {
     expect(coerceToSchemaType("quotes.max_length", "1000")).toBe(1000);
+    expect(coerceToSchemaType("quotes.max_length", " 1000 ")).toBe(1000);
     expect(coerceToSchemaType("quotes.cooldown", "0")).toBe(0);
     expect(coerceToSchemaType("quotes.cooldown", "-1.5")).toBe(-1.5);
   });
@@ -74,5 +86,12 @@ describe("coerceToSchemaType", () => {
       "Lobby",
     );
     expect(coerceToSchemaType("voicechannels.channel.prefix", "🎮")).toBe("🎮");
+  });
+
+  it("does not trim or case-fold a string key, where whitespace is a value", () => {
+    expect(coerceToSchemaType("voicechannels.lobby.name", " Lobby ")).toBe(
+      " Lobby ",
+    );
+    expect(coerceToSchemaType("voicechannels.lobby.name", "TRUE")).toBe("TRUE");
   });
 });

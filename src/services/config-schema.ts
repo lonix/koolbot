@@ -575,6 +575,18 @@ export function getSchemaDefault(
  * digits stays a string because its schema entry is a string. Guessing from
  * the string alone silently retypes ID-like values.
  *
+ * Booleans are matched leniently — trimmed and case-folded, so `TRUE`,
+ * `False` and `true ` all migrate. `ConfigService.getBoolean` deliberately
+ * stays strict (`value === "true"`), and that is not in tension: this runs
+ * only at the migration boundary, translating a hand-edited `.env` string
+ * into storage, and what it stores is a real boolean. The leniency never
+ * reaches a read path. Being strict here would drop an operator's `TRUE` on
+ * the floor, which is precisely how the legacy code lost it — it stored the
+ * string `"TRUE"`, which every read path then evaluated as `false`.
+ *
+ * Strings are taken verbatim, whitespace included: for a string key an empty
+ * or padded value is a value, not a typo to normalise away (#868).
+ *
  * Returns `undefined` for a value that cannot be represented as that type (or
  * for an unknown key), so callers fall back to the schema default rather than
  * persisting something the rest of the app will misread.
@@ -587,8 +599,9 @@ export function coerceToSchemaType(
   if (schemaDefault === undefined) return undefined;
 
   if (typeof schemaDefault === "boolean") {
-    if (raw === "true") return true;
-    if (raw === "false") return false;
+    const normalised = raw.trim().toLowerCase();
+    if (normalised === "true") return true;
+    if (normalised === "false") return false;
     return undefined;
   }
 
