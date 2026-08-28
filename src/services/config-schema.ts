@@ -550,6 +550,57 @@ export function isEnabledValue(value: unknown): boolean {
   return false;
 }
 
+/**
+ * The schema default for `key`, or `undefined` when `key` is not declared in
+ * `defaultConfig`. The single sanctioned way for migration code to learn a
+ * default: hardcoding one alongside the migration is what let the boot-time
+ * backfill drift from the documented schema and force-enable opt-in features
+ * on fresh installs (#867).
+ */
+export function getSchemaDefault(
+  key: string,
+): ConfigSchema[keyof ConfigSchema] | undefined {
+  return hasOwn(defaultConfig, key)
+    ? defaultConfig[key as keyof ConfigSchema]
+    : undefined;
+}
+
+/**
+ * Coerce a raw string (a legacy flat env var) to the type the schema declares
+ * for `key`.
+ *
+ * The *schema entry* decides the target type, never the shape of the string:
+ * `QUOTE_MAX_LENGTH=1000` becomes the number `1000` because
+ * `quotes.max_length` is a number, while a channel ID that happens to be all
+ * digits stays a string because its schema entry is a string. Guessing from
+ * the string alone silently retypes ID-like values.
+ *
+ * Returns `undefined` for a value that cannot be represented as that type (or
+ * for an unknown key), so callers fall back to the schema default rather than
+ * persisting something the rest of the app will misread.
+ */
+export function coerceToSchemaType(
+  key: string,
+  raw: string,
+): ConfigSchema[keyof ConfigSchema] | undefined {
+  const schemaDefault = getSchemaDefault(key);
+  if (schemaDefault === undefined) return undefined;
+
+  if (typeof schemaDefault === "boolean") {
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return undefined;
+  }
+
+  if (typeof schemaDefault === "number") {
+    if (raw.trim() === "") return undefined;
+    const num = Number(raw);
+    return Number.isFinite(num) ? num : undefined;
+  }
+
+  return raw;
+}
+
 /** Human-friendly reference to a key: `"Label" (`dotted.key`)`. */
 function describeKey(key: keyof ConfigSchema): string {
   const label = settingsMetadata[key]?.label;

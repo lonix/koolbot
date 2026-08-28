@@ -1,9 +1,8 @@
 import mongoose from "mongoose";
 import { ConfigService } from "../services/config-service.js";
 import {
-  type ConfigSchema,
-  defaultConfig,
-  hasOwn,
+  coerceToSchemaType,
+  getSchemaDefault,
 } from "../services/config-schema.js";
 import { env, getEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
@@ -129,28 +128,6 @@ const configMigrations: ConfigMigration[] = [
   },
 ];
 
-/**
- * Coerce a raw string configuration value to a boolean or number where that is
- * unambiguous, otherwise leave it as-is.
- *
- * Empty and whitespace-only strings are deliberately left alone: `Number("")`
- * is `0`, so a generic `isNaN(Number(value))` check would turn an intentional
- * empty-string default (e.g. `voicechannels.channel.suffix`) into the number
- * `0` and corrupt a value every other code path reads back as a string.
- */
-function coerceConfigValue(value: string | undefined): unknown {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === "true" || value === "false") {
-    return value === "true";
-  }
-  if (value.trim() !== "" && !isNaN(Number(value))) {
-    return Number(value);
-  }
-  return value;
-}
-
 async function migrateConfiguration(): Promise<void> {
   try {
     logger.info("Starting configuration migration...");
@@ -178,21 +155,21 @@ async function migrateConfiguration(): Promise<void> {
 
         // Only schema keys can be written: an unknown key would land in the
         // database as an "unknown setting" that startup cleanup then deletes.
-        if (!hasOwn(defaultConfig, migration.newKey)) {
+        const schemaDefault = getSchemaDefault(migration.newKey);
+        if (schemaDefault === undefined) {
           logger.warn(
             `Skipping ${migration.oldKey} -> ${migration.newKey}: key is not declared in config-schema.ts`,
           );
           skippedCount++;
           continue;
         }
-        const schemaDefault =
-          defaultConfig[migration.newKey as keyof ConfigSchema];
 
-        // Prefer the legacy env value; fall back to the schema default, which
-        // is already correctly typed and so needs no coercion. Presence is an
-        // explicit `undefined` check (matching ConfigService.migrateFromEnv)
-        // so a deliberately-empty env var migrates as the empty string rather
-        // than being replaced by the default (#868).
+        // Prefer the legacy env value, coerced against the type the schema
+        // declares for this key; fall back to the schema default when it is
+        // unset or cannot be represented as that type. Presence is an explicit
+        // `undefined` check (matching ConfigService.migrateFromEnv) so a
+        // deliberately-empty env var migrates as the empty string for a
+        // string-typed key rather than being replaced by the default (#868).
         const envValue = getEnv(migration.oldKey);
         let finalValue: unknown = schemaDefault;
         if (envValue === undefined) {
@@ -200,7 +177,14 @@ async function migrateConfiguration(): Promise<void> {
             `Environment variable ${migration.oldKey} not set, using the config-schema.ts default`,
           );
         } else {
-          finalValue = coerceConfigValue(envValue);
+          const coerced = coerceToSchemaType(migration.newKey, envValue);
+          if (coerced === undefined) {
+            logger.warn(
+              `${migration.oldKey} is not a valid ${typeof schemaDefault} for ${migration.newKey}; using the config-schema.ts default`,
+            );
+          } else {
+            finalValue = coerced;
+          }
         }
 
         // Set the new configuration. This offline migration moves stored
@@ -251,4 +235,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   migrateConfiguration();
 }
 
-export { migrateConfiguration, coerceConfigValue };
+export { migrateConfiguration };

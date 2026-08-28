@@ -1,14 +1,19 @@
 import { ConfigService } from "./config-service.js";
-import { type ConfigSchema, defaultConfig, hasOwn } from "./config-schema.js";
-import { hasEnv } from "../config/env.js";
+import {
+  type ConfigSchema,
+  coerceToSchemaType,
+  getSchemaDefault,
+} from "./config-schema.js";
+import { getEnv, hasEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
  * A legacy flat env-var key and the dot-notation schema key that replaced it.
  *
  * Deliberately carries **no** default value of its own: the defaults this
- * migrator backfills come from `config-schema.ts` (see
- * {@link resolveSchemaDefault}). Hardcoding them here is what caused #867 —
+ * migrator backfills come from `config-schema.ts` (see `getSchemaDefault`).
+ * Hardcoding them here is what caused #867 —
  * six opt-in features (`voicechannels.enabled`, `voicetracking.enabled`,
  * `voicetracking.seen.enabled`, `voicetracking.announcements.enabled`,
  * `ping.enabled`, `quotes.enabled`) were persisted as `true` on every fresh
@@ -20,22 +25,6 @@ interface ConfigMigration {
   newKey: keyof ConfigSchema;
   category: string;
   description: string;
-}
-
-/**
- * Resolve the value to backfill for a migrated key from `config-schema.ts`,
- * the single source of truth for defaults.
- *
- * Returns `undefined` for a key that is not in the schema, so the caller skips
- * it rather than inventing a value — a guessed default is exactly the failure
- * mode this replaces.
- */
-function resolveSchemaDefault(
-  newKey: string,
-): ConfigSchema[keyof ConfigSchema] | undefined {
-  return hasOwn(defaultConfig, newKey)
-    ? defaultConfig[newKey as keyof ConfigSchema]
-    : undefined;
 }
 
 const configMigrations: ConfigMigration[] = [
@@ -241,6 +230,46 @@ export class StartupMigrator {
   }
 
   /**
+   * Decide what to write for a key that is missing from the database.
+   *
+   * A deployment still configured through the legacy flat env var (e.g.
+   * `ENABLE_VC_MANAGEMENT`) keeps its value: `ConfigService.get()` only ever
+   * looks up an env var named exactly like the dot-notation key, so it can
+   * never see the legacy name. Seeding the schema default on top of it would
+   * silently override the operator — and, because the DB row then exists,
+   * leave `npm run migrate-config` nothing left to migrate.
+   *
+   * The legacy value is coerced against the schema's declared type; anything
+   * that cannot be represented as that type is rejected in favour of the
+   * schema default rather than persisted as-is.
+   */
+  private resolveBackfillValue(
+    migration: ConfigMigration,
+    schemaDefault: ConfigSchema[keyof ConfigSchema],
+  ): { value: ConfigSchema[keyof ConfigSchema]; source: string } {
+    const legacyValue = getEnv(migration.oldKey);
+
+    // Presence is an explicit `undefined` check (matching
+    // `ConfigService.migrateFromEnv`), so a deliberately-empty legacy var
+    // (`VC_SUFFIX=`) seeds the empty string for a string-typed key rather than
+    // being replaced by the default (#868). An empty value is not a valid
+    // boolean or number, so those keys still fall through to the default.
+    if (legacyValue === undefined) {
+      return { value: schemaDefault, source: "config-schema.ts default" };
+    }
+
+    const coerced = coerceToSchemaType(migration.newKey, legacyValue);
+    if (coerced === undefined) {
+      logger.warn(
+        `Ignoring ${migration.oldKey}=${sanitizeForLog(legacyValue)}: not a valid ${typeof schemaDefault} for ${migration.newKey}; using the config-schema.ts default instead`,
+      );
+      return { value: schemaDefault, source: "config-schema.ts default" };
+    }
+
+    return { value: coerced, source: `legacy env var ${migration.oldKey}` };
+  }
+
+  /**
    * Ensure all expected settings exist with default values
    * Only creates settings that are truly missing (not just migrated)
    *
@@ -259,18 +288,22 @@ export class StartupMigrator {
         const existingSetting = await this.configService.get(migration.newKey);
 
         if (existingSetting === null || existingSetting === undefined) {
-          // Setting doesn't exist, create it with its schema default
-          const defaultValue = resolveSchemaDefault(migration.newKey);
+          const schemaDefault = getSchemaDefault(migration.newKey);
 
-          if (defaultValue === undefined) {
+          if (schemaDefault === undefined) {
             logger.warn(
               `Skipping backfill of ${migration.newKey}: no default declared in config-schema.ts`,
             );
             continue;
           }
 
+          const { value, source } = this.resolveBackfillValue(
+            migration,
+            schemaDefault,
+          );
+
           logger.info(
-            `Creating missing setting: ${migration.newKey} with schema default: ${defaultValue}`,
+            `Creating missing setting: ${migration.newKey} = ${value} (from ${source})`,
           );
 
           // Startup migration backfills missing schema keys with their
@@ -278,7 +311,7 @@ export class StartupMigrator {
           // never be blocked by dependency validation (#663).
           await this.configService.set(
             migration.newKey,
-            defaultValue,
+            value,
             migration.description,
             migration.category,
             { skipDependencyCheck: true },
