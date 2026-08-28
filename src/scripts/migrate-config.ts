@@ -180,16 +180,19 @@ async function migrateConfiguration(): Promise<void> {
           continue;
         }
 
-        // Get value from old environment variable
+        // Get value from old environment variable. Presence is an explicit
+        // `undefined` check (matching ConfigService.migrateFromEnv) so a
+        // deliberately-empty env var is migrated as the empty string rather
+        // than being replaced by the default.
         const envValue = getEnv(migration.oldKey);
-        if (!envValue) {
+        if (envValue === undefined) {
           logger.info(
             `Environment variable ${migration.oldKey} not set, using default value`,
           );
         }
 
         // Use environment value or default
-        const value = envValue || migration.defaultValue;
+        const value = envValue ?? migration.defaultValue;
 
         // Convert value to appropriate type
         const finalValue = coerceConfigValue(value);
