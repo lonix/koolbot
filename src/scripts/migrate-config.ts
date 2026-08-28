@@ -1,14 +1,26 @@
 import mongoose from "mongoose";
 import { ConfigService } from "../services/config-service.js";
+import {
+  type ConfigSchema,
+  defaultConfig,
+  hasOwn,
+} from "../services/config-schema.js";
 import { env, getEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
 
+/**
+ * A legacy flat env-var key and the dot-notation schema key that replaced it.
+ *
+ * Like the boot-time migrator, this table carries **no** default of its own:
+ * when the legacy env var is unset the fallback comes from
+ * `config-schema.ts`. Hardcoded defaults here drifted from the schema and
+ * force-enabled opt-in features on a fresh database (#867).
+ */
 interface ConfigMigration {
   oldKey: string;
   newKey: string;
   category: string;
   description: string;
-  defaultValue?: string;
 }
 
 const configMigrations: ConfigMigration[] = [
@@ -18,35 +30,30 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicechannels.enabled",
     category: "voicechannels",
     description: "Enable/disable dynamic voice channel management",
-    defaultValue: "true",
   },
   {
     oldKey: "LOBBY_CHANNEL_NAME",
     newKey: "voicechannels.lobby.name",
     category: "voicechannels",
     description: "Name of the lobby channel",
-    defaultValue: "Lobby",
   },
   {
     oldKey: "LOBBY_CHANNEL_NAME_OFFLINE",
     newKey: "voicechannels.lobby.offlinename",
     category: "voicechannels",
     description: "Name of the offline lobby channel",
-    defaultValue: "Offline Lobby",
   },
   {
     oldKey: "VC_CHANNEL_PREFIX",
     newKey: "voicechannels.channel.prefix",
     category: "voicechannels",
     description: "Prefix for dynamically created channels",
-    defaultValue: "🎮",
   },
   {
     oldKey: "VC_SUFFIX",
     newKey: "voicechannels.channel.suffix",
     category: "voicechannels",
     description: "Suffix for dynamically created channels",
-    defaultValue: "",
   },
 
   // Voice Activity Tracking
@@ -55,14 +62,12 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicetracking.enabled",
     category: "voicetracking",
     description: "Enable/disable voice activity tracking",
-    defaultValue: "true",
   },
   {
     oldKey: "ENABLE_SEEN",
     newKey: "voicetracking.seen.enabled",
     category: "voicetracking",
     description: "Enable/disable last seen tracking",
-    defaultValue: "true",
   },
   {
     oldKey: "EXCLUDED_VC_CHANNELS",
@@ -70,28 +75,24 @@ const configMigrations: ConfigMigration[] = [
     category: "voicetracking",
     description:
       "Comma-separated list of voice channel IDs to exclude from tracking",
-    defaultValue: "",
   },
   {
     oldKey: "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
     newKey: "voicetracking.announcements.enabled",
     category: "voicetracking",
     description: "Enable/disable weekly voice channel announcements",
-    defaultValue: "true",
   },
   {
     oldKey: "VC_ANNOUNCEMENT_SCHEDULE",
     newKey: "voicetracking.announcements.schedule",
     category: "voicetracking",
     description: "Cron expression for weekly announcements",
-    defaultValue: "0 16 * * 5",
   },
   {
     oldKey: "VC_ANNOUNCEMENT_CHANNEL",
     newKey: "voicetracking.announcements.channel",
     category: "voicetracking",
     description: "Channel name for voice channel announcements",
-    defaultValue: "voice-stats",
   },
   // Individual Features
   {
@@ -99,7 +100,6 @@ const configMigrations: ConfigMigration[] = [
     newKey: "ping.enabled",
     category: "ping",
     description: "Enable/disable ping command",
-    defaultValue: "true",
   },
 
   // Quote System (if they exist in old format)
@@ -108,28 +108,24 @@ const configMigrations: ConfigMigration[] = [
     newKey: "quotes.enabled",
     category: "quotes",
     description: "Enable/disable quote system",
-    defaultValue: "true",
   },
   {
     oldKey: "QUOTE_DELETE_ROLES",
     newKey: "quotes.delete_roles",
     category: "quotes",
     description: "Comma-separated role IDs that can delete quotes",
-    defaultValue: "",
   },
   {
     oldKey: "QUOTE_MAX_LENGTH",
     newKey: "quotes.max_length",
     category: "quotes",
     description: "Maximum length for quotes",
-    defaultValue: "1000",
   },
   {
     oldKey: "QUOTE_COOLDOWN",
     newKey: "quotes.cooldown",
     category: "quotes",
     description: "Cooldown in seconds between quote additions",
-    defaultValue: "60",
   },
 ];
 
@@ -180,22 +176,32 @@ async function migrateConfiguration(): Promise<void> {
           continue;
         }
 
-        // Get value from old environment variable. Presence is an explicit
-        // `undefined` check (matching ConfigService.migrateFromEnv) so a
-        // deliberately-empty env var is migrated as the empty string rather
-        // than being replaced by the default.
+        // Only schema keys can be written: an unknown key would land in the
+        // database as an "unknown setting" that startup cleanup then deletes.
+        if (!hasOwn(defaultConfig, migration.newKey)) {
+          logger.warn(
+            `Skipping ${migration.oldKey} -> ${migration.newKey}: key is not declared in config-schema.ts`,
+          );
+          skippedCount++;
+          continue;
+        }
+        const schemaDefault =
+          defaultConfig[migration.newKey as keyof ConfigSchema];
+
+        // Prefer the legacy env value; fall back to the schema default, which
+        // is already correctly typed and so needs no coercion. Presence is an
+        // explicit `undefined` check (matching ConfigService.migrateFromEnv)
+        // so a deliberately-empty env var migrates as the empty string rather
+        // than being replaced by the default (#868).
         const envValue = getEnv(migration.oldKey);
+        let finalValue: unknown = schemaDefault;
         if (envValue === undefined) {
           logger.info(
-            `Environment variable ${migration.oldKey} not set, using default value`,
+            `Environment variable ${migration.oldKey} not set, using the config-schema.ts default`,
           );
+        } else {
+          finalValue = coerceConfigValue(envValue);
         }
-
-        // Use environment value or default
-        const value = envValue ?? migration.defaultValue;
-
-        // Convert value to appropriate type
-        const finalValue = coerceConfigValue(value);
 
         // Set the new configuration. This offline migration moves stored
         // values to renamed keys; it isn't an operator toggling a feature, so
