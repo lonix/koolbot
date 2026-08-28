@@ -133,6 +133,28 @@ const configMigrations: ConfigMigration[] = [
   },
 ];
 
+/**
+ * Coerce a raw string configuration value to a boolean or number where that is
+ * unambiguous, otherwise leave it as-is.
+ *
+ * Empty and whitespace-only strings are deliberately left alone: `Number("")`
+ * is `0`, so a generic `isNaN(Number(value))` check would turn an intentional
+ * empty-string default (e.g. `voicechannels.channel.suffix`) into the number
+ * `0` and corrupt a value every other code path reads back as a string.
+ */
+function coerceConfigValue(value: string | undefined): unknown {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === "true" || value === "false") {
+    return value === "true";
+  }
+  if (value.trim() !== "" && !isNaN(Number(value))) {
+    return Number(value);
+  }
+  return value;
+}
+
 async function migrateConfiguration(): Promise<void> {
   try {
     logger.info("Starting configuration migration...");
@@ -170,12 +192,7 @@ async function migrateConfiguration(): Promise<void> {
         const value = envValue || migration.defaultValue;
 
         // Convert value to appropriate type
-        let finalValue: unknown = value;
-        if (value === "true" || value === "false") {
-          finalValue = value === "true";
-        } else if (!isNaN(Number(value))) {
-          finalValue = Number(value);
-        }
+        const finalValue = coerceConfigValue(value);
 
         // Set the new configuration. This offline migration moves stored
         // values to renamed keys; it isn't an operator toggling a feature, so
@@ -225,4 +242,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   migrateConfiguration();
 }
 
-export { migrateConfiguration };
+export { migrateConfiguration, coerceConfigValue };
