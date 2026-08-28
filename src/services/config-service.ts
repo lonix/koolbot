@@ -1,5 +1,5 @@
 import { Config, CONFIG_CATEGORIES, IConfig } from "../models/config.js";
-import { env, getEnv } from "../config/env.js";
+import { env, getEnv, getEnvConfigValue } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { Client } from "discord.js";
 import mongoose from "mongoose";
@@ -347,20 +347,12 @@ export class ConfigService {
         }
       }
 
-      // If not found, try to get from environment variables (for backward compatibility)
-      const envValue = getEnv(key);
-      if (envValue !== undefined && envValue.trim() !== "") {
-        // Convert string values to appropriate types
-        if (envValue === "true" || envValue === "false") {
-          const boolValue = envValue === "true";
-          this.cache.set(key, boolValue);
-          return boolValue;
-        }
-        const numValue = Number(envValue);
-        if (!isNaN(numValue)) {
-          this.cache.set(key, numValue);
-          return numValue;
-        }
+      // If not found, try to get from environment variables (for backward
+      // compatibility). The string -> boolean/number coercion lives in
+      // `getEnvConfigValue` so the validate-config script reads an
+      // env-supplied setting exactly the way the runtime does.
+      const envValue = getEnvConfigValue(key);
+      if (envValue !== null) {
         this.cache.set(key, envValue);
         return envValue;
       }

@@ -23,12 +23,14 @@
  *   - numeric settings below their `warnBelow` recommendation (warning).
  *
  * Exit code is 1 when any error is reported, so the script can gate a deploy.
+ * The script never writes to the database.
  */
 import mongoose from "mongoose";
-import { ConfigService } from "../services/config-service.js";
+import { Config } from "../models/config.js";
 import {
   env,
   getEnv,
+  getEnvConfigValue,
   getMissingRequiredEnv,
   REQUIRED_VARS,
 } from "../config/env.js";
@@ -439,21 +441,31 @@ function report(findings: Finding[], verbose: boolean): void {
 }
 
 /**
- * Read every schema-declared setting as the running bot would resolve it
- * (database row, else env var, else nothing).
+ * Read every schema-declared setting as the running bot would resolve it:
+ * database row first, else an env var (coerced by the same helper
+ * `ConfigService.get()` uses), else nothing.
  *
- * Note we deliberately do *not* call `ConfigService.initialize()`: it runs
- * `cleanupUnknownSettings()`, which deletes rows. A validator must be
- * read-only. `get()` queries the database directly on a cache miss.
+ * This deliberately bypasses `ConfigService` rather than calling `get()` per
+ * key. `initialize()` runs `cleanupUnknownSettings()`, which *deletes* rows,
+ * and `get()` itself writes when it migrates a legacy `gamification.*` key —
+ * a validator must never mutate. Reading the collection once also avoids a
+ * findOne per key across ~100 settings.
  */
 async function readStoredValues(): Promise<Map<keyof ConfigSchema, unknown>> {
-  const configService = ConfigService.getInstance();
+  const rows = await Config.find({}, { key: 1, value: 1 }).lean();
+  const byKey = new Map<string, unknown>(
+    rows.map((row) => [row.key, row.value]),
+  );
+
   const stored = new Map<keyof ConfigSchema, unknown>();
   for (const key of schemaKeys()) {
-    const value = await configService.get(key);
-    if (value !== null && value !== undefined) {
-      stored.set(key, value);
+    if (byKey.has(key)) {
+      const value = byKey.get(key);
+      if (value !== null && value !== undefined) stored.set(key, value);
+      continue;
     }
+    const fromEnv = getEnvConfigValue(key);
+    if (fromEnv !== null) stored.set(key, fromEnv);
   }
   return stored;
 }

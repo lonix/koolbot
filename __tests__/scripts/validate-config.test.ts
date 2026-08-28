@@ -1,4 +1,4 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, afterEach } from "@jest/globals";
 import {
   schemaKeys,
   expectedPrimitive,
@@ -20,6 +20,14 @@ import {
 // The script's DB access goes through the globally-mocked ConfigService /
 // mongoose (see __tests__/setup.ts), so these tests cover the pure report
 // builders per TESTING.md.
+
+// The env-var findings read process.env, so snapshot and restore it the way
+// __tests__/config/env.test.ts does — Jest workers are shared between suites.
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+});
 
 const find = (findings: Finding[], key: string): Finding => {
   const finding = findings.find((f) => f.key === key);
