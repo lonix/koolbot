@@ -354,8 +354,9 @@ async function handleLetIn(
   let waitingMember;
   try {
     waitingMember = await guild.members.fetch(waitingUserId);
-  } catch {
-    await interaction.reply({
+  } catch (error) {
+    logger.error("Could not fetch the waiting user:", error);
+    await safeReply(interaction, {
       content: "❌ Could not find the waiting user.",
       ephemeral: true,
     });
@@ -377,8 +378,9 @@ async function handleLetIn(
       content: `✅ **${waitingMember.displayName}** has been let into the channel!`,
       ephemeral: true,
     });
-  } catch {
-    await interaction.reply({
+  } catch (error) {
+    logger.error("Error letting user in from the waiting room:", error);
+    await safeReply(interaction, {
       content: `❌ Failed to move **${waitingMember.displayName}** into the channel.`,
       ephemeral: true,
     });

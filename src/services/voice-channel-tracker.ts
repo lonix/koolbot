@@ -7,6 +7,7 @@ import {
   User,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
@@ -750,7 +751,7 @@ export class VoiceChannelTracker {
       });
     } catch (error) {
       logger.error("Error handling button interaction:", error);
-      await interaction.reply({
+      await safeReply(interaction, {
         content: "An error occurred while processing your request.",
         ephemeral: true,
       });

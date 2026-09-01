@@ -198,18 +198,9 @@ async function executeUser(
     await interaction.reply(response);
   } catch (error) {
     logger.error("Error in voicestats user command:", error);
-
-    // Check if interaction was already replied to
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
-    } else {
-      await interaction.reply({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: "There was an error while executing this command!",
+      ephemeral: true,
+    });
   }
 }

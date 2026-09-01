@@ -5,6 +5,7 @@ import {
   PermissionFlagsBits,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { WebSessionService } from "../services/web-session-service.js";
 import type { WebSessionRole } from "../models/web-session.js";
 import { isWebUIEnabled, validateWebUIEnvVars } from "../web/index.js";
@@ -91,13 +92,13 @@ export async function execute(
         `Could not DM web sign-in link to ${userId}; falling back to ephemeral reply`,
         dmError,
       );
-      await interaction.editReply({
+      await safeReply(interaction, {
         content: dmBody,
       });
     }
   } catch (error) {
     logger.error(`Error issuing web sign-in link for user=${userId}:`, error);
-    await interaction.editReply({
+    await safeReply(interaction, {
       content: "An error occurred while issuing your sign-in link.",
     });
   }

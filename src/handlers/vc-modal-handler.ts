@@ -91,12 +91,10 @@ export async function handleVCModal(
     }
   } catch (error) {
     logger.error("Error handling VC modal:", error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: "❌ An error occurred while processing your request.",
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: "❌ An error occurred while processing your request.",
+      ephemeral: true,
+    });
   }
 }
 
@@ -215,7 +213,7 @@ async function handleSavePresetModal(
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `❌ ${error.message}`,
         ephemeral: true,
       });
@@ -276,7 +274,7 @@ async function handleRenamePresetModal(
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `❌ ${error.message}`,
         ephemeral: true,
       });

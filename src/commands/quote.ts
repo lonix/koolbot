@@ -8,6 +8,7 @@ import {
 import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 // Hard cap on a restore upload. A quote backup is small text; this stops a
 // misclicked giant attachment from being streamed into memory.
@@ -160,17 +161,10 @@ export async function execute(
         ? error.message
         : "There was an error while executing this command!";
 
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: `❌ ${errorMessage}`,
-        ephemeral: true,
-      });
-    } else {
-      await interaction.reply({
-        content: `❌ ${errorMessage}`,
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: `❌ ${errorMessage}`,
+      ephemeral: true,
+    });
   }
 }
 
@@ -279,7 +273,7 @@ async function handleEdit(
       error,
     );
 
-    await interaction.reply({
+    await safeReply(interaction, {
       content:
         "❌ I couldn't find or update the quote message in the quote channel. The quote may not have been posted successfully, or the message was deleted. Please contact a server admin.",
       ephemeral: true,
@@ -356,7 +350,7 @@ async function handleImport(
     payload = JSON.parse(await response.text());
   } catch (error) {
     logger.error("Failed to read quote backup attachment:", error);
-    await interaction.editReply({
+    await safeReply(interaction, {
       content:
         "❌ Could not read the backup file. Make sure it's a valid JSON file produced by `/quote export`.",
     });
@@ -410,7 +404,7 @@ async function handleReset(
     });
   } catch (error) {
     logger.error("Failed to reset quote channel:", error);
-    await interaction.editReply({
+    await safeReply(interaction, {
       content: `❌ Failed to rebuild the quote channel: ${
         error instanceof Error ? error.message : "Unknown error"
       }`,
