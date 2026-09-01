@@ -6,6 +6,7 @@ import {
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { formatTimeAgo } from "../utils/time.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 export const data = new SlashCommandBuilder()
   .setName("seen")
@@ -53,7 +54,7 @@ export async function execute(
     );
   } catch (error) {
     logger.error("Error in seen command:", error);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "There was an error while executing this command!",
       ephemeral: true,
     });

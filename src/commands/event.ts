@@ -14,6 +14,7 @@ import {
 } from "../services/event-service.js";
 import { isValidTimezone, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 export const data = new SlashCommandBuilder()
   .setName("event")
@@ -152,12 +153,10 @@ export async function execute(
     else if (sub === "start") await handleStart(interaction);
   } catch (error) {
     logger.error(`Error in /event ${sub}:`, error);
-    const msg = "❌ There was an error running this command.";
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content: msg, ephemeral: true });
-    } else {
-      await interaction.reply({ content: msg, ephemeral: true });
-    }
+    await safeReply(interaction, {
+      content: "❌ There was an error running this command.",
+      ephemeral: true,
+    });
   }
 }
 

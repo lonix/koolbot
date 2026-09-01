@@ -7,6 +7,7 @@ import {
 import { ModerationService } from "../services/moderation-service.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 const PAGE_SIZE = 10;
 
@@ -122,15 +123,9 @@ export async function execute(
     await interaction.reply({ embeds: [embed], ephemeral: true });
   } catch (error) {
     logger.error("Error in modlog command:", error);
-    if (interaction.replied || interaction.deferred) {
-      await interaction.editReply({
-        content: "There was an error fetching the moderation history.",
-      });
-    } else {
-      await interaction.reply({
-        content: "There was an error fetching the moderation history.",
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: "There was an error fetching the moderation history.",
+      ephemeral: true,
+    });
   }
 }

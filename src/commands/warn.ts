@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 import { ModerationService } from "../services/moderation-service.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 const MAX_REASON_LENGTH = 512;
 
@@ -106,15 +107,9 @@ export async function execute(
     await interaction.reply({ embeds: [embed], ephemeral: true });
   } catch (error) {
     logger.error("Error in warn command:", error);
-    if (interaction.replied || interaction.deferred) {
-      await interaction.editReply({
-        content: "There was an error recording the warning.",
-      });
-    } else {
-      await interaction.reply({
-        content: "There was an error recording the warning.",
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: "There was an error recording the warning.",
+      ephemeral: true,
+    });
   }
 }

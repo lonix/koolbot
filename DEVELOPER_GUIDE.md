@@ -887,6 +887,33 @@ try {
 }
 ```
 
+#### Replying from a `catch` block
+
+Never call `interaction.reply()` / `editReply()` / `followUp()` directly in an
+error path. discord.js does not await event-listener promises, so a rejected
+reply escapes as an unhandled rejection — and the reply in an error handler is
+exactly the one most likely to reject, because the interaction is usually
+already dead (`10062 Unknown interaction` after the 3-second ACK window).
+
+Use `safeReply` from `src/utils/safe-reply.ts` instead. It picks `reply`,
+`editReply`, or `followUp` based on the interaction's current state and
+swallows (logging) any failure, returning `true`/`false` for whether the user
+actually saw the message:
+
+```typescript
+import { safeReply } from "../utils/safe-reply.js";
+
+try {
+  await riskyOperation();
+} catch (error) {
+  logger.error("Context about what failed:", error);
+  await safeReply(interaction, {
+    content: "There was an error while executing this command!",
+    ephemeral: true,
+  });
+}
+```
+
 ---
 
 ## Dependency Notes

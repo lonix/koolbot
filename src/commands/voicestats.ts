@@ -7,6 +7,7 @@ import { ConfigService } from "../services/config-service.js";
 import { UserNotificationPrefsService } from "../services/user-notification-prefs-service.js";
 import { formatDateTimeInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 // Helper function to format time in hours and minutes
 function formatTime(seconds: number): string {
@@ -129,19 +130,10 @@ async function executeTop(
     );
   } catch (error) {
     logger.error("Error in voicestats top command:", error);
-
-    // Check if interaction was already replied to
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
-    } else {
-      await interaction.reply({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: "There was an error while executing this command!",
+      ephemeral: true,
+    });
   }
 }
 
@@ -206,18 +198,9 @@ async function executeUser(
     await interaction.reply(response);
   } catch (error) {
     logger.error("Error in voicestats user command:", error);
-
-    // Check if interaction was already replied to
-    if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
-    } else {
-      await interaction.reply({
-        content: "There was an error while executing this command!",
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: "There was an error while executing this command!",
+      ephemeral: true,
+    });
   }
 }

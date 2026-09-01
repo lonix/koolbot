@@ -1,5 +1,6 @@
 import { StringSelectMenuInteraction, ChannelType } from "discord.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 
 export async function handleVCTransferSelect(
@@ -81,7 +82,7 @@ export async function handleVCTransferSelect(
     });
   } catch (error) {
     logger.error("Error transferring ownership:", error);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Failed to transfer ownership. Please try again.",
       ephemeral: true,
     });

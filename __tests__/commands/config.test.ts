@@ -105,12 +105,14 @@ describe("Config Command — execute", () => {
       permissionsBitfield?: string;
     } = {},
   ): ChatInputCommandInteraction {
-    deferReply = jest.fn().mockResolvedValue(undefined as never);
     editReply = jest.fn().mockResolvedValue(undefined as never);
     userSend = jest.fn().mockResolvedValue(undefined as never);
 
-    return {
-      deferReply,
+    // Mirror discord.js: `deferReply()` flips `deferred`, which is what
+    // `safeReply` reads to choose `editReply` over `reply`.
+    const interaction = {
+      deferred: false,
+      replied: false,
       editReply,
       guildId: overrides.guildId === undefined ? "g1" : overrides.guildId,
       member:
@@ -123,7 +125,14 @@ describe("Config Command — execute", () => {
         id: overrides.userId ?? "u1",
         send: userSend,
       },
-    } as unknown as ChatInputCommandInteraction;
+    };
+
+    deferReply = jest.fn().mockImplementation(async () => {
+      interaction.deferred = true;
+    });
+    (interaction as { deferReply?: unknown }).deferReply = deferReply;
+
+    return interaction as unknown as ChatInputCommandInteraction;
   }
 
   beforeEach(() => {

@@ -15,6 +15,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { ConfigService } from "../services/config-service.js";
 import {
   UserVoicePreferences,
@@ -314,12 +315,10 @@ export async function handleVCPresetButton(
     }
   } catch (error) {
     logger.error("Error handling VC preset button:", error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: "❌ An error occurred while processing your request.",
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    await safeReply(interaction, {
+      content: "❌ An error occurred while processing your request.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 }
 
@@ -369,12 +368,10 @@ export async function handleVCPresetSelect(
     });
   } catch (error) {
     logger.error("Error handling VC preset select:", error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: "❌ An error occurred while processing your request.",
-        flags: MessageFlags.Ephemeral,
-      });
-    }
+    await safeReply(interaction, {
+      content: "❌ An error occurred while processing your request.",
+      flags: MessageFlags.Ephemeral,
+    });
   }
 }
 
@@ -545,7 +542,7 @@ async function toggleDefault(
     // reply here; unexpected errors (DB/Discord) propagate to the outer
     // handler so they're logged and surfaced generically.
     if (error instanceof VoicePrefsValidationError) {
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `❌ ${error.message}`,
         flags: MessageFlags.Ephemeral,
       });
@@ -581,7 +578,7 @@ async function deletePreset(
     // As in toggleDefault: translate only the known validation/missing case;
     // rethrow unexpected errors for the outer handler to log and report.
     if (error instanceof VoicePrefsValidationError) {
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `❌ ${error.message}`,
         flags: MessageFlags.Ephemeral,
       });

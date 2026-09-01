@@ -1,5 +1,6 @@
 import { ModalSubmitInteraction, ChannelType } from "discord.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
 import {
@@ -90,12 +91,10 @@ export async function handleVCModal(
     }
   } catch (error) {
     logger.error("Error handling VC modal:", error);
-    if (!interaction.replied && !interaction.deferred) {
-      await interaction.reply({
-        content: "❌ An error occurred while processing your request.",
-        ephemeral: true,
-      });
-    }
+    await safeReply(interaction, {
+      content: "❌ An error occurred while processing your request.",
+      ephemeral: true,
+    });
   }
 }
 
@@ -149,7 +148,7 @@ async function handleNameModal(
     });
   } catch (error) {
     logger.error("Error renaming channel:", error);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Failed to rename channel. Please try again.",
       ephemeral: true,
     });
@@ -214,7 +213,7 @@ async function handleSavePresetModal(
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `❌ ${error.message}`,
         ephemeral: true,
       });
@@ -275,7 +274,7 @@ async function handleRenamePresetModal(
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
-      await interaction.reply({
+      await safeReply(interaction, {
         content: `❌ ${error.message}`,
         ephemeral: true,
       });
