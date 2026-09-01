@@ -1,5 +1,10 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { Client, Role, Message } from "discord.js";
+import {
+  DiscordAPIError,
+  type Client,
+  type Role,
+  type Message,
+} from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
   default: {
@@ -73,7 +78,10 @@ function primeGuild(opts: {
   message?: unknown;
   roleError?: unknown;
   messageError?: unknown;
-}): void {
+  channel?: unknown;
+  channelError?: unknown;
+  guildId?: string;
+}): { channelFetch: jest.Mock } {
   const roleFetch = jest.fn<() => Promise<unknown>>();
   if (opts.roleError !== undefined) {
     roleFetch.mockRejectedValue(opts.roleError);
@@ -92,16 +100,31 @@ function primeGuild(opts: {
     isTextBased: () => true,
     messages: { fetch: messageFetch },
   };
+
+  const channelFetch = jest.fn<() => Promise<unknown>>();
+  if (opts.channelError !== undefined) {
+    channelFetch.mockRejectedValue(opts.channelError);
+  } else {
+    channelFetch.mockResolvedValue(
+      opts.channel !== undefined ? opts.channel : messageChannel,
+    );
+  }
+
   const guild = {
-    id: "g1",
+    id: opts.guildId ?? "g1",
     roles: { fetch: roleFetch },
-    channels: {
-      fetch: jest
-        .fn<() => Promise<unknown>>()
-        .mockResolvedValue(messageChannel),
-    },
+    channels: { fetch: channelFetch },
   };
   guildFetch.mockResolvedValue(guild);
+  return { channelFetch };
+}
+
+/** A Discord REST error carrying a confirmed "entity is gone" numeric code. */
+function unknownEntityError(code: number): DiscordAPIError {
+  return Object.assign(Object.create(DiscordAPIError.prototype), {
+    code,
+    message: `Unknown entity (${code})`,
+  }) as DiscordAPIError;
 }
 
 function makeMessage(opts: { hasOwnReaction: boolean }): {
@@ -200,6 +223,72 @@ describe("ReactionRoleService.reconcileConfigs", () => {
     primeGuild({
       role: { id: "role1", name: "Cool" },
       messageError: new Error("504 gateway timeout"),
+    });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(config.isArchived).toBe(false);
+    expect(config.save).not.toHaveBeenCalled();
+  });
+
+  it("archives every mapping when the shared message channel is confirmed deleted (#870)", async () => {
+    // The channel was deleted while the bot was down, so handleChannelDelete
+    // never fired; reconciliation has to pick up the slack. A bind-only mapping
+    // has no channelId of its own and must be archived all the same.
+    const bindOnly = makeConfig({ _id: "cfg-bind" });
+    const owned = makeConfig({ _id: "cfg-owned", channelId: "chan1" });
+    find.mockResolvedValue([bindOnly, owned]);
+    const { channelFetch } = primeGuild({
+      role: { id: "role1", name: "Cool" },
+      channelError: unknownEntityError(10003),
+    });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(bindOnly.isArchived).toBe(true);
+    expect(bindOnly.save).toHaveBeenCalledTimes(1);
+    expect(owned.isArchived).toBe(true);
+    expect(owned.save).toHaveBeenCalledTimes(1);
+    // The message-channel id is global, so one fetch decides the whole guild.
+    expect(channelFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("archives when the message channel fetch resolves to null (#870)", async () => {
+    const config = makeConfig();
+    find.mockResolvedValue([config]);
+    primeGuild({ role: { id: "role1", name: "Cool" }, channel: null });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(config.isArchived).toBe(true);
+    expect(config.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT archive on a transient message-channel fetch error", async () => {
+    const config = makeConfig();
+    find.mockResolvedValue([config]);
+    // Not a confirmed 10003, so the mapping must survive the pass untouched.
+    primeGuild({
+      role: { id: "role1", name: "Cool" },
+      channelError: new Error("503 service unavailable"),
+    });
+    const { service } = createService();
+
+    await service.reconcileConfigs();
+
+    expect(config.isArchived).toBe(false);
+    expect(config.save).not.toHaveBeenCalled();
+  });
+
+  it("does NOT archive when the message channel is not text-based", async () => {
+    const config = makeConfig();
+    find.mockResolvedValue([config]);
+    primeGuild({
+      role: { id: "role1", name: "Cool" },
+      channel: { isTextBased: () => false },
     });
     const { service } = createService();
 
