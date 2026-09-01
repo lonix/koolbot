@@ -22,6 +22,7 @@ import {
   PartialMessage,
   DMChannel,
   NonThreadGuildBasedChannel,
+  GuildTextBasedChannel,
   DiscordAPIError,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
@@ -56,9 +57,13 @@ export const REACTION_ROLE_SELECT_ID = "reactrole:sel";
  * null from the channel manager); anything else — a timeout, a 5xx, a missing
  * permission, a channel that is no longer text-based — is `unavailable` and
  * must leave the guild's mappings alone.
+ *
+ * `ok` carries a `GuildTextBasedChannel` rather than a `TextChannel`: that is
+ * exactly what `isTextBased()` narrows to, and an announcement channel or a
+ * thread is a perfectly valid home for a reaction-role message.
  */
 type MessageChannelResolution =
-  | { status: "ok"; channel: TextChannel }
+  | { status: "ok"; channel: GuildTextBasedChannel }
   | { status: "deleted" }
   | { status: "unavailable" };
 
@@ -317,9 +322,7 @@ export class ReactionRoleService {
 
     let resolution: MessageChannelResolution;
     try {
-      const channel = (await guild.channels.fetch(
-        messageChannelId,
-      )) as TextChannel | null;
+      const channel = await guild.channels.fetch(messageChannelId);
       if (!channel) {
         resolution = { status: "deleted" };
       } else if (!channel.isTextBased()) {
