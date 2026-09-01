@@ -49,6 +49,19 @@ import {
 export const REACTION_ROLE_BUTTON_PREFIX = "reactrole:btn:";
 export const REACTION_ROLE_SELECT_ID = "reactrole:sel";
 
+/**
+ * Outcome of resolving the shared `reactionroles.message_channel_id` channel
+ * during a reconciliation pass. `deleted` is only ever reported for a
+ * *confirmed* deletion (a `10003 Unknown Channel` REST error, or an explicit
+ * null from the channel manager); anything else — a timeout, a 5xx, a missing
+ * permission, a channel that is no longer text-based — is `unavailable` and
+ * must leave the guild's mappings alone.
+ */
+type MessageChannelResolution =
+  | { status: "ok"; channel: TextChannel }
+  | { status: "deleted" }
+  | { status: "unavailable" };
+
 export class ReactionRoleService {
   private static instance: ReactionRoleService;
   private client: Client;
@@ -126,9 +139,14 @@ export class ReactionRoleService {
 
   /**
    * Startup reconciliation (#814). For every active reaction-role config,
-   * confirm the reaction message and the target role still exist; archive the
-   * config when either is gone, and otherwise re-add the bot's own base
-   * reaction if a member (or Discord) cleared it while the bot was offline.
+   * confirm the shared message channel, the reaction message and the target
+   * role still exist; archive the config when any of them is gone, and
+   * otherwise re-add the bot's own base reaction if a member (or Discord)
+   * cleared it while the bot was offline.
+   *
+   * Archiving is only ever driven by a *confirmed* deletion (10003 Unknown
+   * Channel / 10008 Unknown Message / 10011 Unknown Role, or an explicit null);
+   * any other failure skips the config for this pass.
    *
    * Best-effort and defensive: a failure on one config is logged and never
    * aborts the pass or crashes startup. Bulk REST work goes through
@@ -159,6 +177,10 @@ export class ReactionRoleService {
 
     let archived = 0;
     let repaired = 0;
+
+    // The message-channel id is global, so its fate is decided once per guild
+    // rather than re-fetched for every config in that guild.
+    const messageChannels = new Map<string, MessageChannelResolution>();
 
     for (const config of configs) {
       try {
@@ -195,25 +217,28 @@ export class ReactionRoleService {
         if (!messageChannelId) {
           continue;
         }
-        let messageChannel: TextChannel | null;
-        try {
-          messageChannel = (await guild.channels.fetch(
-            messageChannelId,
-          )) as TextChannel | null;
-        } catch (error) {
-          // A deleted message channel takes every mapping's message with it,
-          // but that is handled live by handleChannelDelete; here we only skip
-          // (archiving all mappings off one shared-channel fetch would be too
-          // blunt, and the message-channel id is global rather than per-row).
-          logger.warn(
-            `Reaction role reconciliation: could not fetch message channel ${messageChannelId}, skipping`,
-            error,
+        // A deleted message channel takes every mapping's message with it.
+        // `handleChannelDelete` covers that live, but the event is delivered to
+        // nobody when the channel is deleted while the bot is down, so a
+        // *confirmed* deletion archives here too — mirroring the role (10011)
+        // and message (10008) paths in this same loop (#870).
+        const resolution = await this.resolveMessageChannel(
+          guild,
+          messageChannelId,
+          messageChannels,
+        );
+        if (resolution.status === "deleted") {
+          await this.archiveConfig(
+            config,
+            `reaction message channel ${messageChannelId} no longer exists`,
           );
+          archived++;
           continue;
         }
-        if (!messageChannel || !messageChannel.isTextBased()) {
+        if (resolution.status === "unavailable") {
           continue;
         }
+        const messageChannel = resolution.channel;
 
         // Only a confirmed Unknown Message (10008) means the reaction message
         // was deleted; transient fetch failures skip rather than archive.
@@ -269,6 +294,62 @@ export class ReactionRoleService {
     logger.info(
       `Reaction role reconciliation complete: ${configs.length} checked, ${archived} archived, ${repaired} reaction(s) repaired`,
     );
+  }
+
+  /**
+   * Resolve the shared `reactionroles.message_channel_id` channel for a guild,
+   * memoized for the lifetime of one reconciliation pass so a single fetch
+   * decides the fate of every mapping in that guild.
+   *
+   * Only a confirmed `10003 Unknown Channel` (or an explicit null, which means
+   * the same thing) reports `deleted`; every other failure reports
+   * `unavailable` so a transient blip can never mass-archive a healthy guild.
+   */
+  private async resolveMessageChannel(
+    guild: Guild,
+    messageChannelId: string,
+    cache: Map<string, MessageChannelResolution>,
+  ): Promise<MessageChannelResolution> {
+    const cached = cache.get(guild.id);
+    if (cached) {
+      return cached;
+    }
+
+    let resolution: MessageChannelResolution;
+    try {
+      const channel = (await guild.channels.fetch(
+        messageChannelId,
+      )) as TextChannel | null;
+      if (!channel) {
+        resolution = { status: "deleted" };
+      } else if (!channel.isTextBased()) {
+        logger.warn(
+          `Reaction role reconciliation: message channel ${messageChannelId} is not text-based, skipping`,
+        );
+        resolution = { status: "unavailable" };
+      } else {
+        resolution = { status: "ok", channel };
+      }
+    } catch (error) {
+      if (this.isUnknownEntityError(error, 10003)) {
+        resolution = { status: "deleted" };
+      } else {
+        logger.warn(
+          `Reaction role reconciliation: could not fetch message channel ${messageChannelId}, skipping`,
+          error,
+        );
+        resolution = { status: "unavailable" };
+      }
+    }
+
+    if (resolution.status === "deleted") {
+      logger.warn(
+        `Reaction role reconciliation: message channel ${messageChannelId} no longer exists in guild ${guild.id}; archiving its mappings`,
+      );
+    }
+
+    cache.set(guild.id, resolution);
+    return resolution;
   }
 
   /**
