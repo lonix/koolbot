@@ -410,9 +410,11 @@ async function gracefulShutdown(signal: string): Promise<void> {
     await runWithTimeout(
       async () => {
         // GUILD_ID is a bootstrap value read directly from the environment
-        // (see env.ts), so we don't depend on configService here — that
-        // keeps this path working even if a signal arrives before the
-        // ConfigService singleton has been wired up.
+        // (see env.ts) rather than through configService, so the guild lookup
+        // still resolves if a signal arrives before ConfigService has been
+        // wired up. Resolving the lobby itself does read ConfigService-managed
+        // keys (`voicechannels.category_id` / `.lobby.*`);
+        // renameLobbyToOffline() logs and skips if they don't resolve.
         const guildId = env.guildId ?? "";
         if (guildId) {
           const guild = await client.guilds.fetch(guildId);
