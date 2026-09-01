@@ -3186,15 +3186,18 @@ describe("Settings page accessibility (#854)", () => {
     );
   });
 
-  it("makes an invalid cron group focusable so the focus-move script can reach it", () => {
+  it("marks an invalid cron group without hard-coding its focusability", () => {
     const html = renderSettingsPage({
       ...COMMON,
       groups: a11yGroups,
       invalidKeys: ["x.schedule"],
     });
-    expect(html).toMatch(
-      /<div class="cron-picker"[^>]*aria-invalid="true" tabindex="-1"/,
-    );
+    const cronTag = html.match(/<div class="cron-picker"[^>]*>/)?.[0] ?? "";
+    expect(cronTag).toContain('aria-invalid="true"');
+    // `tabindex` is added by the client scripts, which tag what they add so it
+    // can be removed once a later save accepts the value. Emitting it here
+    // would cover only the server-rendered rejection and leave it behind.
+    expect(cronTag).not.toContain("tabindex");
   });
 
   it("labels the YAML import textarea and links its help paragraph", () => {

@@ -482,6 +482,20 @@ const CASCADE_DISABLE_SCRIPT =
   "master.addEventListener('change',apply);apply()}" +
   "document.querySelectorAll('[data-cascade-master]').forEach(wire)})();";
 
+// Focus a control the server rejected (#854). Shared verbatim by the AJAX save
+// script and the on-load focus script so the two can't drift. A rejected cron
+// key's target is the `.cron-picker` group `<div>`, which isn't focusable on
+// its own, so give a non-native target a `tabindex` — tagged with
+// `data-a11y-tabindex` so `clearInvalid` removes exactly what was added rather
+// than leaving a stale focus target on a field a later save accepted.
+const FOCUS_INVALID_FN =
+  "function focusInvalid(el){if(!el)return;" +
+  "if(!el.hasAttribute('tabindex')&&" +
+  "!/^(a|button|input|select|textarea)$/i.test(el.tagName)){" +
+  "el.setAttribute('tabindex','-1');el.setAttribute('data-a11y-tabindex','')}" +
+  "try{el.focus()}catch(e){}" +
+  "try{el.scrollIntoView({block:'center'})}catch(e){}}";
+
 // AJAX section save (#555). Each Settings category is its own
 // `POST /admin/settings/save-section` form. A plain submit 303-redirects
 // back to /admin/settings, reloading the page and dropping the admin at the
@@ -501,6 +515,7 @@ const CASCADE_DISABLE_SCRIPT =
 // save-section route.
 const SETTINGS_SAVE_SCRIPT =
   "(function(){" +
+  FOCUS_INVALID_FN +
   "var forms=document.querySelectorAll('form[action=\"/admin/settings/save-section\"]');" +
   "if(!forms.length)return;" +
   // The flash node is given an id so a rejected control can point its
@@ -527,9 +542,12 @@ const SETTINGS_SAVE_SCRIPT =
   "else el.removeAttribute('aria-describedby');" +
   "el.removeAttribute('data-describedby-base')});" +
   // Drop the server-rendered "Rejected" notes too, so nothing is left
-  // describing a field the new save may have accepted.
+  // describing a field the new save may have accepted, and give back the
+  // focusability `focusInvalid` added to reach a group target.
   "Array.prototype.forEach.call(form.querySelectorAll('.settings-error'),function(el){" +
-  "if(el.parentNode)el.parentNode.removeChild(el)})}" +
+  "if(el.parentNode)el.parentNode.removeChild(el)});" +
+  "Array.prototype.forEach.call(form.querySelectorAll('[data-a11y-tabindex]'),function(el){" +
+  "el.removeAttribute('tabindex');el.removeAttribute('data-a11y-tabindex')})}" +
   "function markInvalid(form,keys,msgId){var first=null;" +
   "for(var i=0;i<keys.length;i++){" +
   "if(typeof keys[i]!=='string')continue;" +
@@ -540,9 +558,7 @@ const SETTINGS_SAVE_SCRIPT =
   "if(msgId)el.setAttribute('aria-describedby',base?base+' '+msgId:msgId);" +
   "el.setAttribute('aria-invalid','true');" +
   "if(!first)first=el}" +
-  "if(!first)return;" +
-  "try{first.focus()}catch(e){}" +
-  "try{first.scrollIntoView({block:'center'})}catch(e){}}" +
+  "focusInvalid(first)}" +
   "function applyResult(form,data,msgId){clearInvalid(form);" +
   "var keys=data&&Object.prototype.toString.call(data.invalidKeys)==='[object Array]'" +
   "?data.invalidKeys:null;" +
@@ -611,10 +627,8 @@ const SETTINGS_SAVE_SCRIPT =
 // full page load, and no-ops on every page that renders nothing invalid.
 const INVALID_FOCUS_SCRIPT =
   "(function(){" +
-  "var el=document.querySelector('[aria-invalid=\"true\"]');" +
-  "if(!el||typeof el.focus!=='function')return;" +
-  "try{el.focus()}catch(e){}" +
-  "try{el.scrollIntoView({block:'center'})}catch(e){}" +
+  FOCUS_INVALID_FN +
+  "focusInvalid(document.querySelector('[aria-invalid=\"true\"]'))" +
   "})();";
 
 function renderNav(

@@ -476,8 +476,10 @@ function renderCronPicker(
   // single control a `<label for>` can point at. Expose the cluster as a
   // labelled group instead: the row caption names it and any help / warning
   // text describes it (#854). Each inner control keeps its own `aria-label`.
-  // `tabindex="-1"` on an invalid group is what lets the "focus the first
-  // rejected field" script land on a cron row — a plain <div> isn't focusable.
+  // Making an invalid group focusable is left to the client scripts, which do
+  // it for both the server-rendered and the AJAX rejection and tag what they
+  // added so it can be undone — emitting `tabindex` here would have covered
+  // only the former and left the attribute behind once the value was accepted.
   const groupAttrs =
     a11y.labelledBy || a11y.describedBy
       ? ` role="group"` +
@@ -489,7 +491,7 @@ function renderCronPicker(
           ? ` aria-describedby="${escapeHtml(a11y.describedBy)}"`
           : "") +
         (a11y.invalid
-          ? ` aria-invalid="true" tabindex="-1"` +
+          ? ` aria-invalid="true"` +
             ` data-describedby-base="${escapeHtml(a11y.describedByBase ?? "")}"`
           : "")
       : "";

@@ -144,6 +144,14 @@ describe("renderAdminPage", () => {
     expect(html).toContain("data-describedby-base");
     // A full page load (the no-JS save path) focuses the first marked field.
     expect(html).toContain("document.querySelector('[aria-invalid=\"true\"]')");
+    // A cron row's target is the group <div>, which isn't focusable on its
+    // own, so focusInvalid gives a non-native target a tagged `tabindex` and
+    // clearInvalid takes back exactly what it added.
+    expect(html).toContain("el.setAttribute('tabindex','-1')");
+    expect(html).toContain(
+      "!/^(a|button|input|select|textarea)$/i.test(el.tagName)",
+    );
+    expect(html).toContain("form.querySelectorAll('[data-a11y-tabindex]')");
     // Styling: an invalid control is outlined, and off-screen labels stay in
     // the accessibility tree.
     expect(html).toContain('[aria-invalid="true"]{outline:2px solid #dc2626');
