@@ -300,6 +300,15 @@ const STYLE = [
   // A static class (not toggled by the cascade script) so an enabled section
   // master can't strip the greying off a still-dependency-locked control.
   ".dep-off{opacity:.5}",
+  // Off-screen but still in the accessibility tree — used for labels that
+  // name a control whose caption is carried by a column header or adjacent
+  // cell rather than by text of its own (#854).
+  ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;" +
+    "overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}",
+  // A control the last save rejected (#854). The outline gives sighted users
+  // the same "this field" signal that `aria-invalid` gives a screen reader.
+  '[aria-invalid="true"]{outline:2px solid #dc2626;outline-offset:1px}',
+  '.cron-picker[aria-invalid="true"]{outline-offset:3px}',
   ".wizard-features{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.75rem;margin-bottom:1rem}",
   ".feature-card{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.75rem 1rem;display:flex;gap:.75rem;align-items:flex-start}",
   ".feature-card input{margin-top:.2rem;flex-shrink:0}",
@@ -473,6 +482,20 @@ const CASCADE_DISABLE_SCRIPT =
   "master.addEventListener('change',apply);apply()}" +
   "document.querySelectorAll('[data-cascade-master]').forEach(wire)})();";
 
+// Focus a control the server rejected (#854). Shared verbatim by the AJAX save
+// script and the on-load focus script so the two can't drift. A rejected cron
+// key's target is the `.cron-picker` group `<div>`, which isn't focusable on
+// its own, so give a non-native target a `tabindex` — tagged with
+// `data-a11y-tabindex` so `clearInvalid` removes exactly what was added rather
+// than leaving a stale focus target on a field a later save accepted.
+const FOCUS_INVALID_FN =
+  "function focusInvalid(el){if(!el)return;" +
+  "if(!el.hasAttribute('tabindex')&&" +
+  "!/^(a|button|input|select|textarea)$/i.test(el.tagName)){" +
+  "el.setAttribute('tabindex','-1');el.setAttribute('data-a11y-tabindex','')}" +
+  "try{el.focus()}catch(e){}" +
+  "try{el.scrollIntoView({block:'center'})}catch(e){}}";
+
 // AJAX section save (#555). Each Settings category is its own
 // `POST /admin/settings/save-section` form. A plain submit 303-redirects
 // back to /admin/settings, reloading the page and dropping the admin at the
@@ -492,15 +515,54 @@ const CASCADE_DISABLE_SCRIPT =
 // save-section route.
 const SETTINGS_SAVE_SCRIPT =
   "(function(){" +
+  FOCUS_INVALID_FN +
   "var forms=document.querySelectorAll('form[action=\"/admin/settings/save-section\"]');" +
   "if(!forms.length)return;" +
+  // The flash node is given an id so a rejected control can point its
+  // `aria-describedby` at it and carry the server's reason (#854).
+  "var seq=0;" +
   "function flashEl(form){var card=form.closest('.card');if(!card)return null;" +
   "var n=card.querySelector('.section-flash');" +
   "if(!n){n=document.createElement('div');n.className='notice section-flash';" +
-  "form.parentNode.insertBefore(n,form)}return n}" +
+  "form.parentNode.insertBefore(n,form)}" +
+  "if(!n.id)n.id='section-flash-'+(++seq);return n}" +
   "function show(form,type,text){var n=flashEl(form);if(!n)return;" +
   "var cls=type==='ok'?'ok':type==='warn'?'warn':'err';" +
-  "n.className='notice section-flash '+cls;n.textContent=text}" +
+  "n.className='notice section-flash '+cls;n.textContent=text;return n}" +
+  // Rejected-field marking (#854). Without this an AJAX save tells a screen
+  // reader that "3 values were invalid" and nothing about which of the ~318
+  // controls on the page they were. The pre-existing `aria-describedby` is
+  // stashed on the element so clearing restores it exactly.
+  "function clearInvalid(form){" +
+  "Array.prototype.forEach.call(form.querySelectorAll('[aria-invalid]'),function(el){" +
+  "el.removeAttribute('aria-invalid');" +
+  "var base=el.getAttribute('data-describedby-base');" +
+  "if(base===null)return;" +
+  "if(base)el.setAttribute('aria-describedby',base);" +
+  "else el.removeAttribute('aria-describedby');" +
+  "el.removeAttribute('data-describedby-base')});" +
+  // Drop the server-rendered "Rejected" notes too, so nothing is left
+  // describing a field the new save may have accepted, and give back the
+  // focusability `focusInvalid` added to reach a group target.
+  "Array.prototype.forEach.call(form.querySelectorAll('.settings-error'),function(el){" +
+  "if(el.parentNode)el.parentNode.removeChild(el)});" +
+  "Array.prototype.forEach.call(form.querySelectorAll('[data-a11y-tabindex]'),function(el){" +
+  "el.removeAttribute('tabindex');el.removeAttribute('data-a11y-tabindex')})}" +
+  "function markInvalid(form,keys,msgId){var first=null;" +
+  "for(var i=0;i<keys.length;i++){" +
+  "if(typeof keys[i]!=='string')continue;" +
+  "var el=document.getElementById('set-'+keys[i]);" +
+  "if(!el||!form.contains(el))continue;" +
+  "var base=el.getAttribute('aria-describedby')||'';" +
+  "el.setAttribute('data-describedby-base',base);" +
+  "if(msgId)el.setAttribute('aria-describedby',base?base+' '+msgId:msgId);" +
+  "el.setAttribute('aria-invalid','true');" +
+  "if(!first)first=el}" +
+  "focusInvalid(first)}" +
+  "function applyResult(form,data,msgId){clearInvalid(form);" +
+  "var keys=data&&Object.prototype.toString.call(data.invalidKeys)==='[object Array]'" +
+  "?data.invalidKeys:null;" +
+  "if(keys&&keys.length)markInvalid(form,keys,msgId)}" +
   "function submit(e,submitter){var form=e.currentTarget;" +
   // Reset buttons retarget via formaction — let those submit natively.
   "if(submitter&&submitter.getAttribute('formaction'))return;" +
@@ -538,8 +600,10 @@ const SETTINGS_SAVE_SCRIPT =
   // own envelope) must NOT be mistaken for a successful save, so fall through.
   "var jt=r.json&&typeof r.json==='object'?r.json.text:null;" +
   "var okStatus=r.status>=200&&r.status<300;" +
-  "if(typeof jt==='string'&&jt){show(form,(r.json.type)||(okStatus?'ok':'err'),jt);return}" +
-  "if(okStatus){show(form,'ok','Saved.');return}" +
+  "if(typeof jt==='string'&&jt){" +
+  "var n=show(form,(r.json.type)||(okStatus?'ok':'err'),jt);" +
+  "applyResult(form,r.json,n?n.id:'');return}" +
+  "if(okStatus){show(form,'ok','Saved.');clearInvalid(form);return}" +
   // Non-2xx with no usable JSON: surface the status plus any readable text.
   "var detail=(r.text||'').replace(/<[^>]*>/g,' ').replace(/\\s+/g,' ').trim();" +
   "var msg='Save failed ('+r.status+').';" +
@@ -553,6 +617,19 @@ const SETTINGS_SAVE_SCRIPT =
   "if(b&&form.contains(b))last=b}});" +
   "form.addEventListener('submit',function(e){submit(e,e.submitter||last);last=null})}" +
   "forms.forEach(wire)})();";
+
+// Move focus to the first control the server just rejected (#854). The no-JS
+// Settings save 303-redirects back with `?invalid=<keys>`, so the rejected
+// fields are already marked `aria-invalid` in the delivered HTML — without
+// this, a screen-reader user lands at the top of a page of ~318 controls with
+// only a banner telling them *something* was refused. The AJAX save path does
+// its own focus move in SETTINGS_SAVE_SCRIPT; this one only ever fires on a
+// full page load, and no-ops on every page that renders nothing invalid.
+const INVALID_FOCUS_SCRIPT =
+  "(function(){" +
+  FOCUS_INVALID_FN +
+  "focusInvalid(document.querySelector('[aria-invalid=\"true\"]'))" +
+  "})();";
 
 function renderNav(
   active: string,
@@ -635,6 +712,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<script>${CRON_PICKER_SCRIPT}</script>`,
     `<script>${CASCADE_DISABLE_SCRIPT}</script>`,
     `<script>${SETTINGS_SAVE_SCRIPT}</script>`,
+    `<script>${INVALID_FOCUS_SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }

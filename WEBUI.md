@@ -31,6 +31,7 @@ This document explains how to enable it, expose it, and operate it.
 - [Session lifecycle and revocation](#session-lifecycle-and-revocation)
 - [Prometheus / OpenMetrics endpoint](#prometheus--openmetrics-endpoint)
 - [What the Web UI lets you do](#what-the-web-ui-lets-you-do)
+- [Accessibility](#accessibility)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -1032,6 +1033,39 @@ User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 Discord exactly as before. The per-voice-channel control panel (rename,
 privacy, invite, transfer, live, waiting room) also stays in Discord —
 it's a member-facing feature, not an admin tool.
+
+---
+
+## Accessibility
+
+The admin panel is plain server-rendered HTML with no client-side framework,
+and the conventions below are what keep it usable with a screen reader. Follow
+them when adding a page or a control.
+
+**Every control is named.** A control's caption must be a real `<label for>`
+(or a wrapping `<label>`), not adjacent text. On the Settings page each row's
+control carries `id="set-<config key>"` and its caption is a `<label for>`
+pointing at it; the Setup Wizard uses `id="wiz-<config key>"` the same way.
+Where a control's meaning comes from a column header rather than text of its
+own — the Permissions role picker, for instance — add a `class="visually-hidden"`
+label that names it explicitly.
+
+**Help text is linked, not just adjacent.** Descriptions, "minimum
+recommended value" warnings and dependency hints each render with an `id`, and
+the control lists those ids in `aria-describedby`. Text that merely sits next
+to a field is never announced with it.
+
+**Multi-input controls are groups.** The cron picker has no single element to
+label, so it renders as `role="group"` with `aria-labelledby` pointing at the
+row caption, and each inner input keeps its own `aria-label`.
+
+**Rejected values are pointed at.** When a save is refused, the server echoes
+the offending config keys — as `invalidKeys` in the JSON reply for the AJAX
+save, and as `?invalid=<keys>` on the no-JS redirect. Those controls render
+`aria-invalid="true"` with an inline "Rejected" note, their `aria-describedby`
+is extended to the flash banner carrying the reason, and focus moves to the
+first of them. A page-level "something was invalid" banner on its own is not
+enough on a page with hundreds of fields.
 
 ---
 

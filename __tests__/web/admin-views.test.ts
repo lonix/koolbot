@@ -347,7 +347,7 @@ describe("renderSettingsPage", () => {
     expect(html).toContain('href="/admin/settings/export"');
     expect(html).toContain('href="/admin/wizard"');
     expect(html).toContain('action="/admin/settings/import"');
-    expect(html).toContain('<textarea name="yaml"');
+    expect(html).toContain('<textarea id="import-yaml" name="yaml"');
   });
 
   it("renders a flash banner when provided", () => {
@@ -380,7 +380,7 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(onHtml).toMatch(
-      /type="checkbox" name="value_x\.enabled" value="true" checked/,
+      /type="checkbox"[^>]*name="value_x\.enabled" value="true" checked/,
     );
 
     const offHtml = renderSettingsPage({
@@ -402,7 +402,7 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(offHtml).not.toMatch(
-      /type="checkbox" name="value_x\.enabled" value="true" checked/,
+      /type="checkbox"[^>]*name="value_x\.enabled" value="true" checked/,
     );
   });
 
@@ -432,8 +432,8 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toContain(
-      '<select name="value_voicetracking.announcements.channel_id">',
+    expect(html).toMatch(
+      /<select[^>]*name="value_voicetracking\.announcements\.channel_id"[^>]*>/,
     );
     expect(html).toContain('<option value="111">#general</option>');
     expect(html).toContain(
@@ -528,7 +528,7 @@ describe("renderSettingsPage", () => {
       ],
     });
     expect(html).toMatch(
-      /<select name="value_messagetracking\.excluded_channels" multiple/,
+      /<select[^>]*name="value_messagetracking\.excluded_channels" multiple/,
     );
     expect(html).toContain('<option value="111" selected>#general</option>');
     expect(html).toContain('<option value="222">#afk</option>');
@@ -600,7 +600,9 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toMatch(/<select name="value_quotes\.delete_roles" multiple/);
+    expect(html).toMatch(
+      /<select[^>]*name="value_quotes\.delete_roles" multiple/,
+    );
     expect(html).toContain('<option value="r1">@Admin</option>');
     expect(html).toContain('<option value="r2" selected>@Mod</option>');
   });
@@ -700,7 +702,9 @@ describe("renderSettingsPage", () => {
         },
       ],
     });
-    expect(html).toContain('<select name="value_leaderboard_roles.period">');
+    expect(html).toMatch(
+      /<select name="value_leaderboard_roles\.period"[^>]*>/,
+    );
     expect(html).toContain('<option value="week">This week</option>');
     expect(html).toContain(
       '<option value="month" selected>This month</option>',
@@ -899,7 +903,7 @@ describe("renderSettingsPage", () => {
     );
     // The visible checkbox is still disabled + dep-locked.
     expect(html).toMatch(
-      /type="checkbox" name="value_digest\.include_achievements"[^>]*\bdisabled\b[^>]*data-dep-locked/,
+      /type="checkbox"[^>]*name="value_digest\.include_achievements"[^>]*\bdisabled\b[^>]*data-dep-locked/,
     );
     // The master toggle (dependency met) is neither locked nor round-tripped
     // with a hidden value field.
@@ -2281,7 +2285,7 @@ describe("renderWizardStepPage", () => {
     // Channel key → text-channel dropdown with the current value selected,
     // carrying an id its label points at (#703).
     expect(html).toMatch(
-      /<select id="wiz-reactionroles.message_channel_id" name="value_reactionroles.message_channel_id">/,
+      /<select id="wiz-reactionroles\.message_channel_id"[^>]*name="value_reactionroles\.message_channel_id"[^>]*>/,
     );
     expect(html).toContain('for="wiz-reactionroles.message_channel_id"');
     expect(html).toContain(
@@ -2290,12 +2294,12 @@ describe("renderWizardStepPage", () => {
     expect(html).toContain('<option value="chan-2">#general</option>');
     // Category key → category dropdown.
     expect(html).toMatch(
-      /<select id="wiz-voicechannels.category_id" name="value_voicechannels.category_id">/,
+      /<select id="wiz-voicechannels\.category_id"[^>]*name="value_voicechannels\.category_id"[^>]*>/,
     );
     expect(html).toContain('<option value="cat-1">#Voice Channels</option>');
     // Role key → role dropdown with the `@` prefix.
     expect(html).toMatch(
-      /<select id="wiz-leaderboard_roles.some_role" name="value_leaderboard_roles.some_role">/,
+      /<select id="wiz-leaderboard_roles\.some_role"[^>]*name="value_leaderboard_roles\.some_role"[^>]*>/,
     );
     expect(html).toContain('<option value="role-1">@Moderator</option>');
     // No raw free-text input is emitted for any of these picker keys.
@@ -2329,7 +2333,7 @@ describe("renderWizardStepPage", () => {
     // The wizard shares the Settings page's value_-prefixed field name, with an
     // id the label points at.
     expect(html).toMatch(
-      /<select name="value_leaderboard_roles.period" id="wiz-leaderboard_roles.period">/,
+      /<select name="value_leaderboard_roles\.period" id="wiz-leaderboard_roles\.period"[^>]*>/,
     );
     expect(html).toContain('for="wiz-leaderboard_roles.period"');
     expect(html).toContain(
@@ -2795,7 +2799,7 @@ describe("renderSettingsPage cron picker", () => {
 
   it("renders the cron picker with mode selector and a hidden value field", () => {
     const html = withCron("0 16 * * 5");
-    expect(html).toContain('<div class="cron-picker" data-mode="weekly">');
+    expect(html).toMatch(/<div class="cron-picker" data-mode="weekly"[^>]*>/);
     // The hidden input is found by the bootstrap script via `.cron-hidden`
     // so its `name` can vary per row under the per-section save form.
     expect(html).toContain(
@@ -2812,7 +2816,7 @@ describe("renderSettingsPage cron picker", () => {
 
   it("falls back to custom mode with the raw cron preserved for unrecognised patterns", () => {
     const html = withCron("*/15 * * * *");
-    expect(html).toContain('<div class="cron-picker" data-mode="custom">');
+    expect(html).toMatch(/<div class="cron-picker" data-mode="custom"[^>]*>/);
     expect(html).toContain(
       '<option value="custom" selected>Custom (cron)</option>',
     );
@@ -2825,7 +2829,7 @@ describe("renderSettingsPage cron picker", () => {
 
   it("renders a daily schedule with the time pre-populated", () => {
     const html = withCron("30 8 * * *");
-    expect(html).toContain('<div class="cron-picker" data-mode="daily">');
+    expect(html).toMatch(/<div class="cron-picker" data-mode="daily"[^>]*>/);
     expect(html).toContain('<option value="daily" selected>Daily</option>');
     expect(html).toContain(
       '<input type="time" class="cron-time" value="08:30">',
@@ -2834,7 +2838,7 @@ describe("renderSettingsPage cron picker", () => {
 
   it("renders a monthly schedule with the day-of-month pre-populated", () => {
     const html = withCron("0 0 15 * *");
-    expect(html).toContain('<div class="cron-picker" data-mode="monthly">');
+    expect(html).toMatch(/<div class="cron-picker" data-mode="monthly"[^>]*>/);
     expect(html).toMatch(
       /<input type="number" class="cron-dom"[^>]*value="15"/,
     );
@@ -3016,5 +3020,245 @@ describe("renderAnalyticsPage (#675 Part B)", () => {
     expect(html).toContain("hg-cell peak");
     // No disabled notice when tracking is on.
     expect(html).not.toContain("voicetracking.enabled");
+  });
+});
+
+// Issue #854: the Settings page captioned every row with a bare `<strong>` in
+// a sibling `<td>`, so all ~318 controls announced as "edit text, blank". The
+// row caption, the help / warning / dependency text beside the control, and
+// the rejected-value markers are all associated by id now.
+describe("Settings page accessibility (#854)", () => {
+  const a11yGroups = [
+    {
+      category: "x",
+      rows: [
+        {
+          key: "x.enabled",
+          label: "Enable X",
+          current: true,
+          defaultValue: false,
+          type: "boolean",
+          description: "Turn X on.",
+          category: "x",
+        },
+        {
+          key: "x.count",
+          label: "Count",
+          current: 2,
+          defaultValue: 10,
+          type: "number",
+          description: "How many.",
+          category: "x",
+          warnBelow: { value: 5, message: "Below 5 is not recommended." },
+        },
+        {
+          key: "x.schedule",
+          label: "Schedule",
+          current: "0 9 * * *",
+          defaultValue: "",
+          type: "cron",
+          description: "When to run.",
+          category: "x",
+        },
+      ],
+    },
+  ];
+
+  it("associates every non-cron control with a <label for> naming the row", () => {
+    const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
+    expect(html).toContain(
+      '<label id="set-x.enabled-label" for="set-x.enabled"><strong>Enable X</strong></label>',
+    );
+    expect(html).toContain(
+      '<label id="set-x.count-label" for="set-x.count"><strong>Count</strong></label>',
+    );
+    expect(html).toMatch(/<input type="checkbox" id="set-x\.enabled"/);
+    expect(html).toMatch(/<input type="number" id="set-x\.count"/);
+  });
+
+  it("links the description cell to the control via aria-describedby", () => {
+    const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
+    expect(html).toContain('<td class="muted" id="set-x.enabled-help">');
+    expect(html).toMatch(
+      /id="set-x\.enabled" aria-describedby="set-x\.enabled-help"/,
+    );
+  });
+
+  it("includes the warnBelow hint in the control's description list", () => {
+    const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
+    expect(html).toContain(
+      '<div class="settings-warn" id="set-x.count-warn" role="status"',
+    );
+    expect(html).toMatch(
+      /id="set-x\.count" aria-describedby="set-x\.count-help set-x\.count-warn"/,
+    );
+  });
+
+  it("links an unmet dependency hint to the locked control", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "digest",
+          rows: [
+            {
+              key: "digest.enabled",
+              label: "Digest",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "Digest master.",
+              category: "digest",
+            },
+            {
+              key: "digest.include_achievements",
+              label: "Include achievements",
+              current: true,
+              defaultValue: false,
+              type: "boolean",
+              description: "Add achievements.",
+              category: "digest",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain(
+      '<div class="settings-dep-hint" id="set-digest.include_achievements-dep" role="note"',
+    );
+    expect(html).toMatch(
+      /id="set-digest\.include_achievements" aria-describedby="[^"]*set-digest\.include_achievements-dep"/,
+    );
+  });
+
+  it("exposes a cron row as a labelled group rather than pointing `for` at nothing", () => {
+    const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
+    // No <label for> — the cron picker has no single control to target.
+    expect(html).not.toContain('for="set-x.schedule"');
+    expect(html).toContain('<div id="set-x.schedule-label">');
+    expect(html).toMatch(
+      /<div class="cron-picker" data-mode="daily" role="group" id="set-x\.schedule" aria-labelledby="set-x\.schedule-label" aria-describedby="set-x\.schedule-help">/,
+    );
+  });
+
+  it("hides the redundant true/false text from the accessibility tree when the checkbox is externally labelled", () => {
+    const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
+    expect(html).toContain('<span class="mono" aria-hidden="true">true</span>');
+  });
+
+  it("names each per-row Reset button after its setting", () => {
+    const html = renderSettingsPage({ ...COMMON, groups: a11yGroups });
+    expect(html).toContain('aria-label="Reset Enable X to its default"');
+    expect(html).toContain('aria-label="Reset Count to its default"');
+  });
+
+  it("marks rejected keys aria-invalid and points them at the flash banner", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: a11yGroups,
+      flash: { type: "err", text: "No changes saved — 1 invalid value." },
+      invalidKeys: ["x.count"],
+    });
+    expect(html).toContain('<div class="notice err" id="settings-flash">');
+    expect(html).toMatch(
+      /id="set-x\.count" aria-describedby="set-x\.count-help set-x\.count-warn set-x\.count-err settings-flash" aria-invalid="true"/,
+    );
+    expect(html).toContain(
+      '<div class="settings-error" id="set-x.count-err" role="alert"',
+    );
+    // The base description is stashed so the AJAX save script can restore it
+    // once a later save clears the rejection.
+    expect(html).toContain(
+      'data-describedby-base="set-x.count-help set-x.count-warn"',
+    );
+    // Untouched rows stay clean.
+    expect(html).not.toMatch(/id="set-x\.enabled"[^>]*aria-invalid/);
+  });
+
+  it("omits the flash id from the description list when there is no banner to point at", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: a11yGroups,
+      invalidKeys: ["x.count"],
+    });
+    expect(html).toMatch(
+      /id="set-x\.count" aria-describedby="set-x\.count-help set-x\.count-warn set-x\.count-err" aria-invalid="true"/,
+    );
+  });
+
+  it("marks an invalid cron group without hard-coding its focusability", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: a11yGroups,
+      invalidKeys: ["x.schedule"],
+    });
+    const cronTag = html.match(/<div class="cron-picker"[^>]*>/)?.[0] ?? "";
+    expect(cronTag).toContain('aria-invalid="true"');
+    // `tabindex` is added by the client scripts, which tag what they add so it
+    // can be removed once a later save accepts the value. Emitting it here
+    // would cover only the server-rendered rejection and leave it behind.
+    expect(cronTag).not.toContain("tabindex");
+  });
+
+  it("labels the YAML import textarea and links its help paragraph", () => {
+    const html = renderSettingsPage({ ...COMMON, groups: [] });
+    expect(html).toContain('<label for="import-yaml">YAML to import</label>');
+    expect(html).toContain(
+      '<textarea id="import-yaml" name="yaml" rows="12" aria-describedby="import-yaml-help"',
+    );
+    expect(html).toContain('<p class="muted" id="import-yaml-help"');
+  });
+});
+
+describe("Permissions page accessibility (#854)", () => {
+  it("gives each role multi-select a hidden label and links the Ctrl/⌘ hint", () => {
+    const html = renderPermissionsPage({
+      ...COMMON,
+      commands: ["ping"],
+      roleIds: [],
+      allRoleIds: ["r1"],
+      roleNames: new Map([["r1", "Admin"]]),
+      perCommand: new Map(),
+    });
+    expect(html).toContain(
+      '<label class="visually-hidden" for="perm-roles-ping">Allowed roles for /ping</label>',
+    );
+    expect(html).toContain(
+      '<select id="perm-roles-ping" name="roleIds" multiple size="3" style="min-width:14rem" aria-describedby="perm-hint-ping">',
+    );
+    expect(html).toContain('<span class="muted" id="perm-hint-ping"');
+  });
+});
+
+describe("Wizard step accessibility (#854)", () => {
+  it("links the help text, warning and dependency hint to the control", () => {
+    const html = renderWizardStepPage({
+      ...COMMON,
+      ...EMPTY_PICKERS,
+      stepIndex: 0,
+      totalSteps: 1,
+      featureKey: "voicetracking",
+      settingKeys: ["voicetracking.seen_retention_days"],
+      currentValues: { "voicetracking.seen_retention_days": 2 },
+      defaultValues: { "voicetracking.seen_retention_days": 30 },
+      metadata: {
+        "voicetracking.seen_retention_days": {
+          label: "Retention days",
+          description: "How long to keep sessions.",
+          category: "voicetracking",
+          type: "number",
+          warnBelow: { value: 7, message: "Below 7 days loses history." },
+        },
+      },
+    });
+    expect(html).toContain(
+      '<div class="help" id="wiz-voicetracking.seen_retention_days-help">',
+    );
+    expect(html).toContain(
+      '<div class="settings-warn" id="wiz-voicetracking.seen_retention_days-warn"',
+    );
+    expect(html).toMatch(
+      /id="wiz-voicetracking\.seen_retention_days" aria-describedby="wiz-voicetracking\.seen_retention_days-warn wiz-voicetracking\.seen_retention_days-help"/,
+    );
   });
 });

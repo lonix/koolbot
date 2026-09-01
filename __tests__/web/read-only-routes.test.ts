@@ -4,6 +4,7 @@ import {
   buildSettingRows,
   fetchChannelData,
   VOICE_CHANNELS_SETTING_KEYS,
+  readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
 
@@ -117,5 +118,46 @@ describe("buildSettingRows (#705)", () => {
   it("excludes the feature master voicechannels.enabled from the key list", () => {
     expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
     expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");
+  });
+});
+
+// Issue #854: the Settings page marks the controls a failed save rejected,
+// driven by the `?invalid=` list the redirect carries. The list arrives from
+// the URL, so it is filtered to the shape a config key can take and capped —
+// a hand-crafted redirect must not be able to inject ids into the page or
+// pump an unbounded list through it.
+describe("readInvalidKeys (#854)", () => {
+  it("returns nothing when the param is absent or empty", () => {
+    expect(readInvalidKeys({ query: {} })).toEqual([]);
+    expect(readInvalidKeys({ query: { invalid: "" } })).toEqual([]);
+  });
+
+  it("splits a comma-separated list of dotted config keys", () => {
+    expect(
+      readInvalidKeys({
+        query: { invalid: "quotes.enabled,voicechannels.lobby_channel_name" },
+      }),
+    ).toEqual(["quotes.enabled", "voicechannels.lobby_channel_name"]);
+  });
+
+  it("drops entries that aren't shaped like a config key", () => {
+    expect(
+      readInvalidKeys({
+        query: { invalid: 'quotes.enabled,"><script>,a b,x..y,,ok.key' },
+      }),
+    ).toEqual(["quotes.enabled", "ok.key"]);
+  });
+
+  it("de-duplicates and caps the list", () => {
+    expect(readInvalidKeys({ query: { invalid: "a.b,a.b,c.d" } })).toEqual([
+      "a.b",
+      "c.d",
+    ]);
+    const many = Array.from({ length: 60 }, (_, i) => `x.k${i}`).join(",");
+    expect(readInvalidKeys({ query: { invalid: many } })).toHaveLength(25);
+  });
+
+  it("ignores a repeated param that arrives as an array", () => {
+    expect(readInvalidKeys({ query: { invalid: ["a.b", "c.d"] } })).toEqual([]);
   });
 });

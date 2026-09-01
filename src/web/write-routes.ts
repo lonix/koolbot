@@ -166,14 +166,38 @@ export function wizardApplyFailureMessage(result: WizardApplyResult): string {
   return `Wizard apply failed: ${reason}.`;
 }
 
-function flashRedirect(res: Response, path: string, flash: Flash): void {
+/**
+ * Config keys echoed back on a failed Settings save so the reloaded page can
+ * mark exactly which controls were refused (#854). Capped: the page only needs
+ * enough to point the operator at the first offenders, and an uncapped list of
+ * a 100-key section would push the redirect URL past header/URI limits.
+ */
+export const INVALID_KEYS_MAX = 25;
+
+/** Query string for a flash redirect, exported so its caps can be tested. */
+export function flashRedirectQuery(
+  flash: Flash,
+  invalidKeys: string[] = [],
+): string {
   // Mirror the renderer's 500-char cap on the way out so the redirect
   // URL itself can't balloon to header/URI limits on a noisy failure.
-  const qs = new globalThis.URLSearchParams({
+  const params: Record<string, string> = {
     flash: flash.type,
     msg: truncateFlash(flash.text),
-  }).toString();
-  res.redirect(303, `${path}?${qs}`);
+  };
+  if (invalidKeys.length > 0) {
+    params.invalid = invalidKeys.slice(0, INVALID_KEYS_MAX).join(",");
+  }
+  return new globalThis.URLSearchParams(params).toString();
+}
+
+function flashRedirect(
+  res: Response,
+  path: string,
+  flash: Flash,
+  invalidKeys: string[] = [],
+): void {
+  res.redirect(303, `${path}?${flashRedirectQuery(flash, invalidKeys)}`);
 }
 
 /**
@@ -186,12 +210,20 @@ function respondSectionFlash(
   res: Response,
   flash: Flash,
   redirectTo = "/admin/settings",
+  // Keys whose values the save refused. Both paths carry them so the page can
+  // set `aria-invalid` on those controls and move focus to the first one,
+  // instead of leaving the operator to find the bad field among ~318 (#854).
+  invalidKeys: string[] = [],
 ): void {
   if (wantsJson(req)) {
-    res.status(200).json({ type: flash.type, text: truncateFlash(flash.text) });
+    res.status(200).json({
+      type: flash.type,
+      text: truncateFlash(flash.text),
+      invalidKeys: invalidKeys.slice(0, INVALID_KEYS_MAX),
+    });
     return;
   }
-  flashRedirect(res, redirectTo, flash);
+  flashRedirect(res, redirectTo, flash, invalidKeys);
 }
 
 function getString(req: AuthenticatedRequest, name: string): string {
@@ -603,10 +635,15 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: coerced.reason,
         });
-        flashRedirect(res, redirectTo, {
-          type: "err",
-          text: `Cannot set ${key || "(empty key)"}: ${coerced.reason}.`,
-        });
+        flashRedirect(
+          res,
+          redirectTo,
+          {
+            type: "err",
+            text: `Cannot set ${key || "(empty key)"}: ${coerced.reason}.`,
+          },
+          key ? [key] : [],
+        );
         return;
       }
 
@@ -656,10 +693,12 @@ export function createWriteRouter(
           result: "failure",
           errorMessage: text,
         });
-        flashRedirect(res, redirectTo, {
-          type: "err",
-          text: `Failed to set ${key}: ${text}`,
-        });
+        flashRedirect(
+          res,
+          redirectTo,
+          { type: "err", text: `Failed to set ${key}: ${text}` },
+          [key],
+        );
       }
     }),
   );
@@ -971,6 +1010,7 @@ export function createWriteRouter(
             text: `No changes saved — ${rejected.length} invalid value${rejected.length === 1 ? "" : "s"} in ${category || "section"}: ${detail}.`,
           },
           redirectTo,
+          rejected.map((r) => r.key),
         );
         return;
       }
@@ -1056,6 +1096,7 @@ export function createWriteRouter(
           text: `Saved ${applied.length}/${applied.length + failed.length} in ${label}. Failed: ${firstError.key} (${firstError.reason})${failed.length > 1 ? ` and ${failed.length - 1} more` : ""}.`,
         },
         redirectTo,
+        failed.map((f) => f.key),
       );
     }),
   );
