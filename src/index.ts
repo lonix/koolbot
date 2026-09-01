@@ -410,32 +410,20 @@ async function gracefulShutdown(signal: string): Promise<void> {
     await runWithTimeout(
       async () => {
         // GUILD_ID is a bootstrap value read directly from the environment
-        // (see env.ts), so we don't depend on configService here — that
-        // keeps this path working even if a signal arrives before the
-        // ConfigService singleton has been wired up.
+        // (see env.ts) rather than through configService, so the guild lookup
+        // still resolves if a signal arrives before ConfigService has been
+        // wired up. Resolving the lobby itself does read ConfigService-managed
+        // keys (`voicechannels.category_id` / `.lobby.*`);
+        // renameLobbyToOffline() logs and skips if they don't resolve.
         const guildId = env.guildId ?? "";
         if (guildId) {
           const guild = await client.guilds.fetch(guildId);
-          const offlineLobbyName = configService
-            ? await configService.getString(
-                "voicechannels.lobby.offlinename",
-                "🔴 Lobby",
-              )
-            : "🔴 Lobby";
-
-          // Find the lobby channel and rename it
-          const lobbyChannel = guild.channels.cache.find(
-            (channel) =>
-              channel.name.includes("🟢") &&
-              channel.type === ChannelType.GuildVoice,
-          );
-
-          if (lobbyChannel && lobbyChannel.type === ChannelType.GuildVoice) {
-            await lobbyChannel.setName(offlineLobbyName);
-            logger.info(
-              `✅ Lobby renamed to offline mode: ${offlineLobbyName}`,
-            );
-          }
+          // Delegate to the manager: it resolves the lobby via
+          // `voicechannels.lobby.name` inside the managed category, mirroring
+          // renameLobbyToOnline() on startup. Matching on a hardcoded emoji
+          // here never found the default "Lobby" and could rename an unrelated
+          // channel that happened to contain it (#839).
+          await voiceChannelManager.renameLobbyToOffline(guild);
         }
       },
       5000,
