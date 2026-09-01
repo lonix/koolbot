@@ -1,13 +1,30 @@
 import { ConfigService } from "./config-service.js";
-import { hasEnv } from "../config/env.js";
+import {
+  type ConfigSchema,
+  coerceToSchemaType,
+  getSchemaDefault,
+} from "./config-schema.js";
+import { getEnv, hasEnv } from "../config/env.js";
 import logger from "../utils/logger.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 
+/**
+ * A legacy flat env-var key and the dot-notation schema key that replaced it.
+ *
+ * Deliberately carries **no** default value of its own: the defaults this
+ * migrator backfills come from `config-schema.ts` (see `getSchemaDefault`).
+ * Hardcoding them here is what caused #867 —
+ * six opt-in features (`voicechannels.enabled`, `voicetracking.enabled`,
+ * `voicetracking.seen.enabled`, `voicetracking.announcements.enabled`,
+ * `ping.enabled`, `quotes.enabled`) were persisted as `true` on every fresh
+ * install, silently contradicting `SETTINGS.md` and `defaultConfig`, which
+ * document them as `false`.
+ */
 interface ConfigMigration {
   oldKey: string;
-  newKey: string;
+  newKey: keyof ConfigSchema;
   category: string;
   description: string;
-  defaultValue?: string | number | boolean;
 }
 
 const configMigrations: ConfigMigration[] = [
@@ -17,35 +34,30 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicechannels.enabled",
     category: "voicechannels",
     description: "Enable/disable dynamic voice channel management",
-    defaultValue: "true",
   },
   {
     oldKey: "LOBBY_CHANNEL_NAME",
     newKey: "voicechannels.lobby.name",
     category: "voicechannels",
     description: "Name of the lobby channel",
-    defaultValue: "Lobby",
   },
   {
     oldKey: "LOBBY_CHANNEL_NAME_OFFLINE",
     newKey: "voicechannels.lobby.offlinename",
     category: "voicechannels",
     description: "Name of the offline lobby channel",
-    defaultValue: "Offline Lobby",
   },
   {
     oldKey: "VC_CHANNEL_PREFIX",
     newKey: "voicechannels.channel.prefix",
     category: "voicechannels",
     description: "Prefix for dynamically created channels",
-    defaultValue: "🎮",
   },
   {
     oldKey: "VC_SUFFIX",
     newKey: "voicechannels.channel.suffix",
     category: "voicechannels",
     description: "Suffix for dynamically created channels",
-    defaultValue: "",
   },
 
   // Voice Activity Tracking
@@ -54,14 +66,12 @@ const configMigrations: ConfigMigration[] = [
     newKey: "voicetracking.enabled",
     category: "voicetracking",
     description: "Enable/disable voice activity tracking",
-    defaultValue: true,
   },
   {
     oldKey: "ENABLE_SEEN",
     newKey: "voicetracking.seen.enabled",
     category: "voicetracking",
     description: "Enable/disable last seen tracking",
-    defaultValue: true,
   },
   {
     oldKey: "EXCLUDED_VC_CHANNELS",
@@ -69,21 +79,18 @@ const configMigrations: ConfigMigration[] = [
     category: "voicetracking",
     description:
       "Comma-separated list of voice channel IDs to exclude from tracking",
-    defaultValue: "",
   },
   {
     oldKey: "ENABLE_VC_WEEKLY_ANNOUNCEMENT",
     newKey: "voicetracking.announcements.enabled",
     category: "voicetracking",
     description: "Enable/disable weekly voice channel announcements",
-    defaultValue: true,
   },
   {
     oldKey: "VC_ANNOUNCEMENT_SCHEDULE",
     newKey: "voicetracking.announcements.schedule",
     category: "voicetracking",
     description: "Cron expression for weekly announcements",
-    defaultValue: "0 16 * * 5",
   },
 
   // Individual Features
@@ -92,7 +99,6 @@ const configMigrations: ConfigMigration[] = [
     newKey: "ping.enabled",
     category: "ping",
     description: "Enable/disable ping command",
-    defaultValue: true,
   },
 
   // Quote System
@@ -101,28 +107,24 @@ const configMigrations: ConfigMigration[] = [
     newKey: "quotes.enabled",
     category: "quotes",
     description: "Enable/disable quote system",
-    defaultValue: true,
   },
   {
     oldKey: "QUOTE_DELETE_ROLES",
     newKey: "quotes.delete_roles",
     category: "quotes",
     description: "Comma-separated role IDs that can delete quotes",
-    defaultValue: "",
   },
   {
     oldKey: "QUOTE_MAX_LENGTH",
     newKey: "quotes.max_length",
     category: "quotes",
     description: "Maximum quote length",
-    defaultValue: "1000",
   },
   {
     oldKey: "QUOTE_COOLDOWN",
     newKey: "quotes.cooldown",
     category: "quotes",
     description: "Cooldown in seconds between quote additions",
-    defaultValue: "60",
   },
 ];
 
@@ -228,8 +230,52 @@ export class StartupMigrator {
   }
 
   /**
+   * Decide what to write for a key that is missing from the database.
+   *
+   * A deployment still configured through the legacy flat env var (e.g.
+   * `ENABLE_VC_MANAGEMENT`) keeps its value: `ConfigService.get()` only ever
+   * looks up an env var named exactly like the dot-notation key, so it can
+   * never see the legacy name. Seeding the schema default on top of it would
+   * silently override the operator — and, because the DB row then exists,
+   * leave `npm run migrate-config` nothing left to migrate.
+   *
+   * The legacy value is coerced against the schema's declared type; anything
+   * that cannot be represented as that type is rejected in favour of the
+   * schema default rather than persisted as-is.
+   */
+  private resolveBackfillValue(
+    migration: ConfigMigration,
+    schemaDefault: ConfigSchema[keyof ConfigSchema],
+  ): { value: ConfigSchema[keyof ConfigSchema]; source: string } {
+    const legacyValue = getEnv(migration.oldKey);
+
+    // Presence is an explicit `undefined` check (matching
+    // `ConfigService.migrateFromEnv`), so a deliberately-empty legacy var
+    // (`VC_SUFFIX=`) seeds the empty string for a string-typed key rather than
+    // being replaced by the default (#868). An empty value is not a valid
+    // boolean or number, so those keys still fall through to the default.
+    if (legacyValue === undefined) {
+      return { value: schemaDefault, source: "config-schema.ts default" };
+    }
+
+    const coerced = coerceToSchemaType(migration.newKey, legacyValue);
+    if (coerced === undefined) {
+      logger.warn(
+        `Ignoring ${migration.oldKey}=${sanitizeForLog(legacyValue)}: not a valid ${typeof schemaDefault} for ${migration.newKey}; using the config-schema.ts default instead`,
+      );
+      return { value: schemaDefault, source: "config-schema.ts default" };
+    }
+
+    return { value: coerced, source: `legacy env var ${migration.oldKey}` };
+  }
+
+  /**
    * Ensure all expected settings exist with default values
    * Only creates settings that are truly missing (not just migrated)
+   *
+   * Values come from `config-schema.ts` (`defaultConfig`) and nowhere else, so
+   * this can never persist a default that contradicts the documented schema or
+   * `SETTINGS.md` (#867).
    */
   private async ensureDefaultSettings(): Promise<void> {
     logger.info("Ensuring all expected settings exist with default values...");
@@ -242,25 +288,36 @@ export class StartupMigrator {
         const existingSetting = await this.configService.get(migration.newKey);
 
         if (existingSetting === null || existingSetting === undefined) {
-          // Setting doesn't exist, create it with default value
-          if (migration.defaultValue !== undefined) {
-            logger.info(
-              `Creating missing setting: ${migration.newKey} with default value: ${migration.defaultValue}`,
-            );
+          const schemaDefault = getSchemaDefault(migration.newKey);
 
-            // Startup migration backfills missing schema keys with their
-            // defaults; it isn't an operator enabling a feature, so it must
-            // never be blocked by dependency validation (#663).
-            await this.configService.set(
-              migration.newKey,
-              migration.defaultValue,
-              migration.description,
-              migration.category,
-              { skipDependencyCheck: true },
+          if (schemaDefault === undefined) {
+            logger.warn(
+              `Skipping backfill of ${migration.newKey}: no default declared in config-schema.ts`,
             );
-
-            createdCount++;
+            continue;
           }
+
+          const { value, source } = this.resolveBackfillValue(
+            migration,
+            schemaDefault,
+          );
+
+          logger.info(
+            `Creating missing setting: ${migration.newKey} = ${value} (from ${source})`,
+          );
+
+          // Startup migration backfills missing schema keys with their
+          // defaults; it isn't an operator enabling a feature, so it must
+          // never be blocked by dependency validation (#663).
+          await this.configService.set(
+            migration.newKey,
+            value,
+            migration.description,
+            migration.category,
+            { skipDependencyCheck: true },
+          );
+
+          createdCount++;
         } else {
           logger.debug(
             `Setting ${migration.newKey} already exists with value: ${existingSetting}`,
