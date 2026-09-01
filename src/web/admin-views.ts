@@ -263,6 +263,7 @@ function unmetDependenciesFor(
 export function renderDependencyHint(
   unmet: UnmetDependency[],
   linkSections = true,
+  id = "",
 ): string {
   if (unmet.length === 0) return "";
   const names = unmet
@@ -277,7 +278,11 @@ export function renderDependencyHint(
   // muted-grey tone matches the greyed-nav treatment (admin-layout's
   // `.nav-disabled` colour) so a dependency lock reads as a gentle "not
   // available yet" rather than an error.
-  return `<div class="settings-dep-hint" role="note" style="margin-top:.4rem;color:#94a3b8;font-size:.85em">Requires ${names} enabled</div>`;
+  // The `id` lets the caller point the control's `aria-describedby` here so
+  // the lock reason is announced with the field rather than only being visible
+  // beside it (#854).
+  const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
+  return `<div class="settings-dep-hint"${idAttr} role="note" style="margin-top:.4rem;color:#94a3b8;font-size:.85em">Requires ${names} enabled</div>`;
 }
 
 export interface SettingsProps extends CommonProps {
@@ -291,6 +296,14 @@ export interface SettingsProps extends CommonProps {
   /** Guild name (when fetchable); the preferred reset-confirmation phrase. */
   guildName: string | null;
   flash?: FlashMessage | null;
+  /**
+   * Config keys the last save rejected, echoed back by the no-JS redirect
+   * (#854). Their controls render `aria-invalid="true"` with an inline
+   * "rejected" note, and an inline script moves focus to the first of them —
+   * so a screen-reader user is told *which* of the ~318 fields was refused,
+   * not just that something was.
+   */
+  invalidKeys?: string[];
 }
 
 /**
@@ -441,6 +454,7 @@ function renderCronPicker(
   currentValue: string,
   valueName: string,
   depLocked = false,
+  a11y: ControlA11y = {},
 ): string {
   const state = parseCronToPickerState(currentValue);
   const pad = (n: number): string => String(n).padStart(2, "0");
@@ -458,12 +472,34 @@ function renderCronPicker(
       `<option value="${i}"${sel(state.dayOfWeek === i)}>${name}</option>`,
   ).join("");
 
+  // A cron value is edited through several coordinated inputs, so there is no
+  // single control a `<label for>` can point at. Expose the cluster as a
+  // labelled group instead: the row caption names it and any help / warning
+  // text describes it (#854). Each inner control keeps its own `aria-label`.
+  // `tabindex="-1"` on an invalid group is what lets the "focus the first
+  // rejected field" script land on a cron row — a plain <div> isn't focusable.
+  const groupAttrs =
+    a11y.labelledBy || a11y.describedBy
+      ? ` role="group"` +
+        (a11y.id ? ` id="${escapeHtml(a11y.id)}"` : "") +
+        (a11y.labelledBy
+          ? ` aria-labelledby="${escapeHtml(a11y.labelledBy)}"`
+          : "") +
+        (a11y.describedBy
+          ? ` aria-describedby="${escapeHtml(a11y.describedBy)}"`
+          : "") +
+        (a11y.invalid
+          ? ` aria-invalid="true" tabindex="-1"` +
+            ` data-describedby-base="${escapeHtml(a11y.describedByBase ?? "")}"`
+          : "")
+      : "";
+
   // The hidden input is what the form actually submits. The bootstrap
   // script in admin-layout keeps it in sync with the controls; it locates
   // the input via the `.cron-hidden` class so the form-field name can vary
   // per row (e.g. `value_<key>` under the per-section save form).
   return (
-    `<div class="cron-picker" data-mode="${state.mode}">` +
+    `<div class="cron-picker" data-mode="${state.mode}"${groupAttrs}>` +
     `<input type="hidden" class="cron-hidden" name="${escapeHtml(valueName)}" value="${escapeHtml(currentValue)}">` +
     `<select class="cron-mode" aria-label="Schedule type"${lockAttr}>` +
     `<option value="daily"${sel(state.mode === "daily")}>Daily</option>` +
@@ -599,6 +635,40 @@ function renderSelectionSummary(
 }
 
 /**
+ * Accessibility wiring for a rendered setting control (#854).
+ *
+ * The Settings table and the wizard both caption a control with text that
+ * lives outside the control itself, so the association has to be made
+ * explicitly: `id` is stamped on the primary control so a `<label for>` can
+ * target it, `describedBy` links the help / warning / dependency text that
+ * renders beside it, and `invalid` marks a value the server just rejected.
+ * `labelledBy` is only used by the cron picker, which has no single control to
+ * hang a `<label for>` on and is exposed as a labelled group instead.
+ */
+export interface ControlA11y {
+  /** DOM id for the primary control, so a `<label for>` can point at it. */
+  id?: string;
+  /** Space-separated id list for the control's `aria-describedby`. */
+  describedBy?: string;
+  /** Render `aria-invalid="true"` — the last save rejected this value. */
+  invalid?: boolean;
+  /**
+   * `describedBy` minus the ids that only exist while the value is rejected.
+   * Emitted as `data-describedby-base` so the AJAX save script can restore the
+   * control's normal description after a later save clears the rejection,
+   * instead of leaving `aria-describedby` pointing at a removed note (#854).
+   */
+  describedByBase?: string;
+  /** id of the element naming the control (cron groups only). */
+  labelledBy?: string;
+}
+
+/** DOM id of the value control for a config key on the Settings page. */
+export function settingControlId(key: string): string {
+  return `set-${key}`;
+}
+
+/**
  * Render a setting's value control, plus — when the control is
  * dependency-locked (#666) — a hidden input that round-trips its current value.
  * A `disabled` control isn't submitted by the browser, and the per-section Save
@@ -623,14 +693,14 @@ function renderSettingControl(
   },
   isCascadeMaster = false,
   depLocked = false,
-  controlId = "",
+  a11y: ControlA11y = {},
 ): string {
   const control = renderControlInput(
     r,
     pickers,
     isCascadeMaster,
     depLocked,
-    controlId,
+    a11y,
   );
   if (!depLocked || r.type === "cron") return control;
   const primitive = coerceToDisplayValue(r.current);
@@ -654,17 +724,24 @@ function renderControlInput(
   },
   isCascadeMaster = false,
   depLocked = false,
-  // Optional DOM id stamped onto the primary control element so a caller can
-  // associate a `<label for>` with it (the wizard does this — issue #703). The
-  // Settings page omits it (it labels rows with a `<strong>`, not a `<label>`),
-  // so it defaults to "" and adds nothing there. The cron picker manages its
-  // own inputs and is left unstamped.
-  controlId = "",
+  // Accessibility wiring for the control (#703, #854). Both the wizard and the
+  // Settings page stamp an `id` here so their row caption can be a real
+  // `<label for>`, and pass the ids of the help / warning / dependency text
+  // that renders alongside so it is announced with the field. The cron picker
+  // manages its own inputs, so it takes the group-level attributes instead.
+  a11y: ControlA11y = {},
 ): string {
   const primitive = coerceToDisplayValue(r.current);
   const currentStr = typeof primitive === "string" ? primitive : "";
   const valueName = escapeHtml(settingValueFieldName(r.key));
-  const idAttr = controlId ? ` id="${escapeHtml(controlId)}"` : "";
+  const a11yAttr =
+    (a11y.id ? ` id="${escapeHtml(a11y.id)}"` : "") +
+    (a11y.describedBy
+      ? ` aria-describedby="${escapeHtml(a11y.describedBy)}"`
+      : "") +
+    (a11y.invalid
+      ? ` aria-invalid="true" data-describedby-base="${escapeHtml(a11y.describedByBase ?? "")}"`
+      : "");
   // When a hard dependency is unmet (#666), the control renders disabled so it
   // can't be edited before its requirement is on — the same rule the write-time
   // validator (#663) enforces. `data-dep-locked` tells the cascade-disable
@@ -682,21 +759,30 @@ function renderControlInput(
       valueName,
       r.options,
       currentStr,
-      lockAttr + idAttr,
+      lockAttr + a11yAttr,
     );
   }
   if (r.type === "boolean") {
     const checked = primitive === true ? " checked" : "";
     const masterAttr = isCascadeMaster ? " data-cascade-master" : "";
+    // The wrapping `<label>` keeps the "true"/"false" text clickable. When the
+    // caller supplies its own `<label for>` (Settings, wizard) that text is
+    // hidden from the accessibility tree — otherwise it would be concatenated
+    // onto the real caption, naming the checkbox "Enabled true" and repeating
+    // state the checkbox already announces (#854).
+    const stateText = primitive === true ? "true" : "false";
+    const stateSpan = a11y.id
+      ? `<span class="mono" aria-hidden="true">${stateText}</span>`
+      : `<span class="mono">${stateText}</span>`;
     return (
       `<label class="checkbox" style="display:inline-flex;gap:.4rem;align-items:center;cursor:pointer">` +
-      `<input type="checkbox"${idAttr} name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
-      `<span class="mono">${primitive === true ? "true" : "false"}</span>` +
+      `<input type="checkbox"${a11yAttr} name="${valueName}" value="true"${checked}${masterAttr}${lockAttr}> ` +
+      stateSpan +
       `</label>`
     );
   }
   if (r.type === "number") {
-    return `<input type="number"${idAttr} name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
+    return `<input type="number"${a11yAttr} name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
   }
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
@@ -708,7 +794,7 @@ function renderControlInput(
     const prefix = r.type === "role" ? "@" : "#";
     const selected = currentStr ? new Set([currentStr]) : new Set<string>();
     return (
-      `<select${idAttr} name="${valueName}"${lockAttr}>` +
+      `<select${a11yAttr} name="${valueName}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, true) +
       `</select>`
     );
@@ -724,7 +810,7 @@ function renderControlInput(
         .filter((v) => v !== ""),
     );
     return (
-      `<select${idAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
+      `<select${a11yAttr} name="${valueName}" multiple size="${Math.min(8, Math.max(3, options.length))}"${lockAttr}>` +
       buildOptionsHtml(options, selected, prefix, false) +
       `</select>` +
       renderSelectionSummary(options, selected, prefix)
@@ -735,12 +821,13 @@ function renderControlInput(
       currentStr,
       settingValueFieldName(r.key),
       depLocked,
+      a11y,
     );
   }
   // string or unknown type → plain text input. The maxlength mirrors the
   // server-side `TEXT_LIMITS.configValue` cap in write-routes (#508) — kept as
   // a literal here to avoid a circular import (write-routes imports this file).
-  return `<input type="text"${idAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
+  return `<input type="text"${a11yAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
 }
 
 /**
@@ -749,12 +836,18 @@ function renderControlInput(
  * route. Only the clicked button's `name`/`value` is sent on submission,
  * so the `key=<row-key>` it contributes does not collide with the `keys`
  * hidden inputs the section form uses to enumerate its rows.
+ *
+ * The visible text stays "Reset" — but every row has one, so on its own that
+ * gives a screen-reader user a list of identical buttons with no way to tell
+ * which setting each belongs to. `aria-label` names the row (#854).
  */
-function renderResetButton(key: string): string {
+function renderResetButton(key: string, label = ""): string {
   const escaped = escapeHtml(key);
+  const name = escapeHtml(label || key);
   return (
     `<button type="submit" formaction="/admin/settings/reset" ` +
     `name="key" value="${escaped}" class="btn btn-sm" ` +
+    `aria-label="Reset ${name} to its default" ` +
     `style="margin-left:.4rem">Reset</button>`
   );
 }
@@ -766,7 +859,7 @@ function renderResetButton(key: string): string {
  * don't need it. Shown unconditionally (not gated on a feature toggle) so the
  * degraded state is visible without editing — and it re-renders after a save.
  */
-export function renderWarnBelow(r: SettingRow): string {
+export function renderWarnBelow(r: SettingRow, id = ""): string {
   if (!r.warnBelow) return "";
   // Only warn on a value that's genuinely a number below the threshold.
   // An unset key (null/undefined/empty string) renders as a blank input via
@@ -778,11 +871,33 @@ export function renderWarnBelow(r: SettingRow): string {
   if (!Number.isFinite(value) || value >= r.warnBelow.value) return "";
   // role="status" (implicit aria-live=polite) keeps this persistent advisory
   // from being announced assertively on every page load like role="alert".
-  return `<div class="settings-warn" role="status" style="margin-top:.4rem;color:#b45309;font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
+  // As with the dependency hint, an `id` lets the caller wire this into the
+  // control's `aria-describedby` (#854).
+  const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
+  return `<div class="settings-warn"${idAttr} role="status" style="margin-top:.4rem;color:#b45309;font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
+}
+
+/**
+ * DOM id of the Settings page's flash banner. Shared with `admin-layout`'s
+ * client script and with the controls of rejected keys, whose
+ * `aria-describedby` points here so the field carries the server's actual
+ * rejection reason (#854).
+ */
+export const SETTINGS_FLASH_ID = "settings-flash";
+
+/**
+ * Inline "this value was rejected" marker for a control the last save
+ * refused (#854). `role="alert"` announces it when the page loads with the
+ * rejection already rendered; the id is wired into the control's
+ * `aria-describedby` so the marker is also read when the field takes focus.
+ */
+function renderInvalidNote(id: string): string {
+  return `<div class="settings-error" id="${escapeHtml(id)}" role="alert" style="margin-top:.4rem;color:#fecaca;font-size:.85em">Rejected — not saved. See the error message above for the reason.</div>`;
 }
 
 export function renderSettingsPage(props: SettingsProps): string {
   const csrf = escapeHtml(props.csrfToken);
+  const invalidKeys = new Set(props.invalidKeys ?? []);
 
   const actionBar = `
 <div class="actions">
@@ -833,16 +948,62 @@ export function renderSettingsPage(props: SettingsProps): string {
           const unmet = unmetDependenciesFor(r.key, enabledByKey);
           const depLocked = unmet.length > 0;
           const rowClass = depLocked ? ' class="dep-off"' : "";
+          // Every row's caption, help text and inline notes are associated
+          // with the control by id (#854) — previously the label was a bare
+          // `<strong>` in a sibling cell, so all ~318 controls announced as
+          // "edit text, blank".
+          const controlId = settingControlId(r.key);
+          const labelId = `${controlId}-label`;
+          const helpId = `${controlId}-help`;
+          const warnId = `${controlId}-warn`;
+          const depId = `${controlId}-dep`;
+          const errId = `${controlId}-err`;
+          const warnHtml = renderWarnBelow(r, warnId);
+          const depHtml = renderDependencyHint(unmet, true, depId);
+          const invalid = invalidKeys.has(r.key);
+          const errHtml = invalid ? renderInvalidNote(errId) : "";
+          const describedByBase = [
+            r.description ? helpId : "",
+            warnHtml ? warnId : "",
+            depHtml ? depId : "",
+          ]
+            .filter(Boolean)
+            .join(" ");
+          const describedBy = invalid
+            ? [
+                describedByBase,
+                errId,
+                // Point at the page-level flash too, so the field carries the
+                // server's actual rejection reason and not just "rejected".
+                props.flash ? SETTINGS_FLASH_ID : "",
+              ]
+                .filter(Boolean)
+                .join(" ")
+            : describedByBase;
+          const a11y: ControlA11y = {
+            id: controlId,
+            describedBy,
+            describedByBase,
+            invalid,
+            labelledBy: labelId,
+          };
+          // Cron edits through several inputs, so it gets a labelled group
+          // (`aria-labelledby`) rather than a `<label for>` pointing at nothing.
+          const caption = `<strong>${escapeHtml(r.label || r.key)}</strong>`;
+          const captionHtml =
+            r.type === "cron"
+              ? `<div id="${labelId}">${caption}</div>`
+              : `<div><label id="${labelId}" for="${escapeHtml(controlId)}">${caption}</label></div>`;
           return `<tr${rowClass}>
 <td>
-  <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
+  ${captionHtml}
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey, depLocked)}${renderResetButton(r.key)}${renderWarnBelow(r)}${renderDependencyHint(unmet)}</td>
+<td class="settings-value">${renderSettingControl(r, pickers, r.key === cascadeMasterKey, depLocked, a11y)}${renderResetButton(r.key, r.label)}${warnHtml}${depHtml}${errHtml}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td class="settings-default">${formatValue(r.defaultValue)}</td>
-<td class="muted">${escapeHtml(r.description)}</td>
+<td class="muted" id="${helpId}">${escapeHtml(r.description)}</td>
 </tr>`;
         })
         .join("");
@@ -875,10 +1036,11 @@ export function renderSettingsPage(props: SettingsProps): string {
   const importSection = `
 <div id="import-section" class="card">
   <h2>Import YAML</h2>
-  <p class="muted" style="margin:0 0 .75rem">Paste a YAML key→value mapping. A diff preview is shown before anything is written. Bootstrap and environment keys are always refused.</p>
+  <p class="muted" id="import-yaml-help" style="margin:0 0 .75rem">Paste a YAML key→value mapping. A diff preview is shown before anything is written. Bootstrap and environment keys are always refused.</p>
   <form method="POST" action="/admin/settings/import" class="stack">
     <input type="hidden" name="_csrf" value="${csrf}">
-    <textarea name="yaml" rows="12" placeholder="voicechannels.enabled: true&#10;quotes.max_length: 500"></textarea>
+    <label for="import-yaml">YAML to import</label>
+    <textarea id="import-yaml" name="yaml" rows="12" aria-describedby="import-yaml-help" placeholder="voicechannels.enabled: true&#10;quotes.max_length: 500"></textarea>
     <div>
       <button type="submit" class="btn btn-primary">Preview import</button>
     </div>
@@ -909,7 +1071,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   const body = `
 <h1>Settings</h1>
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
-${renderFlash(props.flash)}
+${renderFlash(props.flash, SETTINGS_FLASH_ID)}
 ${actionBar}
 ${sections}
 ${importSection}
@@ -1071,17 +1233,25 @@ export function renderPermissionsPage(props: PermissionsProps): string {
                 return `<option value="${escapeHtml(rid)}"${sel}>${escapeHtml(name)}</option>`;
               })
               .join("");
+      // The role picker sits in a column headed "Allowed roles", which a
+      // screen reader does not announce as the control's name. Give it a
+      // visually-hidden `<label for>` naming the command it governs, and link
+      // the "Hold Ctrl/⌘" hint beside it via `aria-describedby` (#854).
+      const escapedCmd = escapeHtml(cmd);
+      const selectId = `perm-roles-${escapedCmd}`;
+      const hintId = `perm-hint-${escapedCmd}`;
       return `<tr>
-<td class="mono">/${escapeHtml(cmd)}</td>
+<td class="mono">/${escapedCmd}</td>
 <td>${status}</td>
 <td>
   <form method="POST" action="/admin/permissions/set" class="inline-form" style="align-items:flex-start">
     <input type="hidden" name="_csrf" value="${csrf}">
-    <input type="hidden" name="command" value="${escapeHtml(cmd)}">
-    <select name="roleIds" multiple size="3" style="min-width:14rem">${options}</select>
+    <input type="hidden" name="command" value="${escapedCmd}">
+    <label class="visually-hidden" for="${selectId}">Allowed roles for /${escapedCmd}</label>
+    <select id="${selectId}" name="roleIds" multiple size="3" style="min-width:14rem" aria-describedby="${hintId}">${options}</select>
     <div style="display:flex;flex-direction:column;gap:.25rem">
       <button type="submit" class="btn btn-primary btn-sm">Save</button>
-      <span class="muted" style="font-size:.7rem">Hold Ctrl/⌘<br>for multiple</span>
+      <span class="muted" id="${hintId}" style="font-size:.7rem">Hold Ctrl/⌘<br>for multiple</span>
     </div>
   </form>
 </td>
@@ -1309,30 +1479,44 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       const depLocked = unmet.length > 0;
       const rowClass = depLocked ? " dep-off" : "";
       // Stamp an id onto the primary control so the human-readable label can
-      // associate with it via `for` (#703). The cron picker manages its own
-      // inputs and takes no id, so its label is left unassociated rather than
+      // associate with it via `for` (#703), and link the help / warning /
+      // dependency text beside it via `aria-describedby` (#854). The cron
+      // picker manages its own inputs, so its caption names a group instead of
       // pointing `for` at nothing.
       const inputId = `wiz-${r.key}`;
+      const labelId = `${inputId}-label`;
+      const helpId = `${inputId}-help`;
+      const warnId = `${inputId}-warn`;
+      const depId = `${inputId}-dep`;
+      const warnHtml = renderWarnBelow(r, warnId);
+      const depHtml = renderDependencyHint(unmet, false, depId);
+      const describedBy = [
+        warnHtml ? warnId : "",
+        depHtml ? depId : "",
+        r.description ? helpId : "",
+      ]
+        .filter(Boolean)
+        .join(" ");
       const control = renderSettingControl(
         r,
         pickers,
         r.key === masterKey,
         depLocked,
-        inputId,
+        { id: inputId, describedBy, labelledBy: labelId },
       );
       const labelFor = r.type === "cron" ? "" : ` for="${escapeHtml(inputId)}"`;
       // Human-readable label (#702) with the raw dotted key demoted to
       // monospace helper text — the same treatment the Settings page gives its
       // rows, wrapped in a `<label>` so the whole caption stays clickable.
       return `<div class="field-row${rowClass}">
-  <label class="field-label"${labelFor}>
+  <label class="field-label" id="${labelId}"${labelFor}>
     <strong>${escapeHtml(r.label)}</strong>
     <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   </label>
   ${control}
-  ${renderWarnBelow(r)}
-  ${renderDependencyHint(unmet, false)}
-  <div class="help">${escapeHtml(r.description)}</div>
+  ${warnHtml}
+  ${depHtml}
+  <div class="help" id="${helpId}">${escapeHtml(r.description)}</div>
 </div>`;
     })
     .join("");
@@ -1481,11 +1665,14 @@ export interface EventsProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
-function renderFlash(flash?: FlashMessage | null): string {
+function renderFlash(flash?: FlashMessage | null, id = ""): string {
   if (!flash) return "";
   const cls =
     flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
-  return `<div class="notice ${cls}">${escapeHtml(flash.text)}</div>`;
+  // `id` is optional: the Settings page names its banner so the controls of
+  // rejected keys can reference it from `aria-describedby` (#854).
+  const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
+  return `<div class="notice ${cls}"${idAttr}>${escapeHtml(flash.text)}</div>`;
 }
 
 /**

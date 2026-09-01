@@ -123,6 +123,33 @@ describe("renderAdminPage", () => {
     expect(html).not.toContain("body:new FormData(form)");
   });
 
+  it("marks and focuses the fields a save rejected (issue #854)", () => {
+    const html = renderAdminPage({
+      title: "Settings",
+      active: "/admin/settings",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // The AJAX save reads the server's `invalidKeys` and stamps `aria-invalid`
+    // on those controls, pointing their description at the section flash so
+    // the field carries the actual reason.
+    expect(html).toContain("data.invalidKeys");
+    expect(html).toContain("document.getElementById('set-'+keys[i])");
+    expect(html).toContain("el.setAttribute('aria-invalid','true')");
+    // The flash node is named so `aria-describedby` can reference it.
+    expect(html).toContain("n.id='section-flash-'+(++seq)");
+    // The pre-existing description is stashed and restored, so clearing a
+    // rejection can't leave `aria-describedby` pointing at a removed note.
+    expect(html).toContain("data-describedby-base");
+    // A full page load (the no-JS save path) focuses the first marked field.
+    expect(html).toContain("document.querySelector('[aria-invalid=\"true\"]')");
+    // Styling: an invalid control is outlined, and off-screen labels stay in
+    // the accessibility tree.
+    expect(html).toContain('[aria-invalid="true"]{outline:2px solid #dc2626');
+    expect(html).toContain(".visually-hidden{position:absolute");
+  });
+
   it("escapes the title", () => {
     const html = renderAdminPage({
       title: "<bad>",

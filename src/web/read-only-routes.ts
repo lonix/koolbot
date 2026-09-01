@@ -281,6 +281,32 @@ function readFlash(req: Request): FlashMessage | null {
 }
 
 /**
+ * Config keys the last save refused, echoed back by `flashRedirect` as
+ * `?invalid=a.b,c.d` (#854). The Settings page marks those controls
+ * `aria-invalid` and focuses the first, so a screen-reader user is told which
+ * field was rejected rather than only that something was.
+ *
+ * Values are filtered to the shape a config key can actually take and capped,
+ * so a hand-crafted redirect can't inject ids or pump a huge list into the
+ * page. Unknown-but-well-formed keys simply match no row and render nothing.
+ */
+const INVALID_KEYS_MAX = 25;
+const CONFIG_KEY_RE = /^[a-z0-9_]+(\.[a-z0-9_]+)*$/i;
+
+export function readInvalidKeys(req: Pick<Request, "query">): string[] {
+  const raw = req.query.invalid;
+  if (typeof raw !== "string" || raw === "") return [];
+  const seen = new Set<string>();
+  for (const part of raw.split(",")) {
+    const key = part.trim();
+    if (!CONFIG_KEY_RE.test(key)) continue;
+    seen.add(key);
+    if (seen.size >= INVALID_KEYS_MAX) break;
+  }
+  return Array.from(seen);
+}
+
+/**
  * Wrap an async handler so any rejected promise propagates to Express'
  * error pipeline instead of triggering an UnhandledPromiseRejection.
  */
@@ -533,6 +559,11 @@ export function createReadOnlyRouter(
           roles,
           guildId: common.guildId,
           guildName,
+          // The Settings page had no flash wiring at all, so a rejected save
+          // redirected back with a message nothing rendered. Both the banner
+          // and the per-field markers land here now (#854).
+          flash: readFlash(req),
+          invalidKeys: readInvalidKeys(req),
         }),
       );
     }),

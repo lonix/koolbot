@@ -17,6 +17,8 @@ import {
   wizardApplyFailureMessage,
   TEXT_LIMITS,
   type ResetConfigStore,
+  flashRedirectQuery,
+  INVALID_KEYS_MAX,
 } from "../../src/web/write-routes.js";
 import type { WizardApplyResult } from "../../src/services/wizard-service.js";
 import {
@@ -655,5 +657,35 @@ describe("resetConfigToDefaults (#487)", () => {
     expect(updated).toBe(schemaKeys.length - 1);
     expect(deleted).toBe(1);
     expect(failed).toEqual([{ key: firstSchemaKey, reason: "write boom" }]);
+  });
+});
+
+// Issue #854: a rejected Settings save now echoes the offending keys back so
+// the reloaded page can mark exactly those controls `aria-invalid` and focus
+// the first one, instead of leaving a screen-reader user to hunt through ~318
+// fields for whatever the banner refused.
+describe("flashRedirectQuery invalid-key echo (#854)", () => {
+  it("omits the `invalid` param when nothing was rejected", () => {
+    const qs = flashRedirectQuery({ type: "ok", text: "Saved 3 settings." });
+    expect(qs).toContain("flash=ok");
+    expect(qs).not.toContain("invalid=");
+  });
+
+  it("echoes the rejected keys as a comma-separated list", () => {
+    const qs = flashRedirectQuery({ type: "err", text: "No changes saved." }, [
+      "quotes.max_length",
+      "quotes.enabled",
+    ]);
+    const params = new globalThis.URLSearchParams(qs);
+    expect(params.get("invalid")).toBe("quotes.max_length,quotes.enabled");
+  });
+
+  it("caps the echoed list so a wide section can't blow the redirect URL", () => {
+    const keys = Array.from({ length: 60 }, (_, i) => `x.key_${i}`);
+    const params = new globalThis.URLSearchParams(
+      flashRedirectQuery({ type: "err", text: "nope" }, keys),
+    );
+    expect(params.get("invalid")?.split(",")).toHaveLength(INVALID_KEYS_MAX);
+    expect(params.get("invalid")?.split(",")[0]).toBe("x.key_0");
   });
 });
