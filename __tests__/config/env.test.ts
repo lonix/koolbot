@@ -2,8 +2,14 @@ import { describe, it, expect, afterEach } from "@jest/globals";
 
 const ORIGINAL_ENV = { ...process.env };
 
-const { env, getEnv, hasEnv, requireEnv, getMissingRequiredEnv } =
-  await import("../../src/config/env.js");
+const {
+  env,
+  getEnv,
+  getEnvConfigValue,
+  hasEnv,
+  requireEnv,
+  getMissingRequiredEnv,
+} = await import("../../src/config/env.js");
 
 describe("config/env", () => {
   afterEach(() => {
@@ -131,6 +137,32 @@ describe("config/env", () => {
 
       process.env.WEBUI_BASE_URL = "https://example.test";
       expect(env.webui.baseUrl).toBe("https://example.test");
+    });
+  });
+
+  describe("getEnvConfigValue", () => {
+    it("coerces the boolean and numeric string forms", () => {
+      process.env["voicechannels.enabled"] = "true";
+      expect(getEnvConfigValue("voicechannels.enabled")).toBe(true);
+
+      process.env["voicechannels.enabled"] = "false";
+      expect(getEnvConfigValue("voicechannels.enabled")).toBe(false);
+
+      process.env["polls.default_duration_hours"] = "24";
+      expect(getEnvConfigValue("polls.default_duration_hours")).toBe(24);
+    });
+
+    it("leaves a non-numeric, non-boolean value as a string", () => {
+      process.env["voicechannels.lobby.name"] = "Lobby";
+      expect(getEnvConfigValue("voicechannels.lobby.name")).toBe("Lobby");
+    });
+
+    it("returns null for an unset or blank variable", () => {
+      delete process.env.UNSET_CONFIG_KEY;
+      expect(getEnvConfigValue("UNSET_CONFIG_KEY")).toBeNull();
+
+      process.env.BLANK_CONFIG_KEY = "   ";
+      expect(getEnvConfigValue("BLANK_CONFIG_KEY")).toBeNull();
     });
   });
 });

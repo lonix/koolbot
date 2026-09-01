@@ -30,6 +30,26 @@ export function getEnv(key: string): string | undefined {
   return process.env[key];
 }
 
+/**
+ * Read an env var as a *config* value, coercing the string form the way the
+ * config layer does: `"true"` / `"false"` become booleans, numeric strings
+ * become numbers, anything else stays a string. Returns `null` when the
+ * variable is unset or blank.
+ *
+ * Shared by `ConfigService.get()`'s env fallback and the `validate-config`
+ * script so the two cannot disagree about how an env-supplied setting reads.
+ */
+export function getEnvConfigValue(
+  key: string,
+): string | number | boolean | null {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === "") return null;
+  if (raw === "true" || raw === "false") return raw === "true";
+  const num = Number(raw);
+  if (!Number.isNaN(num)) return num;
+  return raw;
+}
+
 /** True when the env var is defined (even if empty). */
 export function hasEnv(key: string): boolean {
   return process.env[key] !== undefined;
