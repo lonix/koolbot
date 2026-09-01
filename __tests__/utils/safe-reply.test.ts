@@ -114,9 +114,8 @@ describe("safeReply", () => {
 
   it("swallows a rejected reply instead of letting it escape", async () => {
     const interaction = makeInteraction();
-    interaction.reply.mockRejectedValue(
-      new Error("Unknown interaction") as never,
-    );
+    const cause = new Error("Unknown interaction");
+    interaction.reply.mockRejectedValue(cause as never);
 
     await expect(
       safeReply(interaction as never, { content: "boom" }),
@@ -125,6 +124,9 @@ describe("safeReply", () => {
     expect(String(mockLoggerError.mock.calls[0][0])).toContain(
       "Unknown interaction",
     );
+    // The original Error is forwarded so winston's `errors({ stack: true })`
+    // format can emit a stack trace; the summary string alone loses it.
+    expect(mockLoggerError.mock.calls[0][1]).toBe(cause);
   });
 
   it("swallows a rejected editReply and followUp too", async () => {

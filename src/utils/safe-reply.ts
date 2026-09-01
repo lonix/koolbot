@@ -55,8 +55,12 @@ export async function safeReply(
     }
     return true;
   } catch (error) {
+    // Pass the original error alongside the summary: the logger's
+    // `format.errors({ stack: true })` needs the Error itself to emit a stack,
+    // which is what makes an intermittent Discord API failure diagnosable.
     logger.error(
       `Failed to deliver response for interaction ${interaction.id}: ${getErrorMessage(error)}`,
+      error,
     );
     return false;
   }
