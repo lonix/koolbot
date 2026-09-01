@@ -4,6 +4,7 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { ConfigService } from "../services/config-service.js";
 
 export const data = new SlashCommandBuilder()
@@ -166,7 +167,7 @@ export async function execute(
     }
   } catch (error) {
     logger.error("Error in help command:", error);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "There was an error while executing this command!",
       ephemeral: true,
     });

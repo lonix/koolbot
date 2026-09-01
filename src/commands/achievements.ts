@@ -6,6 +6,7 @@ import {
 import { AchievementsService } from "../services/achievements-service.js";
 import type { IAccolade } from "../models/user-achievements.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 
 /**
  * Format the optional metadata of an accolade/achievement into the
@@ -202,7 +203,7 @@ export async function execute(
     await interaction.reply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in achievements command:", error);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "There was an error while fetching achievements!",
       ephemeral: true,
     });

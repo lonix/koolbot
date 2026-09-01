@@ -15,6 +15,7 @@ import {
 } from "discord.js";
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
+import { safeReply } from "./utils/safe-reply.js";
 import { ConfigService } from "./services/config-service.js";
 import { runNameToIdMigrations } from "./services/name-id-migrator.js";
 import { runReactionRoleMigrations } from "./services/reaction-role-migrator.js";
@@ -80,10 +81,16 @@ if (isDebugMode()) {
   logger.info("Debug mode enabled");
 }
 
-// Register global error handlers EARLY to catch initialization errors
+// Register global error handlers EARLY to catch initialization errors.
+//
+// Unhandled rejections log and the bot keeps running (issue #837). discord.js
+// does not await event-listener promises, so a single rejected REST call — an
+// expired interaction token, a transient 5xx — lands here; killing the whole
+// bot over one dropped reply is far worse than losing that reply. Genuinely
+// fatal states still exit through their own error paths, and
+// `uncaughtException` below remains fatal.
 process.on("unhandledRejection", (error) => {
   logger.error("Unhandled promise rejection:", error);
-  process.exit(1);
 });
 
 process.on("uncaughtException", (error) => {
@@ -937,13 +944,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
     );
   } catch (error) {
     logger.error(`Error executing command ${interaction.commandName}:`, error);
-    const errorMessage = "There was an error while executing this command!";
-
-    if (interaction.replied || interaction.deferred) {
-      await interaction.editReply({ content: errorMessage });
-    } else {
-      await interaction.reply({ content: errorMessage, ephemeral: true });
-    }
+    await safeReply(interaction, {
+      content: "There was an error while executing this command!",
+      ephemeral: true,
+    });
   }
 });
 

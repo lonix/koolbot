@@ -1,5 +1,6 @@
 import { ModalSubmitInteraction, ChannelType } from "discord.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 import { ConfigService } from "../services/config-service.js";
 import {
@@ -149,7 +150,7 @@ async function handleNameModal(
     });
   } catch (error) {
     logger.error("Error renaming channel:", error);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ Failed to rename channel. Please try again.",
       ephemeral: true,
     });

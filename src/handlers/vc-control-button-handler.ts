@@ -10,6 +10,7 @@ import {
   StringSelectMenuBuilder,
 } from "discord.js";
 import logger from "../utils/logger.js";
+import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
 
 export async function handleVCControlButton(
@@ -106,7 +107,7 @@ export async function handleVCControlButton(
     }
   } catch (error) {
     logger.error("Error handling VC control button:", error);
-    await interaction.reply({
+    await safeReply(interaction, {
       content: "❌ An error occurred while processing your request.",
       ephemeral: true,
     });
