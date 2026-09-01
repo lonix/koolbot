@@ -272,6 +272,24 @@ Error: An invalid token was provided
    - Use Slash Commands
    - Embed Links
 
+### Commands reply "Permissions can't be verified right now"
+
+**Symptom:** every non-admin command is refused with a "please try again
+in a moment" message.
+
+The bot could not load its command-permissions cache from MongoDB, so it
+cannot tell which commands are role-gated. It refuses commands rather
+than running them ungated; administrators are unaffected, because their
+bypass reads live Discord data rather than the cache.
+
+**Solutions:**
+
+1. Check the bot log for `Error initializing permissions cache` and fix
+   the underlying MongoDB connectivity problem (see
+   [Database Issues](#-database-issues)).
+2. Once Mongo is reachable the cache reloads on the next command; you can
+   force it from the Web UI's Permissions page or with `/config reload`.
+
 ---
 
 ## 🌐 Web UI Issues

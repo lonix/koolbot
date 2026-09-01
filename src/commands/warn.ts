@@ -13,8 +13,10 @@ export const data = new SlashCommandBuilder()
   .setName("warn")
   .setDescription("Record a warning against a member (moderation log)")
   // Hide the command from members without the Moderate Members permission by
-  // default. The bot's own PermissionsService still gates execution and lets
-  // admins configure additional roles.
+  // default. Note a guild admin can override this in Discord's Integrations
+  // UI, and the bot's own PermissionsService only gates execution once roles
+  // have been configured for this command in the Web UI (it is default-open
+  // otherwise) — so treat this as the primary gate, not a backstop.
   .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
   .addUserOption((option) =>
     option

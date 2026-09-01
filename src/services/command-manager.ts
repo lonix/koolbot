@@ -15,7 +15,10 @@ import { ConfigService } from "./config-service.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { recordCommandInvocation } from "../web/metrics.js";
 import { CooldownManager } from "./cooldown-manager.js";
-import { PermissionsService } from "./permissions-service.js";
+import {
+  PermissionCheckError,
+  PermissionsService,
+} from "./permissions-service.js";
 
 interface CommandModule {
   data: SlashCommandBuilder;
@@ -482,12 +485,42 @@ export class CommandManager {
       const userId = interaction.user.id;
 
       if (guildId && userId) {
-        const hasPermission =
-          await this.permissionsService.checkCommandPermission(
+        let hasPermission: boolean;
+        try {
+          // `onUnavailable: "throw"` keeps "couldn't check" distinct from
+          // "checked and denied": without it a failed permissions-cache
+          // load would fall through to the service's default-open branch
+          // and run every role-gated command ungated (#836).
+          hasPermission = await this.permissionsService.checkCommandPermission(
             userId,
             guildId,
             commandName,
+            { onUnavailable: "throw" },
           );
+        } catch (error) {
+          if (!(error instanceof PermissionCheckError)) {
+            throw error;
+          }
+
+          logger.error(
+            `Permission check for ${commandName} unavailable, refusing execution:`,
+            error,
+          );
+          await interaction.reply({
+            content:
+              "⚠️ Permissions can't be verified right now. Please try again in a moment.",
+            ephemeral: true,
+          });
+
+          monitoringService.trackCommandEnd(
+            commandName,
+            trackingId,
+            startTime,
+            false,
+          );
+          await recordAudit("denied", "Permission check unavailable");
+          return;
+        }
 
         if (!hasPermission) {
           await interaction.reply({
