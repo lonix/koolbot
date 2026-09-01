@@ -50,10 +50,10 @@ export class PermissionsService {
   private cacheInitializing: Promise<void> | null = null;
   /**
    * Error from the most recent failed cache load, cleared on success.
-   * Lets `checkCommandPermission` (in `onUnavailable: "throw"` mode) tell
-   * "cache empty because nothing is configured" apart from "cache empty
-   * because loading it failed" — the latter must not fall through to the
-   * default-open branch and silently authorize (#795 review).
+   * Lets `checkCommandPermission` tell "cache empty because nothing is
+   * configured" apart from "cache empty because loading it failed" — the
+   * latter must not fall through to the default-open branch and silently
+   * authorize (#795 review, #836).
    */
   private cacheLoadError: unknown = null;
 
@@ -134,12 +134,13 @@ export class PermissionsService {
    * @param guildId - Discord guild ID
    * @param commandName - Name of the command
    * @param options - `onUnavailable` controls what an *internal* failure
-   *   (Discord API hiccup, rate limit, network blip) maps to: `"deny"`
-   *   (default) keeps the legacy behavior of returning `false`, while
-   *   `"throw"` raises a `PermissionCheckError` so the caller can react
-   *   differently to "couldn't check" than to a genuine denial. A
-   *   definitive Unknown Guild/Member answer from Discord is a real
-   *   denial and returns `false` in both modes.
+   *   (Discord API hiccup, rate limit, network blip, or a permissions
+   *   cache that failed to load) maps to: `"deny"` (default) returns
+   *   `false`, while `"throw"` raises a `PermissionCheckError` so the
+   *   caller can react differently to "couldn't check" than to a genuine
+   *   denial. Neither mode ever falls through to the default-open branch
+   *   on such a failure. A definitive Unknown Guild/Member answer from
+   *   Discord is a real denial and returns `false` in both modes.
    * @returns True if user has permission, false otherwise
    */
   public async checkCommandPermission(
@@ -173,19 +174,23 @@ export class PermissionsService {
 
       // Everything below depends on the permissions cache. If the cache
       // failed to load (e.g. a Mongo blip) we cannot know whether role
-      // gating is configured, so in throw mode surface "couldn't check"
-      // instead of falling through to the default-open branch and
-      // silently authorizing. Admins are unaffected: their short-circuit
-      // above rests on live Discord data, not the cache.
-      if (
-        options.onUnavailable === "throw" &&
-        !this.cacheInitialized &&
-        this.cacheLoadError !== null
-      ) {
-        throw new PermissionCheckError(
-          `Permission check for ${commandName} could not be completed: permissions cache failed to load`,
-          this.cacheLoadError,
+      // gating is configured, so we must not fall through to the
+      // default-open branch and silently authorize (#836). Throw mode
+      // surfaces "couldn't check" so the caller can say "try again";
+      // deny mode fails closed like any other internal failure. Admins
+      // are unaffected: their short-circuit above rests on live Discord
+      // data, not the cache.
+      if (!this.cacheInitialized && this.cacheLoadError !== null) {
+        if (options.onUnavailable === "throw") {
+          throw new PermissionCheckError(
+            `Permission check for ${commandName} could not be completed: permissions cache failed to load`,
+            this.cacheLoadError,
+          );
+        }
+        logger.error(
+          `Permission check for ${sanitizeForLog(commandName)} denied: permissions cache failed to load`,
         );
+        return false;
       }
 
       // Check if there are any permissions set for this command

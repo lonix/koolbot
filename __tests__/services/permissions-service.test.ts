@@ -615,7 +615,10 @@ describe("PermissionsService", () => {
         expect(result).toBe(true);
       });
 
-      it("keeps legacy default-open behavior on cache load failure in default mode", async () => {
+      // #836 — the guard must not depend on the caller opting in: a
+      // failed cache load fails closed in the default "deny" mode too,
+      // rather than falling through to the default-open branch.
+      it("returns false on cache load failure in default mode (#836)", async () => {
         const serviceWithMocks = makeServiceWithFailingCacheLoad(false);
 
         const result = await serviceWithMocks.checkCommandPermission(
@@ -624,7 +627,46 @@ describe("PermissionsService", () => {
           "quote",
         );
 
+        expect(result).toBe(false);
+      });
+
+      it("still allows Administrators on cache load failure in default mode", async () => {
+        const serviceWithMocks = makeServiceWithFailingCacheLoad(true);
+
+        const result = await serviceWithMocks.checkCommandPermission(
+          "user123",
+          "guild123",
+          "quote",
+        );
+
         expect(result).toBe(true);
+      });
+
+      it("allows again once a later cache load succeeds", async () => {
+        const serviceWithMocks = makeServiceWithFailingCacheLoad(false);
+
+        await expect(
+          serviceWithMocks.checkCommandPermission(
+            "user123",
+            "guild123",
+            "quote",
+          ),
+        ).resolves.toBe(false);
+
+        // The outage clears and the cache loads cleanly: no gating is
+        // configured, so the default-open branch applies again.
+        (CommandPermission.find as jest.Mock) = jest
+          .fn()
+          .mockResolvedValue([] as never);
+        await serviceWithMocks.reloadCache();
+
+        await expect(
+          serviceWithMocks.checkCommandPermission(
+            "user123",
+            "guild123",
+            "quote",
+          ),
+        ).resolves.toBe(true);
       });
 
       it("returns false (genuine denial) for Unknown Member even when onUnavailable is 'throw'", async () => {
