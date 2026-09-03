@@ -65,11 +65,16 @@ describe("admin write router — session gating", () => {
     await expect(res.text()).resolves.toContain("Sign in required");
   });
 
-  it("rejects every write path for an unauthenticated caller", async () => {
+  it("answers 401 on every write path for an unauthenticated caller", async () => {
+    // The role middleware is mounted with `router.use` and no path, so its
+    // "no session attached" branch runs for every request into the write
+    // router. Accepting 403 here as well would let a route that skipped the
+    // session gate (and merely happened to reject the request some other
+    // way) pass this test.
     harness = await harnessFor(null);
     for (const path of WRITE_PATHS) {
       const res = await harness.post(path);
-      expect([401, 403]).toContain(res.status);
+      expect(res.status).toBe(401);
     }
   });
 
