@@ -113,7 +113,7 @@ describe("MessageActivityCleanupService", () => {
     expect(find).not.toHaveBeenCalled();
   });
 
-  it.each([0, -1])(
+  it.each([0, -1, Number.NaN])(
     "skips pruning entirely when the retention is %p (0 = keep forever, #835)",
     async (retention) => {
       const { service, mockConfigService } = createService();

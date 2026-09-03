@@ -1768,6 +1768,32 @@ describe("renderDatabasePage", () => {
     expect(html).toContain("6 months");
   });
 
+  it("shows an invalid negative retention window verbatim rather than as keep forever (#835)", () => {
+    // Only exactly 0 means "keep forever"; a negative value (which the write
+    // boundary refuses, but an env var could still supply) must stay visible
+    // as the misconfiguration it is.
+    const html = renderDatabasePage({
+      ...COMMON,
+      connection: { state: "connected", name: "koolbot", host: "mongodb" },
+      trunk: {
+        enabled: true,
+        schedule: "0 0 * * *",
+        isScheduled: true,
+        isRunning: false,
+        lastRun: "—",
+        detailedDays: -1,
+        monthlyMonths: 6,
+        yearlyYears: 1,
+      },
+      trunkHistory: [],
+      collections: [],
+    });
+    expect(html).toContain(
+      "<dt>Detailed sessions retention</dt><dd>-1 days</dd>",
+    );
+    expect(html).not.toContain("keep forever");
+  });
+
   it("lists collections with counts and history when present", () => {
     const html = renderDatabasePage({
       ...COMMON,

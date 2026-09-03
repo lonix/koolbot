@@ -2639,11 +2639,13 @@ export interface DatabaseProps extends CommonProps {
 }
 
 /**
- * Human label for a retention window. `0` means "keep forever" on every
- * retention key (#835), so it is spelled out rather than shown as "0 days".
+ * Human label for a retention window. Exactly `0` means "keep forever" on
+ * every retention key (#835), so it is spelled out rather than shown as
+ * "0 days". Any other value — including an invalid negative one that slipped
+ * in via an env var — is shown verbatim so a misconfiguration stays visible.
  */
 function retentionWindowLabel(value: number, unit: string): string {
-  return value <= 0 ? "keep forever" : `${value} ${unit}`;
+  return value === 0 ? "keep forever" : `${value} ${unit}`;
 }
 
 export function renderDatabasePage(props: DatabaseProps): string {

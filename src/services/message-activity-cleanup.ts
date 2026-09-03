@@ -305,7 +305,7 @@ export class MessageActivityCleanupService {
       // refused blank input is covered too.
       if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
         logger.info(
-          "Message-detail retention is 0 (keep forever); skipping message pruning",
+          `Skipping message pruning: message-detail retention is ${retentionDays} (0 = keep forever; only a positive window prunes)`,
         );
         return {
           messagesPruned: 0,

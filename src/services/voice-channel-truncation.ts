@@ -372,7 +372,7 @@ export class VoiceChannelTruncationService {
         retentionConfig.detailedSessionsDays <= 0
       ) {
         logger.info(
-          "Detailed-session retention is 0 (keep forever); skipping session pruning",
+          `Skipping session pruning: detailed-session retention is ${retentionConfig.detailedSessionsDays} (0 = keep forever; only a positive window prunes)`,
         );
         return {
           sessionsRemoved: 0,
