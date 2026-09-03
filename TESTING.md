@@ -124,12 +124,27 @@ Coverage reports are generated in the `coverage/` directory:
 - **coverage/lcov-report/index.html** - HTML report (open in browser)
 - **coverage/lcov.info** - LCOV format (for CI tools)
 
-Current Coverage Thresholds:
+Current coverage thresholds (`coverageThreshold.global` in `jest.config.js`):
 
-- Statements: 2%
-- Branches: 2%
-- Functions: 2%
-- Lines: 2%
+| Metric | Floor |
+| --- | ---: |
+| Statements | 54% |
+| Branches | 49% |
+| Functions | 63% |
+| Lines | 54% |
+
+These floors sit a few points under measured coverage rather than at a token baseline, so a real
+regression fails CI. They are not ratcheted on a schedule — `npm run coverage:drift` fails once actual
+coverage climbs more than 10 points above any floor, which is the cue to raise them to just under the
+new actuals. Run it after a coverage run:
+
+```bash
+npm run test:coverage
+npm run coverage:drift
+```
+
+`src/index.ts` (process wiring) and `src/scripts/**` (operational one-shots) are deliberately excluded
+from the measurement — see the comment in `jest.config.js`.
 
 ## Best Practices
 

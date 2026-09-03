@@ -58,6 +58,19 @@ export default [
     }
   },
   {
+    // Repo tooling scripts are plain Node ESM, not part of the compiled bot, so
+    // they only need the Node globals the recommended ruleset does not provide.
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        'process': 'readonly',
+        'console': 'readonly'
+      }
+    }
+  },
+  {
     // Test files lean heavily on Discord.js fixtures and partial mocks where
     // precise return-type annotations and fully-typed mock objects add noise
     // without catching real bugs. Production `src/` code above is still held
