@@ -195,6 +195,9 @@ Allowed types (kept in sync with `release-please-config.json` changelog sections
 - ESLint flags `@typescript-eslint/no-explicit-any` and missing return types as **warnings** but
   `no-unused-vars`, `no-duplicate-imports`, and `prefer-const` as **errors**.
 - Update `SETTINGS.md` when adding/changing config keys and `COMMANDS.md` for user-facing commands.
+  `__tests__/config/settings-doc-drift.test.ts` enforces the first half in both directions: every
+  key in `defaultConfig` must appear in `SETTINGS.md`, and every key `SETTINGS.md` names must exist
+  in the schema (#846).
 - Update `Dockerfile` / `Dockerfile.dev` when dependencies or the build process change.
 
 ## Key reference files

@@ -310,7 +310,7 @@ page or via **Setup Wizard → Voice Tracking**:
 | Setting | Example value |
 | --- | --- |
 | `voicetracking.announcements.enabled` | `true` |
-| `voicetracking.announcements.channel` | `voice-stats` (name or ID) |
+| `voicetracking.announcements.channel_id` | `123456789012345678` (channel ID) |
 | `voicetracking.announcements.schedule` | `0 16 * * 5` (Fridays at 4 PM) |
 
 Trigger one on demand from the Web UI's Announcements page — click
