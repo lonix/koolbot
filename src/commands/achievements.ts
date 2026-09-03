@@ -219,9 +219,10 @@ export async function execute(
     await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in achievements command:", error);
+    // Public on purpose: once deferred, visibility is fixed and safeReply
+    // edits the public placeholder, so an ephemeral flag would be a lie.
     await safeReply(interaction, {
       content: "There was an error while fetching achievements!",
-      ephemeral: true,
     });
   }
 }

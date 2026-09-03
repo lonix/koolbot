@@ -139,9 +139,10 @@ async function executeTop(
     await interaction.editReply(`${header}\n${response}`);
   } catch (error) {
     logger.error("Error in voicestats top command:", error);
+    // Public on purpose: once deferred, visibility is fixed and safeReply
+    // edits the public placeholder, so an ephemeral flag would be a lie.
     await safeReply(interaction, {
       content: "There was an error while executing this command!",
-      ephemeral: true,
     });
   }
 }
@@ -216,9 +217,9 @@ async function executeUser(
     await interaction.editReply(response);
   } catch (error) {
     logger.error("Error in voicestats user command:", error);
+    // Public on purpose (see executeTop).
     await safeReply(interaction, {
       content: "There was an error while executing this command!",
-      ephemeral: true,
     });
   }
 }

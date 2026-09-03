@@ -486,40 +486,44 @@ describe("VoiceChannelTracker", () => {
     it.each(["week", "month"] as const)(
       "%s: matches on sessions.startTime before unwinding, then re-filters",
       async (period) => {
-        const { tracker } = createTracker(mockClient);
-        (VoiceChannelTracking.aggregate as jest.Mock).mockClear();
-        (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
+        // Freeze the clock so the expected window start is exact rather
+        // than a wall-clock approximation that could drift on a slow runner.
+        const now = new Date("2026-03-15T12:00:00Z");
+        jest.useFakeTimers({ now });
+        try {
+          const { tracker } = createTracker(mockClient);
+          (VoiceChannelTracking.aggregate as jest.Mock).mockClear();
+          (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
 
-        await tracker.getTopUsers(10, period);
+          await tracker.getTopUsers(10, period);
 
-        const pipeline = (VoiceChannelTracking.aggregate as jest.Mock).mock
-          .calls[0][0] as Array<Record<string, unknown>>;
-        const stageNames = pipeline.map((stage) => Object.keys(stage)[0]);
-        expect(stageNames).toEqual([
-          "$match",
-          "$unwind",
-          "$match",
-          "$group",
-          "$sort",
-          "$limit",
-        ]);
+          const pipeline = (VoiceChannelTracking.aggregate as jest.Mock).mock
+            .calls[0][0] as Array<Record<string, unknown>>;
+          const stageNames = pipeline.map((stage) => Object.keys(stage)[0]);
+          expect(stageNames).toEqual([
+            "$match",
+            "$unwind",
+            "$match",
+            "$group",
+            "$sort",
+            "$limit",
+          ]);
 
-        const windowDays = period === "week" ? 7 : 30;
-        const expectedStart = Date.now() - windowDays * 24 * 60 * 60 * 1000;
-        const preMatch = pipeline[0].$match as {
-          "sessions.startTime": { $gte: Date };
-        };
-        const postMatch = pipeline[2].$match as {
-          "sessions.startTime": { $gte: Date };
-        };
-        expect(preMatch["sessions.startTime"].$gte.getTime()).toBeCloseTo(
-          expectedStart,
-          -4,
-        );
-        // Both stages use the same window: the pre-unwind match selects users
-        // with any qualifying session; the post-unwind one drops the rest.
-        expect(postMatch).toEqual(preMatch);
-        expect(pipeline[1]).toEqual({ $unwind: "$sessions" });
+          const windowDays = period === "week" ? 7 : 30;
+          const expectedStart = new Date(
+            now.getTime() - windowDays * 24 * 60 * 60 * 1000,
+          );
+          expect(pipeline[0]).toEqual({
+            $match: { "sessions.startTime": { $gte: expectedStart } },
+          });
+          expect(pipeline[1]).toEqual({ $unwind: "$sessions" });
+          // Both stages use the same window: the pre-unwind match selects
+          // users with any qualifying session; the post-unwind one drops the
+          // rest of that user's sessions.
+          expect(pipeline[2]).toEqual(pipeline[0]);
+        } finally {
+          jest.useRealTimers();
+        }
       },
     );
 

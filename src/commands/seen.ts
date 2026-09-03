@@ -58,9 +58,10 @@ export async function execute(
     );
   } catch (error) {
     logger.error("Error in seen command:", error);
+    // Public on purpose: once deferred, visibility is fixed and safeReply
+    // edits the public placeholder, so an ephemeral flag would be a lie.
     await safeReply(interaction, {
       content: "There was an error while executing this command!",
-      ephemeral: true,
     });
   }
 }
