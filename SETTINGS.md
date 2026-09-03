@@ -160,10 +160,9 @@ Enable or disable individual commands from the Web UI's **Settings**
 page. **Every command listed below is disabled by default.** `/help`
 and `/config` are the exceptions — both are always registered by
 `CommandManager` regardless of any config flag, so a fresh install
-always has access to the Web UI launcher and help discovery. (The
-schema does contain a `help.enabled` flag with `default: true`, but it
-is **not** consulted when registering `/help` — toggling it has no
-effect on whether the command appears in Discord.)
+always has access to the Web UI launcher and help discovery. Neither
+has an enablement key in `config-schema.ts` — `command-registry.ts`
+declares them with `configKey: null`, so there is nothing to toggle.
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -332,6 +331,8 @@ Dynamic voice channel creation and management.
 | `voicechannels.channel.prefix` | `"🎮"` | Prefix for user-created channels |
 | `voicechannels.channel.suffix` | `""` | Suffix for user-created channels |
 | `voicechannels.controlpanel.enabled` | `true` | Show interactive control panel in channel text chat |
+| `voicechannels.presets.enabled` | `false` | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page |
+| `voicechannels.presets.max_per_user` | `3` | Maximum number of presets a single user can save |
 
 ### Manual cleanup
 
@@ -349,10 +350,10 @@ Track user voice channel activity and generate statistics.
 | `voicetracking.enabled` | `false` | Enable voice channel activity tracking |
 | `voicetracking.stats.top.enabled` | `false` | Enable `/voicestats top` subcommand |
 | `voicetracking.stats.user.enabled` | `false` | Enable `/voicestats user` subcommand |
+| `voicetracking.stats.leaderboard_max_results` | `50` | Server-side cap on how many ranked users `/voicestats top` returns (bounds the aggregation so one request can never materialise the whole collection) |
 | `voicetracking.seen.enabled` | `false` | Enable `/seen` command for last-seen tracking |
 | `voicetracking.companions.enabled` | `false` | Persist precise per-companion co-presence seconds and join-order metadata (was-first, who you joined) on each voice session. Data-capture foundation for future Rewind companion stats (#570) |
 | `voicetracking.excluded_channels` | `""` | Voice channel IDs to exclude from tracking (comma-separated; the Web UI picker lists voice + stage channels) |
-| `voicetracking.admin_roles` | `""` | Role names with tracking admin powers (comma-separated) |
 
 ### Managing excluded channels
 
@@ -389,7 +390,7 @@ independently.
 | Setting | Default | Description |
 | --- | --- | --- |
 | `voicetracking.announcements.enabled` | `false` | Enable the weekly recap |
-| `voicetracking.announcements.channel` | `"voice-stats"` | Channel name or ID for announcements |
+| `voicetracking.announcements.channel_id` | `""` | Discord channel ID where the weekly recap is posted (pick from the dropdown in /admin/settings) |
 | `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM) |
 | `voicetracking.announcements.include_voice_stats` | `true` | Include the top voice-time leaderboard |
 | `voicetracking.announcements.include_accolades` | `true` | Include accolades earned this week (needs achievements + achievement announcements enabled) |
@@ -1112,11 +1113,14 @@ The Web UI form controls map to the underlying schema types:
 
 This is a selected subset — the authoritative list of every key (with
 defaults and metadata) lives in `src/services/config-schema.ts`. Notable
-keys that may be missing from this summary include the `help.*` toggle,
-`voicechannels.presets.*`, the
-`*.header_message_id` storage slots managed by the bot, and the
+keys that may be missing from this summary include the
+`*.header_message_id` storage slots managed by the bot and the
 `leaderboard_roles.*` family (covered in [its own section](#-leaderboard-role-rewards)
-above).
+above) — those are documented in their own sections rather than in these
+bullet lists. `__tests__/config/settings-doc-drift.test.ts` checks the
+whole of this file against the schema in both directions, so a key that
+is documented but no longer exists — or exists but is nowhere in this
+file — fails CI.
 
 #### Feature dependencies (`dependsOn` metadata)
 
@@ -1212,20 +1216,23 @@ leave the graph in a broken state.
 - `voicechannels.channel.prefix` (string, default: "🎮")
 - `voicechannels.channel.suffix` (string, default: "")
 - `voicechannels.controlpanel.enabled` (bool, default: true)
+- `voicechannels.presets.enabled` (bool, default: false)
+- `voicechannels.presets.max_per_user` (number, default: 3)
 
 #### Voice Tracking
 
 - `voicetracking.enabled` (bool, default: false)
 - `voicetracking.stats.top.enabled` (bool, default: false)
 - `voicetracking.stats.user.enabled` (bool, default: false)
+- `voicetracking.stats.leaderboard_max_results` (number, default: 50)
 - `voicetracking.seen.enabled` (bool, default: false)
+- `voicetracking.companions.enabled` (bool, default: false)
 - `voicetracking.excluded_channels` (string, default: "")
-- `voicetracking.admin_roles` (string, default: "")
 
 #### Announcements
 
 - `voicetracking.announcements.enabled` (bool, default: false)
-- `voicetracking.announcements.channel` (string, default: "voice-stats")
+- `voicetracking.announcements.channel_id` (channel, default: "")
 - `voicetracking.announcements.schedule` (string, default: `"0 16 * * 5"`)
 - `voicetracking.announcements.include_voice_stats` (bool, default: true)
 - `voicetracking.announcements.include_accolades` (bool, default: true)

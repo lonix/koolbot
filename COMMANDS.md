@@ -770,6 +770,8 @@ chat. Only you (the channel owner) can use it.
 
 - **🔴 Go Live / ⬜ Go Offline** — Mark the channel as live with a streaming disclaimer
 - **⏳ Waiting Room / 🗑️ Remove Waiting Room** — Toggle a companion waiting room
+- **🎛️ Presets** — Save and apply your own channel presets (only shown when
+  `voicechannels.presets.enabled` is `true`)
 
 **Features:**
 
@@ -785,6 +787,7 @@ chat. Only you (the channel owner) can use it.
 
 - Discord server must support text channels associated with voice channels
 - `voicechannels.controlpanel.enabled` must be `true`
+- The **🎛️ Presets** button additionally needs `voicechannels.presets.enabled`
 
 **Example panel:**
 
@@ -797,7 +800,7 @@ Privacy: 🌐 Public
 🔴 LIVE
 
 [✏️ Rename] [🔒 Make Private] [👥 Invite] [👑 Transfer]
-[⬜ Go Offline] [🗑️ Remove Waiting Room]
+[⬜ Go Offline] [🗑️ Remove Waiting Room] [🎛️ Presets]
 
 Only the channel owner can use these controls
 ```
@@ -838,6 +841,25 @@ indicator.
 **⏳ Waiting Room** creates a companion waiting-room channel. Joiners
 land there muted; you (the owner) get a notification with a **🚪 Let In**
 button to admit them. **🗑️ Remove Waiting Room** deletes it.
+
+### Presets
+
+**🎛️ Presets** opens your personal preset panel (shown only when
+`voicechannels.presets.enabled` is `true`). A preset is a snapshot of a
+channel's **name**, **user limit**, and **bitrate**:
+
+- **Apply a preset to this channel…** — dropdown listing your saved presets;
+  picking one applies it to the current channel
+- **💾 Save current as preset** — snapshot this channel's settings under a
+  name you choose (capped by `voicechannels.presets.max_per_user`, default `3`)
+- **🗑️ Manage…** — pick a preset, then **Set as default** / **Unset default**,
+  **Rename**, or **Delete** it
+
+The preset marked ⭐ default is applied automatically to the next channel you
+spawn from the lobby. The same presets — plus a **channel name pattern**
+applied to every channel you create (`{username}` expands to your display
+name) — can be managed from the Web UI's **Voice** page (`/me/voice`); both
+surfaces share the same validation.
 
 ---
 
