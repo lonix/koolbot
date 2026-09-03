@@ -73,6 +73,20 @@ describe("Config Schema", () => {
       );
     });
 
+    it("declares every README Discord-log category as an enabled + channel_id pair (#844)", () => {
+      for (const type of ["startup", "errors", "cleanup", "config", "cron"]) {
+        const enabledKey = `core.${type}.enabled` as keyof typeof defaultConfig;
+        const channelKey =
+          `core.${type}.channel_id` as keyof typeof defaultConfig;
+        expect(defaultConfig[enabledKey]).toBe(false);
+        expect(defaultConfig[channelKey]).toBe("");
+        expect(settingsMetadata[enabledKey].category).toBe("core");
+        expect(settingsMetadata[enabledKey].type).toBe("boolean");
+        expect(settingsMetadata[channelKey].category).toBe("core");
+        expect(settingsMetadata[channelKey].type).toBe("channel");
+      }
+    });
+
     it("should have string fields for comma-separated values", () => {
       expect(typeof defaultConfig["voicetracking.excluded_channels"]).toBe(
         "string",
@@ -457,6 +471,13 @@ describe("Config Schema", () => {
       // analogous to how WebAuditLog records every WebUI write without
       // requiring opt-in.
       "core.command_audit.enabled": true,
+      // Discord-channel logging categories (#844) — posting lifecycle /
+      // error / cron embeds into a guild channel is an operator opt-in.
+      "core.startup.enabled": false,
+      "core.errors.enabled": false,
+      "core.cleanup.enabled": false,
+      "core.config.enabled": false,
+      "core.cron.enabled": false,
       // Persisted command metrics (#648) — same rationale as audit logging:
       // a cross-cutting operator-visibility feature, on by default so fresh
       // installs get historical command analytics out of the box.

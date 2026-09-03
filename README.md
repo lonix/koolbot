@@ -336,7 +336,9 @@ Run an out-of-schedule cleanup from the **Database** page.
 ## 📝 Discord Logging (Examples)
 
 Configure the bot to send event logs to Discord channels via the
-Settings page. Available log categories:
+Settings page (**core** category). Each category is a pair of settings —
+`core.<type>.enabled` and `core.<type>.channel_id` — and stays silent until
+both are set. Available log categories:
 
 | Log Type | Description | Example Events |
 | --- | --- | --- |
@@ -348,6 +350,7 @@ Settings page. Available log categories:
 
 You can point each category at the same channel for one consolidated log,
 or split them between `#bot-status`, `#admin-alerts`, `#bot-logs`, etc.
+Saved changes apply to the next log message — no restart is needed.
 
 ---
 

@@ -2,6 +2,21 @@ import { Client, TextChannel, EmbedBuilder, ColorResolvable } from "discord.js";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
+import { defaultConfig } from "./config-schema.js";
+
+/**
+ * Discord log categories, derived from the config schema (#844): every
+ * `core.<type>.enabled` key that has a matching `core.<type>.channel_id`.
+ * Declaring the pair in `config-schema.ts` is what makes a category
+ * configurable — it renders on the Settings page, passes write-time
+ * validation, and survives the startup cleanup sweep.
+ */
+export const DISCORD_LOG_TYPES: readonly string[] = Object.keys(defaultConfig)
+  .map((key) => /^core\.([^.]+)\.enabled$/.exec(key)?.[1])
+  .filter(
+    (type): type is string =>
+      type !== undefined && `core.${type}.channel_id` in defaultConfig,
+  );
 
 export interface ILogChannel {
   enabled: boolean;
@@ -27,6 +42,7 @@ export class DiscordLogger {
   private configService: ConfigService;
   private logChannels: Map<string, ILogChannel> = new Map();
   private isInitialized: boolean = false;
+  private reloadCallbackRegistered: boolean = false;
 
   private constructor(client: Client) {
     this.client = client;
@@ -57,6 +73,16 @@ export class DiscordLogger {
       // Load all core.* channel configurations
       await this.loadLogChannels();
 
+      // Re-read every category whenever ConfigService.triggerReload() fires
+      // (e.g. after a wizard apply). Registered once so repeated
+      // initialize() calls (tests, reconnects) don't stack callbacks.
+      if (!this.reloadCallbackRegistered) {
+        this.configService.registerReloadCallback(async () => {
+          await this.refreshChannels();
+        });
+        this.reloadCallbackRegistered = true;
+      }
+
       this.isInitialized = true;
       logger.info("Discord logger initialized successfully");
     } catch (error) {
@@ -65,37 +91,46 @@ export class DiscordLogger {
   }
 
   /**
-   * Load all configured log channels from the database
+   * Load the enabled flag + channel id for every schema-declared log
+   * category. Reads go through ConfigService so cached values and schema
+   * defaults apply (previously this scanned raw Mongo rows, which meant a
+   * category could only be discovered if someone had hand-written a row —
+   * and the startup cleanup deleted those rows as unknown keys; #844).
    */
   private async loadLogChannels(): Promise<void> {
     try {
-      // Get all configuration keys that start with "core."
-      const allConfigs = await this.configService.getAll();
-
-      for (const config of allConfigs) {
-        if (config.key.startsWith("core.") && config.key.endsWith(".enabled")) {
-          const logType = config.key
-            .replace("core.", "")
-            .replace(".enabled", "");
-
-          // Get the channel ID for this log type
-          const channelId = await this.configService.get(
-            `core.${logType}.channel_id`,
-          );
-
-          this.logChannels.set(logType, {
-            enabled: config.value as boolean,
-            channelId: channelId as string,
-          });
-
-          logger.debug(
-            `Loaded log channel: ${logType} - Enabled: ${config.value}, Channel: ${channelId || "not set"}`,
-          );
-        }
+      for (const logType of DISCORD_LOG_TYPES) {
+        const { enabled, channelId } = await this.resolveLogChannel(logType);
+        logger.debug(
+          `Loaded log channel: ${logType} - Enabled: ${enabled}, Channel: ${channelId || "not set"}`,
+        );
       }
     } catch (error) {
       logger.error("Error loading log channels:", error);
     }
+  }
+
+  /**
+   * Read the current enabled flag + channel id for one category and cache
+   * it in `logChannels`. Called on every `logToChannel()` so a Settings-page
+   * save (which writes straight through ConfigService's cache) takes effect
+   * on the next log message — no restart or reload needed.
+   */
+  private async resolveLogChannel(logType: string): Promise<ILogChannel> {
+    const enabled = await this.configService.getBoolean(
+      `core.${logType}.enabled`,
+      false,
+    );
+    const channelId = await this.configService.getString(
+      `core.${logType}.channel_id`,
+      "",
+    );
+    const resolved: ILogChannel = {
+      enabled,
+      channelId: channelId || undefined,
+    };
+    this.logChannels.set(logType, resolved);
+    return resolved;
   }
 
   /**
@@ -116,7 +151,9 @@ export class DiscordLogger {
 
       logger.debug(`Discord logger: Attempting to log to channel: ${logType}`);
 
-      const channelConfig = this.logChannels.get(logType);
+      const channelConfig = DISCORD_LOG_TYPES.includes(logType)
+        ? await this.resolveLogChannel(logType)
+        : this.logChannels.get(logType);
       logger.debug(
         `Discord logger: Channel config for ${logType}:`,
         channelConfig,
