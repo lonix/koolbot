@@ -114,6 +114,10 @@ export interface ConfigSchema {
   "reminders.enabled": boolean;
   "reminders.max_pending": number; // Per-member cap on undelivered reminders
 
+  // Self-service data export (#719)
+  "privacy.enabled": boolean; // Gates the /me/privacy page and its export route
+  "privacy.export.max_items": number; // Per-collection ceiling on exported rows
+
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
@@ -340,6 +344,14 @@ export const defaultConfig: ConfigSchema = {
   "events.channel_grace_minutes": 15,
   "reminders.enabled": false,
   "reminders.max_pending": 10,
+
+  // Self-service data export defaults (#719). Master gate off, rule 1 —
+  // the /me/privacy page renders the standard "off" banner and the export
+  // route refuses until an operator opts in. The ceiling bounds the most
+  // expensive read a member can trigger; it is per collection, and the
+  // payload names anything it clipped.
+  "privacy.enabled": false,
+  "privacy.export.max_items": 5000,
 
   // Reaction Roles defaults
   "reactionroles.enabled": false,
@@ -861,6 +873,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Reminders",
     description:
       "Personal one-off reminders members set for themselves with /remind. KoolBot DMs the reminder when it's due, falling back to the channel it was set in if the member's DMs are closed. Member self-service — the only admin control is the on/off switch and the per-member cap.",
+  },
+  privacy: {
+    title: "Privacy",
+    description:
+      "Self-service data export. When enabled, members can see what KoolBot stores about them on /me/privacy and download all of it as one JSON file. Moderation records, admin audit logs and session rows are never included.",
   },
   reactionroles: {
     title: "Reaction Roles",
@@ -1485,6 +1502,21 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "How many undelivered reminders one member may hold at a time. Bounds abuse; a member must cancel one before adding another once at the cap.",
     category: "reminders",
+    type: "number",
+    min: 1,
+  },
+  "privacy.enabled": {
+    label: "Self-service data export enabled",
+    description:
+      "Let members download everything KoolBot has stored about them from the /me/privacy page. Moderation records, admin audit logs and session rows are never included. When off, the page shows a disabled notice and the download refuses.",
+    category: "privacy",
+    type: "boolean",
+  },
+  "privacy.export.max_items": {
+    label: "Export rows per collection",
+    description:
+      "Ceiling on how many rows (and how many entries of an append-only array, e.g. voice sessions) a single export includes per collection. The export names anything it clipped so a member knows the file is partial.",
+    category: "privacy",
     type: "number",
     min: 1,
   },

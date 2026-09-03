@@ -30,7 +30,7 @@ interface UserNavItem {
    * feature on — the same "let users pre-set" intent the birthday page has
    * always followed.
    */
-  feature?: "rewind" | "voice" | "birthday";
+  feature?: "rewind" | "voice" | "birthday" | "privacy";
   /**
    * Whether the gated page lets the member pre-set a choice (Voice, Birthday)
    * versus being read-only (Rewind). Drives the disabled tooltip copy so a
@@ -58,6 +58,7 @@ export const USER_NAV_ITEMS: UserNavItem[] = [
     presettable: true,
   },
   { href: "/me/rewind", label: "Rewind", feature: "rewind" },
+  { href: "/me/privacy", label: "Privacy", feature: "privacy" },
 ];
 
 /**
@@ -71,6 +72,7 @@ export interface UserFeatureFlags {
   rewindEnabled?: boolean;
   presetsEnabled?: boolean;
   birthdayEnabled?: boolean;
+  privacyEnabled?: boolean;
 }
 
 /** Whether a given nav item's feature is disabled per the supplied flags. */
@@ -81,6 +83,7 @@ function isNavItemDisabled(
   if (item.feature === "rewind") return flags.rewindEnabled === false;
   if (item.feature === "voice") return flags.presetsEnabled === false;
   if (item.feature === "birthday") return flags.birthdayEnabled === false;
+  if (item.feature === "privacy") return flags.privacyEnabled === false;
   return false;
 }
 
@@ -128,6 +131,13 @@ export interface UserPageOptions {
    * either way so members can pre-set their date.
    */
   birthdayEnabled?: boolean;
+  /**
+   * Enabled-state of the feature-gated Privacy / data-export page (#719).
+   * When `false`, the Privacy nav link is greyed with an "off" badge and the
+   * page itself renders the shared disabled banner instead of the download
+   * button — there is nothing to pre-set on a read-only surface.
+   */
+  privacyEnabled?: boolean;
 }
 
 const STYLE = [
@@ -182,6 +192,10 @@ const STYLE = [
   ".tz-preview .now{font-weight:600;color:#e4e6eb}",
   ".btn{background:#2563eb;color:#fff;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
   ".btn:hover{background:#1d4ed8}",
+  // The Privacy page's download control is a link (a plain GET), not a form
+  // button, so it needs the block/decoration bits a <button> gets for free.
+  "a.btn{display:inline-block;text-decoration:none;color:#fff}",
+  "a.btn:hover{text-decoration:none;color:#fff}",
   ".btn-secondary{background:#374151;color:#e4e6eb;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
   ".btn-secondary:hover{background:#4b5563}",
   ".btn-danger{background:#dc2626;color:#fff;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
@@ -353,6 +367,7 @@ export function renderUserPage(opts: UserPageOptions): string {
       rewindEnabled: opts.rewindEnabled,
       presetsEnabled: opts.presetsEnabled,
       birthdayEnabled: opts.birthdayEnabled,
+      privacyEnabled: opts.privacyEnabled,
     })}${renderFlash(opts.flash)}${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     `<script>${FLASH_FOCUS_SCRIPT}</script>`,
@@ -445,6 +460,9 @@ export function renderUserIndexBody(opts: {
   // Whether the feature-gated Birthday page is enabled (#657). When false,
   // its card is shown tagged "off" (#709), mirroring `rewindEnabled`.
   birthdayEnabled?: boolean;
+  // Whether the feature-gated Privacy page is enabled (#719). When false, its
+  // card is shown tagged "off" (#709), mirroring `rewindEnabled`.
+  privacyEnabled?: boolean;
   // The member's poll-participation summary (#655), or null/undefined when
   // poll-participation capture is off or the member has never voted. When
   // present, a small read-only "Poll participation" card surfaces their
@@ -492,6 +510,12 @@ export function renderUserIndexBody(opts: {
     "Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.",
     opts.rewindEnabled !== false,
   );
+  const privacyCard = featureCard(
+    "/me/privacy",
+    "Privacy",
+    "See what Koolbot stores about you — and download all of it as a single JSON file.",
+    opts.privacyEnabled !== false,
+  );
   // Read-only poll-participation summary (#655). Only rendered when the
   // route supplies a summary (capture on + the member has a tracking row).
   const poll = opts.pollParticipation;
@@ -533,6 +557,7 @@ export function renderUserIndexBody(opts: {
     voiceCard,
     birthdayCard,
     rewindCard,
+    privacyCard,
     "</ul>",
     "</div>",
     pollCard,
@@ -1362,5 +1387,108 @@ export function renderUserVoiceBody(opts: VoicePageBodyOptions): string {
     // ---- Presets ----
     `<h2>Saved presets <span class="muted" style="font-size:.85rem">(max ${opts.maxPerUser})</span></h2>`,
     presetCards,
+  ].join("");
+}
+
+// --------------------------------------------------------------------
+// Privacy / data export page (#719)
+// --------------------------------------------------------------------
+
+export interface PrivacyDataRow {
+  /** Registry collection label, shown verbatim so the file and page agree. */
+  collection: string;
+  /** The registry's note — why it is in (or out of) the export. */
+  note: string;
+}
+
+export interface PrivacyPageBodyOptions {
+  /** `privacy.enabled` — when false the download is refused, so hide it. */
+  featureEnabled: boolean;
+  /** Collections the export includes, in registry order. */
+  included: PrivacyDataRow[];
+  /** Collections deliberately left out, with the reason. */
+  excluded: PrivacyDataRow[];
+  /** `privacy.export.max_items`, so the page states the ceiling up front. */
+  maxItems: number;
+}
+
+function renderPrivacyTable(
+  caption: string,
+  rows: PrivacyDataRow[],
+  noteHeading: string,
+): string {
+  const body = rows
+    .map(
+      (row) =>
+        `<tr><td class="mono">${escapeHtml(row.collection)}</td>` +
+        `<td>${escapeHtml(row.note)}</td></tr>`,
+    )
+    .join("");
+  return (
+    '<table class="prefs-table">' +
+    `<caption class="muted" style="text-align:left;padding:.25rem .5rem">${escapeHtml(caption)}</caption>` +
+    `<thead><tr><th scope="col">Collection</th><th scope="col">${escapeHtml(noteHeading)}</th></tr></thead>` +
+    `<tbody>${body}</tbody></table>`
+  );
+}
+
+/**
+ * Inner HTML for `GET /me/privacy` (#719). Three parts: what the download
+ * contains, what it deliberately does not, and the download button itself.
+ *
+ * The two tables are rendered from the same registry the export reads, so the
+ * page cannot drift from the file a member actually receives — the drift the
+ * registry exists to prevent would otherwise just move from the code into the
+ * copy describing it.
+ */
+export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
+  const disabledNotice = renderUserFeatureDisabledNotice({
+    enabled: opts.featureEnabled,
+    label: "self-service data export",
+    presettable: false,
+  });
+  const download = opts.featureEnabled
+    ? '<div class="form-actions">' +
+      '<a class="btn" href="/me/privacy/export" download>Download my data (JSON)</a>' +
+      '<span class="muted">Served as a file, not a page. Large histories may take a moment.</span>' +
+      "</div>"
+    : "";
+  return [
+    "<h1>Privacy</h1>",
+    '<p class="subtitle">What Koolbot stores about you on this server, and how to get a copy of it.</p>',
+    disabledNotice,
+    '<div class="card">',
+    "<h2>Download your data</h2>",
+    "<p>One JSON file with every row Koolbot holds that is about <strong>you</strong> — " +
+      "your voice history, activity counters, preferences, quotes, RSVPs and reminders. " +
+      "It is a record, not a recap: for the readable version of your year, see " +
+      '<a href="/me/rewind">Rewind</a>.</p>',
+    `<p class="muted">Long histories are capped at ${opts.maxItems} entries per collection; ` +
+      "anything clipped is listed under <code>truncated</code> in the file. Each download is " +
+      "recorded in the server's Web UI audit log.</p>",
+    download,
+    "</div>",
+    '<div class="card">',
+    "<h2>What's in the file</h2>",
+    renderPrivacyTable(
+      "Collections included in your export.",
+      opts.included,
+      "What it holds",
+    ),
+    '<p class="muted" style="margin-top:.75rem">Where a row is shared with other members ' +
+      "(poll turnout, event RSVPs, leaderboard role rosters), the export contains only your " +
+      "own slice of it — never the other members on that row.</p>",
+    "</div>",
+    '<div class="card">',
+    "<h2>What's not in it</h2>",
+    "<p>Some things Koolbot stores are deliberately out of reach of this download.</p>",
+    renderPrivacyTable(
+      "Collections deliberately excluded from your export.",
+      opts.excluded,
+      "Why it's excluded",
+    ),
+    '<p class="muted" style="margin-top:.75rem">Moderation records in particular are not ' +
+      "self-service: ask a server moderator if you need to know where you stand.</p>",
+    "</div>",
   ].join("");
 }

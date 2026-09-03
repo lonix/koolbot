@@ -39,6 +39,7 @@ import {
   renderUserIndexBody,
   renderUserNotificationsBody,
   renderUserPage,
+  renderUserPrivacyBody,
   renderUserRewindBody,
   renderUserTimezoneBody,
   renderUserVoiceBody,
@@ -809,6 +810,33 @@ export function userPages(): A11yPage[] {
     {
       name: "/me rewind",
       html: shell("Rewind", "/me/rewind", renderUserRewindBody(REWIND)),
+    },
+    {
+      name: "/me privacy",
+      html: shell(
+        "Privacy",
+        "/me/privacy",
+        renderUserPrivacyBody({
+          featureEnabled: true,
+          included: [
+            {
+              collection: "voice-channel-tracking",
+              note: "Your voice history and per-session detail.",
+            },
+            {
+              collection: "quote",
+              note: "Quotes attributed to you, and quotes you saved.",
+            },
+          ],
+          excluded: [
+            {
+              collection: "moderation-log",
+              note: "Moderation record — not self-service.",
+            },
+          ],
+          maxItems: 5000,
+        }),
+      ),
     },
   ];
 }

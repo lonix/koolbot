@@ -484,6 +484,7 @@ describe("Config Schema", () => {
       "reactiontracking.enabled": false,
       "moderation.enabled": false,
       "reminders.enabled": false,
+      "privacy.enabled": false,
 
       // ─── Sub-features that default off (auxiliary opt-ins) ──────────
       "voicechannels.presets.enabled": false,
