@@ -920,25 +920,27 @@ window on a large guild, after which every `reply` fails with
 
 Call `deferReply()` before the first slow `await` and finish with `editReply()`.
 Visibility is fixed at the first acknowledgement, so pass
-`{ ephemeral: true }` to the deferral when the final response should be
-ephemeral, and drop `ephemeral` from the later `editReply` payload (it is not a
-valid edit option). Cheap synchronous guards — a missing guild, a self-target —
-can still `reply()` directly before the deferral.
+`{ flags: MessageFlags.Ephemeral }` to the deferral when the final response
+should be ephemeral, and drop `flags` from the later `editReply` payload (it is
+not a valid edit option). The older `flags: MessageFlags.Ephemeral` spelling is deprecated in
+discord.js v14.16+ and is no longer used in this codebase. Cheap synchronous
+guards — a missing guild, a self-target — can still `reply()` directly before
+the deferral.
 
 ```typescript
 export async function execute(interaction: ChatInputCommandInteraction) {
   try {
     if (!interaction.guildId) {
-      await interaction.reply({ content: "Server only.", ephemeral: true });
+      await interaction.reply({ content: "Server only.", flags: MessageFlags.Ephemeral });
       return;
     }
 
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const rows = await someService.expensiveQuery(interaction.guildId);
     await interaction.editReply({ content: render(rows) });
   } catch (error) {
     logger.error("Error in mycmd command:", error);
-    await safeReply(interaction, { content: "Something went wrong.", ephemeral: true });
+    await safeReply(interaction, { content: "Something went wrong.", flags: MessageFlags.Ephemeral });
   }
 }
 ```
@@ -965,7 +967,7 @@ try {
   logger.error("Context about what failed:", error);
   await safeReply(interaction, {
     content: "There was an error while executing this command!",
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 ```

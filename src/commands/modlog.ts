@@ -3,6 +3,7 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   PermissionFlagsBits,
+  MessageFlags,
 } from "discord.js";
 import { ModerationService } from "../services/moderation-service.js";
 import type { ModerationAction } from "../models/moderation-log.js";
@@ -68,7 +69,7 @@ export async function execute(
     if (!interaction.guildId) {
       await interaction.reply({
         content: "This command can only be used in a server.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -76,7 +77,7 @@ export async function execute(
     // Acknowledge before any DB work so a slow history query cannot miss
     // Discord's 3-second ACK window (`10062 Unknown interaction`, #842).
     // Every response below is ephemeral, and visibility is fixed here.
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const targetUser = interaction.options.getUser("user", true);
     const requestedPage = interaction.options.getInteger("page") ?? 1;
@@ -150,7 +151,7 @@ export async function execute(
     logger.error("Error in modlog command:", error);
     await safeReply(interaction, {
       content: "There was an error fetching the moderation history.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }

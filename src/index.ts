@@ -12,6 +12,7 @@ import {
   TextChannel,
   Partials,
   AuditLogEvent,
+  MessageFlags,
 } from "discord.js";
 import { env, getMissingRequiredEnv } from "./config/env.js";
 import logger, { isDebugMode } from "./utils/logger.js";
@@ -843,7 +844,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({
           content:
             "This button is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     } catch (error) {
@@ -872,7 +873,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({
           content:
             "This menu is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     } catch (error) {
@@ -895,7 +896,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         await interaction.reply({
           content:
             "This form is no longer supported. The control it belongs to has been removed in v1.0 — please dismiss this message.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     } catch (error) {
@@ -941,7 +942,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     logger.error(`Error executing command ${interaction.commandName}:`, error);
     await safeReply(interaction, {
       content: "There was an error while executing this command!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 });

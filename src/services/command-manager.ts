@@ -7,6 +7,7 @@ import {
   ChatInputCommandInteraction,
   DiscordAPIError,
   HTTPError,
+  MessageFlags,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
@@ -467,7 +468,7 @@ export class CommandManager {
           await interaction.reply({
             content:
               "⚠️ Permissions can't be verified right now. Please try again in a moment.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
 
           monitoringService.trackCommandEnd(
@@ -483,7 +484,7 @@ export class CommandManager {
         if (!hasPermission) {
           await interaction.reply({
             content: "❌ You don't have permission to use this command.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
 
           monitoringService.trackCommandEnd(
@@ -539,7 +540,7 @@ export class CommandManager {
 
             await interaction.reply({
               content: errorMessage,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
 
             monitoringService.trackCommandEnd(

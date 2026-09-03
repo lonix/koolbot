@@ -24,6 +24,7 @@ import {
   NonThreadGuildBasedChannel,
   GuildTextBasedChannel,
   DiscordAPIError,
+  MessageFlags,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
@@ -864,7 +865,7 @@ export class ReactionRoleService {
       if (!roleId || !interaction.guildId) {
         await interaction.reply({
           content: "⚠️ This role button is invalid.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -876,7 +877,7 @@ export class ReactionRoleService {
       if (!enabled) {
         await interaction.reply({
           content: "⚠️ Self-assign roles are currently disabled.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -889,7 +890,7 @@ export class ReactionRoleService {
       if (!config) {
         await interaction.reply({
           content: "⚠️ This role is no longer available.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -904,7 +905,7 @@ export class ReactionRoleService {
         );
         await interaction.reply({
           content: "⚠️ That role no longer exists.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -916,7 +917,10 @@ export class ReactionRoleService {
         desired,
       );
 
-      await interaction.reply({ content: message, ephemeral: true });
+      await interaction.reply({
+        content: message,
+        flags: MessageFlags.Ephemeral,
+      });
     } catch (error) {
       logger.error("Error handling reaction-role button:", error);
       await this.safeErrorReply(interaction);
@@ -937,7 +941,7 @@ export class ReactionRoleService {
       if (!interaction.guildId) {
         await interaction.reply({
           content: "⚠️ This menu is invalid.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -949,7 +953,7 @@ export class ReactionRoleService {
       if (!enabled) {
         await interaction.reply({
           content: "⚠️ Self-assign roles are currently disabled.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -962,7 +966,7 @@ export class ReactionRoleService {
       if (configs.length === 0) {
         await interaction.reply({
           content: "⚠️ These roles are no longer available.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -1002,7 +1006,7 @@ export class ReactionRoleService {
 
       await interaction.reply({
         content: lines.length > 0 ? lines.join("\n") : "No changes made.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (error) {
       logger.error("Error handling reaction-role select menu:", error);
@@ -1017,9 +1021,9 @@ export class ReactionRoleService {
     const content = "⚠️ Something went wrong updating your roles.";
     try {
       if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content, ephemeral: true });
+        await interaction.followUp({ content, flags: MessageFlags.Ephemeral });
       } else {
-        await interaction.reply({ content, ephemeral: true });
+        await interaction.reply({ content, flags: MessageFlags.Ephemeral });
       }
     } catch {
       // Nothing more we can do if the interaction can't be answered.

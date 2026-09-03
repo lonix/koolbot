@@ -1,5 +1,9 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
+import {
+  MessageFlags,
+  type ChatInputCommandInteraction,
+  type EmbedBuilder,
+} from "discord.js";
 
 const mockIsEnabled = jest.fn<() => Promise<boolean>>();
 const mockCountHistory = jest.fn<() => Promise<number>>();
@@ -208,13 +212,15 @@ describe("Modlog Command", () => {
       await execute(interaction);
 
       expect(order).toEqual(["defer", "isEnabled", "count"]);
-      expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
       expect(reply).not.toHaveBeenCalled();
       expect(editReply).toHaveBeenCalledTimes(1);
       const payload = editReply.mock.calls[0][0] as { embeds: unknown[] };
       expect(payload.embeds).toHaveLength(1);
       // Ephemerality is set on the deferral; editReply must not repeat it.
-      expect(payload).not.toHaveProperty("ephemeral");
+      expect(payload).not.toHaveProperty("flags");
     });
 
     it("edits the deferred reply when the member has no history", async () => {
@@ -234,7 +240,9 @@ describe("Modlog Command", () => {
 
       await execute(interaction);
 
-      expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
       expect(mockCountHistory).not.toHaveBeenCalled();
       expect(editReply).toHaveBeenCalledWith({
         content: "The moderation log is currently disabled.",
@@ -248,7 +256,7 @@ describe("Modlog Command", () => {
 
       expect(deferReply).not.toHaveBeenCalled();
       expect(reply).toHaveBeenCalledWith(
-        expect.objectContaining({ ephemeral: true }),
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
       );
     });
 

@@ -8,6 +8,7 @@ import {
   VoiceChannel,
   ChannelType,
   StringSelectMenuBuilder,
+  MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
@@ -23,7 +24,7 @@ export async function handleVCControlButton(
   if (parts.length < 5 || parts[0] !== "vc" || parts[1] !== "control") {
     await interaction.reply({
       content: "❌ Invalid button interaction.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -39,7 +40,7 @@ export async function handleVCControlButton(
     if (!mainChannelId || !waitingUserId || !ownerId) {
       await interaction.reply({
         content: "❌ Invalid let-in button interaction.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -47,7 +48,7 @@ export async function handleVCControlButton(
     if (interaction.user.id !== ownerId) {
       await interaction.reply({
         content: "❌ Only the channel owner can let users in.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -64,7 +65,7 @@ export async function handleVCControlButton(
   if (userId !== ownerId) {
     await interaction.reply({
       content: "❌ Only the channel owner can use these controls.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -74,7 +75,7 @@ export async function handleVCControlButton(
   if (!channel || channel.type !== ChannelType.GuildVoice) {
     await interaction.reply({
       content: "❌ Voice channel not found.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -102,14 +103,14 @@ export async function handleVCControlButton(
       default:
         await interaction.reply({
           content: "❌ Unknown action.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
     }
   } catch (error) {
     logger.error("Error handling VC control button:", error);
     await safeReply(interaction, {
       content: "❌ An error occurred while processing your request.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }
@@ -147,7 +148,7 @@ async function handlePrivacy(
   if (!everyoneRole) {
     await interaction.reply({
       content: "❌ Could not find @everyone role.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -161,7 +162,7 @@ async function handlePrivacy(
 
     await interaction.reply({
       content: "✅ Channel is now public. Anyone can join!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
 
     // Update control panel
@@ -182,7 +183,7 @@ async function handlePrivacy(
     await interaction.reply({
       content:
         "🔒 Channel is now invite-only! Use the Invite button to add users.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
 
     // Update control panel
@@ -195,7 +196,7 @@ async function handleInvite(interaction: ButtonInteraction): Promise<void> {
   await interaction.reply({
     content:
       "💡 To invite someone to your private channel, grant them permission by right-clicking their name and selecting 'Edit Permissions' for this channel. They'll be notified when you do.",
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -212,7 +213,7 @@ async function handleTransfer(
     await interaction.reply({
       content:
         "❌ There are no other users in the channel to transfer ownership to. Invite someone to the channel first!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -236,7 +237,7 @@ async function handleTransfer(
   await interaction.reply({
     content: "👑 Select a user to transfer channel ownership:",
     components: [row],
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -252,7 +253,7 @@ async function handleLive(
     content: isNowLive
       ? "🔴 Channel marked as **LIVE**! A disclaimer has been posted."
       : "⬜ Channel is now marked as **offline**.",
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 
   // Update the control panel
@@ -276,7 +277,7 @@ async function handleWaitingRoom(
     await manager.removeWaitingRoom(channel.id);
     await interaction.reply({
       content: "🗑️ Waiting room removed.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } else {
     // Create waiting room
@@ -284,12 +285,12 @@ async function handleWaitingRoom(
     if (waitingRoom) {
       await interaction.reply({
         content: `⏳ Waiting room **${waitingRoom.name}** created! Users who join it will notify you here.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } else {
       await interaction.reply({
         content: "❌ Failed to create waiting room.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -312,7 +313,7 @@ async function handleLetIn(
   if (!guild) {
     await interaction.reply({
       content: "❌ Guild not found.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -323,7 +324,7 @@ async function handleLetIn(
   if (!mainChannel || mainChannel.type !== ChannelType.GuildVoice) {
     await interaction.reply({
       content: "❌ Main channel not found.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -336,7 +337,7 @@ async function handleLetIn(
     await interaction.reply({
       content:
         "❌ Only the current owner of this voice channel can let users in.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -346,7 +347,7 @@ async function handleLetIn(
   if (!waitingRoomId) {
     await interaction.reply({
       content: "⚠️ The waiting room no longer exists.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -358,7 +359,7 @@ async function handleLetIn(
     logger.error("Could not fetch the waiting user:", error);
     await safeReply(interaction, {
       content: "❌ Could not find the waiting user.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -367,7 +368,7 @@ async function handleLetIn(
   if (waitingMember.voice.channelId !== waitingRoomId) {
     await interaction.reply({
       content: `⚠️ **${waitingMember.displayName}** is no longer in the waiting room.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -376,13 +377,13 @@ async function handleLetIn(
     await waitingMember.voice.setChannel(mainChannel);
     await interaction.reply({
       content: `✅ **${waitingMember.displayName}** has been let into the channel!`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     logger.error("Error letting user in from the waiting room:", error);
     await safeReply(interaction, {
       content: `❌ Failed to move **${waitingMember.displayName}** into the channel.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }

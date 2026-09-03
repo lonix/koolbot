@@ -120,7 +120,7 @@ command:
    Do not add a per-method copy of the list, and do not hand-maintain command metadata in `help.ts`.
 3. Add the enablement key `mycmd.enabled` (with default) to `config-schema.ts`.
 4. Document user-facing commands in `COMMANDS.md`.
-5. Call `await interaction.deferReply()` (with `{ ephemeral: true }` when the final reply is ephemeral)
+5. Call `await interaction.deferReply()` (with `{ flags: MessageFlags.Ephemeral }` when the final reply is ephemeral)
    **before** the first DB query or other slow await, then finish with `editReply`. Discord invalidates
    an interaction that is not acknowledged within 3 seconds, and the resulting `10062 Unknown
    interaction` cannot be recovered (#842). Cheap synchronous guards may still `reply` directly.

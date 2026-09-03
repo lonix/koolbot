@@ -1,4 +1,4 @@
-import crypto from "crypto";
+import crypto from "node:crypto";
 import { Buffer } from "buffer";
 import { Request, Response, NextFunction } from "express";
 import { parseCookies, setCookie } from "./cookies.js";

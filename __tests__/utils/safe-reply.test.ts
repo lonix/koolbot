@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+import { MessageFlags } from "discord.js";
 
 const mockLoggerError = jest.fn();
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -47,13 +48,13 @@ describe("safeReply", () => {
 
     const delivered = await safeReply(interaction as never, {
       content: "boom",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
 
     expect(delivered).toBe(true);
     expect(interaction.reply).toHaveBeenCalledWith({
       content: "boom",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     expect(interaction.editReply).not.toHaveBeenCalled();
     expect(interaction.followUp).not.toHaveBeenCalled();
@@ -76,6 +77,8 @@ describe("safeReply", () => {
 
     await safeReply(interaction as never, {
       content: "boom",
+      flags: MessageFlags.Ephemeral,
+      // Deprecated spelling of the flag; still stripped for callers that use it.
       ephemeral: true,
       tts: false,
       withResponse: true,
@@ -90,13 +93,13 @@ describe("safeReply", () => {
 
     const delivered = await safeReply(interaction as never, {
       content: "boom",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
 
     expect(delivered).toBe(true);
     expect(interaction.followUp).toHaveBeenCalledWith({
       content: "boom",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     expect(interaction.reply).not.toHaveBeenCalled();
   });

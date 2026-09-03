@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { MessageFlags } from "discord.js";
 
 const mockGetBoolean = jest.fn<() => Promise<boolean>>();
 const mockGetString = jest.fn<() => Promise<string>>();
@@ -119,7 +120,7 @@ describe("ReactionRoleService component interactions", () => {
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("You now have **Gamer**"),
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }),
       );
     });
@@ -137,7 +138,7 @@ describe("ReactionRoleService component interactions", () => {
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("Removed **Gamer**"),
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }),
       );
     });
@@ -152,7 +153,7 @@ describe("ReactionRoleService component interactions", () => {
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("disabled"),
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }),
       );
     });
@@ -167,7 +168,7 @@ describe("ReactionRoleService component interactions", () => {
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: expect.stringContaining("no longer available"),
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }),
       );
     });
@@ -198,7 +199,7 @@ describe("ReactionRoleService component interactions", () => {
 
       expect(member.roles.add).toHaveBeenCalledTimes(1);
       expect(interaction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({ ephemeral: true }),
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
       );
     });
 
@@ -226,7 +227,7 @@ describe("ReactionRoleService component interactions", () => {
       expect(interaction.reply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: "No changes made.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }),
       );
     });

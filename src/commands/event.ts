@@ -4,6 +4,7 @@ import {
   EmbedBuilder,
   PermissionFlagsBits,
   GuildMember,
+  MessageFlags,
 } from "discord.js";
 import { ConfigService } from "../services/config-service.js";
 import {
@@ -120,14 +121,14 @@ export async function execute(
   if (!enabled) {
     await interaction.reply({
       content: "The events feature is currently disabled.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
   if (!interaction.guildId) {
     await interaction.reply({
       content: "This command must be run inside a guild.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -143,7 +144,7 @@ export async function execute(
     if (!isAdmin(interaction)) {
       await interaction.reply({
         content: "❌ Only administrators can manage events.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -155,7 +156,7 @@ export async function execute(
     logger.error(`Error in /event ${sub}:`, error);
     await safeReply(interaction, {
       content: "❌ There was an error running this command.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }
@@ -164,7 +165,7 @@ async function handleCreate(
   interaction: ChatInputCommandInteraction,
   config: ConfigService,
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const title = interaction.options.getString("title", true).trim();
   const date = interaction.options.getString("date", true).trim();
@@ -223,7 +224,7 @@ async function handleCreate(
 async function handleList(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const service = EventService.getInstance(interaction.client);
   const events = await service.listEvents(interaction.guildId as string);
 
@@ -259,7 +260,7 @@ async function handleList(
 async function handleCancel(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const id = interaction.options.getString("id", true).trim();
   const service = EventService.getInstance(interaction.client);
   const event = await service.cancelEvent(id, interaction.guildId as string);
@@ -273,7 +274,7 @@ async function handleCancel(
 async function handleStart(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const id = interaction.options.getString("id", true).trim();
   const service = EventService.getInstance(interaction.client);
   const event = await service.startEventNow(id, interaction.guildId as string);

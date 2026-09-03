@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 import { CommandManager } from "../../src/services/command-manager.js";
 import {
   PermissionCheckError,
@@ -89,7 +89,7 @@ describe("CommandManager.executeCommand permission availability (#836)", () => {
     expect(interaction.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         content: expect.stringContaining("try again"),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       }),
     );
   });

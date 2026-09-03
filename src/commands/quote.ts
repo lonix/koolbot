@@ -4,6 +4,7 @@ import {
   GuildMember,
   PermissionFlagsBits,
   AttachmentBuilder,
+  MessageFlags,
 } from "discord.js";
 import { quoteService } from "../services/quote-service.js";
 import { QuoteChannelManager } from "../services/quote-channel-manager.js";
@@ -163,7 +164,7 @@ export async function execute(
 
     await safeReply(interaction, {
       content: `❌ ${errorMessage}`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }
@@ -199,13 +200,13 @@ async function handleAdd(
     await quoteService.updateQuoteMessageId(quote._id.toString(), messageId);
     await interaction.reply({
       content: "✅ Quote added successfully and posted to the quote channel!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } else {
     await interaction.reply({
       content:
         "✅ Quote added to database, but could not post to channel. Check quote channel configuration.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }
@@ -222,7 +223,7 @@ async function handleEdit(
     await interaction.reply({
       content:
         "❌ Please provide at least one field to update (text or author).",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -232,7 +233,7 @@ async function handleEdit(
   if (!existingQuote) {
     await interaction.reply({
       content: "❌ Quote not found with that ID.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -245,7 +246,7 @@ async function handleEdit(
   if (normalizedAddedById !== interaction.user.id) {
     await interaction.reply({
       content: "❌ You can only edit quotes that you added.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -276,7 +277,7 @@ async function handleEdit(
     await safeReply(interaction, {
       content:
         "❌ I couldn't find or update the quote message in the quote channel. The quote may not have been posted successfully, or the message was deleted. Please contact a server admin.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -286,7 +287,7 @@ async function handleEdit(
 
   await interaction.reply({
     content: "✅ Quote updated successfully!",
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 }
 
@@ -296,12 +297,12 @@ async function handleExport(
   if (!invokerIsAdmin(interaction.member)) {
     await interaction.reply({
       content: "❌ This command requires the Administrator permission.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   const backup = await quoteService.exportQuotes();
   const json = JSON.stringify(backup, null, 2);
@@ -323,7 +324,7 @@ async function handleImport(
   if (!invokerIsAdmin(interaction.member)) {
     await interaction.reply({
       content: "❌ This command requires the Administrator permission.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -334,12 +335,12 @@ async function handleImport(
   if (attachment.size > MAX_IMPORT_BYTES) {
     await interaction.reply({
       content: `❌ Backup file is too large (max ${MAX_IMPORT_BYTES / (1024 * 1024)} MB).`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   let payload: unknown;
   try {
@@ -387,12 +388,12 @@ async function handleReset(
   if (!invokerIsAdmin(interaction.member)) {
     await interaction.reply({
       content: "❌ This command requires the Administrator permission.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
 
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     const manager = QuoteChannelManager.getInstance(interaction.client);

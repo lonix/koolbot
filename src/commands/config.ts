@@ -3,6 +3,7 @@ import {
   ChatInputCommandInteraction,
   GuildMember,
   PermissionFlagsBits,
+  MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
@@ -25,7 +26,7 @@ export async function execute(
 
   // Defer immediately so the DB revoke/create + DM round-trip can't blow
   // Discord's 3-second interaction-ack deadline.
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   if (!isWebUIEnabled()) {
     logger.info(

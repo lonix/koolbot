@@ -1,6 +1,11 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import { data, execute } from "../../src/commands/ping.js";
-import type { ChatInputCommandInteraction, Message, Client } from "discord.js";
+import {
+  MessageFlags,
+  type ChatInputCommandInteraction,
+  type Message,
+  type Client,
+} from "discord.js";
 
 // Mock logger
 jest.mock("../../src/utils/logger.js");
@@ -44,7 +49,10 @@ describe("Ping Command", () => {
         client: mockClient as Client,
         replied: false,
         deferred: false,
-        reply: jest.fn().mockResolvedValue(mockMessage),
+        reply: jest
+          .fn()
+          .mockResolvedValue({ resource: { message: mockMessage } }),
+        fetchReply: jest.fn().mockResolvedValue(mockMessage),
         editReply: jest.fn().mockResolvedValue(undefined),
         followUp: jest.fn().mockResolvedValue(undefined),
       };
@@ -55,8 +63,9 @@ describe("Ping Command", () => {
 
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content: "Pinging...",
-        fetchReply: true,
+        withResponse: true,
       });
+      expect(mockInteraction.fetchReply).not.toHaveBeenCalled();
 
       expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.stringContaining("Pong! 🏓"),
@@ -78,6 +87,20 @@ describe("Ping Command", () => {
       expect(mockInteraction.editReply).toHaveBeenCalledWith(
         expect.stringContaining("Bot Latency: 250ms"),
       );
+    });
+
+    it("fetches the reply when the callback response carries no message", async () => {
+      (mockInteraction.reply as jest.Mock).mockResolvedValue({
+        resource: null,
+      } as never);
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.fetchReply).toHaveBeenCalledTimes(1);
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        expect.stringContaining("Bot Latency: 100ms"),
+      );
+      expect(mockInteraction.followUp).not.toHaveBeenCalled();
     });
 
     it("should handle API latency from WebSocket", async () => {
@@ -105,7 +128,7 @@ describe("Ping Command", () => {
     it("should follow up with an error message when editReply fails after the reply succeeded", async () => {
       (mockInteraction.reply as jest.Mock).mockImplementation(async () => {
         (mockInteraction as any).replied = true;
-        return mockMessage;
+        return { resource: { message: mockMessage } };
       });
       (mockInteraction.editReply as jest.Mock).mockRejectedValue(
         new Error("editReply failed") as never,
@@ -115,7 +138,7 @@ describe("Ping Command", () => {
 
       expect(mockInteraction.followUp).toHaveBeenCalledWith({
         content: "There was an error while executing this command!",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       expect(mockInteraction.reply).toHaveBeenCalledTimes(1);
     });
@@ -130,7 +153,7 @@ describe("Ping Command", () => {
       expect(mockInteraction.reply).toHaveBeenCalledTimes(2);
       expect(mockInteraction.reply).toHaveBeenLastCalledWith({
         content: "There was an error while executing this command!",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       expect(mockInteraction.followUp).not.toHaveBeenCalled();
     });
