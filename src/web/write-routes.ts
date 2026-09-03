@@ -4126,7 +4126,7 @@ export function createWriteRouter(
     guildId: string,
     id: string,
   ): Promise<HydratedDocument<IBotStatusMessage> | null> => {
-    let entry: HydratedDocument<IBotStatusMessage> | null = null;
+    let entry: HydratedDocument<IBotStatusMessage> | null;
     try {
       entry = await BotStatusMessage.findById(id);
     } catch {
