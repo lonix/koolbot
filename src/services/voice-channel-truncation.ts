@@ -361,6 +361,28 @@ export class VoiceChannelTruncationService {
       // Get retention configuration
       const retentionConfig = await this.getRetentionConfig();
 
+      // `0` means "keep forever" on every retention key (#835). Without this
+      // guard a 0 (or negative) window would put the cutoff at — or after —
+      // now and `$pull` every session for every user, so the sweep is skipped
+      // rather than run with a degenerate cutoff. The check is on the value
+      // the cleanup actually consumes, so it also covers a stray 0 stored
+      // before the write boundary started refusing blank input.
+      if (
+        !Number.isFinite(retentionConfig.detailedSessionsDays) ||
+        retentionConfig.detailedSessionsDays <= 0
+      ) {
+        logger.info(
+          `Skipping session pruning: detailed-session retention is ${retentionConfig.detailedSessionsDays} (0 = keep forever; only a positive window prunes)`,
+        );
+        return {
+          sessionsRemoved: 0,
+          dataAggregated: 0,
+          errors,
+          executionTime: Date.now() - startTime,
+          timestamp: new Date(),
+        };
+      }
+
       const cutoffDate = new Date();
       cutoffDate.setDate(
         cutoffDate.getDate() - retentionConfig.detailedSessionsDays,

@@ -201,7 +201,13 @@ export interface SettingRow {
    * `warnBelow.value`, the settings page renders `warnBelow.message` as a
    * non-blocking inline warning. Sourced from `SettingMetadata.warnBelow`.
    */
-  warnBelow?: { value: number; message: string };
+  warnBelow?: { value: number; message: string; exemptZero?: boolean };
+  /**
+   * Inclusive lower bound for a `number` control, rendered as its `min`
+   * attribute so the browser refuses a lower value before the server does.
+   * Sourced from `SettingMetadata.min` (#835).
+   */
+  min?: number;
   /**
    * Which channel picker a `channel` / `channel_list` control draws from:
    * `"voice"` uses the voice (+ stage) list, anything else (the default) uses
@@ -784,7 +790,15 @@ function renderControlInput(
     );
   }
   if (r.type === "number") {
-    return `<input type="number"${a11yAttr} name="${valueName}" value="${escapeHtml(primitive)}" style="width:8rem"${lockAttr}>`;
+    // `required` so a cleared field is caught by the browser rather than
+    // posted as "" (which the server now rejects, #835); `min` mirrors the
+    // schema bound the server enforces. A dep-locked / cascade-disabled
+    // control is `disabled`, which exempts it from both constraints.
+    const minAttr =
+      typeof r.min === "number" && Number.isFinite(r.min)
+        ? ` min="${r.min}"`
+        : "";
+    return `<input type="number"${a11yAttr} name="${valueName}" value="${escapeHtml(primitive)}"${minAttr} required style="width:8rem"${lockAttr}>`;
   }
   if (r.type === "channel" || r.type === "category" || r.type === "role") {
     const options =
@@ -871,6 +885,9 @@ export function renderWarnBelow(r: SettingRow, id = ""): string {
     return "";
   const value = typeof r.current === "number" ? r.current : Number(r.current);
   if (!Number.isFinite(value) || value >= r.warnBelow.value) return "";
+  // On retention keys `0` means "keep forever" (#835), which can't degrade
+  // the feature the hint protects, so the hint opts that value out.
+  if (value === 0 && r.warnBelow.exemptZero) return "";
   // role="status" (implicit aria-live=polite) keeps this persistent advisory
   // from being announced assertively on every page load like role="alert".
   // As with the dependency hint, an `id` lets the caller wire this into the
@@ -1451,6 +1468,7 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
       category: meta?.category ?? props.featureKey,
       options: meta?.options,
       warnBelow: meta?.warnBelow,
+      min: meta?.min,
       channelKind: meta?.channelKind,
     };
   });
@@ -2620,6 +2638,16 @@ export interface DatabaseProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
+/**
+ * Human label for a retention window. Exactly `0` means "keep forever" on
+ * every retention key (#835), so it is spelled out rather than shown as
+ * "0 days". Any other value — including an invalid negative one that slipped
+ * in via an env var — is shown verbatim so a misconfiguration stays visible.
+ */
+function retentionWindowLabel(value: number, unit: string): string {
+  return value === 0 ? "keep forever" : `${value} ${unit}`;
+}
+
 export function renderDatabasePage(props: DatabaseProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const collectionsHtml =
@@ -2670,9 +2698,9 @@ ${renderFlash(props.flash)}
     <dt>Scheduled</dt><dd>${props.trunk.isScheduled ? '<span class="tag tag-on">yes</span>' : '<span class="tag tag-off">no</span>'}</dd>
     <dt>Currently running</dt><dd>${props.trunk.isRunning ? '<span class="tag tag-warn">yes</span>' : '<span class="tag tag-on">idle</span>'}</dd>
     <dt>Last run</dt><dd class="muted">${escapeHtml(props.trunk.lastRun)}</dd>
-    <dt>Detailed sessions retention</dt><dd>${props.trunk.detailedDays} days</dd>
-    <dt>Monthly summaries retention</dt><dd>${props.trunk.monthlyMonths} months</dd>
-    <dt>Yearly summaries retention</dt><dd>${props.trunk.yearlyYears} years</dd>
+    <dt>Detailed sessions retention</dt><dd>${retentionWindowLabel(props.trunk.detailedDays, "days")}</dd>
+    <dt>Monthly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.monthlyMonths, "months")}</dd>
+    <dt>Yearly summaries retention</dt><dd>${retentionWindowLabel(props.trunk.yearlyYears, "years")}</dd>
   </dl>
   <form method="POST" action="/admin/database/run-cleanup" class="inline-form" onsubmit="return confirm('Run voice-channel data cleanup now?');">
     ${csrfInput}

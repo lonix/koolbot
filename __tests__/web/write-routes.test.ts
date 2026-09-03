@@ -226,6 +226,83 @@ describe("coerceConfigValue", () => {
     if (!r.ok) expect(r.reason).toBe("invalid number");
   });
 
+  describe("blank input for number keys (#835)", () => {
+    // `Number("") === 0` and `Number(null) === 0`, so a cleared
+    // <input type="number"> (the browser posts "") or a YAML key with no
+    // value (parses as null) used to be stored as 0 — which for a retention
+    // key meant "cut off at now" and wiped the whole history. Blank must be
+    // refused, never coerced.
+    it.each([
+      ["empty string", ""],
+      ["whitespace", "   "],
+      ["null (YAML empty value)", null],
+      ["undefined (absent field)", undefined],
+    ])("rejects %s for a retention key", (_label, raw) => {
+      const r = coerceConfigValue(
+        "voicetracking.cleanup.retention.detailed_sessions_days",
+        raw,
+      );
+      expect(r).toEqual({ ok: false, reason: "invalid number" });
+    });
+
+    it("rejects blank input for a plain number key too", () => {
+      expect(coerceConfigValue("quotes.max_length", "")).toEqual({
+        ok: false,
+        reason: "invalid number",
+      });
+    });
+
+    it("rejects a boolean for a number key rather than reading it as 0/1", () => {
+      expect(coerceConfigValue("quotes.max_length", true).ok).toBe(false);
+      expect(coerceConfigValue("quotes.max_length", false).ok).toBe(false);
+    });
+
+    it("still accepts an explicit 0 where the key allows it", () => {
+      // 0 = keep forever on retention keys; it is a deliberate value, not a
+      // cleared field, and must round-trip.
+      expect(coerceConfigValue("core.web_audit.retention_days", "0")).toEqual({
+        ok: true,
+        value: 0,
+      });
+    });
+  });
+
+  describe("declared minimum for number keys (#835)", () => {
+    it("rejects a value below the key's min with a field-level reason", () => {
+      const r = coerceConfigValue(
+        "voicetracking.cleanup.retention.detailed_sessions_days",
+        "-1",
+      );
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe("must be at least 0");
+    });
+
+    it("accepts a value exactly at the min", () => {
+      expect(
+        coerceConfigValue(
+          "voicetracking.cleanup.retention.detailed_sessions_days",
+          "0",
+        ),
+      ).toEqual({ ok: true, value: 0 });
+    });
+
+    it("refuses 0 for the TTL-driven metrics retention (min 1)", () => {
+      const r = coerceConfigValue("monitoring.metrics_retention_days", 0);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe("must be at least 1");
+      expect(coerceConfigValue("monitoring.metrics_retention_days", 1)).toEqual(
+        { ok: true, value: 1 },
+      );
+    });
+
+    it("leaves keys without a declared min unbounded", () => {
+      expect(coerceConfigValue("quotes.max_length", -5)).toEqual({
+        ok: true,
+        value: -5,
+      });
+    });
+  });
+
   it("stringifies values for string keys", () => {
     expect(coerceConfigValue("voicechannels.lobby.name", "Lobby")).toEqual({
       ok: true,

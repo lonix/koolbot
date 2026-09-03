@@ -448,6 +448,12 @@ export const REWIND_RETENTION_MIN_DAYS = 366;
 export interface SettingWarnBelow {
   value: number;
   message: string;
+  /**
+   * When true, a value of exactly `0` never triggers the warning. Set on the
+   * retention hints: `0` means "keep forever" on every retention key (#835),
+   * which cannot degrade the feature the hint protects.
+   */
+  exemptZero?: boolean;
 }
 
 export interface SettingMetadata {
@@ -470,6 +476,15 @@ export interface SettingMetadata {
    * keys (see `REWIND_RETENTION_MIN_DAYS`).
    */
   warnBelow?: SettingWarnBelow;
+  /**
+   * Inclusive lower bound for `number`-typed keys (#835). Enforced at the
+   * write boundary by `coerceConfigValue` (a value below it is rejected, not
+   * clamped), rendered as the `min` attribute of the Settings input, and
+   * checked by `validate-config`. Retention keys declare `min: 0` — `0` means
+   * "keep forever" — so a negative window (whose cutoff would lie in the
+   * future and prune everything) can never be stored.
+   */
+  min?: number;
   /**
    * Which kind of Discord channel a `channel` / `channel_list` picker offers.
    * `"text"` (the default when omitted) lists text/announcement channels;
@@ -720,7 +735,16 @@ export function validateDependencies(
 const rewindRetentionWarning: SettingWarnBelow = {
   value: REWIND_RETENTION_MIN_DAYS,
   message: `⚠️ Rewind / year-in-review needs ≥ ${REWIND_RETENTION_MIN_DAYS} days of detailed data. At this value, recaps that reach further back will be incomplete. Lower it only if you don't need a full year-in-review.`,
+  // `0` disables pruning entirely (#835), so it keeps every day of detail.
+  exemptZero: true,
 };
+
+/**
+ * Lower bound shared by every retention key (#835): `0` means "keep forever"
+ * (the cleanup job skips pruning), anything negative is refused at the write
+ * boundary. Declared once so the meaning of `0` can't drift between keys.
+ */
+const RETENTION_MIN = 0;
 
 /**
  * Per-category metadata for the WebUI Settings page section headers and
@@ -1013,22 +1037,27 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "voicetracking.cleanup.retention.detailed_sessions_days": {
     label: "Detailed-session retention (days)",
     description:
-      "Days to keep detailed session rows before they are summarised away. Rewind reads these detailed sessions, so keep this at or above a full year.",
+      "Days to keep detailed session rows before the cleanup job prunes them. Rewind reads these detailed sessions, so keep this at or above a full year. Set to 0 to keep every session forever.",
     category: "voicetracking",
     type: "number",
     warnBelow: rewindRetentionWarning,
+    min: RETENTION_MIN,
   },
   "voicetracking.cleanup.retention.monthly_summaries_months": {
     label: "Monthly-summary retention (months)",
-    description: "Months to keep monthly summary rows.",
+    description:
+      "Months to keep monthly summary rows. Set to 0 to keep them forever.",
     category: "voicetracking",
     type: "number",
+    min: RETENTION_MIN,
   },
   "voicetracking.cleanup.retention.yearly_summaries_years": {
     label: "Yearly-summary retention (years)",
-    description: "Years to keep yearly summary rows.",
+    description:
+      "Years to keep yearly summary rows. Set to 0 to keep them forever.",
     category: "voicetracking",
     type: "number",
+    min: RETENTION_MIN,
   },
 
   // Text-Message Activity Tracking (#495)
@@ -1062,10 +1091,11 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "messagetracking.cleanup.retention.detailed_days": {
     label: "Message-detail retention (days)",
     description:
-      "Days to keep per-message detail (recentMessages) before it is pruned. All-time per-channel totals are never pruned. Rewind reads this detail, so keep it at or above a full year.",
+      "Days to keep per-message detail (recentMessages) before it is pruned. All-time per-channel totals are never pruned. Rewind reads this detail, so keep it at or above a full year. Set to 0 to keep every message forever.",
     category: "messagetracking",
     type: "number",
     warnBelow: rewindRetentionWarning,
+    min: RETENTION_MIN,
   },
 
   // Reaction Activity Tracking (#570)
@@ -1497,6 +1527,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Weeks of per-member weekly vote counters to keep before the daily cleanup drops them. Lifetime and per-year totals are never pruned. Set to 0 to keep every week forever.",
     category: "polls",
     type: "number",
+    min: RETENTION_MIN,
   },
   "polls.turnout.retention_days": {
     label: "Poll turnout retention (days)",
@@ -1504,6 +1535,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Days to keep the per-poll turnout rows (which polls ran and who voted on them) that back the weekly recap's 'across M polls' line. Set to 0 to keep them forever.",
     category: "polls",
     type: "number",
+    min: RETENTION_MIN,
   },
 
   // Leaderboard Role Rewards
@@ -1560,9 +1592,10 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "core.command_audit.retention_days": {
     label: "Slash-command audit retention (days)",
     description:
-      "Days to keep slash-command audit rows before the cleanup job prunes them.",
+      "Days to keep slash-command audit rows before the daily cleanup job prunes them. Set to 0 to keep history forever.",
     category: "core",
     type: "number",
+    min: RETENTION_MIN,
   },
   "core.web_audit.retention_days": {
     label: "WebUI audit retention (days)",
@@ -1570,6 +1603,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Days to keep WebUI audit-log rows before the daily cleanup job prunes them. Set to 0 to keep history forever.",
     category: "core",
     type: "number",
+    min: RETENTION_MIN,
   },
   "monitoring.metrics_persistence.enabled": {
     label: "Persist command metrics",
@@ -1581,9 +1615,10 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "monitoring.metrics_retention_days": {
     label: "Command-metrics retention (days)",
     description:
-      "Days to keep persisted command-metric buckets before MongoDB's TTL index prunes them.",
+      "Days to keep persisted command-metric buckets before MongoDB's TTL index prunes them. Must be at least 1: the TTL index needs a finite window, so 0 cannot mean 'forever' here.",
     category: "core",
     type: "number",
+    min: 1,
   },
 
   // Moderation log (#728)
@@ -1600,5 +1635,6 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Days to keep moderation-log rows before the daily cleanup job prunes them. Set to 0 to keep moderation history forever.",
     category: "moderation",
     type: "number",
+    min: RETENTION_MIN,
   },
 };

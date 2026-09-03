@@ -324,6 +324,15 @@ describe("ConfigService - Methods", () => {
       expect(result).toBe(0);
     });
 
+    it("returns defaultValue for a blank stored string instead of reading it as 0 (#835)", async () => {
+      // `Number("") === 0`; a blank value must fall back like any other
+      // unparsable string — 0 meant "prune everything" on a retention key.
+      mockFindOne.mockResolvedValue({ key: "num.key", value: "   " });
+
+      const result = await service.getNumber("num.key", 400);
+      expect(result).toBe(400);
+    });
+
     it("should honor defaultValue when env var is set to empty string", async () => {
       process.env["EMPTY_NUM_KEY"] = "";
       mockFindOne.mockResolvedValue(null);

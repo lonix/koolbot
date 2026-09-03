@@ -174,6 +174,32 @@ describe("validateSetting", () => {
     expect(finding.message).toContain("Rewind");
   });
 
+  it("flags a retention below its declared minimum as an error (#835)", () => {
+    const finding = validateSetting(
+      "voicetracking.cleanup.retention.detailed_sessions_days",
+      -1,
+    );
+    expect(finding.severity).toBe("error");
+    expect(finding.message).toContain("minimum of 0");
+  });
+
+  it("does not raise the Rewind warning for 0, which means keep forever (#835)", () => {
+    const finding = validateSetting(
+      "voicetracking.cleanup.retention.detailed_sessions_days",
+      0,
+    );
+    expect(finding.severity).toBe("ok");
+  });
+
+  it("refuses 0 for the TTL-driven metrics retention (#835)", () => {
+    expect(
+      validateSetting("monitoring.metrics_retention_days", 0).severity,
+    ).toBe("error");
+    expect(
+      validateSetting("monitoring.metrics_retention_days", 1).severity,
+    ).toBe("ok");
+  });
+
   it("treats an unset key as using the schema default", () => {
     for (const key of schemaKeys()) {
       expect(validateSetting(key, null).severity).toBe("default");

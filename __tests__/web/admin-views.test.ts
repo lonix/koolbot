@@ -341,6 +341,74 @@ describe("renderSettingsPage", () => {
     }
   });
 
+  it("does not warn on 0 when the hint exempts it (0 = keep forever, #835)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.cleanup.retention.detailed_sessions_days",
+              current: 0,
+              defaultValue: 400,
+              type: "number",
+              description: "",
+              category: "voicetracking",
+              min: 0,
+              warnBelow: {
+                value: 366,
+                message: "Rewind needs 366 days of detailed data.",
+                exemptZero: true,
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).not.toContain('class="settings-warn"');
+  });
+
+  it("renders number controls as required with the declared min so a cleared field is refused client-side (#835)", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      groups: [
+        {
+          category: "voicetracking",
+          rows: [
+            {
+              key: "voicetracking.cleanup.retention.detailed_sessions_days",
+              current: 400,
+              defaultValue: 400,
+              type: "number",
+              description: "",
+              category: "voicetracking",
+              min: 0,
+            },
+            {
+              key: "quotes.max_length",
+              current: 500,
+              defaultValue: 500,
+              type: "number",
+              description: "",
+              category: "quotes",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toMatch(
+      /<input type="number"[^>]*name="value_voicetracking\.cleanup\.retention\.detailed_sessions_days"[^>]*value="400" min="0" required/,
+    );
+    // A key without a declared min is still required but carries no bound.
+    const quotesInput = html.match(
+      /<input type="number"[^>]*name="value_quotes\.max_length"[^>]*>/,
+    )?.[0];
+    expect(quotesInput).toBeDefined();
+    expect(quotesInput).toContain(" required");
+    expect(quotesInput).not.toContain(" min=");
+  });
+
   it("renders the action bar and import textarea", () => {
     const html = renderSettingsPage({ ...COMMON, groups: [] });
     expect(html).toContain('action="/admin/settings/reload"');
@@ -1674,6 +1742,56 @@ describe("renderDatabasePage", () => {
     expect(html).toMatch(
       /<button[^>]*type="submit"[^>]*disabled[^>]*>Run cleanup now<\/button>/,
     );
+  });
+
+  it("labels a 0 retention window as keep forever instead of 0 days (#835)", () => {
+    const html = renderDatabasePage({
+      ...COMMON,
+      connection: { state: "connected", name: "koolbot", host: "mongodb" },
+      trunk: {
+        enabled: true,
+        schedule: "0 0 * * *",
+        isScheduled: true,
+        isRunning: false,
+        lastRun: "—",
+        detailedDays: 0,
+        monthlyMonths: 6,
+        yearlyYears: 1,
+      },
+      trunkHistory: [],
+      collections: [],
+    });
+    expect(html).toContain(
+      "<dt>Detailed sessions retention</dt><dd>keep forever</dd>",
+    );
+    expect(html).not.toContain("0 days");
+    expect(html).toContain("6 months");
+  });
+
+  it("shows an invalid negative retention window verbatim rather than as keep forever (#835)", () => {
+    // Only exactly 0 means "keep forever"; a negative value (which the write
+    // boundary refuses, but an env var could still supply) must stay visible
+    // as the misconfiguration it is.
+    const html = renderDatabasePage({
+      ...COMMON,
+      connection: { state: "connected", name: "koolbot", host: "mongodb" },
+      trunk: {
+        enabled: true,
+        schedule: "0 0 * * *",
+        isScheduled: true,
+        isRunning: false,
+        lastRun: "—",
+        detailedDays: -1,
+        monthlyMonths: 6,
+        yearlyYears: 1,
+      },
+      trunkHistory: [],
+      collections: [],
+    });
+    expect(html).toContain(
+      "<dt>Detailed sessions retention</dt><dd>-1 days</dd>",
+    );
+    expect(html).not.toContain("keep forever");
   });
 
   it("lists collections with counts and history when present", () => {
