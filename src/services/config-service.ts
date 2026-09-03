@@ -202,6 +202,7 @@ export class ConfigService {
         // operator-tunable default) but must survive the unknown-settings
         // sweep so the 24h cleanup guard persists across restarts.
         "messagetracking.cleanup.last_run",
+        "voicetracking.cleanup.last_run",
       ];
       knownOldKeys.forEach((key) => validKeys.add(key));
 
