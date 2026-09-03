@@ -683,8 +683,9 @@ export function settingControlId(key: string): string {
  * dependency-locked (#666) — a hidden input that round-trips its current value.
  * A `disabled` control isn't submitted by the browser, and the per-section Save
  * handler coerces a missing value to `false`/`""` (see `coerceConfigValue` in
- * write-routes), so without this a dep-locked boolean would be silently flipped
- * off (and other types blanked) whenever its section is saved while the lock is
+ * `src/web/routes/write/helpers.ts`), so without this a dep-locked boolean would
+ * be silently flipped off (and other types blanked) whenever its section is
+ * saved while the lock is
  * active. The same-section / master-off case is already protected by the
  * cascade-skip in `save-section`, but a cross-section dependent (e.g.
  * `digest.include_achievements` under an enabled digest section) is not.
@@ -843,8 +844,9 @@ function renderControlInput(
     );
   }
   // string or unknown type → plain text input. The maxlength mirrors the
-  // server-side `TEXT_LIMITS.configValue` cap in write-routes (#508) — kept as
-  // a literal here to avoid a circular import (write-routes imports this file).
+  // server-side `TEXT_LIMITS.configValue` cap in
+  // `src/web/routes/write/helpers.ts` (#508) — kept as a literal here to avoid a
+  // circular import (the write routers import this file).
   return `<input type="text"${a11yAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
 }
 
@@ -1074,7 +1076,7 @@ export function renderSettingsPage(props: SettingsProps): string {
   // must additionally type the guild name (or guild id when the name can't
   // be fetched) into the text field, which the server re-validates. The
   // `required` attribute and `confirmTarget` keep the client and server in
-  // step. See `POST /admin/settings/reset-defaults` in write-routes.ts.
+  // step. See `POST /admin/settings/reset-defaults` in routes/write/settings.ts.
   const confirmTarget = props.guildName ?? props.guildId;
   const dangerSection = `
 <div id="danger-zone" class="card" style="border-color:#7f1d1d">

@@ -42,7 +42,8 @@ src/
 │   ├── cookies.ts        # Signed cookie helpers
 │   ├── rate-limit.ts     # In-memory rate limiter
 │   ├── read-only-routes.ts  # Dashboard, Bootstrap, Settings, etc. (GET)
-│   ├── write-routes.ts   # POST handlers (settings, permissions, wizard, etc.)
+│   ├── write-routes.ts   # Mounts the admin write routers behind session/role/CSRF
+│   ├── routes/write/     # One POST router per domain (settings, polls, …) + helpers.ts
 │   ├── admin-layout.ts   # Shared layout + escapeHtml/escapeJsInAttr helpers
 │   ├── admin-views.ts    # Page renderers for the admin pages
 │   └── views.ts          # Sign-in / sign-out / invalid-link views
@@ -116,7 +117,7 @@ isn't enough; the DB row has to also be unrevoked, unexpired, and match.
 
 ### CSRF
 
-All state-changing routes (POSTs in `write-routes.ts`) use the
+All state-changing routes (POSTs in `src/web/routes/write/*`) use the
 double-submit cookie pattern via `csrf.ts`. The `ensureCsrfCookie`
 middleware sets a `koolbot_csrf` cookie on every request; `requireCsrf`
 checks that the form's hidden `_csrf` field matches.
@@ -153,7 +154,7 @@ The goal — not yet fully reached in the existing code — is to keep
 
 Current state of the code:
 
-- `src/web/write-routes.ts` still owns some input coercion
+- `src/web/routes/write/helpers.ts` still owns some input coercion
   (`coerceConfigValue`, `normalizeCron`, `validCron`) and reads/writes
   to Mongoose models directly. Same for `read-only-routes.ts`, which
   imports several models for page data.
@@ -168,31 +169,46 @@ accepted in one place can never be silently rejected in the other.
 
 ### Adding a write route
 
+The write handlers are split by domain under `src/web/routes/write/`
+(#850): each module exports a router factory (`createPollsRouter`,
+`createNoticesRouter`, …) and `src/web/write-routes.ts` mounts them all
+behind the shared `requireSession` → admin-role → `requireCsrf` middleware.
+Add a handler to the module for its domain (or create a new module and
+mount it in `createWriteRouter`); never re-add the middleware per module.
+
 `createWebRouter` mounts the router at `/admin`, so routes declared
-inside `write-routes.ts` use **relative** paths — Express composes the
-final `/admin/<your-path>` URL for you.
+inside a domain module use **relative** paths — Express composes the
+final `/admin/<your-path>` URL for you. Shared plumbing (`asyncHandler`,
+`flashRedirect`, `getString`, `TEXT_LIMITS`, …) lives in
+`src/web/routes/write/helpers.ts` and is unit-tested directly.
 
 ```typescript
-// src/web/write-routes.ts (example)
-router.post(
-  "/myfeature/save",            // becomes /admin/myfeature/save
-  requireCsrf,
-  requireSession,
-  async (req: AuthenticatedRequest, res: Response) => {
-    const { name, value } = req.body;
-    try {
-      await MyFeatureService.getInstance().updateThing(name, value);
-      res.redirect(303, "/admin/myfeature");
-    } catch (err) {
-      // Translate service errors → HTTP. Do not validate here.
-      if (err instanceof ValidationError) {
-        res.status(400).type("text/html").send(renderError(err.message));
-        return;
+// src/web/routes/write/myfeature.ts (example)
+export function createMyFeatureRouter(client: Client): Router {
+  const router = Router();
+
+  // No per-route `requireSession` / `requireCsrf`: `createWriteRouter`
+  // already applies them to every router it mounts.
+  router.post(
+    "/myfeature/save",            // becomes /admin/myfeature/save
+    asyncHandler(async (req, res) => {
+      const { name, value } = req.body;
+      try {
+        await MyFeatureService.getInstance().updateThing(name, value);
+        res.redirect(303, "/admin/myfeature");
+      } catch (err) {
+        // Translate service errors → HTTP. Do not validate here.
+        if (err instanceof ValidationError) {
+          res.status(400).type("text/html").send(renderError(err.message));
+          return;
+        }
+        throw err;
       }
-      throw err;
-    }
-  },
-);
+    }),
+  );
+
+  return router;
+}
 ```
 
 Service methods own:
@@ -580,8 +596,8 @@ through `ConfigService` so the same lookup path serves both surfaces;
 add new direct `process.env` reads only when the value is genuinely a
 startup-only secret.
 
-The protected-keys list lives at the top of `src/web/write-routes.ts`
-(`PROTECTED_KEYS`). It is hand-maintained — when you add a new
+The protected-keys list lives in `src/web/bootstrap-vars.ts`
+(`PROTECTED_KEYS`, enforced by `src/web/routes/write/settings.ts`). It is hand-maintained — when you add a new
 **bootstrap** env var (something whose value should never round-trip
 through YAML import/export), add it to that set so imports can't
 overwrite it. Operational tuning vars like `WEBUI_TRUST_PROXY` don't
@@ -619,7 +635,7 @@ const setting = await configService.getString("myfeature.setting", "default");
 **Step 3**: Document in `SETTINGS.md`.
 
 **Step 4**: If the setting needs to appear on the Setup Wizard, add it to
-`WIZARD_FEATURE_SETTINGS` in `src/web/write-routes.ts`. The Settings page
+`WIZARD_FEATURE_SETTINGS` in `src/web/routes/write/helpers.ts`. The Settings page
 discovers settings from `defaultConfig` automatically.
 
 #### Configuration Best Practices
@@ -664,7 +680,8 @@ discovers settings from `defaultConfig` automatically.
 
 5. **Web UI surface** (if applicable)
    - [ ] Add a read-only view in `src/web/read-only-routes.ts` / `admin-views.ts`
-   - [ ] Add write handlers in `src/web/write-routes.ts` (CSRF + session required)
+   - [ ] Add write handlers in `src/web/routes/write/<domain>.ts` (mounted by
+     `write-routes.ts` behind CSRF + session)
    - [ ] Link the page from `NAV_ITEMS` in `admin-layout.ts` (set its `group`:
      `Info`, `Settings`, or `Features`; gated pages go under `Features`)
    - [ ] Routes stay thin — no business logic outside services

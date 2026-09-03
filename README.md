@@ -681,7 +681,8 @@ src/
 │   ├── index.ts          # Express router mounted at /admin
 │   ├── session.ts        # Cookie session middleware
 │   ├── read-only-routes.ts
-│   ├── write-routes.ts
+│   ├── write-routes.ts   # Mount point for the admin write routers
+│   ├── routes/write/     # One router per admin domain + shared helpers
 │   ├── csrf.ts
 │   └── ...
 ├── models/               # MongoDB schemas

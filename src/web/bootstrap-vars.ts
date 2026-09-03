@@ -4,8 +4,8 @@
  *
  * Two consumers share this list:
  *   - `read-only-routes.ts` renders the admin Bootstrap page from it.
- *   - `write-routes.ts` rejects these keys in YAML import/export (see
- *     `PROTECTED_KEYS`), since the DB row would have no effect and could
+ *   - `routes/write/settings.ts` rejects these keys in YAML import/export
+ *     (see `PROTECTED_KEYS`), since the DB row would have no effect and could
  *     mask the real value held in the environment (see `src/config/env.ts`).
  *
  * Adding a new env var here automatically protects it from YAML import.

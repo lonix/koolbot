@@ -1,5 +1,6 @@
 /**
- * Unit tests for the pure helpers exported from `src/web/write-routes.ts`.
+ * Unit tests for the pure helpers in `src/web/routes/write/helpers.ts`
+ * (#850) plus a mount-parity check for the composed write router.
  * Route-handler integration tests live alongside the higher-level admin
  * harness; here we focus on the bits that don't need Express + Mongo.
  */
@@ -19,7 +20,8 @@ import {
   type ResetConfigStore,
   flashRedirectQuery,
   INVALID_KEYS_MAX,
-} from "../../src/web/write-routes.js";
+} from "../../src/web/routes/write/helpers.js";
+import { createWriteRouter } from "../../src/web/write-routes.js";
 import type { WizardApplyResult } from "../../src/services/wizard-service.js";
 import {
   BOOTSTRAP_VARS,
@@ -764,5 +766,118 @@ describe("flashRedirectQuery invalid-key echo (#854)", () => {
     );
     expect(params.get("invalid")?.split(",")).toHaveLength(INVALID_KEYS_MAX);
     expect(params.get("invalid")?.split(",")[0]).toBe("x.key_0");
+  });
+});
+
+describe("createWriteRouter (#850)", () => {
+  type Layer = {
+    handle: ((...args: unknown[]) => unknown) & { stack?: Layer[] };
+    route?: { path: string; methods: Record<string, boolean> };
+  };
+
+  /** Flatten nested routers into "METHOD path" pairs, in registration order. */
+  function collectRoutes(stack: Layer[]): string[] {
+    const out: string[] = [];
+    for (const layer of stack) {
+      if (layer.route) {
+        for (const method of Object.keys(layer.route.methods)) {
+          out.push(`${method.toUpperCase()} ${layer.route.path}`);
+        }
+      } else if (layer.handle.stack) {
+        out.push(...collectRoutes(layer.handle.stack));
+      }
+    }
+    return out;
+  }
+
+  const requireSession = (_req: unknown, _res: unknown, next: () => void) =>
+    next();
+
+  function buildRouter() {
+    // The domain factories only touch the client inside handlers, so a bare
+    // object is enough to compose the router.
+    return createWriteRouter(
+      {} as never,
+      requireSession as never,
+    ) as unknown as {
+      stack: Layer[];
+    };
+  }
+
+  it("keeps the shared middleware ahead of every domain router", () => {
+    const { stack } = buildRouter();
+    // requireSession → admin-role check → requireCsrf, then the sub-routers.
+    expect(stack[0].handle).toBe(requireSession);
+    expect(stack.slice(0, 3).every((l) => !l.route && !l.handle.stack)).toBe(
+      true,
+    );
+    expect(stack.slice(3).every((l) => !l.route && !!l.handle.stack)).toBe(
+      true,
+    );
+    // Every domain module mounted exactly once.
+    expect(stack.length - 3).toBe(12);
+  });
+
+  it("exposes the same route surface as before the split", () => {
+    const routes = collectRoutes(buildRouter().stack).sort();
+    expect(routes).toEqual(
+      [
+        "GET /settings/export",
+        "GET /wizard",
+        "POST /announcements/:id/delete",
+        "POST /announcements/:id/post-now",
+        "POST /announcements/:id/toggle",
+        "POST /announcements/create",
+        "POST /announcements/post-once",
+        "POST /announcements/post-vc-stats",
+        "POST /bot-status/entry/:id/delete",
+        "POST /bot-status/entry/:id/order",
+        "POST /bot-status/entry/:id/update",
+        "POST /bot-status/pool/:pool/add",
+        "POST /bot-status/pool/:pool/import",
+        "POST /bot-status/pool/:pool/seed",
+        "POST /database/run-cleanup",
+        "POST /digest/send-now",
+        "POST /events/:id/cancel",
+        "POST /events/:id/start-now",
+        "POST /events/create",
+        "POST /notices/:id/delete",
+        "POST /notices/:id/order",
+        "POST /notices/:id/update",
+        "POST /notices/create",
+        "POST /notices/sync",
+        "POST /permissions/set",
+        "POST /polls/items/:id/delete",
+        "POST /polls/items/:id/edit",
+        "POST /polls/items/:id/toggle",
+        "POST /polls/items/create",
+        "POST /polls/items/import-text",
+        "POST /polls/schedules/:id/delete",
+        "POST /polls/schedules/:id/edit",
+        "POST /polls/schedules/:id/test",
+        "POST /polls/schedules/:id/toggle",
+        "POST /polls/schedules/create",
+        "POST /reaction-roles/archive",
+        "POST /reaction-roles/bind",
+        "POST /reaction-roles/create",
+        "POST /reaction-roles/delete",
+        "POST /reaction-roles/group/create",
+        "POST /reaction-roles/group/delete",
+        "POST /reaction-roles/remove-mapping",
+        "POST /reaction-roles/unarchive",
+        "POST /settings/import",
+        "POST /settings/import/apply",
+        "POST /settings/reload",
+        "POST /settings/reset",
+        "POST /settings/reset-defaults",
+        "POST /settings/save-section",
+        "POST /settings/set",
+        "POST /voice-channels/force-reload",
+        "POST /wizard/apply",
+        "POST /wizard/cancel",
+        "POST /wizard/start",
+        "POST /wizard/step/:n",
+      ].sort(),
+    );
   });
 });
