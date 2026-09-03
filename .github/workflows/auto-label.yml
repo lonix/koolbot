@@ -178,9 +178,12 @@ jobs:
             let stale = [];
             if (payload.pull_request) {
               wanted = labelsForTitle(target.title, target.body);
-              const oldTitle = payload.changes && payload.changes.title && payload.changes.title.from;
-              if (oldTitle !== undefined && oldTitle !== target.title) {
-                stale = labelsForTitle(oldTitle, target.body).filter((l) => !wanted.includes(l));
+              const oldTitle = payload.changes?.title?.from ?? target.title;
+              const oldBody = payload.changes?.body?.from ?? target.body;
+              const hadEditedFields =
+                payload.changes?.title?.from !== undefined || payload.changes?.body?.from !== undefined;
+              if (hadEditedFields) {
+                stale = labelsForTitle(oldTitle, oldBody).filter((l) => !wanted.includes(l));
               }
             } else {
               wanted = labelsForIssue(target.title, target.body, current);
