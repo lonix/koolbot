@@ -426,11 +426,22 @@ describe("WizardService", () => {
   });
 
   describe("shutdown", () => {
-    it("should shutdown without errors", () => {
+    const userId = "user-shutdown";
+    const guildId = "guild-shutdown";
+
+    it("should drop every in-flight session and stop the cleanup timer", () => {
+      service.createSession(userId, guildId);
+      expect(service.getSession(userId, guildId)).not.toBeNull();
+
       service.shutdown();
 
-      // Method should execute without errors
-      expect(true).toBe(true);
+      expect(service.getSession(userId, guildId)).toBeNull();
+      expect((service as any).cleanupInterval).toBeNull();
+    });
+
+    it("should be safe to call twice", () => {
+      service.shutdown();
+      expect(() => service.shutdown()).not.toThrow();
     });
   });
 });

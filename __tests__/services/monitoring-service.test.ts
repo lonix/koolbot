@@ -93,20 +93,47 @@ describe("MonitoringService", () => {
       expect(id1).not.toBe(id2);
     });
 
-    it("should track command completion", () => {
-      const trackingId = service.trackCommandStart("test-command");
-      service.trackCommandEnd("test-command", trackingId, 100);
+    // The service is a process-wide singleton with no reset, so these use
+    // per-test command names and compare deltas rather than absolutes.
+    it("should fold the response time into the command's averages", () => {
+      const name = "track-end-average";
+      const startTime = Date.now() - 100;
+      const trackingId = service.trackCommandStart(name);
+      service.trackCommandEnd(name, trackingId, startTime);
 
-      // Method should execute without errors
-      expect(true).toBe(true);
+      const metrics = service.getCommandMetrics(name);
+      expect(metrics?.usageCount).toBe(1);
+      expect(metrics?.errorCount).toBe(0);
+      expect(metrics?.totalResponseTime).toBeGreaterThanOrEqual(100);
+      expect(metrics?.averageResponseTime).toBe(metrics?.totalResponseTime);
     });
 
-    it("should track command errors", () => {
-      const error = new Error("Test error");
-      service.trackError("test-command", error);
+    it("should count a failed completion as an error", () => {
+      const name = "track-end-failure";
+      const before = service.getPerformanceMetrics().totalErrors;
+      const trackingId = service.trackCommandStart(name);
+      service.trackCommandEnd(name, trackingId, Date.now(), false);
 
-      // Method should execute without errors
-      expect(true).toBe(true);
+      expect(service.getCommandMetrics(name)?.errorCount).toBe(1);
+      expect(service.getPerformanceMetrics().totalErrors).toBe(before + 1);
+    });
+
+    it("should track command errors against the command and the total", () => {
+      const name = "track-error";
+      const before = service.getPerformanceMetrics().totalErrors;
+      service.trackCommandStart(name);
+      service.trackError(name, new Error("Test error"));
+
+      expect(service.getCommandMetrics(name)?.errorCount).toBe(1);
+      expect(service.getPerformanceMetrics().totalErrors).toBe(before + 1);
+    });
+
+    it("should still count an error for a command it never saw start", () => {
+      const before = service.getPerformanceMetrics().totalErrors;
+      service.trackError("never-started", new Error("Test error"));
+
+      expect(service.getCommandMetrics("never-started")).toBeUndefined();
+      expect(service.getPerformanceMetrics().totalErrors).toBe(before + 1);
     });
 
     it("should get command metrics", () => {

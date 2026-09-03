@@ -32,8 +32,9 @@ export default {
   coverageDirectory: 'coverage',
   coverageReporters: ['text', 'lcov', 'html', 'json-summary'],
   // Floors sit a few points under measured coverage so a real regression fails the
-  // build. Measured on main at the time of writing: 56.96% statements, 52.06%
-  // branches, 66.10% functions, 56.89% lines.
+  // build. Measured at the time of writing: 68.58% statements, 62.64% branches,
+  // 74.41% functions, 68.77% lines -- raised here because the admin write-surface
+  // route tests (#849) pushed actual coverage past the drift budget below.
   //
   // Do not hand-ratchet these on a schedule -- that is what let them drift ~33
   // points out of date (#848). `npm run coverage:drift` (wired into CI) fails once
@@ -41,10 +42,10 @@ export default {
   // to raise the numbers below to just under the new actuals.
   coverageThreshold: {
     global: {
-      branches: 49,
-      functions: 63,
-      lines: 54,
-      statements: 54,
+      branches: 60,
+      functions: 72,
+      lines: 66,
+      statements: 66,
     },
   },
   testTimeout: 10000,

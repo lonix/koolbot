@@ -45,6 +45,10 @@ describe("BotStatusService", () => {
           setPresence: jest.fn(),
         },
       };
+      // The singleton caches the client it was first built with, so drop the
+      // cached instance to bind this block's spy-carrying client.
+      (BotStatusService as unknown as { instance?: unknown }).instance =
+        undefined;
       service = BotStatusService.getInstance(mockClient);
     });
 
@@ -64,28 +68,41 @@ describe("BotStatusService", () => {
       expect(typeof service.setShutdownStatus).toBe("function");
     });
 
-    it("should set connecting status", () => {
-      service.setConnectingStatus();
-      // Method should execute without errors
-      expect(true).toBe(true);
+    // The status setters are the operator's only signal that the bot is
+    // connecting / reloading / shutting down rather than wedged, so assert
+    // the presence they actually push instead of just "it didn't throw".
+    it.each([
+      ["setConnectingStatus", "Connecting to Discord..."],
+      ["setConfigReloadStatus", "Reloading configuration..."],
+      ["setShutdownStatus", "Shutting down..."],
+    ] as const)("%s pushes an idle presence saying %s", (method, name) => {
+      service[method]();
+
+      expect(mockClient.user.setPresence).toHaveBeenCalledTimes(1);
+      expect(mockClient.user.setPresence).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: "idle",
+          activities: [expect.objectContaining({ name })],
+        }),
+      );
     });
 
-    it("should set operational status", () => {
+    it("setOperationalStatus renders a live status instead of a fixed string", () => {
       service.setOperationalStatus();
-      // Method should execute without errors
-      expect(true).toBe(true);
+
+      expect(mockClient.user.setPresence).toHaveBeenCalled();
+      const presence = mockClient.user.setPresence.mock.calls[0][0];
+      expect(presence.status).not.toBe("idle");
+      expect(presence.activities[0].name).toEqual(expect.any(String));
     });
 
-    it("should set config reload status", () => {
-      service.setConfigReloadStatus();
-      // Method should execute without errors
-      expect(true).toBe(true);
-    });
+    it("never lets a failed presence update escape as a rejection", () => {
+      mockClient.user.setPresence.mockImplementation(() => {
+        throw new Error("Shard not ready");
+      });
 
-    it("should set shutdown status", () => {
-      service.setShutdownStatus();
-      // Method should execute without errors
-      expect(true).toBe(true);
+      expect(() => service.setConnectingStatus()).not.toThrow();
+      expect(() => service.setShutdownStatus()).not.toThrow();
     });
   });
 
