@@ -335,7 +335,10 @@ export function renderUserPage(opts: UserPageOptions): string {
     // First focusable element on every page (#855); `main` carries
     // `tabindex="-1"` so the fragment jump also moves keyboard focus.
     '<a class="skip-link" href="#main">Skip to content</a>',
-    '<div class="banner">',
+    // A `<header>` banner landmark rather than a bare div, so the session
+    // countdown / Finish button aren't stranded outside every landmark
+    // (axe `region`, #856).
+    '<header class="banner">',
     '<div class="left"><strong>Koolbot · My preferences</strong></div>',
     '<div class="right">',
     adminLink,
@@ -344,7 +347,7 @@ export function renderUserPage(opts: UserPageOptions): string {
     '<form method="POST" action="/me/finish">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<button type="submit">Finish</button>',
-    "</form></div></div>",
+    "</form></div></header>",
     '<div class="shell">',
     `<main id="main" tabindex="-1">${renderPageNav(opts.active, {
       rewindEnabled: opts.rewindEnabled,
@@ -381,7 +384,9 @@ function renderPageNav(active: string, flags: UserFeatureFlags): string {
     const badge = disabled ? '<span class="nav-badge">off</span>' : "";
     return `<a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a>`;
   }).join("");
-  return `<nav class="page-nav">${items}</nav>`;
+  // Named so it stays distinguishable from a page body's own nav (the
+  // Rewind year picker) — axe `landmark-unique`, #856.
+  return `<nav class="page-nav" aria-label="My preferences sections">${items}</nav>`;
 }
 
 function renderFlash(flash?: UserFlashMessage | null): string {
@@ -622,7 +627,7 @@ function renderYearPicker(current: number, years: number[]): string {
       return `<a href="/me/rewind/${y}"${cls}>${y}</a>`;
     })
     .join("");
-  return `<nav class="rw-year-picker">${items}</nav>`;
+  return `<nav class="rw-year-picker" aria-label="Rewind year">${items}</nav>`;
 }
 
 function renderBadges(badges: RewindBadgeView[]): string {

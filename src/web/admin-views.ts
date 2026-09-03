@@ -518,16 +518,16 @@ function renderCronPicker(
     `<option value="custom"${sel(state.mode === "custom")}>Custom (cron)</option>` +
     `</select>` +
     `<span class="cron-time-wrap"${hidden(state.mode === "custom")}>` +
-    ` at <input type="time" class="cron-time" value="${timeAttr}"${lockAttr}>` +
+    ` at <input type="time" class="cron-time" aria-label="Time of day" value="${timeAttr}"${lockAttr}>` +
     `</span>` +
     `<span class="cron-dow-wrap"${hidden(state.mode !== "weekly")}>` +
     ` on <select class="cron-dow" aria-label="Day of week"${lockAttr}>${dowOptions}</select>` +
     `</span>` +
     `<span class="cron-dom-wrap"${hidden(state.mode !== "monthly")}>` +
-    ` on day <input type="number" class="cron-dom" min="1" max="31" value="${state.dayOfMonth}" style="width:5rem"${lockAttr}>` +
+    ` on day <input type="number" class="cron-dom" aria-label="Day of month" min="1" max="31" value="${state.dayOfMonth}" style="width:5rem"${lockAttr}>` +
     `</span>` +
     `<span class="cron-custom-wrap"${hidden(state.mode !== "custom")}>` +
-    `<input type="text" class="cron-custom" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem"${lockAttr}>` +
+    `<input type="text" class="cron-custom" aria-label="Cron expression" value="${escapeHtml(state.raw)}" placeholder="0 16 * * 5" style="width:12rem"${lockAttr}>` +
     `</span>` +
     `</div>`
   );
@@ -2553,7 +2553,7 @@ export function renderNoticesPage(props: NoticesProps): string {
             const rows = g.rows
               .map(
                 (n) => `<tr>
-<td><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" value="${n.order}" min="-1000" max="10000" required><button type="submit" class="btn">Save</button></form></td>
+<td><form method="POST" action="/admin/notices/${escapeHtml(n.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(n.title)}" value="${n.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(n.title)}">Save</button></form></td>
 <td>${escapeHtml(n.title)}<div class="muted mono">id: ${escapeHtml(n.id)}</div></td>
 <td class="muted">${escapeHtml(n.preview)}</td>
 <td class="mono muted">${escapeHtml(n.messageId)}</td>
@@ -2800,7 +2800,7 @@ export function renderStringArrayEditor(
       : opts.items
           .map(
             (item) => `<tr>
-<td><form method="POST" action="${entryPath(item.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" value="${item.order}" min="-1000" max="10000" required><button type="submit" class="btn">Save</button></form></td>
+<td><form method="POST" action="${entryPath(item.id)}/order" class="inline-order">${csrfInput}<input type="number" name="order" aria-label="Display order for ${escapeHtml(item.text)}" value="${item.order}" min="-1000" max="10000" required><button type="submit" class="btn" aria-label="Save display order for ${escapeHtml(item.text)}">Save</button></form></td>
 <td>
   <details class="helper edit-details"><summary>${escapeHtml(item.text)}</summary>
     <form method="POST" action="${entryPath(item.id)}/update" class="stack">${csrfInput}
@@ -2959,19 +2959,44 @@ function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
     categoryChannels: props.categoryChannels,
     roles: [] as RoleOption[],
   };
+  // Same caption / description wiring as the Settings page (#854): the
+  // control carries the row's id so the caption can be a real `<label for>`
+  // and the description cell is announced with it. Without this the in-place
+  // controls announced as "edit text, blank" (#856).
   const rows = props.settingRows
-    .map(
-      (r) => `<tr>
+    .map((r) => {
+      const controlId = settingControlId(r.key);
+      const labelId = `${controlId}-label`;
+      const helpId = `${controlId}-help`;
+      const warnId = `${controlId}-warn`;
+      const warnHtml = renderWarnBelow(r, warnId);
+      const describedBy = [r.description ? helpId : "", warnHtml ? warnId : ""]
+        .filter(Boolean)
+        .join(" ");
+      const a11y: ControlA11y = {
+        id: controlId,
+        describedBy,
+        describedByBase: describedBy,
+        labelledBy: labelId,
+      };
+      const caption = `<strong>${escapeHtml(r.label || r.key)}</strong>`;
+      // Cron edits through several inputs, so it gets a labelled group
+      // (`aria-labelledby`) rather than a `<label for>` pointing at nothing.
+      const captionHtml =
+        r.type === "cron"
+          ? `<div id="${labelId}">${caption}</div>`
+          : `<div><label id="${labelId}" for="${escapeHtml(controlId)}">${caption}</label></div>`;
+      return `<tr>
 <td>
-  <div><strong>${escapeHtml(r.label || r.key)}</strong></div>
+  ${captionHtml}
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td class="settings-value">${renderControlInput(r, pickers)}${renderResetButton(r.key)}${renderWarnBelow(r)}</td>
+<td class="settings-value">${renderControlInput(r, pickers, false, false, a11y)}${renderResetButton(r.key, r.label)}${warnHtml}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
-<td class="muted">${escapeHtml(r.description)}</td>
-</tr>`,
-    )
+<td class="muted" id="${helpId}">${escapeHtml(r.description)}</td>
+</tr>`;
+    })
     .join("");
   return `
 <div class="card">

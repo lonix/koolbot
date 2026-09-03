@@ -291,6 +291,32 @@ with Discord but lack a handler ("The application did not respond"), or ship wit
 - **Return user-friendly error messages** in Discord interactions
 - **Recover gracefully** when possible
 
+### Accessibility (Web UI)
+
+The Web UI is the only admin surface, so every operator has to be able to use
+it — including with a keyboard and a screen reader. When you touch a page in
+`src/web/`:
+
+- **Label every control.** A caption must be a real `<label for>` (or a
+  wrapping `<label>`); adjacent text is never announced with a field. Where a
+  control's meaning comes from a column header, add a `visually-hidden` label
+  or an `aria-label`.
+- **Link help text.** Descriptions, warnings and hints get an `id`, and the
+  control lists them in `aria-describedby`.
+- **Never let a glyph carry meaning alone.** Pair `✓` / `—` / an emoji with
+  text and mark the glyph `aria-hidden="true"`.
+- **Give every `<th>` a `scope`**, and a table whose heading isn't directly
+  above it a `visually-hidden` `<caption>`.
+- **Announce dynamic outcomes** through a `role="status"` live region.
+- **Take colours from `src/web/theme.ts`.** Don't introduce a new grey for
+  "less important" text — the previous ones all failed WCAG contrast.
+
+Three Jest suites gate this in CI (`a11y-axe`, `a11y-routes`, `a11y-contrast`
+under `__tests__/web/`). **When you add a page renderer, add a fixture for it
+to `__tests__/web/a11y-pages.ts`** — a page that isn't listed there isn't
+scanned. The full conventions, and how the suites are wired, are in the
+[Accessibility section of `WEBUI.md`](WEBUI.md#accessibility).
+
 ## Testing Guidelines
 
 ### Writing Tests
