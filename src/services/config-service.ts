@@ -505,7 +505,12 @@ export class ConfigService {
           category,
           updatedAt: new Date(),
         },
-        { upsert: true, new: true },
+        // runValidators makes an invalid `category` (one missing from
+        // CONFIG_CATEGORIES) fail loudly here at write time instead of being
+        // silently purged by cleanupUnknownSettings() on the next restart
+        // (#834). Mongoose does not run schema validators on
+        // findOneAndUpdate by default.
+        { upsert: true, new: true, runValidators: true },
       );
 
       this.cache.set(key, value);

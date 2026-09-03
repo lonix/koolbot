@@ -603,6 +603,12 @@ export const defaultConfig: ConfigSchema = {
 };
 ```
 
+If the key introduces a **new category** (a new dot-prefix such as `myfeature`), also add that
+category to `CONFIG_CATEGORIES` in `src/models/config.ts`. That list backs the Mongoose enum *and* the
+set `ConfigService.cleanupUnknownSettings()` uses to decide which rows to keep; a category declared in
+`settingsMetadata` but missing from it is silently deleted from Mongo on every restart / `/config reload`
+(see #609 and #834). `__tests__/services/settings-metadata.test.ts` fails if the two drift.
+
 **Step 2**: Access in code (only inside a service):
 
 ```typescript

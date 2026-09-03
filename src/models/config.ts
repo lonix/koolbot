@@ -5,14 +5,18 @@ import mongoose, { Document, Schema } from "mongoose";
  * source of truth for valid categories: it backs the Mongoose enum below and is
  * reused by ConfigService's cleanup sweep so the two can never drift apart (a
  * past drift caused valid `polls.*` / `notices.*` settings to be purged as
- * "unknown" — see issue #609). Some entries are retained purely for backward
- * compatibility with legacy database rows.
+ * "unknown" — see issue #609; `celebrations.*` was purged the same way in
+ * #834). Every `category` used in `settingsMetadata` (config-schema.ts) MUST
+ * appear here — `__tests__/services/settings-metadata.test.ts` enforces it.
+ * Some entries are retained purely for backward compatibility with legacy
+ * database rows.
  */
 export const CONFIG_CATEGORIES = [
   "achievements",
   "amikool", // Kept for backward compatibility; key removed but legacy rows may exist
   "announcements",
   "birthdays",
+  "celebrations",
   "core",
   "digest",
   "events",

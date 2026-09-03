@@ -21,13 +21,17 @@ jest.unstable_mockModule("../../src/models/config.js", () => ({
     "achievements",
     "amikool",
     "announcements",
+    "birthdays",
+    "celebrations",
     "core",
     "digest",
+    "events",
     "fun",
     "gamification",
     "help",
     "leaderboard_roles",
     "messagetracking",
+    "moderation",
     "notices",
     "ping",
     "polls",
@@ -196,6 +200,33 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
       expect(deletedKeys).not.toContain("notices.enabled");
       // The genuinely unknown key is still purged.
       expect(deletedKeys).toContain("bogus.setting");
+    });
+
+    // #834: `celebrations.*` rows were purged on every restart because the
+    // category was declared in settingsMetadata but missing from
+    // CONFIG_CATEGORIES, so Marquee Celebrations silently turned itself off.
+    it("should not delete valid celebrations.* settings (#834)", async () => {
+      const mockSettings = [
+        {
+          key: "celebrations.enabled",
+          value: true,
+          category: "celebrations",
+          description: "Milestone celebrations enabled",
+        },
+        {
+          key: "celebrations.channel_id",
+          value: "123456789012345678",
+          category: "celebrations",
+          description: "Milestone celebrations channel",
+        },
+      ];
+      mockFind.mockResolvedValue(mockSettings);
+
+      const service = ConfigService.getInstance();
+      await service.initialize();
+
+      expect(mockDeleteOne).not.toHaveBeenCalled();
+      expect(mockUpdateOne).not.toHaveBeenCalled();
     });
 
     // Legacy categories that still have an active normalization mapping must
