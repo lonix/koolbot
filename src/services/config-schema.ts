@@ -139,6 +139,20 @@ export interface ConfigSchema {
   "leaderboard_roles.tiers": string; // Comma-separated "topN:roleId" pairs, e.g. "1:111,3:222,10:333"
   "leaderboard_roles.announcement_channel_id": string; // Optional channel ID for role-change announcements
 
+  // Discord-channel logging categories consumed by DiscordLogger (#844).
+  // Each `core.<type>.enabled` toggle pairs with a `core.<type>.channel_id`
+  // that names the text channel the embeds are posted to.
+  "core.startup.enabled": boolean;
+  "core.startup.channel_id": string;
+  "core.errors.enabled": boolean;
+  "core.errors.channel_id": string;
+  "core.cleanup.enabled": boolean;
+  "core.cleanup.channel_id": string;
+  "core.config.enabled": boolean;
+  "core.config.channel_id": string;
+  "core.cron.enabled": boolean;
+  "core.cron.channel_id": string;
+
   // Discord slash-command audit log (issue #459)
   "core.command_audit.enabled": boolean;
   "core.command_audit.retention_days": number;
@@ -363,6 +377,20 @@ export const defaultConfig: ConfigSchema = {
   // matches the proposal in the issue (90 days).
   "core.command_audit.enabled": true,
   "core.command_audit.retention_days": 90,
+
+  // Discord-channel logging categories (#844). Off by default: posting
+  // bot lifecycle/error/cron embeds into a guild channel is an operator
+  // opt-in, and each category needs a channel id before it does anything.
+  "core.startup.enabled": false,
+  "core.startup.channel_id": "",
+  "core.errors.enabled": false,
+  "core.errors.channel_id": "",
+  "core.cleanup.enabled": false,
+  "core.cleanup.channel_id": "",
+  "core.config.enabled": false,
+  "core.config.channel_id": "",
+  "core.cron.enabled": false,
+  "core.cron.channel_id": "",
 
   // WebUI audit log retention default (#756). WebAuditLog rows are written
   // unconditionally on every state-changing WebUI request, so there's no
@@ -1578,6 +1606,80 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "Optional channel ID where role-change announcements are posted. Leave empty to disable announcements.",
     category: "leaderboard_roles",
+    type: "channel",
+  },
+
+  // Discord-channel logging categories (#844). Consumed by DiscordLogger,
+  // which routes each `logToChannel(<type>)` call to `core.<type>.channel_id`
+  // when `core.<type>.enabled` is on.
+  "core.startup.enabled": {
+    label: "Startup log to Discord",
+    description:
+      "Post bot lifecycle events (startup, shutdown, database connection, Discord registration, service initialization) as embeds to the startup log channel.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.startup.channel_id": {
+    label: "Startup log channel",
+    description:
+      "Text channel that receives startup log embeds. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
+  },
+  "core.errors.enabled": {
+    label: "Error log to Discord",
+    description:
+      "Post critical errors (unhandled command failures, service crashes) as embeds to the error log channel.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.errors.channel_id": {
+    label: "Error log channel",
+    description:
+      "Text channel that receives error log embeds. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
+  },
+  "core.cleanup.enabled": {
+    label: "Cleanup log to Discord",
+    description:
+      "Post data-maintenance results (voice-session cleanup runs, rows removed/aggregated) as embeds to the cleanup log channel.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.cleanup.channel_id": {
+    label: "Cleanup log channel",
+    description:
+      "Text channel that receives cleanup log embeds. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
+  },
+  "core.config.enabled": {
+    label: "Config log to Discord",
+    description:
+      "Post configuration reloads and their outcome (success/failure, commands updated) as embeds to the config log channel.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.config.channel_id": {
+    label: "Config log channel",
+    description:
+      "Text channel that receives config log embeds. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
+  },
+  "core.cron.enabled": {
+    label: "Cron log to Discord",
+    description:
+      "Post scheduled-job outcomes (announcement triggers, digest runs, other cron tasks) as embeds to the cron log channel.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.cron.channel_id": {
+    label: "Cron log channel",
+    description:
+      "Text channel that receives cron log embeds. Nothing is posted while this is empty.",
+    category: "core",
     type: "channel",
   },
 

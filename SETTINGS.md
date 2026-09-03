@@ -1329,6 +1329,25 @@ window (staggered at 03:00 / 03:15 server time to avoid contention).
   cleanup (03:15) prunes them. Set to `0` to keep history forever. WebUI
   audit rows are always written, so there is no separate enable toggle.
 
+#### Discord Logging (bot events posted to Discord channels)
+
+`DiscordLogger` can mirror bot events into guild text channels as embeds. Each
+category is a pair of keys: an `enabled` toggle and the `channel_id` it posts
+to. Both live under the **core** category on the Settings page. Nothing is
+posted while a category is disabled or its channel id is empty. Saved changes
+apply to the next log message — no restart is needed.
+
+| Key | Type | Default | Events |
+| --- | --- | --- | --- |
+| `core.startup.enabled` / `core.startup.channel_id` | bool / channel | `false` / `""` | Startup, shutdown, DB connection, Discord registration, service init |
+| `core.errors.enabled` / `core.errors.channel_id` | bool / channel | `false` / `""` | Unhandled command failures, service crashes |
+| `core.cleanup.enabled` / `core.cleanup.channel_id` | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated) |
+| `core.config.enabled` / `core.config.channel_id` | bool / channel | `false` / `""` | Configuration reloads and their outcome |
+| `core.cron.enabled` / `core.cron.channel_id` | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks) |
+
+Point every category at one channel for a single consolidated log, or split
+them (e.g. `#bot-status` for startup, `#admin-alerts` for errors).
+
 ### Bootstrap env vars (read-only in Web UI)
 
 - `DISCORD_TOKEN`, `CLIENT_ID`, `GUILD_ID`, `MONGODB_URI`
