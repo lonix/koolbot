@@ -90,6 +90,13 @@ jobs:
       - name: Run tests
         run: npm run test:ci
 
+      # Jest's coverageThreshold only catches coverage falling; this catches the
+      # floors falling behind actual coverage and going stale (#848). Also writes
+      # the actual-vs-floor table to the run summary on every PR.
+      - name: Check coverage floor drift
+        if: matrix.node == '22'
+        run: npm run coverage:drift
+
       - name: Upload coverage artifact
         if: matrix.node == '22'
         uses: actions/upload-artifact@v7.0.1

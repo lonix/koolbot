@@ -351,10 +351,13 @@ npm test -- path/to/test.test.ts
 
 ### Test Coverage
 
-- **Minimum coverage**: 2% (current baseline)
+- **Enforced floors**: statements 54% / branches 49% / functions 63% / lines 54%
+  (`coverageThreshold.global` in `jest.config.js`) — CI fails below these
 - **Target coverage**: 70-80% for critical modules
 - **Focus on**: Commands, services, utilities
 - **Coverage reports** are generated in `coverage/` directory
+- **Keeping the floors honest**: `npm run coverage:drift` fails when actual coverage rises more than
+  10 points above a floor, so the thresholds get raised instead of silently going stale
 
 ## Commit Guidelines
 
