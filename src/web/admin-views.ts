@@ -3797,7 +3797,7 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
     0,
   );
 
-  let grid = "";
+  let grid: string;
   if (heatmap.totalMinutes <= 0) {
     grid = `<div class="empty">No voice activity recorded in the last ${props.windowDays} days.</div>`;
   } else {

@@ -190,7 +190,7 @@ docker compose logs -f mongodb
 3. **Verify MongoDB image:**
 
    ```bash
-   docker pull mongo:latest
+   docker pull mongo:8
    docker compose up -d --force-recreate
    ```
 

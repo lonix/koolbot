@@ -201,6 +201,7 @@ export class CommandManager {
         if (attempt === maxRetries) {
           throw new Error(
             `Failed to ${operationName} after ${maxRetries} attempts`,
+            { cause: error },
           );
         }
       } finally {
@@ -405,7 +406,7 @@ export class CommandManager {
     // `getSubcommand(false)` returns null when the command has no
     // subcommand group rather than throwing — safe to call on every
     // chat-input interaction.
-    let subcommand: string | null = null;
+    let subcommand: string | null;
     try {
       subcommand = interaction.options.getSubcommand(false) ?? null;
     } catch {

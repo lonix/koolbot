@@ -167,7 +167,7 @@ export class ScheduledAnnouncementService {
     // Members currently online — best effort. Requires the GUILD_PRESENCES
     // intent and a populated member cache; when presence data is unavailable
     // this counts 0 rather than throwing.
-    let onlineCount = 0;
+    let onlineCount: number;
     try {
       onlineCount = guild.members.cache.filter(
         (m) => m.presence != null && m.presence.status !== "offline",
@@ -179,7 +179,7 @@ export class ScheduledAnnouncementService {
     // Server owner mention. fetchOwner can reject if the owner is uncached or
     // temporarily unavailable — degrade to an empty string rather than fail
     // the whole announcement.
-    let ownerMention = "";
+    let ownerMention: string;
     try {
       const owner = await guild.fetchOwner();
       ownerMention = owner.toString();

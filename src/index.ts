@@ -166,8 +166,8 @@ function isAppReady(): boolean {
   if (!isReady) {
     return false;
   }
-  let discordReady = false;
-  let mongoReady = false;
+  let discordReady: boolean;
+  let mongoReady: boolean;
   try {
     discordReady =
       typeof client.isReady === "function" ? client.isReady() : false;

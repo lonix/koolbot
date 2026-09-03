@@ -22,7 +22,7 @@ services:
       - "3000:3000"
 
   mongodb:
-    image: mongo:latest
+    image: mongo:8
     container_name: koolbot-mongodb-dev
     restart: unless-stopped
     volumes:
