@@ -1266,7 +1266,7 @@ export class VoiceChannelManager {
         );
       } else {
         logger.info(
-          `No text channel found for voice channel ${channel.name}, control panel not sent. Users can use /vc commands instead.`,
+          `No text channel found for voice channel ${channel.name}, control panel not sent.`,
         );
       }
     } catch (error) {

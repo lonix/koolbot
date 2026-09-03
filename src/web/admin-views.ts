@@ -1858,7 +1858,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 
   const body = `
 <h1>Announcements</h1>
-<p class="subtitle">Scheduled announcements posted on a cron. Replaces <code>/announce</code> and <code>/announce-vc-stats</code>; the slash commands still work in parallel during migration.</p>
+<p class="subtitle">Scheduled announcements posted on a cron. Replaces the retired <code>/announce</code> and <code>/announce-vc-stats</code> slash commands.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
 <div class="card">
@@ -1870,7 +1870,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", 
   <form method="POST" action="/admin/announcements/post-vc-stats" class="inline-form">
     ${csrfInput}
     <button type="submit" class="btn btn-primary">Post weekly VC stats now</button>
-    <span class="muted">Runs the same announcement as <code>/announce-vc-stats</code>.</span>
+    <span class="muted">Posts the weekly voice-stats announcement immediately, off schedule.</span>
   </form>
 </div>
 <div class="card">
@@ -2204,7 +2204,7 @@ export function renderPollsPage(props: PollsProps): string {
 
   const body = `
 <h1>Polls</h1>
-<p class="subtitle">Poll schedules and the question library. Replaces <code>/poll create|delete|test|add-item|delete-item|list|list-items</code>; the slash commands still work in parallel during migration.</p>
+<p class="subtitle">Poll schedules and the question library. Replaces the retired <code>/poll create|delete|test|add-item|delete-item|list|list-items</code> slash commands.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
 <div class="card">
@@ -2582,7 +2582,7 @@ export function renderNoticesPage(props: NoticesProps): string {
 
   const body = `
 <h1>Notices</h1>
-<p class="subtitle">Notice posts grouped by category. Replaces <code>/notice add|edit|delete|sync</code>; the slash commands still work in parallel during migration. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
+<p class="subtitle">Notice posts grouped by category. Replaces the retired <code>/notice add|edit|delete|sync</code> slash commands. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
 <div class="card">
@@ -2596,7 +2596,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Notices", featur
   <form method="POST" action="/admin/notices/sync" class="inline-form" onsubmit="return confirm('Resync all notices? This deletes and reposts every notice message.');">
     ${csrfInput}
     <button type="submit" class="btn btn-primary">Resync notices to channel</button>
-    <span class="muted">Same effect as <code>/notice sync</code>.</span>
+    <span class="muted">Deletes and reposts every notice message in the channel.</span>
   </form>
 </div>
 <div class="card">
@@ -2693,11 +2693,11 @@ export function renderDatabasePage(props: DatabaseProps): string {
     ? "Enable <code>voicetracking.cleanup.enabled</code> first."
     : props.trunk.isRunning
       ? "A cleanup is already running."
-      : "Same effect as <code>/dbtrunk run</code>. Subject to the 24-hour minimum interval.";
+      : "Runs the cleanup now. Subject to the 24-hour minimum interval.";
 
   const body = `
 <h1>Database</h1>
-<p class="subtitle">MongoDB connection state and the voice-channel <code>dbtrunk</code> cleanup. Replaces <code>/dbtrunk status|run</code>; the slash commands still work in parallel during migration.</p>
+<p class="subtitle">MongoDB connection state and the voice-channel <code>dbtrunk</code> cleanup. Replaces the retired <code>/dbtrunk status|run</code> slash commands.</p>
 ${renderFlash(props.flash)}
 <div class="card">
   <h2>Connection</h2>

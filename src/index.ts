@@ -42,7 +42,6 @@ import { DiscordLogger } from "./services/discord-logger.js";
 import { BotStatusService } from "./services/bot-status-service.js";
 import { QuoteChannelManager } from "./services/quote-channel-manager.js";
 import { NoticesChannelManager } from "./services/notices-channel-manager.js";
-import { PermissionsService } from "./services/permissions-service.js";
 import { ReactionRoleService } from "./services/reaction-role-service.js";
 import { PollService } from "./services/poll-service.js";
 import { LeaderboardRoleService } from "./services/leaderboard-role-service.js";
@@ -741,10 +740,6 @@ async function initializeServices(): Promise<void> {
     // Start the moderation-log retention cleanup cron (#742). Gates on
     // `moderation.enabled` and `moderation.retention_days` at run time.
     ModerationLogCleanupService.getInstance().start();
-
-    // Initialize permissions service and set up default permissions
-    const permissionsService = PermissionsService.getInstance(client);
-    await permissionsService.initializeDefaultPermissions(guildId);
 
     // Switch lobby to online mode on startup and handle any users in offline lobby
     try {
