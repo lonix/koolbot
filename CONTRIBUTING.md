@@ -249,36 +249,31 @@ Follow the established architecture:
 
 ### Adding New Commands
 
-**CRITICAL:** When adding a new command, you must update **TWO** places in `src/services/command-manager.ts`:
+Register a new command in **one** place: the `COMMAND_CONFIGS` list in `src/services/command-registry.ts`.
 
-1. **`loadCommandsDynamically()` method** - Registers command with Discord API
-   - Add `{ name, configKey, file }` to the `commandConfigs` array
+That list is the single source of truth for the command set. It drives:
 
-2. **`populateClientCommands()` method** - Loads execute handler into client
-   - Add the **same** `{ name, configKey, file }` to the `commandConfigs` array
+- `loadCommandsDynamically()` in `CommandManager` — tells Discord about your command (makes it appear in the UI)
+- `populateClientCommands()` in `CommandManager` — gives the bot the code to execute when the command is used
+- `/help` — lists the command and derives its description and usage line from the command's
+  `SlashCommandBuilder`, so a new command appears in `/help` automatically
 
-**Why both?** These methods serve different purposes:
-
-- `loadCommandsDynamically()` tells Discord about your command (makes it appear in the UI)
-- `populateClientCommands()` gives the bot the code to execute when the command is used
-
-**Failure Mode:** If you only update `loadCommandsDynamically()`, the command will appear in Discord but
-will fail with "The application did not respond" because the bot has no handler for it.
+Because both `CommandManager` methods and `/help` read the same list, a command can no longer be registered
+with Discord but lack a handler ("The application did not respond"), or ship without a `/help` entry.
 
 **Example:**
 
 ```typescript
-// In BOTH loadCommandsDynamically() and populateClientCommands()
+// src/services/command-registry.ts
 { name: "mycmd", configKey: "mycmd.enabled", file: "mycmd" }
 ```
 
 **Checklist for adding a command:**
 
 1. ✅ Create `src/commands/mycmd.ts` with `data` and `execute` exports
-2. ✅ Add to `commandConfigs` in `loadCommandsDynamically()`
-3. ✅ Add to `commandConfigs` in `populateClientCommands()`
-4. ✅ Add `mycmd.enabled` to `config-schema.ts`
-5. ✅ Document in `COMMANDS.md`
+2. ✅ Add `{ name, configKey, file }` to `COMMAND_CONFIGS` in `src/services/command-registry.ts`
+3. ✅ Add `mycmd.enabled` to `config-schema.ts`
+4. ✅ Document in `COMMANDS.md`
 
 ### Configuration
 

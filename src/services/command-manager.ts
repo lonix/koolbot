@@ -12,6 +12,7 @@ import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { ConfigService } from "./config-service.js";
+import { COMMAND_CONFIGS } from "./command-registry.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { recordCommandInvocation } from "../web/metrics.js";
 import { CooldownManager } from "./cooldown-manager.js";
@@ -77,30 +78,8 @@ export class CommandManager {
       const enabledCommands = [];
       const debugModeEnabled = isDebugMode();
 
-      // Define command configurations with their requirements
-      const commandConfigs = [
-        { name: "ping", configKey: "ping.enabled", file: "ping" },
-        { name: "help", configKey: null, file: "help" }, // Always enabled - core feature
-        {
-          name: "voicestats",
-          configKey: "voicetracking.enabled",
-          file: "voicestats",
-        },
-        { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
-        {
-          name: "achievements",
-          configKey: "achievements.enabled",
-          file: "achievements",
-        },
-        { name: "quote", configKey: "quotes.enabled", file: "quote" },
-        { name: "event", configKey: "events.enabled", file: "event" },
-        { name: "warn", configKey: "moderation.enabled", file: "warn" },
-        { name: "modlog", configKey: "moderation.enabled", file: "modlog" },
-        { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher
-      ];
-
       // Process each command
-      for (const config of commandConfigs) {
+      for (const config of COMMAND_CONFIGS) {
         try {
           let shouldEnable = true;
 
@@ -314,30 +293,8 @@ export class CommandManager {
       // Clear existing commands
       this.client.commands.clear();
 
-      // Define command configurations with their requirements
-      const commandConfigs = [
-        { name: "ping", configKey: "ping.enabled", file: "ping" },
-        { name: "help", configKey: null, file: "help" }, // Always enabled - core feature
-        {
-          name: "voicestats",
-          configKey: "voicetracking.enabled",
-          file: "voicestats",
-        },
-        { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
-        {
-          name: "achievements",
-          configKey: "achievements.enabled",
-          file: "achievements",
-        },
-        { name: "quote", configKey: "quotes.enabled", file: "quote" },
-        { name: "event", configKey: "events.enabled", file: "event" },
-        { name: "warn", configKey: "moderation.enabled", file: "warn" },
-        { name: "modlog", configKey: "moderation.enabled", file: "modlog" },
-        { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher
-      ];
-
       // Process each command
-      for (const config of commandConfigs) {
+      for (const config of COMMAND_CONFIGS) {
         try {
           let shouldEnable = true;
 

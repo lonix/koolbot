@@ -86,6 +86,10 @@ API Latency: 123ms
 **Description:** Get help with KoolBot commands. Lists all available commands
 or shows detailed information about a specific command.
 
+The list is derived from the bot's command registry and each command's slash-command definition, so every
+registered command (including `/quote`, `/event`, `/warn` and `/modlog`) appears automatically with its
+description and a usage line such as `/quote <add|edit|export|import|reset> [options]`.
+
 **Note:** Core command, **always enabled**, no configuration needed.
 
 **Usage:**
@@ -105,15 +109,17 @@ or shows detailed information about a specific command.
 # List all commands
 📚 KoolBot Help
 ✅ Enabled Commands
-/ping - Check if the bot is responding and measure latency.
-/help - Get help with KoolBot commands.
+/ping - Replies with Pong!
+/help - Get help with KoolBot commands
+/quote - Manage quotes in the quote channel
 ...
 
 # Specific command help
-📖 Help: /ping
-Check if the bot is responding and measure latency.
-Usage: /ping
+📖 Help: /modlog
+View a member's moderation history
+Usage: /modlog <user> [page]
 Status: ✅ Enabled
+Config Key: moderation.enabled
 ```
 
 ---
