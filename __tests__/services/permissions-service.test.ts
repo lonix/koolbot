@@ -59,7 +59,6 @@ describe("PermissionsService", () => {
       expect(typeof service.listAllPermissions).toBe("function");
       expect(typeof service.getUserPermissions).toBe("function");
       expect(typeof service.getRolePermissions).toBe("function");
-      expect(typeof service.initializeDefaultPermissions).toBe("function");
       expect(typeof service.reloadCache).toBe("function");
     });
   });

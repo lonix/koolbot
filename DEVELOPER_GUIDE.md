@@ -702,8 +702,10 @@ Discord commands. They run against **compiled** output, so build first:
 
 ```bash
 npm run build
-npm run validate-config        # check the stored config against the schema
-npm run migrate-config         # migrate legacy config keys
+npm run validate-config             # check the stored config against the schema
+npm run migrate-config              # migrate legacy config keys
+npm run cleanup-global-commands     # remove stale globally-registered slash commands
+npm run unregister-guild-commands   # remove all guild-registered slash commands
 npm run seed-sample-data -- --yes   # populate a dev DB with fake activity
 ```
 
@@ -745,7 +747,7 @@ echoed to the log. It never writes to the database.
 `src/scripts/seed-sample-data.ts` populates a **non-production** MongoDB with
 realistic, deterministic fake users and a year's worth of activity so the
 data-heavy surfaces — Rewind / year-in-review, leaderboards, weekly digests,
-achievements, `/stats`, and the WebUI stats pages — can be exercised locally
+achievements, `/voicestats`, and the WebUI stats pages — can be exercised locally
 without waiting for a real server to accumulate history (#667).
 
 It writes to `VoiceChannelTracking`, `MessageActivityTracking`,

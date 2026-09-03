@@ -987,29 +987,46 @@ opt-outs, Rewind, personal settings).
 
 Once in the admin Web UI (admin sessions):
 
-| Page           | Replaces (legacy slash command)                                            |
-| -------------- | -------------------------------------------------------------------------- |
-| Dashboard      | `/botstats`                                                                |
-| Settings       | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload`        |
-| Permissions    | `/permissions set/add/remove/clear/list/view`                              |
-| Setup Wizard   | `/setup wizard`                                                            |
-| Announcements  | `/announce create/list/delete`, `/announce-vc-stats`                       |
-| Events         | `/event create/list/cancel/start`                                          |
-| Polls          | `/poll create/list/add-item/delete/delete-item/test/list-items`            |
-| Reaction Roles | `/reactrole create/archive/unarchive/delete/list/status`                   |
-| Notices        | `/notice add/edit/delete/sync`                                             |
-| Voice Channels | `/vc reload`, `/vc force-reload`                                           |
-| Database       | `/dbtrunk status`, `/dbtrunk run`                                          |
-| Bootstrap      | (new — read-only `.env` diagnostics)                                       |
+| Page            | Replaces (legacy slash command)                                     |
+| --------------- | ------------------------------------------------------------------- |
+| Dashboard       | `/botstats`                                                         |
+| Bot Status      | `/botstats` (live health, uptime, connection detail)                |
+| Database        | `/dbtrunk status`, `/dbtrunk run`                                   |
+| Command Audit   | (new — slash-command audit log)                                     |
+| Command Metrics | (new — per-command usage metrics)                                   |
+| Moderation      | (new — warning log browser; `/warn` and `/modlog` stay in Discord)  |
+| Bootstrap       | (new — read-only `.env` diagnostics)                                |
+| Settings        | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
+| Permissions     | `/permissions set/add/remove/clear/list/view`                       |
+| Setup Wizard    | `/setup wizard`                                                     |
+| Announcements   | `/announce create/list/delete`, `/announce-vc-stats`                |
+| Events          | `/event create/list/cancel/start`                                   |
+| Polls           | `/poll create/list/add-item/delete/delete-item/test/list-items`     |
+| Reaction Roles  | `/reactrole create/archive/unarchive/delete/list/status`            |
+| Notices         | `/notice add/edit/delete/sync`                                      |
+| Voice Channels  | `/vc reload`, `/vc force-reload`                                    |
+| Weekly Digest   | (new — weekly DM digest configuration and preview)                  |
+| Voice Analytics | (new — voice activity charts and channel breakdowns)                |
+
+Feature pages stay in the nav while their `*.enabled` setting is off —
+greyed out, badged **off**, and sorted below the enabled ones. The page
+itself still opens and prompts you to enable the feature there.
 
 On the personal surface (`/me/`, available to every member — admins
 reach it from a header link on any admin page):
 
-| Page          | What it does                                                                        |
-| ------------- | ----------------------------------------------------------------------------------- |
-| Overview      | `/me/` index linking to your per-user pages                                         |
-| Notifications | `/me/notifications` — opt in to DM nudges; off by default                           |
-| Rewind        | `/me/rewind` — personal year-in-review (voice time, top channels, rank journey, …)  |
+| Page          | What it does                                                                       |
+| ------------- | ---------------------------------------------------------------------------------- |
+| Overview      | `/me/` index linking to your per-user pages                                        |
+| Notifications | `/me/notifications` — opt in to DM nudges; off by default                          |
+| Timezone      | `/me/timezone` — the timezone used for birthdays and scheduled DMs                 |
+| Voice         | `/me/voice` — your personal voice channel presets (`voicechannels.enabled`)        |
+| Birthday      | `/me/birthday` — set or clear your birthday (`birthdays.enabled`)                  |
+| Rewind        | `/me/rewind` — personal year-in-review (voice time, top channels, rank journey, …) |
+
+Feature-gated pages stay in the nav when their feature is off — greyed
+out and badged **off**. Voice and Birthday still accept your choice while
+disabled, so it is already saved when an admin turns the feature on.
 
 ---
 

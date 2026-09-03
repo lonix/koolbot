@@ -3,8 +3,8 @@
 A powerful and modular Discord bot built with TypeScript, featuring dynamic voice channel
 management, activity tracking, automated announcements, and a browser-based admin Web UI.
 
-![Discord.js](https://img.shields.io/badge/Discord.js-14.25.1-blue)
-![TypeScript](https://img.shields.io/badge/TypeScript-5.9.3-blue)
+![Discord.js](https://img.shields.io/badge/Discord.js-14.27.0-blue)
+![TypeScript](https://img.shields.io/badge/TypeScript-6.0.3-blue)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Latest-green)
 ![Docker](https://img.shields.io/badge/Docker-Ready-blue)
 
@@ -152,6 +152,9 @@ commands always registered):
 - `/seen` — Last-seen lookup (`voicetracking.seen.enabled`)
 - `/achievements` — View earned accolades (`achievements.enabled`)
 - `/quote add` / `/quote edit` — Manage memorable quotes (`quotes.enabled`)
+- `/event` — Create, browse and RSVP to server events (`events.enabled`)
+- `/warn` — Record a moderation warning (`moderation.enabled`)
+- `/modlog` — Look up a member's moderation history (`moderation.enabled`)
 
 A fresh install only sees `/help` and `/config` in Discord until you
 enable the others on the Settings page and click **Reload commands to
@@ -209,21 +212,26 @@ Web UI's Settings page once the bot is running.
 
 | Category | Description |
 | --- | --- |
-| **Commands** | Enable/disable individual commands (`ping.enabled`, `quotes.enabled`, etc.) |
 | **Voice Channels** | Dynamic channel creation, lobby settings, naming patterns |
-| **Voice Tracking** | Activity tracking, excluded channels, admin roles |
-| **Announcements** | Scheduled posts and weekly stats |
-| **Polls** | Scheduled native Discord polls from a question library |
-| **Data Cleanup** | Retention periods, cleanup schedule, aggregation |
-| **Discord Logging** | Log bot events to Discord channels (`core.*` settings) |
-| **Quote System** | Cooldowns, permissions, max length |
-| **Notices** | Server rules / game-server info / help posts |
-| **Reaction Roles** | Self-assignable role categories |
-| **Leaderboard Roles** | Auto-assign Discord roles from voice leaderboard |
-| **Achievements** | Persistent accolades and milestone badges |
-| **Fun Features** | Easter eggs and passive listeners |
+| **Voice Tracking** | Time in voice, leaderboards, last-seen, excluded channels |
+| **Message Tracking** | Per-user, per-channel text activity with retention-trimmed detail |
+| **Reaction Tracking** | Reactions given and received, lifetime and per-year |
+| **Ping** | The `/ping` latency check command |
+| **Quotes** | Cooldowns, permissions, max length |
 | **Rate Limiting** | Command spam protection with admin bypass |
-| **Permissions** | Per-command role gating |
+| **Scheduled Announcements** | Cron-scheduled messages to a Discord channel |
+| **Achievements** | Persistent accolades and milestone badges |
+| **Milestone Celebrations** | Server-wide shout-outs for marquee accolades |
+| **Weekly Digest** | Opt-in weekly DM summarising each user's activity |
+| **Rewind (Year-in-Review)** | End-of-year recap at `/me/rewind` plus a December nudge |
+| **Birthdays** | Timezone-aware birthday announcements and a temporary role |
+| **Events** | Scheduled events with RSVPs and temporary voice channels |
+| **Reaction Roles** | Self-assignable role categories |
+| **Notices** | Server rules / game-server info / help posts |
+| **Polls** | Scheduled native Discord polls from a question library |
+| **Leaderboard Role Rewards** | Auto-assign Discord roles from the voice leaderboard |
+| **Core** | Audit logging, retention, Discord logging (`core.*` settings) |
+| **Moderation** | Warning log, native action mirroring, per-member history |
 
 📖 **[Complete Settings Reference →](SETTINGS.md)**
 

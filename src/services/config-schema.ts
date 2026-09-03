@@ -1239,7 +1239,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   // Scheduled Announcements
   "announcements.enabled": {
     label: "Scheduled announcements enabled",
-    description: "Enable scheduled announcements and the /announce command.",
+    description:
+      "Enable scheduled announcements. Manage them from the /admin/announcements page.",
     category: "announcements",
     type: "boolean",
   },
@@ -1492,7 +1493,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   // Notices System
   "notices.enabled": {
     label: "Notices system enabled",
-    description: "Enable the notices system and the /notice command.",
+    description:
+      "Enable the notices system. Manage notices from the /admin/notices page.",
     category: "notices",
     type: "boolean",
   },
@@ -1525,7 +1527,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   // Poll System
   "polls.enabled": {
     label: "Polls system enabled",
-    description: "Enable the poll system and the /poll command.",
+    description:
+      "Enable the poll system. Create and manage polls from the /admin/polls page.",
     category: "polls",
     type: "boolean",
   },

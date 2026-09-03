@@ -111,7 +111,8 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/admin/settings", label: "Settings", group: "Settings" },
   { href: "/admin/permissions", label: "Permissions", group: "Settings" },
   { href: "/admin/wizard", label: "Setup Wizard", group: "Settings" },
-  // Features — feature-gated pages (hidden when their feature is off).
+  // Features — feature-gated pages. A page whose feature is off is greyed
+  // with an "off" badge and sorted last, never hidden (#610, #706).
   {
     href: "/admin/announcements",
     label: "Announcements",
