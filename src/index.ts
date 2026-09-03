@@ -49,6 +49,7 @@ import { DigestService } from "./services/digest-service.js";
 import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { BirthdayService } from "./services/birthday-service.js";
 import { EventService } from "./services/event-service.js";
+import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
@@ -510,6 +511,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         rewindNudgeService.destroy();
         birthdayService.destroy();
         eventService.destroy();
+        reminderService.destroy();
         WizardService.getInstance().shutdown();
         // Persist any metrics still buffered in memory before the DB
         // connection closes below, then stop the flush/logging timers.
@@ -577,6 +579,7 @@ let digestService: DigestService;
 let rewindNudgeService: RewindNudgeService;
 let birthdayService: BirthdayService;
 let eventService: EventService;
+let reminderService: ReminderService;
 let moderationService: ModerationService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
@@ -606,6 +609,7 @@ try {
   rewindNudgeService = RewindNudgeService.getInstance(client);
   birthdayService = BirthdayService.getInstance(client);
   eventService = EventService.getInstance(client);
+  reminderService = ReminderService.getInstance(client);
   moderationService = ModerationService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
@@ -724,6 +728,10 @@ async function initializeServices(): Promise<void> {
     // birthday today (in their timezone)?" check.
     await birthdayService.start();
     await eventService.start();
+
+    // Start the personal reminder scan (#866). Members schedule their own
+    // reminders with /remind; this delivers the due ones once a minute.
+    await reminderService.start();
 
     // Initialize the moderation log (#728). No timers to own — this just logs
     // its enabled state; the /warn write path and the audit-log mirroring

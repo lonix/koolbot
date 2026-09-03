@@ -11,7 +11,7 @@
  * never configure a zone see no change in behaviour.
  */
 
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import logger from "./logger.js";
 
 let cachedZones: Set<string> | null = null;
@@ -131,4 +131,37 @@ export function secondsIntoHourInZone(date: Date, tz: string): number {
 export function formatDateTimeInZone(date: Date, tz?: string | null): string {
   const zone = resolveTimezone(tz);
   return `${formatInTimeZone(date, zone, "yyyy-MM-dd HH:mm")} (${zone})`;
+}
+
+/**
+ * Parse a wall-clock date + time entered in `tz` into an absolute UTC
+ * instant. Returns null on any malformed or impossible input (e.g.
+ * `2026-02-30`), verified by round-tripping the instant back through the
+ * same zone — `fromZonedTime` otherwise silently rolls invalid dates over.
+ *
+ * Shared by `/event create` (which reads the organiser's chosen zone) and
+ * `/remind set` (which reads the member's own `/me/timezone` preference),
+ * so both interpret a typed date and time identically.
+ *
+ * @param dateStr Calendar date as `YYYY-MM-DD`
+ * @param timeStr 24-hour time as `HH:MM`
+ * @param tz IANA zone the pair is written in; falls back to the server zone
+ */
+export function parseZonedDateTime(
+  dateStr: string,
+  timeStr: string,
+  tz: string,
+): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  if (!/^\d{2}:\d{2}$/.test(timeStr)) return null;
+  const zone = resolveTimezone(tz);
+  try {
+    const utc = fromZonedTime(`${dateStr}T${timeStr}:00`, zone);
+    if (Number.isNaN(utc.getTime())) return null;
+    const roundTrip = formatInTimeZone(utc, zone, "yyyy-MM-dd'T'HH:mm");
+    if (roundTrip !== `${dateStr}T${timeStr}`) return null;
+    return utc;
+  } catch {
+    return null;
+  }
 }
