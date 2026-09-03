@@ -184,25 +184,31 @@ final `/admin/<your-path>` URL for you. Shared plumbing (`asyncHandler`,
 
 ```typescript
 // src/web/routes/write/myfeature.ts (example)
-router.post(
-  "/myfeature/save",            // becomes /admin/myfeature/save
-  requireCsrf,
-  requireSession,
-  async (req: AuthenticatedRequest, res: Response) => {
-    const { name, value } = req.body;
-    try {
-      await MyFeatureService.getInstance().updateThing(name, value);
-      res.redirect(303, "/admin/myfeature");
-    } catch (err) {
-      // Translate service errors → HTTP. Do not validate here.
-      if (err instanceof ValidationError) {
-        res.status(400).type("text/html").send(renderError(err.message));
-        return;
+export function createMyFeatureRouter(client: Client): Router {
+  const router = Router();
+
+  // No per-route `requireSession` / `requireCsrf`: `createWriteRouter`
+  // already applies them to every router it mounts.
+  router.post(
+    "/myfeature/save",            // becomes /admin/myfeature/save
+    asyncHandler(async (req, res) => {
+      const { name, value } = req.body;
+      try {
+        await MyFeatureService.getInstance().updateThing(name, value);
+        res.redirect(303, "/admin/myfeature");
+      } catch (err) {
+        // Translate service errors → HTTP. Do not validate here.
+        if (err instanceof ValidationError) {
+          res.status(400).type("text/html").send(renderError(err.message));
+          return;
+        }
+        throw err;
       }
-      throw err;
-    }
-  },
-);
+    }),
+  );
+
+  return router;
+}
 ```
 
 Service methods own:

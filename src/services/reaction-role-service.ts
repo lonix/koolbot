@@ -1276,6 +1276,7 @@ export class ReactionRoleService {
           logger.error("Failed to add reaction to message:", reactionError);
           throw new Error(
             "Failed to add reaction. The emoji might be invalid or inaccessible.",
+            { cause: reactionError },
           );
         }
       }
@@ -1303,7 +1304,9 @@ export class ReactionRoleService {
         await reactionRoleConfig.save();
       } catch (dbError) {
         logger.error("Failed to save reaction role config:", dbError);
-        throw new Error("Failed to save configuration to database.");
+        throw new Error("Failed to save configuration to database.", {
+          cause: dbError,
+        });
       }
 
       logger.info(`Saved reaction role config for ${sanitizeForLog(roleName)}`);

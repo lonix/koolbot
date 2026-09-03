@@ -3,10 +3,10 @@ import type { Response } from "express";
 /**
  * Shared flash/error helpers for the WebUI's state-changing routes.
  *
- * Lives in its own module (rather than `routes/write/helpers.ts`) so the CSRF and
- * rate-limit middleware and the router-level error handler can reuse
- * `wantsJson` / `respondFlashError` without importing the heavyweight write
- * router (which itself imports the CSRF middleware — a cycle we avoid here).
+ * Lives in its own module (rather than with the write-route helpers) so the
+ * CSRF and rate-limit middleware and the router-level error handler can reuse
+ * `wantsJson` / `respondFlashError` without importing the write routers (which
+ * themselves import the CSRF middleware — a cycle we avoid here).
  */
 
 /** Max length for inline flash/toast text, shared by redirect + JSON paths. */

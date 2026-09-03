@@ -30,7 +30,7 @@ For detailed technical guidance on extending KoolBot:
 
 ### Prerequisites
 
-- **Node.js** 20 or higher
+- **Node.js** 22 or higher (24 recommended — see `.nvmrc`; the Docker image runs Node 24)
 - **npm** (comes with Node.js)
 - **Docker** and **Docker Compose** (for containerized development)
 - **Git** for version control

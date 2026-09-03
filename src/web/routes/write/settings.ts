@@ -804,7 +804,9 @@ export function createSettingsRouter(client: Client): Router {
           applied++;
         } catch (err) {
           const text = err instanceof Error ? err.message : "set failed";
-          logger.error(`Import: failed to set ${key}`, err);
+          // Static message: `key` comes from the uploaded YAML, and the
+          // failing key is already reported through `failed` below.
+          logger.error("Import: failed to set setting", err);
           failed.push({ key, reason: text });
         }
       }

@@ -683,8 +683,9 @@ export function settingControlId(key: string): string {
  * dependency-locked (#666) — a hidden input that round-trips its current value.
  * A `disabled` control isn't submitted by the browser, and the per-section Save
  * handler coerces a missing value to `false`/`""` (see `coerceConfigValue` in
- * routes/write/helpers), so without this a dep-locked boolean would be silently flipped
- * off (and other types blanked) whenever its section is saved while the lock is
+ * `src/web/routes/write/helpers.ts`), so without this a dep-locked boolean would
+ * be silently flipped off (and other types blanked) whenever its section is
+ * saved while the lock is
  * active. The same-section / master-off case is already protected by the
  * cascade-skip in `save-section`, but a cross-section dependent (e.g.
  * `digest.include_achievements` under an enabled digest section) is not.
@@ -843,9 +844,9 @@ function renderControlInput(
     );
   }
   // string or unknown type → plain text input. The maxlength mirrors the
-  // server-side `TEXT_LIMITS.configValue` cap in routes/write/helpers (#508) — kept
-  // as a literal here to avoid a circular import (the write routers import
-  // this file).
+  // server-side `TEXT_LIMITS.configValue` cap in
+  // `src/web/routes/write/helpers.ts` (#508) — kept as a literal here to avoid a
+  // circular import (the write routers import this file).
   return `<input type="text"${a11yAttr} name="${valueName}" maxlength="2000" value="${escapeHtml(primitive)}"${lockAttr}>`;
 }
 
@@ -3798,7 +3799,7 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
     0,
   );
 
-  let grid = "";
+  let grid: string;
   if (heatmap.totalMinutes <= 0) {
     grid = `<div class="empty">No voice activity recorded in the last ${props.windowDays} days.</div>`;
   } else {

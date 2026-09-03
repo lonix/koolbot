@@ -356,7 +356,7 @@ services:
       - "3000:3000"   # /health and /admin (when WEBUI_ENABLED=true)
 
   mongodb:
-    image: mongo:latest
+    image: mongo:8
     container_name: koolbot-mongodb
     restart: unless-stopped
     volumes:
@@ -434,7 +434,7 @@ services:
     # No `ports:` — Caddy is the only public surface.
 
   mongodb:
-    image: mongo:latest
+    image: mongo:8
     container_name: koolbot-mongodb
     restart: unless-stopped
     volumes:
