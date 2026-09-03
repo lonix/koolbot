@@ -30,6 +30,7 @@ import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { CommandManager } from "./command-manager.js";
 import logger from "../utils/logger.js";
+import { waitForClientReady } from "../utils/discord.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import {
   ReactionRoleConfig,
@@ -86,23 +87,6 @@ export class ReactionRoleService {
     return ReactionRoleService.instance;
   }
 
-  private async waitForClientReady(): Promise<void> {
-    if (this.client.isReady()) {
-      return;
-    }
-
-    return new Promise((resolve) => {
-      const checkReady = (): void => {
-        if (this.client.isReady()) {
-          resolve();
-        } else {
-          setTimeout(checkReady, 100).unref?.();
-        }
-      };
-      checkReady();
-    });
-  }
-
   public async initialize(): Promise<void> {
     if (this.isInitialized) {
       logger.warn("Reaction role service already initialized, skipping...");
@@ -114,7 +98,7 @@ export class ReactionRoleService {
     this.isInitialized = true;
 
     try {
-      await this.waitForClientReady();
+      await waitForClientReady(this.client, "ReactionRoleService");
 
       const enabled = await this.configService.getBoolean(
         "reactionroles.enabled",

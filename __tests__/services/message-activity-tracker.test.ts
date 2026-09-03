@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { stubMongoGuard } from "../test-utils.js";
 import type { Client, Message } from "discord.js";
 
 // Rely on the global mongoose mock from setup.ts for a stable shared model
@@ -32,7 +33,7 @@ function createTracker() {
     getNumber: jest.fn().mockResolvedValue(0),
   };
   (tracker as never)["configService"] = mockConfigService;
-  (tracker as never)["isConnected"] = true;
+  stubMongoGuard(tracker);
 
   return { tracker, mockConfigService };
 }

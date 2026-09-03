@@ -82,6 +82,14 @@ presence specifically fans out to `VoiceChannelManager` (channel lifecycle & cle
 **Resilience:** wrap Discord REST calls in `CommandManager.makeDiscordApiCall` (timeout race + backoff);
 reuse it for any new bulk REST work.
 
+**Shared service helpers (#851):** cron parsing (`utils/cron.ts` —
+`sanitizeCronExpression` / `validateCronExpression`), the gateway-readiness wait
+(`utils/discord.ts` — `waitForClientReady`), Mongo reconnects (`utils/mongo.ts` —
+`MongoConnectionGuard`, which owns the connection flag and defaults to
+`DEFAULT_MONGODB_URI` from `config/env.ts`) and HTML escaping (`web/html.ts` — `escapeHtml` /
+`escapeJsInAttr`) each live in exactly one module. Import them; do not re-add a per-service copy.
+Tests stub the Mongo guard with `stubMongoGuard(service)` from `__tests__/test-utils.ts`.
+
 **Web UI (`src/web/`)** is an optional Express app (admin + user routers, sessions, CSRF, rate limiting,
 Prometheus metrics at `src/web/metrics.ts`). It is gated by env/config — see `validateWebUIEnvVars` /
 `isWebUIEnabled`. Substantial feature docs live in `WEBUI.md`.

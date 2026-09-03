@@ -10,6 +10,7 @@ import {
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { waitForClientReady } from "../utils/discord.js";
 import { quoteService } from "./quote-service.js";
 
 // Internal sweep interval for purging unauthorised messages from the
@@ -121,23 +122,6 @@ export class QuoteChannelManager {
     return QuoteChannelManager.instance;
   }
 
-  private async waitForClientReady(): Promise<void> {
-    if (this.client.isReady()) {
-      return;
-    }
-
-    return new Promise((resolve) => {
-      const checkReady = (): void => {
-        if (this.client.isReady()) {
-          resolve();
-        } else {
-          setTimeout(checkReady, 100).unref?.();
-        }
-      };
-      checkReady();
-    });
-  }
-
   public async initialize(): Promise<void> {
     if (this.isInitialized) {
       logger.warn("Quote channel manager already initialized, skipping...");
@@ -147,7 +131,7 @@ export class QuoteChannelManager {
     logger.info("Initializing quote channel manager...");
 
     try {
-      await this.waitForClientReady();
+      await waitForClientReady(this.client, "QuoteChannelManager");
 
       const enabled = await this.configService.getBoolean(
         "quotes.enabled",

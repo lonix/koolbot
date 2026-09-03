@@ -1,7 +1,7 @@
 import { Client, Message } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
+import { MongoConnectionGuard } from "../utils/mongo.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
-import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
 
 /**
@@ -16,52 +16,12 @@ import { ConfigService } from "./config-service.js";
 export class MessageActivityTracker {
   private static instance: MessageActivityTracker;
   private client: Client;
-  private isConnected: boolean = false;
+  private mongo = new MongoConnectionGuard("message activity tracker");
   private configService: ConfigService;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
-    this.setupMongoConnectionHandlers();
-  }
-
-  private setupMongoConnectionHandlers(): void {
-    mongoose.connection.on("connected", () => {
-      this.isConnected = true;
-      logger.info(
-        "MongoDB connection established for message activity tracker",
-      );
-    });
-
-    mongoose.connection.on("disconnected", () => {
-      this.isConnected = false;
-      logger.warn("MongoDB connection lost for message activity tracker");
-    });
-
-    mongoose.connection.on("error", (error: Error) => {
-      this.isConnected = false;
-      logger.error(
-        "MongoDB connection error in message activity tracker:",
-        error,
-      );
-    });
-  }
-
-  private async ensureConnection(): Promise<void> {
-    if (!this.isConnected) {
-      try {
-        await mongoose.connect(
-          await this.configService.getString(
-            "MONGODB_URI",
-            "mongodb://mongodb:27017/koolbot",
-          ),
-        );
-        logger.info("Reconnected to MongoDB for message activity tracker");
-      } catch (error: unknown) {
-        logger.error("Error reconnecting to MongoDB:", error);
-        throw error;
-      }
-    }
   }
 
   public static getInstance(client: Client): MessageActivityTracker {
@@ -164,7 +124,7 @@ export class MessageActivityTracker {
    *   3. Positional `$inc` — now guaranteed to match.
    */
   private async recordMessage(message: Message): Promise<void> {
-    await this.ensureConnection();
+    await this.mongo.ensureConnection();
 
     const userId = message.author.id;
     const guildId = message.guild!.id;
@@ -244,7 +204,7 @@ export class MessageActivityTracker {
 
   public async initialize(): Promise<void> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
       logger.info("MessageActivityTracker initialized");
     } catch (error) {
       logger.error("Error initializing MessageActivityTracker:", error);

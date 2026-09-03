@@ -6,11 +6,16 @@ import {
   EmbedBuilder,
   GuildTextBasedChannel,
 } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelTracker, TimePeriod } from "./voice-channel-tracker.js";
 import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import logger from "../utils/logger.js";
+import { waitForClientReady } from "../utils/discord.js";
+import {
+  sanitizeCronExpression,
+  validateCronExpression,
+} from "../utils/cron.js";
 
 interface ParsedTier {
   topN: number;
@@ -28,10 +33,6 @@ export interface LeaderboardRoleRunSummary {
     removed: string[]; // user IDs that lost the role
     skippedReason?: string;
   }>;
-}
-
-function sanitizeCronExpression(expression: string): string {
-  return expression.trim().replace(/^["']|["']$/g, "");
 }
 
 export class LeaderboardRoleService {
@@ -93,19 +94,6 @@ export class LeaderboardRoleService {
       undefined as unknown as LeaderboardRoleService;
   }
 
-  private validateCronExpression(expression: string): boolean {
-    try {
-      new CronTime(expression);
-      return true;
-    } catch (error) {
-      logger.error(
-        `Invalid cron expression for leaderboard roles: ${expression}`,
-        error,
-      );
-      return false;
-    }
-  }
-
   /**
    * Parse the tiers config string into [{ topN, roleId }] sorted ascending by topN.
    * Format: "1:roleId1,3:roleId2,10:roleId3"
@@ -156,50 +144,6 @@ export class LeaderboardRoleService {
     return "alltime";
   }
 
-  private async waitForClientReady(): Promise<void> {
-    if (this.client.isReady()) return;
-
-    return new Promise((resolve) => {
-      const maxWaitMs = 30000;
-      const pollIntervalMs = 500;
-      let resolved = false;
-      let elapsed = 0;
-
-      const cleanup = (): void => {
-        if (resolved) return;
-        resolved = true;
-        this.client.off("ready", onReady);
-        clearInterval(intervalId);
-      };
-
-      const onReady = (): void => {
-        cleanup();
-        resolve();
-      };
-
-      const intervalId = setInterval((): void => {
-        if (this.client.isReady()) {
-          cleanup();
-          resolve();
-          return;
-        }
-        elapsed += pollIntervalMs;
-        if (elapsed >= maxWaitMs) {
-          logger.warn(
-            "LeaderboardRoleService: client did not become ready in time; continuing anyway.",
-          );
-          cleanup();
-          resolve();
-        }
-      }, pollIntervalMs);
-
-      // Don't keep the event loop alive solely for this readiness poll.
-      intervalId.unref?.();
-
-      this.client.once("ready", onReady);
-    });
-  }
-
   /**
    * Recalculate role assignments now. Safe to call manually (e.g. from a
    * future WebUI "Run now" button) — does not depend on the cron job state.
@@ -215,7 +159,7 @@ export class LeaderboardRoleService {
     }
     this.isRunning = true;
     try {
-      await this.waitForClientReady();
+      await waitForClientReady(this.client, "LeaderboardRoleService");
 
       const enabled = await this.configService.getBoolean(
         "leaderboard_roles.enabled",
@@ -507,7 +451,7 @@ export class LeaderboardRoleService {
       );
       const cronExpression = sanitizeCronExpression(rawCron);
 
-      if (!this.validateCronExpression(cronExpression)) {
+      if (!validateCronExpression(cronExpression, "leaderboard roles")) {
         logger.error(
           `Leaderboard role service not started: invalid cron "${rawCron}"`,
         );

@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { stubMongoGuard } from "../test-utils.js";
 import type { Client } from "discord.js";
 
 // Mirrors the proven mocking pattern in achievements-service.test.ts: mock the
@@ -80,7 +81,7 @@ function createService(
     triggerReload: jest.fn().mockResolvedValue(undefined),
   };
   (service as never)["configService"] = mockConfigService;
-  (service as never)["isConnected"] = true;
+  stubMongoGuard(service);
   return service;
 }
 
