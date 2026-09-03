@@ -1,4 +1,4 @@
-import { ModalSubmitInteraction, ChannelType } from "discord.js";
+import { ModalSubmitInteraction, ChannelType, MessageFlags } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
@@ -24,7 +24,7 @@ export async function handleVCModal(
   if (parts.length < 5 || parts[0] !== "vc" || parts[1] !== "modal") {
     await interaction.reply({
       content: "❌ Invalid modal interaction.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -45,7 +45,7 @@ export async function handleVCModal(
   if (userId !== interaction.user.id) {
     await interaction.reply({
       content: "❌ This modal belongs to another user.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -55,7 +55,7 @@ export async function handleVCModal(
   if (!channel || channel.type !== ChannelType.GuildVoice) {
     await interaction.reply({
       content: "❌ Voice channel not found.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -72,7 +72,7 @@ export async function handleVCModal(
         if (presetIndex === null || !Number.isInteger(presetIndex)) {
           await interaction.reply({
             content: "❌ Invalid preset reference.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
@@ -86,14 +86,14 @@ export async function handleVCModal(
       default:
         await interaction.reply({
           content: "❌ Unknown modal action.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
     }
   } catch (error) {
     logger.error("Error handling VC modal:", error);
     await safeReply(interaction, {
       content: "❌ An error occurred while processing your request.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }
@@ -108,7 +108,7 @@ async function handleNameModal(
   if (newName.length > 100) {
     await interaction.reply({
       content: "❌ Channel name must be 100 characters or less.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -116,7 +116,7 @@ async function handleNameModal(
   if (newName.length < 1) {
     await interaction.reply({
       content: "❌ Channel name cannot be empty.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -126,7 +126,7 @@ async function handleNameModal(
     if (!channel || channel.type !== ChannelType.GuildVoice) {
       await interaction.reply({
         content: "❌ Voice channel not found.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -144,13 +144,13 @@ async function handleNameModal(
 
     await interaction.reply({
       content: `✅ Channel renamed to: **${newName}**`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     logger.error("Error renaming channel:", error);
     await safeReply(interaction, {
       content: "❌ Failed to rename channel. Please try again.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }
@@ -167,7 +167,7 @@ async function handleSavePresetModal(
   if (!enabled) {
     await interaction.reply({
       content: "❌ Presets are disabled on this server.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -178,7 +178,7 @@ async function handleSavePresetModal(
   if (!channel || channel.type !== ChannelType.GuildVoice) {
     await interaction.reply({
       content: "❌ Voice channel not found.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -209,13 +209,13 @@ async function handleSavePresetModal(
       content: updated
         ? `✅ Preset **${name}** updated from this channel's settings.`
         : `✅ Preset **${name}** saved.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
       await safeReply(interaction, {
         content: `❌ ${error.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -236,7 +236,7 @@ async function handleRenamePresetModal(
   if (!enabled) {
     await interaction.reply({
       content: "❌ Presets are disabled on this server.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -255,7 +255,7 @@ async function handleRenamePresetModal(
     await interaction.reply({
       content:
         "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -270,13 +270,13 @@ async function handleRenamePresetModal(
 
     await interaction.reply({
       content: `✏️ Preset **${oldName}** renamed to **${savedName}**.`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     if (error instanceof VoicePrefsValidationError) {
       await safeReply(interaction, {
         content: `❌ ${error.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }

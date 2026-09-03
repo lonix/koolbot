@@ -1,4 +1,4 @@
-import { ButtonInteraction } from "discord.js";
+import { ButtonInteraction, MessageFlags } from "discord.js";
 import { EventService } from "../services/event-service.js";
 import type { RsvpStatus } from "../models/event.js";
 import logger from "../utils/logger.js";
@@ -26,7 +26,7 @@ export async function handleEventRsvpButton(
   if (parts.length !== 4 || parts[0] !== "event" || parts[1] !== "rsvp") {
     await interaction.reply({
       content: "❌ Invalid RSVP button.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -35,7 +35,7 @@ export async function handleEventRsvpButton(
   if (!isRsvpStatus(status)) {
     await interaction.reply({
       content: "❌ Unknown RSVP option.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -47,7 +47,7 @@ export async function handleEventRsvpButton(
       await interaction.reply({
         content:
           "❌ This event is no longer accepting RSVPs (it may have ended or been cancelled).",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -56,7 +56,7 @@ export async function handleEventRsvpButton(
     await interaction.update(service.buildAnnouncementPayload(event));
     await interaction.followUp({
       content: `Your RSVP: **${RSVP_LABELS[status]}**`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   } catch (error) {
     logger.error("Error handling event RSVP button:", error);
@@ -64,14 +64,14 @@ export async function handleEventRsvpButton(
       await interaction
         .followUp({
           content: "❌ There was an error recording your RSVP.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => undefined);
     } else {
       await interaction
         .reply({
           content: "❌ There was an error recording your RSVP.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         })
         .catch(() => undefined);
     }

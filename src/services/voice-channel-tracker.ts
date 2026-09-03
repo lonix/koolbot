@@ -5,6 +5,7 @@ import {
   Client,
   ButtonInteraction,
   User,
+  MessageFlags,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
@@ -695,7 +696,7 @@ export class VoiceChannelTracker {
       if (!interaction.guild) {
         await interaction.reply({
           content: "This command can only be used in a server.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -750,13 +751,13 @@ export class VoiceChannelTracker {
 
       await interaction.reply({
         content: response,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (error) {
       logger.error("Error handling button interaction:", error);
       await safeReply(interaction, {
         content: "An error occurred while processing your request.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   }

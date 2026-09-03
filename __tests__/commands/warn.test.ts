@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
 const mockIsEnabled = jest.fn<() => Promise<boolean>>();
 const mockLogWarn = jest.fn<() => Promise<unknown>>();
@@ -118,7 +118,9 @@ describe("Warn Command", () => {
       await execute(interaction);
 
       expect(order).toEqual(["defer", "isEnabled", "logWarn"]);
-      expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(interaction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
       expect(mockLogWarn).toHaveBeenCalledWith({
         guildId: "guild-1",
         userId: "user-2",
@@ -131,7 +133,7 @@ describe("Warn Command", () => {
         embeds: unknown[];
       };
       expect(payload.embeds).toHaveLength(1);
-      expect(payload).not.toHaveProperty("ephemeral");
+      expect(payload).not.toHaveProperty("flags");
     });
 
     it("edits the deferred reply when the moderation log is disabled", async () => {
@@ -140,7 +142,9 @@ describe("Warn Command", () => {
 
       await execute(interaction);
 
-      expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(interaction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
       expect(mockLogWarn).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith({
         content: "The moderation log is currently disabled.",
@@ -165,7 +169,7 @@ describe("Warn Command", () => {
       expect(interaction.deferReply).not.toHaveBeenCalled();
       expect(mockLogWarn).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({ ephemeral: true }),
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
       );
     });
 

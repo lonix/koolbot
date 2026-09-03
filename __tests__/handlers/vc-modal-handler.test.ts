@@ -5,6 +5,7 @@ import {
   type Guild,
   type VoiceChannel,
   type Client,
+  MessageFlags,
 } from "discord.js";
 
 // Mock dependencies before importing
@@ -82,7 +83,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       );
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content: "✅ Channel renamed to: **New Custom Name**",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -96,7 +97,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content: "❌ Failed to rename channel. Please try again.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -112,7 +113,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content: "❌ Channel name must be 100 characters or less.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -127,7 +128,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       expect(mockSetCustomChannelName).not.toHaveBeenCalled();
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content: "❌ Channel name cannot be empty.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
   });
@@ -171,7 +172,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       );
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content: "✏️ Preset **Squad Night** renamed to **Renamed Preset**.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -187,7 +188,7 @@ describe("VCModalHandler - Custom Name Tracking", () => {
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content:
           "❌ Your presets changed since this dialog was opened — reopen the panel and try again.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 

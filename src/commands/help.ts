@@ -6,6 +6,7 @@ import {
   type APIApplicationCommandSubcommandGroupOption,
   type APIApplicationCommandSubcommandOption,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
+  MessageFlags,
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
@@ -168,7 +169,7 @@ export async function execute(
       if (!commandInfo) {
         await interaction.reply({
           content: `❌ Command \`/${requestedCommand}\` not found. Use \`/help\` to see all available commands.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -204,7 +205,10 @@ export async function execute(
         });
       }
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({
+        embeds: [embed],
+        flags: MessageFlags.Ephemeral,
+      });
     } else {
       // Show list of all commands
       const enabledCommands: string[] = [];
@@ -261,13 +265,16 @@ export async function execute(
         inline: false,
       });
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply({
+        embeds: [embed],
+        flags: MessageFlags.Ephemeral,
+      });
     }
   } catch (error) {
     logger.error("Error in help command:", error);
     await safeReply(interaction, {
       content: "There was an error while executing this command!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }

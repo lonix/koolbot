@@ -12,6 +12,7 @@ import {
   type APIApplicationCommandSubcommandOption,
   type ChatInputCommandInteraction,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
+  MessageFlags,
 } from "discord.js";
 
 // Mock logger
@@ -78,7 +79,7 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -95,7 +96,7 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -108,7 +109,7 @@ describe("Help Command", () => {
 
       expect(mockInteraction.reply).toHaveBeenCalledWith({
         content: expect.stringContaining("Command `/nonexistent` not found"),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -141,7 +142,7 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -160,7 +161,7 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -179,7 +180,7 @@ describe("Help Command", () => {
               }),
             }),
           ]),
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     });

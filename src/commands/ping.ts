@@ -1,4 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  MessageFlags,
+} from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 
@@ -10,10 +14,15 @@ export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
-    const sent = await interaction.reply({
+    // `withResponse` returns the interaction callback, whose resource carries
+    // the message we just sent (the v14.16+ replacement for `fetchReply`).
+    // The resource is typed as nullable, so fall back to fetching the reply
+    // rather than crashing on a missing message.
+    const response = await interaction.reply({
       content: "Pinging...",
-      fetchReply: true,
+      withResponse: true,
     });
+    const sent = response.resource?.message ?? (await interaction.fetchReply());
     const latency = sent.createdTimestamp - interaction.createdTimestamp;
     const apiLatency = Math.round(interaction.client.ws.ping);
 
@@ -24,7 +33,7 @@ export async function execute(
     logger.error("Error in ping command:", error);
     await safeReply(interaction, {
       content: "There was an error while executing this command!",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }

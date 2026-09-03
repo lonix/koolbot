@@ -6,7 +6,7 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
 const mockCreateSession = jest.fn();
 const mockGetInstance = jest.fn(() => ({
@@ -157,7 +157,7 @@ describe("Config Command — execute", () => {
 
     await execute(interaction);
 
-    expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
   });
 
   it("rejects when the WebUI is disabled", async () => {

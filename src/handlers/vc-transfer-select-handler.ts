@@ -1,4 +1,8 @@
-import { StringSelectMenuInteraction, ChannelType } from "discord.js";
+import {
+  StringSelectMenuInteraction,
+  ChannelType,
+  MessageFlags,
+} from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelManager } from "../services/voice-channel-manager.js";
@@ -13,7 +17,7 @@ export async function handleVCTransferSelect(
   if (parts.length < 5 || parts[0] !== "vc" || parts[1] !== "transfer") {
     await interaction.reply({
       content: "❌ Invalid select menu interaction.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -26,7 +30,7 @@ export async function handleVCTransferSelect(
   if (userId !== ownerId) {
     await interaction.reply({
       content: "❌ Only the channel owner can transfer ownership.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -37,7 +41,7 @@ export async function handleVCTransferSelect(
   if (!targetUserId) {
     await interaction.reply({
       content: "❌ Please select a user.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -47,7 +51,7 @@ export async function handleVCTransferSelect(
   if (!channel || channel.type !== ChannelType.GuildVoice) {
     await interaction.reply({
       content: "❌ Voice channel not found.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
     return;
   }
@@ -58,7 +62,7 @@ export async function handleVCTransferSelect(
     if (!targetMember) {
       await interaction.reply({
         content: "❌ Could not find the target user.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -67,7 +71,7 @@ export async function handleVCTransferSelect(
     if (targetMember.voice.channelId !== channelId) {
       await interaction.reply({
         content: "❌ The target user must be in the same voice channel!",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -84,7 +88,7 @@ export async function handleVCTransferSelect(
     logger.error("Error transferring ownership:", error);
     await safeReply(interaction, {
       content: "❌ Failed to transfer ownership. Please try again.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }

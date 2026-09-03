@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
 const mockGetBoolean =
   jest.fn<(key: string, def: boolean) => Promise<boolean>>();
@@ -418,7 +418,7 @@ describe("VoiceStats Command", () => {
       expect(interaction.deferReply).not.toHaveBeenCalled();
       expect(mockGetTopUsers).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({ ephemeral: true }),
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
       );
     });
 
@@ -449,7 +449,7 @@ describe("VoiceStats Command", () => {
       expect(interaction.deferReply).not.toHaveBeenCalled();
       expect(mockGetUserStats).not.toHaveBeenCalled();
       expect(interaction.reply).toHaveBeenCalledWith(
-        expect.objectContaining({ ephemeral: true }),
+        expect.objectContaining({ flags: MessageFlags.Ephemeral }),
       );
     });
 

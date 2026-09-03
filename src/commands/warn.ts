@@ -3,6 +3,7 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   PermissionFlagsBits,
+  MessageFlags,
 } from "discord.js";
 import { ModerationService } from "../services/moderation-service.js";
 import logger from "../utils/logger.js";
@@ -40,7 +41,7 @@ export async function execute(
     if (!interaction.guildId) {
       await interaction.reply({
         content: "This command can only be used in a server.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -51,7 +52,7 @@ export async function execute(
     if (targetUser.bot) {
       await interaction.reply({
         content: "You can't warn a bot.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -59,7 +60,7 @@ export async function execute(
     if (targetUser.id === interaction.user.id) {
       await interaction.reply({
         content: "You can't warn yourself.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -67,7 +68,7 @@ export async function execute(
     // Acknowledge before any DB work so the write + count cannot miss
     // Discord's 3-second ACK window (`10062 Unknown interaction`, #842).
     // Every response below is ephemeral, and visibility is fixed here.
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const moderationService = ModerationService.getInstance(interaction.client);
 
@@ -114,7 +115,7 @@ export async function execute(
     logger.error("Error in warn command:", error);
     await safeReply(interaction, {
       content: "There was an error recording the warning.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 }

@@ -1,4 +1,8 @@
-import { SlashCommandBuilder, ChatInputCommandInteraction } from "discord.js";
+import {
+  SlashCommandBuilder,
+  ChatInputCommandInteraction,
+  MessageFlags,
+} from "discord.js";
 import {
   VoiceChannelTracker,
   TimePeriod,
@@ -96,7 +100,7 @@ async function executeTop(
       await interaction.reply({
         content:
           "The voice statistics leaderboard feature is currently disabled.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -160,7 +164,7 @@ async function executeUser(
     if (!userEnabled) {
       await interaction.reply({
         content: "The voice statistics feature is currently disabled.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
