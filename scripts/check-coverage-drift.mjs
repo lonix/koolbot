@@ -34,16 +34,21 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--warn-only") {
       args.warnOnly = true;
-    } else if (arg === "--max-drift") {
-      args.maxDrift = Number(argv[++i]);
-    } else if (arg.startsWith("--max-drift=")) {
-      args.maxDrift = Number(arg.slice("--max-drift=".length));
+    } else if (arg === "--max-drift" || arg.startsWith("--max-drift=")) {
+      const raw =
+        arg === "--max-drift" ? argv[++i] : arg.slice("--max-drift=".length);
+      if (raw === undefined || raw.trim() === "") {
+        throw new Error("--max-drift requires a value, e.g. --max-drift 10");
+      }
+      args.maxDrift = Number(raw);
+      if (!Number.isFinite(args.maxDrift) || args.maxDrift < 0) {
+        throw new Error(
+          `--max-drift must be a non-negative number, got "${raw}"`,
+        );
+      }
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
-  }
-  if (!Number.isFinite(args.maxDrift) || args.maxDrift < 0) {
-    throw new Error("--max-drift must be a non-negative number");
   }
   return args;
 }
@@ -131,9 +136,17 @@ async function main() {
     `\nCoverage floors are more than ${points(maxDrift)} below actual coverage:`,
   );
   for (const { metric, actual, floor } of drifted) {
-    const suggested = Math.max(floor + 1, Math.floor(actual) - 2);
+    // Aim a couple of points under actual, but never above it -- a floor above
+    // measured coverage would fail the build the moment it was applied.
+    const suggested = Math.min(
+      Math.max(floor + 1, Math.floor(actual) - 2),
+      Math.floor(actual),
+    );
     console.error(
-      `  ${metric}: raise the floor from ${floor} toward ${suggested}`,
+      suggested > floor
+        ? `  ${metric}: raise the floor from ${floor} toward ${suggested}`
+        : `  ${metric}: floor ${floor} is already within a point of actual ` +
+            `${actual.toFixed(2)}% -- no higher whole-number floor is safe`,
     );
   }
   console.error(
