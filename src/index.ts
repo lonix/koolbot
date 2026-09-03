@@ -748,7 +748,14 @@ async function initializeServices(): Promise<void> {
     // Switch lobby to online mode on startup and handle any users in offline lobby
     try {
       const guild = await client.guilds.fetch(guildId);
-      await voiceChannelManager.renameLobbyToOnline(guild);
+      const lobbyOnline = await voiceChannelManager.renameLobbyToOnline(guild);
+      if (!lobbyOnline) {
+        logger.error(
+          "❌ Lobby could not be switched to online mode — the voice channel category or the " +
+            "bot's Manage Channels permission is misconfigured. Periodic voice channel cleanup " +
+            "stays paused until this is fixed (#843).",
+        );
+      }
     } catch (error) {
       logger.error("❌ Error switching lobby to online mode:", error);
     }

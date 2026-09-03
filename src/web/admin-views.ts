@@ -3026,7 +3026,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
 
   const body = `
 <h1>Voice Channels</h1>
-<p class="subtitle">Voice-channel category contents and live state. Replaces <code>/vc force-reload</code>; for the gentler empty-channel cleanup use <code>/vc reload</code>. The slash commands still work in parallel during migration.</p>
+<p class="subtitle">Voice-channel category contents and live state. Replaces the retired <code>/vc force-reload</code> and <code>/vc reload</code> slash commands.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels", featureKey: "voicechannels.enabled", returnTo: "/admin/voice-channels", csrfToken: props.csrfToken })}
 <div class="card">
@@ -3045,10 +3045,10 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels",
 ${renderVoiceChannelsSettings(props)}
 <div class="card">
   <h2>Cleanup actions</h2>
-  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of ALL unmanaged channels in the category and re-create lobby channels?');">
+  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty. An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it.');">
     ${csrfInput}
     <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force VC cleanup</button>
-    <span class="muted">Removes ALL unmanaged channels in the category and re-creates the lobby. Same effect as <code>/vc force-reload</code>.</span>
+    <span class="muted">Removes all empty unmanaged channels in the category (unmanaged channels with members in them are kept until they empty), then ensures the lobby exists: an offline lobby is renamed back online, otherwise the lobby is deleted and re-created, which disconnects anyone currently in it.</span>
   </form>
   ${reloadHint ? `<p class="muted">${reloadHint}</p>` : ""}
 </div>

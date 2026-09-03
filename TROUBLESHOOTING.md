@@ -534,8 +534,11 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 
 2. **Force cleanup** — Web UI → Voice Channels → **Force cleanup**.
 
-   ⚠️ **Warning:** Force cleanup removes ALL unmanaged channels in the
-   category, including ones with users in them.
+   ⚠️ **Warning:** Force cleanup removes all empty unmanaged channels in
+   the category and then ensures the lobby exists. Unmanaged channels with
+   members in them are kept until they empty. An offline lobby is renamed
+   back online; otherwise the lobby is deleted and re-created, which
+   disconnects anyone currently sitting in it.
 
 3. **Check bot logs:**
 
