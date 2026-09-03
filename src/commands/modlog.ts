@@ -8,8 +8,21 @@ import { ModerationService } from "../services/moderation-service.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import {
+  clampToLimit,
+  truncateText,
+  DISCORD_EMBED_DESCRIPTION_LIMIT,
+} from "../utils/discord-limits.js";
 
-const PAGE_SIZE = 10;
+export const PAGE_SIZE = 10;
+
+/**
+ * Longest reason shown per entry. Reasons are stored at up to 512 chars, but
+ * a full page of those (plus the action/when/moderator line) overflows the
+ * 4096-char embed description (#840). 300 keeps a full page well inside the
+ * limit while still showing the vast majority of reasons untouched.
+ */
+export const MAX_REASON_DISPLAY_LENGTH = 300;
 
 /** Emoji + label shown for each action in the history embed. */
 export function actionLabel(action: ModerationAction): string {
@@ -104,15 +117,24 @@ export async function execute(
       const moderator = entry.moderatorId
         ? `<@${entry.moderatorId}>`
         : "Unknown";
-      const reason = entry.reason ? `\n> ${entry.reason}` : "";
+      const reason = entry.reason
+        ? `\n> ${truncateText(entry.reason, MAX_REASON_DISPLAY_LENGTH)}`
+        : "";
       return `**${actionLabel(entry.action)}** · ${when} · by ${moderator}${reason}`;
+    });
+
+    // The per-reason cap above keeps a full page under the limit; this clamp
+    // is the guarantee should the line format or page size ever grow.
+    const description = clampToLimit(lines, DISCORD_EMBED_DESCRIPTION_LIMIT, {
+      separator: "\n\n",
+      overflowLabel: (dropped) => `…and ${dropped} more on this page`,
     });
 
     const embed = new EmbedBuilder()
       .setColor(0x6366f1)
       .setTitle(`🛡️ Moderation history — ${targetUser.tag}`)
       .setThumbnail(targetUser.displayAvatarURL())
-      .setDescription(lines.join("\n\n"))
+      .setDescription(description)
       .setFooter({
         text: `Page ${page}/${totalPages} · ${total} total entr${
           total === 1 ? "y" : "ies"

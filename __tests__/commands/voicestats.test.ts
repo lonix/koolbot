@@ -59,6 +59,23 @@ function makeUserInteraction(
   } as unknown as ChatInputCommandInteraction & { reply: jest.Mock };
 }
 
+function makeTopInteraction(
+  limit: number,
+): ChatInputCommandInteraction & { reply: jest.Mock } {
+  return {
+    options: {
+      getSubcommand: () => "top",
+      getUser: () => null,
+      getString: (name: string) => (name === "period" ? "alltime" : null),
+      getInteger: (name: string) => (name === "limit" ? limit : null),
+    },
+    user: { id: "user-1", username: "alice" },
+    guildId: "guild-1",
+    client: {},
+    reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  } as unknown as ChatInputCommandInteraction & { reply: jest.Mock };
+}
+
 describe("VoiceStats Command", () => {
   describe("command metadata", () => {
     it("should have correct command name", () => {
@@ -275,6 +292,57 @@ describe("VoiceStats Command", () => {
       expect(interaction.reply).toHaveBeenCalledWith(
         "No voice channel activity found for the selected period.",
       );
+    });
+  });
+
+  // #840: the leaderboard joins up to 50 rows without checking the 2000-char
+  // message limit, so a busy guild's `/voicestats top limit:50` failed with
+  // 50035 Invalid Form Body and the user saw nothing.
+  describe("top subcommand payload limit (#840)", () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockGetBoolean.mockResolvedValue(true);
+    });
+
+    const worstCaseUsers = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        userId: `user-${i}`,
+        // Discord usernames are at most 32 characters.
+        username: `${"w".repeat(30)}${String(i).padStart(2, "0")}`,
+        // Five-digit hours: a long-lived guild's all-time totals.
+        totalTime: 99999 * 3600 + 59 * 60,
+      }));
+
+    it("keeps the maximum 50-row leaderboard within 2000 characters", async () => {
+      mockGetTopUsers.mockResolvedValue(worstCaseUsers(50));
+      const interaction = makeTopInteraction(50);
+
+      await execute(interaction);
+
+      expect(interaction.reply).toHaveBeenCalledTimes(1);
+      const content = interaction.reply.mock.calls[0][0] as string;
+      expect(typeof content).toBe("string");
+      expect(content.length).toBeLessThanOrEqual(2000);
+      expect(
+        content.startsWith("Top Voice Channel Users (alltime):\n🥇 "),
+      ).toBe(true);
+      expect(content).toMatch(/\n…and \d+ more$/);
+      // Whatever was dropped is accounted for, so nothing silently vanishes.
+      const shown = (content.match(/: 99999h 59m/g) ?? []).length;
+      const dropped = Number(/…and (\d+) more$/.exec(content)?.[1]);
+      expect(shown + dropped).toBe(50);
+    });
+
+    it("leaves a leaderboard that fits untouched", async () => {
+      mockGetTopUsers.mockResolvedValue(worstCaseUsers(10));
+      const interaction = makeTopInteraction(10);
+
+      await execute(interaction);
+
+      const content = interaction.reply.mock.calls[0][0] as string;
+      expect(content.length).toBeLessThanOrEqual(2000);
+      expect(content).not.toContain("…and");
+      expect(content.split("\n")).toHaveLength(11);
     });
   });
 });
