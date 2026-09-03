@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
 
 // Create mock functions
 const mockFind = jest.fn();
@@ -228,6 +231,89 @@ describe("ConfigService - Cleanup Unknown Settings", () => {
         key: "gamification.enabled",
         set: { category: "achievements" },
       });
+    });
+
+    // Regression test for #838: the voice-tracking cleanup timestamp was not
+    // allowlisted, so it was purged as "unknown" on every startup and the
+    // "at most once per 24h" guard reset after any restart. Its
+    // message-tracking counterpart was already handled; both must survive.
+    it("should not delete cleanup last_run bookkeeping keys (#838)", async () => {
+      mockFind.mockResolvedValue([
+        {
+          key: "voicetracking.cleanup.last_run",
+          value: "2026-08-20T08:00:00.000Z",
+          category: "voicetracking",
+          description: "Last cleanup execution timestamp",
+        },
+        {
+          key: "messagetracking.cleanup.last_run",
+          value: "2026-08-20T08:00:00.000Z",
+          category: "messagetracking",
+          description: "Last message-tracking cleanup execution timestamp",
+        },
+        // A genuinely unknown key that should still be removed.
+        {
+          key: "bogus.setting",
+          value: "x",
+          category: "bogus",
+          description: "Bogus",
+        },
+      ]);
+
+      const service = ConfigService.getInstance();
+      await service.initialize();
+
+      const deletedKeys = mockDeleteOne.mock.calls.map(
+        (call) => (call[0] as { key: string }).key,
+      );
+      expect(deletedKeys).not.toContain("voicetracking.cleanup.last_run");
+      expect(deletedKeys).not.toContain("messagetracking.cleanup.last_run");
+      expect(deletedKeys).toContain("bogus.setting");
+      // Their categories are already valid, so nothing is rewritten either.
+      expect(mockUpdateOne).not.toHaveBeenCalled();
+    });
+
+    // Every key the bot itself persists via ConfigService.set() with a literal
+    // key must be declared in defaultConfig or in the knownOldKeys allowlist;
+    // otherwise the startup sweep silently deletes it on the next boot. This
+    // scans src/ so a newly introduced bookkeeping key cannot regress the way
+    // voicetracking.cleanup.last_run did (#838).
+    it("should keep every literal key written via ConfigService.set() in src/", async () => {
+      const testDir = path.dirname(fileURLToPath(import.meta.url));
+      const srcDir = path.resolve(testDir, "../../src");
+      const tsFiles = (
+        fs.readdirSync(srcDir, { recursive: true }) as string[]
+      ).filter((f) => f.endsWith(".ts") && !f.endsWith(".d.ts"));
+
+      const writtenKeys = new Set<string>();
+      const setCall =
+        /[cC]onfigService(?:\.getInstance\(\))?\s*\.set\(\s*"([^"]+)"/g;
+      for (const file of tsFiles) {
+        const source = fs.readFileSync(path.join(srcDir, file), "utf-8");
+        for (const match of source.matchAll(setCall)) {
+          writtenKeys.add(match[1]);
+        }
+      }
+      // Sanity check: the scan must actually find the known call sites.
+      expect(writtenKeys).toContain("voicetracking.cleanup.last_run");
+      expect(writtenKeys).toContain("messagetracking.cleanup.last_run");
+
+      mockFind.mockResolvedValue(
+        [...writtenKeys].map((key) => ({
+          key,
+          value: "x",
+          category: key.split(".")[0],
+          description: "Written by the bot",
+        })),
+      );
+
+      const service = ConfigService.getInstance();
+      await service.initialize();
+
+      const deletedKeys = mockDeleteOne.mock.calls.map(
+        (call) => (call[0] as { key: string }).key,
+      );
+      expect(deletedKeys).toEqual([]);
     });
   });
 });
