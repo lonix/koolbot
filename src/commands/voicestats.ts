@@ -181,13 +181,19 @@ async function executeUser(
       ? formatDateTimeInZone(stats.lastSeen, viewerTimezone)
       : stats.lastSeen.toLocaleString();
 
+    // Sessions are appended in chronological order, so sort explicitly by
+    // startTime (newest first) rather than relying on array position (#841).
+    const recentSessions = [...stats.sessions]
+      .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
+      .slice(0, 5);
+
     const response = [
       `**Voice Channel Statistics for ${user.username} (${period})**`,
       `Total Time: ${formatTime(stats.totalTime)}`,
       `Last Seen: ${lastSeen}`,
       "",
       "**Recent Sessions:**",
-      ...stats.sessions.slice(0, 5).map((session) => {
+      ...recentSessions.map((session) => {
         const duration = session.duration
           ? formatTime(session.duration)
           : "ongoing";
