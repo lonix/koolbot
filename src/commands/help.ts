@@ -57,17 +57,27 @@ export function usageFromCommand(
   return [`/${command.name}`, ...params].join(" ");
 }
 
-let helpEntriesPromise: Promise<Map<string, CommandHelpEntry>> | undefined;
+type CommandModuleLoader = (
+  file: string,
+) => Promise<{ data: SlashCommandBuilder }>;
 
-async function loadHelpEntries(): Promise<Map<string, CommandHelpEntry>> {
+const importCommandModule: CommandModuleLoader = (file) =>
+  import(`./${file}.js`);
+
+/**
+ * Builds the help entries for every command in the registry. A command whose
+ * module fails to load still gets a minimal entry (name + config key) so the
+ * list never silently shrinks; `complete` reports whether every module loaded.
+ */
+export async function buildHelpEntries(
+  loadCommandModule: CommandModuleLoader = importCommandModule,
+): Promise<{ entries: Map<string, CommandHelpEntry>; complete: boolean }> {
   const entries = new Map<string, CommandHelpEntry>();
+  let complete = true;
 
   for (const config of COMMAND_CONFIGS) {
     try {
-      const commandModule = (await import(`./${config.file}.js`)) as {
-        data: SlashCommandBuilder;
-      };
-      const json = commandModule.data.toJSON();
+      const json = (await loadCommandModule(config.file)).data.toJSON();
       entries.set(config.name, {
         name: config.name,
         description: json.description,
@@ -75,26 +85,40 @@ async function loadHelpEntries(): Promise<Map<string, CommandHelpEntry>> {
         configKey: config.configKey,
       });
     } catch (error) {
+      complete = false;
       logger.warn(`Failed to load help metadata for /${config.name}:`, error);
+      entries.set(config.name, {
+        name: config.name,
+        description: "Description unavailable (command module failed to load).",
+        usage: `/${config.name}`,
+        configKey: config.configKey,
+      });
     }
   }
 
-  return entries;
+  return { entries, complete };
 }
+
+let cachedHelpEntries: Map<string, CommandHelpEntry> | undefined;
 
 /**
  * Help entries derived from the command registry and each command's
  * `SlashCommandBuilder`, so `/help` never needs a hand-maintained copy of
- * command metadata. Loaded once and cached.
+ * command metadata. Cached once every command module has loaded; a partial
+ * result (some module failed) is returned but not cached, so a transient
+ * failure is retried on the next `/help` instead of sticking until restart.
  */
-export function getCommandHelpEntries(): Promise<
+export async function getCommandHelpEntries(): Promise<
   Map<string, CommandHelpEntry>
 > {
-  helpEntriesPromise ??= loadHelpEntries().catch((error) => {
-    helpEntriesPromise = undefined;
-    throw error;
-  });
-  return helpEntriesPromise;
+  if (cachedHelpEntries) {
+    return cachedHelpEntries;
+  }
+  const { entries, complete } = await buildHelpEntries();
+  if (complete) {
+    cachedHelpEntries = entries;
+  }
+  return entries;
 }
 
 export async function execute(

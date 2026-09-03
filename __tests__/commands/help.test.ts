@@ -2,6 +2,7 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
   data,
   execute,
+  buildHelpEntries,
   getCommandHelpEntries,
   usageFromCommand,
 } from "../../src/commands/help.js";
@@ -252,6 +253,35 @@ describe("Help Command", () => {
       const first = await getCommandHelpEntries();
       const second = await getCommandHelpEntries();
       expect(second).toBe(first);
+    });
+
+    it("should keep a fallback entry for a command whose module fails to load", async () => {
+      const failing = "quote";
+      const { entries, complete } = await buildHelpEntries(async (file) => {
+        if (file === failing) {
+          throw new Error("boom");
+        }
+        return import(`../../src/commands/${file}.js`);
+      });
+
+      expect(complete).toBe(false);
+      // Every registry entry is still present, so /help never shrinks.
+      expect([...entries.keys()].sort()).toEqual(
+        COMMAND_CONFIGS.map((config) => config.name).sort(),
+      );
+      expect(entries.get(failing)).toEqual({
+        name: failing,
+        description: expect.stringContaining("unavailable"),
+        usage: `/${failing}`,
+        configKey: "quotes.enabled",
+      });
+      // Other commands are unaffected.
+      expect(entries.get("warn")?.usage).toBe("/warn <user> <reason>");
+    });
+
+    it("should report a complete load when every module resolves", async () => {
+      const { complete } = await buildHelpEntries();
+      expect(complete).toBe(true);
     });
   });
 
