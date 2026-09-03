@@ -8,10 +8,12 @@ const mockGetBoolean =
 const mockGetNumber =
   jest.fn<(key: string, fallback: number) => Promise<number>>();
 
+const mockRegisterReloadCallback = jest.fn<(cb: () => Promise<void>) => void>();
+
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
-      registerReloadCallback: jest.fn(),
+      registerReloadCallback: mockRegisterReloadCallback,
       getBoolean: mockGetBoolean,
       getNumber: mockGetNumber,
       getString: jest.fn(),
@@ -134,7 +136,10 @@ function makeClient(): {
  * it claimed — mirroring `findOneAndUpdate({ new: true })`.
  */
 function setDue(rows: ReminderView[]): void {
-  ReminderMock.find.mockResolvedValue(rows);
+  // The scan chains `.sort().limit()` onto the query.
+  ReminderMock.find.mockReturnValue({
+    sort: () => ({ limit: async () => rows }),
+  });
   ReminderMock.findOneAndUpdate.mockImplementation(
     async (filter: { _id: string }) =>
       rows.find((row) => row._id === filter._id) ?? null,
@@ -373,6 +378,19 @@ describe("ReminderService delivery scan", () => {
     });
   });
 
+  it("asks for an oldest-first bounded batch, not every due row", async () => {
+    const { client } = makeClient();
+    const service = ReminderService.getInstance(client);
+    const sort = jest.fn(() => ({ limit }));
+    const limit = jest.fn(async () => []);
+    ReminderMock.find.mockReturnValue({ sort });
+
+    await service.runNow();
+
+    expect(sort).toHaveBeenCalledWith({ remindAt: 1 });
+    expect(limit).toHaveBeenCalledWith(100);
+  });
+
   it("claims a row before sending, so a racing scan cannot double-send", async () => {
     const { client, userSend } = makeClient();
     const service = ReminderService.getInstance(client);
@@ -426,6 +444,30 @@ describe("ReminderService delivery scan", () => {
       content: "<@user-1> ⏰ **Reminder:** check the oven",
       allowedMentions: { users: ["user-1"] },
     });
+  });
+
+  it("never publishes to the channel when the DM fails for another reason", async () => {
+    const { client, userSend, channelSend } = makeClient();
+    // A transient failure says nothing about the member's DM settings, so
+    // escalating it to a public post would leak a private reminder.
+    userSend.mockRejectedValue(discordError(500));
+    const service = ReminderService.getInstance(client);
+    setDue([dueReminder({ message: "call the clinic" })]);
+
+    await service.runNow();
+
+    expect(channelSend).not.toHaveBeenCalled();
+  });
+
+  it("never publishes to the channel when the user fetch fails", async () => {
+    const { client, channelSend, usersFetch } = makeClient();
+    usersFetch.mockRejectedValue(new Error("network"));
+    const service = ReminderService.getInstance(client);
+    setDue([dueReminder()]);
+
+    await service.runNow();
+
+    expect(channelSend).not.toHaveBeenCalled();
   });
 
   it("pins the channel fallback's mentions to the one member", async () => {
@@ -523,6 +565,46 @@ describe("ReminderService cron lifecycle", () => {
     expect(mockJobStop).toHaveBeenCalledTimes(1);
     expect(mockCronJob).toHaveBeenCalledTimes(2);
     expect(mockJobStart).toHaveBeenCalledTimes(2);
+  });
+
+  it("starts the scan when the reload callback sees the feature enabled", async () => {
+    const { client } = makeClient();
+    ReminderService.getInstance(client);
+    // The constructor hands its callback to ConfigService; invoke that,
+    // rather than reload(), to cover the path a real /config reload takes.
+    const onReload = mockRegisterReloadCallback.mock.calls[0][0];
+
+    mockGetBoolean.mockResolvedValue(true);
+    await onReload();
+
+    expect(mockCronJob).toHaveBeenCalledTimes(1);
+    expect(mockJobStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the scan when the reload callback sees the feature disabled", async () => {
+    const { client } = makeClient();
+    const service = ReminderService.getInstance(client);
+    const onReload = mockRegisterReloadCallback.mock.calls[0][0];
+
+    await service.start();
+    mockGetBoolean.mockResolvedValue(false);
+    await onReload();
+
+    expect(mockJobStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not stack jobs when the reload callback fires repeatedly", async () => {
+    const { client } = makeClient();
+    ReminderService.getInstance(client);
+    const onReload = mockRegisterReloadCallback.mock.calls[0][0];
+
+    mockGetBoolean.mockResolvedValue(true);
+    await onReload();
+    await onReload();
+
+    // Each reload stops the previous job before arming the next.
+    expect(mockCronJob).toHaveBeenCalledTimes(2);
+    expect(mockJobStop).toHaveBeenCalledTimes(1);
   });
 
   it("refuses an instance built for a different client", async () => {

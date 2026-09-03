@@ -38,6 +38,10 @@ describe("parseDuration", () => {
       expect(parseDuration(" 1h 30m ")).toBe(HOUR + 30 * MINUTE);
     });
 
+    it("allows whitespace around the unit", () => {
+      expect(parseDuration("1 h 30 m")).toBe(HOUR + 30 * MINUTE);
+    });
+
     it("is case-insensitive", () => {
       expect(parseDuration("1H30M")).toBe(HOUR + 30 * MINUTE);
     });
@@ -66,6 +70,8 @@ describe("parseDuration", () => {
       ["free text", "tomorrow"],
       ["a zero total", "0m"],
       ["a zero compound total", "0h0m"],
+      ["a number split by whitespace, which is a typo not 10m", "1 0m"],
+      ["a split number in a compound duration", "1h 3 0m"],
     ])("rejects %s", (_label, input) => {
       expect(parseDuration(input)).toBeNull();
     });

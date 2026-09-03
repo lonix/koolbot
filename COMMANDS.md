@@ -565,7 +565,7 @@ it back to you when it's due.
 
 ```text
 /remind set message:"check the oven" in:2h
-/remind set message:"renew server sub" date:2026-09-01 time:18:00
+/remind set message:"renew server sub" date:YYYY-MM-DD time:18:00
 /remind list
 /remind cancel id:697bdfe2808f7d245289392c
 ```

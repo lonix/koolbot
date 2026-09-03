@@ -175,7 +175,7 @@ async function handleSet(
   }
   if (!hasRelative && !hasAbsolute) {
     await interaction.editReply(
-      "Tell me when: `in:2h` for a relative time, or `date:2026-09-01 time:18:00` for a specific one.",
+      "Tell me when: `in:2h` for a relative time, or `date:YYYY-MM-DD time:HH:MM` for a specific one.",
     );
     return;
   }
@@ -210,7 +210,7 @@ async function handleSet(
     const parsed = parseZonedDateTime(dateRaw, timeRaw, zone);
     if (!parsed) {
       await interaction.editReply(
-        `That date and time didn't parse. Use \`date:YYYY-MM-DD\` and \`time:HH:MM\` (24-hour), e.g. \`date:2026-09-01 time:18:00\`. Times are read in **${zone}**.`,
+        `That date and time didn't parse. Use \`date:YYYY-MM-DD\` and \`time:HH:MM\` (24-hour) — a four-digit year, then month and day. Times are read in **${zone}**.`,
       );
       return;
     }

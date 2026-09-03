@@ -112,9 +112,13 @@ const DURATION_UNIT_MS: Record<string, number> = {
  * Written for the `/remind in:` option, which needs to turn a short,
  * hand-typed string into a future instant. Deliberately *not* a
  * natural-language parser: only whole numbers followed by one of
- * `m`/`h`/`d`/`w`, optionally repeated, in any order. Whitespace between
- * segments is ignored and the unit letter is case-insensitive, so
+ * `m`/`h`/`d`/`w`, optionally repeated, in any order. The unit letter is
+ * case-insensitive and whitespace is allowed *around* each segment, so
  * `1H 30M` parses the same as `1h30m`.
+ *
+ * Whitespace inside a number is not: `1 0m` is a typo, not ten minutes,
+ * and silently reading it as `10m` would schedule a reminder the member
+ * never asked for.
  *
  * Seconds are not a unit: reminders are delivered by a once-a-minute scan,
  * so a sub-minute duration would promise a precision the scheduler cannot
@@ -126,15 +130,17 @@ const DURATION_UNIT_MS: Record<string, number> = {
  */
 export function parseDuration(input: string): number | null {
   if (typeof input !== "string") return null;
-  const compact = input.replace(/\s+/g, "").toLowerCase();
-  if (compact.length === 0) return null;
+  const normalized = input.trim().toLowerCase();
+  if (normalized.length === 0) return null;
 
   // Anchored so trailing junk ("2hx") and bare numbers ("90") are rejected
-  // rather than silently parsed as their leading valid segment.
-  if (!/^(\d+[mhdw])+$/.test(compact)) return null;
+  // rather than silently parsed as their leading valid segment. `\s*` sits
+  // between the digits and the unit, never inside `\d+`, so a split number
+  // ("1 0m") has no valid parse and is rejected.
+  if (!/^(\d+\s*[mhdw]\s*)+$/.test(normalized)) return null;
 
   let total = 0;
-  for (const [, amount, unit] of compact.matchAll(/(\d+)([mhdw])/g)) {
+  for (const [, amount, unit] of normalized.matchAll(/(\d+)\s*([mhdw])/g)) {
     const value = Number(amount);
     // A duration long enough to overflow this check is nonsense input, and
     // letting it through would produce an invalid Date downstream.

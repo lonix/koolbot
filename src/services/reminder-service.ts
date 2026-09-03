@@ -36,6 +36,15 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  */
 export const MAX_HORIZON_MS = 365 * MS_PER_DAY;
 
+/**
+ * Most reminders one scan will deliver. Sends are serial, so an unbounded
+ * query after an outage could hold thousands of rows in memory and run for
+ * many minutes — and because ticks coalesce, newly due reminders would not
+ * even be queried until that backlog drained. A bounded, oldest-first batch
+ * keeps each tick short; the remainder is picked up by the next one.
+ */
+const SCAN_BATCH_SIZE = 100;
+
 /** Fallback for `reminders.max_pending`, mirroring the schema default. */
 const DEFAULT_MAX_PENDING = 10;
 
@@ -45,6 +54,12 @@ const DISCORD_CANNOT_SEND_TO_USER = 50007;
 // ---------------------------------------------------------------
 // Pure helpers (exported for unit testing)
 // ---------------------------------------------------------------
+
+/**
+ * How a DM attempt ended. Only `dms-closed` may escalate to a public
+ * channel post — see `sendDm`.
+ */
+type DmOutcome = "sent" | "dms-closed" | "failed";
 
 /** Why a requested reminder instant is unusable, or `null` when it's fine. */
 export type RemindAtIssue = "past" | "too-far";
@@ -265,7 +280,9 @@ export class ReminderService {
       const due = await Reminder.find({
         delivered: false,
         remindAt: { $lte: new Date() },
-      });
+      })
+        .sort({ remindAt: 1 })
+        .limit(SCAN_BATCH_SIZE);
 
       for (const reminder of due) {
         try {
@@ -301,19 +318,26 @@ export class ReminderService {
     // Another scan got there first.
     if (!claimed) return;
 
-    const sentByDm = await this.sendDm(claimed);
-    if (!sentByDm) {
+    // Only a *closed DM* earns the public fallback. A transient fetch or
+    // send failure must not push a member's private reminder into a channel.
+    const outcome = await this.sendDm(claimed);
+    if (outcome === "dms-closed") {
       await this.sendToChannel(claimed);
     }
   }
 
   /**
-   * DM the reminder. Returns false when the member has DMs closed so the
-   * caller can fall back to the channel; every other failure is logged and
-   * also reported as "not delivered by DM" so the fallback still gets a
-   * chance.
+   * DM the reminder.
+   *
+   * The three outcomes are kept distinct because only one of them may
+   * escalate to a public channel post. `dms-closed` (Discord 50007) means
+   * the member has chosen not to receive DMs, which is exactly the case the
+   * channel fallback exists for. Any other failure — a network blip, a
+   * rate limit, an outage — says nothing about the member's preferences, so
+   * it is logged and the reminder is dropped rather than published where
+   * anyone can read it.
    */
-  private async sendDm(reminder: IReminder): Promise<boolean> {
+  private async sendDm(reminder: IReminder): Promise<DmOutcome> {
     try {
       const user = await this.client.users.fetch(reminder.userId);
       await user.send({
@@ -321,20 +345,20 @@ export class ReminderService {
         // The body is member-authored text: never let it ping anyone.
         allowedMentions: { parse: [] },
       });
-      return true;
+      return "sent";
     } catch (error) {
       const code = (error as DiscordAPIError).code;
       if (code === DISCORD_CANNOT_SEND_TO_USER) {
         logger.debug(
           `Reminder: DMs closed for ${sanitizeForLog(reminder.userId)}, falling back to channel`,
         );
-      } else {
-        logger.error(
-          `Reminder: DM failed for ${sanitizeForLog(reminder.userId)}:`,
-          error,
-        );
+        return "dms-closed";
       }
-      return false;
+      logger.error(
+        `Reminder: DM failed for ${sanitizeForLog(reminder.userId)}:`,
+        error,
+      );
+      return "failed";
     }
   }
 
