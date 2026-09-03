@@ -753,7 +753,10 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     // First focusable element on every page (#855). `main` carries
     // `tabindex="-1"` so the fragment jump also moves keyboard focus.
     '<a class="skip-link" href="#main">Skip to content</a>',
-    '<div class="banner">',
+    // A `<header>` banner landmark rather than a bare div, so the session
+    // countdown / Finish button aren't stranded outside every landmark
+    // (axe `region`, #856).
+    '<header class="banner">',
     '<div class="left"><strong>Koolbot Admin</strong></div>',
     '<div class="right">',
     // "My preferences" link to the parallel `/me` surface added in #481.
@@ -765,9 +768,11 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     '<form method="POST" action="/admin/finish">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<button type="submit">Finish</button>',
-    "</form></div></div>",
+    "</form></div></header>",
     '<div class="shell">',
-    `<nav class="side">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
+    // Named so it stays distinguishable from any other nav landmark a page
+    // body introduces (axe `landmark-unique`, #856).
+    `<nav class="side" aria-label="Admin sections">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
     `<main id="main" tabindex="-1">${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     `<script>${CRON_PICKER_SCRIPT}</script>`,

@@ -27,8 +27,28 @@ __tests__/
 ├── commands/       # Tests for Discord slash commands
 ├── services/       # Tests for business logic services
 ├── scripts/        # Tests for operational scripts (src/scripts/)
+├── web/            # Tests for the Express Web UI (routes, renderers, a11y)
 └── utils/          # Tests for utility functions
 ```
+
+### Accessibility tests
+
+`__tests__/web/` carries the Web UI accessibility gate (issue #856):
+
+- `a11y-axe.test.ts` runs axe-core over every page renderer's output.
+- `a11y-routes.test.ts` runs axe over pages served through the real router.
+- `a11y-contrast.test.ts` computes WCAG contrast ratios for the `THEME`
+  palette (4.5:1 for text, 3:1 for control borders and the focus ring).
+
+The two axe suites need a DOM, so they opt into `__tests__/jsdom-node-env.cjs`
+through a `@jest-environment` docblock — jsdom with Node's web globals
+restored, since `discord.js` pulls in undici. Everything else stays on the
+default `node` environment.
+
+**Adding a Web UI page? Add it to `__tests__/web/a11y-pages.ts`.** That module
+is the list of pages the axe scan walks; a page missing from it is not gated.
+See the [Accessibility section of `WEBUI.md`](WEBUI.md#accessibility) for the
+conventions the scan enforces.
 
 ### Generating sample data for manual testing
 

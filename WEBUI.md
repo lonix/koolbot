@@ -1111,6 +1111,36 @@ responses (401 / 403 / 503) render through `renderErrorPage` in `views.ts` so
 they carry `lang`, a viewport, a `<main>` landmark and the dark palette like
 every other page.
 
+**Landmarks are named.** Both layouts wrap the top bar in a `<header>` so the
+session countdown and Finish button aren't stranded outside every landmark,
+and each `<nav>` carries an `aria-label` (`Admin sections`,
+`My preferences sections`, `Rewind year`) so a page that introduces a second
+nav stays navigable.
+
+### Automated checks (#856)
+
+The conventions above are gated in CI by three Jest suites, so a page that
+breaks one fails the build rather than being found by a user:
+
+| Suite | What it gates |
+| --- | --- |
+| `__tests__/web/a11y-axe.test.ts` | Runs [axe-core](https://github.com/dequelabs/axe-core) over every page renderer's output — labels, landmarks, heading order, `lang`, table semantics, ARIA validity. |
+| `__tests__/web/a11y-routes.test.ts` | Runs axe over pages served through the real router (consent, the 401 error page, the `/me` surface) so the wiring around the renderers is gated too. |
+| `__tests__/web/a11y-contrast.test.ts` | Computes the WCAG contrast ratio for every `THEME` foreground/background pair: 4.5:1 for text, 3:1 for control borders and the focus ring. |
+
+The page list the axe scan walks lives in `__tests__/web/a11y-pages.ts`.
+**When you add a page renderer, add a fixture for it there** — a page that
+isn't in that list isn't gated, which is exactly how the violations fixed in
+issues #853 / #855 accumulated unnoticed. Likewise, add a pair to the contrast
+suite whenever you add a colour token.
+
+Two notes on the setup. axe needs a DOM, so those two suites run under
+`__tests__/jsdom-node-env.cjs` — jsdom with Node's web globals restored,
+because `discord.js` pulls in undici, which jsdom alone can't satisfy. And
+axe's own `color-contrast` rule is disabled there: jsdom does no layout, so
+the rule cannot run — which is precisely why the palette is gated separately
+by computing the ratios from the tokens.
+
 ---
 
 ## Troubleshooting

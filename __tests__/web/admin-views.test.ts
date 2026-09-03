@@ -2995,7 +2995,7 @@ describe("renderSettingsPage cron picker", () => {
     expect(html).toMatch(/<div class="cron-picker" data-mode="daily"[^>]*>/);
     expect(html).toContain('<option value="daily" selected>Daily</option>');
     expect(html).toContain(
-      '<input type="time" class="cron-time" value="08:30">',
+      '<input type="time" class="cron-time" aria-label="Time of day" value="08:30">',
     );
   });
 
