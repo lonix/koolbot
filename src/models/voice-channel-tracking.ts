@@ -89,6 +89,14 @@ const VoiceChannelTrackingSchema = new Schema({
   ],
 });
 
+// Multikey index over the embedded session timestamps. Every time-windowed
+// read filters on `sessions.startTime` — `getTopUsers` (week/month), the
+// truncation sweep's `$lt: cutoff` prune, the achievements weekly champion,
+// and the Rewind/analytics aggregations — but the schema previously carried
+// only the implicit unique index on `userId`, so each of those was a full
+// collection scan that grew linearly with guild history (#842).
+VoiceChannelTrackingSchema.index({ "sessions.startTime": 1 });
+
 export const VoiceChannelTracking = mongoose.model<IVoiceChannelTracking>(
   "VoiceChannelTracking",
   VoiceChannelTrackingSchema,

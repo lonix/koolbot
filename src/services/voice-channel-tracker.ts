@@ -616,38 +616,41 @@ export class VoiceChannelTracker {
         requestedLimit > 0 ? Math.min(requestedLimit, maxResults) : 0;
       const limitStage = effectiveLimit > 0 ? [{ $limit: effectiveLimit }] : [];
 
+      // Pre-filter on the multikey `sessions.startTime` index *before*
+      // unwinding: `$match` ahead of `$unwind` can use the index and only
+      // materialises users who have at least one session in the window,
+      // whereas unwinding first flattened every session of every user in
+      // memory on each call (#842). The second `$match` after `$unwind` is
+      // still required to drop that user's out-of-window sessions.
+      const windowedTotalsPipeline = (
+        since: Date,
+      ): mongoose.PipelineStage[] => [
+        { $match: { "sessions.startTime": { $gte: since } } },
+        { $unwind: "$sessions" },
+        { $match: { "sessions.startTime": { $gte: since } } },
+        {
+          $group: {
+            _id: "$userId",
+            username: { $first: "$username" },
+            totalTime: { $sum: "$sessions.duration" },
+          },
+        },
+        { $sort: { totalTime: -1 } },
+        ...limitStage,
+      ];
+
       switch (timePeriod) {
         case "week":
           startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          users = await VoiceChannelTracking.aggregate([
-            { $unwind: "$sessions" },
-            { $match: { "sessions.startTime": { $gte: startDate } } },
-            {
-              $group: {
-                _id: "$userId",
-                username: { $first: "$username" },
-                totalTime: { $sum: "$sessions.duration" },
-              },
-            },
-            { $sort: { totalTime: -1 } },
-            ...limitStage,
-          ]);
+          users = await VoiceChannelTracking.aggregate(
+            windowedTotalsPipeline(startDate),
+          );
           break;
         case "month":
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-          users = await VoiceChannelTracking.aggregate([
-            { $unwind: "$sessions" },
-            { $match: { "sessions.startTime": { $gte: startDate } } },
-            {
-              $group: {
-                _id: "$userId",
-                username: { $first: "$username" },
-                totalTime: { $sum: "$sessions.duration" },
-              },
-            },
-            { $sort: { totalTime: -1 } },
-            ...limitStage,
-          ]);
+          users = await VoiceChannelTracking.aggregate(
+            windowedTotalsPipeline(startDate),
+          );
           break;
         case "alltime":
           users = await VoiceChannelTracking.aggregate([

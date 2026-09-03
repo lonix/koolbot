@@ -28,12 +28,16 @@ export async function execute(
       return;
     }
 
+    // Acknowledge before the DB lookup so a slow query cannot miss Discord's
+    // 3-second ACK window (`10062 Unknown interaction`, #842).
+    await interaction.deferReply();
+
     const tracker = VoiceChannelTracker.getInstance(interaction.client);
 
     // Check if user is currently in a voice channel
     const activeSession = tracker.getActiveSession(targetUser.id);
     if (activeSession) {
-      await interaction.reply(
+      await interaction.editReply(
         `${targetUser.username} is currently in the voice channel "${activeSession.channelName}".`,
       );
       return;
@@ -42,14 +46,14 @@ export async function execute(
     const lastSeen = await tracker.getUserLastSeen(targetUser.id);
 
     if (!lastSeen) {
-      await interaction.reply(
+      await interaction.editReply(
         `${targetUser.username} has never been seen in a voice channel.`,
       );
       return;
     }
 
     const timeAgo = formatTimeAgo(lastSeen);
-    await interaction.reply(
+    await interaction.editReply(
       `${targetUser.username} was last seen in a voice channel ${timeAgo}.`,
     );
   } catch (error) {

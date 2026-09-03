@@ -101,6 +101,13 @@ async function executeTop(
       return;
     }
 
+    // Acknowledge before the leaderboard aggregation: it scans the session
+    // history and can exceed Discord's 3-second ACK window on a large guild,
+    // after which every reply fails with `10062 Unknown interaction` (#842).
+    // The config gate above is a cached read, so it can still reply directly
+    // (and stay ephemeral — visibility is fixed at the first acknowledgement).
+    await interaction.deferReply();
+
     const limit = interaction.options.getInteger("limit") || 10;
     const period = (interaction.options.getString("period") ||
       "week") as TimePeriod;
@@ -108,7 +115,7 @@ async function executeTop(
     const topUsers = await tracker.getTopUsers(limit, period);
 
     if (!topUsers || topUsers.length === 0) {
-      await interaction.reply(
+      await interaction.editReply(
         "No voice channel activity found for the selected period.",
       );
       return;
@@ -129,7 +136,7 @@ async function executeTop(
       DISCORD_MESSAGE_CONTENT_LIMIT - header.length - 1,
     );
 
-    await interaction.reply(`${header}\n${response}`);
+    await interaction.editReply(`${header}\n${response}`);
   } catch (error) {
     logger.error("Error in voicestats top command:", error);
     await safeReply(interaction, {
@@ -157,6 +164,9 @@ async function executeUser(
       return;
     }
 
+    // Acknowledge before the DB reads (see executeTop, #842).
+    await interaction.deferReply();
+
     const user = interaction.options.getUser("user") || interaction.user;
     const period = (interaction.options.getString("period") ||
       "week") as TimePeriod;
@@ -164,7 +174,7 @@ async function executeUser(
     const stats = await tracker.getUserStats(user.id, period);
 
     if (!stats) {
-      await interaction.reply(
+      await interaction.editReply(
         "No voice channel activity found for the selected period.",
       );
       return;
@@ -203,7 +213,7 @@ async function executeUser(
       }),
     ].join("\n");
 
-    await interaction.reply(response);
+    await interaction.editReply(response);
   } catch (error) {
     logger.error("Error in voicestats user command:", error);
     await safeReply(interaction, {

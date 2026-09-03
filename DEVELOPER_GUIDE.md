@@ -893,6 +893,39 @@ try {
 }
 ```
 
+#### Acknowledge before slow work
+
+Discord invalidates any interaction that has not been acknowledged within
+three seconds. A command whose first `await` is a database query (a leaderboard
+aggregation, a moderation-history count, an achievements lookup) will miss that
+window on a large guild, after which every `reply` fails with
+`10062 Unknown interaction` and there is no way to recover it (#842).
+
+Call `deferReply()` before the first slow `await` and finish with `editReply()`.
+Visibility is fixed at the first acknowledgement, so pass
+`{ ephemeral: true }` to the deferral when the final response should be
+ephemeral, and drop `ephemeral` from the later `editReply` payload (it is not a
+valid edit option). Cheap synchronous guards — a missing guild, a self-target —
+can still `reply()` directly before the deferral.
+
+```typescript
+export async function execute(interaction: ChatInputCommandInteraction) {
+  try {
+    if (!interaction.guildId) {
+      await interaction.reply({ content: "Server only.", ephemeral: true });
+      return;
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+    const rows = await someService.expensiveQuery(interaction.guildId);
+    await interaction.editReply({ content: render(rows) });
+  } catch (error) {
+    logger.error("Error in mycmd command:", error);
+    await safeReply(interaction, { content: "Something went wrong.", ephemeral: true });
+  }
+}
+```
+
 #### Replying from a `catch` block
 
 Never call `interaction.reply()` / `editReply()` / `followUp()` directly in an

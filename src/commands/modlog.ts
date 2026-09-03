@@ -73,6 +73,11 @@ export async function execute(
       return;
     }
 
+    // Acknowledge before any DB work so a slow history query cannot miss
+    // Discord's 3-second ACK window (`10062 Unknown interaction`, #842).
+    // Every response below is ephemeral, and visibility is fixed here.
+    await interaction.deferReply({ ephemeral: true });
+
     const targetUser = interaction.options.getUser("user", true);
     const requestedPage = interaction.options.getInteger("page") ?? 1;
 
@@ -82,9 +87,8 @@ export async function execute(
     // stale command registration must not keep serving history after the
     // feature is turned off.
     if (!(await moderationService.isEnabled())) {
-      await interaction.reply({
+      await interaction.editReply({
         content: "The moderation log is currently disabled.",
-        ephemeral: true,
       });
       return;
     }
@@ -95,9 +99,8 @@ export async function execute(
     );
 
     if (total === 0) {
-      await interaction.reply({
+      await interaction.editReply({
         content: `**${targetUser.tag}** has no moderation history.`,
-        ephemeral: true,
       });
       return;
     }
@@ -142,7 +145,7 @@ export async function execute(
       })
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in modlog command:", error);
     await safeReply(interaction, {
