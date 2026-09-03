@@ -25,11 +25,21 @@ Tests are located in the `__tests__` directory, organized by module:
 ```plaintext
 __tests__/
 ├── commands/       # Tests for Discord slash commands
-├── services/       # Tests for business logic services
+├── config/         # Tests for env/config plumbing
+├── content/        # Tests for the static content definitions
+├── handlers/       # Tests for button/modal/select interaction handlers
+├── models/         # Tests for Mongoose model modules
 ├── scripts/        # Tests for operational scripts (src/scripts/)
+├── services/       # Tests for business logic services
+├── utils/          # Tests for utility functions
 ├── web/            # Tests for the Express Web UI (routes, renderers, a11y)
-└── utils/          # Tests for utility functions
+├── setup.ts        # Global mocks (mongoose, ConfigService) — runs per suite
+└── test-utils.ts   # Shared Discord client/interaction mock builders
 ```
+
+Files that are not `*.test.ts` are helpers, not suites: `test-utils.ts`,
+`web/admin-harness.ts` and `web/a11y-*.ts` are imported by tests and never
+collected by Jest.
 
 ### Accessibility tests
 
@@ -56,6 +66,28 @@ with `jest`.
 is the list of pages the axe scan walks; a page missing from it is not gated.
 See the [Accessibility section of `WEBUI.md`](WEBUI.md#accessibility) for the
 conventions the scan enforces.
+
+### Shared helpers
+
+Prefer the shared builders over hand-rolling a stub — a large part of the
+duplication across suites came from every file inventing its own Discord
+mocks (issue #849).
+
+- `__tests__/test-utils.ts` — `createMockClient`,
+  `createMockChatInputInteraction`, `createMockButtonInteraction`,
+  `createRawMember` (the string permission bitfield an uncached interaction
+  member carries) and `createMockCollection`.
+- `__tests__/web/admin-harness.ts` — mounts real Express routers on an
+  ephemeral port and drives them with `fetch`. `startAdminHarness()` handles
+  body encoding and the double-submit CSRF token; `createTestSession()` /
+  `stubRequireSession()` stand in for the Mongo-backed session middleware,
+  and `parseFlashRedirect()` unpacks a handler's 303 `Location` into its
+  flash parts. See `__tests__/web/write-routes-*.test.ts` for the shape.
+
+The harness deliberately imports nothing from `src/`: suites register their
+service mocks with `jest.unstable_mockModule` and then `await import()` the
+routers, so a static import in the harness would load them too early and
+defeat the mocks.
 
 ### Generating sample data for manual testing
 
@@ -155,10 +187,10 @@ Current coverage thresholds (`coverageThreshold.global` in `jest.config.js`):
 
 | Metric | Floor |
 | --- | ---: |
-| Statements | 54% |
-| Branches | 49% |
-| Functions | 63% |
-| Lines | 54% |
+| Statements | 66% |
+| Branches | 60% |
+| Functions | 72% |
+| Lines | 66% |
 
 These floors sit a few points under measured coverage rather than at a token baseline, so a real
 regression fails CI. They are not ratcheted on a schedule — `npm run coverage:drift` fails once actual
@@ -221,6 +253,16 @@ See `__tests__/services/cooldown-manager.test.ts` for examples of testing statef
 ### Command Tests
 
 See `__tests__/commands/ping.test.ts` for examples of testing Discord commands.
+Metadata assertions (`data.name`, option types) are not enough on their own —
+cover `execute()` too; `__tests__/commands/quote-execute.test.ts` and
+`__tests__/commands/event-execute.test.ts` show the pattern.
+
+### Web UI route tests
+
+See `__tests__/web/write-routes-gating.test.ts` for the middleware contract
+(`requireSession` → admin-role check → `requireCsrf`) and any
+`__tests__/web/write-routes-<domain>.test.ts` for a domain router driven over
+HTTP through the admin harness.
 
 ## Troubleshooting
 
@@ -257,5 +299,7 @@ Tests are automatically run in GitHub Actions CI. See `.github/workflows/test.ym
 - [ ] Add integration tests for Discord interactions
 - [ ] Add end-to-end tests for voice channel management
 - [ ] Increase coverage to >70% for critical paths
+- [ ] Replace the global mongoose mock with `mongodb-memory-server` so model
+      validators, indexes, defaults and TTLs are actually exercised
 - [ ] Add snapshot testing for command outputs
 - [ ] Add performance benchmarks

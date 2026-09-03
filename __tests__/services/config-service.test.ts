@@ -73,31 +73,49 @@ describe("ConfigService", () => {
   });
 
   describe("client management", () => {
-    it("should set client", () => {
+    it("should store the client for later reload notifications", () => {
       const mockClient = { user: { id: "123" } } as any;
       service.setClient(mockClient);
 
-      // Method should execute without errors
-      expect(true).toBe(true);
+      expect((service as any).client).toBe(mockClient);
     });
   });
 
   describe("callback management", () => {
-    it("should register reload callback", () => {
+    /** The set `triggerReload` iterates; asserted directly so the tests
+     * don't have to run a full reload (which would hit Mongo). */
+    const callbacks = (): Set<unknown> =>
+      (service as any).reloadCallbacks as Set<unknown>;
+
+    it("should register a reload callback exactly once", () => {
       const callback = jest.fn(async () => {});
       service.registerReloadCallback(callback);
+      service.registerReloadCallback(callback);
 
-      // Method should execute without errors
-      expect(true).toBe(true);
+      expect(callbacks().has(callback)).toBe(true);
+      // A double registration must not fire the callback twice per reload.
+      expect([...callbacks()].filter((c) => c === callback)).toHaveLength(1);
+
+      service.removeReloadCallback(callback);
     });
 
-    it("should remove reload callback", () => {
+    it("should remove a reload callback", () => {
       const callback = jest.fn(async () => {});
       service.registerReloadCallback(callback);
       service.removeReloadCallback(callback);
 
-      // Method should execute without errors
-      expect(true).toBe(true);
+      expect(callbacks().has(callback)).toBe(false);
+    });
+
+    it("should ignore removal of a callback that was never registered", () => {
+      const registered = jest.fn(async () => {});
+      const stranger = jest.fn(async () => {});
+      service.registerReloadCallback(registered);
+
+      service.removeReloadCallback(stranger);
+
+      expect(callbacks().has(registered)).toBe(true);
+      service.removeReloadCallback(registered);
     });
   });
 });

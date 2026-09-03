@@ -1,8 +1,10 @@
 /**
  * Unit tests for the pure helpers in `src/web/routes/write/helpers.ts`
- * (#850) plus a mount-parity check for the composed write router.
- * Route-handler integration tests live alongside the higher-level admin
- * harness; here we focus on the bits that don't need Express + Mongo.
+ * (#850) plus a mount-parity check for the composed write router. Here we
+ * focus on the bits that don't need Express + Mongo; the route handlers
+ * themselves are driven over HTTP by `write-routes-gating.test.ts` and the
+ * per-domain `write-routes-<domain>.test.ts` suites, which share the harness
+ * in `__tests__/web/admin-harness.ts` (#849).
  */
 
 import { describe, it, expect } from "@jest/globals";

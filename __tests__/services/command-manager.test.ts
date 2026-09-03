@@ -63,9 +63,12 @@ describe("CommandManager", () => {
   });
 
   describe("command collection", () => {
-    it("should start with empty commands", () => {
-      // Service is initialized, commands should be defined
-      expect(true).toBe(true);
+    it("should start with an empty command collection", () => {
+      // `populateClientCommands()` is what fills this; a fresh manager must
+      // not carry commands over from a previous instance.
+      const commands = (service as any).commands;
+      expect(commands).toBeDefined();
+      expect(commands.size).toBe(0);
     });
   });
 });
