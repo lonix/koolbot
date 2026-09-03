@@ -26,16 +26,14 @@ Registration is automatic; DO NOT manually push to client collections outside `C
 To add a command:
 
 1. Create `src/commands/mycmd.ts` exporting `data` + `execute`.
-2. **CRITICAL:** Add `{ name, configKey, file }` entry to `commandConfigs` in **BOTH** methods in `CommandManager`:
-   - `loadCommandsDynamically()` - registers command with Discord API
-   - `populateClientCommands()` - loads execute handler into client
-   - **Both arrays must stay in sync** or commands will appear but not respond
+2. Add a `{ name, configKey, file }` entry to `COMMAND_CONFIGS` in `src/services/command-registry.ts`.
+   That single list drives `loadCommandsDynamically()` (Discord API registration),
+   `populateClientCommands()` (execute handler) and `/help` (command list, description, usage).
 3. Add schema key `mycmd.enabled` (default) in `config-schema.ts`.
 4. Document in `COMMANDS.md` if user-facing.
 
-**Common Pitfall:** Adding command only to `loadCommandsDynamically()` without adding to
-`populateClientCommands()` causes "The application did not respond" error because Discord knows
-about the command but the bot has no handler.
+**Common Pitfall:** Do not re-introduce a per-method command list in `CommandManager` or hand-written
+command metadata in `help.ts` — both drift from the registry (see issue #845).
 
 ## Setup Wizard
 
@@ -238,7 +236,7 @@ npx markdownlint "**/*.md" --ignore node_modules --ignore dist  # Markdown
 
 1. Direct env access mid-runtime (always use `ConfigService`).
 2. Missing backward compat for renamed config keys.
-3. Command added without enablement key in schema + `commandConfigs`.
+3. Command added without enablement key in schema + `COMMAND_CONFIGS` (`command-registry.ts`).
 4. New REST call without timeout/retry pattern.
 
 ## Reference Files
@@ -265,7 +263,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 }
 ```
 
-Add to `commandConfigs`: `{ name: 'echo', configKey: 'echo.enabled', file: 'echo' }` then add schema key
+Add to `COMMAND_CONFIGS` in `src/services/command-registry.ts`:
+`{ name: 'echo', configKey: 'echo.enabled', file: 'echo' }` then add schema key
 `echo.enabled` default `true`.
 
 ## CI/CD & GitHub Workflows

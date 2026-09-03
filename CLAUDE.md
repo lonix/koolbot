@@ -113,10 +113,11 @@ is automatic through `CommandManager` — never push to client command collectio
 command:
 
 1. Create `src/commands/mycmd.ts` exporting `data` + `execute`.
-2. **Add a `{ name, configKey, file }` entry to `commandConfigs` in BOTH methods of `CommandManager`:**
-   `loadCommandsDynamically()` (registers with the Discord API) and `populateClientCommands()` (loads the
-   execute handler). The two arrays must stay in sync — adding to only the first causes Discord to show the
-   command but the bot to reply "The application did not respond".
+2. **Add a `{ name, configKey, file }` entry to `COMMAND_CONFIGS` in `src/services/command-registry.ts`.**
+   That list is the single source of truth: `CommandManager` reads it in both `loadCommandsDynamically()`
+   (registers with the Discord API) and `populateClientCommands()` (loads the execute handler), and `/help`
+   derives its command list, descriptions and usage lines from it plus each command's `SlashCommandBuilder`.
+   Do not add a per-method copy of the list, and do not hand-maintain command metadata in `help.ts`.
 3. Add the enablement key `mycmd.enabled` (with default) to `config-schema.ts`.
 4. Document user-facing commands in `COMMANDS.md`.
 

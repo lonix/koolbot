@@ -2,103 +2,73 @@ import { describe, it, expect } from "@jest/globals";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const commandManagerSource = fs.readFileSync(
+  path.join(__dirname, "../../src/services/command-manager.ts"),
+  "utf-8",
+);
+
 describe("CommandManager Methods", () => {
-  it("should have matching command arrays in loadCommandsDynamically and populateClientCommands", () => {
-    // Read the command-manager.ts file
-    const filePath = path.join(
-      __dirname,
-      "../../src/services/command-manager.ts",
+  it("should drive both loadCommandsDynamically and populateClientCommands from the shared registry", () => {
+    // Extract the methods
+    const loadCommandsMethod = commandManagerSource.match(
+      /private async loadCommandsDynamically[\s\S]*?^\s{2}\}/m,
     );
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-
-    // Extract command names from both arrays
-    const loadCommandsMatch = fileContent.match(
-      /private async loadCommandsDynamically[\s\S]*?const commandConfigs = \[([\s\S]*?)\];/,
-    );
-    const populateCommandsMatch = fileContent.match(
-      /public async populateClientCommands[\s\S]*?const commandConfigs = \[([\s\S]*?)\];/,
+    const populateCommandsMethod = commandManagerSource.match(
+      /public async populateClientCommands[\s\S]*?^\s{2}\}/m,
     );
 
-    expect(loadCommandsMatch).toBeTruthy();
-    expect(populateCommandsMatch).toBeTruthy();
+    expect(loadCommandsMethod).toBeTruthy();
+    expect(populateCommandsMethod).toBeTruthy();
 
-    if (loadCommandsMatch && populateCommandsMatch) {
-      const loadCommands = loadCommandsMatch[1];
-      const populateCommands = populateCommandsMatch[1];
+    // Both iterate the single COMMAND_CONFIGS list, so the Discord
+    // registration and the execute handlers can never drift apart.
+    expect(loadCommandsMethod?.[0]).toMatch(
+      /for \(const \w+ of COMMAND_CONFIGS\)/,
+    );
+    expect(populateCommandsMethod?.[0]).toMatch(
+      /for \(const \w+ of COMMAND_CONFIGS\)/,
+    );
 
-      // Extract command names using regex
-      const extractNames = (text: string): string[] => {
-        const nameRegex = /name:\s*"([^"]+)"/g;
-        const names: string[] = [];
-        let match;
-        while ((match = nameRegex.exec(text)) !== null) {
-          names.push(match[1]);
-        }
-        return names.sort();
-      };
+    // No method keeps its own local copy of the command list.
+    expect(commandManagerSource).not.toMatch(/const commandConfigs\s*=/);
+  });
 
-      const loadCommandNames = extractNames(loadCommands);
-      const populateCommandNames = extractNames(populateCommands);
+  it("should have a unique name and a matching command module for every registry entry", () => {
+    const names = COMMAND_CONFIGS.map((config) => config.name);
+    expect(new Set(names).size).toBe(names.length);
 
-      // Both arrays should have the same commands
-      expect(loadCommandNames).toEqual(populateCommandNames);
-
-      // /config is the sole admin slash command after the v1.0 cut
-      expect(loadCommandNames).toContain("config");
-      expect(populateCommandNames).toContain("config");
+    for (const config of COMMAND_CONFIGS) {
+      const modulePath = path.join(
+        __dirname,
+        `../../src/commands/${config.file}.ts`,
+      );
+      expect(fs.existsSync(modulePath)).toBe(true);
     }
   });
 
   it("should register /config as the collapsed WebUI launcher", () => {
-    const filePath = path.join(
-      __dirname,
-      "../../src/services/command-manager.ts",
-    );
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-
     // /config maps to src/commands/config.ts and is always enabled
-    const configCommandPattern =
-      /{\s*name:\s*"config",\s*configKey:\s*null,\s*file:\s*"config"\s*}/g;
-    const matches = fileContent.match(configCommandPattern);
-    expect(matches).not.toBeNull();
-    // Once in loadCommandsDynamically and once in populateClientCommands
-    expect(matches?.length).toBe(2);
+    expect(COMMAND_CONFIGS).toContainEqual({
+      name: "config",
+      configKey: null,
+      file: "config",
+    });
   });
 
   it("should have help command without help.enabled gate", () => {
-    const filePath = path.join(
-      __dirname,
-      "../../src/services/command-manager.ts",
-    );
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-
-    // Check that help command has configKey: null (always enabled)
-    const helpCommandPatterns = [
-      /{\s*name:\s*"help",\s*configKey:\s*null,\s*file:\s*"help"\s*}/,
-    ];
-
-    let foundHelpWithNull = false;
-    for (const pattern of helpCommandPatterns) {
-      if (pattern.test(fileContent)) {
-        foundHelpWithNull = true;
-        break;
-      }
-    }
-
-    expect(foundHelpWithNull).toBe(true);
+    expect(COMMAND_CONFIGS).toContainEqual({
+      name: "help",
+      configKey: null,
+      file: "help",
+    });
   });
 
   it("should not register any of the deprecated admin slash commands", () => {
-    const filePath = path.join(
-      __dirname,
-      "../../src/services/command-manager.ts",
-    );
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-
     const removedCommands = [
       "permissions",
       "setup",
@@ -112,24 +82,18 @@ describe("CommandManager Methods", () => {
       "botstats",
     ];
 
+    const registered = COMMAND_CONFIGS.map((config) => config.name);
     for (const name of removedCommands) {
-      const pattern = new RegExp(`name:\\s*"${name}"`);
-      expect(fileContent).not.toMatch(pattern);
+      expect(registered).not.toContain(name);
     }
   });
 
   it("should use getBoolean() for config checks in both loadCommandsDynamically and populateClientCommands", () => {
-    const filePath = path.join(
-      __dirname,
-      "../../src/services/command-manager.ts",
-    );
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-
     // Extract the methods
-    const loadCommandsMethod = fileContent.match(
+    const loadCommandsMethod = commandManagerSource.match(
       /private async loadCommandsDynamically[\s\S]*?^\s{2}\}/m,
     );
-    const populateCommandsMethod = fileContent.match(
+    const populateCommandsMethod = commandManagerSource.match(
       /public async populateClientCommands[\s\S]*?^\s{2}\}/m,
     );
 
