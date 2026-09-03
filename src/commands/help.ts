@@ -3,6 +3,8 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   ApplicationCommandOptionType,
+  type APIApplicationCommandSubcommandGroupOption,
+  type APIApplicationCommandSubcommandOption,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
 import logger from "../utils/logger.js";
@@ -28,27 +30,54 @@ export interface CommandHelpEntry {
   configKey: string | null;
 }
 
+type SubcommandLike =
+  | APIApplicationCommandSubcommandOption
+  | APIApplicationCommandSubcommandGroupOption;
+
+function isSubcommandLike(
+  option: NonNullable<
+    RESTPostAPIChatInputApplicationCommandsJSONBody["options"]
+  >[number],
+): option is SubcommandLike {
+  return (
+    option.type === ApplicationCommandOptionType.Subcommand ||
+    option.type === ApplicationCommandOptionType.SubcommandGroup
+  );
+}
+
+/** Leaf subcommand paths: `add` for a subcommand, `group sub` for each subcommand in a group. */
+function subcommandPaths(option: SubcommandLike): string[] {
+  if (option.type === ApplicationCommandOptionType.SubcommandGroup) {
+    return (option.options ?? []).map((sub) => `${option.name} ${sub.name}`);
+  }
+  return [option.name];
+}
+
+/** Whether any leaf subcommand under this option takes parameters. */
+function takesParameters(option: SubcommandLike): boolean {
+  if (option.type === ApplicationCommandOptionType.SubcommandGroup) {
+    return (option.options ?? []).some((sub) => (sub.options?.length ?? 0) > 0);
+  }
+  return (option.options?.length ?? 0) > 0;
+}
+
 /**
  * Builds a one-line usage string from a command's registration payload:
  * `/quote <add|edit|export|import|reset> [options]` for subcommand-based
- * commands, `/warn <user> <reason>` / `/modlog <user> [page]` otherwise.
+ * commands (a subcommand group expands to `group sub` paths, e.g.
+ * `/foo <add|settings show|settings set>`), and `/warn <user> <reason>` /
+ * `/modlog <user> [page]` for plain option lists.
  */
 export function usageFromCommand(
   command: RESTPostAPIChatInputApplicationCommandsJSONBody,
 ): string {
   const options = command.options ?? [];
-  const subcommands = options.filter(
-    (option) =>
-      option.type === ApplicationCommandOptionType.Subcommand ||
-      option.type === ApplicationCommandOptionType.SubcommandGroup,
-  );
+  const subcommands = options.filter(isSubcommandLike);
 
   if (subcommands.length > 0) {
-    const hasOptions = subcommands.some(
-      (sub) => ((sub as { options?: unknown[] }).options?.length ?? 0) > 0,
-    );
-    const names = subcommands.map((sub) => sub.name).join("|");
-    return `/${command.name} <${names}>${hasOptions ? " [options]" : ""}`;
+    const hasOptions = subcommands.some(takesParameters);
+    const paths = subcommands.flatMap(subcommandPaths).join("|");
+    return `/${command.name} <${paths}>${hasOptions ? " [options]" : ""}`;
   }
 
   const params = options.map((option) =>

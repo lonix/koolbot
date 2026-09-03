@@ -9,6 +9,7 @@ import {
 import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
 import {
   ApplicationCommandOptionType,
+  type APIApplicationCommandSubcommandOption,
   type ChatInputCommandInteraction,
   type RESTPostAPIChatInputApplicationCommandsJSONBody,
 } from "discord.js";
@@ -356,6 +357,57 @@ describe("Help Command", () => {
           ]),
         ),
       ).toBe("/demo <list>");
+    });
+
+    it("should expand a subcommand group into group+subcommand paths", () => {
+      const withGroup = (
+        subOptions: APIApplicationCommandSubcommandOption["options"],
+      ) =>
+        command([
+          {
+            type: ApplicationCommandOptionType.Subcommand,
+            name: "add",
+            description: "a",
+          },
+          {
+            type: ApplicationCommandOptionType.SubcommandGroup,
+            name: "settings",
+            description: "s",
+            options: [
+              {
+                type: ApplicationCommandOptionType.Subcommand,
+                name: "show",
+                description: "sh",
+              },
+              {
+                type: ApplicationCommandOptionType.Subcommand,
+                name: "set",
+                description: "se",
+                options: subOptions,
+              },
+            ],
+          },
+        ]);
+
+      // A group is never listed as a bare name, and its subcommands alone
+      // do not count as "options".
+      expect(usageFromCommand(withGroup(undefined))).toBe(
+        "/demo <add|settings show|settings set>",
+      );
+
+      // Only a leaf subcommand with parameters adds [options].
+      expect(
+        usageFromCommand(
+          withGroup([
+            {
+              type: ApplicationCommandOptionType.String,
+              name: "value",
+              description: "v",
+              required: true,
+            },
+          ]),
+        ),
+      ).toBe("/demo <add|settings show|settings set> [options]");
     });
   });
 });
