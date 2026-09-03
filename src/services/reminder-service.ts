@@ -1,5 +1,6 @@
 import { Client, DiscordAPIError } from "discord.js";
 import { CronJob, CronTime } from "cron";
+import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { Reminder, type IReminder } from "../models/reminder.js";
 import logger from "../utils/logger.js";
@@ -74,6 +75,22 @@ export function checkRemindAt(
  */
 export function discordTimestamp(date: Date, style: "F" | "R" = "F"): string {
   return `<t:${Math.floor(date.getTime() / 1000)}:${style}>`;
+}
+
+/**
+ * Resolve the configured per-member pending cap to a usable positive integer.
+ *
+ * `ConfigService.getNumber` hands back a stored number verbatim, so a row
+ * written straight to Mongo (bypassing the Settings page, which enforces
+ * `min: 1`) can carry `0`, a negative, or a non-finite value. Left unchecked
+ * those either disable the feature outright (`pending >= 0` is always true)
+ * or remove the cap entirely (`pending >= NaN` is always false). Anything
+ * not a finite integer of at least 1 falls back to the schema default.
+ */
+export function resolvePendingLimit(raw: number): number {
+  return Number.isFinite(raw) && raw >= 1
+    ? Math.floor(raw)
+    : DEFAULT_MAX_PENDING;
 }
 
 /** Outcome of a create attempt, so the command can render a real reason. */
@@ -380,9 +397,11 @@ export class ReminderService {
   public async createReminder(
     input: CreateReminderInput,
   ): Promise<CreateReminderResult> {
-    const limit = await this.configService.getNumber(
-      "reminders.max_pending",
-      DEFAULT_MAX_PENDING,
+    const limit = resolvePendingLimit(
+      await this.configService.getNumber(
+        "reminders.max_pending",
+        DEFAULT_MAX_PENDING,
+      ),
     );
     const pending = await this.countPending(input.userId, input.guildId);
     if (pending >= limit) {
@@ -405,12 +424,19 @@ export class ReminderService {
    * Cancel one of the member's own pending reminders. Scoped by `userId` in
    * the query itself, so a member can never cancel someone else's by
    * guessing an id. Returns false when no such pending reminder exists.
+   *
+   * A malformed id is one such case, and is rejected here rather than left
+   * to Mongoose (which raises a `CastError`): the command guards its own
+   * input, but this method is public and has to hold its contract for every
+   * caller.
    */
   public async cancelReminder(
     id: string,
     userId: string,
     guildId: string,
   ): Promise<boolean> {
+    if (!isValidObjectId(id)) return false;
+
     const result = await Reminder.deleteOne({
       _id: id,
       userId,

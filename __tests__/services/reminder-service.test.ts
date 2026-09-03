@@ -58,8 +58,16 @@ const ReminderMock = Reminder as unknown as {
   deleteOne: jest.Mock;
 };
 
-const { ReminderService, checkRemindAt, discordTimestamp, MAX_HORIZON_MS } =
-  await import("../../src/services/reminder-service.js");
+const {
+  ReminderService,
+  checkRemindAt,
+  discordTimestamp,
+  resolvePendingLimit,
+  MAX_HORIZON_MS,
+} = await import("../../src/services/reminder-service.js");
+
+/** A syntactically valid Mongo ObjectId, for the cancel path. */
+const VALID_ID = "507f1f77bcf86cd799439011";
 
 const NOW = new Date("2026-09-01T12:00:00Z");
 const MINUTE = 60 * 1000;
@@ -227,6 +235,46 @@ describe("ReminderService.createReminder", () => {
     expect(result).toEqual({ ok: false, reason: "cap", limit: 10 });
     expect(ReminderMock.create).not.toHaveBeenCalled();
   });
+
+  it("still enforces a cap when the configured value is unusable", async () => {
+    const { client } = makeClient();
+    const service = ReminderService.getInstance(client);
+    // A value only reachable by writing straight to Mongo; unchecked it
+    // would make `pending >= limit` false forever.
+    mockGetNumber.mockResolvedValue(Number.NaN);
+    ReminderMock.countDocuments.mockResolvedValue(10);
+
+    const result = await service.createReminder({
+      userId: "user-1",
+      guildId: "guild-1",
+      channelId: "chan-1",
+      message: "one too many",
+      remindAt: new Date(NOW.getTime() + MINUTE),
+      timezone: "",
+    });
+
+    expect(result).toEqual({ ok: false, reason: "cap", limit: 10 });
+    expect(ReminderMock.create).not.toHaveBeenCalled();
+  });
+
+  it("does not block every create when the configured cap is zero", async () => {
+    const { client } = makeClient();
+    const service = ReminderService.getInstance(client);
+    mockGetNumber.mockResolvedValue(0);
+    ReminderMock.countDocuments.mockResolvedValue(0);
+    ReminderMock.create.mockResolvedValue(dueReminder());
+
+    const result = await service.createReminder({
+      userId: "user-1",
+      guildId: "guild-1",
+      channelId: "chan-1",
+      message: "first one",
+      remindAt: new Date(NOW.getTime() + MINUTE),
+      timezone: "",
+    });
+
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe("ReminderService.cancelReminder", () => {
@@ -236,14 +284,14 @@ describe("ReminderService.cancelReminder", () => {
     ReminderMock.deleteOne.mockResolvedValue({ deletedCount: 1 });
 
     const cancelled = await service.cancelReminder(
-      "rem-1",
+      VALID_ID,
       "user-1",
       "guild-1",
     );
 
     expect(cancelled).toBe(true);
     expect(ReminderMock.deleteOne).toHaveBeenCalledWith({
-      _id: "rem-1",
+      _id: VALID_ID,
       userId: "user-1",
       guildId: "guild-1",
       delivered: false,
@@ -255,9 +303,38 @@ describe("ReminderService.cancelReminder", () => {
     const service = ReminderService.getInstance(client);
     ReminderMock.deleteOne.mockResolvedValue({ deletedCount: 0 });
 
-    expect(await service.cancelReminder("rem-9", "user-1", "guild-1")).toBe(
+    expect(await service.cancelReminder(VALID_ID, "user-1", "guild-1")).toBe(
       false,
     );
+  });
+
+  it("returns false for a malformed id instead of throwing a CastError", async () => {
+    const { client } = makeClient();
+    const service = ReminderService.getInstance(client);
+
+    expect(await service.cancelReminder("not-an-id", "user-1", "guild-1")).toBe(
+      false,
+    );
+    expect(ReminderMock.deleteOne).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolvePendingLimit", () => {
+  it("keeps a sane configured value", () => {
+    expect(resolvePendingLimit(25)).toBe(25);
+  });
+
+  it("floors a fractional value", () => {
+    expect(resolvePendingLimit(7.9)).toBe(7);
+  });
+
+  it.each([
+    ["zero, which would block every create", 0],
+    ["a negative", -1],
+    ["NaN, which would remove the cap entirely", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+  ])("falls back to the default for %s", (_label, raw) => {
+    expect(resolvePendingLimit(raw)).toBe(10);
   });
 });
 
