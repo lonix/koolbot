@@ -928,6 +928,8 @@ guards — a missing guild, a self-target — can still `reply()` directly befor
 the deferral.
 
 ```typescript
+import { ChatInputCommandInteraction, MessageFlags } from "discord.js";
+
 export async function execute(interaction: ChatInputCommandInteraction) {
   try {
     if (!interaction.guildId) {
@@ -959,6 +961,7 @@ swallows (logging) any failure, returning `true`/`false` for whether the user
 actually saw the message:
 
 ```typescript
+import { MessageFlags } from "discord.js";
 import { safeReply } from "../utils/safe-reply.js";
 
 try {
