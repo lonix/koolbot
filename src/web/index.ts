@@ -12,7 +12,12 @@ import {
   createSessionMiddleware,
   writeSessionCookie,
 } from "./session.js";
-import { renderConsent, renderInvalidLink, renderSignedOut } from "./views.js";
+import {
+  renderConsent,
+  renderErrorPage,
+  renderInvalidLink,
+  renderSignedOut,
+} from "./views.js";
 import { createReadOnlyRouter } from "./read-only-routes.js";
 import { createWriteRouter } from "./write-routes.js";
 import { createUserRouter, SelfScopeError } from "./user-routes.js";
@@ -257,13 +262,15 @@ export function userWebErrorHandler(
       .status(403)
       .type("text/html")
       .send(
-        `<!doctype html><html><head><meta charset="utf-8"><title>Forbidden</title></head>` +
-          `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
-          `<h1>Forbidden</h1>` +
-          `<p>That request targeted another user's data. The user self-service ` +
-          `surface only lets you view and change your own. Head back to ` +
-          `<a href="/me/">/me</a>.</p>` +
-          `</body></html>`,
+        renderErrorPage({
+          title: "Forbidden",
+          heading: "Forbidden",
+          product: "Koolbot",
+          bodyHtml:
+            `<p>That request targeted another user's data. The user self-service ` +
+            `surface only lets you view and change your own. Head back to ` +
+            `<a href="/me/">/me</a>.</p>`,
+        }),
       );
     return;
   }

@@ -1028,6 +1028,48 @@ describe("renderPermissionsPage", () => {
     expect(html).toContain('class="tag tag-warn">restricted');
   });
 
+  it("exposes the matrix as a real 2D grid to assistive tech (#855)", () => {
+    const html = renderPermissionsPage({
+      ...COMMON,
+      commands: ["dbtrunk", "ping"],
+      roleIds: ["r1", "r2"],
+      allRoleIds: ["r1", "r2"],
+      roleNames: new Map([
+        ["r1", "Admins"],
+        ["r2", "Mods"],
+      ]),
+      perCommand: new Map([["dbtrunk", ["r1"]]]),
+    });
+    // Column headers carry scope, and the role headers keep their id tooltip.
+    expect(html).toContain('<th scope="col">Command</th>');
+    expect(html).toContain('<th scope="col" title="r1">Admins</th>');
+    // The command name is the row header rather than a plain cell.
+    expect(html).toContain('<th scope="row" class="mono">/dbtrunk</th>');
+    expect(html).not.toContain('<td class="mono">/dbtrunk</td>');
+    // A cell is never just a glyph: hidden text says what it means.
+    expect(html).toContain(
+      '<span aria-hidden="true">✓</span><span class="visually-hidden">Allowed</span>',
+    );
+    expect(html).toContain(
+      '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>',
+    );
+    expect(html).toContain(
+      '<caption class="visually-hidden">Which roles may run each restricted command</caption>',
+    );
+  });
+
+  it("never emits a scope-less <th> anywhere in the admin views (#855)", () => {
+    const html = renderPermissionsPage({
+      ...COMMON,
+      commands: ["ping"],
+      roleIds: ["r1"],
+      allRoleIds: ["r1"],
+      roleNames: new Map([["r1", "Admins"]]),
+      perCommand: new Map(),
+    });
+    expect(html).not.toContain("<th>");
+  });
+
   it("renders an editable multi-select per command using allRoleIds", () => {
     const html = renderPermissionsPage({
       ...COMMON,
@@ -1203,7 +1245,10 @@ describe("renderEventsPage", () => {
     });
     // Title is HTML-escaped.
     expect(html).toContain("Game &lt;Night&gt;");
-    expect(html).toContain("✅ 3");
+    // RSVP counts are worded, not emoji-only (#855); the glyph is decorative.
+    expect(html).toContain(
+      '<span aria-hidden="true">✅</span> 3 going · <span aria-hidden="true">🤔</span> 1 maybe · <span aria-hidden="true">🚫</span> 0 can\'t',
+    );
     expect(html).toContain("/admin/events/e1/start-now");
     expect(html).toContain("/admin/events/e1/cancel");
   });
@@ -3020,6 +3065,11 @@ describe("renderAnalyticsPage (#675 Part B)", () => {
     expect(html).toContain("hg-cell peak");
     // No disabled notice when tracking is on.
     expect(html).not.toContain("voicetracking.enabled");
+    // The grid's cells only carry data in hover-only `title`s, so the grid
+    // is exposed as one labelled image pointing at the text lists (#855).
+    expect(html).toContain(
+      '<div class="heatgrid" role="img" aria-label="Voice activity heatmap by weekday and hour of day. Busiest slot: Friday at 10 PM. Per-weekday and per-hour totals are listed below.">',
+    );
   });
 });
 
@@ -3159,7 +3209,9 @@ describe("Settings page accessibility (#854)", () => {
       flash: { type: "err", text: "No changes saved — 1 invalid value." },
       invalidKeys: ["x.count"],
     });
-    expect(html).toContain('<div class="notice err" id="settings-flash">');
+    expect(html).toContain(
+      '<div class="notice err" id="settings-flash" role="status" tabindex="-1" data-flash>',
+    );
     expect(html).toMatch(
       /id="set-x\.count" aria-describedby="set-x\.count-help set-x\.count-warn set-x\.count-err settings-flash" aria-invalid="true"/,
     );

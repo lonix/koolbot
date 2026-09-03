@@ -17,6 +17,7 @@ import {
 } from "./cookies.js";
 import { shouldUseSecureCookies } from "./csrf.js";
 import { env } from "../config/env.js";
+import { renderErrorPage } from "./views.js";
 
 export const SESSION_COOKIE = "koolbot_session";
 /**
@@ -295,13 +296,14 @@ export function requireAdminRoleMiddleware(): (
         .status(403)
         .type("text/html")
         .send(
-          `<!doctype html><html><head><meta charset="utf-8"><title>Forbidden</title></head>` +
-            `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
-            `<h1>Forbidden</h1>` +
-            `<p>This page is part of the admin panel and your sign-in link does not authorise it. ` +
-            `Visit <a href="/me/">/me</a> for your own preferences, or ask an Administrator to ` +
-            `re-issue your link via <code>/config</code>.</p>` +
-            `</body></html>`,
+          renderErrorPage({
+            title: "Forbidden",
+            heading: "Forbidden",
+            bodyHtml:
+              `<p>This page is part of the admin panel and your sign-in link does not authorise it. ` +
+              `Visit <a href="/me/">/me</a> for your own preferences, or ask an Administrator to ` +
+              `re-issue your link via <code>/config</code>.</p>`,
+          }),
         );
       return;
     }
@@ -380,12 +382,13 @@ function respondServiceUnavailable(res: Response): void {
     .status(503)
     .type("text/html")
     .send(
-      `<!doctype html><html><head><meta charset="utf-8"><title>Temporarily unavailable</title></head>` +
-        `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
-        `<h1>Temporarily unavailable</h1>` +
-        `<p>Your sign-in could not be verified because Discord did not respond. ` +
-        `Your session is still valid &mdash; refresh the page to try again.</p>` +
-        `</body></html>`,
+      renderErrorPage({
+        title: "Temporarily unavailable",
+        heading: "Temporarily unavailable",
+        bodyHtml:
+          `<p>Your sign-in could not be verified because Discord did not respond. ` +
+          `Your session is still valid &mdash; refresh the page to try again.</p>`,
+      }),
     );
 }
 
@@ -394,10 +397,12 @@ function respondUnauthorized(res: Response): void {
     .status(401)
     .type("text/html")
     .send(
-      `<!doctype html><html><head><meta charset="utf-8"><title>Sign in required</title></head>` +
-        `<body style="font-family:system-ui,sans-serif;padding:2rem;max-width:32rem;margin:0 auto;">` +
-        `<h1>Sign in required</h1>` +
-        `<p>Run <code>/config</code> in Discord to receive a fresh sign-in link.</p>` +
-        `</body></html>`,
+      renderErrorPage({
+        title: "Sign in required",
+        heading: "Sign in required",
+        bodyHtml:
+          "<p>Your session has expired or you are not signed in. " +
+          "Run <code>/config</code> in Discord to receive a fresh sign-in link.</p>",
+      }),
     );
 }
