@@ -594,6 +594,9 @@ newest first, paginated 10 per page. The reply is ephemeral.
 - `user` (required) — the member whose history to view
 - `page` (optional) — page of history to view (10 per page; defaults to 1)
 
+Reasons longer than 300 characters are shortened in this view so a full page always fits in
+Discord's embed; the full reason is kept and shown in the Web UI moderation log.
+
 ---
 
 ## 🔧 Web UI launcher

@@ -1,12 +1,60 @@
-import { describe, it, expect, jest } from "@jest/globals";
-import {
-  data,
-  formatMetadata,
-  formatProgressBar,
-} from "../../src/commands/achievements.js";
+import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import type { ChatInputCommandInteraction, EmbedBuilder } from "discord.js";
 
-jest.mock("../../src/services/achievements-service.js");
-jest.mock("../../src/utils/logger.js");
+const mockGetUserAchievements = jest.fn<() => Promise<unknown>>();
+const mockGetUnearnedAccoladeProgress = jest.fn<() => Promise<unknown[]>>();
+const mockGetAccoladeDefinition = jest.fn<(type: string) => unknown>();
+const mockGetAchievementDefinition = jest.fn<(type: string) => unknown>();
+
+jest.unstable_mockModule("../../src/services/achievements-service.js", () => ({
+  AchievementsService: {
+    getInstance: jest.fn(() => ({
+      getUserAchievements: mockGetUserAchievements,
+      getUnearnedAccoladeProgress: mockGetUnearnedAccoladeProgress,
+      getAccoladeDefinition: mockGetAccoladeDefinition,
+      getAchievementDefinition: mockGetAchievementDefinition,
+    })),
+  },
+}));
+
+jest.unstable_mockModule("../../src/utils/logger.js", () => ({
+  default: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  },
+}));
+
+const { data, formatMetadata, formatProgressBar, execute } =
+  await import("../../src/commands/achievements.js");
+
+function makeInteraction() {
+  const reply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const interaction = {
+    id: "interaction-1",
+    client: {},
+    guildId: "guild-1",
+    user: {
+      id: "user-1",
+      username: "member",
+      displayAvatarURL: () => "https://cdn.example/avatar.png",
+    },
+    replied: false,
+    deferred: false,
+    options: { getUser: () => null },
+    reply,
+  };
+  return {
+    interaction: interaction as unknown as ChatInputCommandInteraction,
+    reply,
+  };
+}
+
+function embedFields(reply: jest.Mock): { name: string; value: string }[] {
+  const payload = reply.mock.calls[0][0] as { embeds: EmbedBuilder[] };
+  return payload.embeds[0].data.fields ?? [];
+}
 
 describe("Achievements Command", () => {
   describe("command metadata", () => {
@@ -221,5 +269,72 @@ describe("Achievements Command", () => {
     });
   });
 
-  // Execute tests removed - service mocking issues with getInstance().mockReturnValue
+  // #840: the accolades field is chunked to 1024 and the progress field is
+  // clamped, but the achievements field joined up to ten three-line entries
+  // unbounded, so a decorated member's embed failed with 50035.
+  describe("achievements field payload limit (#840)", () => {
+    beforeEach(() => {
+      mockGetUserAchievements.mockReset();
+      mockGetUnearnedAccoladeProgress.mockReset().mockResolvedValue([]);
+      mockGetAccoladeDefinition.mockReset().mockReturnValue(undefined);
+      mockGetAchievementDefinition.mockReset().mockImplementation(() => ({
+        emoji: "🏅",
+        name: "Weekly Voice Champion Of The Entire Server",
+        description:
+          "Topped the weekly voice leaderboard by spending more time in voice channels than anyone else",
+      }));
+    });
+
+    const achievements = (count: number) =>
+      Array.from({ length: count }, (_, i) => ({
+        type: "weekly_champion",
+        earnedAt: new Date(2026, 0, 1 + i),
+        period: `2026-W${String(i + 1).padStart(2, "0")}`,
+        metadata: { value: 1234, unit: "hrs" },
+      }));
+
+    it("keeps the ten most recent achievements within the 1024-char field limit", async () => {
+      mockGetUserAchievements.mockResolvedValue({
+        accolades: [],
+        achievements: achievements(25),
+        statistics: { totalAccolades: 0, totalAchievements: 25 },
+      });
+      const { interaction, reply } = makeInteraction();
+
+      await execute(interaction);
+
+      expect(reply).toHaveBeenCalledTimes(1);
+      const field = embedFields(reply).find((f) =>
+        f.name.includes("Recent Achievements"),
+      );
+      expect(field).toBeDefined();
+      expect(field!.value.length).toBeLessThanOrEqual(1024);
+      expect(field!.value).toMatch(/\n\n…and \d+ more$/);
+      const shown = (field!.value.match(/🏅 \*\*/g) ?? []).length;
+      const dropped = Number(/…and (\d+) more$/.exec(field!.value)?.[1]);
+      // Only the 10 most recent are ever considered; all are accounted for.
+      expect(shown + dropped).toBe(10);
+      // Newest first, and no entry is cut mid-way.
+      expect(field!.value.startsWith("🏅 **")).toBe(true);
+      expect(field!.value).toContain("(2026-W25)");
+    });
+
+    it("does not add an overflow note when the achievements fit", async () => {
+      mockGetUserAchievements.mockResolvedValue({
+        accolades: [],
+        achievements: achievements(3),
+        statistics: { totalAccolades: 0, totalAchievements: 3 },
+      });
+      const { interaction, reply } = makeInteraction();
+
+      await execute(interaction);
+
+      const field = embedFields(reply).find((f) =>
+        f.name.includes("Recent Achievements"),
+      );
+      expect(field!.value.length).toBeLessThanOrEqual(1024);
+      expect(field!.value).not.toContain("…and");
+      expect(field!.value.match(/🏅 \*\*/g)).toHaveLength(3);
+    });
+  });
 });

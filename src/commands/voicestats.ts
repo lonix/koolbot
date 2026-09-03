@@ -8,6 +8,10 @@ import { UserNotificationPrefsService } from "../services/user-notification-pref
 import { formatDateTimeInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import {
+  clampToLimit,
+  DISCORD_MESSAGE_CONTENT_LIMIT,
+} from "../utils/discord-limits.js";
 
 // Helper function to format time in hours and minutes
 function formatTime(seconds: number): string {
@@ -110,24 +114,22 @@ async function executeTop(
       return;
     }
 
-    const response = topUsers
-      .map((user, index) => {
-        const rank = index + 1;
-        const medal =
-          rank === 1
-            ? "🥇"
-            : rank === 2
-              ? "🥈"
-              : rank === 3
-                ? "🥉"
-                : `${rank}.`;
-        return `${medal} ${user.username}: ${formatTime(user.totalTime)}`;
-      })
-      .join("\n");
+    const rows = topUsers.map((user, index) => {
+      const rank = index + 1;
+      const medal =
+        rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : `${rank}.`;
+      return `${medal} ${user.username}: ${formatTime(user.totalTime)}`;
+    });
 
-    await interaction.reply(
-      `Top Voice Channel Users (${period}):\n${response}`,
+    // Up to 50 rows of "<rank> <username>: <time>" can exceed the 2000-char
+    // message limit; drop the tail rather than fail the whole reply (#840).
+    const header = `Top Voice Channel Users (${period}):`;
+    const response = clampToLimit(
+      rows,
+      DISCORD_MESSAGE_CONTENT_LIMIT - header.length - 1,
     );
+
+    await interaction.reply(`${header}\n${response}`);
   } catch (error) {
     logger.error("Error in voicestats top command:", error);
     await safeReply(interaction, {

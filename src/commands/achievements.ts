@@ -7,6 +7,10 @@ import { AchievementsService } from "../services/achievements-service.js";
 import type { IAccolade } from "../models/user-achievements.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import {
+  clampToLimit,
+  DISCORD_EMBED_FIELD_VALUE_LIMIT,
+} from "../utils/discord-limits.js";
 
 /**
  * Format the optional metadata of an accolade/achievement into the
@@ -161,9 +165,15 @@ export async function execute(
         .filter((text): text is string => Boolean(text));
 
       if (achievementsList.length > 0) {
+        // Ten three-line entries can exceed the 1024-char field limit; keep
+        // the most recent ones that fit and summarise the rest (#840).
         embed.addFields({
           name: "🏅 Recent Achievements (Time-Based)",
-          value: achievementsList.join("\n\n"),
+          value: clampToLimit(
+            achievementsList,
+            DISCORD_EMBED_FIELD_VALUE_LIMIT,
+            { separator: "\n\n" },
+          ),
           inline: false,
         });
       }
