@@ -347,7 +347,7 @@ describe("ConfigService - Methods", () => {
           description: "New setting",
           category: "core",
         }),
-        { upsert: true, new: true },
+        { upsert: true, new: true, runValidators: true },
       );
 
       // Verify the cache was updated

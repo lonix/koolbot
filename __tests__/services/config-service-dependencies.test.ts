@@ -129,7 +129,7 @@ describe("ConfigService dependency enforcement (#663)", () => {
       expect(mockFindOneAndUpdate).toHaveBeenCalledWith(
         { key: "achievements.enabled" },
         expect.objectContaining({ key: "achievements.enabled", value: true }),
-        { upsert: true, new: true },
+        { upsert: true, new: true, runValidators: true },
       );
     });
 

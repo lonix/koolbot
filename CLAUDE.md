@@ -65,7 +65,9 @@ environment variables with values stored in Mongo (`models/config.ts`) and cache
 `ConfigService.getBoolean | getString | getNumber` — never read `process.env` directly mid-runtime. Keys
 use dot notation grouped by feature (`voicechannels.*`, `voicetracking.*`, `quotes.*`, `core.*`). Every
 key must be declared with a default in `services/config-schema.ts`; when renaming a key, keep a
-backward-compat fallback (see `voice-channel-manager.ts`). `/config reload` calls
+backward-compat fallback (see `voice-channel-manager.ts`). A key whose `category` is new must also be
+added to `CONFIG_CATEGORIES` in `models/config.ts`, or the startup cleanup sweep deletes its rows as
+"unknown" on every restart (#609, #834). `/config reload` calls
 `ConfigService.triggerReload()` (clears cache + fires registered reload callbacks) — do not reintroduce
 implicit reload logic into `CommandManager`.
 

@@ -3,6 +3,7 @@ import {
   defaultConfig,
   settingsMetadata,
 } from "../../src/services/config-schema.js";
+import { CONFIG_CATEGORIES } from "../../src/models/config.js";
 
 describe("settingsMetadata", () => {
   it("has an entry for every key in defaultConfig", () => {
@@ -31,35 +32,15 @@ describe("settingsMetadata", () => {
     expect(violations).toEqual([]);
   });
 
-  it("uses only known feature categories that match the Mongo Config model enum", () => {
-    // The Mongo Config model's category enum is grouped by feature
-    // (voicechannels, voicetracking, quotes, …). Most settings keys are
-    // dot-prefixed with that same group. Anything that diverges should be
-    // intentional, not accidental.
-    const knownCategories = new Set([
-      "voicechannels",
-      "voicetracking",
-      "ping",
-      "help",
-      "quotes",
-      "core",
-      "digest",
-      "events",
-      "rewind",
-      "ratelimit",
-      "announcements",
-      "achievements",
-      "celebrations",
-      "birthdays",
-      "reactionroles",
-      "wizard",
-      "notices",
-      "polls",
-      "leaderboard_roles",
-      "messagetracking",
-      "reactiontracking",
-      "moderation",
-    ]);
+  it("uses only categories present in the Mongo Config model's CONFIG_CATEGORIES", () => {
+    // CONFIG_CATEGORIES is the single source of truth for valid categories: it
+    // backs the Mongoose enum AND the set ConfigService.cleanupUnknownSettings()
+    // uses to decide which rows to keep. A metadata category that is missing
+    // from it is silently *deleted from Mongo* on every restart / `/config
+    // reload` (#609 `polls.*`/`notices.*`, #834 `celebrations.*`). This test
+    // must import the real list rather than hardcode its own copy, otherwise
+    // it passes while the invariant it protects is broken.
+    const knownCategories = new Set<string>(CONFIG_CATEGORIES);
     const violations: string[] = [];
     for (const [key, meta] of Object.entries(settingsMetadata)) {
       if (!knownCategories.has(meta.category)) {
