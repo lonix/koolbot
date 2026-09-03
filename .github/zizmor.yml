@@ -14,3 +14,11 @@ rules:
         zizmorcore/*: ref-pin
         release-drafter/*: ref-pin
         '*': hash-pin
+
+  dangerous-triggers:
+    ignore:
+      # auto-label.yml needs `pull_request_target` so it can label pull requests
+      # opened from forks (the `pull_request` token is read-only there). It never
+      # checks out or runs PR code — it only reads event metadata and the changed
+      # file list through the API — so the usual pwn-request risk does not apply.
+      - auto-label.yml

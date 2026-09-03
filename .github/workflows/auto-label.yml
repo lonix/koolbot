@@ -1,0 +1,217 @@
+name: Auto Label
+
+# Applies labels to issues and pull requests so the backlog can be filtered by
+# type and by area of the bot (see CONTRIBUTING.md "PR Labels").
+#
+#   * Pull requests: `actions/labeler` adds path-based labels from
+#     .github/labeler.yml, and the script below derives a type label
+#     (bug, enhancement, ...) plus the release impact (major/minor/patch) from
+#     the Conventional Commit PR title that pr-title-lint.yml already enforces.
+#   * Issues: the script adds `area: *` labels from keywords in the title/body
+#     and a type label when the title makes it obvious and the issue form did
+#     not already set one.
+#
+# Labels are only ever ADDED (never removed), with one exception: when a PR is
+# retitled, the type/release-impact labels derived from the OLD title are
+# dropped so they cannot go stale. Missing labels are created on the fly with a
+# consistent colour and description from the LABELS catalogue in the script.
+#
+# Security: this runs on `pull_request_target` so it has a token that can label
+# PRs from forks. It therefore NEVER checks out or executes PR code — it only
+# reads event metadata (title, body, changed-file list) through the API. Keep
+# it that way; the zizmor `dangerous-triggers` exemption in .github/zizmor.yml
+# relies on it.
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+  issues:
+    types: [opened]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    name: Apply labels
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # release-please's own PR is labelled by release-please itself; skip it so
+    # its CHANGELOG/package.json bump does not pick up documentation/dependencies.
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Type, release-impact and issue-area labels
+        uses: actions/github-script@v9.0.0
+        with:
+          script: |
+            // ---- Label catalogue: [colour, description]. Used to create a label
+            //      that does not exist yet; existing labels are never modified.
+            const LABELS = {
+              bug: ['d73a4a', "Something isn't working"],
+              enhancement: ['a2eeef', 'New feature or request'],
+              documentation: ['0075ca', 'Improvements or additions to documentation'],
+              dependencies: ['0366d6', 'Pull requests that update a dependency file'],
+              'github-actions': ['ededed', 'Workflow and CI configuration changes'],
+              docker: ['0db7ed', 'Dockerfile / docker-compose changes'],
+              tests: ['bfd4f2', 'Test suite changes'],
+              chore: ['ededed', 'Maintenance, build and tooling changes'],
+              refactor: ['ededed', 'Code changes with no functional effect'],
+              performance: ['fbca04', 'Performance improvement'],
+              revert: ['e99695', 'Reverts a previous change'],
+              'breaking change': ['b60205', 'Contains a breaking change'],
+              major: ['b60205', 'Release impact: major version bump'],
+              minor: ['2AC913', 'Release impact: minor version bump'],
+              patch: ['210B06', 'Release impact: patch version bump'],
+              'area: web-ui': ['c5def5', 'Admin / member Web UI (src/web)'],
+              'area: commands': ['c5def5', 'Slash commands and command lifecycle'],
+              'area: voice': ['c5def5', 'Voice channel management and tracking'],
+              'area: config': ['c5def5', 'Configuration schema, service and settings'],
+              'area: database': ['c5def5', 'Mongo models, migrations and cleanup jobs'],
+              'area: quotes': ['c5def5', 'Quotes feature'],
+              'area: polls': ['c5def5', 'Polls feature'],
+              'area: moderation': ['c5def5', 'Warnings and moderation log'],
+              'area: achievements': ['c5def5', 'Achievements, accolades, leaderboards and rewind'],
+              'area: activity-tracking': ['c5def5', 'Message/reaction/voice activity tracking and stats'],
+              'area: notices': ['c5def5', 'Notices, announcements, digests and bot status'],
+              'area: events': ['c5def5', 'Events, RSVPs and birthdays'],
+              'area: reaction-roles': ['c5def5', 'Reaction roles'],
+              'area: monitoring': ['c5def5', 'Logging, metrics and health monitoring'],
+            };
+
+            // ---- Conventional Commit title -> labels. Types match pr-title-lint.yml.
+            const TYPES = 'feat|fix|perf|revert|refactor|docs|deps|test|build|ci|chore';
+            const TITLE_RE = new RegExp(`^(${TYPES})(\\([a-z0-9 ,./_-]+\\))*(!)?: `);
+            const TYPE_LABELS = {
+              feat: 'enhancement', fix: 'bug', perf: 'performance', revert: 'revert',
+              refactor: 'refactor', docs: 'documentation', deps: 'dependencies',
+              test: 'tests', build: 'chore', ci: 'chore', chore: 'chore',
+            };
+            // Release impact as release-please will compute it from the squash title.
+            const BUMP = { feat: 'minor', fix: 'patch', perf: 'patch' };
+
+            function labelsForTitle(title, body = '') {
+              const m = TITLE_RE.exec((title || '').trim());
+              if (!m) return [];
+              const [, type, , bang] = m;
+              const breaking = Boolean(bang) || /^BREAKING[ -]CHANGE:/m.test(body || '');
+              const out = [TYPE_LABELS[type]];
+              if (breaking) out.push('breaking change', 'major');
+              else if (BUMP[type]) out.push(BUMP[type]);
+              return out;
+            }
+
+            // ---- Issue keyword classification.
+            // [label, regex, scope]; scope 'title' keeps generic words from
+            // matching every body that mentions them in passing.
+            const AREAS = [
+              ['area: web-ui', /\b(web[ -]?ui|admin (page|panel|dashboard)|dashboard|express|csrf)\b/i, 'all'],
+              ['area: commands', /\b(slash[ -]?commands?)\b|\/(help|ping|quote|seen|voicestats|achievements|warn|modlog|config|event)\b/i, 'all'],
+              ['area: voice', /\b(voice|vc|lobby|lobbies)\b/i, 'all'],
+              ['area: config', /\b(config(uration)?|settings?)\b/i, 'title'],
+              ['area: database', /\b(mongo(db)?|mongoose|database|migrations?)\b/i, 'title'],
+              ['area: quotes', /\bquotes?\b/i, 'all'],
+              ['area: polls', /\bpolls?\b/i, 'all'],
+              ['area: moderation', /\b(moderation|modlog|warn(ing)?s?|kick(ed)?|bans?|banned)\b/i, 'all'],
+              ['area: achievements', /\b(achievements?|accolades?|leaderboards?|rewind)\b/i, 'all'],
+              ['area: activity-tracking', /\b(activity|tracking|voicestats|statistics|stats)\b/i, 'title'],
+              ['area: notices', /\b(notices?|announcements?|digests?|bot status)\b/i, 'all'],
+              ['area: events', /\b(events?|rsvps?|birthdays?)\b/i, 'title'],
+              ['area: reaction-roles', /\breaction[ -]?roles?\b/i, 'all'],
+              ['area: monitoring', /\b(metrics|prometheus|logging|health ?checks?|monitoring)\b/i, 'all'],
+            ];
+            const ISSUE_TYPE_KEYWORDS = [
+              ['bug', /\b(bug|crash(es|ed|ing)?|error|exception|broken|breaks?|fails?|failing|not working|doesn'?t work|does not work|regression)\b/i],
+              ['enhancement', /\b(feature|enhancement|proposal|suggestion|add support|support for|would be nice|request)\b/i],
+              ['documentation', /\b(docs?|documentation|readme|typo)\b/i],
+            ];
+            const ISSUE_TYPE_LABELS = ['bug', 'enhancement', 'documentation', 'question'];
+
+            // Strip the parts of an issue-form body that are boilerplate rather
+            // than the reporter's words: fenced code/log blocks, HTML comments,
+            // "### Field" headings and checklist lines.
+            function cleanBody(body) {
+              return (body || '')
+                .replace(/```[\s\S]*?```/g, ' ')
+                .replace(/<!--[\s\S]*?-->/g, ' ')
+                .split('\n')
+                .filter((l) => !/^\s*#{1,6}\s/.test(l) && !/^\s*[-*]\s+\[[ xX]\]/.test(l))
+                .join('\n');
+            }
+
+            function labelsForIssue(title, body, existingLabels) {
+              const t = title || '';
+              const b = cleanBody(body);
+              const out = [];
+              for (const [label, re, scope] of AREAS) {
+                if (re.test(t) || (scope === 'all' && re.test(b))) out.push(label);
+              }
+              if (!existingLabels.some((l) => ISSUE_TYPE_LABELS.includes(l))) {
+                const m = TITLE_RE.exec(t.trim());
+                let type = m ? TYPE_LABELS[m[1]] : undefined;
+                if (!ISSUE_TYPE_LABELS.includes(type)) {
+                  type = undefined;
+                  for (const [label, re] of ISSUE_TYPE_KEYWORDS) {
+                    if (re.test(t)) { type = label; break; }
+                  }
+                }
+                if (type) out.push(type);
+              }
+              return out;
+            }
+
+            // ---- Apply.
+            const { owner, repo } = context.repo;
+            const payload = context.payload;
+            const target = payload.pull_request || payload.issue;
+            const number = target.number;
+            const current = target.labels.map((l) => l.name);
+
+            let wanted = [];
+            let stale = [];
+            if (payload.pull_request) {
+              wanted = labelsForTitle(target.title, target.body);
+              const oldTitle = payload.changes && payload.changes.title && payload.changes.title.from;
+              if (oldTitle !== undefined && oldTitle !== target.title) {
+                stale = labelsForTitle(oldTitle, target.body).filter((l) => !wanted.includes(l));
+              }
+            } else {
+              wanted = labelsForIssue(target.title, target.body, current);
+            }
+
+            // Make sure every catalogue label exists so actions/labeler (next step)
+            // and this step never create one with a random colour.
+            const existing = new Set(
+              (await github.paginate(github.rest.issues.listLabelsForRepo, { owner, repo, per_page: 100 })).map((l) => l.name),
+            );
+            for (const [name, [color, description]] of Object.entries(LABELS)) {
+              if (existing.has(name)) continue;
+              core.info(`Creating missing label "${name}"`);
+              await github.rest.issues.createLabel({ owner, repo, name, color, description });
+            }
+
+            const toAdd = [...new Set(wanted)].filter((l) => !current.includes(l));
+            const toRemove = stale.filter((l) => current.includes(l));
+            core.info(`#${number}: add [${toAdd.join(', ')}] remove [${toRemove.join(', ')}]`);
+            if (toAdd.length) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: toAdd });
+            }
+            for (const name of toRemove) {
+              await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name }).catch((e) => {
+                if (e.status !== 404) throw e;
+              });
+            }
+
+      - name: Path-based PR labels
+        if: ${{ github.event_name == 'pull_request_target' }}
+        uses: actions/labeler@v7.0.0
+        with:
+          configuration-path: .github/labeler.yml
+          sync-labels: false

@@ -1,0 +1,181 @@
+# Path-based labels for pull requests, applied by .github/workflows/auto-label.yml
+# (actions/labeler). Labels are only ever ADDED — sync-labels is off, so a label a
+# maintainer removes by hand stays removed. Type labels (bug, enhancement, ...) and
+# the release-impact labels (major/minor/patch) are derived from the Conventional
+# Commit PR title in the same workflow, not from paths.
+#
+# Every label named here is also declared in the LABELS catalogue of the workflow so
+# it is created with a consistent colour/description if it does not exist yet.
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '**/*.md'
+          - '.markdownlint.json'
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'package.json'
+          - 'package-lock.json'
+
+github-actions:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '.github/workflows/**'
+          - '.github/actions/**'
+          - '.github/dependabot.yml'
+          - '.github/zizmor.yml'
+          - '.github/labeler.yml'
+
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'Dockerfile'
+          - 'Dockerfile.*'
+          - 'docker-compose*.yml'
+          - '.dockerignore'
+          - '.hadolint.yaml'
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - '__tests__/**'
+          - 'jest.config.*'
+          - 'TESTING.md'
+
+'area: web-ui':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/web/**'
+          - '__tests__/web/**'
+          - 'WEBUI.md'
+
+'area: commands':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/commands/**'
+          - 'src/services/command-*.ts'
+          - 'src/services/cooldown-manager.ts'
+          - 'src/services/permissions-service.ts'
+          - 'src/models/command-*.ts'
+          - 'src/utils/record-command-audit.ts'
+          - 'src/utils/safe-reply.ts'
+          - '__tests__/commands/**'
+          - 'COMMANDS.md'
+
+'area: voice':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/voice-*.ts'
+          - 'src/services/user-voice-prefs-service.ts'
+          - 'src/handlers/vc-*.ts'
+          - 'src/models/voice-*.ts'
+          - 'src/models/user-voice-preferences.ts'
+          - 'src/models/channel-invite.ts'
+
+'area: config':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/config/**'
+          - 'src/services/config-*.ts'
+          - 'src/services/wizard-service.ts'
+          - 'src/models/config.ts'
+          - 'src/scripts/validate-config.ts'
+          - 'src/scripts/migrate-config.ts'
+          - 'SETTINGS.md'
+          - '.env.example'
+
+'area: database':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/database/**'
+          - 'src/models/**'
+          - 'src/services/*-migrator.ts'
+          - 'src/services/*-cleanup.ts'
+          - 'src/services/*-truncation.ts'
+          - 'src/scripts/seed-sample-data.ts'
+
+'area: quotes':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/quote-*.ts'
+          - 'src/commands/quote.ts'
+
+'area: polls':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/poll-*.ts'
+          - 'src/models/poll-*.ts'
+          - 'examples/polls/**'
+
+'area: moderation':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/moderation-*.ts'
+          - 'src/models/moderation-log.ts'
+          - 'src/commands/warn.ts'
+          - 'src/commands/modlog.ts'
+
+'area: achievements':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/achievements-service.ts'
+          - 'src/services/leaderboard-role-service.ts'
+          - 'src/services/rewind-*.ts'
+          - 'src/models/user-achievements.ts'
+          - 'src/models/leaderboard-role-assignment.ts'
+          - 'src/models/rewind-*.ts'
+          - 'src/content/achievements.ts'
+          - 'src/content/accolades.ts'
+          - 'src/commands/achievements.ts'
+
+'area: activity-tracking':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/message-activity-*.ts'
+          - 'src/services/reaction-activity-tracker.ts'
+          - 'src/services/voice-activity-analytics.ts'
+          - 'src/models/message-activity-tracking.ts'
+          - 'src/models/reaction-activity-tracking.ts'
+          - 'src/commands/seen.ts'
+          - 'src/commands/voicestats.ts'
+
+'area: notices':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/notices-channel-manager.ts'
+          - 'src/services/scheduled-announcement-service.ts'
+          - 'src/services/bot-status-service.ts'
+          - 'src/services/digest-service.ts'
+          - 'src/models/notice.ts'
+          - 'src/models/scheduled-announcement.ts'
+          - 'src/models/bot-status-message.ts'
+          - 'src/models/digest-state.ts'
+          - 'src/content/notice-categories.ts'
+          - 'src/content/statuses.ts'
+
+'area: events':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/event-service.ts'
+          - 'src/services/birthday-service.ts'
+          - 'src/handlers/event-rsvp-handler.ts'
+          - 'src/models/event.ts'
+          - 'src/models/user-birthday.ts'
+          - 'src/commands/event.ts'
+
+'area: reaction-roles':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/reaction-role-*.ts'
+          - 'src/models/reaction-role-config.ts'
+
+'area: monitoring':
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'src/services/monitoring-service.ts'
+          - 'src/services/discord-logger.ts'
+          - 'src/web/metrics.ts'
+          - 'src/utils/logger.ts'
+          - 'src/utils/log-sanitize.ts'

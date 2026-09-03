@@ -492,20 +492,41 @@ When you open a PR, the template will guide you through the required information
 
 ### PR Labels
 
-Your PR will be automatically labeled based on file changes:
+The `Auto Label` workflow labels every PR on open, retitle and push. Nothing is
+required from you, and it never removes a label you added by hand.
 
-- `documentation` - Markdown file changes
-- `dependencies` - package.json changes
-- `github-actions` - Workflow changes
-- `test` - Test file changes
-- `docker` - Dockerfile changes
+From the files you changed:
 
-You can also add manual labels:
+- `documentation` - Markdown files
+- `dependencies` - `package.json` / `package-lock.json`
+- `github-actions` - Workflow and Actions config
+- `docker` - `Dockerfile*`, `docker-compose*.yml`, `.dockerignore`
+- `tests` - `__tests__/**`, Jest config
+- `area: *` - the part of the bot you touched (`area: web-ui`, `area: voice`,
+  `area: commands`, `area: config`, `area: database`, and so on - the full map
+  lives in `.github/labeler.yml`)
 
-- `feature`/`enhancement` - New features
-- `bug`/`fix` - Bug fixes
-- `breaking` - Breaking changes
-- `patch` - Patch release changes
+From the Conventional Commit type in your PR title:
+
+| Title prefix | Type label | Release impact |
+| --- | --- | --- |
+| `feat:` | `enhancement` | `minor` |
+| `fix:` | `bug` | `patch` |
+| `perf:` | `performance` | `patch` |
+| `docs:` | `documentation` | - |
+| `test:` | `tests` | - |
+| `refactor:` | `refactor` | - |
+| `deps:` | `dependencies` | - |
+| `revert:` | `revert` | - |
+| `ci:`, `build:`, `chore:` | `chore` | - |
+| `<type>!:` or a `BREAKING CHANGE:` footer | `breaking change` | `major` |
+
+The release-impact label mirrors the version bump release-please will make from
+your squashed title, so retitling the PR updates it (the labels derived from the
+old title are dropped).
+
+New issues get the same `area: *` labels from keywords in their title and body,
+plus a type label when the issue form did not already set one.
 
 ## Issue Reporting
 

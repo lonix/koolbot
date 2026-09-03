@@ -149,6 +149,10 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
 - **`docker.yml`** — on push to `main` and `v*.*.*` tags: hadolint, then build/scan (Trivy)/sign
   (cosign)/push the image to GHCR.
 - **`pr-title-lint.yml`** — see below.
+- **`auto-label.yml`** — labels issues and PRs (path map in `.github/labeler.yml`, plus type and
+  release-impact labels derived from the Conventional Commit PR title). Runs on
+  `pull_request_target` so fork PRs get a write token, and therefore must never check out or run PR
+  code — see the `dangerous-triggers` exemption in `.github/zizmor.yml`.
 - **`release-please.yml`** — release automation on push to `main`.
 
 Coverage thresholds are enforced by `jest.config.js` (`coverageThreshold`, currently branches 15 /
