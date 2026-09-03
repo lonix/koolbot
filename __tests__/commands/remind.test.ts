@@ -168,6 +168,19 @@ describe("remind command gating", () => {
     expect(ReminderMock.create).not.toHaveBeenCalled();
   });
 
+  it("refuses when the interaction carries no channel", async () => {
+    const interaction = makeInteraction(
+      "set",
+      { message: "hi", in: "2h" },
+      { channelId: null },
+    );
+
+    await execute(interaction);
+
+    expect(replyText(interaction)).toContain("nowhere to post");
+    expect(ReminderMock.create).not.toHaveBeenCalled();
+  });
+
   it("refuses outside a guild", async () => {
     const interaction = makeInteraction(
       "set",

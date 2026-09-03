@@ -152,6 +152,18 @@ async function handleSet(
     return;
   }
 
+  // `channelId` is nullable on the interaction type. A guild slash command
+  // always carries one in practice, but storing an empty fallback target
+  // would create a reminder whose channel fallback silently drops it — the
+  // one delivery path we promise when DMs are closed. Refuse instead of
+  // storing something undeliverable.
+  if (!interaction.channelId) {
+    await interaction.editReply(
+      "I couldn't tell which channel this is, so I'd have nowhere to post if your DMs are closed. Try again from a normal text channel.",
+    );
+    return;
+  }
+
   const hasRelative = Boolean(inRaw);
   const hasAbsolute = Boolean(dateRaw || timeRaw);
 
@@ -223,7 +235,7 @@ async function handleSet(
   const result = await service.createReminder({
     userId: interaction.user.id,
     guildId,
-    channelId: interaction.channelId ?? "",
+    channelId: interaction.channelId,
     message,
     remindAt: when.remindAt,
     timezone: when.timezone,

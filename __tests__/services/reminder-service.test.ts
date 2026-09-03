@@ -72,7 +72,19 @@ const VALID_ID = "507f1f77bcf86cd799439011";
 const NOW = new Date("2026-09-01T12:00:00Z");
 const MINUTE = 60 * 1000;
 
-function dueReminder(overrides: Record<string, unknown> = {}): never {
+/** The fields of a stored reminder the service actually reads. */
+interface ReminderView {
+  _id: string;
+  userId: string;
+  guildId: string;
+  channelId: string;
+  message: string;
+  remindAt: Date;
+  timezone: string;
+  delivered: boolean;
+}
+
+function dueReminder(overrides: Partial<ReminderView> = {}): ReminderView {
   return {
     _id: "rem-1",
     userId: "user-1",
@@ -83,7 +95,7 @@ function dueReminder(overrides: Record<string, unknown> = {}): never {
     timezone: "",
     delivered: false,
     ...overrides,
-  } as never;
+  };
 }
 
 function makeClient(): {
@@ -121,11 +133,11 @@ function makeClient(): {
  * Point the scan at `rows`, and make the claiming update echo back the row
  * it claimed — mirroring `findOneAndUpdate({ new: true })`.
  */
-function setDue(rows: ReturnType<typeof dueReminder>[]): void {
+function setDue(rows: ReminderView[]): void {
   ReminderMock.find.mockResolvedValue(rows);
   ReminderMock.findOneAndUpdate.mockImplementation(
     async (filter: { _id: string }) =>
-      rows.find((row) => (row as { _id: string })._id === filter._id) ?? null,
+      rows.find((row) => row._id === filter._id) ?? null,
   );
 }
 
