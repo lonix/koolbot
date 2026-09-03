@@ -606,11 +606,14 @@ Cancels one of your own pending reminders by ID. IDs come from
 2. A once-a-minute scan picks up reminders that have come due
 3. The reminder is DM'd to you
 4. If your DMs are closed, it's posted in the channel you set it in,
-   mentioning you
+   mentioning you — but only while you're still in the server, so a
+   reminder is never published to a server you've left
 
-Delivery is restart-safe: a reminder lives in the database, not in memory,
-so a bot restart never loses one. Each reminder is claimed before it is
-sent, so it can never arrive twice.
+A pending reminder lives in the database, not in memory, so a bot restart
+never loses one that hasn't come due yet. Delivery itself is **at most
+once**: a reminder is marked sent before it is sent, so it can never
+arrive twice, and in exchange a crash or a hard Discord failure in that
+instant drops it rather than retrying.
 
 Every reply is ephemeral — only you see your reminders. Your reminder text
 can never ping anyone, in the DM or the channel fallback.

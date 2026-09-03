@@ -106,6 +106,8 @@ function makeClient(): {
   channelSend: jest.Mock;
   usersFetch: jest.Mock;
   channelsFetch: jest.Mock;
+  guildsFetch: jest.Mock;
+  membersFetch: jest.Mock;
 } {
   const userSend = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const channelSend = jest
@@ -117,17 +119,27 @@ function makeClient(): {
   const channelsFetch = jest.fn<() => Promise<unknown>>().mockResolvedValue({
     isTextBased: () => true,
     isSendable: () => true,
+    guildId: "guild-1",
     send: channelSend,
   });
+  const membersFetch = jest
+    .fn<() => Promise<unknown>>()
+    .mockResolvedValue({ id: "user-1" });
+  const guildsFetch = jest
+    .fn<() => Promise<unknown>>()
+    .mockResolvedValue({ members: { fetch: membersFetch } });
   return {
     client: {
       users: { fetch: usersFetch },
       channels: { fetch: channelsFetch },
+      guilds: { fetch: guildsFetch },
     } as never,
     userSend,
     channelSend,
     usersFetch,
     channelsFetch,
+    guildsFetch,
+    membersFetch,
   };
 }
 
@@ -484,12 +496,57 @@ describe("ReminderService delivery scan", () => {
     expect(payload.allowedMentions).toEqual({ users: ["user-1"] });
   });
 
+  it("drops the fallback when the member has left the guild", async () => {
+    const { client, userSend, channelSend, membersFetch } = makeClient();
+    // Discord also raises 50007 once a member shares no server with the
+    // bot, so the closed-DM path must not publish their reminder in a
+    // server they are no longer in.
+    userSend.mockRejectedValue(discordError(50007));
+    membersFetch.mockRejectedValue(new Error("Unknown Member"));
+    const service = ReminderService.getInstance(client);
+    setDue([dueReminder({ message: "call the clinic" })]);
+
+    await service.runNow();
+
+    expect(channelSend).not.toHaveBeenCalled();
+  });
+
+  it("drops the fallback when the guild cannot be resolved", async () => {
+    const { client, userSend, channelSend, guildsFetch } = makeClient();
+    userSend.mockRejectedValue(discordError(50007));
+    guildsFetch.mockRejectedValue(new Error("Unknown Guild"));
+    const service = ReminderService.getInstance(client);
+    setDue([dueReminder()]);
+
+    await service.runNow();
+
+    expect(channelSend).not.toHaveBeenCalled();
+  });
+
+  it("drops the fallback when the channel belongs to another guild", async () => {
+    const { client, userSend, channelSend, channelsFetch } = makeClient();
+    userSend.mockRejectedValue(discordError(50007));
+    channelsFetch.mockResolvedValue({
+      isTextBased: () => true,
+      isSendable: () => true,
+      guildId: "some-other-guild",
+      send: channelSend,
+    });
+    const service = ReminderService.getInstance(client);
+    setDue([dueReminder()]);
+
+    await service.runNow();
+
+    expect(channelSend).not.toHaveBeenCalled();
+  });
+
   it("skips a channel that cannot be sent to", async () => {
     const { client, userSend, channelSend, channelsFetch } = makeClient();
     userSend.mockRejectedValue(discordError(50007));
     channelsFetch.mockResolvedValue({
       isTextBased: () => true,
       isSendable: () => false,
+      guildId: "guild-1",
       send: channelSend,
     });
     const service = ReminderService.getInstance(client);

@@ -252,7 +252,7 @@ async function handleSet(
   await interaction.editReply(
     [
       `⏰ Reminder set for ${discordTimestamp(when.remindAt)} — ${discordTimestamp(when.remindAt, "R")}${zoneNote}.`,
-      "I'll DM you, and post here instead if your DMs are closed.",
+      "I'll DM you. If your DMs are closed I'll try to post here instead.",
       `Cancel it with \`/remind cancel id:${result.reminder._id}\`.`,
     ].join("\n"),
   );

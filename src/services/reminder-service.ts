@@ -367,6 +367,14 @@ export class ReminderService {
    * mentioned so the ping still reaches them, and `allowedMentions` is
    * pinned to that one id so nothing inside their own reminder text can
    * ping anybody else.
+   *
+   * The fallback only makes sense while the member can actually read it, so
+   * it is dropped unless the channel still belongs to the guild the
+   * reminder was set in *and* the member is still in that guild. Discord
+   * raises 50007 for a member who has left and no longer shares a server
+   * with the bot, so without this check the "DMs are closed" path would
+   * post a departed member's private reminder into a channel they cannot
+   * even see — and the mention would not reach them either.
    */
   private async sendToChannel(reminder: IReminder): Promise<void> {
     if (!reminder.channelId) return;
@@ -378,6 +386,22 @@ export class ReminderService {
         );
         return;
       }
+
+      const channelGuildId = (channel as { guildId?: string }).guildId;
+      if (channelGuildId !== reminder.guildId) {
+        logger.warn(
+          `Reminder: channel ${sanitizeForLog(reminder.channelId)} is not in guild ${sanitizeForLog(reminder.guildId)}, dropping`,
+        );
+        return;
+      }
+
+      if (!(await this.isStillAMember(reminder))) {
+        logger.info(
+          `Reminder: ${sanitizeForLog(reminder.userId)} is no longer in guild ${sanitizeForLog(reminder.guildId)}, dropping rather than posting publicly`,
+        );
+        return;
+      }
+
       await channel.send({
         content: `<@${reminder.userId}> ${this.formatBody(reminder)}`,
         allowedMentions: { users: [reminder.userId] },
@@ -388,6 +412,19 @@ export class ReminderService {
         error,
       );
     }
+  }
+
+  /**
+   * Whether the reminder's owner is still in the guild it was set in.
+   * Fails closed: an unresolvable guild or member means no public post.
+   */
+  private async isStillAMember(reminder: IReminder): Promise<boolean> {
+    const guild = await this.client.guilds
+      .fetch(reminder.guildId)
+      .catch(() => null);
+    if (!guild) return false;
+    const member = await guild.members.fetch(reminder.userId).catch(() => null);
+    return member !== null;
   }
 
   private formatBody(reminder: IReminder): string {
