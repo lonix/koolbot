@@ -44,10 +44,19 @@ const AXE_TIMEOUT_MS = 30_000;
 let server: Server;
 let baseUrl: string;
 
+/**
+ * One client object for the whole suite, shared by both routers.
+ * `PermissionsService.getInstance` throws when it is re-entered with a
+ * *different* client, so handing each router (or each `beforeEach`) its own
+ * `{}` would make the suite order-dependent: whichever test first reached the
+ * permission re-check would win, and the next one would get a 503.
+ */
+const CLIENT = {} as never;
+
 function startServer(): Promise<void> {
   const app = express();
-  app.use("/admin", createWebRouter({} as never));
-  app.use("/me", createUserWebRouter({} as never));
+  app.use("/admin", createWebRouter(CLIENT));
+  app.use("/me", createUserWebRouter(CLIENT));
   return new Promise((resolve) => {
     server = createServer(app);
     server.listen(0, "127.0.0.1", () => {
@@ -153,6 +162,10 @@ describe("WebUI accessibility over HTTP (#856)", () => {
     process.env.WEBUI_SESSION_SECRET = SECRET;
     process.env.WEBUI_BASE_URL = "http://127.0.0.1";
     (WebSessionService as unknown as { instance: unknown }).instance = null;
+    // Both singletons are module state that outlives a single test, so they
+    // are cleared here rather than leaking a stale client / stubbed method
+    // into the next one.
+    PermissionsService.reset();
 
     const svc = WebSessionService.getInstance();
     const context = {
@@ -181,6 +194,7 @@ describe("WebUI accessibility over HTTP (#856)", () => {
 
   afterEach(async () => {
     await stopServer();
+    PermissionsService.reset();
     jest.restoreAllMocks();
     process.env = { ...ORIGINAL_ENV };
   });
@@ -206,10 +220,26 @@ describe("WebUI accessibility over HTTP (#856)", () => {
   );
 
   it(
-    "serves accessible /me pages to a redeemed session",
+    "serves an accessible /me overview to a redeemed session",
     async () => {
       const cookie = await signIn();
-      for (const path of ["/me/", "/me/notifications", "/me/timezone"]) {
+      const res = await httpRequest("/me/", { headers: { cookie } });
+      expect(res.status).toBe(200);
+      await expectNoViolations(res.body);
+    },
+    AXE_TIMEOUT_MS,
+  );
+
+  // A second authenticated test on purpose: it re-enters the session
+  // middleware's `PermissionsService.getInstance(client)` after the previous
+  // test already initialised that singleton. With a per-test client object
+  // this 503s instead of 200ing, so this is the regression guard for the
+  // shared `CLIENT` above.
+  it(
+    "serves accessible /me preference pages to a redeemed session",
+    async () => {
+      const cookie = await signIn();
+      for (const path of ["/me/notifications", "/me/timezone"]) {
         const res = await httpRequest(path, { headers: { cookie } });
         expect(res.status).toBe(200);
         await expectNoViolations(res.body);

@@ -45,6 +45,13 @@ through a `@jest-environment` docblock — jsdom with Node's web globals
 restored, since `discord.js` pulls in undici. Everything else stays on the
 default `node` environment.
 
+`jest-environment-jsdom` is pinned with `~` rather than `^` so it tracks the
+same minor as `jest` itself. The environment depends on internal `@jest/*`
+packages; letting it drift a minor ahead makes npm install a second, nested
+copy of `@jest/environment`, `jest-util` and `jest-mock` beside the ones Jest
+resolves, which is a subtle-breakage risk for no benefit. Bump it together
+with `jest`.
+
 **Adding a Web UI page? Add it to `__tests__/web/a11y-pages.ts`.** That module
 is the list of pages the axe scan walks; a page missing from it is not gated.
 See the [Accessibility section of `WEBUI.md`](WEBUI.md#accessibility) for the
