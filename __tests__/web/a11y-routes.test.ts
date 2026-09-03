@@ -29,6 +29,7 @@ import express from "express";
 import type { AddressInfo } from "net";
 import { createServer, request, type Server } from "http";
 import { axe, toHaveNoViolations } from "jest-axe";
+import { installDocumentForAxe } from "./a11y-dom.js";
 import { createUserWebRouter, createWebRouter } from "../../src/web/index.js";
 import { WebSessionService } from "../../src/services/web-session-service.js";
 import { PermissionsService } from "../../src/services/permissions-service.js";
@@ -104,31 +105,26 @@ function httpRequest(
   });
 }
 
+/**
+ * Pull a cookie's value out of a Set-Cookie header list. Parsed with plain
+ * string operations rather than a `RegExp` built from `name`: interpolating a
+ * value into a pattern is how regex-injection bugs start, and a cookie name
+ * never needs matching cleverer than "up to the first `=`".
+ */
 function readCookie(setCookies: string[], name: string): string | undefined {
   for (const line of setCookies) {
-    const match = line.match(new RegExp(`^${name}=([^;]*)`));
-    if (match) return decodeURIComponent(match[1]);
+    const pair = line.split(";", 1)[0];
+    const eq = pair.indexOf("=");
+    if (eq !== -1 && pair.slice(0, eq).trim() === name) {
+      return decodeURIComponent(pair.slice(eq + 1));
+    }
   }
   return undefined;
 }
 
-/**
- * Install a served document into jsdom and run axe over it. `lang` lives on
- * `<html>`, which `innerHTML` can't carry, so it is mirrored explicitly —
- * otherwise `html-has-lang` would pass vacuously.
- */
+/** Install a served document into jsdom and run axe over it. */
 async function expectNoViolations(html: string): Promise<void> {
-  document.documentElement.innerHTML = html
-    .replace(/^<!doctype html>/i, "")
-    .replace(/^<html[^>]*>/i, "")
-    .replace(/<\/html>$/i, "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-  const lang = html.match(/<html[^>]*\slang="([^"]*)"/)?.[1];
-  if (lang === undefined) {
-    document.documentElement.removeAttribute("lang");
-  } else {
-    document.documentElement.setAttribute("lang", lang);
-  }
+  installDocumentForAxe(html);
   const results = await axe(document.documentElement, AXE_OPTIONS);
   expect(results).toHaveNoViolations();
 }

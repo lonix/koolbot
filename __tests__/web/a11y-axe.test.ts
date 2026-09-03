@@ -19,6 +19,7 @@
 
 import { describe, it, expect } from "@jest/globals";
 import { axe, toHaveNoViolations } from "jest-axe";
+import { installDocumentForAxe } from "./a11y-dom.js";
 import { allPages } from "./a11y-pages.js";
 
 expect.extend(toHaveNoViolations);
@@ -47,18 +48,7 @@ describe("WebUI accessibility (axe)", () => {
     it(
       `${page.name} has no axe violations`,
       async () => {
-        document.documentElement.innerHTML = extractDocumentInnerHtml(
-          page.html,
-        );
-        // `lang` lives on <html>, which `innerHTML` can't carry — mirror the
-        // attribute the renderer emitted so `html-has-lang` still gates it.
-        const lang = page.html.match(/<html[^>]*\slang="([^"]*)"/)?.[1];
-        if (lang === undefined) {
-          document.documentElement.removeAttribute("lang");
-        } else {
-          document.documentElement.setAttribute("lang", lang);
-        }
-
+        installDocumentForAxe(page.html);
         const results = await axe(document.documentElement, AXE_OPTIONS);
         expect(results).toHaveNoViolations();
       },
@@ -66,18 +56,3 @@ describe("WebUI accessibility (axe)", () => {
     );
   }
 });
-
-/**
- * Strip the doctype / `<html>` wrapper so the document's `<head>` and
- * `<body>` can be installed into jsdom's existing document. Inline `<script>`
- * blocks are dropped: jsdom would execute the layout's countdown / cascade
- * scripts against a document that has no real event loop behind it, and they
- * are not what this gate measures.
- */
-function extractDocumentInnerHtml(html: string): string {
-  return html
-    .replace(/^<!doctype html>/i, "")
-    .replace(/^<html[^>]*>/i, "")
-    .replace(/<\/html>$/i, "")
-    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
-}
