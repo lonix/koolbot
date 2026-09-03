@@ -922,8 +922,8 @@ Call `deferReply()` before the first slow `await` and finish with `editReply()`.
 Visibility is fixed at the first acknowledgement, so pass
 `{ flags: MessageFlags.Ephemeral }` to the deferral when the final response
 should be ephemeral, and drop `flags` from the later `editReply` payload (it is
-not a valid edit option). The older `flags: MessageFlags.Ephemeral` spelling is deprecated in
-discord.js v14.16+ and is no longer used in this codebase. Cheap synchronous
+not a valid edit option). The older `ephemeral: true` boolean is deprecated as
+of discord.js v14.16 and is no longer used in this codebase. Cheap synchronous
 guards — a missing guild, a self-target — can still `reply()` directly before
 the deferral.
 
