@@ -1075,12 +1075,17 @@ document never is), so `renderFlash` gives it `role="status" tabindex="-1"
 data-flash` and the layout script focuses it on load when nothing is
 `aria-invalid`.
 
-**Keyboard focus is visible.** Both layouts ship one `:focus-visible` ring
-(`THEME.focus`, 2px, offset 2px) for every link, button and form control, and
-mirror the sidebar / button hover surfaces for focus. Every page starts with a
-"Skip to content" link targeting `<main id="main" tabindex="-1">`, and the
-active nav item carries `aria-current="page"`. Never add a `:hover` affordance
-without its `:focus-visible` twin, and never set `outline:none`.
+**Keyboard focus is visible.** Both layouts (and the pre-auth / error shell
+in `views.ts`) ship one `:focus-visible` ring (`THEME.focus`, 2px, offset 2px)
+for every link, button and form control, and the admin and `/me` layouts
+mirror the sidebar / button hover surfaces for focus. Every navigated admin
+and `/me` page starts with a "Skip to content" link targeting
+`<main id="main" tabindex="-1">`, and the active nav item carries
+`aria-current="page"`. Never add a `:hover` affordance without its
+`:focus-visible` twin, and never suppress the ring on an interactive element.
+The one deliberate `outline:none` is `#main:focus-visible`: `<main>` is only
+focusable so the skip link can land on it, and drawing a ring around the whole
+content column would be noise rather than a cue.
 
 **Tables are tables.** Every `<th>` has a `scope` (`col` in `<thead>`, `row`
 for a row header such as the command name in the Permissions matrix), and a
