@@ -31,6 +31,10 @@ const { data, formatMetadata, formatProgressBar, execute } =
 
 function makeInteraction() {
   const reply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const deferReply = jest
+    .fn<() => Promise<void>>()
+    .mockResolvedValue(undefined);
+  const editReply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const interaction = {
     id: "interaction-1",
     client: {},
@@ -44,15 +48,20 @@ function makeInteraction() {
     deferred: false,
     options: { getUser: () => null },
     reply,
+    deferReply,
+    editReply,
   };
   return {
     interaction: interaction as unknown as ChatInputCommandInteraction,
     reply,
+    deferReply,
+    editReply,
   };
 }
 
-function embedFields(reply: jest.Mock): { name: string; value: string }[] {
-  const payload = reply.mock.calls[0][0] as { embeds: EmbedBuilder[] };
+// The handler defers first (#842), so the rendered embed arrives via editReply.
+function embedFields(editReply: jest.Mock): { name: string; value: string }[] {
+  const payload = editReply.mock.calls[0][0] as { embeds: EmbedBuilder[] };
   return payload.embeds[0].data.fields ?? [];
 }
 
@@ -299,12 +308,12 @@ describe("Achievements Command", () => {
         achievements: achievements(25),
         statistics: { totalAccolades: 0, totalAchievements: 25 },
       });
-      const { interaction, reply } = makeInteraction();
+      const { interaction, editReply } = makeInteraction();
 
       await execute(interaction);
 
-      expect(reply).toHaveBeenCalledTimes(1);
-      const field = embedFields(reply).find((f) =>
+      expect(editReply).toHaveBeenCalledTimes(1);
+      const field = embedFields(editReply).find((f) =>
         f.name.includes("Recent Achievements"),
       );
       expect(field).toBeDefined();
@@ -325,16 +334,87 @@ describe("Achievements Command", () => {
         achievements: achievements(3),
         statistics: { totalAccolades: 0, totalAchievements: 3 },
       });
-      const { interaction, reply } = makeInteraction();
+      const { interaction, editReply } = makeInteraction();
 
       await execute(interaction);
 
-      const field = embedFields(reply).find((f) =>
+      const field = embedFields(editReply).find((f) =>
         f.name.includes("Recent Achievements"),
       );
       expect(field!.value.length).toBeLessThanOrEqual(1024);
       expect(field!.value).not.toContain("…and");
       expect(field!.value.match(/🏅 \*\*/g)).toHaveLength(3);
+    });
+  });
+  // The achievements + progress reads are DB round trips; the handler must
+  // acknowledge before them so a slow query cannot miss Discord's 3-second
+  // window (`10062 Unknown interaction`, #842).
+  describe("interaction acknowledgement (#842)", () => {
+    beforeEach(() => {
+      mockGetUserAchievements.mockReset().mockResolvedValue(null);
+      mockGetUnearnedAccoladeProgress.mockReset().mockResolvedValue([]);
+      mockGetAccoladeDefinition.mockReset().mockReturnValue({
+        emoji: "🏆",
+        name: "Accolade",
+        description: "desc",
+      });
+      mockGetAchievementDefinition.mockReset().mockReturnValue(undefined);
+    });
+
+    it("defers before the DB reads and edits the reply with the embed", async () => {
+      const order: string[] = [];
+      const { interaction, reply, deferReply, editReply } = makeInteraction();
+      deferReply.mockImplementation(async () => {
+        order.push("defer");
+      });
+      mockGetUserAchievements.mockImplementation(async () => {
+        order.push("query");
+        return {
+          accolades: [
+            { type: "any", earnedAt: new Date("2026-01-01T00:00:00Z") },
+          ],
+          achievements: [],
+          statistics: { totalAccolades: 1, totalAchievements: 0 },
+        };
+      });
+
+      await execute(interaction);
+
+      expect(order).toEqual(["defer", "query"]);
+      expect(deferReply).toHaveBeenCalledWith();
+      expect(reply).not.toHaveBeenCalled();
+      expect(editReply).toHaveBeenCalledTimes(1);
+      const payload = editReply.mock.calls[0][0] as { embeds: unknown[] };
+      expect(payload.embeds).toHaveLength(1);
+    });
+
+    it("edits the deferred reply when the user has no badges or progress", async () => {
+      const { interaction, deferReply, editReply } = makeInteraction();
+
+      await execute(interaction);
+
+      expect(deferReply).toHaveBeenCalledTimes(1);
+      expect(editReply).toHaveBeenCalledWith({
+        content:
+          "member hasn't earned any badges yet. Keep participating in voice channels!",
+      });
+    });
+
+    it("delivers the error message via editReply once deferred", async () => {
+      mockGetUserAchievements.mockRejectedValue(new Error("boom"));
+      const { interaction, reply, deferReply, editReply } = makeInteraction();
+      deferReply.mockImplementation(async () => {
+        (interaction as { deferred: boolean }).deferred = true;
+      });
+
+      await execute(interaction);
+
+      expect(reply).not.toHaveBeenCalled();
+      expect(editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "There was an error while fetching achievements!",
+        }),
+      );
     });
   });
 });

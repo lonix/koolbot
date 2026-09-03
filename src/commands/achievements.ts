@@ -52,6 +52,13 @@ export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
+    // Acknowledge before the DB reads so the achievements + progress queries
+    // cannot miss Discord's 3-second ACK window (`10062 Unknown interaction`,
+    // #842). Visibility is fixed at this point and the embed is public, so
+    // the "no badges yet" notice below is now public too (it used to be
+    // ephemeral) — there is no way to pick per-branch after deferring.
+    await interaction.deferReply();
+
     const targetUser = interaction.options.getUser("user") || interaction.user;
     const achievementsService = AchievementsService.getInstance(
       interaction.client,
@@ -68,9 +75,8 @@ export async function execute(
         userAchievements.achievements.length > 0);
 
     if (!hasBadges && progress.length === 0) {
-      await interaction.reply({
+      await interaction.editReply({
         content: `${targetUser.username} hasn't earned any badges yet. Keep participating in voice channels!`,
-        ephemeral: true,
       });
       return;
     }
@@ -210,12 +216,13 @@ export async function execute(
       inline: false,
     });
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in achievements command:", error);
+    // Public on purpose: once deferred, visibility is fixed and safeReply
+    // edits the public placeholder, so an ephemeral flag would be a lie.
     await safeReply(interaction, {
       content: "There was an error while fetching achievements!",
-      ephemeral: true,
     });
   }
 }

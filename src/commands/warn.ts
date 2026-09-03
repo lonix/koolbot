@@ -64,6 +64,11 @@ export async function execute(
       return;
     }
 
+    // Acknowledge before any DB work so the write + count cannot miss
+    // Discord's 3-second ACK window (`10062 Unknown interaction`, #842).
+    // Every response below is ephemeral, and visibility is fixed here.
+    await interaction.deferReply({ ephemeral: true });
+
     const moderationService = ModerationService.getInstance(interaction.client);
 
     // Runtime gate: the command is only registered while moderation.enabled is
@@ -71,9 +76,8 @@ export async function execute(
     // operator who toggles the feature off expects new writes to stop
     // immediately. Return a clear message instead of recording a warning.
     if (!(await moderationService.isEnabled())) {
-      await interaction.reply({
+      await interaction.editReply({
         content: "The moderation log is currently disabled.",
-        ephemeral: true,
       });
       return;
     }
@@ -102,9 +106,10 @@ export async function execute(
       .setFooter({ text: `Use /modlog to view history` })
       .setTimestamp();
 
-    // Ephemeral so the moderator gets a clear confirmation without posting a
-    // public call-out; the durable record lives in the moderation log.
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    // Ephemeral (set at the deferral above) so the moderator gets a clear
+    // confirmation without posting a public call-out; the durable record
+    // lives in the moderation log.
+    await interaction.editReply({ embeds: [embed] });
   } catch (error) {
     logger.error("Error in warn command:", error);
     await safeReply(interaction, {

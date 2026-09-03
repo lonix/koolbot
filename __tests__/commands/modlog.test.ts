@@ -27,12 +27,19 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 const { data, actionLabel, execute, PAGE_SIZE, MAX_REASON_DISPLAY_LENGTH } =
   await import("../../src/commands/modlog.js");
 
-function makeInteraction(page: number | null = null) {
+function makeInteraction(
+  page: number | null = null,
+  guildId: string | null = "guild-1",
+) {
   const reply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const deferReply = jest
+    .fn<() => Promise<void>>()
+    .mockResolvedValue(undefined);
+  const editReply = jest.fn<() => Promise<void>>().mockResolvedValue(undefined);
   const interaction = {
     id: "interaction-1",
     client: {},
-    guildId: "guild-1",
+    guildId,
     user: { id: "mod-1" },
     replied: false,
     deferred: false,
@@ -45,15 +52,20 @@ function makeInteraction(page: number | null = null) {
       getInteger: () => page,
     },
     reply,
+    deferReply,
+    editReply,
   };
   return {
     interaction: interaction as unknown as ChatInputCommandInteraction,
     reply,
+    deferReply,
+    editReply,
   };
 }
 
-function embedDescription(reply: jest.Mock): string {
-  const payload = reply.mock.calls[0][0] as { embeds: EmbedBuilder[] };
+// The handler defers first (#842), so the rendered embed arrives via editReply.
+function embedDescription(editReply: jest.Mock): string {
+  const payload = editReply.mock.calls[0][0] as { embeds: EmbedBuilder[] };
   return payload.embeds[0].data.description ?? "";
 }
 
@@ -122,12 +134,12 @@ describe("Modlog Command", () => {
     it("keeps a full page of maximum-length reasons within 4096 characters", async () => {
       mockCountHistory.mockResolvedValue(PAGE_SIZE * 3);
       mockGetHistory.mockResolvedValue(worstCaseEntries(PAGE_SIZE));
-      const { interaction, reply } = makeInteraction(1);
+      const { interaction, editReply } = makeInteraction(1);
 
       await execute(interaction);
 
-      expect(reply).toHaveBeenCalledTimes(1);
-      const description = embedDescription(reply);
+      expect(editReply).toHaveBeenCalledTimes(1);
+      const description = embedDescription(editReply);
       expect(description.length).toBeLessThanOrEqual(4096);
       // Every entry on the page is still shown: pagination stays honest.
       expect(description.match(/Timeout lifted/g)).toHaveLength(PAGE_SIZE);
@@ -137,11 +149,11 @@ describe("Modlog Command", () => {
     it("shortens each over-long reason to the display cap", async () => {
       mockCountHistory.mockResolvedValue(1);
       mockGetHistory.mockResolvedValue(worstCaseEntries(1));
-      const { interaction, reply } = makeInteraction();
+      const { interaction, editReply } = makeInteraction();
 
       await execute(interaction);
 
-      const description = embedDescription(reply);
+      const description = embedDescription(editReply);
       const quoted = description.split("\n> ")[1];
       expect(quoted.length).toBe(MAX_REASON_DISPLAY_LENGTH);
       expect(quoted.endsWith("…")).toBe(true);
@@ -153,11 +165,108 @@ describe("Modlog Command", () => {
       mockGetHistory.mockResolvedValue([
         { ...worstCaseEntries(1)[0], action: "warn", reason: "Spamming" },
       ]);
-      const { interaction, reply } = makeInteraction();
+      const { interaction, editReply } = makeInteraction();
 
       await execute(interaction);
 
-      expect(embedDescription(reply)).toContain("\n> Spamming");
+      expect(embedDescription(editReply)).toContain("\n> Spamming");
+    });
+  });
+  // The history count + page query are DB round trips; the handler must
+  // acknowledge (ephemerally — visibility is fixed at the first ACK) before
+  // them so a slow query cannot miss Discord's 3-second window (#842).
+  describe("interaction acknowledgement (#842)", () => {
+    beforeEach(() => {
+      mockIsEnabled.mockReset().mockResolvedValue(true);
+      mockCountHistory.mockReset().mockResolvedValue(0);
+      mockGetHistory.mockReset().mockResolvedValue([]);
+    });
+
+    it("defers ephemerally before any DB work, then edits the reply", async () => {
+      const order: string[] = [];
+      const { interaction, reply, deferReply, editReply } = makeInteraction();
+      deferReply.mockImplementation(async () => {
+        order.push("defer");
+      });
+      mockIsEnabled.mockImplementation(async () => {
+        order.push("isEnabled");
+        return true;
+      });
+      mockCountHistory.mockImplementation(async () => {
+        order.push("count");
+        return 1;
+      });
+      mockGetHistory.mockResolvedValue([
+        {
+          action: "warn",
+          createdAt: new Date("2026-01-01T00:00:00Z"),
+          moderatorId: "mod-1",
+          reason: "spam",
+        },
+      ]);
+
+      await execute(interaction);
+
+      expect(order).toEqual(["defer", "isEnabled", "count"]);
+      expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(reply).not.toHaveBeenCalled();
+      expect(editReply).toHaveBeenCalledTimes(1);
+      const payload = editReply.mock.calls[0][0] as { embeds: unknown[] };
+      expect(payload.embeds).toHaveLength(1);
+      // Ephemerality is set on the deferral; editReply must not repeat it.
+      expect(payload).not.toHaveProperty("ephemeral");
+    });
+
+    it("edits the deferred reply when the member has no history", async () => {
+      const { interaction, deferReply, editReply } = makeInteraction();
+
+      await execute(interaction);
+
+      expect(deferReply).toHaveBeenCalledTimes(1);
+      expect(editReply).toHaveBeenCalledWith({
+        content: "**target#0001** has no moderation history.",
+      });
+    });
+
+    it("edits the deferred reply when the moderation log is disabled", async () => {
+      mockIsEnabled.mockResolvedValue(false);
+      const { interaction, deferReply, editReply } = makeInteraction();
+
+      await execute(interaction);
+
+      expect(deferReply).toHaveBeenCalledWith({ ephemeral: true });
+      expect(mockCountHistory).not.toHaveBeenCalled();
+      expect(editReply).toHaveBeenCalledWith({
+        content: "The moderation log is currently disabled.",
+      });
+    });
+
+    it("replies directly, without deferring, outside a guild", async () => {
+      const { interaction, reply, deferReply } = makeInteraction(null, null);
+
+      await execute(interaction);
+
+      expect(deferReply).not.toHaveBeenCalled();
+      expect(reply).toHaveBeenCalledWith(
+        expect.objectContaining({ ephemeral: true }),
+      );
+    });
+
+    it("delivers the error message via editReply once deferred", async () => {
+      mockCountHistory.mockRejectedValue(new Error("boom"));
+      const { interaction, reply, deferReply, editReply } = makeInteraction();
+      deferReply.mockImplementation(async () => {
+        (interaction as { deferred: boolean }).deferred = true;
+      });
+
+      await execute(interaction);
+
+      expect(reply).not.toHaveBeenCalled();
+      expect(editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "There was an error fetching the moderation history.",
+        }),
+      );
     });
   });
 });

@@ -42,9 +42,28 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const { data, execute } = await import("../../src/commands/voicestats.js");
 
+type MockInteraction = ChatInputCommandInteraction & {
+  reply: jest.Mock;
+  deferReply: jest.Mock;
+  editReply: jest.Mock;
+};
+
+function mockReplyMethods(): Pick<
+  MockInteraction,
+  "replied" | "deferred" | "reply" | "deferReply" | "editReply"
+> {
+  return {
+    replied: false,
+    deferred: false,
+    reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+  };
+}
+
 function makeUserInteraction(
   period: string | null = "alltime",
-): ChatInputCommandInteraction & { reply: jest.Mock } {
+): MockInteraction {
   return {
     options: {
       getSubcommand: () => "user",
@@ -55,25 +74,26 @@ function makeUserInteraction(
     user: { id: "user-1", username: "alice" },
     guildId: null,
     client: {},
-    reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  } as unknown as ChatInputCommandInteraction & { reply: jest.Mock };
+    ...mockReplyMethods(),
+  } as unknown as MockInteraction;
 }
 
 function makeTopInteraction(
-  limit: number,
-): ChatInputCommandInteraction & { reply: jest.Mock } {
+  limit: number | null,
+  period: string | null = "alltime",
+): MockInteraction {
   return {
     options: {
       getSubcommand: () => "top",
       getUser: () => null,
-      getString: (name: string) => (name === "period" ? "alltime" : null),
+      getString: (name: string) => (name === "period" ? period : null),
       getInteger: (name: string) => (name === "limit" ? limit : null),
     },
     user: { id: "user-1", username: "alice" },
     guildId: "guild-1",
     client: {},
-    reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
-  } as unknown as ChatInputCommandInteraction & { reply: jest.Mock };
+    ...mockReplyMethods(),
+  } as unknown as MockInteraction;
 }
 
 describe("VoiceStats Command", () => {
@@ -197,8 +217,8 @@ describe("VoiceStats Command", () => {
       channelName: `session-${i + 1}`,
     }));
 
-    function recentLines(reply: jest.Mock): string[] {
-      const content = reply.mock.calls[0][0] as string;
+    function recentLines(editReply: jest.Mock): string[] {
+      const content = editReply.mock.calls[0][0] as string;
       const lines = content.split("\n");
       const headerIdx = lines.indexOf("**Recent Sessions:**");
       expect(headerIdx).toBeGreaterThan(-1);
@@ -217,8 +237,8 @@ describe("VoiceStats Command", () => {
       const interaction = makeUserInteraction();
       await execute(interaction);
 
-      expect(interaction.reply).toHaveBeenCalledTimes(1);
-      expect(recentLines(interaction.reply)).toEqual([
+      expect(interaction.editReply).toHaveBeenCalledTimes(1);
+      expect(recentLines(interaction.editReply)).toEqual([
         "• session-7: 1h 0m",
         "• session-6: 1h 0m",
         "• session-5: 1h 0m",
@@ -250,7 +270,7 @@ describe("VoiceStats Command", () => {
       const interaction = makeUserInteraction();
       await execute(interaction);
 
-      expect(recentLines(interaction.reply)).toEqual([
+      expect(recentLines(interaction.editReply)).toEqual([
         "• session-7: 1h 0m",
         "• session-6: 1h 0m",
         "• session-5: 1h 0m",
@@ -277,7 +297,7 @@ describe("VoiceStats Command", () => {
       const interaction = makeUserInteraction();
       await execute(interaction);
 
-      expect(recentLines(interaction.reply)).toEqual([
+      expect(recentLines(interaction.editReply)).toEqual([
         "• live: ongoing",
         "• session-1: 1h 0m",
       ]);
@@ -289,7 +309,7 @@ describe("VoiceStats Command", () => {
       const interaction = makeUserInteraction();
       await execute(interaction);
 
-      expect(interaction.reply).toHaveBeenCalledWith(
+      expect(interaction.editReply).toHaveBeenCalledWith(
         "No voice channel activity found for the selected period.",
       );
     });
@@ -319,8 +339,8 @@ describe("VoiceStats Command", () => {
 
       await execute(interaction);
 
-      expect(interaction.reply).toHaveBeenCalledTimes(1);
-      const content = interaction.reply.mock.calls[0][0] as string;
+      expect(interaction.editReply).toHaveBeenCalledTimes(1);
+      const content = interaction.editReply.mock.calls[0][0] as string;
       expect(typeof content).toBe("string");
       expect(content.length).toBeLessThanOrEqual(2000);
       expect(
@@ -339,10 +359,115 @@ describe("VoiceStats Command", () => {
 
       await execute(interaction);
 
-      const content = interaction.reply.mock.calls[0][0] as string;
+      const content = interaction.editReply.mock.calls[0][0] as string;
       expect(content.length).toBeLessThanOrEqual(2000);
       expect(content).not.toContain("…and");
       expect(content.split("\n")).toHaveLength(11);
+    });
+  });
+  // Discord invalidates an interaction that is not acknowledged within three
+  // seconds; the leaderboard aggregation on a large guild can take longer, so
+  // the handler must defer before querying and finish with editReply (#842).
+  describe("interaction acknowledgement (#842)", () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockGetBoolean.mockResolvedValue(true);
+      mockGetTimezone.mockResolvedValue(null);
+    });
+
+    it("top: defers before running the leaderboard query, then edits the reply", async () => {
+      const order: string[] = [];
+      const interaction = makeTopInteraction(null, "week");
+      interaction.deferReply.mockImplementation(async () => {
+        order.push("defer");
+      });
+      mockGetTopUsers.mockImplementation(async () => {
+        order.push("query");
+        return [{ userId: "user-1", username: "alice", totalTime: 3600 }];
+      });
+
+      await execute(interaction);
+
+      expect(order).toEqual(["defer", "query"]);
+      expect(interaction.deferReply).toHaveBeenCalledTimes(1);
+      expect(interaction.deferReply).toHaveBeenCalledWith();
+      expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        "Top Voice Channel Users (week):\n🥇 alice: 1h 0m",
+      );
+    });
+
+    it("top: edits the deferred reply when there is no activity", async () => {
+      mockGetTopUsers.mockResolvedValue([]);
+      const interaction = makeTopInteraction(null, "week");
+
+      await execute(interaction);
+
+      expect(interaction.deferReply).toHaveBeenCalledTimes(1);
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        "No voice channel activity found for the selected period.",
+      );
+    });
+
+    it("top: replies ephemerally without deferring when the feature is disabled", async () => {
+      mockGetBoolean.mockResolvedValue(false);
+      const interaction = makeTopInteraction(null, "week");
+
+      await execute(interaction);
+
+      expect(interaction.deferReply).not.toHaveBeenCalled();
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+      expect(interaction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ ephemeral: true }),
+      );
+    });
+
+    it("user: defers before querying stats, then edits the reply", async () => {
+      const order: string[] = [];
+      const interaction = makeUserInteraction();
+      interaction.deferReply.mockImplementation(async () => {
+        order.push("defer");
+      });
+      mockGetUserStats.mockImplementation(async () => {
+        order.push("query");
+        return null;
+      });
+
+      await execute(interaction);
+
+      expect(order).toEqual(["defer", "query"]);
+      expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledTimes(1);
+    });
+
+    it("user: replies ephemerally without deferring when the feature is disabled", async () => {
+      mockGetBoolean.mockResolvedValue(false);
+      const interaction = makeUserInteraction();
+
+      await execute(interaction);
+
+      expect(interaction.deferReply).not.toHaveBeenCalled();
+      expect(mockGetUserStats).not.toHaveBeenCalled();
+      expect(interaction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({ ephemeral: true }),
+      );
+    });
+
+    it("top: falls back to editReply for the error message once deferred", async () => {
+      mockGetTopUsers.mockRejectedValue(new Error("boom"));
+      const interaction = makeTopInteraction(null, "week");
+      interaction.deferReply.mockImplementation(async () => {
+        (interaction as { deferred: boolean }).deferred = true;
+      });
+
+      await execute(interaction);
+
+      expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "There was an error while executing this command!",
+        }),
+      );
     });
   });
 });

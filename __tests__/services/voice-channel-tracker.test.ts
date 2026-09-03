@@ -480,6 +480,65 @@ describe("VoiceChannelTracker", () => {
       expect(limitStage).toEqual({ $limit: 5 });
     });
 
+    // `$unwind` before `$match` flattened every session of every user on each
+    // call and could not use an index; the window filter must come first so
+    // the multikey `sessions.startTime` index narrows the documents (#842).
+    it.each(["week", "month"] as const)(
+      "%s: matches on sessions.startTime before unwinding, then re-filters",
+      async (period) => {
+        // Freeze the clock so the expected window start is exact rather
+        // than a wall-clock approximation that could drift on a slow runner.
+        const now = new Date("2026-03-15T12:00:00Z");
+        jest.useFakeTimers({ now });
+        try {
+          const { tracker } = createTracker(mockClient);
+          (VoiceChannelTracking.aggregate as jest.Mock).mockClear();
+          (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
+
+          await tracker.getTopUsers(10, period);
+
+          const pipeline = (VoiceChannelTracking.aggregate as jest.Mock).mock
+            .calls[0][0] as Array<Record<string, unknown>>;
+          const stageNames = pipeline.map((stage) => Object.keys(stage)[0]);
+          expect(stageNames).toEqual([
+            "$match",
+            "$unwind",
+            "$match",
+            "$group",
+            "$sort",
+            "$limit",
+          ]);
+
+          const windowDays = period === "week" ? 7 : 30;
+          const expectedStart = new Date(
+            now.getTime() - windowDays * 24 * 60 * 60 * 1000,
+          );
+          expect(pipeline[0]).toEqual({
+            $match: { "sessions.startTime": { $gte: expectedStart } },
+          });
+          expect(pipeline[1]).toEqual({ $unwind: "$sessions" });
+          // Both stages use the same window: the pre-unwind match selects
+          // users with any qualifying session; the post-unwind one drops the
+          // rest of that user's sessions.
+          expect(pipeline[2]).toEqual(pipeline[0]);
+        } finally {
+          jest.useRealTimers();
+        }
+      },
+    );
+
+    it("alltime: does not unwind sessions at all", async () => {
+      const { tracker } = createTracker(mockClient);
+      (VoiceChannelTracking.aggregate as jest.Mock).mockClear();
+      (VoiceChannelTracking.aggregate as jest.Mock).mockResolvedValue([]);
+
+      await tracker.getTopUsers(10, "alltime");
+
+      const pipeline = (VoiceChannelTracking.aggregate as jest.Mock).mock
+        .calls[0][0] as Array<Record<string, unknown>>;
+      expect(pipeline.some((stage) => "$unwind" in stage)).toBe(false);
+    });
+
     it('keeps every row for the "all" sentinel (non-positive limit)', async () => {
       const { tracker, mockConfigService } = createTracker(mockClient);
       mockConfigService.getNumber.mockResolvedValue(5);
