@@ -2,6 +2,7 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   EmbedBuilder,
+  MessageFlags,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
 import { ConfigService } from "../services/config-service.js";
@@ -91,7 +92,7 @@ export async function execute(
 ): Promise<void> {
   // Acknowledge before any config or DB read so a slow lookup cannot miss
   // Discord's 3-second ACK window (`10062 Unknown interaction`, #842).
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
   try {
     const config = ConfigService.getInstance();

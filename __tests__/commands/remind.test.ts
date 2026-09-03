@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import type { ChatInputCommandInteraction } from "discord.js";
+import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
 
 const mockGetBoolean =
   jest.fn<(key: string, fallback: boolean) => Promise<boolean>>();
@@ -153,7 +153,9 @@ describe("remind command gating", () => {
 
     await execute(interaction);
 
-    expect(interaction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+    expect(interaction.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
   });
 
   it("refuses when the feature is disabled", async () => {
