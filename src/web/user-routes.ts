@@ -69,7 +69,7 @@ import {
 import {
   EXCLUDED_USER_DATA,
   EXPORTABLE_USER_DATA,
-  type UserDataField,
+  summariseByCollection,
 } from "../services/user-data-registry.js";
 import { createRateLimiter } from "./rate-limit.js";
 import { recordAudit } from "./audit.js";
@@ -275,27 +275,6 @@ async function readUserFeatureFlags(): Promise<Required<UserFeatureFlags>> {
       isPrivacyExportEnabled(),
     ]);
   return { rewindEnabled, presetsEnabled, birthdayEnabled, privacyEnabled };
-}
-
-/**
- * Collapse the registry's per-field rows into one row per collection for the
- * `/me/privacy` tables. A collection with two classified user fields (quotes
- * carry `authorId` *and* `addedById`) is one line to a member, and the notes
- * are joined so neither half is lost.
- */
-function summariseRegistry(
-  entries: readonly UserDataField[],
-): Array<{ collection: string; note: string }> {
-  const byCollection = new Map<string, string[]>();
-  for (const entry of entries) {
-    const notes = byCollection.get(entry.collection) ?? [];
-    if (!notes.includes(entry.note)) notes.push(entry.note);
-    byCollection.set(entry.collection, notes);
-  }
-  return [...byCollection].map(([collection, notes]) => ({
-    collection,
-    note: notes.join(" "),
-  }));
 }
 
 /**
@@ -1357,8 +1336,8 @@ export function createUserRouter(
           active: "/me/privacy",
           body: renderUserPrivacyBody({
             featureEnabled: flags.privacyEnabled,
-            included: summariseRegistry(EXPORTABLE_USER_DATA),
-            excluded: summariseRegistry(EXCLUDED_USER_DATA),
+            included: summariseByCollection(EXPORTABLE_USER_DATA),
+            excluded: summariseByCollection(EXCLUDED_USER_DATA),
             maxItems,
           }),
           csrfToken: getCsrfToken(req),

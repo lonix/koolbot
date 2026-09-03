@@ -30,6 +30,7 @@ import { ConfigService } from "./config-service.js";
 import {
   EXCLUDED_USER_DATA,
   EXPORTABLE_COLLECTIONS,
+  summariseByCollection,
 } from "./user-data-registry.js";
 import { quoteSchema } from "../database/schema.js";
 import { ChannelInvite } from "../models/channel-invite.js";
@@ -443,11 +444,13 @@ function isEmptyResult(value: unknown): boolean {
   return false;
 }
 
-/** The "what isn't in here" list, straight from the registry. */
+/**
+ * The "what isn't in here" list, straight from the registry — through the
+ * same collapse the `/me/privacy` tables use, so a collection excluded on
+ * two grounds states both in the file as well as on the page.
+ */
 function excludedSummary(): Array<{ collection: string; reason: string }> {
-  const seen = new Map<string, string>();
-  for (const entry of EXCLUDED_USER_DATA) {
-    if (!seen.has(entry.collection)) seen.set(entry.collection, entry.note);
-  }
-  return [...seen].map(([collection, reason]) => ({ collection, reason }));
+  return summariseByCollection(EXCLUDED_USER_DATA).map(
+    ({ collection, note }) => ({ collection, reason: note }),
+  );
 }

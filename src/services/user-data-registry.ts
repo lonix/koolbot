@@ -354,6 +354,32 @@ export const EXCLUDED_USER_DATA: readonly UserDataField[] =
   USER_DATA_REGISTRY.filter((entry) => !entry.exportable);
 
 /**
+ * Collapse the registry's per-field rows into one row per collection,
+ * joining the notes so a collection classified through two fields keeps both
+ * rationales — `moderation-log` is excluded for the record *and* for
+ * exposing which moderator acted; a quote row matches as `authorId` or
+ * `addedById`. Dropping the second note would state a different reason
+ * depending on where a member read it.
+ *
+ * The `/me/privacy` tables and the export payload's `excluded` list both
+ * render from this, so the page and the file can never disagree.
+ */
+export function summariseByCollection(
+  entries: readonly UserDataField[],
+): Array<{ collection: string; note: string }> {
+  const byCollection = new Map<string, string[]>();
+  for (const entry of entries) {
+    const notes = byCollection.get(entry.collection) ?? [];
+    if (!notes.includes(entry.note)) notes.push(entry.note);
+    byCollection.set(entry.collection, notes);
+  }
+  return [...byCollection].map(([collection, notes]) => ({
+    collection,
+    note: notes.join(" "),
+  }));
+}
+
+/**
  * Words that mark a schema field as pointing at a *person* rather than a
  * channel, message, guild or role. Used by `isUserIdFieldName` below, which
  * the drift test runs over every schema source file.

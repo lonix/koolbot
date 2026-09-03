@@ -217,6 +217,32 @@ describe("UserDataExportService", () => {
     }
   });
 
+  it("states every ground for excluding a collection, not just the first", async () => {
+    // `moderation-log` is excluded twice over — for the record itself
+    // (`userId`) and for exposing which moderator acted (`moderatorId`).
+    // The file and the /me/privacy table render from the same collapse, so
+    // keeping only the first note would have the two state different
+    // reasons depending on where a member read them.
+    const { payload } = await runExport();
+    const notes = EXCLUDED_USER_DATA.filter(
+      (entry) => entry.collection === "moderation-log",
+    ).map((entry) => entry.note);
+    expect(notes.length).toBeGreaterThan(1);
+
+    const reason = payload.excluded.find(
+      (row) => row.collection === "moderation-log",
+    )?.reason;
+    for (const note of notes) {
+      expect(reason).toContain(note);
+    }
+  });
+
+  it("lists each excluded collection once", async () => {
+    const { payload } = await runExport();
+    const collections = payload.excluded.map((row) => row.collection);
+    expect(collections).toEqual([...new Set(collections)]);
+  });
+
   it("scopes guild-scoped reads to the session's guild", async () => {
     await runExport();
 
