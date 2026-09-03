@@ -15,12 +15,16 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function pageShell(title: string, body: string): string {
+function pageShell(
+  title: string,
+  body: string,
+  product: "Koolbot Admin" | "Koolbot" = "Koolbot Admin",
+): string {
   return [
     "<!doctype html>",
     '<html lang="en"><head>',
     '<meta charset="utf-8">',
-    `<title>${escapeHtml(title)} — Koolbot Admin</title>`,
+    `<title>${escapeHtml(title)} — ${product}</title>`,
     '<meta name="viewport" content="width=device-width,initial-scale=1">',
     "<style>",
     // Dark palette shared with the authenticated admin UI (issue #569) so the
@@ -37,10 +41,40 @@ function pageShell(title: string, body: string): string {
     "form{margin-top:1rem;}",
     `button{background:${THEME.primary};color:${THEME.onPrimary};border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font:inherit;font-weight:600;}`,
     `button:hover{background:${THEME.primaryHover};}`,
+    // Keyboard focus ring (WCAG 2.4.7, #855). The UA default is nearly
+    // invisible on this dark palette.
+    `a:focus-visible,button:focus-visible{outline:2px solid ${THEME.focus};outline-offset:2px;}`,
     "</style></head><body>",
+    // <main> gives assistive tech a landmark to jump to on these one-shot pages.
+    "<main>",
     body,
-    "</body></html>",
+    "</main></body></html>",
   ].join("");
+}
+
+/**
+ * The shared shell for the HTTP error responses the web layer renders as
+ * HTML (401 / 403 / 503). Before #855 each caller hand-rolled a bare
+ * `<html><head>` with no `lang`, no viewport, no landmark and a light-on-
+ * white body — the session-expiry 401 being a *routine* path, not an edge
+ * case. Rendering them through `pageShell` gives them the same document
+ * basics and dark palette as every other page.
+ *
+ * `bodyHtml` is trusted markup authored by the caller (static copy with
+ * links); interpolate any dynamic value through `escapeHtml` first.
+ */
+export function renderErrorPage(opts: {
+  title: string;
+  heading: string;
+  bodyHtml: string;
+  /** Which surface the page belongs to — drives the `<title>` suffix. */
+  product?: "Koolbot Admin" | "Koolbot";
+}): string {
+  return pageShell(
+    opts.title,
+    `<h1>${escapeHtml(opts.heading)}</h1>${opts.bodyHtml}`,
+    opts.product ?? "Koolbot Admin",
+  );
 }
 
 export function renderSignedOut(): string {

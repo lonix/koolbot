@@ -207,12 +207,14 @@ const STYLE = [
   `body{margin:0;font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:${THEME.bg};color:${THEME.text}}`,
   `a{color:${THEME.link};text-decoration:none}`,
   "a:hover{text-decoration:underline}",
-  ".banner{background:#1f2937;border-bottom:1px solid #2d3748;padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem}",
+  ".banner{background:#1f2937;border-bottom:1px solid #2d3748;padding:.5rem 1rem;display:flex;justify-content:space-between;align-items:center;font-size:.85rem;gap:.5rem;flex-wrap:wrap}",
+  ".banner .right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
   ".banner .left{display:flex;gap:.75rem;align-items:center}",
   ".banner .pill{background:#374151;color:#d1d5db;padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
   ".banner form{display:inline;margin:0}",
-  ".banner button{background:#ef4444;color:#fff;border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}",
-  ".banner button:hover{background:#dc2626}",
+  // #dc2626 (not #ef4444) so the white label reaches 4.5:1 (WCAG 1.4.3, #855).
+  `.banner button{background:${THEME.danger};color:#fff;border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}`,
+  `.banner button:hover{background:${THEME.dangerHover}}`,
   ".banner a.surface{color:#cbd5e1;background:#374151;padding:.25rem .55rem;border-radius:4px;font-weight:600;text-decoration:none;margin-right:.5rem}",
   ".banner a.surface:hover{background:#4b5563;color:#fff}",
   ".shell{display:flex;min-height:calc(100vh - 41px)}",
@@ -228,19 +230,28 @@ const STYLE = [
   // Feature-gated pages whose feature is off are shown but greyed with an
   // "off" badge so they stay discoverable (#610). The active page keeps its
   // highlight even when disabled, so the greying only applies when inactive.
-  "nav.side a.nav-disabled:not(.active){color:#6b7280}",
-  "nav.side a.nav-disabled:not(.active):hover{color:#94a3b8}",
+  // Greyed, but still 6.8:1 on the sidebar (#6b7280 was 3.6:1 — #855).
+  `nav.side a.nav-disabled:not(.active){color:${THEME.muted}}`,
+  "nav.side a.nav-disabled:not(.active):hover{color:#cbd5e1}",
   "nav.side a .nav-badge{float:right;font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#cbd5e1;background:#374151;border-radius:4px;padding:.05rem .3rem;margin-top:.1rem}",
-  "main{flex:1;padding:1.5rem 2rem;max-width:1100px}",
+  // `min-width:0` lets the flex child shrink below its content width so a
+  // wide table scrolls inside `main` / its card instead of forcing the whole
+  // page to scroll sideways (WCAG 1.4.10 reflow, #855).
+  "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
+  // The skip-link target itself shouldn't draw a ring around the whole column.
+  "#main:focus-visible{outline:none}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
   "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:#cbd5e1}",
   ".subtitle{color:#94a3b8;margin:0 0 1rem}",
-  ".card{background:#161a22;border:1px solid #2d3748;border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem}",
+  ".card{background:#161a22;border:1px solid #2d3748;border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
   ".card h2{margin-top:0}",
   "table{width:100%;border-collapse:collapse;font-size:.9rem}",
   "th,td{text-align:left;padding:.5rem .6rem;border-bottom:1px solid #2d3748;vertical-align:top}",
   "th{font-weight:600;color:#94a3b8;background:#1a1f2a}",
-  "tr:hover td{background:#1a1f2a}",
+  // Row headers (`<th scope="row">`, e.g. the Permissions matrix) read as
+  // body cells visually; the semantics are for assistive tech (#855).
+  "tbody th[scope=row]{background:transparent;color:inherit;font-weight:500}",
+  "tr:hover td,tr:hover th[scope=row]{background:#1a1f2a}",
   // Settings page: keep editable controls inside their cell and let long
   // current/default values wrap instead of pushing the table wide (issue #489).
   "td.settings-value{min-width:12rem}",
@@ -274,7 +285,9 @@ const STYLE = [
   "form.stack{display:flex;flex-direction:column;gap:.6rem}",
   "form.stack label{display:flex;flex-direction:column;gap:.25rem;font-size:.85rem;color:#cbd5e1}",
   "form.stack label.checkbox{flex-direction:row;align-items:center;gap:.5rem}",
-  "form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack textarea,form.stack select{background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}",
+  // Control borders use THEME.control (3.97:1) — the hairline #2d3748 was
+  // 1.58:1 against the field, far below the 3:1 floor (WCAG 1.4.11, #855).
+  `form.stack input[type=text],form.stack input[type=number],form.stack input[type=url],form.stack textarea,form.stack select{background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
   "form.stack textarea{resize:vertical;min-height:5rem;font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace}",
   "form.stack fieldset{border:1px solid #2d3748;border-radius:6px;padding:.5rem .75rem;display:flex;flex-direction:column;gap:.4rem}",
   "form.stack fieldset legend{color:#94a3b8;padding:0 .35rem}",
@@ -293,7 +306,7 @@ const STYLE = [
   ".actions form{margin:0}",
   ".field-row{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.75rem}",
   ".field-row > label{font-size:.85rem;color:#94a3b8}",
-  ".field-row .help{font-size:.75rem;color:#6b7280;margin-top:.15rem}",
+  `.field-row .help{font-size:.75rem;color:${THEME.muted};margin-top:.15rem}`,
   // Cascade greying: rows whose master `.enabled` toggle is off (#485).
   ".cascade-off{opacity:.5}",
   // Dependency greying: rows whose hard `dependsOn` target is off (#666).
@@ -309,30 +322,43 @@ const STYLE = [
   // the same "this field" signal that `aria-invalid` gives a screen reader.
   '[aria-invalid="true"]{outline:2px solid #dc2626;outline-offset:1px}',
   '.cron-picker[aria-invalid="true"]{outline-offset:3px}',
+  // Keyboard focus (WCAG 2.4.7, #855). There were 22 `:hover` rules and no
+  // `:focus` rule at all; the UA default ring is near-invisible on this
+  // palette. One visible ring for every interactive element, and the nav /
+  // button hover surfaces are mirrored so keyboard users get the same
+  // affordance. Declared after `[aria-invalid]` so the ring wins on focus.
+  `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid ${THEME.focus};outline-offset:2px}`,
+  "nav.side a:focus-visible{background:#1f2937;text-decoration:none}",
+  ".btn:focus-visible{text-decoration:none}",
+  ".banner a.surface:focus-visible{background:#4b5563;color:#fff;text-decoration:none}",
+  // Skip link: off-screen until focused, then pinned top-left so keyboard
+  // users can jump past the ~20 sidebar links on every page.
+  `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:${THEME.primary};color:#fff;padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
+  ".skip-link:focus{left:0;text-decoration:none}",
   ".wizard-features{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:.75rem;margin-bottom:1rem}",
   ".feature-card{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.75rem 1rem;display:flex;gap:.75rem;align-items:flex-start}",
   ".feature-card input{margin-top:.2rem;flex-shrink:0}",
   ".feature-card .fc-info{flex:1}",
   ".feature-card .fc-name{font-weight:600;font-size:.9rem;color:#e4e6eb;display:block;cursor:pointer}",
   ".feature-card .fc-desc{font-size:.75rem;color:#94a3b8;margin-top:.1rem}",
-  "select[multiple]{min-height:4rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}",
+  `select[multiple]{min-height:4rem;background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px;padding:.4rem .55rem;font:inherit;font-size:.9rem}`,
   "td.actions{display:flex;gap:.35rem;flex-wrap:wrap}",
   "td.actions form{margin:0}",
   ".helper{background:#0f1115;border:1px solid #2d3748;border-radius:6px;padding:.4rem .6rem;font-size:.85rem}",
   ".helper summary{cursor:pointer;color:#cbd5e1;font-weight:600}",
   ".helper ul{margin:.4rem 0;padding-left:1.2rem}",
   "form.inline-order{display:flex;gap:.25rem;align-items:center;margin:0}",
-  "form.inline-order input[type=number]{width:5rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px;padding:.25rem .4rem;font:inherit;font-size:.85rem}",
+  `form.inline-order input[type=number]{width:5rem;background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px;padding:.25rem .4rem;font:inherit;font-size:.85rem}`,
   ".edit-details{flex:0 0 100%;margin-bottom:.35rem}",
   ".edit-details form.stack{margin-top:.5rem}",
   "button[disabled]{opacity:.5;cursor:not-allowed}",
   ".cron-picker{display:inline-flex;align-items:center;gap:.4rem;flex-wrap:wrap}",
-  ".cron-picker select,.cron-picker input{font:inherit;font-size:.85rem;padding:.2rem .35rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:6px}",
+  `.cron-picker select,.cron-picker input{font:inherit;font-size:.85rem;padding:.2rem .35rem;background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:6px}`,
   ".cron-picker input[type=time]{width:7rem}",
   ".cron-picker[hidden]{display:none}",
   // Voice-analytics heatmap (#675): a 24-column × 7-row hour×weekday grid of
   // colour-intensity cells, plus simple bar summaries for the marginals.
-  ".heatgrid{display:grid;grid-template-columns:auto repeat(24,1fr);gap:2px;font-size:.65rem}",
+  ".heatgrid{display:grid;grid-template-columns:auto repeat(24,1fr);gap:2px;font-size:.65rem;min-width:560px}",
   ".heatgrid .hg-corner,.heatgrid .hg-col,.heatgrid .hg-rowlabel{color:#94a3b8;display:flex;align-items:center}",
   ".heatgrid .hg-col{justify-content:center}",
   ".heatgrid .hg-rowlabel{padding-right:.4rem;white-space:nowrap}",
@@ -343,7 +369,22 @@ const STYLE = [
   ".heat-bars .hbar .lbl{width:3rem;color:#94a3b8;flex-shrink:0}",
   ".heat-bars .hbar .track{flex:1;background:#0f1115;border:1px solid #2d3748;border-radius:4px;height:.9rem;overflow:hidden}",
   ".heat-bars .hbar .track .fill{height:100%;background:#4338ca}",
-  ".heat-bars .hbar .val{width:6rem;text-align:right;color:#64748b;flex-shrink:0;font-size:.7rem}",
+  `.heat-bars .hbar .val{width:6rem;text-align:right;color:${THEME.muted};flex-shrink:0;font-size:.7rem}`,
+  // Reflow (WCAG 1.4.10, #855): below ~760px the 220px sidebar would take
+  // most of the viewport, so it collapses into a wrapping row of links above
+  // the content and the definition grid stacks.
+  "@media (max-width:760px){" +
+    ".shell{flex-direction:column}" +
+    "nav.side{width:auto;border-right:0;border-bottom:1px solid #2d3748;padding:.5rem .75rem}" +
+    "nav.side .nav-group{display:inline-block;vertical-align:top;margin:.25rem 1rem .25rem 0}" +
+    "nav.side .nav-group+.nav-group{margin-top:.25rem}" +
+    "nav.side ul{display:flex;flex-wrap:wrap;gap:.25rem}" +
+    "nav.side a{padding:.3rem .5rem}" +
+    "nav.side a .nav-badge{float:none;margin-left:.3rem}" +
+    "main{padding:1rem}" +
+    ".kv{grid-template-columns:1fr;gap:.1rem 0}" +
+    ".kv dd{margin-bottom:.4rem}" +
+    "}",
 ].join("");
 
 // Session banner script (#367, refreshed in #435).
@@ -523,7 +564,10 @@ const SETTINGS_SAVE_SCRIPT =
   "var seq=0;" +
   "function flashEl(form){var card=form.closest('.card');if(!card)return null;" +
   "var n=card.querySelector('.section-flash');" +
+  // role="status" makes the node a polite live region, so every save result
+  // (success, CSRF failure, rate-limit, network error) is announced (#855).
   "if(!n){n=document.createElement('div');n.className='notice section-flash';" +
+  "n.setAttribute('role','status');n.setAttribute('aria-live','polite');" +
   "form.parentNode.insertBefore(n,form)}" +
   "if(!n.id)n.id='section-flash-'+(++seq);return n}" +
   "function show(form,type,text){var n=flashEl(form);if(!n)return;" +
@@ -625,10 +669,21 @@ const SETTINGS_SAVE_SCRIPT =
 // only a banner telling them *something* was refused. The AJAX save path does
 // its own focus move in SETTINGS_SAVE_SCRIPT; this one only ever fires on a
 // full page load, and no-ops on every page that renders nothing invalid.
+//
+// With nothing invalid, focus moves to the post-redirect flash instead (the
+// `.notice[data-flash]` rendered by `renderFlash`): a live region that is
+// part of a freshly loaded document is never announced on its own, so
+// focusing it is what gets "Saved." / "Import failed" read out after a PRG
+// round-trip (#855).
 const INVALID_FOCUS_SCRIPT =
   "(function(){" +
   FOCUS_INVALID_FN +
-  "focusInvalid(document.querySelector('[aria-invalid=\"true\"]'))" +
+  "var inv=document.querySelector('[aria-invalid=\"true\"]');" +
+  "if(inv){focusInvalid(inv);return}" +
+  // Plain focus() for the flash: it sits at the top of the page, so the
+  // scroll-to-centre that focusInvalid does for a deep field isn't wanted.
+  "var f=document.querySelector('.notice[data-flash]');" +
+  "if(f){try{f.focus()}catch(e){}}" +
   "})();";
 
 function renderNav(
@@ -652,11 +707,14 @@ function renderNav(
       .filter(Boolean)
       .join(" ");
     const cls = classes ? ` class="${classes}"` : "";
+    // The active page is conveyed by class alone visually; `aria-current`
+    // says the same thing to assistive tech (#855).
+    const current = isActive ? ' aria-current="page"' : "";
     const title = disabled
       ? ' title="This feature is disabled — open it to enable it"'
       : "";
     const badge = disabled ? '<span class="nav-badge">off</span>' : "";
-    return `<li><a href="${escapeHtml(item.href)}"${cls}${title}>${escapeHtml(item.label)}${badge}</a></li>`;
+    return `<li><a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a></li>`;
   };
   // One <ul> per group, preceded by a small heading. Feature items are now
   // always shown, so a group only renders empty if it genuinely has no items
@@ -692,6 +750,9 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     `<title>${escapeHtml(opts.title)} — Koolbot Admin</title>`,
     `<style>${STYLE}</style>`,
     "</head><body>",
+    // First focusable element on every page (#855). `main` carries
+    // `tabindex="-1"` so the fragment jump also moves keyboard focus.
+    '<a class="skip-link" href="#main">Skip to content</a>',
     '<div class="banner">',
     '<div class="left"><strong>Koolbot Admin</strong></div>',
     '<div class="right">',
@@ -707,7 +768,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     "</form></div></div>",
     '<div class="shell">',
     `<nav class="side">${renderNav(opts.active, opts.navFeatureStatus)}</nav>`,
-    `<main>${opts.body}</main></div>`,
+    `<main id="main" tabindex="-1">${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
     `<script>${CRON_PICKER_SCRIPT}</script>`,
     `<script>${CASCADE_DISABLE_SCRIPT}</script>`,

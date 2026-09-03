@@ -20,6 +20,7 @@ import {
   type SettingOption,
 } from "../services/config-schema.js";
 import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
+import { THEME } from "./theme.js";
 import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import type { ModerationAction } from "../models/moderation-log.js";
@@ -111,7 +112,8 @@ export function renderDashboardPage(props: DashboardProps): string {
 <div class="card">
   <h2>Features</h2>
   <table>
-    <thead><tr><th>Feature</th><th>Status</th><th>Config key</th></tr></thead>
+    <caption class="visually-hidden">Feature enablement</caption>
+    <thead><tr><th scope="col">Feature</th><th scope="col">Status</th><th scope="col">Config key</th></tr></thead>
     <tbody>${featuresHtml}</tbody>
   </table>
 </div>
@@ -159,7 +161,7 @@ export function renderBootstrapPage(props: BootstrapProps): string {
       return `
 <div class="card">
   <h2>${escapeHtml(group.category)}</h2>
-  <table><thead><tr><th>Variable</th><th>Status</th><th>Value</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><caption class="visually-hidden">Environment variables</caption><thead><tr><th scope="col">Variable</th><th scope="col">Status</th><th scope="col">Value</th></tr></thead><tbody>${rows}</tbody></table>
 </div>`;
     })
     .join("");
@@ -893,7 +895,8 @@ export function renderWarnBelow(r: SettingRow, id = ""): string {
   // As with the dependency hint, an `id` lets the caller wire this into the
   // control's `aria-describedby` (#854).
   const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
-  return `<div class="settings-warn"${idAttr} role="status" style="margin-top:.4rem;color:#b45309;font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
+  // THEME.warn (#f59e0b) is 8.1:1 on the card; #b45309 was 3.47:1 (#855).
+  return `<div class="settings-warn"${idAttr} role="status" style="margin-top:.4rem;color:${THEME.warn};font-size:.85em">${escapeHtml(r.warnBelow.message)}</div>`;
 }
 
 /**
@@ -1041,7 +1044,8 @@ export function renderSettingsPage(props: SettingsProps): string {
     <input type="hidden" name="_csrf" value="${csrf}">
     <input type="hidden" name="category" value="${escapeHtml(g.category)}">
     <table>
-      <thead><tr><th>Setting</th><th>Edit</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+      <caption class="visually-hidden">${escapeHtml(meta.title)} settings</caption>
+      <thead><tr><th scope="col">Setting</th><th scope="col">Edit</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Description</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="actions" style="margin-top:.75rem">
@@ -1167,7 +1171,7 @@ export function renderImportDiffPage(props: ImportDiffProps): string {
 <div class="notice info">${pendingCount} key(s) will be written; ${rejectedCount} rejected.</div>
 <div class="card">
   <table>
-    <thead><tr><th>Key</th><th>Status</th><th>Current</th><th>New value</th></tr></thead>
+    <thead><tr><th scope="col">Key</th><th scope="col">Status</th><th scope="col">Current</th><th scope="col">New value</th></tr></thead>
     <tbody>${diffRows}</tbody>
   </table>
 </div>
@@ -1209,7 +1213,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
   const headerRoles = props.roleIds
     .map(
       (rid) =>
-        `<th title="${escapeHtml(rid)}">${escapeHtml(props.roleNames.get(rid) ?? rid)}</th>`,
+        `<th scope="col" title="${escapeHtml(rid)}">${escapeHtml(props.roleNames.get(rid) ?? rid)}</th>`,
     )
     .join("");
 
@@ -1219,21 +1223,29 @@ export function renderPermissionsPage(props: PermissionsProps): string {
       const cells = props.roleIds
         .map(
           (rid) =>
-            `<td>${allowed.has(rid) ? '<span class="tag tag-on">✓</span>' : '<span class="muted">—</span>'}</td>`,
+            // Each cell's whole content was "✓" or "—" (#855): the glyph stays
+            // for sighted users (aria-hidden) and hidden text says what it means.
+            `<td>${
+              allowed.has(rid)
+                ? '<span class="tag tag-on"><span aria-hidden="true">✓</span><span class="visually-hidden">Allowed</span></span>'
+                : '<span class="muted" aria-hidden="true">—</span><span class="visually-hidden">Not allowed</span>'
+            }</td>`,
         )
         .join("");
       const status =
         allowed.size === 0
           ? `<span class="tag tag-info">open</span>`
           : `<span class="tag tag-warn">restricted</span>`;
-      return `<tr><td class="mono">/${escapeHtml(cmd)}</td><td>${status}</td>${cells}</tr>`;
+      // The command name is the row header of a true 2D grid (#855), so a
+      // screen reader can recover "which command, which role" from any cell.
+      return `<tr><th scope="row" class="mono">/${escapeHtml(cmd)}</th><td>${status}</td>${cells}</tr>`;
     })
     .join("");
 
   const matrixHtml =
     props.roleIds.length === 0
       ? `<div class="empty">No restricted commands. All registered commands are open by default.</div>`
-      : `<table><thead><tr><th>Command</th><th>Status</th>${headerRoles}</tr></thead><tbody>${matrixRows}</tbody></table>`;
+      : `<table><caption class="visually-hidden">Which roles may run each restricted command</caption><thead><tr><th scope="col">Command</th><th scope="col">Status</th>${headerRoles}</tr></thead><tbody>${matrixRows}</tbody></table>`;
 
   const editRows = props.commands
     .map((cmd) => {
@@ -1260,7 +1272,7 @@ export function renderPermissionsPage(props: PermissionsProps): string {
       const selectId = `perm-roles-${escapedCmd}`;
       const hintId = `perm-hint-${escapedCmd}`;
       return `<tr>
-<td class="mono">/${escapedCmd}</td>
+<th scope="row" class="mono">/${escapedCmd}</th>
 <td>${status}</td>
 <td>
   <form method="POST" action="/admin/permissions/set" class="inline-form" style="align-items:flex-start">
@@ -1285,7 +1297,7 @@ ${renderFlash(props.flash)}
 <div class="card">
   <h2>Edit</h2>
   <table>
-    <thead><tr><th>Command</th><th>Status</th><th>Allowed roles (multi-select)</th></tr></thead>
+    <thead><tr><th scope="col">Command</th><th scope="col">Status</th><th scope="col">Allowed roles (multi-select)</th></tr></thead>
     <tbody>${editRows}</tbody>
   </table>
 </div>
@@ -1605,7 +1617,7 @@ export function renderWizardConfirmPage(props: WizardConfirmPageProps): string {
 <p class="subtitle">The following settings will be applied when you click <strong>Apply</strong>.</p>
 <div class="card">
   <table>
-    <thead><tr><th>Key</th><th>New value</th><th>Description</th></tr></thead>
+    <thead><tr><th scope="col">Key</th><th scope="col">New value</th><th scope="col">Description</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
 </div>
@@ -1692,7 +1704,10 @@ function renderFlash(flash?: FlashMessage | null, id = ""): string {
   // `id` is optional: the Settings page names its banner so the controls of
   // rejected keys can reference it from `aria-describedby` (#854).
   const idAttr = id ? ` id="${escapeHtml(id)}"` : "";
-  return `<div class="notice ${cls}"${idAttr}>${escapeHtml(flash.text)}</div>`;
+  // role="status" + tabindex="-1" + data-flash: a polite live region that the
+  // layout's on-load script focuses (when nothing is aria-invalid) so the
+  // outcome of a post-redirect save is actually announced (WCAG 4.1.3, #855).
+  return `<div class="notice ${cls}"${idAttr} role="status" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
 }
 
 /**
@@ -1837,7 +1852,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
   const tableHtml =
     props.rows.length === 0
       ? `<div class="empty">No scheduled announcements configured.</div>`
-      : `<table><thead><tr><th>ID</th><th>Channel</th><th>Cron</th><th>Status</th><th>Message</th><th>Placeholders</th><th>Created</th><th>Actions</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+      : `<table><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Status</th><th scope="col">Message</th><th scope="col">Placeholders</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>${tableRows}</tbody></table>`;
 
   const body = `
 <h1>Announcements</h1>
@@ -1966,7 +1981,7 @@ export function renderEventsPage(props: EventsProps): string {
 <td>${escapeHtml(e.title)}</td>
 <td class="mono">${escapeHtml(e.when)}</td>
 <td>${eventStateTag(e.state)}</td>
-<td>✅ ${e.going} · 🤔 ${e.maybe} · 🚫 ${e.cant}</td>
+<td><span aria-hidden="true">✅</span> ${e.going} going · <span aria-hidden="true">🤔</span> ${e.maybe} maybe · <span aria-hidden="true">🚫</span> ${e.cant} can't</td>
 <td>${channelCell}</td>
 <td class="mono">${escapeHtml(e.id)}</td>
 <td class="actions">${actions}</td>
@@ -1977,7 +1992,7 @@ export function renderEventsPage(props: EventsProps): string {
   const tableHtml =
     props.rows.length > 0
       ? `<table class="data">
-<thead><tr><th>Title</th><th>When</th><th>State</th><th>RSVPs</th><th>Channel</th><th>ID</th><th>Actions</th></tr></thead>
+<thead><tr><th scope="col">Title</th><th scope="col">When</th><th scope="col">State</th><th scope="col">RSVPs</th><th scope="col">Channel</th><th scope="col">ID</th><th scope="col">Actions</th></tr></thead>
 <tbody>${tableRows}</tbody>
 </table>`
       : '<p class="muted">No events scheduled yet.</p>';
@@ -2205,7 +2220,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureK
   ${
     props.schedules.length === 0
       ? `<div class="empty">No poll schedules configured.</div>`
-      : `<table><thead><tr><th>ID</th><th>Channel</th><th>Cron</th><th>Duration</th><th>Ping role</th><th>Status</th><th>Last run</th><th>Actions</th></tr></thead><tbody>${scheduleRows}</tbody></table>`
+      : `<table><thead><tr><th scope="col">ID</th><th scope="col">Channel</th><th scope="col">Cron</th><th scope="col">Duration</th><th scope="col">Ping role</th><th scope="col">Status</th><th scope="col">Last run</th><th scope="col">Actions</th></tr></thead><tbody>${scheduleRows}</tbody></table>`
   }
 </div>
 <div class="card">
@@ -2233,7 +2248,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureK
   ${
     props.items.length === 0
       ? `<div class="empty">No poll questions stored.</div>`
-      : `<table><thead><tr><th>Question</th><th>Tags</th><th>Used</th><th>Last used</th><th>Status</th><th>Source</th><th>Actions</th></tr></thead><tbody>${itemRows}</tbody></table>`
+      : `<table><thead><tr><th scope="col">Question</th><th scope="col">Tags</th><th scope="col">Used</th><th scope="col">Last used</th><th scope="col">Status</th><th scope="col">Source</th><th scope="col">Actions</th></tr></thead><tbody>${itemRows}</tbody></table>`
   }
 </div>
 <div class="card">
@@ -2399,7 +2414,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
   ${
     props.active.length === 0
       ? `<div class="empty">No active reaction-role mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Mode</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
+      : `<table><thead><tr><th scope="col">Emoji</th><th scope="col">Role</th><th scope="col">Type</th><th scope="col">Category</th><th scope="col">Channel</th><th scope="col">Message ID</th><th scope="col">Mode</th><th scope="col">Status</th><th scope="col">Archived</th><th scope="col">Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
   }
 </div>
 <div class="card">
@@ -2472,7 +2487,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles",
   ${
     props.archived.length === 0
       ? `<div class="empty">No archived mappings.</div>`
-      : `<table><thead><tr><th>Emoji</th><th>Role</th><th>Type</th><th>Category</th><th>Channel</th><th>Message ID</th><th>Mode</th><th>Status</th><th>Archived</th><th>Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
+      : `<table><thead><tr><th scope="col">Emoji</th><th scope="col">Role</th><th scope="col">Type</th><th scope="col">Category</th><th scope="col">Channel</th><th scope="col">Message ID</th><th scope="col">Mode</th><th scope="col">Status</th><th scope="col">Archived</th><th scope="col">Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
   }
 </div>
 `;
@@ -2558,7 +2573,7 @@ export function renderNoticesPage(props: NoticesProps): string {
               .join("");
             return `<div class="card">
   <h2>${escapeHtml(g.category)} <span class="muted">(${g.rows.length})</span></h2>
-  <table><thead><tr><th>Order</th><th>Title</th><th>Content</th><th>Message ID</th><th>Updated</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th scope="col">Order</th><th scope="col">Title</th><th scope="col">Content</th><th scope="col">Message ID</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead><tbody>${rows}</tbody></table>
 </div>`;
           })
           .join("");
@@ -2653,12 +2668,12 @@ export function renderDatabasePage(props: DatabaseProps): string {
   const collectionsHtml =
     props.collections.length === 0
       ? `<div class="empty">No collection statistics available.</div>`
-      : `<table><thead><tr><th>Collection</th><th>Documents (est.)</th></tr></thead><tbody>${props.collections.map((c) => `<tr><td class="mono">${escapeHtml(c.name)}</td><td>${c.count}</td></tr>`).join("")}</tbody></table>`;
+      : `<table><thead><tr><th scope="col">Collection</th><th scope="col">Documents (est.)</th></tr></thead><tbody>${props.collections.map((c) => `<tr><td class="mono">${escapeHtml(c.name)}</td><td>${c.count}</td></tr>`).join("")}</tbody></table>`;
 
   const historyHtml =
     props.trunkHistory.length === 0
       ? `<div class="empty">No prior cleanup runs recorded.</div>`
-      : `<table><thead><tr><th>When</th><th>Result</th><th>Sessions removed</th><th>Users processed</th><th>Time</th><th>Errors</th></tr></thead><tbody>${props.trunkHistory
+      : `<table><thead><tr><th scope="col">When</th><th scope="col">Result</th><th scope="col">Sessions removed</th><th scope="col">Users processed</th><th scope="col">Time</th><th scope="col">Errors</th></tr></thead><tbody>${props.trunkHistory
           .map(
             (h) => `<tr>
 <td class="muted">${escapeHtml(h.ranAt)}</td>
@@ -2812,7 +2827,7 @@ export function renderStringArrayEditor(
   <h2>${escapeHtml(opts.title)} <span class="muted">(${opts.items.length})</span></h2>
   ${opts.description ? `<p class="subtitle">${escapeHtml(opts.description)}</p>` : ""}
   ${defaultsBanner}
-  <table><thead><tr><th>Order</th><th>Text</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table>
+  <table><thead><tr><th scope="col">Order</th><th scope="col">Text</th><th scope="col">Actions</th></tr></thead><tbody>${rows}</tbody></table>
   <form method="POST" action="${poolPath}/add" class="stack">
     ${csrfInput}
     <label>Add entry<input type="text" name="text" maxlength="${opts.maxLength}" required></label>
@@ -2966,7 +2981,7 @@ function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
     <input type="hidden" name="redirect" value="/admin/voice-channels">
     <input type="hidden" name="no_cascade" value="1">
     <table>
-      <thead><tr><th>Setting</th><th>Edit</th><th>Type</th><th>Description</th></tr></thead>
+      <thead><tr><th scope="col">Setting</th><th scope="col">Edit</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="actions" style="margin-top:.75rem">
@@ -2998,7 +3013,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
     ? `<div class="empty">Voice channel category not found in this guild.</div>`
     : props.channels.length === 0
       ? `<div class="empty">Category exists but contains no voice channels.</div>`
-      : `<table><thead><tr><th>Name</th><th>Type</th><th>Users</th><th>Custom name</th><th>Channel ID</th></tr></thead><tbody>${rows}</tbody></table>`;
+      : `<table><thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Users</th><th scope="col">Custom name</th><th scope="col">Channel ID</th></tr></thead><tbody>${rows}</tbody></table>`;
 
   const reloadDisabled = !props.enabled || !props.categoryFound;
   const reloadHint = !props.enabled
@@ -3287,8 +3302,8 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
       ? `<div class="empty">No command invocations match the current filters.</div>`
       : `<table>
 <thead><tr>
-<th>When</th><th>User</th><th>Command</th><th>Channel</th>
-<th>Result</th><th>Duration</th><th>Error</th>
+<th scope="col">When</th><th scope="col">User</th><th scope="col">Command</th><th scope="col">Channel</th>
+<th scope="col">Result</th><th scope="col">Duration</th><th scope="col">Error</th>
 </tr></thead>
 <tbody>${props.rows
           .map((r) => {
@@ -3471,8 +3486,8 @@ export function renderModerationPage(props: ModerationProps): string {
       ? `<div class="empty">No moderation actions match the current filters.</div>`
       : `<table>
 <thead><tr>
-<th>When</th><th>User</th><th>Action</th><th>Moderator</th>
-<th>Reason</th><th>Source</th>
+<th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Moderator</th>
+<th scope="col">Reason</th><th scope="col">Source</th>
 </tr></thead>
 <tbody>${props.rows
           .map((r) => {
@@ -3622,7 +3637,7 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
       ? `<div class="empty">No command metrics recorded in the last ${props.windowDays} days.</div>`
       : `<table>
 <thead><tr>
-<th>Command</th><th>Invocations</th><th>Error rate</th><th>Avg response</th><th>Last used</th>
+<th scope="col">Command</th><th scope="col">Invocations</th><th scope="col">Error rate</th><th scope="col">Avg response</th><th scope="col">Last used</th>
 </tr></thead>
 <tbody>${props.rows
           .map(
@@ -3643,7 +3658,7 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
     spotlight.length === 0
       ? `<p class="muted">No command exceeded a ${formatPct(METRICS_ERROR_SPOTLIGHT)} error rate. 🎉</p>`
       : `<table>
-<thead><tr><th>Command</th><th>Error rate</th><th>Errors</th><th>Invocations</th></tr></thead>
+<thead><tr><th scope="col">Command</th><th scope="col">Error rate</th><th scope="col">Errors</th><th scope="col">Invocations</th></tr></thead>
 <tbody>${spotlight
           .map(
             (r) => `<tr>
@@ -3663,7 +3678,7 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
     slowest.length === 0
       ? `<div class="empty">No data yet.</div>`
       : `<table>
-<thead><tr><th>Command</th><th>Avg response</th><th>Invocations</th></tr></thead>
+<thead><tr><th scope="col">Command</th><th scope="col">Avg response</th><th scope="col">Invocations</th></tr></thead>
 <tbody>${slowest
           .map(
             (r) => `<tr>
@@ -3819,7 +3834,14 @@ export function renderAnalyticsPage(props: AnalyticsProps): string {
       })
       .join("");
 
-    grid = `<div class="heatgrid">${header}${rows}</div>`;
+    // The cells are non-focusable and their only data carrier is `title`
+    // (mouse-hover only). The weekday and hour bar lists below repeat every
+    // marginal as text and "Busiest slot" is stated in prose, so the grid is
+    // exposed as one image with a label pointing there (#855).
+    const peakText = heatmap.peak
+      ? ` Busiest slot: ${DAY_NAMES[heatmap.peak.day]} at ${formatHourLabel(heatmap.peak.hour)}.`
+      : "";
+    grid = `<div class="heatgrid" role="img" aria-label="${escapeHtml(`Voice activity heatmap by weekday and hour of day.${peakText} Per-weekday and per-hour totals are listed below.`)}">${header}${rows}</div>`;
   }
 
   const peakLine = heatmap.peak

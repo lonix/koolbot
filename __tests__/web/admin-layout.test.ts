@@ -189,6 +189,84 @@ describe("renderAdminPage", () => {
     );
   });
 
+  const render = (): string =>
+    renderAdminPage({
+      title: "Test",
+      active: "/admin/settings",
+      body: "<p>hi</p>",
+      csrfToken: "csrf",
+      remainingMs: 60_000,
+    });
+
+  it("gives keyboard users a visible focus ring, a skip link and aria-current (#855)", () => {
+    const html = render();
+    // One :focus-visible ring for every interactive element, plus mirrored
+    // hover surfaces for the sidebar and buttons.
+    expect(html).toContain(
+      "a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,summary:focus-visible,[tabindex]:focus-visible{outline:2px solid #93c5fd;outline-offset:2px}",
+    );
+    expect(html).toContain("nav.side a:focus-visible{background:#1f2937");
+    // The ring rule is declared after the aria-invalid outline so it wins on
+    // focus (same specificity, later wins).
+    expect(html.indexOf('[aria-invalid="true"]{outline')).toBeLessThan(
+      html.indexOf("a:focus-visible,button:focus-visible"),
+    );
+    // Skip link is the first focusable thing on the page and targets <main>.
+    expect(html).toMatch(
+      /<body><a class="skip-link" href="#main">Skip to content<\/a>/,
+    );
+    expect(html).toContain('<main id="main" tabindex="-1">');
+    expect(html).toContain(".skip-link:focus{left:0");
+    // aria-current marks the active page, not just a CSS class.
+    expect(html).toContain(
+      'href="/admin/settings" class="active" aria-current="page"',
+    );
+    expect(html.match(/aria-current="page"/g)).toHaveLength(1);
+  });
+
+  it("reflows at narrow widths instead of forcing horizontal page scroll (#855)", () => {
+    const html = render();
+    expect(html).toContain(
+      "@media (max-width:760px){.shell{flex-direction:column}",
+    );
+    expect(html).toContain("nav.side{width:auto;border-right:0;");
+    // Wide tables scroll inside their container, not the page.
+    expect(html).toContain(
+      "main{flex:1;padding:1.5rem 2rem;max-width:1100px;min-width:0;overflow-x:auto}",
+    );
+    expect(html).toContain("margin:0 0 1rem;overflow-x:auto}");
+  });
+
+  it("uses colours that clear the WCAG contrast floors (#855)", () => {
+    const html = render();
+    // Form-control borders: #2d3748 was 1.58:1 against the field.
+    expect(html).toContain(
+      "form.stack textarea,form.stack select{background:#0f1115;color:#e4e6eb;border:1px solid #64748b;",
+    );
+    expect(html).not.toContain(
+      "border:1px solid #2d3748;border-radius:6px;padding:.4rem .55rem",
+    );
+    // Finish button: white on #ef4444 was 3.76:1.
+    expect(html).toContain(".banner button{background:#dc2626;");
+    expect(html).not.toContain("#ef4444");
+    // Small muted text at 12px: #6b7280 / #64748b were < 4.5:1.
+    expect(html).not.toContain("#6b7280");
+    expect(html).not.toContain("#64748b;flex-shrink");
+    expect(html).toContain(".field-row .help{font-size:.75rem;color:#94a3b8;");
+  });
+
+  it("announces the AJAX save result through a live region and focuses a post-redirect flash (#855)", () => {
+    const html = render();
+    expect(html).toContain(
+      "n.className='notice section-flash';n.setAttribute('role','status');n.setAttribute('aria-live','polite');",
+    );
+    // With nothing aria-invalid, the on-load script focuses the flash.
+    expect(html).toContain(
+      "var inv=document.querySelector('[aria-invalid=\"true\"]');if(inv){focusInvalid(inv);return}var f=document.querySelector('.notice[data-flash]');if(f){try{f.focus()}catch(e){}}",
+    );
+    expect(html).toContain("#main:focus-visible{outline:none}");
+  });
+
   it("marks the active nav item", () => {
     const html = renderAdminPage({
       title: "Settings",

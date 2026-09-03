@@ -10,6 +10,7 @@
  */
 
 import { escapeHtml, getInactivityWindowMs } from "./admin-layout.js";
+import { THEME } from "./theme.js";
 import {
   DAY_NAMES,
   formatHourLabel,
@@ -139,16 +140,20 @@ const STYLE = [
   ".banner .right{display:flex;gap:.75rem;align-items:center}",
   ".banner .pill{background:#374151;color:#d1d5db;padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
   ".banner form{display:inline;margin:0}",
-  ".banner button{background:#ef4444;color:#fff;border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}",
-  ".banner button:hover{background:#dc2626}",
+  // #dc2626 (not #ef4444) so the white label reaches 4.5:1 (WCAG 1.4.3, #855).
+  `.banner button{background:${THEME.danger};color:#fff;border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}`,
+  `.banner button:hover{background:${THEME.dangerHover}}`,
   ".banner a.surface{color:#cbd5e1;background:#374151;padding:.25rem .55rem;border-radius:4px;font-weight:600}",
   ".banner a.surface:hover{background:#4b5563;text-decoration:none;color:#fff}",
   ".shell{display:flex;min-height:calc(100vh - 41px);justify-content:center}",
-  "main{flex:1;padding:2rem 2rem;max-width:64rem}",
+  // `min-width:0` + `overflow-x:auto` keep a wide table scrolling inside the
+  // content column rather than the whole page (WCAG 1.4.10 reflow, #855).
+  "main{flex:1;padding:2rem 2rem;max-width:64rem;min-width:0;overflow-x:auto}",
+  "#main:focus-visible{outline:none}",
   "h1{margin:0 0 .25rem;font-size:1.5rem}",
   "h2{margin:1.5rem 0 .5rem;font-size:1.15rem;color:#cbd5e1}",
   ".subtitle{color:#94a3b8;margin:0 0 1rem}",
-  ".card{background:#161a22;border:1px solid #2d3748;border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem}",
+  ".card{background:#161a22;border:1px solid #2d3748;border-radius:8px;padding:1rem 1.25rem;margin:0 0 1rem;overflow-x:auto}",
   ".card h2{margin-top:0}",
   ".empty{padding:1rem;color:#94a3b8;font-style:italic}",
   ".muted{color:#94a3b8}",
@@ -171,7 +176,8 @@ const STYLE = [
   ".prefs-table .toggle{display:flex;align-items:center;gap:.4rem;font-size:.85rem;color:#94a3b8}",
   ".prefs-table .pref-desc{color:#94a3b8;font-size:.85rem;margin-top:.15rem}",
   ".prefs-table .pref-soon{display:block;color:#f59e0b;font-size:.75rem;font-style:italic;margin-top:.15rem}",
-  "select.tz-select{width:100%;max-width:28rem;background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:4px;padding:.45rem .5rem;font-size:.9rem}",
+  // Control borders use THEME.control (3.97:1); #2d3748 was 1.58:1 (#855).
+  `select.tz-select{width:100%;max-width:28rem;background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:4px;padding:.45rem .5rem;font-size:.9rem}`,
   ".tz-preview{margin-top:.75rem;font-size:.9rem;color:#cbd5e1}",
   ".tz-preview .now{font-weight:600;color:#e4e6eb}",
   ".btn{background:#2563eb;color:#fff;border:0;padding:.45rem .9rem;border-radius:4px;cursor:pointer;font-weight:600;font-size:.9rem}",
@@ -182,7 +188,7 @@ const STYLE = [
   ".btn-danger:hover{background:#b91c1c}",
   ".preset-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem;margin:.5rem 0}",
   ".preset-grid label{display:flex;flex-direction:column;gap:.25rem;font-size:.8rem;color:#94a3b8}",
-  ".preset-grid input{background:#0f1115;color:#e4e6eb;border:1px solid #2d3748;border-radius:4px;padding:.4rem .5rem;font-size:.9rem}",
+  `.preset-grid input{background:#0f1115;color:#e4e6eb;border:1px solid ${THEME.control};border-radius:4px;padding:.4rem .5rem;font-size:.9rem}`,
   ".preset-actions{display:flex;gap:.5rem;margin-top:.5rem}",
   ".preset-actions form{display:inline;margin:0}",
   ".form-actions{margin-top:1rem;display:flex;gap:.5rem;align-items:center}",
@@ -198,8 +204,10 @@ const STYLE = [
   // "off" badge so they stay discoverable and pre-settable (#709), mirroring
   // the admin side nav (#610). The active page keeps its highlight even when
   // disabled, so the greying only applies while inactive.
-  ".page-nav a.nav-disabled:not(.active){color:#6b7280;border-style:dashed}",
-  ".page-nav a.nav-disabled:not(.active):hover{color:#94a3b8}",
+  // Greyed, but still 6.8:1 (#6b7280 was 3.6:1 — #855); the dashed border
+  // and "off" badge carry the state too, not the colour alone.
+  `.page-nav a.nav-disabled:not(.active){color:${THEME.muted};border-style:dashed}`,
+  ".page-nav a.nav-disabled:not(.active):hover{color:#cbd5e1}",
   ".page-nav a .nav-badge{font-size:.6rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#cbd5e1;background:#374151;border-radius:4px;padding:.05rem .3rem;margin-left:.35rem}",
   ".rw-hero{background:linear-gradient(135deg,#1e1b4b 0%,#312e81 100%);border:1px solid #4338ca;border-radius:8px;padding:1.5rem;margin:0 0 1rem;text-align:center}",
   ".rw-hero .total{font-size:2.5rem;font-weight:700;color:#fff;line-height:1.1}",
@@ -221,7 +229,7 @@ const STYLE = [
   ".rw-badge .body{flex:1;min-width:0}",
   ".rw-badge .body .name{font-weight:600;color:#e4e6eb;font-size:.9rem}",
   ".rw-badge .body .desc{color:#94a3b8;font-size:.75rem;margin-top:.15rem}",
-  ".rw-badge .body .date{color:#64748b;font-size:.7rem;margin-top:.2rem}",
+  `.rw-badge .body .date{color:${THEME.muted};font-size:.7rem;margin-top:.2rem}`,
   ".rw-year-picker{display:flex;gap:.4rem;flex-wrap:wrap;margin:0 0 1rem}",
   ".rw-year-picker a{padding:.3rem .7rem;border-radius:999px;background:#161a22;border:1px solid #2d3748;color:#cbd5e1;font-size:.8rem;font-weight:600}",
   ".rw-year-picker a:hover{background:#1f2937;text-decoration:none;color:#fff}",
@@ -230,7 +238,7 @@ const STYLE = [
   ".rw-journey .step{text-align:center;flex:1;min-width:100px}",
   ".rw-journey .step .num{font-size:1.4rem;font-weight:700;color:#e4e6eb}",
   ".rw-journey .step .when{font-size:.75rem;color:#94a3b8;margin-top:.15rem}",
-  ".rw-journey .step .label{font-size:.7rem;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem}",
+  `.rw-journey .step .label{font-size:.7rem;color:${THEME.muted};text-transform:uppercase;letter-spacing:.05em;margin-bottom:.2rem}`,
   // Voice activity heatmap (#675): a vertical 24-bar hour histogram and a
   // horizontal 7-bar weekday breakdown, sharing the indigo Rewind palette.
   ".rw-heat .peak{font-size:.95rem;color:#cbd5e1;margin:0 0 .9rem}",
@@ -242,14 +250,27 @@ const STYLE = [
   ".rw-hours .hb{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%}",
   ".rw-hours .hb .fill{background:#4338ca;border-radius:2px 2px 0 0;min-height:2px}",
   ".rw-hours .hb.peak .fill{background:#a5b4fc}",
-  ".rw-hour-axis{display:flex;justify-content:space-between;font-size:.65rem;color:#64748b;margin-top:.3rem}",
+  `.rw-hour-axis{display:flex;justify-content:space-between;font-size:.65rem;color:${THEME.muted};margin-top:.3rem}`,
   ".rw-days{display:flex;flex-direction:column;gap:.32rem}",
   ".rw-days .db{display:flex;align-items:center;gap:.55rem}",
   ".rw-days .db .dl{width:2.4rem;font-size:.75rem;color:#94a3b8;flex-shrink:0}",
   ".rw-days .db .track{flex:1;background:#0f1115;border:1px solid #2d3748;border-radius:4px;height:.95rem;overflow:hidden}",
   ".rw-days .db .track .fill{height:100%;background:#4338ca}",
   ".rw-days .db.peak .track .fill{background:#a5b4fc}",
-  ".rw-days .db .dv{width:5rem;text-align:right;font-size:.7rem;color:#64748b;flex-shrink:0}",
+  `.rw-days .db .dv{width:5rem;text-align:right;font-size:.7rem;color:${THEME.muted};flex-shrink:0}`,
+  // Off-screen but still in the accessibility tree (#855) — same rule as the
+  // admin layout.
+  ".visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;" +
+    "overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}",
+  // Keyboard focus (WCAG 2.4.7, #855): a visible ring on every interactive
+  // element, with the nav / button hover surfaces mirrored for focus.
+  `a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid ${THEME.focus};outline-offset:2px}`,
+  ".page-nav a:focus-visible{background:#1f2937;text-decoration:none;color:#fff}",
+  ".banner a.surface:focus-visible{background:#4b5563;color:#fff;text-decoration:none}",
+  `.skip-link{position:absolute;left:-999px;top:0;z-index:100;background:${THEME.primary};color:#fff;padding:.5rem .75rem;border-radius:0 0 4px 0;font-weight:600}`,
+  ".skip-link:focus{left:0;text-decoration:none}",
+  // Reflow (WCAG 1.4.10, #855): tighter gutters on narrow viewports.
+  "@media (max-width:760px){main{padding:1rem}.rw-hero{padding:1rem}.rw-hero .total{font-size:1.8rem}}",
 ].join("");
 
 // Same DOM hooks (`#session-countdown`, `data-remaining-ms`,
@@ -287,6 +308,15 @@ const SCRIPT =
   "document.addEventListener('mousemove',onActivity,{passive:true});" +
   "document.addEventListener('keydown',onActivity)})();";
 
+// Move focus to the post-redirect flash (#855). A live region that is part
+// of a freshly loaded document is never announced by itself, so after a PRG
+// save the "Preferences saved." notice would otherwise be silent to a
+// screen reader. `renderFlash` gives the node `tabindex="-1"` so this plain
+// `focus()` works; no-ops on every page without a flash.
+const FLASH_FOCUS_SCRIPT =
+  "(function(){var n=document.querySelector('.notice[data-flash]');" +
+  "if(!n)return;try{n.focus()}catch(e){}})();";
+
 export function renderUserPage(opts: UserPageOptions): string {
   const remainingMs = Math.max(0, Math.floor(opts.remainingMs));
   const inactivityMs = getInactivityWindowMs();
@@ -302,6 +332,9 @@ export function renderUserPage(opts: UserPageOptions): string {
     `<title>${escapeHtml(opts.title)} — Koolbot</title>`,
     `<style>${STYLE}</style>`,
     "</head><body>",
+    // First focusable element on every page (#855); `main` carries
+    // `tabindex="-1"` so the fragment jump also moves keyboard focus.
+    '<a class="skip-link" href="#main">Skip to content</a>',
     '<div class="banner">',
     '<div class="left"><strong>Koolbot · My preferences</strong></div>',
     '<div class="right">',
@@ -313,12 +346,13 @@ export function renderUserPage(opts: UserPageOptions): string {
     '<button type="submit">Finish</button>',
     "</form></div></div>",
     '<div class="shell">',
-    `<main>${renderPageNav(opts.active, {
+    `<main id="main" tabindex="-1">${renderPageNav(opts.active, {
       rewindEnabled: opts.rewindEnabled,
       presetsEnabled: opts.presetsEnabled,
       birthdayEnabled: opts.birthdayEnabled,
     })}${renderFlash(opts.flash)}${opts.body}</main></div>`,
     `<script>${SCRIPT}</script>`,
+    `<script>${FLASH_FOCUS_SCRIPT}</script>`,
     "</body></html>",
   ].join("");
 }
@@ -337,6 +371,7 @@ function renderPageNav(active: string, flags: UserFeatureFlags): string {
       .filter(Boolean)
       .join(" ");
     const cls = classes ? ` class="${classes}"` : "";
+    const current = isActive ? ' aria-current="page"' : "";
     // Read-only pages (Rewind) have no choice to save, so don't claim one.
     const title = disabled
       ? item.presettable
@@ -344,7 +379,7 @@ function renderPageNav(active: string, flags: UserFeatureFlags): string {
         : ' title="Your server admin hasn\'t enabled this yet"'
       : "";
     const badge = disabled ? '<span class="nav-badge">off</span>' : "";
-    return `<a href="${escapeHtml(item.href)}"${cls}${title}>${escapeHtml(item.label)}${badge}</a>`;
+    return `<a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a>`;
   }).join("");
   return `<nav class="page-nav">${items}</nav>`;
 }
@@ -353,7 +388,10 @@ function renderFlash(flash?: UserFlashMessage | null): string {
   if (!flash) return "";
   const cls =
     flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
-  return `<div class="notice ${cls}">${escapeHtml(flash.text)}</div>`;
+  // role="status" + tabindex="-1" + data-flash: a polite live region that the
+  // layout's FLASH_FOCUS_SCRIPT focuses on load so the outcome of a
+  // post-redirect save is actually announced (WCAG 4.1.3, #855).
+  return `<div class="notice ${cls}" role="status" tabindex="-1" data-flash>${escapeHtml(flash.text)}</div>`;
 }
 
 /**
@@ -750,7 +788,10 @@ function renderActivityHeatmap(opts: RewindBodyOptions): string {
             const pct = maxHour > 0 ? Math.round((v / maxHour) * 100) : 0;
             const cls = h === peakHour ? " peak" : "";
             return (
+              // `title` is mouse-hover only; the visually-hidden text carries
+              // the same value for assistive tech (WCAG 1.4.1, #855).
               `<div class="hb${cls}" title="${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}">` +
+              `<span class="visually-hidden">${escapeHtml(formatHourLabel(h))}: ${escapeHtml(heatMinutesLabel(v))}</span>` +
               `<div class="fill" style="height:${pct}%"></div></div>`
             );
           })
@@ -1173,9 +1214,13 @@ export function renderUserNotificationsBody(
     '<form method="POST" action="/me/notifications">',
     `<input type="hidden" name="_csrf" value="${escapeHtml(opts.csrfToken)}">`,
     '<div class="card">',
-    '<table class="prefs-table"><thead><tr>',
-    "<th>Notification</th>",
-    "<th>Current state</th>",
+    '<table class="prefs-table">',
+    // A caption must be the table's first child; hidden visually because the
+    // page heading already says it (#855).
+    '<caption class="visually-hidden">Direct-message notification channels and whether each is on</caption>',
+    "<thead><tr>",
+    '<th scope="col">Notification</th>',
+    '<th scope="col">Current state</th>',
     "</tr></thead><tbody>",
     rows,
     "</tbody></table>",
@@ -1238,7 +1283,9 @@ function renderPresetRow(p: VoicePresetView, csrfToken: string): string {
 
   return [
     '<div class="card">',
-    `<h2>${escapeHtml(p.name)} ${p.isDefault ? "⭐" : ""}</h2>`,
+    // The star alone carried "default" (WCAG 1.4.1, #855); the word does now,
+    // with the glyph kept as decoration.
+    `<h2>${escapeHtml(p.name)}${p.isDefault ? ' <span class="pill"><span aria-hidden="true">⭐</span> Default</span>' : ""}</h2>`,
     `<p class="muted">${summary}</p>`,
     // Edit form (name + channel name + limit + bitrate in one save).
     '<form method="POST" action="/me/voice/preset/edit">',

@@ -76,6 +76,11 @@ describe("requireAdminRoleMiddleware", () => {
     expect(res.statusCode).toBe(403);
     expect(res.body).toContain("Forbidden");
     expect(res.body).toContain('href="/me/"');
+    // Rendered through the shared shell (#855): document basics, not a bare
+    // light-on-white body.
+    expect(res.body).toContain('<html lang="en">');
+    expect(res.body).toContain('<meta name="viewport"');
+    expect(res.body).toContain("<main><h1>Forbidden</h1>");
   });
 
   it("returns 401 (not 403) when no webSession is attached", () => {

@@ -1067,6 +1067,50 @@ is extended to the flash banner carrying the reason, and focus moves to the
 first of them. A page-level "something was invalid" banner on its own is not
 enough on a page with hundreds of fields.
 
+**Outcomes are announced.** The inline flash the AJAX Settings save inserts is
+a `role="status"` live region, so success, CSRF failure, rate-limit and
+network-error results are all read out. A flash rendered after a
+redirect is not announced on its own (a live region that is part of a fresh
+document never is), so `renderFlash` gives it `role="status" tabindex="-1"
+data-flash` and the layout script focuses it on load when nothing is
+`aria-invalid`.
+
+**Keyboard focus is visible.** Both layouts (and the pre-auth / error shell
+in `views.ts`) ship one `:focus-visible` ring (`THEME.focus`, 2px, offset 2px)
+for every link, button and form control, and the admin and `/me` layouts
+mirror the sidebar / button hover surfaces for focus. Every navigated admin
+and `/me` page starts with a "Skip to content" link targeting
+`<main id="main" tabindex="-1">`, and the active nav item carries
+`aria-current="page"`. Never add a `:hover` affordance without its
+`:focus-visible` twin, and never suppress the ring on an interactive element.
+The one deliberate `outline:none` is `#main:focus-visible`: `<main>` is only
+focusable so the skip link can land on it, and drawing a ring around the whole
+content column would be noise rather than a cue.
+
+**Tables are tables.** Every `<th>` has a `scope` (`col` in `<thead>`, `row`
+for a row header such as the command name in the Permissions matrix), and a
+table whose heading doesn't sit directly above it gets a `visually-hidden`
+`<caption>`. A cell must never be a glyph alone: pair `✓` / `—` / emoji with
+`visually-hidden` text (or plain words) and mark the glyph `aria-hidden`.
+Where a chart's only data carrier is a hover `title` (the analytics heatmap),
+expose it as `role="img"` with an `aria-label` that points at the text lists
+that repeat the values.
+
+**Colours come from `THEME`.** `src/web/theme.ts` holds the palette; the
+tokens document their contrast ratios. Form-control borders use
+`THEME.control` (3.97:1, the WCAG 1.4.11 floor is 3:1), secondary text uses
+`THEME.muted` (6.8:1 on a card — the 4.5:1 floor applies to small text), and
+destructive buttons use `THEME.danger` (white text reaches 4.8:1). Don't
+introduce a new grey for "less important" text — the previous ones
+(`#6b7280`, `#64748b`, `#b45309`) all failed.
+
+**Pages reflow.** The admin sidebar collapses into a wrapping row above the
+content below 760px, and `main` / `.card` scroll wide tables inside themselves
+(`overflow-x:auto`) so the page never scrolls sideways at 320px. Error
+responses (401 / 403 / 503) render through `renderErrorPage` in `views.ts` so
+they carry `lang`, a viewport, a `<main>` landmark and the dark palette like
+every other page.
+
 ---
 
 ## Troubleshooting

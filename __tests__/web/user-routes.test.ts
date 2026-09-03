@@ -627,6 +627,10 @@ describe("userWebErrorHandler", () => {
     expect(res.statusCode).toBe(403);
     expect(res.body).toContain("Forbidden");
     expect(res.body).toContain('href="/me/"');
+    // Shared error shell (#855): lang, viewport, landmark, /me title suffix.
+    expect(res.body).toContain('<html lang="en">');
+    expect(res.body).toContain("<title>Forbidden — Koolbot</title>");
+    expect(res.body).toContain("<main><h1>Forbidden</h1>");
     expect(next).not.toHaveBeenCalled();
   });
 
