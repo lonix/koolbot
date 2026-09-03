@@ -113,6 +113,24 @@ describe("MessageActivityCleanupService", () => {
     expect(find).not.toHaveBeenCalled();
   });
 
+  it.each([0, -1])(
+    "skips pruning entirely when the retention is %p (0 = keep forever, #835)",
+    async (retention) => {
+      const { service, mockConfigService } = createService();
+      mockConfigService.getNumber.mockResolvedValue(retention);
+
+      const stats = await service.runCleanup();
+
+      // A 0/negative window would put the cutoff at (or after) now and
+      // $pull every recentMessages entry for every user.
+      expect(stats.messagesPruned).toBe(0);
+      expect(stats.usersProcessed).toBe(0);
+      expect(stats.errors).toEqual([]);
+      expect(aggregate).not.toHaveBeenCalled();
+      expect(updateMany).not.toHaveBeenCalled();
+    },
+  );
+
   it("reports zeros when nothing is beyond retention", async () => {
     const { service } = createService();
 

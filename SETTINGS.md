@@ -856,13 +856,15 @@ Automatic cleanup of old tracking data with data aggregation.
 | --- | --- | --- |
 | `voicetracking.cleanup.enabled` | `false` | Enable automatic data cleanup |
 | `voicetracking.cleanup.schedule` | `"0 0 * * *"` | Cron schedule (default: daily at midnight) |
-| `voicetracking.cleanup.retention.detailed_sessions_days` | `400` | Days to keep detailed session data (full Rewind year + buffer) |
-| `voicetracking.cleanup.retention.monthly_summaries_months` | `6` | Months to keep monthly summaries |
-| `voicetracking.cleanup.retention.yearly_summaries_years` | `1` | Years to keep yearly summaries |
+| `voicetracking.cleanup.retention.detailed_sessions_days` | `400` | Days to keep detailed session data (full Rewind year + buffer). `0` keeps every session forever |
+| `voicetracking.cleanup.retention.monthly_summaries_months` | `6` | Months to keep monthly summaries. `0` keeps them forever |
+| `voicetracking.cleanup.retention.yearly_summaries_years` | `1` | Years to keep yearly summaries. `0` keeps them forever |
 
 **How it works:**
 
-1. Old detailed sessions are removed after the retention period
+1. Old detailed sessions are removed after the retention period. With
+   `detailed_sessions_days` set to `0` the pruning step is skipped entirely
+   (see [Retention values](#retention-values))
 2. Data is aggregated into monthly / yearly summaries before deletion
 3. Statistics are preserved even after detailed data is removed
 4. Manual cleanup runs from the Web UI's **Database** page (replaces
@@ -906,7 +908,7 @@ introduced.
 | `messagetracking.excluded_channels` | `""` | Channel IDs to skip (comma-separated; mirrors `voicetracking.excluded_channels`) |
 | `messagetracking.cleanup.enabled` | `false` | Master switch for the per-message detail cleanup job |
 | `messagetracking.cleanup.schedule` | `"0 3 * * *"` | Cron schedule (default: daily at 03:00) |
-| `messagetracking.cleanup.retention.detailed_days` | `400` | Drop per-message detail older than N days (allows a full Rewind year + buffer) |
+| `messagetracking.cleanup.retention.detailed_days` | `400` | Drop per-message detail older than N days (allows a full Rewind year + buffer). `0` keeps every message forever |
 
 **What's tracked:**
 
@@ -1020,12 +1022,31 @@ permissions.
 All DB-backed settings are edited on the Web UI's **Settings** page.
 The Settings page groups settings by feature, coerces inputs to the
 declared primitive type (boolean / number / string), and shows inline
-help. It does **not** enforce schema-level constraints like numeric
-ranges or enum allow-lists — invalid-but-well-typed values are
-accepted, so double-check inputs against the docs for keys with valid
-ranges (cron expressions, retention days, etc.). After changing any
-`*.enabled` value, click **Reload commands to Discord** so Discord
-re-syncs the registration.
+help. Number fields refuse blank input (a cleared field is an error, not
+`0`) and enforce the lower bound declared for the key — today that is
+the retention keys, see [Retention values](#retention-values) — but the
+page does **not** otherwise enforce schema-level constraints like numeric
+ranges or enum allow-lists. Invalid-but-well-typed values are accepted,
+so double-check inputs against the docs for keys with valid ranges (cron
+expressions, etc.). After changing any `*.enabled` value, click **Reload
+commands to Discord** so Discord re-syncs the registration.
+
+### Retention values
+
+Every `*retention*` key is a window in days, weeks, months or years, and
+they all read `0` the same way: **keep forever** — the cleanup job for
+that data skips its pruning step instead of running with a cutoff at
+"now". This holds for the voice-session and message-detail windows
+(`voicetracking.cleanup.retention.*`,
+`messagetracking.cleanup.retention.detailed_days`) as well as the audit,
+moderation and poll windows. Negative values are refused at save time,
+and a cleared field is refused rather than stored as `0`, because the
+opposite reading — a `0` window that cuts off at now — would delete the
+entire history on the next cleanup tick.
+
+The one exception is `monitoring.metrics_retention_days`, which is
+enforced by a MongoDB TTL index rather than a cleanup job and therefore
+needs a finite window: it must be at least `1`.
 
 ### YAML export / import
 
@@ -1286,7 +1307,9 @@ batched (every few minutes, never per-invocation) and pruned by a TTL index.
 - `monitoring.metrics_persistence.enabled` (bool, default: true) — when off,
   command metrics stay in-memory only and nothing is written to MongoDB.
 - `monitoring.metrics_retention_days` (number, default: 30) — days to keep
-  persisted daily buckets before the TTL index prunes them.
+  persisted daily buckets before the TTL index prunes them. Must be at least
+  `1`: the TTL index needs a finite window, so this is the one retention key
+  where `0` is refused rather than meaning "keep forever".
 
 #### Audit Logs (operator visibility)
 
@@ -1299,7 +1322,8 @@ window (staggered at 03:00 / 03:15 server time to avoid contention).
   Discord slash-command invocation (who, what, when, outcome). Raw command
   arguments are never stored.
 - `core.command_audit.retention_days` (number, default: 90) — days to keep
-  slash-command audit rows before the daily cleanup (03:00) prunes them.
+  slash-command audit rows before the daily cleanup (03:00) prunes them. Set
+  to `0` to keep history forever.
 - `core.web_audit.retention_days` (number, default: 90) — days to keep WebUI
   audit-log rows (one per state-changing WebUI request) before the daily
   cleanup (03:15) prunes them. Set to `0` to keep history forever. WebUI

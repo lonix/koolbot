@@ -408,6 +408,10 @@ export class ConfigService {
       return value;
     }
     if (typeof value === "string") {
+      // `Number("")` is 0, not NaN — a blank stored value must fall back to
+      // the default like any other unparsable string, not read as zero
+      // (which for a retention key meant "prune everything", #835).
+      if (value.trim() === "") return defaultValue;
       const num = Number(value);
       return isNaN(num) ? defaultValue : num;
     }

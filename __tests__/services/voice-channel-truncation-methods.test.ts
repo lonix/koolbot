@@ -127,4 +127,42 @@ describe("VoiceChannelTruncationService Methods", () => {
     // No read-then-write snapshot of user documents.
     expect(find).not.toHaveBeenCalled();
   });
+
+  it.each([0, -1, Number.NaN])(
+    "skips pruning entirely when the detailed-session retention is %p (0 = keep forever, #835)",
+    async (retention) => {
+      const { VoiceChannelTruncationService } =
+        await import("../../src/services/voice-channel-truncation.js");
+      const instance = VoiceChannelTruncationService.getInstance(
+        mockClient as Client,
+      );
+      // A 0/negative window would put the cutoff at (or after) now and
+      // $pull every session for every user. The guard sits on the consumed
+      // value so a stray 0 stored before the write boundary refused blank
+      // input is covered too.
+      (instance as never)["configService"] = {
+        getNumber: jest.fn().mockResolvedValue(retention),
+      };
+      const updateMany = VoiceChannelTracking.updateMany as jest.Mock;
+      const aggregate = VoiceChannelTracking.aggregate as jest.Mock;
+
+      const stats = await (
+        instance as unknown as {
+          performCleanup: () => Promise<{
+            sessionsRemoved: number;
+            dataAggregated: number;
+            errors: string[];
+          }>;
+        }
+      ).performCleanup();
+
+      expect(stats).toMatchObject({
+        sessionsRemoved: 0,
+        dataAggregated: 0,
+        errors: [],
+      });
+      expect(aggregate).not.toHaveBeenCalled();
+      expect(updateMany).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -152,6 +152,7 @@ export function buildSettingRows(
       category: dbEntry?.category ?? meta?.category ?? deriveCategory(key),
       options: meta?.options,
       warnBelow: meta?.warnBelow,
+      min: meta?.min,
       channelKind: meta?.channelKind,
     };
   });
@@ -492,6 +493,7 @@ export function createReadOnlyRouter(
               dbEntry?.category ?? meta?.category ?? deriveCategory(key),
             options: meta?.options,
             warnBelow: meta?.warnBelow,
+            min: meta?.min,
             channelKind: meta?.channelKind,
           };
         },

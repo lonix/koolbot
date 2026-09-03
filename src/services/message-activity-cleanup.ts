@@ -297,6 +297,25 @@ export class MessageActivityCleanupService {
 
     try {
       const retentionDays = await this.getRetentionDays();
+
+      // `0` means "keep forever" on every retention key (#835). A 0 (or
+      // negative) window would put the cutoff at — or after — now and `$pull`
+      // every recentMessages entry, so the sweep is skipped instead. Checked
+      // on the consumed value so a stray 0 stored before the write boundary
+      // refused blank input is covered too.
+      if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
+        logger.info(
+          "Message-detail retention is 0 (keep forever); skipping message pruning",
+        );
+        return {
+          messagesPruned: 0,
+          usersProcessed: 0,
+          errors,
+          executionTime: Date.now() - startTime,
+          timestamp: new Date(),
+        };
+      }
+
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 

@@ -291,7 +291,19 @@ export function validateSetting(
     }
   }
 
-  if (meta.warnBelow && Number(value) < meta.warnBelow.value) {
+  if (meta.min !== undefined && Number(value) < meta.min) {
+    return {
+      key,
+      severity: "error",
+      message: `${key}: ${formatValue(value)} is below the minimum of ${meta.min} — the Web UI refuses this value; a negative retention window would prune everything`,
+    };
+  }
+
+  if (
+    meta.warnBelow &&
+    Number(value) < meta.warnBelow.value &&
+    !(meta.warnBelow.exemptZero && Number(value) === 0)
+  ) {
     return {
       key,
       severity: "warning",

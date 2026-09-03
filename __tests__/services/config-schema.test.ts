@@ -149,6 +149,49 @@ describe("Config Schema", () => {
       expect(mismatches).toEqual([]);
     });
 
+    it("declares a lower bound on every retention key so a negative window can't be stored (#835)", () => {
+      // Every key whose value is a retention window. `0` means "keep forever"
+      // on all of them except the TTL-driven metrics key, which needs a
+      // finite window and therefore starts at 1.
+      const zeroIsForever = [
+        "voicetracking.cleanup.retention.detailed_sessions_days",
+        "voicetracking.cleanup.retention.monthly_summaries_months",
+        "voicetracking.cleanup.retention.yearly_summaries_years",
+        "messagetracking.cleanup.retention.detailed_days",
+        "polls.participation.weekly_retention_weeks",
+        "polls.turnout.retention_days",
+        "core.command_audit.retention_days",
+        "core.web_audit.retention_days",
+        "moderation.retention_days",
+      ] as const;
+      for (const key of zeroIsForever) {
+        expect(settingsMetadata[key].min).toBe(0);
+        expect(settingsMetadata[key].description).toMatch(/0 to keep/);
+      }
+      expect(settingsMetadata["monitoring.metrics_retention_days"].min).toBe(1);
+
+      // No retention-shaped key slipped in without a bound.
+      const unbounded = Object.keys(settingsMetadata).filter(
+        (k) =>
+          /retention/.test(k) &&
+          settingsMetadata[k as keyof typeof settingsMetadata].min ===
+            undefined,
+      );
+      expect(unbounded).toEqual([]);
+    });
+
+    it("exempts 0 from the Rewind warnBelow hint because 0 means keep forever (#835)", () => {
+      expect(
+        settingsMetadata[
+          "voicetracking.cleanup.retention.detailed_sessions_days"
+        ].warnBelow?.exemptZero,
+      ).toBe(true);
+      expect(
+        settingsMetadata["messagetracking.cleanup.retention.detailed_days"]
+          .warnBelow?.exemptZero,
+      ).toBe(true);
+    });
+
     it("attaches a warnBelow hint at the Rewind threshold to both detailed-retention keys (#575)", () => {
       const voice =
         settingsMetadata[

@@ -448,8 +448,25 @@ export function coerceConfigValue(
     return { ok: true, value: raw === "true" || raw === true };
   }
   if (expected === "number") {
+    // A cleared `<input type="number">` posts "" and a YAML key with no value
+    // parses as null — both of which `Number()` silently turns into 0. For a
+    // retention key that used to mean "cut off at now" and wiped the whole
+    // history (#835), so blank input is refused outright instead of coerced.
+    // Only a finite number or a non-blank numeric string is accepted.
+    if (raw === null || raw === undefined || typeof raw === "boolean") {
+      return { ok: false, reason: "invalid number" };
+    }
+    if (typeof raw === "string" && raw.trim() === "") {
+      return { ok: false, reason: "invalid number" };
+    }
     const n = typeof raw === "number" ? raw : Number(raw);
     if (!Number.isFinite(n)) return { ok: false, reason: "invalid number" };
+    // Declared lower bound (#835): refuse — never clamp — so the operator sees
+    // a field-level error rather than a silently different value.
+    const min = settingsMetadata[key as keyof typeof settingsMetadata]?.min;
+    if (min !== undefined && n < min) {
+      return { ok: false, reason: `must be at least ${min}` };
+    }
     return { ok: true, value: n };
   }
   let value = String(raw ?? "");
@@ -939,8 +956,8 @@ export function createWriteRouter(
       // dependent controls were greyed out client-side and aren't submitted.
       // Honour that here — write only the master flag and leave the rest
       // untouched, so disabling a feature can't silently clobber its
-      // sub-settings (an absent number field would otherwise be rejected, an
-      // absent string blanked).
+      // sub-settings (an absent — or cleared — number field would otherwise
+      // be rejected, an absent string blanked).
       const masterKey = noCascade ? null : findSectionMasterKey(keys);
       const masterOff =
         masterKey !== null &&
