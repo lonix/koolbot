@@ -986,8 +986,9 @@ Once in the admin Web UI (admin sessions):
 | Weekly Digest   | (new — weekly DM digest configuration and preview)                  |
 | Voice Analytics | (new — voice activity charts and channel breakdowns)                |
 
-Feature pages are hidden from the nav while their `*.enabled` setting is
-off.
+Feature pages stay in the nav while their `*.enabled` setting is off —
+greyed out, badged **off**, and sorted below the enabled ones. The page
+itself still opens and prompts you to enable the feature there.
 
 On the personal surface (`/me/`, available to every member — admins
 reach it from a header link on any admin page):
@@ -1001,7 +1002,9 @@ reach it from a header link on any admin page):
 | Birthday      | `/me/birthday` — set or clear your birthday (`birthdays.enabled`)                  |
 | Rewind        | `/me/rewind` — personal year-in-review (voice time, top channels, rank journey, …) |
 
-Feature-gated pages appear once their feature is enabled.
+Feature-gated pages stay in the nav when their feature is off — greyed
+out and badged **off**. Voice and Birthday still accept your choice while
+disabled, so it is already saved when an admin turns the feature on.
 
 ---
 
