@@ -202,7 +202,7 @@ browser.
 
 YAML import/export covers the MongoDB tier only. Imports apply
 **per-key**: the protected-keys list (`PROTECTED_KEYS` in
-`src/web/write-routes.ts`) flags any row that targets a bootstrap key
+`src/web/bootstrap-vars.ts`, enforced by `src/web/routes/write/settings.ts`) flags any row that targets a bootstrap key
 as `rejected: protected key`, but other valid rows in the same file
 still apply. The result page shows per-key outcomes plus a top-level
 `ok` / `partial` / `failed` status — a mixed YAML produces a partial

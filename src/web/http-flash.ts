@@ -3,7 +3,7 @@ import type { Response } from "express";
 /**
  * Shared flash/error helpers for the WebUI's state-changing routes.
  *
- * Lives in its own module (rather than `write-routes.ts`) so the CSRF and
+ * Lives in its own module (rather than `routes/write/helpers.ts`) so the CSRF and
  * rate-limit middleware and the router-level error handler can reuse
  * `wantsJson` / `respondFlashError` without importing the heavyweight write
  * router (which itself imports the CSRF middleware — a cycle we avoid here).
