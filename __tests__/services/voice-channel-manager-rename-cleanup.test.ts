@@ -129,9 +129,23 @@ describe("VoiceChannelManager - rename-safe unmanaged cleanup (issue #542)", () 
     expect(foreignChannel.delete).toHaveBeenCalled();
   });
 
-  it("deletes a renamed channel that is no longer tracked as owned", async () => {
+  it("keeps a renamed, occupied channel that is no longer tracked as owned until it empties", async () => {
     // Nothing in userChannels: the renamed channel is now indistinguishable
-    // from a foreign channel and should be removed.
+    // from a foreign channel. It still has a member inside, so the sweep must
+    // leave it alone rather than kick them out (#843).
+    await manager.cleanupEmptyChannels();
+
+    expect(renamedChannel.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes a renamed channel that is no longer tracked as owned once it is empty", async () => {
+    // Nothing in userChannels and nobody inside: the renamed channel is now
+    // indistinguishable from an empty foreign channel and should be removed.
+    Object.defineProperty(renamedChannel, "members", {
+      value: new Collection(),
+      writable: true,
+    });
+
     await manager.cleanupEmptyChannels();
 
     expect(renamedChannel.delete).toHaveBeenCalled();

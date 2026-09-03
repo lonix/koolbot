@@ -15,6 +15,7 @@ import {
   PermissionFlagsBits,
   Message,
 } from "discord.js";
+import { randomInt } from "node:crypto";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
@@ -73,6 +74,14 @@ export class VoiceChannelManager {
   private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
   private healthCheckInterval: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Set when renameLobbyToOnline() could not bring the lobby online (category
+   * unresolvable, missing Manage Channels, ...). While set, the periodic
+   * cleanup sweep re-attempts the rename first and skips the sweep if it
+   * still fails, so a startup misconfiguration surfaces in the logs instead
+   * of turning into channel deletions. See issue #843.
+   */
+  private lobbyOnlineRenameFailed = false;
   private ownershipTransferTimers: Map<
     string,
     { timer: ReturnType<typeof setTimeout>; originalOwnerId: string }
@@ -1648,9 +1657,15 @@ export class VoiceChannelManager {
 
   /**
    * Rename offline lobby channel back to normal name when bot starts up
-   * Also creates dynamic channels for any users currently in the offline lobby
+   * Any users currently in the offline lobby are first moved together into
+   * one shared dynamic channel (see moveOfflineLobbyMembersToSharedChannel).
+   *
+   * Returns true when the lobby is online (renamed, or no offline lobby was
+   * found and the normal lobby was ensured), false when the rename could not
+   * be performed. A false result also pauses the periodic cleanup sweep until
+   * a later attempt succeeds (issue #843).
    */
-  public async renameLobbyToOnline(guild: Guild): Promise<void> {
+  public async renameLobbyToOnline(guild: Guild): Promise<boolean> {
     try {
       const lobbyName = await configService.getString(
         "voicechannels.lobby.name",
@@ -1663,10 +1678,12 @@ export class VoiceChannelManager {
 
       const category = await resolveManagedCategory(guild);
       if (!category) {
+        this.lobbyOnlineRenameFailed = true;
         logger.error(
-          "voicechannels.category_id is not set or doesn't resolve — lobby rename skipped",
+          "voicechannels.category_id is not set or doesn't resolve — lobby rename skipped. " +
+            "Periodic voice channel cleanup is paused until the category resolves.",
         );
-        return;
+        return false;
       }
 
       // Find the offline lobby channel
@@ -1677,37 +1694,13 @@ export class VoiceChannelManager {
       );
 
       if (offlineLobbyChannel) {
-        // Check if anyone is currently in the offline lobby
-        const usersInOfflineLobby = offlineLobbyChannel.members.filter(
-          (member) => !member.user.bot,
+        // Anyone sitting in the offline lobby was talking together while the
+        // bot was down; keep them together in one channel rather than
+        // scattering them into one room each.
+        await this.moveOfflineLobbyMembersToSharedChannel(
+          guild,
+          offlineLobbyChannel,
         );
-
-        if (usersInOfflineLobby.size > 0) {
-          logger.info(
-            `Found ${usersInOfflineLobby.size} users in offline lobby, creating dynamic channels for them`,
-          );
-
-          // Create dynamic channels for each user and move them
-          for (const [userId, member] of usersInOfflineLobby) {
-            try {
-              const dynamicChannel = await this.createDynamicChannel(
-                guild,
-                userId,
-              );
-              if (dynamicChannel) {
-                await member.voice.setChannel(dynamicChannel.id);
-                logger.info(
-                  `Created dynamic channel and moved user ${member.displayName} from offline lobby`,
-                );
-              }
-            } catch (error) {
-              logger.error(
-                `Failed to create dynamic channel for user ${member.displayName}:`,
-                error,
-              );
-            }
-          }
-        }
 
         // Now rename the channel back to online
         await offlineLobbyChannel.setName(lobbyName, "Bot starting up");
@@ -1715,18 +1708,118 @@ export class VoiceChannelManager {
       } else {
         // No offline lobby found, ensure we have a lobby channel
         logger.info("No offline lobby found, ensuring lobby channel exists");
-        await this.ensureLobbyChannelExists(guild);
+        if (!(await this.ensureLobbyChannelExists(guild))) {
+          // ensureLobbyChannelExists() logs the specific cause; it swallows
+          // permission/category errors, so the pause must key off its result.
+          this.lobbyOnlineRenameFailed = true;
+          logger.error(
+            "Lobby channel could not be ensured at startup. Periodic voice channel cleanup " +
+              "is paused until the lobby can be brought online.",
+          );
+          return false;
+        }
       }
+
+      this.lobbyOnlineRenameFailed = false;
+      return true;
     } catch (error) {
-      logger.error("Error renaming offline lobby to online:", error);
+      this.lobbyOnlineRenameFailed = true;
+      logger.error(
+        "Error renaming offline lobby to online — check that the bot has the Manage Channels " +
+          "permission on the managed category. Periodic voice channel cleanup is paused until " +
+          "the lobby can be brought online:",
+        error,
+      );
+      return false;
     }
+  }
+
+  /**
+   * Random index in [0, count). Uses the CSPRNG so CodeQL does not flag
+   * Math.random(); kept as a method so tests can pin the choice.
+   */
+  private pickRandomIndex(count: number): number {
+    return randomInt(count);
+  }
+
+  /**
+   * Move everyone sitting in the offline lobby into ONE new dynamic channel.
+   *
+   * A member is picked at random to own the channel, it is created for them,
+   * and the remaining members are moved in with them. People who were in the
+   * offline lobby together were already talking to each other, so they are
+   * kept together rather than split into a separate room each. Bots are
+   * ignored. Individual move failures are logged and do not stop the rest.
+   *
+   * Returns true when no non-bot member is left behind (nobody was there, or
+   * everyone was moved), false when at least one could not be moved — callers
+   * that delete the lobby afterwards must not do so on a false result, or
+   * they would disconnect whoever is still inside.
+   */
+  private async moveOfflineLobbyMembersToSharedChannel(
+    guild: Guild,
+    offlineLobby: VoiceChannel,
+  ): Promise<boolean> {
+    const members = Array.from(
+      offlineLobby.members.filter((member) => !member.user.bot).values(),
+    );
+    if (members.length === 0) {
+      return true;
+    }
+
+    const host = members[this.pickRandomIndex(members.length)];
+    logger.info(
+      `Found ${members.length} user(s) in offline lobby, creating a shared channel owned by ${host.displayName}`,
+    );
+
+    let sharedChannel: VoiceChannel | null = null;
+    try {
+      sharedChannel = await this.createDynamicChannel(guild, host.id);
+    } catch (error) {
+      logger.error(
+        `Failed to create shared channel for ${host.displayName} from offline lobby:`,
+        error,
+      );
+    }
+    if (!sharedChannel) {
+      logger.error(
+        "Could not create a channel for the offline lobby members; leaving them where they are",
+      );
+      return false;
+    }
+
+    // Owner first so the channel is not left owner-less with guests inside.
+    // Their move can still fail (a stale voice state, say), in which case the
+    // others are moved anyway — being together is the point — and the usual
+    // ownership-transfer machinery hands the channel to whoever is in it.
+    const ordered = [host, ...members.filter((member) => member !== host)];
+    let moved = 0;
+    for (const member of ordered) {
+      try {
+        await member.voice.setChannel(sharedChannel.id);
+        moved += 1;
+        logger.info(
+          `Moved ${member.displayName} from offline lobby into ${sharedChannel.name}`,
+        );
+      } catch (error) {
+        logger.error(
+          `Failed to move ${member.displayName} from offline lobby into ${sharedChannel.name}:`,
+          error,
+        );
+      }
+    }
+    return moved === ordered.length;
   }
 
   /**
    * Ensure lobby channel exists for normal startup operations
    * This method is gentle and tries to reuse existing offline lobby channels
+   *
+   * Returns true when an online lobby exists afterwards (already there,
+   * renamed from offline, or newly created) and false when it could not be
+   * ensured. Errors are logged, never thrown.
    */
-  public async ensureLobbyChannelExists(guild: Guild): Promise<void> {
+  public async ensureLobbyChannelExists(guild: Guild): Promise<boolean> {
     try {
       const lobbyName = await configService.getString(
         "voicechannels.lobby.name",
@@ -1742,7 +1835,7 @@ export class VoiceChannelManager {
         logger.error(
           "voicechannels.category_id is not set or doesn't resolve — lobby creation skipped",
         );
-        return;
+        return false;
       }
 
       // First, try to find an existing online lobby
@@ -1753,7 +1846,7 @@ export class VoiceChannelManager {
 
       if (existingLobby) {
         logger.debug(`Lobby channel already exists: ${existingLobby.name}`);
-        return; // We're good, lobby already exists
+        return true; // We're good, lobby already exists
       }
 
       // Check if there's an offline lobby we can rename
@@ -1773,7 +1866,7 @@ export class VoiceChannelManager {
           logger.info(
             `Renamed offline lobby channel back to online: ${lobbyName}`,
           );
-          return; // We're done
+          return true; // We're done
         } catch (error) {
           logger.error(`Failed to rename offline lobby channel:`, error);
           // Fall through to creation if renaming fails
@@ -1794,11 +1887,14 @@ export class VoiceChannelManager {
           ],
         });
         logger.info(`Created new lobby channel: ${newLobby.name}`);
+        return true;
       } catch (error) {
         logger.error(`Failed to create lobby channel:`, error);
+        return false;
       }
     } catch (error) {
       logger.error("Error ensuring lobby channel exists:", error);
+      return false;
     }
   }
 
@@ -1807,8 +1903,12 @@ export class VoiceChannelManager {
    * Also removes duplicate lobby channels
    * WARNING: This method is aggressive and will delete ALL existing lobby channels
    * Use ensureLobbyChannelExists for normal startup operations
+   *
+   * Returns true when a lobby exists afterwards (renamed from offline or
+   * re-created), false when it could not be ensured. Errors are logged,
+   * never thrown.
    */
-  public async ensureLobbyChannels(guild: Guild): Promise<void> {
+  public async ensureLobbyChannels(guild: Guild): Promise<boolean> {
     try {
       const lobbyName = await configService.getString(
         "voicechannels.lobby.name",
@@ -1820,7 +1920,7 @@ export class VoiceChannelManager {
         logger.error(
           "voicechannels.category_id is not set or doesn't resolve — lobby creation skipped",
         );
-        return;
+        return false;
       }
 
       // Find ALL lobby channels (including duplicates and offline ones)
@@ -1846,7 +1946,7 @@ export class VoiceChannelManager {
           logger.info(
             `Renamed offline lobby channel back to online: ${lobbyName}`,
           );
-          return; // We're done, no need to create a new channel
+          return true; // We're done, no need to create a new channel
         } catch (error) {
           logger.error(`Failed to rename offline lobby channel:`, error);
           // Fall through to deletion if renaming fails
@@ -1882,15 +1982,26 @@ export class VoiceChannelManager {
           ],
         });
         logger.info(`Created lobby channel: ${newLobby.name}`);
+        return true;
       } catch (error) {
         logger.error(`Failed to create lobby channel:`, error);
+        return false;
       }
     } catch (error) {
       logger.error("Error ensuring lobby channels:", error);
+      return false;
     }
   }
 
-  public async cleanupEmptyChannels(): Promise<void> {
+  /**
+   * Periodic cleanup sweep. Returns true when the sweep ran to completion.
+   * False means it did not: either it was skipped outright (feature disabled,
+   * guild/category unresolvable, the lobby could not be brought online) or it
+   * swept and then failed to ensure the lobby afterwards — so callers such as
+   * the Web UI's Force cleanup must report "did not complete", not "nothing
+   * happened".
+   */
+  public async cleanupEmptyChannels(): Promise<boolean> {
     try {
       // Check if voice channel management is enabled using correct config keys
       const isEnabled =
@@ -1899,19 +2010,37 @@ export class VoiceChannelManager {
         (await configService.getBoolean("ENABLE_VC_MANAGEMENT"));
 
       if (!isEnabled) {
-        return;
+        return false;
       }
 
       const guildId = await configService.getString("GUILD_ID", "");
       if (!guildId) {
         logger.error("GUILD_ID not set in configuration");
-        return;
+        return false;
       }
 
       const guild = await this.getGuild(guildId);
       if (!guild) {
         logger.error("Guild not found during cleanup");
-        return;
+        return false;
+      }
+
+      // If the lobby could not be brought online at startup (unresolvable
+      // category, missing Manage Channels, ...) the bot is misconfigured.
+      // Re-attempt the rename so the sweep self-heals once the admin fixes
+      // the problem, and refuse to sweep while it still fails: a sweep in
+      // that state would only ever delete channels it should not (#843).
+      if (this.lobbyOnlineRenameFailed) {
+        logger.warn(
+          "Lobby is still offline from a failed startup rename — retrying before cleanup",
+        );
+        if (!(await this.renameLobbyToOnline(guild))) {
+          logger.error(
+            "Skipping periodic voice channel cleanup: the lobby could not be brought online. " +
+              "Fix voicechannels.category_id / the bot's Manage Channels permission.",
+          );
+          return false;
+        }
       }
 
       const lobbyChannelName = await this.getLobbyChannelName();
@@ -1926,7 +2055,7 @@ export class VoiceChannelManager {
         logger.error(
           "voicechannels.lobby.offlinename is not set in configuration",
         );
-        return;
+        return false;
       }
 
       const category = await resolveManagedCategory(guild);
@@ -1934,7 +2063,7 @@ export class VoiceChannelManager {
         logger.error(
           "voicechannels.category_id is not set or doesn't resolve — cleanup skipped",
         );
-        return;
+        return false;
       }
 
       // Get all channels in the category
@@ -1949,11 +2078,15 @@ export class VoiceChannelManager {
         "🎮",
       );
 
-      // Channels the bot manages - only count UNIQUE names
-      const managedChannelNames = new Set([
-        lobbyChannelName,
-        // Note: offlineLobbyName is NOT managed - it's just a temporary state
-      ]);
+      // Channels the bot manages - only count UNIQUE names.
+      //
+      // The offline lobby name is included on purpose: if the startup rename
+      // to the online name failed (permissions, category misconfiguration)
+      // the lobby is still carrying its offline name when this sweep runs,
+      // and it must never be a deletion candidate — members may be in it.
+      // ensureLobbyChannelExists() at the end of the sweep renames it back to
+      // the online name instead. See issue #843.
+      const managedChannelNames = new Set([lobbyChannelName, offlineLobbyName]);
 
       // Add any channels that start with our prefix
       for (const channel of allChannels.values()) {
@@ -2001,7 +2134,17 @@ export class VoiceChannelManager {
             continue;
           }
 
-          // Delete unmanaged channels (empty or not)
+          // Never kick members out: an occupied channel is left alone until it
+          // empties, whatever its name. Occupancy is an unconditional guard for
+          // the whole sweep, not a per-branch one (#843).
+          if (channel.members.size > 0) {
+            logger.debug(
+              `Skipping occupied unmanaged channel: ${channel.name} (${channel.members.size} member(s))`,
+            );
+            continue;
+          }
+
+          // Delete empty unmanaged channels
           await channel.delete("Bot cleanup - unmanaged channel");
           // Reconcile any leftover in-memory tracking for this channel
           await this.reconcileDeletedChannelState(channel.id);
@@ -2039,9 +2182,23 @@ export class VoiceChannelManager {
       // configured name and is deleted above as "unmanaged"; without this the
       // guild is left with no lobby until the next (much slower) health check
       // happens to notice it is missing. Re-ensuring here closes that gap.
-      await this.ensureLobbyChannelExists(guild);
+      //
+      // ensureLobbyChannelExists() swallows permission/category errors, so
+      // key off its result: if the lobby could not be renamed/created, pause
+      // the sweep exactly as a failed startup rename does, so the next sweep
+      // retries the rename first instead of carrying on without a lobby.
+      if (!(await this.ensureLobbyChannelExists(guild))) {
+        this.lobbyOnlineRenameFailed = true;
+        logger.error(
+          "Lobby could not be ensured after cleanup. Periodic voice channel cleanup is " +
+            "paused until the lobby can be brought online.",
+        );
+        return false;
+      }
+      return true;
     } catch (error) {
       logger.error("Error during voice channel cleanup:", error);
+      return false;
     }
   }
 
@@ -2097,29 +2254,32 @@ export class VoiceChannelManager {
           "Offline lobby detected, attempting to restore normal lobby...",
         );
 
-        // If there are users in the offline lobby, create new channels for them
-        if (offlineLobby.members.size > 0) {
-          for (const member of offlineLobby.members.values()) {
-            try {
-              await this.createUserChannel(member);
-            } catch (error) {
-              logger.error(
-                `Error creating channel for member ${member.user.tag}:`,
-                error,
-              );
-            }
-          }
-        }
+        // Keep anyone in the offline lobby together in one new channel
+        const emptied = await this.moveOfflineLobbyMembersToSharedChannel(
+          guild,
+          offlineLobby,
+        );
 
-        // Delete the offline lobby
-        try {
-          await offlineLobby.delete("Health check cleanup");
-          logger.info("Deleted offline lobby channel during health check");
-        } catch (error) {
-          logger.error(
-            "Error deleting offline lobby channel during health check:",
-            error,
+        // Only delete it once nobody is left inside. Deleting a channel with
+        // members in it disconnects them, so a failed or partial move means
+        // the lobby stays until the next health check retries (#843).
+        const stillInside = offlineLobby.members.filter(
+          (member) => !member.user.bot,
+        ).size;
+        if (!emptied || stillInside > 0) {
+          logger.warn(
+            `Offline lobby still has ${stillInside} member(s) after the move; leaving it in place rather than disconnecting them`,
           );
+        } else {
+          try {
+            await offlineLobby.delete("Health check cleanup");
+            logger.info("Deleted offline lobby channel during health check");
+          } catch (error) {
+            logger.error(
+              "Error deleting offline lobby channel during health check:",
+              error,
+            );
+          }
         }
       }
 
