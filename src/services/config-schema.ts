@@ -111,6 +111,8 @@ export interface ConfigSchema {
   "events.create_lead_minutes": number; // How long before start the temp channel is created
   "events.default_duration_minutes": number; // Default event length when none is given
   "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
+  "reminders.enabled": boolean;
+  "reminders.max_pending": number; // Per-member cap on undelivered reminders
 
   // Reaction Roles
   "reactionroles.enabled": boolean;
@@ -336,6 +338,8 @@ export const defaultConfig: ConfigSchema = {
   "events.create_lead_minutes": 15,
   "events.default_duration_minutes": 120,
   "events.channel_grace_minutes": 15,
+  "reminders.enabled": false,
+  "reminders.max_pending": 10,
 
   // Reaction Roles defaults
   "reactionroles.enabled": false,
@@ -852,6 +856,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Events",
     description:
       "Schedule server events that spin up a temporary voice channel shortly before they start, let members RSVP with buttons, post a reminder beforehand, and tear the channel down once it ends. For servers without static voice channels. Manage from /admin/events or the /event command.",
+  },
+  reminders: {
+    title: "Reminders",
+    description:
+      "Personal one-off reminders members set for themselves with /remind. KoolBot DMs the reminder when it's due, falling back to the channel it was set in if the member's DMs are closed. Member self-service — the only admin control is the on/off switch and the per-member cap.",
   },
   reactionroles: {
     title: "Reaction Roles",
@@ -1462,6 +1471,21 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How long after an event ends the bot waits before deleting its (now empty) voice channel.",
     category: "events",
     type: "number",
+  },
+  "reminders.enabled": {
+    label: "Reminders enabled",
+    description:
+      "Enable personal reminders and the /remind command. Members schedule their own one-off reminders; KoolBot DMs them when due and falls back to the channel the reminder was set in if DMs are closed.",
+    category: "reminders",
+    type: "boolean",
+  },
+  "reminders.max_pending": {
+    label: "Pending reminders per member",
+    description:
+      "How many undelivered reminders one member may hold at a time. Bounds abuse; a member must cancel one before adding another once at the cap.",
+    category: "reminders",
+    type: "number",
+    min: 1,
   },
   "reactionroles.enabled": {
     label: "Reaction roles enabled",

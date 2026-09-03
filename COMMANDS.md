@@ -36,6 +36,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/achievements](#achievements)
   - [/quote](#quote)
   - [/event](#event)
+  - [/remind](#remind)
 - [Moderation commands](#-moderation-commands)
   - [/warn](#warn)
   - [/modlog](#modlog)
@@ -553,6 +554,72 @@ restart-safe — progress is tracked on the stored event, not in memory.
 
 ---
 
+### `/remind`
+
+**Description:** Set a personal, one-off reminder for yourself. KoolBot DMs
+it back to you when it's due.
+
+**Enable:** Web UI → Settings → `reminders.enabled = true` → Reload commands.
+
+**Usage:**
+
+```text
+/remind set message:"check the oven" in:2h
+/remind set message:"renew server sub" date:2026-09-01 time:18:00
+/remind list
+/remind cancel id:697bdfe2808f7d245289392c
+```
+
+#### `/remind set`
+
+Say when in **one** of two ways — `in:` or `date:` + `time:`, never both.
+
+**Parameters:**
+
+- `message` (required) — what to remind you about (max 500 characters)
+- `in` (optional) — time from now: `30m`, `2h`, `3d`, `1w`, or a
+  combination like `1h30m`. Whole numbers only; seconds aren't a unit
+- `date` (optional) — calendar date as `YYYY-MM-DD`, used with `time:`
+- `time` (optional) — 24-hour `HH:MM`, used with `date:`
+
+A `date:`/`time:` pair is read in **your** timezone — the one you set on
+`/me/timezone` — falling back to the server's timezone if you haven't set
+one. The confirmation renders the due time as a Discord timestamp, so it
+always displays in your real local time and a wrong timezone is obvious
+straight away.
+
+Reminders can be set up to a year ahead.
+
+#### `/remind list`
+
+Shows your pending reminders, soonest first, with the ID needed to cancel
+each one. You only ever see your own.
+
+#### `/remind cancel`
+
+Cancels one of your own pending reminders by ID. IDs come from
+`/remind list`.
+
+**How it works:**
+
+1. You schedule a reminder; it's stored with its due time
+2. A once-a-minute scan picks up reminders that have come due
+3. The reminder is DM'd to you
+4. If your DMs are closed, it's posted in the channel you set it in,
+   mentioning you
+
+Delivery is restart-safe: a reminder lives in the database, not in memory,
+so a bot restart never loses one. Each reminder is claimed before it is
+sent, so it can never arrive twice.
+
+Every reply is ephemeral — only you see your reminders. Your reminder text
+can never ping anyone, in the DM or the channel fallback.
+
+You can hold up to `reminders.max_pending` reminders at once (10 by
+default); cancel one to make room.
+
+---
+
 ## 🚨 Moderation commands
 
 A lightweight, queryable **moderation log**. KoolBot records warnings issued
@@ -854,6 +921,7 @@ button to admit them. **🗑️ Remove Waiting Room** deletes it.
 | `/quote`                       | Everyone\*       | Quotes enabled                |
 | `/event list`                  | Everyone\*       | Events enabled                |
 | `/event` create/cancel/start   | Administrator    | Events enabled                |
+| `/remind`                      | Everyone\*       | Reminders enabled             |
 | `/warn`                        | Moderate Members | Moderation log enabled        |
 | `/modlog`                      | Moderate Members | Moderation log enabled        |
 
@@ -949,6 +1017,9 @@ when its message, role, category, or channel is deleted.
 /quote edit id:"..." [text:"..."] [author:@User]
 /event list                         # List upcoming events
 /event create title:"..." date:YYYY-MM-DD time:HH:MM  # (admin) schedule an event
+/remind set message:"..." in:2h     # Set a personal reminder
+/remind list                        # Your pending reminders
+/remind cancel id:"..."             # Cancel one of your reminders
 /warn user:@User reason:"..."       # (mod) record a warning
 /modlog user:@User [page:N]         # (mod) view a member's moderation history
 ```

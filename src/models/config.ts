@@ -33,6 +33,7 @@ export const CONFIG_CATEGORIES = [
   "ratelimit",
   "reactionroles",
   "reactiontracking",
+  "reminders",
   "rewind",
   "voicechannels",
   "voicetracking",

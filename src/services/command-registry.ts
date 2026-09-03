@@ -34,6 +34,7 @@ export const COMMAND_CONFIGS: readonly CommandConfig[] = [
   },
   { name: "quote", configKey: "quotes.enabled", file: "quote" },
   { name: "event", configKey: "events.enabled", file: "event" },
+  { name: "remind", configKey: "reminders.enabled", file: "remind" },
   { name: "warn", configKey: "moderation.enabled", file: "warn" },
   { name: "modlog", configKey: "moderation.enabled", file: "modlog" },
   { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher

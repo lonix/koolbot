@@ -41,6 +41,7 @@ Complete configuration reference for all KoolBot settings.
 - [Rewind (Year-in-Review)](#-rewind-year-in-review)
 - [Birthdays](#-birthdays)
 - [Events](#-events)
+- [Reminders](#-reminders)
 - [Moderation](#-moderation)
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
@@ -690,6 +691,37 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 - Only administrators can create, cancel, or start events; `/event list`
   is open to everyone. A configurable creator role is a possible future
   enhancement. Recurring events are not yet supported.
+
+---
+
+## ⏰ Reminders
+
+Personal, one-off reminders members set for themselves with
+**`/remind`** (see [COMMANDS.md](COMMANDS.md#remind)). Member
+self-service, not admin configuration — there is nothing to wire up
+beyond the on/off switch and the per-member cap.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `reminders.enabled` | `false` | Master switch — enables the feature and the `/remind` command |
+| `reminders.max_pending` | `10` | How many undelivered reminders one member may hold at a time |
+
+**Notes:**
+
+- Delivery is a **DM**. That does not conflict with the opt-in DM posture
+  used by the digest and Rewind nudges: those are pushes nobody asked
+  for, whereas a reminder is the member's own explicit request. Reminders
+  are therefore **not** gated on `/me/notifications`.
+- If a member's DMs are closed, the reminder is posted in the channel it
+  was set in, mentioning them. Reminder text can never ping anyone else.
+- Due reminders are delivered by a **once-a-minute scan**, so delivery is
+  restart-safe and accurate to the minute. Each reminder is claimed before
+  it is sent, so it can never be delivered twice.
+- A `date:`/`time:` reminder is read in the member's own timezone from
+  `/me/timezone`, falling back to the host/server timezone. Reminders can
+  be set at most a year ahead.
+- Delivered reminders are pruned automatically a week after they fire, so
+  the collection needs no retention setting or cleanup job.
 
 ---
 

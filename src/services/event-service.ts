@@ -13,11 +13,11 @@ import {
 } from "discord.js";
 import { CronJob, CronTime } from "cron";
 import { isValidObjectId } from "mongoose";
-import { fromZonedTime, formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone } from "date-fns-tz";
 import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import { Event, type IEvent, type RsvpStatus } from "../models/event.js";
-import { resolveTimezone } from "../utils/timezone.js";
+import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -84,28 +84,19 @@ export function computeEndTime(startTime: Date, durationMinutes: number): Date {
 
 /**
  * Parse an organiser-entered wall-clock date + time (in `tz`) into an
- * absolute UTC instant. Returns null on any malformed or impossible input
- * (e.g. `2026-02-30`), verified by round-tripping the instant back through
- * the same zone — `fromZonedTime` otherwise silently rolls invalid dates
- * over.
+ * absolute UTC instant, or null when the pair is malformed or impossible
+ * (e.g. `2026-02-30`).
+ *
+ * Kept as a named export so the events code (and its tests) read in event
+ * terms; the parsing itself lives in `utils/timezone` because `/remind`
+ * needs exactly the same wall-clock handling.
  */
 export function parseEventDateTime(
   dateStr: string,
   timeStr: string,
   tz: string,
 ): Date | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
-  if (!/^\d{2}:\d{2}$/.test(timeStr)) return null;
-  const zone = resolveTimezone(tz);
-  try {
-    const utc = fromZonedTime(`${dateStr}T${timeStr}:00`, zone);
-    if (Number.isNaN(utc.getTime())) return null;
-    const roundTrip = formatInTimeZone(utc, zone, "yyyy-MM-dd'T'HH:mm");
-    if (roundTrip !== `${dateStr}T${timeStr}`) return null;
-    return utc;
-  } catch {
-    return null;
-  }
+  return parseZonedDateTime(dateStr, timeStr, tz);
 }
 
 /** Tally RSVPs by response. */
