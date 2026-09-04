@@ -1,5 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import {
+  isValidCronExpression,
   sanitizeCronExpression,
   validateCronExpression,
 } from "../../src/utils/cron.js";
@@ -56,5 +57,29 @@ describe("validateCronExpression", () => {
   it("sanitizes the logged expression so it cannot forge log lines", () => {
     validateCronExpression("bad\nINFO forged", "digest");
     expect(String(errorSpy.mock.calls[0][0])).not.toMatch(/[\r\n]/);
+  });
+});
+
+// The WebUI form handlers validate admin-typed input, where a rejection is a
+// field error rather than a fault, so they use the non-logging variant.
+describe("isValidCronExpression", () => {
+  let errorSpy: ReturnType<typeof jest.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = jest
+      .spyOn(logger, "error")
+      .mockImplementation((() => logger) as never);
+    errorSpy.mockClear();
+  });
+
+  it("agrees with validateCronExpression on both valid and invalid input", () => {
+    expect(isValidCronExpression("0 9 * * *")).toBe(true);
+    expect(isValidCronExpression('"0 9 * * *"')).toBe(true);
+    expect(isValidCronExpression("not a cron")).toBe(false);
+  });
+
+  it("never logs, however bad the input", () => {
+    isValidCronExpression("not a cron");
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 });

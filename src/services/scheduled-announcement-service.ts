@@ -313,10 +313,15 @@ export class ScheduledAnnouncementService {
   private scheduleAnnouncement(
     announcement: IScheduledAnnouncement,
   ): CronJob | null {
-    if (!validateCronExpression(announcement.cronSchedule)) {
-      logger.error(
-        `Invalid cron schedule for announcement ${announcement._id}: ${announcement.cronSchedule}`,
-      );
+    // The shared validator logs the (sanitized) expression itself, so pass the
+    // announcement id as its context rather than logging the raw value again.
+    const announcementId = sanitizeForLog(announcement._id.toString());
+    if (
+      !validateCronExpression(
+        announcement.cronSchedule,
+        `announcement ${announcementId}`,
+      )
+    ) {
       return null;
     }
 

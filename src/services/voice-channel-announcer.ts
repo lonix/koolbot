@@ -3,11 +3,17 @@ import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
-import { validateCronExpression } from "../utils/cron.js";
+import {
+  sanitizeCronExpression,
+  validateCronExpression,
+} from "../utils/cron.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { AchievementsService } from "./achievements-service.js";
 import { quoteService } from "./quote-service.js";
 import { PollParticipationTracker } from "./poll-participation-tracker.js";
+
+/** Fallback schedule when the configured one is missing or unparseable. */
+const DEFAULT_ANNOUNCEMENT_SCHEDULE = "0 16 * * 5";
 
 /** One week, in milliseconds — the window every recap section covers. */
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -124,18 +130,20 @@ export class VoiceChannelAnnouncer {
         return;
       }
 
-      let schedule = await this.configService.getString(
-        "voicetracking.announcements.schedule",
-        "0 16 * * 5",
+      let schedule = sanitizeCronExpression(
+        await this.configService.getString(
+          "voicetracking.announcements.schedule",
+          DEFAULT_ANNOUNCEMENT_SCHEDULE,
+        ),
       );
-      // Remove any surrounding quotes from the schedule
-      schedule = schedule.replace(/^["']|["']$/g, "");
 
-      if (!validateCronExpression(schedule)) {
+      // The shared validator has already logged the offending expression, so
+      // this line only records the fallback being applied.
+      if (!validateCronExpression(schedule, "voice channel announcements")) {
         logger.error(
-          `Invalid announcement schedule: ${schedule}. Using default schedule: 0 16 * * 5`,
+          `Using the default announcement schedule instead: ${DEFAULT_ANNOUNCEMENT_SCHEDULE}`,
         );
-        schedule = "0 16 * * 5";
+        schedule = DEFAULT_ANNOUNCEMENT_SCHEDULE;
       }
 
       this.announcementJob = new CronJob(schedule, () => {

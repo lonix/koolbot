@@ -1,5 +1,6 @@
 import { Client } from "discord.js";
 import logger from "../utils/logger.js";
+import { sanitizeCronExpression } from "../utils/cron.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
 import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
@@ -200,7 +201,7 @@ export class MessageActivityCleanupService {
 
       const schedule = await this.getSchedule();
       const cleanSchedule = schedule
-        ? schedule.replace(/^["']|["']$/g, "")
+        ? sanitizeCronExpression(schedule)
         : "0 3 * * *";
 
       this.cleanupJob = new CronJob(cleanSchedule, () => {

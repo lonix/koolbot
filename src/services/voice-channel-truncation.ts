@@ -1,10 +1,14 @@
 import { Client } from "discord.js";
 import logger from "../utils/logger.js";
+import { sanitizeCronExpression } from "../utils/cron.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import mongoose from "mongoose";
 import { CronJob } from "cron";
+
+/** Daily at midnight — used when no cleanup schedule is configured. */
+const DEFAULT_CLEANUP_SCHEDULE = "0 0 * * *";
 
 export interface ICleanupStats {
   sessionsRemoved: number;
@@ -234,15 +238,14 @@ export class VoiceChannelTruncationService {
           "No cleanup schedule configured, using default (daily at midnight)",
         );
         // Default to daily at midnight
-        this.cleanupJob = new CronJob("0 0 * * *", () => {
+        this.cleanupJob = new CronJob(DEFAULT_CLEANUP_SCHEDULE, () => {
           logger.info("Scheduled cleanup triggered");
           this.runCleanup().catch((error) => {
             logger.error("Error in scheduled cleanup:", error);
           });
         });
       } else {
-        // Remove any surrounding quotes from the schedule
-        const cleanSchedule = schedule.replace(/^["']|["']$/g, "");
+        const cleanSchedule = sanitizeCronExpression(schedule);
         logger.info(`Using cleaned schedule: "${cleanSchedule}"`);
 
         this.cleanupJob = new CronJob(cleanSchedule, () => {
@@ -256,7 +259,7 @@ export class VoiceChannelTruncationService {
       this.cleanupJob.start();
       this.isScheduled = true;
       logger.info(
-        `✅ Voice channel cleanup scheduled successfully with cron: ${schedule ? schedule.replace(/^["']|["']$/g, "") : "0 0 * * *"}`,
+        `✅ Voice channel cleanup scheduled successfully with cron: ${schedule ? sanitizeCronExpression(schedule) : DEFAULT_CLEANUP_SCHEDULE}`,
       );
     } catch (error) {
       logger.error("❌ Error starting scheduled cleanup:", error);
