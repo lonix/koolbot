@@ -1857,7 +1857,7 @@ export function renderAnnouncementsPage(props: AnnouncementsProps): string {
 
   const body = `
 <h1>Announcements</h1>
-<p class="subtitle">Scheduled announcements posted on a cron. Replaces the retired <code>/announce</code> and <code>/announce-vc-stats</code> slash commands.</p>
+<p class="subtitle">Scheduled announcements posted on a cron.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", featureKey: "announcements.enabled", returnTo: "/admin/announcements", csrfToken: props.csrfToken })}
 <div class="card">
@@ -2203,7 +2203,7 @@ export function renderPollsPage(props: PollsProps): string {
 
   const body = `
 <h1>Polls</h1>
-<p class="subtitle">Poll schedules and the question library. Replaces the retired <code>/poll create|delete|test|add-item|delete-item|list|list-items</code> slash commands.</p>
+<p class="subtitle">Poll schedules and the question library.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureKey: "polls.enabled", returnTo: "/admin/polls", csrfToken: props.csrfToken })}
 <div class="card">
@@ -2398,7 +2398,7 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
 
   const body = `
 <h1>Reaction Roles</h1>
-<p class="subtitle">Per-message reaction-role mappings. This page is the admin surface for reaction roles; the legacy <code>/reactrole</code> slash command was retired in the Web UI migration.</p>
+<p class="subtitle">Per-message reaction-role mappings.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Reaction Roles", featureKey: "reactionroles.enabled", returnTo: "/admin/reaction-roles", csrfToken: props.csrfToken })}
 <div class="card">
@@ -2581,7 +2581,7 @@ export function renderNoticesPage(props: NoticesProps): string {
 
   const body = `
 <h1>Notices</h1>
-<p class="subtitle">Notice posts grouped by category. Replaces the retired <code>/notice add|edit|delete|sync</code> slash commands. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
+<p class="subtitle">Notice posts grouped by category. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
 <div class="card">
@@ -2696,7 +2696,7 @@ export function renderDatabasePage(props: DatabaseProps): string {
 
   const body = `
 <h1>Database</h1>
-<p class="subtitle">MongoDB connection state and the voice-channel <code>dbtrunk</code> cleanup. Replaces the retired <code>/dbtrunk status|run</code> slash commands.</p>
+<p class="subtitle">MongoDB connection state and the scheduled voice-tracking data cleanup.</p>
 ${renderFlash(props.flash)}
 <div class="card">
   <h2>Connection</h2>
@@ -2707,7 +2707,7 @@ ${renderFlash(props.flash)}
   </dl>
 </div>
 <div class="card">
-  <h2>dbtrunk (voice-tracking cleanup)</h2>
+  <h2>Voice-tracking cleanup</h2>
   <dl class="kv">
     <dt>Feature</dt><dd>${tagOnOff(props.trunk.enabled, "enabled", "disabled")}</dd>
     <dt>Schedule</dt><dd class="mono">${escapeHtml(props.trunk.schedule || "(unset)")}</dd>
@@ -3050,7 +3050,7 @@ export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
 
   const body = `
 <h1>Voice Channels</h1>
-<p class="subtitle">Voice-channel category contents and live state. Replaces the retired <code>/vc force-reload</code> and <code>/vc reload</code> slash commands.</p>
+<p class="subtitle">Voice-channel category contents and live state.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels", featureKey: "voicechannels.enabled", returnTo: "/admin/voice-channels", csrfToken: props.csrfToken })}
 <div class="card">
