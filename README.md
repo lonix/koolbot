@@ -153,6 +153,7 @@ commands always registered):
 - `/achievements` — View earned accolades (`achievements.enabled`)
 - `/quote add` / `/quote edit` — Manage memorable quotes (`quotes.enabled`)
 - `/event` — Create, browse and RSVP to server events (`events.enabled`)
+- `/remind` — Set personal one-off reminders KoolBot DMs when due (`reminders.enabled`)
 - `/warn` — Record a moderation warning (`moderation.enabled`)
 - `/modlog` — Look up a member's moderation history (`moderation.enabled`)
 
@@ -226,6 +227,8 @@ Web UI's Settings page once the bot is running.
 | **Rewind (Year-in-Review)** | End-of-year recap at `/me/rewind` plus a December nudge |
 | **Birthdays** | Timezone-aware birthday announcements and a temporary role |
 | **Events** | Scheduled events with RSVPs and temporary voice channels |
+| **Reminders** | Personal one-off `/remind` reminders, DM'd when due, with a per-member cap |
+| **Privacy** | Self-service data export: what KoolBot stores about a member, downloadable at `/me/privacy` |
 | **Reaction Roles** | Self-assignable role categories |
 | **Notices** | Server rules / game-server info / help posts |
 | **Polls** | Scheduled native Discord polls from a question library |
