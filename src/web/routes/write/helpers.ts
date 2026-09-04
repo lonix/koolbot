@@ -9,7 +9,10 @@
  */
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { CronTime } from "cron";
+import {
+  isValidCronExpression,
+  sanitizeCronExpression,
+} from "../../../utils/cron.js";
 import logger from "../../../utils/logger.js";
 import { ConfigService } from "../../../services/config-service.js";
 import type { WizardApplyResult } from "../../../services/wizard-service.js";
@@ -206,19 +209,17 @@ export function parseIntInRange(
  * persist the same form. Otherwise `"0 9 * * *"` would pass validation
  * (which strips quotes internally) but get stored verbatim, and later
  * fail when the cron job is actually scheduled from the database row.
+ *
+ * Delegates to the shared helper so the WebUI stores exactly the form the
+ * services parse.
  */
-export function normalizeCron(expr: string): string {
-  return expr.replace(/^["']|["']$/g, "").trim();
-}
+export const normalizeCron = sanitizeCronExpression;
 
-export function validCron(expr: string): boolean {
-  try {
-    new CronTime(expr);
-    return true;
-  } catch {
-    return false;
-  }
-}
+/**
+ * A rejected expression here is an admin typo answered with a field error, not
+ * a fault, so this uses the non-logging variant.
+ */
+export const validCron = isValidCronExpression;
 
 export function parseHexColor(input: string): number | null {
   const match = input.match(/^#?([0-9A-Fa-f]{6})$/);

@@ -10,6 +10,7 @@ import {
   renderAdminPage,
   type NavFeatureStatus,
 } from "./admin-layout.js";
+import { sanitizeCronExpression } from "../utils/cron.js";
 import {
   categoryMetadata,
   getDependencies,
@@ -395,13 +396,11 @@ export interface CronPickerState {
 }
 
 export function parseCronToPickerState(cron: string): CronPickerState {
-  // Strip surrounding quotes the same way the runtime services do
-  // (voice-channel-truncation, voice-channel-announcer,
-  // scheduled-announcement-service all apply this normalisation before
-  // handing the string to CronJob). Without it a stored value like
-  // `"0 16 * * 5"` would silently fall back to custom mode here even
-  // though the bot itself treats it as the unquoted form.
-  const stripped = cron.replace(/^["']|["']$/g, "");
+  // Strip surrounding quotes the same way the runtime services do — they all
+  // normalise through `sanitizeCronExpression` before handing the string to
+  // CronJob. Without it a stored value like `"0 16 * * 5"` would silently fall
+  // back to custom mode here even though the bot treats it as the unquoted form.
+  const stripped = sanitizeCronExpression(cron);
   const fallback: CronPickerState = {
     mode: "custom",
     minute: 0,

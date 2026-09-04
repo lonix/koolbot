@@ -1,7 +1,9 @@
 import { Client, TextChannel } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { waitForClientReady } from "../utils/discord.js";
+import { validateCronExpression } from "../utils/cron.js";
 import { PollSchedule, IPollSchedule } from "../models/poll-schedule.js";
 import { PollItem, IPollItem } from "../models/poll-item.js";
 import { PollParticipationTracker } from "./poll-participation-tracker.js";
@@ -90,69 +92,6 @@ export class PollService {
     PollService.instance = undefined as unknown as PollService;
   }
 
-  private validateCronExpression(expression: string): boolean {
-    try {
-      const cleanExpression = expression.replace(/^["']|["']$/g, "");
-      new CronTime(cleanExpression);
-      return true;
-    } catch (error) {
-      logger.error(
-        `Invalid cron expression: ${sanitizeForLog(expression)}`,
-        error,
-      );
-      return false;
-    }
-  }
-
-  private async waitForClientReady(): Promise<void> {
-    if (this.client.isReady()) {
-      return;
-    }
-
-    return new Promise((resolve) => {
-      const maxWaitMs = 30000;
-      const pollIntervalMs = 500;
-      let resolved = false;
-      let elapsed = 0;
-
-      const cleanup = (): void => {
-        if (resolved) {
-          return;
-        }
-        resolved = true;
-        this.client.off("ready", onReady);
-        clearInterval(intervalId);
-      };
-
-      const onReady = (): void => {
-        cleanup();
-        resolve();
-      };
-
-      const intervalId = setInterval(() => {
-        if (this.client.isReady()) {
-          cleanup();
-          resolve();
-          return;
-        }
-
-        elapsed += pollIntervalMs;
-        if (elapsed >= maxWaitMs) {
-          logger.warn(
-            "PollService: client did not become ready within expected time; continuing anyway.",
-          );
-          cleanup();
-          resolve();
-        }
-      }, pollIntervalMs);
-
-      // Don't keep the event loop alive solely for this readiness poll.
-      intervalId.unref?.();
-
-      this.client.once("ready", onReady);
-    });
-  }
-
   /**
    * Select a poll item from the database that hasn't been used recently
    */
@@ -199,7 +138,7 @@ export class PollService {
    */
   private async postPoll(schedule: IPollSchedule): Promise<void> {
     try {
-      await this.waitForClientReady();
+      await waitForClientReady(this.client, "PollService");
 
       const guild = await this.client.guilds.fetch(schedule.guildId);
       if (!guild) {
@@ -287,7 +226,7 @@ export class PollService {
   }
 
   private schedulePoll(schedule: IPollSchedule): CronJob | null {
-    if (!this.validateCronExpression(schedule.cronSchedule)) {
+    if (!validateCronExpression(schedule.cronSchedule)) {
       logger.error(
         `Invalid cron schedule for poll ${sanitizeForLog(schedule._id)}: ${sanitizeForLog(schedule.cronSchedule)}`,
       );
@@ -332,7 +271,7 @@ export class PollService {
     logger.info("Starting poll service...");
 
     try {
-      await this.waitForClientReady();
+      await waitForClientReady(this.client, "PollService");
 
       const enabled = await this.configService.getBoolean(
         "polls.enabled",
@@ -521,7 +460,7 @@ export class PollService {
   public async createSchedule(
     data: Omit<IPollSchedule, "createdAt" | "updatedAt" | "lastRun">,
   ): Promise<IPollSchedule> {
-    if (!this.validateCronExpression(data.cronSchedule)) {
+    if (!validateCronExpression(data.cronSchedule)) {
       throw new Error(`Invalid cron expression: ${data.cronSchedule}`);
     }
 
@@ -558,7 +497,7 @@ export class PollService {
     },
     guildId?: string,
   ): Promise<IPollSchedule | null> {
-    if (!this.validateCronExpression(data.cronSchedule)) {
+    if (!validateCronExpression(data.cronSchedule)) {
       throw new Error(`Invalid cron expression: ${data.cronSchedule}`);
     }
 

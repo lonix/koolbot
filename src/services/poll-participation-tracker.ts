@@ -1,5 +1,6 @@
 import { Client, PollAnswer, PartialPollAnswer, Snowflake } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
+import { MongoConnectionGuard } from "../utils/mongo.js";
 import { PollParticipationTracking } from "../models/poll-participation-tracking.js";
 import { PollTurnout } from "../models/poll-turnout.js";
 import mongoose from "mongoose";
@@ -54,53 +55,13 @@ const PRUNE_BATCH_SIZE = 500;
 export class PollParticipationTracker {
   private static instance: PollParticipationTracker;
   private client: Client;
-  private isConnected: boolean = false;
+  private mongo = new MongoConnectionGuard("poll participation tracker");
   private configService: ConfigService;
   private pruneInterval: ReturnType<typeof setInterval> | null = null;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
-    this.setupMongoConnectionHandlers();
-  }
-
-  private setupMongoConnectionHandlers(): void {
-    mongoose.connection.on("connected", () => {
-      this.isConnected = true;
-      logger.info(
-        "MongoDB connection established for poll participation tracker",
-      );
-    });
-
-    mongoose.connection.on("disconnected", () => {
-      this.isConnected = false;
-      logger.warn("MongoDB connection lost for poll participation tracker");
-    });
-
-    mongoose.connection.on("error", (error: Error) => {
-      this.isConnected = false;
-      logger.error(
-        "MongoDB connection error in poll participation tracker:",
-        error,
-      );
-    });
-  }
-
-  private async ensureConnection(): Promise<void> {
-    if (!this.isConnected) {
-      try {
-        await mongoose.connect(
-          await this.configService.getString(
-            "MONGODB_URI",
-            "mongodb://mongodb:27017/koolbot",
-          ),
-        );
-        logger.info("Reconnected to MongoDB for poll participation tracker");
-      } catch (error: unknown) {
-        logger.error("Error reconnecting to MongoDB:", error);
-        throw error;
-      }
-    }
   }
 
   public static getInstance(client: Client): PollParticipationTracker {
@@ -177,7 +138,7 @@ export class PollParticipationTracker {
     year: string,
     now: Date,
   ): Promise<void> {
-    await this.ensureConnection();
+    await this.mongo.ensureConnection();
 
     const week = getIsoWeekKey(now);
     await PollParticipationTracking.updateOne(
@@ -229,7 +190,7 @@ export class PollParticipationTracker {
     const messageId = message.id;
     if (!messageId) return;
 
-    await this.ensureConnection();
+    await this.mongo.ensureConnection();
 
     const question = (
       message.poll as { question?: { text?: string } } | null | undefined
@@ -281,7 +242,7 @@ export class PollParticipationTracker {
       );
       if (!isEnabled) return;
 
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       await PollTurnout.updateOne(
         { guildId: params.guildId, messageId: params.messageId },
@@ -337,7 +298,7 @@ export class PollParticipationTracker {
     lastVoteAt: Date | null;
   } | null> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const doc = await PollParticipationTracking.findOne(
         { userId, guildId },
@@ -384,7 +345,7 @@ export class PollParticipationTracker {
     since: Date,
   ): Promise<number> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
       return await PollParticipationTracking.countDocuments({
         guildId,
         lastVoteAt: { $gte: since },
@@ -409,7 +370,7 @@ export class PollParticipationTracker {
     since: Date,
   ): Promise<number> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
       return await PollTurnout.countDocuments({
         guildId,
         lastVoteAt: { $gte: since },
@@ -443,7 +404,7 @@ export class PollParticipationTracker {
     votesCast: number;
   } | null> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const rows = await PollTurnout.aggregate<{
         messageId: string;
@@ -513,7 +474,7 @@ export class PollParticipationTracker {
     const result = { weekBucketsPruned: 0, turnoutRowsDeleted: 0 };
 
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const retentionWeeks = await this.configService.getNumber(
         "polls.participation.weekly_retention_weeks",
@@ -631,7 +592,7 @@ export class PollParticipationTracker {
 
   public async initialize(): Promise<void> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       // Run the retention pass once at startup, then daily. The interval is
       // unref'd so it never keeps the process alive on shutdown, and the

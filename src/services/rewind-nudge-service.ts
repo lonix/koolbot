@@ -1,5 +1,5 @@
 import { Client, EmbedBuilder, type ColorResolvable } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import { DiscordLogger } from "./discord-logger.js";
@@ -7,6 +7,10 @@ import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindService } from "./rewind-service.js";
 import logger from "../utils/logger.js";
+import {
+  sanitizeCronExpression,
+  validateCronExpression,
+} from "../utils/cron.js";
 
 /**
  * End-of-year DM nudge for the Rewind WebUI page (#484).
@@ -42,10 +46,6 @@ export interface RewindNudgeRunSummary {
   snapshotsSkipped: number;
   /** Snapshots that failed to write. */
   snapshotsFailed: number;
-}
-
-function sanitizeCronExpression(expression: string): string {
-  return expression.trim().replace(/^["']|["']$/g, "");
 }
 
 export class RewindNudgeService {
@@ -115,19 +115,6 @@ export class RewindNudgeService {
     return this.configService.getBoolean("rewind.nudge.enabled", legacy);
   }
 
-  private validateCronExpression(expression: string): boolean {
-    try {
-      new CronTime(expression);
-      return true;
-    } catch (error) {
-      logger.error(
-        `Invalid cron expression for rewind nudge: ${expression}`,
-        error,
-      );
-      return false;
-    }
-  }
-
   public async start(): Promise<void> {
     if (this.isInitialized) {
       logger.warn("Rewind nudge service is already initialized, skipping...");
@@ -148,7 +135,7 @@ export class RewindNudgeService {
       );
       const cronExpression = sanitizeCronExpression(rawCron);
 
-      if (!this.validateCronExpression(cronExpression)) {
+      if (!validateCronExpression(cronExpression, "rewind nudge")) {
         logger.error(
           `Rewind nudge service not started: invalid cron "${rawCron}"`,
         );

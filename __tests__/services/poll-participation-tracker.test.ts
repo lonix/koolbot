@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { stubMongoGuard } from "../test-utils.js";
 import type { Client, PollAnswer, User } from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
@@ -67,7 +68,7 @@ function createTracker(voter: { username: string; bot: boolean } | null) {
     getNumber: jest.fn().mockResolvedValue(0),
   };
   (tracker as never)["configService"] = mockConfigService;
-  (tracker as never)["isConnected"] = true;
+  stubMongoGuard(tracker);
   (tracker as never)["client"] = mockClient;
 
   return { tracker, mockConfigService, usersFetch };

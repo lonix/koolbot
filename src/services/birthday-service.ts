@@ -1,5 +1,5 @@
 import { Client, Guild, TextChannel } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { formatInTimeZone } from "date-fns-tz";
 import { ConfigService } from "./config-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
@@ -7,6 +7,10 @@ import { DiscordLogger } from "./discord-logger.js";
 import { UserBirthday, type IUserBirthday } from "../models/user-birthday.js";
 import { resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import {
+  sanitizeCronExpression,
+  validateCronExpression,
+} from "../utils/cron.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
@@ -49,10 +53,6 @@ export interface BirthdayRunSummary {
   rolesGranted: number;
   rolesRemoved: number;
   failed: number;
-}
-
-function sanitizeCronExpression(expression: string): string {
-  return expression.trim().replace(/^["']|["']$/g, "");
 }
 
 /** Days in each (1-based) month, treating February as 29 so leap-day
@@ -219,19 +219,6 @@ export class BirthdayService {
     BirthdayService.instance = undefined as unknown as BirthdayService;
   }
 
-  private validateCronExpression(expression: string): boolean {
-    try {
-      new CronTime(expression);
-      return true;
-    } catch (error) {
-      logger.error(
-        `Invalid cron expression for birthdays: ${expression}`,
-        error,
-      );
-      return false;
-    }
-  }
-
   // ---------------------------------------------------------------
   // Storage (used by the /me/birthday WebUI surface)
   // ---------------------------------------------------------------
@@ -341,7 +328,7 @@ export class BirthdayService {
         DEFAULT_CRON,
       );
       const cronExpression = sanitizeCronExpression(rawCron);
-      if (!this.validateCronExpression(cronExpression)) {
+      if (!validateCronExpression(cronExpression, "birthdays")) {
         logger.error(`Birthday service not started: invalid cron "${rawCron}"`);
         this.isInitialized = true;
         return;

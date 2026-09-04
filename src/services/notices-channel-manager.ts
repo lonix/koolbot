@@ -2,6 +2,7 @@ import { Client, TextChannel, EmbedBuilder } from "discord.js";
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { waitForClientReady } from "../utils/discord.js";
 import Notice, { INotice } from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 
@@ -42,23 +43,6 @@ export class NoticesChannelManager {
       undefined as unknown as NoticesChannelManager;
   }
 
-  private async waitForClientReady(): Promise<void> {
-    if (this.client.isReady()) {
-      return;
-    }
-
-    return new Promise((resolve) => {
-      const checkReady = (): void => {
-        if (this.client.isReady()) {
-          resolve();
-        } else {
-          setTimeout(checkReady, 100).unref?.();
-        }
-      };
-      checkReady();
-    });
-  }
-
   public async initialize(): Promise<void> {
     if (this.isInitialized) {
       logger.warn("Notices channel manager already initialized, skipping...");
@@ -68,7 +52,7 @@ export class NoticesChannelManager {
     logger.info("Initializing notices channel manager...");
 
     try {
-      await this.waitForClientReady();
+      await waitForClientReady(this.client, "NoticesChannelManager");
 
       const enabled = await this.configService.getBoolean(
         "notices.enabled",

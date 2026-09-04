@@ -135,7 +135,8 @@ count.
 Pages are server-rendered HTML strings composed in `admin-views.ts` and
 wrapped by `renderAdminPage` from `admin-layout.ts`. There is no SPA, no
 JS bundle, no CDN. All values are escaped through `escapeHtml` /
-`escapeJsInAttr` at the boundary.
+`escapeJsInAttr` (defined in `src/web/html.ts`, re-exported by
+`admin-layout.ts`) at the boundary.
 
 The always-visible **session expires in X · [Finish]** banner is part of
 the shared layout and reads `WebSessionContext.expiresAt` to render the
@@ -564,6 +565,60 @@ export class MyService {
 const myService = MyService.getInstance(client);
 await myService.initialize();
 ```
+
+---
+
+### Shared service helpers
+
+Cron parsing, gateway-readiness waits and MongoDB reconnects are the three
+things nearly every service needs, and each of them used to be copy-pasted
+into the services that needed it (#851). Import the shared helper instead of
+writing a local copy:
+
+| Need | Helper | Module |
+| --- | --- | --- |
+| Parse/validate a cron string from config | `sanitizeCronExpression`, `validateCronExpression` | `src/utils/cron.ts` |
+| Wait for the gateway before the first fetch | `waitForClientReady` | `src/utils/discord.ts` |
+| Reconnect Mongo before a query | `MongoConnectionGuard` | `src/utils/mongo.ts` |
+| Escape a value into HTML | `escapeHtml`, `escapeJsInAttr` | `src/web/html.ts` |
+
+```typescript
+import { CronJob } from "cron";
+import { sanitizeCronExpression, validateCronExpression } from "../utils/cron.js";
+import { waitForClientReady } from "../utils/discord.js";
+import { MongoConnectionGuard } from "../utils/mongo.js";
+
+export class MyService {
+  // Owns the connection flag and the mongoose connection listeners.
+  private mongo = new MongoConnectionGuard("my service");
+
+  public async start(): Promise<void> {
+    await waitForClientReady(this.client, "MyService");
+
+    const raw = await this.configService.getString("myfeature.cron", "0 9 * * *");
+    const cron = sanitizeCronExpression(raw);
+    // The context argument only shapes the error log.
+    if (!validateCronExpression(cron, "my feature")) return;
+
+    this.job = new CronJob(cron, () => void this.runNow());
+    this.job.start();
+  }
+
+  private async load(): Promise<void> {
+    await this.mongo.ensureConnection();
+    // …query
+  }
+}
+```
+
+`waitForClientReady` always gives up after 30 s (configurable) and logs a
+warning rather than waiting forever, so a client that never connects surfaces
+as a diagnostic instead of a hung `initialize()`.
+
+`MongoConnectionGuard` reads `MONGODB_URI` through `ConfigService`, defaulting
+to `DEFAULT_MONGODB_URI` from `src/config/env.ts` — do not re-inline the
+connection string. In tests, stub the guard with `stubMongoGuard(service)` from
+`__tests__/test-utils.ts`.
 
 ---
 

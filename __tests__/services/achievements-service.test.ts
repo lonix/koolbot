@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { stubMongoGuard } from "../test-utils.js";
 import { type Client, TextChannel } from "discord.js";
 
 // Do NOT override the global mongoose mock from setup.ts — rely on it for stable jest.fn() instances.
@@ -74,9 +75,9 @@ function createAchievementsService(mockClient: Partial<Client>) {
     getNumber: jest.fn().mockResolvedValue(0),
     triggerReload: jest.fn().mockResolvedValue(undefined),
   };
-  // Inject mock config service and mark as connected (established pattern from codebase)
+  // Inject mock config service and stub the Mongo connection guard
   (service as never)["configService"] = mockConfigService;
-  (service as never)["isConnected"] = true;
+  stubMongoGuard(service);
 
   return { service, mockConfigService };
 }

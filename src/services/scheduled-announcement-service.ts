@@ -1,7 +1,9 @@
 import { Client, Guild, TextChannel, EmbedBuilder } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
+import { waitForClientReady } from "../utils/discord.js";
+import { validateCronExpression } from "../utils/cron.js";
 import {
   ScheduledAnnouncement,
   IScheduledAnnouncement,
@@ -86,69 +88,6 @@ export class ScheduledAnnouncementService {
     }
     ScheduledAnnouncementService.instance =
       undefined as unknown as ScheduledAnnouncementService;
-  }
-
-  private validateCronExpression(expression: string): boolean {
-    try {
-      const cleanExpression = expression.replace(/^["']|["']$/g, "");
-      new CronTime(cleanExpression);
-      return true;
-    } catch (error) {
-      logger.error(
-        `Invalid cron expression: ${sanitizeForLog(expression)}`,
-        error,
-      );
-      return false;
-    }
-  }
-
-  private async waitForClientReady(): Promise<void> {
-    if (this.client.isReady()) {
-      return;
-    }
-
-    return new Promise((resolve) => {
-      const maxWaitMs = 30000;
-      const pollIntervalMs = 500;
-      let resolved = false;
-      let elapsed = 0;
-
-      const cleanup = (): void => {
-        if (resolved) {
-          return;
-        }
-        resolved = true;
-        this.client.off("ready", onReady);
-        clearInterval(intervalId);
-      };
-
-      const onReady = (): void => {
-        cleanup();
-        resolve();
-      };
-
-      const intervalId = setInterval(() => {
-        if (this.client.isReady()) {
-          cleanup();
-          resolve();
-          return;
-        }
-
-        elapsed += pollIntervalMs;
-        if (elapsed >= maxWaitMs) {
-          logger.warn(
-            "ScheduledAnnouncementService: client did not become ready within the expected time; continuing anyway.",
-          );
-          cleanup();
-          resolve();
-        }
-      }, pollIntervalMs);
-
-      // Don't keep the event loop alive solely for this readiness poll.
-      intervalId.unref?.();
-
-      this.client.once("ready", onReady);
-    });
   }
 
   /**
@@ -257,7 +196,7 @@ export class ScheduledAnnouncementService {
   private async dispatchAnnouncement(
     announcement: AnnouncementContent,
   ): Promise<void> {
-    await this.waitForClientReady();
+    await waitForClientReady(this.client, "ScheduledAnnouncementService");
 
     const guild = await this.client.guilds.fetch(announcement.guildId);
     if (!guild) {
@@ -374,10 +313,15 @@ export class ScheduledAnnouncementService {
   private scheduleAnnouncement(
     announcement: IScheduledAnnouncement,
   ): CronJob | null {
-    if (!this.validateCronExpression(announcement.cronSchedule)) {
-      logger.error(
-        `Invalid cron schedule for announcement ${announcement._id}: ${announcement.cronSchedule}`,
-      );
+    // The shared validator logs the (sanitized) expression itself, so pass the
+    // announcement id as its context rather than logging the raw value again.
+    const announcementId = sanitizeForLog(announcement._id.toString());
+    if (
+      !validateCronExpression(
+        announcement.cronSchedule,
+        `announcement ${announcementId}`,
+      )
+    ) {
       return null;
     }
 
@@ -426,7 +370,7 @@ export class ScheduledAnnouncementService {
     logger.info("Starting scheduled announcement service...");
 
     try {
-      await this.waitForClientReady();
+      await waitForClientReady(this.client, "ScheduledAnnouncementService");
 
       const enabled = await this.configService.getBoolean(
         "announcements.enabled",
@@ -480,7 +424,7 @@ export class ScheduledAnnouncementService {
   public async createAnnouncement(
     data: Omit<IScheduledAnnouncement, "createdAt" | "updatedAt">,
   ): Promise<IScheduledAnnouncement> {
-    if (!this.validateCronExpression(data.cronSchedule)) {
+    if (!validateCronExpression(data.cronSchedule)) {
       throw new Error(`Invalid cron expression: ${data.cronSchedule}`);
     }
 

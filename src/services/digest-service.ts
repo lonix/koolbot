@@ -1,5 +1,5 @@
 import { Client, EmbedBuilder, type ColorResolvable } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
@@ -11,6 +11,10 @@ import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
 import { formatInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import {
+  sanitizeCronExpression,
+  validateCronExpression,
+} from "../utils/cron.js";
 
 interface QualifyingUser {
   userId: string;
@@ -78,10 +82,6 @@ const DEFAULT_CRON = "0 9 * * 1";
 const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_WEEK = 7 * 24 * 60 * 60;
 const EMBED_COLOR: ColorResolvable = "#5865f2";
-
-function sanitizeCronExpression(expression: string): string {
-  return expression.trim().replace(/^["']|["']$/g, "");
-}
 
 function formatDuration(seconds: number): string {
   if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`;
@@ -186,16 +186,6 @@ export class DigestService {
     DigestService.instance = undefined as unknown as DigestService;
   }
 
-  private validateCronExpression(expression: string): boolean {
-    try {
-      new CronTime(expression);
-      return true;
-    } catch (error) {
-      logger.error(`Invalid cron expression for digest: ${expression}`, error);
-      return false;
-    }
-  }
-
   public async start(): Promise<void> {
     if (this.isInitialized) {
       logger.warn("Digest service is already initialized, skipping...");
@@ -220,7 +210,7 @@ export class DigestService {
       );
       const cronExpression = sanitizeCronExpression(rawCron);
 
-      if (!this.validateCronExpression(cronExpression)) {
+      if (!validateCronExpression(cronExpression, "digest")) {
         logger.error(`Digest service not started: invalid cron "${rawCron}"`);
         this.isInitialized = true;
         return;

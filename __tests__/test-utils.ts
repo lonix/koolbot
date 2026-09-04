@@ -196,3 +196,18 @@ export function createMockButtonInteraction(
 export function createRawMember(admin: boolean): { permissions: string } {
   return { permissions: admin ? String(1n << 3n) : "0" };
 }
+
+/**
+ * Stub out a service's `MongoConnectionGuard` so `ensureConnection()` is a
+ * no-op and the test never reaches a real `mongoose.connect`.
+ *
+ * Replaces the older `(service as never)["isConnected"] = true` poke: the
+ * connection flag now lives inside the guard (`src/utils/mongo.ts`), not on
+ * the service.
+ */
+export function stubMongoGuard(service: unknown): void {
+  (service as Record<string, unknown>)["mongo"] = {
+    isConnected: true,
+    ensureConnection: jest.fn(async () => undefined),
+  };
+}

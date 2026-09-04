@@ -31,7 +31,7 @@ import {
   secondsIntoHourInZone,
 } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
-import mongoose from "mongoose";
+import { MongoConnectionGuard } from "../utils/mongo.js";
 import { quoteService } from "./quote-service.js";
 import {
   ACCOLADE_METADATA,
@@ -102,7 +102,7 @@ export class AchievementsService {
   private static instance: AchievementsService;
   private client: Client;
   private configService: ConfigService;
-  private isConnected: boolean = false;
+  private mongo = new MongoConnectionGuard("achievements service");
 
   // Accolade/achievement evaluation is driven entirely by the session-end
   // flow, whose hard dependency is voice tracking (#659): most badges score
@@ -966,41 +966,6 @@ export class AchievementsService {
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
-    this.setupMongoConnectionHandlers();
-  }
-
-  private setupMongoConnectionHandlers(): void {
-    mongoose.connection.on("connected", () => {
-      this.isConnected = true;
-      logger.info("MongoDB connection established for achievements service");
-    });
-
-    mongoose.connection.on("disconnected", () => {
-      this.isConnected = false;
-      logger.warn("MongoDB connection lost for achievements service");
-    });
-
-    mongoose.connection.on("error", (error: Error) => {
-      this.isConnected = false;
-      logger.error("MongoDB connection error in achievements service:", error);
-    });
-  }
-
-  private async ensureConnection(): Promise<void> {
-    if (!this.isConnected) {
-      try {
-        await mongoose.connect(
-          await this.configService.getString(
-            "MONGODB_URI",
-            "mongodb://mongodb:27017/koolbot",
-          ),
-        );
-        logger.info("Reconnected to MongoDB for achievements service");
-      } catch (error: unknown) {
-        logger.error("Error reconnecting to MongoDB:", error);
-        throw error;
-      }
-    }
   }
 
   public static getInstance(client: Client): AchievementsService {
@@ -1451,7 +1416,7 @@ export class AchievementsService {
     username: string,
   ): Promise<IAccolade[]> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const isEnabled = await this.configService.getBoolean(
         "achievements.enabled",
@@ -1561,7 +1526,7 @@ export class AchievementsService {
     username: string,
   ): Promise<IAchievement[]> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const isEnabled = await this.configService.getBoolean(
         "achievements.enabled",
@@ -1669,7 +1634,7 @@ export class AchievementsService {
     statistics: { totalAccolades: number; totalAchievements: number };
   } | null> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const userAchievements = await UserAchievements.findOne({ userId });
       if (!userAchievements) {
@@ -1703,7 +1668,7 @@ export class AchievementsService {
     limit: number = 5,
   ): Promise<AccoladeProgress[]> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const userAchievements = await UserAchievements.findOne({ userId });
       const earned = new Set(
@@ -1968,7 +1933,7 @@ export class AchievementsService {
     Array<{ userId: string; username: string; accolades: IAccolade[] }>
   > {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 

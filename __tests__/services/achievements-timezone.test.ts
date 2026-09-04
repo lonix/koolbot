@@ -1,4 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
+import { stubMongoGuard } from "../test-utils.js";
 import type { Client } from "discord.js";
 
 // Rely on the global mongoose mock from setup.ts.
@@ -47,7 +48,7 @@ function makeService(): {
     getNumber: jest.fn().mockResolvedValue(0),
   };
   (service as never)["configService"] = mockConfigService;
-  (service as never)["isConnected"] = true;
+  stubMongoGuard(service);
   return { service, mockConfigService };
 }
 

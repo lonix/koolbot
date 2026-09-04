@@ -8,6 +8,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
+import { MongoConnectionGuard } from "../utils/mongo.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
@@ -61,47 +62,12 @@ export class VoiceChannelTracker {
     { wasFirst: boolean; joinedExisting: string[] }
   > = new Map();
   private client: Client;
-  private isConnected: boolean = false;
+  private mongo = new MongoConnectionGuard("voice channel tracker");
   private configService: ConfigService;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
-    this.setupMongoConnectionHandlers();
-  }
-
-  private setupMongoConnectionHandlers(): void {
-    mongoose.connection.on("connected", () => {
-      this.isConnected = true;
-      logger.info("MongoDB connection established for voice channel tracker");
-    });
-
-    mongoose.connection.on("disconnected", () => {
-      this.isConnected = false;
-      logger.warn("MongoDB connection lost for voice channel tracker");
-    });
-
-    mongoose.connection.on("error", (error: Error) => {
-      this.isConnected = false;
-      logger.error("MongoDB connection error in voice channel tracker:", error);
-    });
-  }
-
-  private async ensureConnection(): Promise<void> {
-    if (!this.isConnected) {
-      try {
-        await mongoose.connect(
-          await this.configService.getString(
-            "MONGODB_URI",
-            "mongodb://mongodb:27017/koolbot",
-          ),
-        );
-        logger.info("Reconnected to MongoDB for voice channel tracker");
-      } catch (error: unknown) {
-        logger.error("Error reconnecting to MongoDB:", error);
-        throw error;
-      }
-    }
   }
 
   public static getInstance(client: Client): VoiceChannelTracker {
@@ -326,7 +292,7 @@ export class VoiceChannelTracker {
   ): Promise<void> {
     try {
       const debugModeEnabled = isDebugMode();
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       // Check if channel is excluded
       if (await this.isChannelExcluded(channelId)) {
@@ -390,7 +356,7 @@ export class VoiceChannelTracker {
   private async endTracking(userId: string): Promise<void> {
     try {
       const debugModeEnabled = isDebugMode();
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
 
       const session = this.activeSessions.get(userId);
       if (!session) {
@@ -764,7 +730,7 @@ export class VoiceChannelTracker {
 
   async initialize(): Promise<void> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
       logger.info("VoiceChannelTracker initialized");
     } catch (error) {
       logger.error("Error initializing VoiceChannelTracker:", error);

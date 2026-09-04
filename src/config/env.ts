@@ -83,7 +83,12 @@ export function getMissingRequiredEnv(): string[] {
   return REQUIRED_VARS.filter((key) => !process.env[key]);
 }
 
-const DEFAULT_MONGODB_URI = "mongodb://mongodb:27017/koolbot";
+/**
+ * Fallback connection string used when `MONGODB_URI` is unset. Exported so
+ * runtime reconnect paths (`utils/mongo.ts`) share this one definition
+ * instead of re-inlining the literal (#851).
+ */
+export const DEFAULT_MONGODB_URI = "mongodb://mongodb:27017/koolbot";
 
 /**
  * Typed, defaulted view over the known environment variables. Getters read

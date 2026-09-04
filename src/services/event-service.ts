@@ -11,7 +11,7 @@ import {
   TextChannel,
   VoiceChannel,
 } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { isValidObjectId } from "mongoose";
 import { formatInTimeZone } from "date-fns-tz";
 import { ConfigService } from "./config-service.js";
@@ -19,6 +19,7 @@ import { DiscordLogger } from "./discord-logger.js";
 import { Event, type IEvent, type RsvpStatus } from "../models/event.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
+import { validateCronExpression } from "../utils/cron.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
@@ -264,7 +265,7 @@ export class EventService {
         return;
       }
 
-      if (!this.validateCronExpression(TICK_CRON)) {
+      if (!validateCronExpression(TICK_CRON, "events")) {
         logger.error("Event service not started: invalid tick cron");
         this.isInitialized = true;
         return;
@@ -303,16 +304,6 @@ export class EventService {
     }
     this.isInitialized = false;
     logger.info("Event service destroyed");
-  }
-
-  private validateCronExpression(expression: string): boolean {
-    try {
-      new CronTime(expression);
-      return true;
-    } catch (error) {
-      logger.error(`Invalid cron expression for events: ${expression}`, error);
-      return false;
-    }
   }
 
   // ---------------------------------------------------------------

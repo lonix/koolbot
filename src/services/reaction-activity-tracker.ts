@@ -6,8 +6,8 @@ import {
   PartialUser,
 } from "discord.js";
 import logger, { isDebugMode } from "../utils/logger.js";
+import { MongoConnectionGuard } from "../utils/mongo.js";
 import { ReactionActivityTracking } from "../models/reaction-activity-tracking.js";
-import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
 
 /**
@@ -25,52 +25,12 @@ import { ConfigService } from "./config-service.js";
 export class ReactionActivityTracker {
   private static instance: ReactionActivityTracker;
   private client: Client;
-  private isConnected: boolean = false;
+  private mongo = new MongoConnectionGuard("reaction activity tracker");
   private configService: ConfigService;
 
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
-    this.setupMongoConnectionHandlers();
-  }
-
-  private setupMongoConnectionHandlers(): void {
-    mongoose.connection.on("connected", () => {
-      this.isConnected = true;
-      logger.info(
-        "MongoDB connection established for reaction activity tracker",
-      );
-    });
-
-    mongoose.connection.on("disconnected", () => {
-      this.isConnected = false;
-      logger.warn("MongoDB connection lost for reaction activity tracker");
-    });
-
-    mongoose.connection.on("error", (error: Error) => {
-      this.isConnected = false;
-      logger.error(
-        "MongoDB connection error in reaction activity tracker:",
-        error,
-      );
-    });
-  }
-
-  private async ensureConnection(): Promise<void> {
-    if (!this.isConnected) {
-      try {
-        await mongoose.connect(
-          await this.configService.getString(
-            "MONGODB_URI",
-            "mongodb://mongodb:27017/koolbot",
-          ),
-        );
-        logger.info("Reconnected to MongoDB for reaction activity tracker");
-      } catch (error: unknown) {
-        logger.error("Error reconnecting to MongoDB:", error);
-        throw error;
-      }
-    }
   }
 
   public static getInstance(client: Client): ReactionActivityTracker {
@@ -209,7 +169,7 @@ export class ReactionActivityTracker {
     kind: "given" | "received",
     year: string,
   ): Promise<void> {
-    await this.ensureConnection();
+    await this.mongo.ensureConnection();
 
     const totalField = kind === "given" ? "totalGiven" : "totalReceived";
     const yearField = kind === "given" ? "yearlyGiven" : "yearlyReceived";
@@ -227,7 +187,7 @@ export class ReactionActivityTracker {
 
   public async initialize(): Promise<void> {
     try {
-      await this.ensureConnection();
+      await this.mongo.ensureConnection();
       logger.info("ReactionActivityTracker initialized");
     } catch (error) {
       logger.error("Error initializing ReactionActivityTracker:", error);

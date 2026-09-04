@@ -1,9 +1,10 @@
 import { Client, DiscordAPIError } from "discord.js";
-import { CronJob, CronTime } from "cron";
+import { CronJob } from "cron";
 import { isValidObjectId } from "mongoose";
 import { ConfigService } from "./config-service.js";
 import { Reminder, type IReminder } from "../models/reminder.js";
 import logger from "../utils/logger.js";
+import { validateCronExpression } from "../utils/cron.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
@@ -195,7 +196,7 @@ export class ReminderService {
         return;
       }
 
-      if (!this.validateCronExpression(TICK_CRON)) {
+      if (!validateCronExpression(TICK_CRON, "reminders")) {
         logger.error("Reminder service not started: invalid tick cron");
         this.isInitialized = true;
         return;
@@ -234,19 +235,6 @@ export class ReminderService {
     }
     this.isInitialized = false;
     logger.info("Reminder service destroyed");
-  }
-
-  private validateCronExpression(expression: string): boolean {
-    try {
-      new CronTime(expression);
-      return true;
-    } catch (error) {
-      logger.error(
-        `Invalid cron expression for reminders: ${expression}`,
-        error,
-      );
-      return false;
-    }
   }
 
   // ---------------------------------------------------------------
