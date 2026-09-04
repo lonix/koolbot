@@ -330,10 +330,9 @@ export class QuoteService {
     // last write. Stamping that delta is what makes "most-liked this week"
     // answerable for a quote added long ago (#817).
     const existing = await this.model.findOne({ messageId });
-    if (!existing) {
-      await this.model.findOneAndUpdate({ messageId }, tallies);
-      return;
-    }
+    // Nothing to update: the message is not (or is no longer) a stored quote,
+    // and there is no upsert to perform.
+    if (!existing) return;
 
     const previousLikes = existing.likes ?? 0;
     const delta = nextLikes - previousLikes;

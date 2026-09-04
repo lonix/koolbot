@@ -29,6 +29,11 @@ describe("QuoteService backup & vote persistence", () => {
 
   describe("setVoteCountsByMessageId", () => {
     it("writes the tally keyed by messageId", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 3,
+        dislikes: 0,
+        likeEvents: [],
+      });
       model.findOneAndUpdate.mockResolvedValue({});
       await service.setVoteCountsByMessageId("msg1", 3, 1);
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
@@ -38,6 +43,11 @@ describe("QuoteService backup & vote persistence", () => {
     });
 
     it("clamps negative counts to zero", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 0,
+        dislikes: 0,
+        likeEvents: [],
+      });
       model.findOneAndUpdate.mockResolvedValue({});
       await service.setVoteCountsByMessageId("msg1", -2, -5);
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
@@ -49,6 +59,15 @@ describe("QuoteService backup & vote persistence", () => {
     it("is a no-op when messageId is empty", async () => {
       await service.setVoteCountsByMessageId("", 1, 1);
       expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing when the message is not a stored quote", async () => {
+      // Without an upsert there is nothing to match, so the update would be a
+      // wasted roundtrip.
+      model.findOne.mockResolvedValue(null);
+      await service.setVoteCountsByMessageId("msg1", 3, 1);
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(model.updateOne).not.toHaveBeenCalled();
     });
 
     it("stamps the like delta against the stored tally (#817)", async () => {
