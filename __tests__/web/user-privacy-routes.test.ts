@@ -31,6 +31,12 @@ interface Captured {
   written: string[];
   ended: boolean;
   headers: Record<string, unknown>;
+  /** Simulate a full kernel buffer: `write()` returns false from here on. */
+  backpressure: boolean;
+  /** Simulate the client hanging up: no `drain` will ever fire. */
+  destroyed: boolean;
+  /** Listeners registered by `writeChunk`, keyed by event name. */
+  listeners: Record<string, Array<() => void>>;
 }
 
 function buildCookie(): string {
@@ -67,7 +73,7 @@ function makeRes(captured: Captured): Record<string, unknown> {
     getHeader: jest.fn((name: string) => captured.headers[name.toLowerCase()]),
     write: jest.fn((chunk: string) => {
       captured.written.push(chunk);
-      return true;
+      return !captured.backpressure;
     }),
     end: jest.fn(() => {
       captured.ended = true;
@@ -75,9 +81,31 @@ function makeRes(captured: Captured): Record<string, unknown> {
     }),
     redirect: jest.fn(() => res),
     header: jest.fn(() => res),
-    once: jest.fn(() => res),
+    once: jest.fn((event: string, fn: () => void) => {
+      (captured.listeners[event] ??= []).push(fn);
+      return res;
+    }),
+    off: jest.fn((event: string, fn: () => void) => {
+      captured.listeners[event] = (captured.listeners[event] ?? []).filter(
+        (registered) => registered !== fn,
+      );
+      return res;
+    }),
   };
+  // `writableEnded`/`destroyed` track the simulated socket state.
+  Object.defineProperty(res, "writableEnded", {
+    get: () => captured.ended,
+  });
+  Object.defineProperty(res, "destroyed", {
+    get: () => captured.destroyed,
+  });
   return res;
+}
+
+/** Fire the listeners a disconnect would fire on a real socket. */
+function simulateDisconnect(captured: Captured): void {
+  captured.destroyed = true;
+  for (const fn of [...(captured.listeners.close ?? [])]) fn();
 }
 
 /** Audit rows written during the current test. */
@@ -143,7 +171,12 @@ async function stubExportService(
 
 async function dispatch(
   path: string,
-  opts: { ip?: string; router?: ReturnType<typeof createUserRouter> } = {},
+  opts: {
+    ip?: string;
+    router?: ReturnType<typeof createUserRouter>;
+    backpressure?: boolean;
+    onWait?: (captured: Captured) => void;
+  } = {},
 ): Promise<{ captured: Captured; router: ReturnType<typeof createUserRouter> }> {
   const mockClient = {} as never;
   const { createSessionMiddleware } = await import("../../src/web/session.js");
@@ -156,6 +189,9 @@ async function dispatch(
     written: [],
     ended: false,
     headers: {},
+    backpressure: opts.backpressure ?? false,
+    destroyed: false,
+    listeners: {},
   };
   const headers: Record<string, unknown> = { cookie: buildCookie() };
   const req = {
@@ -178,6 +214,10 @@ async function dispatch(
     router(req as never, res as never, (() => resolve()) as never);
     setTimeout(resolve, 0);
   });
+  // Give the handler a chance to park on backpressure, then let the test
+  // decide what unblocks it (a drain, or a disconnect that never drains).
+  await new Promise((r) => setTimeout(r, 20));
+  opts.onWait?.(captured);
   await new Promise((r) => setTimeout(r, 20));
   return { captured, router };
 }
@@ -319,6 +359,57 @@ describe("/me/privacy/export", () => {
       result: "failure",
       errorMessage: "mongo went away",
     });
+  });
+
+
+  it("stops and audits when the client hangs up mid-stream", async () => {
+    await installCommonMocks(true);
+    await stubExportService(["{", '"a":1', "}"], {
+      collections: ["voice-channel-tracking"],
+      truncated: [],
+    });
+
+    // The socket is full, so `writeChunk` parks on `drain` — then the reader
+    // disconnects. `drain` never fires on a dead socket, so without the
+    // `close` release the handler would hang here forever and never audit.
+    const { captured } = await dispatch("/privacy/export", {
+      backpressure: true,
+      onWait: simulateDisconnect,
+    });
+
+    // It stopped pulling rather than streaming the rest into the void.
+    expect(captured.written).toEqual(["{"]);
+    // No end() on a socket that is already gone.
+    expect(captured.ended).toBe(false);
+    // And the attempt is on the record, marked as not delivered.
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      action: "user.privacy.export",
+      result: "failure",
+      errorMessage: "client disconnected before the export completed",
+      details: { aborted: true },
+    });
+  });
+
+  it("resumes writing once a backpressured socket drains", async () => {
+    await installCommonMocks(true);
+    await stubExportService(["{", '"a":1', "}"], {
+      collections: [],
+      truncated: [],
+    });
+
+    const { captured } = await dispatch("/privacy/export", {
+      backpressure: true,
+      onWait: (c) => {
+        // Buffer clears: drain fires and write() succeeds from now on.
+        c.backpressure = false;
+        for (const fn of [...(c.listeners.drain ?? [])]) fn();
+      },
+    });
+
+    expect(captured.written).toEqual(["{", '"a":1', "}"]);
+    expect(captured.ended).toBe(true);
+    expect(auditRows[0]).toMatchObject({ result: "success" });
   });
 
   it("rate-limits repeated downloads from one client", async () => {

@@ -355,12 +355,33 @@ function parseYearParam(raw: unknown, fallback: number): number {
  * Write one chunk, waiting for the socket to drain when the kernel buffer is
  * full. Without this the "stream" would just accumulate in Node's memory,
  * which is the thing the export is streamed to avoid (#719).
+ *
+ * Returns false once the response can take no more — the client hung up, or
+ * the socket errored. `drain` never fires on a dead socket, so waiting on it
+ * alone would park the handler forever: the audit row would never be written
+ * and the export's Mongo reads would keep running for a reader that is gone.
+ * `close` and `error` therefore release the wait too, and the caller stops
+ * pulling data.
  */
-async function writeChunk(res: Response, chunk: string): Promise<void> {
+async function writeChunk(res: Response, chunk: string): Promise<boolean> {
+  if (res.writableEnded || res.destroyed) return false;
+
   const flushed = res.write(chunk);
-  if (flushed === false && typeof res.once === "function") {
-    await new Promise<void>((resolve) => res.once("drain", () => resolve()));
-  }
+  if (flushed !== false || typeof res.once !== "function") return true;
+
+  await new Promise<void>((resolve) => {
+    const release = (): void => {
+      res.off?.("drain", release);
+      res.off?.("close", release);
+      res.off?.("error", release);
+      resolve();
+    };
+    res.once("drain", release);
+    res.once("close", release);
+    res.once("error", release);
+  });
+
+  return !res.writableEnded && !res.destroyed;
 }
 
 /**
@@ -1283,13 +1304,19 @@ export function createUserRouter(
       res.setHeader("Cache-Control", "no-store");
 
       let errorMessage: string | null = null;
+      let aborted = false;
       try {
         for await (const chunk of UserDataExportService.getInstance().streamJson(
           userId,
           guildId,
           progress,
         )) {
-          await writeChunk(res, chunk);
+          if (!(await writeChunk(res, chunk))) {
+            // The reader is gone. Stop pulling collections rather than
+            // finishing an export nobody will receive.
+            aborted = true;
+            break;
+          }
         }
       } catch (err) {
         errorMessage = err instanceof Error ? err.message : String(err);
@@ -1297,10 +1324,13 @@ export function createUserRouter(
           `Failed to stream user data export: ${sanitizeForLog(errorMessage)}`,
         );
       }
+      if (aborted && errorMessage === null) {
+        errorMessage = "client disconnected before the export completed";
+      }
       // The response is already committed by the time a reader can fail, so
       // a mid-stream error can only truncate the file — the audit row is what
-      // records that it happened.
-      res.end();
+      // records that it happened. A disconnect leaves nothing to close.
+      if (!res.writableEnded && !res.destroyed) res.end();
 
       await recordAudit(session, {
         action: "user.privacy.export",
@@ -1308,6 +1338,7 @@ export function createUserRouter(
         details: {
           collections: progress.collections,
           truncated: progress.truncated,
+          ...(aborted ? { aborted: true } : {}),
         },
         result: errorMessage === null ? "success" : "failure",
         errorMessage,

@@ -303,6 +303,58 @@ describe("UserDataExportService", () => {
     expect(progress.collections).toContain("voice-channel-tracking");
   });
 
+  it("strips Mongo bookkeeping from nested subdocuments too", async () => {
+    // `sessions[]` and the rollup arrays are inline subdocument schemas, so
+    // Mongoose stamps every entry with its own `_id`. Removing only the outer
+    // one left those internal ids in a member's download.
+    DATA["voice-channel-tracking"] = {
+      _id: "doc-id",
+      __v: 3,
+      userId: USER,
+      sessions: [
+        { _id: "session-id", channelId: "c1", companions: [{ _id: "x", userId: "friend-1" }] },
+      ],
+      monthlyTotals: [{ _id: "month-id", month: "2026-01", totalTime: 60 }],
+    };
+
+    const { payload, raw } = await runExport();
+    const voice = payload.data["voice-channel-tracking"] as {
+      sessions: Array<Record<string, unknown>>;
+      monthlyTotals: Array<Record<string, unknown>>;
+    };
+
+    expect(raw).not.toContain("session-id");
+    expect(raw).not.toContain("month-id");
+    expect(raw).not.toContain("doc-id");
+    expect(raw).not.toContain("__v");
+    expect(voice.sessions[0]).not.toHaveProperty("_id");
+    expect(voice.monthlyTotals[0]).not.toHaveProperty("_id");
+    // Only the bookkeeping goes — the member's own data survives at depth.
+    expect(voice.sessions[0].channelId).toBe("c1");
+    expect(voice.sessions[0].companions).toEqual([{ userId: "friend-1" }]);
+    expect(voice.monthlyTotals[0].month).toBe("2026-01");
+  });
+
+  it("keeps non-plain values (dates) intact while stripping ids", async () => {
+    // Recursing into a Date would rebuild it as `{}`. Guard the distinction.
+    const lastSeen = new Date("2026-05-01T12:00:00.000Z");
+    DATA["voice-channel-tracking"] = {
+      _id: "doc-id",
+      userId: USER,
+      lastSeen,
+      sessions: [{ _id: "s1", startTime: lastSeen }],
+    };
+
+    const { payload } = await runExport();
+    const voice = payload.data["voice-channel-tracking"] as {
+      lastSeen: string;
+      sessions: Array<{ startTime: string }>;
+    };
+
+    expect(voice.lastSeen).toBe("2026-05-01T12:00:00.000Z");
+    expect(voice.sessions[0].startTime).toBe("2026-05-01T12:00:00.000Z");
+  });
+
   it("caps append-only voice history and reports the truncation", async () => {
     mockGetNumber.mockResolvedValue(2);
     DATA["voice-channel-tracking"] = {

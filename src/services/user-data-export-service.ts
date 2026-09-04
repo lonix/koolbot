@@ -83,12 +83,41 @@ interface CollectionResult {
 
 type CollectionReader = (ctx: ReadContext) => Promise<CollectionResult>;
 
+/**
+ * Whether a value is a plain object we should recurse into, as opposed to a
+ * value that merely happens to be an object — a `Date`, an `ObjectId`, a
+ * `Buffer`, a `Map`. Recursing into those would rebuild them as bare objects
+ * and destroy them on the way out.
+ */
+function isPlainObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Strip Mongo bookkeeping a member has no use for — at every depth, not just
+ * the top level. Several exported documents hold arrays of subdocuments
+ * (`sessions[]`, `recentMessages[]`, the achievement and rollup arrays) whose
+ * schemas are declared inline, so Mongoose stamps each entry with its own
+ * `_id`. Removing only the outer one left those internal ids in a member's
+ * download, which is exactly the bookkeeping this is supposed to keep out.
+ */
+function stripInternals(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripInternals);
+  if (value === null || typeof value !== "object") return value;
+  if (!isPlainObject(value)) return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (key === "_id" || key === "__v") continue;
+    out[key] = stripInternals(entry);
+  }
+  return out;
+}
+
 /** Strip Mongo bookkeeping a member has no use for. */
 function toPlain(doc: unknown): Record<string, unknown> {
-  const obj = { ...(doc as Record<string, unknown>) };
-  delete obj._id;
-  delete obj.__v;
-  return obj;
+  return stripInternals(doc) as Record<string, unknown>;
 }
 
 /** Apply the ceiling to a list read with `limit(maxItems + 1)`. */
