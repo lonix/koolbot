@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import { QuoteService } from "../../src/services/quote-service.js";
+import {
+  QuoteService,
+  likeEventCutoff,
+  hasExpiredLikeEvents,
+  sumLikeEventsSince,
+} from "../../src/services/quote-service.js";
 
 // Mock mongoose and dependencies
 jest.mock("mongoose");
@@ -103,6 +108,191 @@ describe("QuoteService", () => {
 
       const result = await quoteService.getTopQuoteSince(new Date());
       expect(result).toBeNull();
+    });
+  });
+
+  describe("getTopQuoteByVotesSince (#817)", () => {
+    const since = new Date("2026-08-27T00:00:00Z");
+    const inWindow = new Date("2026-08-28T00:00:00Z");
+    const beforeWindow = new Date("2026-06-01T00:00:00Z");
+
+    function stubFind(docs: unknown[]): jest.Mock {
+      const find = jest.fn<any>().mockResolvedValue(docs);
+      (quoteService as never)["model"] = { find };
+      return find as unknown as jest.Mock;
+    }
+
+    it("queries only quotes with a positive like event inside the window", async () => {
+      const find = stubFind([]);
+      await quoteService.getTopQuoteByVotesSince(since);
+      expect(find).toHaveBeenCalledWith({
+        likeEvents: { $elemMatch: { at: { $gte: since }, delta: { $gt: 0 } } },
+      });
+    });
+
+    it("ranks by likes gained in the window, not lifetime likes", async () => {
+      // The old quote is far more liked overall but only picked up one like
+      // this week; the newer one gained three. "Quote of the week" is the
+      // latter -- this is the behaviour #817 asked for.
+      stubFind([
+        {
+          content: "beloved classic",
+          likes: 50,
+          likeEvents: [
+            { at: beforeWindow, delta: 49 },
+            { at: inWindow, delta: 1 },
+          ],
+        },
+        {
+          content: "this week's hit",
+          likes: 3,
+          likeEvents: [
+            { at: inWindow, delta: 2 },
+            { at: inWindow, delta: 1 },
+          ],
+        },
+      ]);
+
+      const result = await quoteService.getTopQuoteByVotesSince(since);
+      expect(result?.quote.content).toBe("this week's hit");
+      expect(result?.likes).toBe(3);
+    });
+
+    it("surfaces an old quote that surged this week", async () => {
+      stubFind([
+        {
+          content: "resurfaced oldie",
+          likes: 12,
+          likeEvents: [
+            { at: beforeWindow, delta: 4 },
+            { at: inWindow, delta: 8 },
+          ],
+        },
+      ]);
+
+      const result = await quoteService.getTopQuoteByVotesSince(since);
+      expect(result?.quote.content).toBe("resurfaced oldie");
+      expect(result?.likes).toBe(8);
+    });
+
+    it("nets out likes taken back inside the window", async () => {
+      stubFind([
+        {
+          content: "briefly popular",
+          likes: 1,
+          likeEvents: [
+            { at: inWindow, delta: 3 },
+            { at: inWindow, delta: -3 },
+          ],
+        },
+        {
+          content: "steady",
+          likes: 1,
+          likeEvents: [{ at: inWindow, delta: 1 }],
+        },
+      ]);
+
+      const result = await quoteService.getTopQuoteByVotesSince(since);
+      expect(result?.quote.content).toBe("steady");
+      expect(result?.likes).toBe(1);
+    });
+
+    it("breaks ties on the lifetime tally so the pick is stable", async () => {
+      stubFind([
+        {
+          content: "newcomer",
+          likes: 2,
+          likeEvents: [{ at: inWindow, delta: 2 }],
+        },
+        {
+          content: "established",
+          likes: 30,
+          likeEvents: [{ at: inWindow, delta: 2 }],
+        },
+      ]);
+
+      const result = await quoteService.getTopQuoteByVotesSince(since);
+      expect(result?.quote.content).toBe("established");
+    });
+
+    it("returns null when nothing gained likes in the window", async () => {
+      stubFind([
+        {
+          content: "stale",
+          likes: 9,
+          likeEvents: [{ at: beforeWindow, delta: 9 }],
+        },
+        { content: "untimed", likes: 4 },
+      ]);
+
+      expect(await quoteService.getTopQuoteByVotesSince(since)).toBeNull();
+    });
+  });
+
+  describe("like-event retention helpers (#817)", () => {
+    const now = new Date("2026-09-01T12:00:00Z");
+
+    it("computes the cutoff from the retention window", () => {
+      expect(likeEventCutoff(now, 2)).toEqual(new Date("2026-08-30T12:00:00Z"));
+    });
+
+    it("falls back to the default retention when misconfigured", () => {
+      // A NaN/zero setting must not produce a NaN cutoff, which would
+      // silently disable pruning altogether.
+      expect(likeEventCutoff(now, Number.NaN)).toEqual(
+        new Date("2026-08-02T12:00:00Z"),
+      );
+      expect(likeEventCutoff(now, 0)).toEqual(likeEventCutoff(now, 30));
+    });
+
+    it("detects history that has aged out", () => {
+      const cutoff = likeEventCutoff(now, 30);
+      expect(
+        hasExpiredLikeEvents(
+          [
+            { at: new Date("2026-08-30T00:00:00Z"), delta: 1 },
+            { at: new Date("2026-07-01T00:00:00Z"), delta: 1 },
+          ],
+          cutoff,
+        ),
+      ).toBe(true);
+    });
+
+    it("reports nothing to prune for in-window or missing history", () => {
+      const cutoff = likeEventCutoff(now, 30);
+      expect(
+        hasExpiredLikeEvents(
+          [{ at: new Date("2026-08-30T00:00:00Z"), delta: 1 }],
+          cutoff,
+        ),
+      ).toBe(false);
+      expect(hasExpiredLikeEvents(undefined, cutoff)).toBe(false);
+      expect(
+        hasExpiredLikeEvents(
+          [{ at: new Date("nope"), delta: 1 }] as never,
+          cutoff,
+        ),
+      ).toBe(false);
+    });
+  });
+
+  describe("sumLikeEventsSince (#817)", () => {
+    it("counts only events at or after the window start", () => {
+      const since = new Date("2026-08-27T00:00:00Z");
+      expect(
+        sumLikeEventsSince(
+          [
+            { at: new Date("2026-08-26T23:59:59Z"), delta: 10 },
+            { at: since, delta: 1 },
+            { at: new Date("2026-08-28T00:00:00Z"), delta: 2 },
+          ],
+          since,
+        ),
+      ).toBe(3);
+    });
+
+    it("treats missing history as zero", () => {
+      expect(sumLikeEventsSince(undefined, new Date())).toBe(0);
     });
   });
 });

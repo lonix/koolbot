@@ -330,7 +330,13 @@ export class VoiceChannelAnnouncer {
     }
   }
 
-  /** Recap section: the most-liked quote added in the last week (#777). */
+  /**
+   * Recap section: the quote that gained the most 👍 in the last week (#777,
+   * #817). Ranking is by votes cast inside the window, so a quote added long
+   * ago can win on a surge of likes; when no vote timing has been captured
+   * yet the section falls back to the original "most-liked quote added this
+   * week" approximation.
+   */
   private async announceQuoteOfWeek(
     channel: TextChannel,
     since: Date,
@@ -348,7 +354,24 @@ export class VoiceChannelAnnouncer {
       );
       if (!quotesEnabled) return;
 
-      const topQuote = await quoteService.getTopQuoteSince(since);
+      // A failure of the vote-window lookup must not take the whole section
+      // down: the legacy "added this week" query is independent and may still
+      // answer, so a throw here degrades to the fallback rather than skipping
+      // Quote of the Week entirely.
+      let byVotes: Awaited<
+        ReturnType<typeof quoteService.getTopQuoteByVotesSince>
+      > = null;
+      try {
+        byVotes = await quoteService.getTopQuoteByVotesSince(since);
+      } catch (error) {
+        logger.warn(
+          "Vote-window quote lookup failed, falling back to quotes added this week:",
+          error,
+        );
+      }
+
+      const topQuote =
+        byVotes?.quote ?? (await quoteService.getTopQuoteSince(since));
       if (!topQuote) return;
 
       // Author IDs may be stored in legacy formats (<@123>, <@!123>, @123,
@@ -358,7 +381,11 @@ export class VoiceChannelAnnouncer {
       // @everyone/@here or arbitrary roles.
       const authorId = resolveAuthorMentionId(topQuote.authorId);
       const author = authorId ? `<@${authorId}>` : "someone";
-      const likeLabel = topQuote.likes === 1 ? "like" : "likes";
+      // When the pick came from vote timing, report the likes gained this
+      // week — the lifetime tally would overstate what the window measured.
+      const likeCount = byVotes ? byVotes.likes : (topQuote.likes ?? 0);
+      const likeLabel = likeCount === 1 ? "like" : "likes";
+      const likeSuffix = byVotes ? " this week" : "";
 
       await channel.send({
         content: [
@@ -366,7 +393,7 @@ export class VoiceChannelAnnouncer {
           "💬 **Quote of the Week** 💬",
           "",
           `> ${topQuote.content}`,
-          `— ${author} · 👍 ${topQuote.likes} ${likeLabel}`,
+          `— ${author} · 👍 ${likeCount} ${likeLabel}${likeSuffix}`,
         ].join("\n"),
         allowedMentions: authorId
           ? { parse: [], users: [authorId] }

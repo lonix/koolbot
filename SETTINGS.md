@@ -203,6 +203,7 @@ Configure the quote management system.
 | `quotes.header_pin_enabled` | `true` | Pin the header post for easy access |
 | `quotes.header_message_id` | `""` | Stores header message ID (managed automatically) |
 | `quotes.clear_on_sync` | `false` | Wipe and re-post the entire channel on each quote sync |
+| `quotes.vote_history_days` | `30` | Days of timestamped 👍 vote history kept for "quote of the week" ranking |
 
 **Notes:**
 
@@ -215,6 +216,12 @@ Configure the quote management system.
 - `quotes.clear_on_sync` — When enabled, the quote channel is wiped and all
   quotes are re-posted from scratch on each sync. Destructive and slow on large
   collections; leave off unless you need a full rebuild.
+- `quotes.vote_history_days` — Individual 👍 reactions are timestamped so the
+  weekly recap's "Quote of the Week" can rank by likes gained during the week,
+  rather than by the most-liked quote added that week. Records older than this
+  many days are pruned; lifetime like/dislike tallies are unaffected. Votes
+  cast before this feature shipped have no timing and are not backfilled, so
+  the recap falls back to the "added this week" pick until votes accumulate.
 
 ---
 
@@ -396,7 +403,7 @@ independently.
 | `voicetracking.announcements.schedule` | `"0 16 * * 5"` | Cron schedule (default: Fridays 4 PM) |
 | `voicetracking.announcements.include_voice_stats` | `true` | Include the top voice-time leaderboard |
 | `voicetracking.announcements.include_accolades` | `true` | Include accolades earned this week (needs achievements + achievement announcements enabled) |
-| `voicetracking.announcements.include_quote_of_week` | `true` | Include the most-liked quote added this week (needs quotes enabled) |
+| `voicetracking.announcements.include_quote_of_week` | `true` | Include the quote that gained the most likes this week (needs quotes enabled) |
 | `voicetracking.announcements.include_poll_turnout` | `true` | Include how many members voted across how many polls this week, plus the best-attended poll when several ran (needs poll participation tracking enabled) |
 
 To trigger one out of schedule, use the **Post weekly stats now** button
@@ -1261,6 +1268,7 @@ leave the graph in a broken state.
 - `quotes.header_enabled` (bool, default: true)
 - `quotes.header_pin_enabled` (bool, default: true)
 - `quotes.clear_on_sync` (bool, default: false)
+- `quotes.vote_history_days` (number, default: 30)
 
 #### Notices
 

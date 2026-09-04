@@ -20,6 +20,7 @@ describe("QuoteService backup & vote persistence", () => {
       find: jest.fn(),
       findOne: jest.fn(),
       findOneAndUpdate: jest.fn(),
+      updateOne: jest.fn(),
       create: jest.fn(),
     };
     // Replace the (mongoose-mocked) model with a controllable stub.
@@ -28,6 +29,11 @@ describe("QuoteService backup & vote persistence", () => {
 
   describe("setVoteCountsByMessageId", () => {
     it("writes the tally keyed by messageId", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 3,
+        dislikes: 0,
+        likeEvents: [],
+      });
       model.findOneAndUpdate.mockResolvedValue({});
       await service.setVoteCountsByMessageId("msg1", 3, 1);
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
@@ -37,6 +43,11 @@ describe("QuoteService backup & vote persistence", () => {
     });
 
     it("clamps negative counts to zero", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 0,
+        dislikes: 0,
+        likeEvents: [],
+      });
       model.findOneAndUpdate.mockResolvedValue({});
       await service.setVoteCountsByMessageId("msg1", -2, -5);
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
@@ -48,6 +59,140 @@ describe("QuoteService backup & vote persistence", () => {
     it("is a no-op when messageId is empty", async () => {
       await service.setVoteCountsByMessageId("", 1, 1);
       expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("writes nothing when the message is not a stored quote", async () => {
+      // Without an upsert there is nothing to match, so the update would be a
+      // wasted roundtrip.
+      model.findOne.mockResolvedValue(null);
+      await service.setVoteCountsByMessageId("msg1", 3, 1);
+      expect(model.findOneAndUpdate).not.toHaveBeenCalled();
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("stamps the like delta against the stored tally (#817)", async () => {
+      const before = new Date();
+      model.findOne.mockResolvedValue({
+        likes: 1,
+        dislikes: 0,
+        likeEvents: [],
+      });
+      model.findOneAndUpdate.mockResolvedValue({ _id: "q1" });
+
+      await service.setVoteCountsByMessageId("msg1", 4, 0);
+
+      const [filter, update] = model.findOneAndUpdate.mock.calls[0];
+      // Guarded on the tally the delta was measured against.
+      expect(filter).toEqual({ messageId: "msg1", likes: 1 });
+      expect(update.$set).toEqual({ likes: 4, dislikes: 0 });
+      const pushed = update.$push.likeEvents;
+      expect(pushed.$each).toHaveLength(1);
+      expect(pushed.$each[0].delta).toBe(3);
+      expect(pushed.$each[0].at.getTime()).toBeGreaterThanOrEqual(
+        before.getTime(),
+      );
+      // The array is appended to server-side and capped, never rewritten.
+      expect(pushed.$slice).toBeLessThan(0);
+    });
+
+    it("records a negative delta when a like is taken back (#817)", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 5,
+        dislikes: 0,
+        likeEvents: [],
+      });
+      model.findOneAndUpdate.mockResolvedValue({ _id: "q1" });
+
+      await service.setVoteCountsByMessageId("msg1", 3, 0);
+
+      const [, update] = model.findOneAndUpdate.mock.calls[0];
+      expect(update.$push.likeEvents.$each[0].delta).toBe(-2);
+    });
+
+    it("prunes expired history even when the like tally is unchanged (#817)", async () => {
+      // A quote whose 👍 count has settled (only 👎 changed, or a burst came
+      // back to where it started) must still have its history aged out.
+      model.findOne.mockResolvedValue({
+        likes: 3,
+        dislikes: 0,
+        likeEvents: [{ at: new Date("2020-01-01T00:00:00Z"), delta: 1 }],
+      });
+      model.findOneAndUpdate.mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 3, 1);
+
+      expect(model.updateOne).toHaveBeenCalledTimes(1);
+      expect(
+        model.updateOne.mock.calls[0][1].$pull.likeEvents.at.$lt,
+      ).toBeInstanceOf(Date);
+    });
+
+    it("writes no vote history when the tally is unchanged (#817)", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 3,
+        dislikes: 1,
+        likeEvents: [],
+      });
+      model.findOneAndUpdate.mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 3, 1);
+
+      expect(model.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { messageId: "msg1" },
+        { likes: 3, dislikes: 1 },
+      );
+    });
+
+    it("persists the tally without stamping when a concurrent write won (#817)", async () => {
+      // Vote writes are debounced and not awaited, so an overlapping persist
+      // can land first. The guard then misses: the tally must still be
+      // recorded, but the stale delta must not be stamped.
+      model.findOne.mockResolvedValue({
+        likes: 1,
+        dislikes: 0,
+        likeEvents: [],
+      });
+      model.findOneAndUpdate.mockResolvedValueOnce(null).mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 4, 0);
+
+      expect(model.findOneAndUpdate).toHaveBeenCalledTimes(2);
+      expect(model.findOneAndUpdate.mock.calls[1]).toEqual([
+        { messageId: "msg1" },
+        { likes: 4, dislikes: 0 },
+      ]);
+      // Nothing has aged out, so no prune write either.
+      expect(model.updateOne).not.toHaveBeenCalled();
+    });
+
+    it("prunes history that has aged out of the retention window (#817)", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 1,
+        dislikes: 0,
+        likeEvents: [{ at: new Date("2020-01-01T00:00:00Z"), delta: 1 }],
+      });
+      model.findOneAndUpdate.mockResolvedValue({ _id: "q1" });
+
+      await service.setVoteCountsByMessageId("msg1", 2, 0);
+
+      expect(model.updateOne).toHaveBeenCalledTimes(1);
+      const [filter, update] = model.updateOne.mock.calls[0];
+      expect(filter).toEqual({ messageId: "msg1" });
+      expect(update.$pull.likeEvents.at.$lt).toBeInstanceOf(Date);
+    });
+
+    it("skips the prune write when nothing has aged out (#817)", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 1,
+        dislikes: 0,
+        likeEvents: [{ at: new Date(), delta: 1 }],
+      });
+      model.findOneAndUpdate.mockResolvedValue({ _id: "q1" });
+
+      await service.setVoteCountsByMessageId("msg1", 2, 0);
+
+      expect(model.updateOne).not.toHaveBeenCalled();
     });
   });
 
