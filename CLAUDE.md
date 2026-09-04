@@ -141,8 +141,12 @@ command:
    an interaction that is not acknowledged within 3 seconds, and the resulting `10062 Unknown
    interaction` cannot be recovered (#842). Cheap synchronous guards may still `reply` directly.
 
-Multi-setting features should also be wired into the `/setup wizard` (`src/commands/setup-wizard.ts`
-`FEATURES` constant + handlers in `src/handlers/wizard-*`); single settings stay on `/config set`.
+Multi-setting features should also be wired into the Setup Wizard, which lives in the Web UI at
+`/admin/wizard` (there is no `/setup` command): add the feature's key list to `WIZARD_FEATURE_SETTINGS`
+and its position to `WIZARD_FEATURE_ORDER`, both in `src/web/routes/write/helpers.ts`. The step, review
+and apply routes in `src/web/routes/write/wizard.ts` render those keys from `settingsMetadata` on top of
+`WizardService` (`src/services/wizard-service.ts`), so no per-feature rendering code is needed. Single
+settings need no wiring at all — the Settings page discovers them from `defaultConfig`.
 
 ### Logging
 
