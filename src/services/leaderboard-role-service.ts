@@ -6,16 +6,14 @@ import {
   EmbedBuilder,
   GuildTextBasedChannel,
 } from "discord.js";
-import { CronJob } from "cron";
-import { ConfigService } from "./config-service.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { VoiceChannelTracker, TimePeriod } from "./voice-channel-tracker.js";
 import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
-import {
-  sanitizeCronExpression,
-  validateCronExpression,
-} from "../utils/cron.js";
+
+/** Weekly, Monday 00:00 — the schedule leaderboard roles ship with. */
+const DEFAULT_CRON = "0 0 * * 1";
 
 interface ParsedTier {
   topN: number;
@@ -35,44 +33,27 @@ export interface LeaderboardRoleRunSummary {
   }>;
 }
 
-export class LeaderboardRoleService {
+export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunSummary | null> {
   private static instance: LeaderboardRoleService;
-  private client: Client;
-  private configService: ConfigService;
-  private job: CronJob | null = null;
-  private isInitialized: boolean = false;
-  private isRunning: boolean = false;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-
-    this.configService.registerReloadCallback(async () => {
-      try {
-        logger.info(
-          "Leaderboard role rewards configuration changed, reloading...",
-        );
-
-        const enabled = await this.configService.getBoolean(
-          "leaderboard_roles.enabled",
-          false,
-        );
-
-        if (!enabled && this.isInitialized) {
-          logger.info(
-            "Leaderboard role rewards disabled, stopping cron job...",
-          );
-          this.destroy();
-        } else if (enabled) {
-          await this.reload();
-        }
-      } catch (error) {
-        logger.error(
-          "Error reloading leaderboard role rewards after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Leaderboard role service",
+      disabledMessage: "Leaderboard role rewards are disabled",
+      cronContext: "leaderboard roles",
+      runLabel: "Leaderboard role reconciliation",
     });
+  }
+
+  protected async isEnabled(): Promise<boolean> {
+    return this.configService.getBoolean("leaderboard_roles.enabled", false);
+  }
+
+  protected async resolveSchedule(): Promise<string> {
+    return this.configService.getString(
+      "leaderboard_roles.update_cron",
+      DEFAULT_CRON,
+    );
   }
 
   public static getInstance(client: Client): LeaderboardRoleService {
@@ -145,31 +126,14 @@ export class LeaderboardRoleService {
   }
 
   /**
-   * Recalculate role assignments now. Safe to call manually (e.g. from a
-   * future WebUI "Run now" button) — does not depend on the cron job state.
-   * Concurrent invocations (cron + manual) are coalesced: the second call
-   * returns null immediately without doing work.
+   * Recalculate role assignments. Reached through `runNow()`, so it runs on
+   * the cron tick and from a manual trigger alike, and never concurrently
+   * with itself.
    */
-  public async runNow(): Promise<LeaderboardRoleRunSummary | null> {
-    if (this.isRunning) {
-      logger.info(
-        "Leaderboard role reconciliation already in progress, skipping concurrent run.",
-      );
-      return null;
-    }
-    this.isRunning = true;
+  protected async runOnce(): Promise<LeaderboardRoleRunSummary | null> {
+    await waitForClientReady(this.client, "LeaderboardRoleService");
+
     try {
-      await waitForClientReady(this.client, "LeaderboardRoleService");
-
-      const enabled = await this.configService.getBoolean(
-        "leaderboard_roles.enabled",
-        false,
-      );
-      if (!enabled) {
-        logger.info("Leaderboard role rewards are disabled, skipping run.");
-        return null;
-      }
-
       // Voice tracking is a hard dependency (#659): without it there is no
       // ranking data, so reconciling roles would only churn members against
       // empty/stale data. Mirror voice-channel-announcer.ts and short-circuit.
@@ -251,8 +215,6 @@ export class LeaderboardRoleService {
     } catch (error) {
       logger.error("Error during leaderboard role reconciliation:", error);
       return null;
-    } finally {
-      this.isRunning = false;
     }
   }
 
@@ -423,75 +385,5 @@ export class LeaderboardRoleService {
     } catch (error) {
       logger.error("Failed to post leaderboard role announcement:", error);
     }
-  }
-
-  public async start(): Promise<void> {
-    if (this.isInitialized) {
-      logger.warn(
-        "Leaderboard role service is already initialized, skipping...",
-      );
-      return;
-    }
-
-    try {
-      const enabled = await this.configService.getBoolean(
-        "leaderboard_roles.enabled",
-        false,
-      );
-
-      if (!enabled) {
-        logger.info("Leaderboard role rewards are disabled");
-        this.isInitialized = true;
-        return;
-      }
-
-      const rawCron = await this.configService.getString(
-        "leaderboard_roles.update_cron",
-        "0 0 * * 1",
-      );
-      const cronExpression = sanitizeCronExpression(rawCron);
-
-      if (!validateCronExpression(cronExpression, "leaderboard roles")) {
-        logger.error(
-          `Leaderboard role service not started: invalid cron "${rawCron}"`,
-        );
-        this.isInitialized = true;
-        return;
-      }
-
-      this.job = new CronJob(cronExpression, async () => {
-        await this.runNow();
-      });
-      this.job.start();
-
-      const nextRun = this.job.nextDate();
-      logger.info(
-        `Leaderboard role service started (cron: "${cronExpression}", next run: ${nextRun.toLocaleString()})`,
-      );
-
-      this.isInitialized = true;
-    } catch (error) {
-      logger.error("Error starting leaderboard role service:", error);
-      throw error;
-    }
-  }
-
-  public async reload(): Promise<void> {
-    logger.info("Reloading leaderboard role service...");
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    await this.start();
-  }
-
-  public destroy(): void {
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    logger.info("Leaderboard role service destroyed");
   }
 }

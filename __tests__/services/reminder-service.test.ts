@@ -44,7 +44,12 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 // Mock the scheduler so no real interval is ever armed by a test.
 const mockJobStart = jest.fn();
 const mockJobStop = jest.fn();
-const mockCronJob = jest.fn(() => ({ start: mockJobStart, stop: mockJobStop }));
+const mockCronJob = jest.fn(() => ({
+  start: mockJobStart,
+  stop: mockJobStop,
+  // The shared lifecycle logs the next run time when it arms a job.
+  nextDate: () => ({ toLocaleString: () => "2026-01-01, 00:00:00" }),
+}));
 
 jest.unstable_mockModule("cron", () => ({
   CronJob: mockCronJob,

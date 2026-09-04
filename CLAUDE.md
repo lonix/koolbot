@@ -60,6 +60,14 @@ leaderboard roles, digests, monitoring, logging, migration). Services are single
 `getInstance(client)` pattern and own their own timers/intervals for periodic work (e.g. cleanup ~5m,
 health ~15m). Periodic jobs store their interval handle, log errors, and must never crash the process.
 
+**Cron-driven services extend `ScheduledService` (`services/scheduled-service.ts`, #851)** — birthdays,
+digest, rewind nudge, events, reminders and leaderboard roles all do. The base class owns the whole
+`start` / `runNow` / `reload` / `destroy` lifecycle: the enablement gate, cron sanitising/validation,
+arming and stopping the `CronJob`, coalescing concurrent runs, swallowing tick failures, and the
+`/config reload` callback. A subclass supplies only `isEnabled()`, `resolveSchedule()` and `runOnce()`
+(plus its own `getInstance`/`reset`). Do not hand-roll the skeleton again, and do not re-add an
+`isRunning` guard inside a `runOnce` — the base class already guarantees runs never overlap.
+
 **Configuration is the backbone.** All runtime config flows through `ConfigService`, which merges
 environment variables with values stored in Mongo (`models/config.ts`) and caches them. Read config via
 `ConfigService.getBoolean | getString | getNumber` — never read `process.env` directly mid-runtime. Keys

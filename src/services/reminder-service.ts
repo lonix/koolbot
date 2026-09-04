@@ -1,10 +1,8 @@
 import { Client, DiscordAPIError } from "discord.js";
-import { CronJob } from "cron";
 import { isValidObjectId } from "mongoose";
-import { ConfigService } from "./config-service.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { Reminder, type IReminder } from "../models/reminder.js";
 import logger from "../utils/logger.js";
-import { validateCronExpression } from "../utils/cron.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
@@ -123,39 +121,25 @@ export interface CreateReminderInput {
   timezone: string;
 }
 
-export class ReminderService {
+export class ReminderService extends ScheduledService {
   private static instance: ReminderService;
-  private client: Client;
-  private configService: ConfigService;
-  private job: CronJob | null = null;
-  private isInitialized = false;
-  private isRunning = false;
-  private inFlight: Promise<void> | null = null;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-
-    this.configService.registerReloadCallback(async () => {
-      try {
-        logger.info("Reminders configuration changed, reloading...");
-        const enabled = await this.configService.getBoolean(
-          "reminders.enabled",
-          false,
-        );
-        if (!enabled && this.isInitialized) {
-          logger.info("Reminders disabled, stopping scan job...");
-          this.destroy();
-        } else if (enabled) {
-          await this.reload();
-        }
-      } catch (error) {
-        logger.error(
-          "Error reloading reminder service after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Reminder service",
+      disabledMessage: "Reminders are disabled",
+      cronContext: "reminders",
+      runLabel: "Reminder scan",
     });
+  }
+
+  protected async isEnabled(): Promise<boolean> {
+    return this.configService.getBoolean("reminders.enabled", false);
+  }
+
+  /** Reminders are delivered on a fixed tick rather than an admin-set schedule. */
+  protected async resolveSchedule(): Promise<string> {
+    return TICK_CRON;
   }
 
   public static getInstance(client: Client): ReminderService {
@@ -177,113 +161,26 @@ export class ReminderService {
   }
 
   // ---------------------------------------------------------------
-  // Cron lifecycle
-  // ---------------------------------------------------------------
-
-  public async start(): Promise<void> {
-    if (this.isInitialized) {
-      logger.warn("Reminder service is already initialized, skipping...");
-      return;
-    }
-    try {
-      const enabled = await this.configService.getBoolean(
-        "reminders.enabled",
-        false,
-      );
-      if (!enabled) {
-        logger.info("Reminders are disabled");
-        this.isInitialized = true;
-        return;
-      }
-
-      if (!validateCronExpression(TICK_CRON, "reminders")) {
-        logger.error("Reminder service not started: invalid tick cron");
-        this.isInitialized = true;
-        return;
-      }
-
-      this.job = new CronJob(TICK_CRON, async () => {
-        try {
-          await this.runNow();
-        } catch (error) {
-          logger.error("Error running reminder scan:", error);
-        }
-      });
-      this.job.start();
-      logger.info(`Reminder service started (scan cron: "${TICK_CRON}")`);
-      this.isInitialized = true;
-    } catch (error) {
-      logger.error("Error starting reminder service:", error);
-      throw error;
-    }
-  }
-
-  public async reload(): Promise<void> {
-    logger.info("Reloading reminder service...");
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    await this.start();
-  }
-
-  public destroy(): void {
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    logger.info("Reminder service destroyed");
-  }
-
-  // ---------------------------------------------------------------
   // Scan
   // ---------------------------------------------------------------
 
-  /** Run the delivery scan immediately. Concurrent calls coalesce. */
-  public async runNow(): Promise<void> {
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.runOnce();
-    try {
-      await this.inFlight;
-    } finally {
-      this.inFlight = null;
-    }
-  }
+  protected async runOnce(): Promise<void> {
+    const due = await Reminder.find({
+      delivered: false,
+      remindAt: { $lte: new Date() },
+    })
+      .sort({ remindAt: 1 })
+      .limit(SCAN_BATCH_SIZE);
 
-  private async runOnce(): Promise<void> {
-    if (this.isRunning) {
-      logger.warn("Reminder scan already in progress, skipping");
-      return;
-    }
-    this.isRunning = true;
-    try {
-      const enabled = await this.configService.getBoolean(
-        "reminders.enabled",
-        false,
-      );
-      if (!enabled) return;
-
-      const due = await Reminder.find({
-        delivered: false,
-        remindAt: { $lte: new Date() },
-      })
-        .sort({ remindAt: 1 })
-        .limit(SCAN_BATCH_SIZE);
-
-      for (const reminder of due) {
-        try {
-          await this.deliver(reminder);
-        } catch (error) {
-          logger.error(
-            `Error delivering reminder ${sanitizeForLog(String(reminder._id))}:`,
-            error,
-          );
-        }
+    for (const reminder of due) {
+      try {
+        await this.deliver(reminder);
+      } catch (error) {
+        logger.error(
+          `Error delivering reminder ${sanitizeForLog(String(reminder._id))}:`,
+          error,
+        );
       }
-    } finally {
-      this.isRunning = false;
     }
   }
 

@@ -230,11 +230,11 @@ describe("LeaderboardRoleService", () => {
         LeaderboardRoleService.getInstance(makeClient());
       const [first, second] = await Promise.all([svc.runNow(), svc.runNow()]);
 
-      // One of them ran, the other was coalesced and returned null.
-      const succeeded = [first, second].filter((r) => r !== null);
-      const skipped = [first, second].filter((r) => r === null);
-      expect(succeeded).toHaveLength(1);
-      expect(skipped).toHaveLength(1);
+      // The second caller joins the run already in flight and gets its
+      // result, so the reconciliation itself only happens once.
+      expect(first).not.toBeNull();
+      expect(second).toBe(first);
+      expect(mockGetTopUsers).toHaveBeenCalledTimes(1);
     });
   });
 

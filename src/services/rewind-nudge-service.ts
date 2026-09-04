@@ -1,16 +1,11 @@
 import { Client, EmbedBuilder, type ColorResolvable } from "discord.js";
-import { CronJob } from "cron";
-import { ConfigService } from "./config-service.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindService } from "./rewind-service.js";
 import logger from "../utils/logger.js";
-import {
-  sanitizeCronExpression,
-  validateCronExpression,
-} from "../utils/cron.js";
 
 /**
  * End-of-year DM nudge for the Rewind WebUI page (#484).
@@ -48,35 +43,20 @@ export interface RewindNudgeRunSummary {
   snapshotsFailed: number;
 }
 
-export class RewindNudgeService {
+export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary | null> {
   private static instance: RewindNudgeService;
-  private client: Client;
-  private configService: ConfigService;
-  private job: CronJob | null = null;
-  private isInitialized = false;
-  private isRunning = false;
-  private inFlight: Promise<RewindNudgeRunSummary | null> | null = null;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-
-    this.configService.registerReloadCallback(async () => {
-      try {
-        const enabled = await this.isNudgeEnabled();
-        if (!enabled && this.isInitialized) {
-          logger.info("Rewind nudge disabled, stopping cron job...");
-          this.destroy();
-        } else if (enabled) {
-          await this.reload();
-        }
-      } catch (error) {
-        logger.error(
-          "Error reloading rewind nudge service after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Rewind nudge service",
+      disabledMessage: "Rewind nudge is disabled",
+      cronContext: "rewind nudge",
+      runLabel: "Rewind nudge run",
     });
+  }
+
+  protected async resolveSchedule(): Promise<string> {
+    return this.configService.getString("rewind.cron", DEFAULT_CRON);
   }
 
   public static getInstance(client: Client): RewindNudgeService {
@@ -110,227 +90,149 @@ export class RewindNudgeService {
    * gate: an admin can keep the page on with no DMs (today's behaviour),
    * or run the nudge without other coupling.
    */
-  private async isNudgeEnabled(): Promise<boolean> {
+  protected async isEnabled(): Promise<boolean> {
     const legacy = await this.configService.getBoolean("rewind.enabled", false);
     return this.configService.getBoolean("rewind.nudge.enabled", legacy);
   }
 
-  public async start(): Promise<void> {
-    if (this.isInitialized) {
-      logger.warn("Rewind nudge service is already initialized, skipping...");
-      return;
-    }
-
-    try {
-      const enabled = await this.isNudgeEnabled();
-      if (!enabled) {
-        logger.info("Rewind nudge is disabled");
-        this.isInitialized = true;
-        return;
-      }
-
-      const rawCron = await this.configService.getString(
-        "rewind.cron",
-        DEFAULT_CRON,
-      );
-      const cronExpression = sanitizeCronExpression(rawCron);
-
-      if (!validateCronExpression(cronExpression, "rewind nudge")) {
-        logger.error(
-          `Rewind nudge service not started: invalid cron "${rawCron}"`,
-        );
-        this.isInitialized = true;
-        return;
-      }
-
-      this.job = new CronJob(cronExpression, async () => {
-        try {
-          await this.runNow();
-        } catch (error) {
-          logger.error("Error running rewind nudge job:", error);
-        }
-      });
-      this.job.start();
-
-      const nextRun = this.job.nextDate();
-      logger.info(
-        `Rewind nudge service started (cron: "${cronExpression}", next run: ${nextRun.toLocaleString()})`,
-      );
-
-      this.isInitialized = true;
-    } catch (error) {
-      logger.error("Error starting rewind nudge service:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Run the nudge immediately. Coalesces concurrent invocations so a
-   * slow run + the next cron tick can't double-deliver.
-   */
-  public async runNow(): Promise<RewindNudgeRunSummary | null> {
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.runOnce();
-    try {
-      return await this.inFlight;
-    } finally {
-      this.inFlight = null;
-    }
-  }
-
-  private async runOnce(): Promise<RewindNudgeRunSummary | null> {
-    if (this.isRunning) {
-      logger.warn("Rewind nudge run already in progress, skipping");
+  protected async runOnce(): Promise<RewindNudgeRunSummary | null> {
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) {
+      logger.error("Rewind nudge aborted: GUILD_ID not configured");
       return null;
     }
-    this.isRunning = true;
-    try {
-      const enabled = await this.isNudgeEnabled();
-      if (!enabled) {
-        logger.info("Rewind nudge aborted: nudge disabled");
-        return null;
-      }
 
-      const guildId = await this.configService.getString("GUILD_ID", "");
-      if (!guildId) {
-        logger.error("Rewind nudge aborted: GUILD_ID not configured");
-        return null;
-      }
+    const minMinutes = await this.configService.getNumber(
+      "rewind.min_minutes",
+      60,
+    );
+    const minSeconds = Math.max(0, minMinutes) * SECONDS_PER_MINUTE;
 
-      const minMinutes = await this.configService.getNumber(
-        "rewind.min_minutes",
-        60,
-      );
-      const minSeconds = Math.max(0, minMinutes) * SECONDS_PER_MINUTE;
+    const year = new Date().getUTCFullYear();
+    const summary: RewindNudgeRunSummary = {
+      ranAt: new Date(),
+      year,
+      qualifying: 0,
+      sent: 0,
+      skippedOptOut: 0,
+      skippedDmsClosed: 0,
+      skippedAlreadySent: 0,
+      failed: 0,
+      snapshotsCreated: 0,
+      snapshotsExisting: 0,
+      snapshotsSkipped: 0,
+      snapshotsFailed: 0,
+    };
 
-      const year = new Date().getUTCFullYear();
-      const summary: RewindNudgeRunSummary = {
-        ranAt: new Date(),
-        year,
-        qualifying: 0,
-        sent: 0,
-        skippedOptOut: 0,
-        skippedDmsClosed: 0,
-        skippedAlreadySent: 0,
-        failed: 0,
-        snapshotsCreated: 0,
-        snapshotsExisting: 0,
-        snapshotsSkipped: 0,
-        snapshotsFailed: 0,
-      };
+    const prefsService = UserNotificationPrefsService.getInstance();
 
-      const prefsService = UserNotificationPrefsService.getInstance();
-
-      const yearStart = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
-      const yearEnd = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0));
-      // Aggregate seconds per user for the current year and filter by
-      // the configured minimum. No `$limit` — every qualifying user
-      // should be considered, not just the top N.
-      const annualUsers = await VoiceChannelTracking.aggregate<{
-        _id: string;
-        username: string;
-        totalTime: number;
-      }>([
-        { $unwind: "$sessions" },
-        {
-          $match: {
-            "sessions.startTime": { $gte: yearStart, $lt: yearEnd },
-          },
+    const yearStart = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+    const yearEnd = new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0));
+    // Aggregate seconds per user for the current year and filter by
+    // the configured minimum. No `$limit` — every qualifying user
+    // should be considered, not just the top N.
+    const annualUsers = await VoiceChannelTracking.aggregate<{
+      _id: string;
+      username: string;
+      totalTime: number;
+    }>([
+      { $unwind: "$sessions" },
+      {
+        $match: {
+          "sessions.startTime": { $gte: yearStart, $lt: yearEnd },
         },
-        {
-          $group: {
-            _id: "$userId",
-            username: { $first: "$username" },
-            totalTime: { $sum: "$sessions.duration" },
-          },
+      },
+      {
+        $group: {
+          _id: "$userId",
+          username: { $first: "$username" },
+          totalTime: { $sum: "$sessions.duration" },
         },
-        { $match: { totalTime: { $gte: minSeconds } } },
-        { $sort: { totalTime: -1 } },
-      ]);
-      const qualifying = annualUsers.map((u) => ({
-        userId: u._id,
-        username: u.username ?? u._id,
-        totalTime: u.totalTime,
-      }));
-      summary.qualifying = qualifying.length;
+      },
+      { $match: { totalTime: { $gte: minSeconds } } },
+      { $sort: { totalTime: -1 } },
+    ]);
+    const qualifying = annualUsers.map((u) => ({
+      userId: u._id,
+      username: u.username ?? u._id,
+      totalTime: u.totalTime,
+    }));
+    summary.qualifying = qualifying.length;
 
-      for (const user of qualifying) {
-        try {
-          // One-shot per (userId, guildId, year). A re-run of the cron
-          // — or a manual `runNow()` for validation — must not produce
-          // a duplicate DM. We check before any other work so an
-          // already-nudged user costs only this lookup.
-          const existing = await RewindNudgeState.findOne({
-            userId: user.userId,
-            guildId,
-            year,
-          });
-          if (existing) {
-            summary.skippedAlreadySent += 1;
-            continue;
-          }
-
-          const prefs = await prefsService.getPrefs(user.userId, guildId);
-          if (!prefs.rewind) {
-            summary.skippedOptOut += 1;
-            continue;
-          }
-          const embed = this.buildEmbed(user.username, year);
-          const delivered = await this.sendNudgeDM(user.userId, embed);
-          if (!delivered) {
-            summary.skippedDmsClosed += 1;
-            continue;
-          }
-          summary.sent += 1;
-
-          // Record the delivery marker only after a successful send so
-          // DM-closed / failed deliveries can be retried on the next run.
-          await RewindNudgeState.findOneAndUpdate(
-            { userId: user.userId, guildId, year },
-            {
-              $set: {
-                userId: user.userId,
-                guildId,
-                year,
-                sentAt: summary.ranAt,
-              },
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true },
-          );
-        } catch (error) {
-          summary.failed += 1;
-          logger.error(
-            `Error sending rewind nudge for user ${user.userId}:`,
-            error,
-          );
+    for (const user of qualifying) {
+      try {
+        // One-shot per (userId, guildId, year). A re-run of the cron
+        // — or a manual `runNow()` for validation — must not produce
+        // a duplicate DM. We check before any other work so an
+        // already-nudged user costs only this lookup.
+        const existing = await RewindNudgeState.findOne({
+          userId: user.userId,
+          guildId,
+          year,
+        });
+        if (existing) {
+          summary.skippedAlreadySent += 1;
+          continue;
         }
+
+        const prefs = await prefsService.getPrefs(user.userId, guildId);
+        if (!prefs.rewind) {
+          summary.skippedOptOut += 1;
+          continue;
+        }
+        const embed = this.buildEmbed(user.username, year);
+        const delivered = await this.sendNudgeDM(user.userId, embed);
+        if (!delivered) {
+          summary.skippedDmsClosed += 1;
+          continue;
+        }
+        summary.sent += 1;
+
+        // Record the delivery marker only after a successful send so
+        // DM-closed / failed deliveries can be retried on the next run.
+        await RewindNudgeState.findOneAndUpdate(
+          { userId: user.userId, guildId, year },
+          {
+            $set: {
+              userId: user.userId,
+              guildId,
+              year,
+              sentAt: summary.ranAt,
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true },
+        );
+      } catch (error) {
+        summary.failed += 1;
+        logger.error(
+          `Error sending rewind nudge for user ${user.userId}:`,
+          error,
+        );
       }
-
-      // Freeze each qualifying user's recap for the wrapping-up year into
-      // an immutable snapshot (#574). The end-of-year cron runs in late
-      // December, so `year` is the current UTC year that's essentially
-      // done; once it rolls over, `getSummary` serves this frozen copy.
-      // This runs independently of DM delivery — opted-out / DM-closed
-      // users still get their year preserved — and is idempotent, so a
-      // re-run leaves existing snapshots untouched.
-      await this.snapshotQualifyingUsers(qualifying, guildId, year, summary);
-
-      logger.info(
-        `Rewind nudge complete: year=${summary.year} qualifying=${summary.qualifying} ` +
-          `sent=${summary.sent} opted_out=${summary.skippedOptOut} ` +
-          `already_sent=${summary.skippedAlreadySent} ` +
-          `dms_closed=${summary.skippedDmsClosed} failed=${summary.failed} ` +
-          `snapshots_created=${summary.snapshotsCreated} ` +
-          `snapshots_existing=${summary.snapshotsExisting} ` +
-          `snapshots_skipped=${summary.snapshotsSkipped} ` +
-          `snapshots_failed=${summary.snapshotsFailed}`,
-      );
-
-      await this.logSummary(summary);
-      return summary;
-    } finally {
-      this.isRunning = false;
     }
+
+    // Freeze each qualifying user's recap for the wrapping-up year into
+    // an immutable snapshot (#574). The end-of-year cron runs in late
+    // December, so `year` is the current UTC year that's essentially
+    // done; once it rolls over, `getSummary` serves this frozen copy.
+    // This runs independently of DM delivery — opted-out / DM-closed
+    // users still get their year preserved — and is idempotent, so a
+    // re-run leaves existing snapshots untouched.
+    await this.snapshotQualifyingUsers(qualifying, guildId, year, summary);
+
+    logger.info(
+      `Rewind nudge complete: year=${summary.year} qualifying=${summary.qualifying} ` +
+        `sent=${summary.sent} opted_out=${summary.skippedOptOut} ` +
+        `already_sent=${summary.skippedAlreadySent} ` +
+        `dms_closed=${summary.skippedDmsClosed} failed=${summary.failed} ` +
+        `snapshots_created=${summary.snapshotsCreated} ` +
+        `snapshots_existing=${summary.snapshotsExisting} ` +
+        `snapshots_skipped=${summary.snapshotsSkipped} ` +
+        `snapshots_failed=${summary.snapshotsFailed}`,
+    );
+
+    await this.logSummary(summary);
+    return summary;
   }
 
   /**
@@ -436,24 +338,5 @@ export class RewindNudgeService {
         error,
       );
     }
-  }
-
-  public async reload(): Promise<void> {
-    logger.info("Reloading rewind nudge service...");
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    await this.start();
-  }
-
-  public destroy(): void {
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    logger.info("Rewind nudge service destroyed");
   }
 }
