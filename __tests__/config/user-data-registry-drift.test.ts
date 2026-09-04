@@ -2,6 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  DELETABLE_COLLECTIONS,
   EXPORTABLE_COLLECTIONS,
   USER_DATA_REGISTRY,
   isUserIdFieldName,
@@ -19,6 +20,10 @@ import { READER_COLLECTIONS } from "../../src/services/user-data-export-service.
  * scans every schema source for user-id-shaped fields and requires each one
  * to be classified — the same forcing function `settings-doc-drift.test.ts`
  * applies to config keys.
+ *
+ * Since #913 the classification has two halves, and both are forced here: a
+ * new per-user model that ships with an export decision and no delete decision
+ * is the same silent failure moved one column over.
  *
  * Both directions are checked: a field the scan finds must be in the
  * registry, and a field the registry names must still exist in its source.
@@ -64,7 +69,7 @@ function declaredFields(source: string): Set<string> {
 function classificationOf(
   source: string,
   field: string,
-): { exportable: boolean } | undefined {
+): (typeof USER_DATA_REGISTRY)[number] | undefined {
   return USER_DATA_REGISTRY.find(
     (entry) => entry.source === source && entry.field === field,
   );
@@ -120,6 +125,50 @@ describe("user-data registry / schema drift", () => {
     ).toEqual([]);
   });
 
+  it("declares a delete policy on every entry", () => {
+    // #913: `onDelete` says what a purge does with the rows this field
+    // matches, and `subject` says whether they are the member's to erase at
+    // all. TypeScript already requires both; this catches an entry that
+    // reaches the registry from untyped JSON or a widened cast.
+    const policies = [
+      "hard-delete",
+      "pull-member",
+      "anonymise",
+      "retain",
+      "expires",
+    ];
+    expect(
+      USER_DATA_REGISTRY.filter(
+        (entry) =>
+          !policies.includes(entry.onDelete) ||
+          !["self", "mention"].includes(entry.subject),
+      ).map((entry) => `${entry.source}:${entry.field}`),
+    ).toEqual([]);
+  });
+
+  it("justifies every delete policy", () => {
+    // Mirrors the export-side `note` check: the deleteNote is the triage
+    // decision, and an entry without one is an entry nobody thought about.
+    expect(
+      USER_DATA_REGISTRY.filter(
+        (entry) => entry.deleteNote.trim().length < 20,
+      ).map((entry) => `${entry.source}:${entry.field}`),
+    ).toEqual([]);
+  });
+
+  it("never purges a field that only mentions the member", () => {
+    // A `mention` names the member inside a row that belongs to someone
+    // else — the co-present ids on other members' voice sessions, the
+    // moderator on another member's record. Those are not theirs to erase,
+    // so no actionable policy may be paired with one.
+    const wrong = USER_DATA_REGISTRY.filter(
+      (entry) =>
+        entry.subject === "mention" &&
+        !["retain", "expires"].includes(entry.onDelete),
+    );
+    expect(wrong.map((entry) => `${entry.source}:${entry.field}`)).toEqual([]);
+  });
+
   it("keeps the moderation and audit surface out of the export", () => {
     // The one classification the issue is explicit about: a warned member
     // must not be able to read their own moderation history — or the audit
@@ -134,6 +183,45 @@ describe("user-data registry / schema drift", () => {
       (entry) => entry.exportable && mustExclude.includes(entry.source),
     );
     expect(leaked).toEqual([]);
+  });
+
+  it("keeps the moderation and audit surface out of a purge", () => {
+    // The delete-side mirror of the test above: a member must not be able to
+    // erase their own moderation history — or the audit trails, or the
+    // session infrastructure — from a self-service endpoint.
+    const mustRetain = [
+      "src/models/moderation-log.ts",
+      "src/models/discord-command-audit-log.ts",
+      "src/models/web-audit-log.ts",
+      "src/models/web-session.ts",
+    ];
+    const purged = USER_DATA_REGISTRY.filter(
+      (entry) =>
+        mustRetain.includes(entry.source) && entry.onDelete !== "retain",
+    );
+    expect(purged.map((entry) => `${entry.source}:${entry.field}`)).toEqual([]);
+    // And none of them reaches the coordinator's work list.
+    expect(
+      DELETABLE_COLLECTIONS.filter((collection) =>
+        [
+          "moderation-log",
+          "discord-command-audit-log",
+          "web-audit-log",
+          "web-session",
+        ].includes(collection),
+      ),
+    ).toEqual([]);
+  });
+
+  it("purges only collections a member can also export", () => {
+    // Anything a purge touches is by definition the member's own data, so it
+    // must already be classified as exportable. The reverse does not hold:
+    // `voice-channel-ownership` is exported by nobody and expires on its own.
+    expect(
+      DELETABLE_COLLECTIONS.filter(
+        (collection) => !EXPORTABLE_COLLECTIONS.includes(collection),
+      ),
+    ).toEqual([]);
   });
 
   it("has a reader for exactly the exportable collections", () => {
