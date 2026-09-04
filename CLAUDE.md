@@ -171,13 +171,14 @@ CI runs on PRs to `main` and pushes to `main`. The relevant workflows in `.githu
   code — see the `dangerous-triggers` exemption in `.github/zizmor.yml`.
 - **`release-please.yml`** — release automation on push to `main`.
 
-Coverage thresholds are enforced by `jest.config.js` (`coverageThreshold`, currently branches 49 /
-functions 63 / lines 54 / statements 54) and sit a few points under measured coverage, so a real
-regression fails the `test` job. Do not ratchet them by hand on a schedule — that is how they drifted
-~33 points out of date (#848). `npm run coverage:drift` (`scripts/check-coverage-drift.mjs`, run in CI
-on the Node 22 matrix leg) fails once actual coverage climbs more than 10 points above any floor, and
-writes the actual-vs-floor table to the run summary on every PR; raising the numbers in
-`jest.config.js` is then the fix.
+Coverage thresholds are enforced by `coverageThreshold.global` in `jest.config.js`, which is the
+single source of truth for the numbers — read them there (`TESTING.md` carries the same table for
+contributors) rather than restating them here, so this file cannot drift out of date (#920). The
+floors sit a few points under measured coverage, so a real regression fails the `test` job. Do not
+ratchet them by hand on a schedule — that is how they drifted ~33 points out of date (#848).
+`npm run coverage:drift` (`scripts/check-coverage-drift.mjs`, run in CI on the Node 22 matrix leg)
+fails once actual coverage climbs more than 10 points above any floor, and writes the actual-vs-floor
+table to the run summary on every PR; raising the numbers in `jest.config.js` is then the fix.
 
 ### Conventional Commits are mandatory
 
