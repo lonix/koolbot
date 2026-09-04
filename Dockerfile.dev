@@ -23,5 +23,7 @@ EXPOSE 3000
 # Set environment variables
 ENV NODE_ENV=development
 
-# Start the application with hot reloading
-CMD ["node", "--import", "./src/loader.js", "src/index.ts"]
+# Start the application with hot reloading. `--watch` (Node >= 22) restarts the
+# process whenever a loaded source file changes; docker-compose.dev.yml bind-mounts
+# the repo at /app so host edits are what it sees.
+CMD ["node", "--watch", "--watch-preserve-output", "--import", "./src/loader.js", "src/index.ts"]

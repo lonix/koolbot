@@ -11,7 +11,8 @@ via Mongoose. Discord interactions use discord.js v14.
 ## Commands
 
 ```bash
-npm run dev          # Run from source via ts-node ESM loader (src/loader.js) — no build step
+npm run dev          # Run from source via ts-node ESM loader (src/loader.js) — no build step;
+                     # runs under node --watch, so it restarts on source changes
 npm run build        # tsc -> dist/ (also the typecheck gate; tsconfig is strict)
 npm start            # Run the compiled bot (node dist/index.js)
 npm run watch        # tsc --watch

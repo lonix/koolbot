@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc --listFiles --listEmittedFiles",
     "start": "node dist/index.js",
-    "dev": "node --import ./src/loader.js src/index.ts",
+    "dev": "node --watch --watch-preserve-output --import ./src/loader.js src/index.ts",
     "watch": "tsc --watch",
     "unregister-guild-commands": "node dist/unregister-guild-commands.js",
     "cleanup-global-commands": "node dist/scripts/cleanup-global-commands.js",

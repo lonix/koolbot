@@ -467,8 +467,15 @@ docker compose -f docker-compose.dev.yml up
 docker compose -f docker-compose.dev.yml up -d
 ```
 
-This mounts your local code into the container and reloads on file
-changes.
+This mounts your local code into the container and runs the bot under
+`node --watch`, so the process restarts whenever a source file changes.
+
+If your editor's saves don't reach the container (some bind-mount
+setups don't forward filesystem events), restart it by hand:
+
+```bash
+docker compose -f docker-compose.dev.yml restart koolbot
+```
 
 ### Configuration & data backup
 
@@ -667,11 +674,27 @@ npm run test:ci        # Run tests in CI mode
 ```bash
 npm run build                     # Compile TypeScript
 npm run start                     # Start production bot
-npm run dev                       # Development with hot reload
-npm run validate-config           # Validate configuration (add -- --verbose for all keys)
-npm run migrate-config            # Migrate old settings
-npm run cleanup-global-commands   # Clean up Discord commands
+npm run dev                       # Development, restarts on file changes (node --watch)
+npm run watch                     # tsc --watch (recompiles only, does not restart the bot)
+npm run coverage:drift            # Fail if the coverage floors have fallen behind actuals
 ```
+
+The operational scripts run against the compiled output in `dist/`, so
+run `npm run build` first:
+
+```bash
+npm run build
+npm run validate-config             # Validate configuration (add -- --verbose for all keys)
+npm run migrate-config              # Migrate old settings
+npm run cleanup-global-commands     # Remove stale globally-registered slash commands
+npm run unregister-guild-commands   # Remove all guild-registered slash commands
+npm run seed-sample-data -- --yes   # Populate a dev/test DB with deterministic fake activity
+```
+
+⚠️ `seed-sample-data` is for development and testing only — never point
+it at a production database. See
+**[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** for its safety model and
+`--clean` flag.
 
 ### Architecture overview
 
