@@ -60,6 +60,7 @@ export interface ConfigSchema {
   "quotes.header_message_id": string; // Message ID of the header post
   "quotes.header_pin_enabled": boolean; // Pin the header post
   "quotes.clear_on_sync": boolean; // Wipe and re-post the entire channel on quote sync
+  "quotes.vote_history_days": number; // Retention for per-vote like timing (days)
 
   // Rate Limiting
   "ratelimit.enabled": boolean;
@@ -276,6 +277,9 @@ export const defaultConfig: ConfigSchema = {
   "quotes.header_pin_enabled": true, // Pin header for easy access
   // Destructive — off by default (rule 1: operator must explicitly opt in)
   "quotes.clear_on_sync": false,
+  // How long timestamped 👍 events are kept so the weekly recap can rank by
+  // votes cast this week rather than quotes added this week (#817).
+  "quotes.vote_history_days": 30,
 
   // Rate Limiting defaults
   "ratelimit.enabled": false,
@@ -1234,6 +1238,15 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "This is destructive and slow on large quote collections; leave off unless you need a full rebuild.",
     category: "quotes",
     type: "boolean",
+  },
+  "quotes.vote_history_days": {
+    label: "Vote history retention (days)",
+    description:
+      "How long individual 👍 votes are timestamped and kept, so the weekly recap can pick the quote " +
+      "that gained the most likes this week rather than the most-liked quote added this week. " +
+      "Older vote records are pruned; the lifetime like tally is never affected.",
+    category: "quotes",
+    type: "number",
   },
 
   // Rate Limiting

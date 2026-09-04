@@ -49,6 +49,72 @@ describe("QuoteService backup & vote persistence", () => {
       await service.setVoteCountsByMessageId("", 1, 1);
       expect(model.findOneAndUpdate).not.toHaveBeenCalled();
     });
+
+    it("stamps the like delta against the stored tally (#817)", async () => {
+      const before = new Date();
+      model.findOne.mockResolvedValue({
+        likes: 1,
+        dislikes: 0,
+        likeEvents: [],
+      });
+      model.findOneAndUpdate.mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 4, 0);
+
+      const [, update] = model.findOneAndUpdate.mock.calls[0];
+      expect(update.likes).toBe(4);
+      expect(update.likeEvents).toHaveLength(1);
+      expect(update.likeEvents[0].delta).toBe(3);
+      expect(update.likeEvents[0].at.getTime()).toBeGreaterThanOrEqual(
+        before.getTime(),
+      );
+    });
+
+    it("records a negative delta when a like is taken back (#817)", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 5,
+        dislikes: 0,
+        likeEvents: [],
+      });
+      model.findOneAndUpdate.mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 3, 0);
+
+      const [, update] = model.findOneAndUpdate.mock.calls[0];
+      expect(update.likeEvents[0].delta).toBe(-2);
+    });
+
+    it("appends to existing history rather than replacing it (#817)", async () => {
+      const earlier = new Date();
+      model.findOne.mockResolvedValue({
+        likes: 2,
+        dislikes: 0,
+        likeEvents: [{ at: earlier, delta: 2 }],
+      });
+      model.findOneAndUpdate.mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 3, 0);
+
+      const [, update] = model.findOneAndUpdate.mock.calls[0];
+      expect(update.likeEvents).toHaveLength(2);
+      expect(update.likeEvents.map((e: any) => e.delta)).toEqual([2, 1]);
+    });
+
+    it("writes no vote history when the tally is unchanged (#817)", async () => {
+      model.findOne.mockResolvedValue({
+        likes: 3,
+        dislikes: 1,
+        likeEvents: [],
+      });
+      model.findOneAndUpdate.mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 3, 1);
+
+      expect(model.findOneAndUpdate).toHaveBeenCalledWith(
+        { messageId: "msg1" },
+        { likes: 3, dislikes: 1 },
+      );
+    });
   });
 
   describe("exportQuotes", () => {

@@ -64,7 +64,11 @@ jest.unstable_mockModule("mongoose", () => ({
     models: { Quote: listModel("quote") },
     model: jest.fn(() => listModel("quote")),
   },
-  Schema: class {},
+  // Real schemas declare indexes at module load (e.g. the quote schema's
+  // like-event index, #817), so the stub has to tolerate `.index()`.
+  Schema: class {
+    index(): void {}
+  },
 }));
 
 jest.unstable_mockModule("../../src/models/voice-channel-tracking.js", () => ({

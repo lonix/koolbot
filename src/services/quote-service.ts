@@ -36,6 +36,12 @@ function normalizeUserId(input: string): string {
   return input;
 }
 
+/** One timestamped change to a quote's 👍 tally (#817). */
+export interface QuoteLikeEvent {
+  at: Date;
+  delta: number;
+}
+
 export interface IQuote extends Document {
   content: string;
   authorId: string;
@@ -46,6 +52,77 @@ export interface IQuote extends Document {
   addedAt: Date;
   likes: number;
   dislikes: number;
+  /** Timestamped like deltas within the retention window (#817). */
+  likeEvents?: QuoteLikeEvent[];
+}
+
+/** Fallback retention for per-vote like timing, in days. */
+const DEFAULT_VOTE_HISTORY_DAYS = 30;
+
+/**
+ * Hard cap on stored like events per quote. Retention alone is not a bound —
+ * a reaction war on a single quote could otherwise grow the document without
+ * limit — so the newest events win once the cap is reached.
+ */
+export const MAX_LIKE_EVENTS = 200;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Rebuild a quote's like-event list: drop anything older than the retention
+ * window, append `delta` (when non-zero) stamped at `now`, and keep only the
+ * newest {@link MAX_LIKE_EVENTS} entries.
+ */
+export function buildLikeEvents(
+  existing: QuoteLikeEvent[] | undefined | null,
+  delta: number,
+  now: Date,
+  retentionDays: number = DEFAULT_VOTE_HISTORY_DAYS,
+): QuoteLikeEvent[] {
+  // A misconfigured (or non-numeric) retention must not silently disable
+  // pruning, so fall back to the default rather than computing a NaN cutoff.
+  const days =
+    Number.isFinite(retentionDays) && retentionDays > 0
+      ? retentionDays
+      : DEFAULT_VOTE_HISTORY_DAYS;
+  const cutoff = new Date(now.getTime() - days * MS_PER_DAY);
+  const kept: QuoteLikeEvent[] = [];
+
+  for (const event of existing ?? []) {
+    if (!event || !event.at) continue;
+    const at = new Date(event.at);
+    if (Number.isNaN(at.getTime()) || at < cutoff) continue;
+    if (!Number.isFinite(event.delta) || event.delta === 0) continue;
+    kept.push({ at, delta: event.delta });
+  }
+
+  if (Number.isFinite(delta) && delta !== 0) {
+    kept.push({ at: new Date(now), delta });
+  }
+
+  return kept.length > MAX_LIKE_EVENTS
+    ? kept.slice(kept.length - MAX_LIKE_EVENTS)
+    : kept;
+}
+
+/**
+ * Net likes a quote gained at or after `since`. Negative deltas (a like that
+ * was taken back) count against the window, so a quote cannot ride a vote it
+ * no longer has.
+ */
+export function sumLikeEventsSince(
+  events: QuoteLikeEvent[] | undefined | null,
+  since: Date,
+): number {
+  let total = 0;
+  for (const event of events ?? []) {
+    if (!event || !event.at) continue;
+    const at = new Date(event.at);
+    if (Number.isNaN(at.getTime()) || at < since) continue;
+    if (!Number.isFinite(event.delta)) continue;
+    total += event.delta;
+  }
+  return total;
 }
 
 /** Bumped if the export shape ever changes in a backwards-incompatible way. */
@@ -183,8 +260,29 @@ export class QuoteService {
     await this.model.findByIdAndDelete(quoteId);
   }
 
+  /**
+   * Configured retention for like-event timing, in days (#817).
+   */
+  private async getVoteHistoryDays(): Promise<number> {
+    return configService.getNumber(
+      "quotes.vote_history_days",
+      DEFAULT_VOTE_HISTORY_DAYS,
+    );
+  }
+
   async likeQuote(quoteId: string): Promise<void> {
-    await this.model.findByIdAndUpdate(quoteId, { $inc: { likes: 1 } });
+    // Record *when* the like landed alongside the lifetime counter (#817), so
+    // the weekly recap can rank by votes cast in the window. `$slice` bounds
+    // the array without a read-modify-write.
+    await this.model.findByIdAndUpdate(quoteId, {
+      $inc: { likes: 1 },
+      $push: {
+        likeEvents: {
+          $each: [{ at: new Date(), delta: 1 }],
+          $slice: -MAX_LIKE_EVENTS,
+        },
+      },
+    });
   }
 
   async dislikeQuote(quoteId: string): Promise<void> {
@@ -233,10 +331,31 @@ export class QuoteService {
     dislikes: number,
   ): Promise<void> {
     if (!messageId) return;
-    await this.model.findOneAndUpdate(
-      { messageId },
-      { likes: Math.max(0, likes), dislikes: Math.max(0, dislikes) },
-    );
+    const nextLikes = Math.max(0, likes);
+    const nextDislikes = Math.max(0, dislikes);
+    const update: Record<string, unknown> = {
+      likes: nextLikes,
+      dislikes: nextDislikes,
+    };
+
+    // Reactions arrive as an absolute snapshot, so the difference against the
+    // stored tally is how many likes were gained (or taken back) since the
+    // last write. Stamping that delta is what makes "most-liked this week"
+    // answerable for a quote added long ago (#817).
+    const existing = await this.model.findOne({ messageId });
+    if (existing) {
+      const delta = nextLikes - (existing.likes ?? 0);
+      if (delta !== 0) {
+        update.likeEvents = buildLikeEvents(
+          existing.likeEvents,
+          delta,
+          new Date(),
+          await this.getVoteHistoryDays(),
+        );
+      }
+    }
+
+    await this.model.findOneAndUpdate({ messageId }, update);
   }
 
   /**
@@ -381,10 +500,14 @@ export class QuoteService {
    * Return the most-liked quote added since `since`, for the public weekly
    * recap (#777). Only quotes with at least one like qualify, so a quiet week
    * surfaces nothing rather than an arbitrary zero-vote quote. Scoped by
-   * `createdAt` (when the quote was added) because vote events are not
-   * timestamped — "top-voted this week" can only be approximated as
-   * "most-liked among quotes added this week". Returns null when nothing
-   * qualifies.
+   * `createdAt` (when the quote was added), which approximates "top-voted
+   * this week" as "most-liked among quotes added this week".
+   *
+   * Since #817 this is the *fallback*: prefer
+   * {@link getTopQuoteByVotesSince}, which ranks by votes actually cast in
+   * the window, and fall back here when no vote timing has been captured yet
+   * (an install that has had quotes for longer than it has recorded votes).
+   * Returns null when nothing qualifies.
    */
   async getTopQuoteSince(since: Date): Promise<IQuote | null> {
     return this.model
@@ -393,6 +516,43 @@ export class QuoteService {
         likes: { $gt: 0 },
       })
       .sort({ likes: -1 });
+  }
+
+  /**
+   * Return the quote that gained the most likes *within* the window starting
+   * at `since`, regardless of when it was added (#817) — the pick the weekly
+   * recap actually wants. Ranking happens in memory because the candidate set
+   * is only the quotes voted on during the window, and each one's score is
+   * the sum of its like deltas inside it.
+   *
+   * Only votes recorded after the timing feature shipped can be windowed;
+   * quotes with no events in range simply do not qualify, and callers fall
+   * back to {@link getTopQuoteSince}. Returns null when nothing qualifies.
+   */
+  async getTopQuoteByVotesSince(
+    since: Date,
+  ): Promise<{ quote: IQuote; likes: number } | null> {
+    const candidates = await this.model.find({
+      likeEvents: { $elemMatch: { at: { $gte: since }, delta: { $gt: 0 } } },
+    });
+
+    let best: IQuote | null = null;
+    let bestLikes = 0;
+    for (const quote of candidates ?? []) {
+      const gained = sumLikeEventsSince(quote.likeEvents, since);
+      if (gained <= 0) continue;
+      // Ties go to the quote with the higher lifetime tally, so the pick is
+      // stable rather than dependent on document order.
+      if (
+        gained > bestLikes ||
+        (gained === bestLikes && (quote.likes ?? 0) > (best?.likes ?? 0))
+      ) {
+        best = quote;
+        bestLikes = gained;
+      }
+    }
+
+    return best ? { quote: best, likes: bestLikes } : null;
   }
 
   /**
