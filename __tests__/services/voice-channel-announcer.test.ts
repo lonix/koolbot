@@ -248,6 +248,29 @@ describe("VoiceChannelAnnouncer", () => {
         expect(arg.content).not.toContain("this week");
       });
 
+      it("still falls back when the vote-window lookup throws", async () => {
+        setConfig({
+          "voicetracking.announcements.include_quote_of_week": true,
+          "quotes.enabled": true,
+        });
+        // A transient failure of the newer query must not take the whole
+        // section down -- the legacy query is independent.
+        ((quoteService as any).getTopQuoteByVotesSince =
+          jest.fn<any>()).mockRejectedValue(new Error("vote lookup boom"));
+        ((quoteService as any).getTopQuoteSince =
+          jest.fn<any>()).mockResolvedValue({
+          content: "fallback quote",
+          authorId: "555",
+          likes: 3,
+        });
+
+        await (service as any).announceQuoteOfWeek(channel, new Date());
+
+        const arg = channel.send.mock.calls[0][0] as any;
+        expect(arg.content).toContain("fallback quote");
+        expect(arg.content).toContain("👍 3 likes");
+      });
+
       it("swallows its own errors (isolation contract)", async () => {
         setConfig({
           "voicetracking.announcements.include_quote_of_week": true,

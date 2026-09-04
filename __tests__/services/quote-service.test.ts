@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import {
   QuoteService,
-  buildLikeEvents,
+  likeEventCutoff,
+  hasExpiredLikeEvents,
   sumLikeEventsSince,
-  MAX_LIKE_EVENTS,
 } from "../../src/services/quote-service.js";
 
 // Mock mongoose and dependencies
@@ -229,75 +229,50 @@ describe("QuoteService", () => {
     });
   });
 
-  describe("buildLikeEvents (#817)", () => {
+  describe("like-event retention helpers (#817)", () => {
     const now = new Date("2026-09-01T12:00:00Z");
 
-    it("appends the delta stamped at now", () => {
-      const events = buildLikeEvents([], 2, now, 30);
-      expect(events).toEqual([{ at: now, delta: 2 }]);
-    });
-
-    it("drops events older than the retention window", () => {
-      const old = new Date("2026-07-01T00:00:00Z");
-      const recent = new Date("2026-08-30T00:00:00Z");
-      const events = buildLikeEvents(
-        [
-          { at: old, delta: 5 },
-          { at: recent, delta: 1 },
-        ],
-        1,
-        now,
-        30,
-      );
-      expect(events).toEqual([
-        { at: recent, delta: 1 },
-        { at: now, delta: 1 },
-      ]);
-    });
-
-    it("records nothing new when the delta is zero", () => {
-      const recent = new Date("2026-08-30T00:00:00Z");
-      expect(buildLikeEvents([{ at: recent, delta: 1 }], 0, now, 30)).toEqual([
-        { at: recent, delta: 1 },
-      ]);
-    });
-
-    it("caps stored events, keeping the newest", () => {
-      const existing = Array.from({ length: MAX_LIKE_EVENTS + 5 }, () => ({
-        at: new Date("2026-08-30T00:00:00Z"),
-        delta: 1,
-      }));
-      const events = buildLikeEvents(existing, 1, now, 30);
-      expect(events).toHaveLength(MAX_LIKE_EVENTS);
-      expect(events[events.length - 1]).toEqual({ at: now, delta: 1 });
+    it("computes the cutoff from the retention window", () => {
+      expect(likeEventCutoff(now, 2)).toEqual(new Date("2026-08-30T12:00:00Z"));
     });
 
     it("falls back to the default retention when misconfigured", () => {
-      const old = new Date("2026-01-01T00:00:00Z");
-      const recent = new Date("2026-08-30T00:00:00Z");
-      const events = buildLikeEvents(
-        [
-          { at: old, delta: 5 },
-          { at: recent, delta: 1 },
-        ],
-        0,
-        now,
-        Number.NaN,
+      // A NaN/zero setting must not produce a NaN cutoff, which would
+      // silently disable pruning altogether.
+      expect(likeEventCutoff(now, Number.NaN)).toEqual(
+        new Date("2026-08-02T12:00:00Z"),
       );
-      expect(events).toEqual([{ at: recent, delta: 1 }]);
+      expect(likeEventCutoff(now, 0)).toEqual(likeEventCutoff(now, 30));
     });
 
-    it("ignores malformed entries", () => {
-      const events = buildLikeEvents(
-        [
-          { at: new Date("not a date"), delta: 3 },
-          { at: new Date("2026-08-30T00:00:00Z"), delta: Number.NaN },
-        ] as never,
-        1,
-        now,
-        30,
-      );
-      expect(events).toEqual([{ at: now, delta: 1 }]);
+    it("detects history that has aged out", () => {
+      const cutoff = likeEventCutoff(now, 30);
+      expect(
+        hasExpiredLikeEvents(
+          [
+            { at: new Date("2026-08-30T00:00:00Z"), delta: 1 },
+            { at: new Date("2026-07-01T00:00:00Z"), delta: 1 },
+          ],
+          cutoff,
+        ),
+      ).toBe(true);
+    });
+
+    it("reports nothing to prune for in-window or missing history", () => {
+      const cutoff = likeEventCutoff(now, 30);
+      expect(
+        hasExpiredLikeEvents(
+          [{ at: new Date("2026-08-30T00:00:00Z"), delta: 1 }],
+          cutoff,
+        ),
+      ).toBe(false);
+      expect(hasExpiredLikeEvents(undefined, cutoff)).toBe(false);
+      expect(
+        hasExpiredLikeEvents(
+          [{ at: new Date("nope"), delta: 1 }] as never,
+          cutoff,
+        ),
+      ).toBe(false);
     });
   });
 

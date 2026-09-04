@@ -354,7 +354,22 @@ export class VoiceChannelAnnouncer {
       );
       if (!quotesEnabled) return;
 
-      const byVotes = await quoteService.getTopQuoteByVotesSince(since);
+      // A failure of the vote-window lookup must not take the whole section
+      // down: the legacy "added this week" query is independent and may still
+      // answer, so a throw here degrades to the fallback rather than skipping
+      // Quote of the Week entirely.
+      let byVotes: Awaited<
+        ReturnType<typeof quoteService.getTopQuoteByVotesSince>
+      > = null;
+      try {
+        byVotes = await quoteService.getTopQuoteByVotesSince(since);
+      } catch (error) {
+        logger.warn(
+          "Vote-window quote lookup failed, falling back to quotes added this week:",
+          error,
+        );
+      }
+
       const topQuote =
         byVotes?.quote ?? (await quoteService.getTopQuoteSince(since));
       if (!topQuote) return;

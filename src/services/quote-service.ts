@@ -69,40 +69,30 @@ export const MAX_LIKE_EVENTS = 200;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
- * Rebuild a quote's like-event list: drop anything older than the retention
- * window, append `delta` (when non-zero) stamped at `now`, and keep only the
- * newest {@link MAX_LIKE_EVENTS} entries.
+ * Resolve a retention setting to a cutoff date. A misconfigured (or
+ * non-numeric) value must not silently disable pruning, so it falls back to
+ * the default rather than producing a NaN cutoff.
  */
-export function buildLikeEvents(
-  existing: QuoteLikeEvent[] | undefined | null,
-  delta: number,
-  now: Date,
-  retentionDays: number = DEFAULT_VOTE_HISTORY_DAYS,
-): QuoteLikeEvent[] {
-  // A misconfigured (or non-numeric) retention must not silently disable
-  // pruning, so fall back to the default rather than computing a NaN cutoff.
+export function likeEventCutoff(now: Date, retentionDays: number): Date {
   const days =
     Number.isFinite(retentionDays) && retentionDays > 0
       ? retentionDays
       : DEFAULT_VOTE_HISTORY_DAYS;
-  const cutoff = new Date(now.getTime() - days * MS_PER_DAY);
-  const kept: QuoteLikeEvent[] = [];
+  return new Date(now.getTime() - days * MS_PER_DAY);
+}
 
-  for (const event of existing ?? []) {
+/** True when any stored event predates `cutoff` and is therefore prunable. */
+export function hasExpiredLikeEvents(
+  events: QuoteLikeEvent[] | undefined | null,
+  cutoff: Date,
+): boolean {
+  for (const event of events ?? []) {
     if (!event || !event.at) continue;
     const at = new Date(event.at);
-    if (Number.isNaN(at.getTime()) || at < cutoff) continue;
-    if (!Number.isFinite(event.delta) || event.delta === 0) continue;
-    kept.push({ at, delta: event.delta });
+    if (Number.isNaN(at.getTime())) continue;
+    if (at < cutoff) return true;
   }
-
-  if (Number.isFinite(delta) && delta !== 0) {
-    kept.push({ at: new Date(now), delta });
-  }
-
-  return kept.length > MAX_LIKE_EVENTS
-    ? kept.slice(kept.length - MAX_LIKE_EVENTS)
-    : kept;
+  return false;
 }
 
 /**
@@ -333,29 +323,66 @@ export class QuoteService {
     if (!messageId) return;
     const nextLikes = Math.max(0, likes);
     const nextDislikes = Math.max(0, dislikes);
-    const update: Record<string, unknown> = {
-      likes: nextLikes,
-      dislikes: nextDislikes,
-    };
+    const tallies = { likes: nextLikes, dislikes: nextDislikes };
 
     // Reactions arrive as an absolute snapshot, so the difference against the
     // stored tally is how many likes were gained (or taken back) since the
     // last write. Stamping that delta is what makes "most-liked this week"
     // answerable for a quote added long ago (#817).
     const existing = await this.model.findOne({ messageId });
-    if (existing) {
-      const delta = nextLikes - (existing.likes ?? 0);
-      if (delta !== 0) {
-        update.likeEvents = buildLikeEvents(
-          existing.likeEvents,
-          delta,
-          new Date(),
-          await this.getVoteHistoryDays(),
-        );
-      }
+    const previousLikes = existing?.likes ?? 0;
+    const delta = existing ? nextLikes - previousLikes : 0;
+
+    if (delta === 0) {
+      await this.model.findOneAndUpdate({ messageId }, tallies);
+      return;
     }
 
-    await this.model.findOneAndUpdate({ messageId }, update);
+    // Vote writes are debounced and fired without being awaited, so two
+    // persists for the same message can overlap. The delta was measured
+    // against `previousLikes`, so the write is guarded on that tally still
+    // being current: the winner stamps atomically ($push, never a
+    // read-modify-write of the array), and a loser — whose delta is now
+    // measured against a stale count — records the latest tallies without
+    // stamping rather than double-counting or clobbering the history.
+    const stamped = await this.model.findOneAndUpdate(
+      { messageId, likes: previousLikes },
+      {
+        $set: tallies,
+        $push: {
+          likeEvents: {
+            $each: [{ at: new Date(), delta }],
+            $slice: -MAX_LIKE_EVENTS,
+          },
+        },
+      },
+    );
+
+    if (!stamped) {
+      await this.model.findOneAndUpdate({ messageId }, tallies);
+      return;
+    }
+
+    await this.pruneLikeEvents(messageId, existing?.likeEvents);
+  }
+
+  /**
+   * Drop like events that have aged out of the retention window. `$slice`
+   * on the stamping write bounds the array's size; this bounds its age. The
+   * pre-read history is only used to skip the write when there is nothing to
+   * prune — the `$pull` itself is evaluated server-side, so it stays correct
+   * under concurrent persists.
+   */
+  private async pruneLikeEvents(
+    messageId: string,
+    events: QuoteLikeEvent[] | undefined,
+  ): Promise<void> {
+    const cutoff = likeEventCutoff(new Date(), await this.getVoteHistoryDays());
+    if (!hasExpiredLikeEvents(events, cutoff)) return;
+    await this.model.updateOne(
+      { messageId },
+      { $pull: { likeEvents: { at: { $lt: cutoff } } } },
+    );
   }
 
   /**
