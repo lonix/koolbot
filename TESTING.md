@@ -292,7 +292,15 @@ it('should handle long operation', async () => {
 
 ## CI Integration
 
-Tests are automatically run in GitHub Actions CI. See `.github/workflows/test.yml` for configuration.
+Tests run automatically in GitHub Actions on pull requests to `main` and pushes to `main`. The
+configuration lives in [`.github/workflows/ci.yml`](.github/workflows/ci.yml), alongside the `lint`
+and `typecheck` jobs:
+
+- The `test` job runs `npm run test:ci` on a Node 22 and Node 24 matrix (`fail-fast: false`, so both
+  legs always report).
+- The `coverage:drift` check and the `coverage-report` artifact upload only run on the Node 22 leg.
+- `ci-success` aggregates `lint`, `typecheck` and `test`, and is the single required status check for
+  branch protection — it fails if any job failed or was cancelled.
 
 ## Future Improvements
 
