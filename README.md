@@ -677,7 +677,15 @@ npm run cleanup-global-commands   # Clean up Discord commands
 
 ```text
 src/
+├── index.ts              # Application entry point
 ├── commands/             # Discord slash commands (/ping, /config, etc.)
+├── config/               # env.ts — the only module that reads process.env
+├── content/              # Achievement / accolade / status / notice definitions
+├── database/             # Shared Mongoose schema fragments
+├── handlers/             # Discord component/interaction handlers
+├── interfaces/           # Shared TypeScript interfaces
+├── models/               # MongoDB schemas
+├── scripts/              # One-shot operational tools (validate-config, …)
 ├── services/             # Core business logic (single source of truth)
 │   ├── config-service.ts
 │   ├── permissions-service.ts
@@ -685,18 +693,18 @@ src/
 │   ├── voice-channel-tracker.ts
 │   ├── web-session-service.ts
 │   └── ...
-├── web/                  # Web UI router (HTTP layer over services)
-│   ├── index.ts          # Express router mounted at /admin
-│   ├── session.ts        # Cookie session middleware
-│   ├── read-only-routes.ts
-│   ├── write-routes.ts   # Mount point for the admin write routers
-│   ├── routes/write/     # One router per admin domain + shared helpers
-│   ├── csrf.ts
-│   └── ...
-├── models/               # MongoDB schemas
-├── handlers/             # Discord event handlers
-├── utils/                # Helper functions
-└── index.ts              # Application entry point
+├── utils/                # Helper functions (cron, discord, mongo, logger, …)
+└── web/                  # Web UI (HTTP layer over services)
+    ├── index.ts          # Routers mounted at /admin and /me
+    ├── session.ts        # Cookie session middleware
+    ├── read-only-routes.ts
+    ├── write-routes.ts   # Mount point for the admin write routers
+    ├── routes/write/     # One router per admin domain + shared helpers
+    ├── user-routes.ts    # The /me self-service surface
+    ├── user-layout.ts
+    ├── html.ts           # escapeHtml / escapeJsInAttr
+    ├── csrf.ts
+    └── ...
 ```
 
 The target for `src/web/` is to be a thin HTTP layer over the

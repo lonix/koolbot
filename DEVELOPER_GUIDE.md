@@ -26,30 +26,39 @@ KoolBot follows a service-oriented architecture where each service owns a specif
 ```text
 src/
 ├── index.ts              # Entry point, service initialization, Express bootstrap
+├── unregister-guild-commands.ts  # Operational script that predates src/scripts/ (see below)
 ├── commands/             # Discord slash commands (small surface from v1.0)
-│   ├── achievements.ts
-│   ├── config.ts         # Web UI launcher (the only admin command)
-│   ├── help.ts
-│   ├── ping.ts
-│   ├── quote.ts
-│   ├── seen.ts
-│   └── voicestats.ts
-├── services/             # Business logic services (single source of truth)
-├── web/                  # Web UI router — mounted at /admin when WEBUI_ENABLED=true
-│   ├── index.ts          # createWebRouter(client) — composes the router
-│   ├── session.ts        # Cookie session middleware + permission revalidation
-│   ├── csrf.ts           # CSRF (double-submit cookie)
-│   ├── cookies.ts        # Signed cookie helpers
-│   ├── rate-limit.ts     # In-memory rate limiter
-│   ├── read-only-routes.ts  # Dashboard, Bootstrap, Settings, etc. (GET)
-│   ├── write-routes.ts   # Mounts the admin write routers behind session/role/CSRF
-│   ├── routes/write/     # One POST router per domain (settings, polls, …) + helpers.ts
-│   ├── admin-layout.ts   # Shared layout + escapeHtml/escapeJsInAttr helpers
-│   ├── admin-views.ts    # Page renderers for the admin pages
-│   └── views.ts          # Sign-in / sign-out / invalid-link views
+│                         #   The authoritative list is COMMAND_CONFIGS in
+│                         #   services/command-registry.ts — read that, not this tree
+├── config/               # env.ts — the only sanctioned reader of process.env
+├── content/              # Achievement / accolade / status / notice definitions (has its own README.md)
+├── database/             # schema.ts — shared Mongoose schema fragments
+├── handlers/             # Discord component/interaction handlers (VC buttons, modals, RSVP)
+├── interfaces/           # Shared TypeScript interfaces (command.ts)
 ├── models/               # MongoDB schemas
-├── handlers/             # Event handlers
-└── utils/                # Shared utilities
+├── scripts/              # One-shot operational tools (see Operational Scripts below)
+├── services/             # Business logic services (single source of truth)
+├── utils/                # Shared utilities (cron, discord, mongo, logger, …)
+└── web/                  # Web UI — /admin (admin) and /me (self-service)
+    ├── index.ts          # createWebRouter(client) + createUserWebRouter(client)
+    ├── session.ts        # Cookie session middleware + permission revalidation
+    ├── csrf.ts           # CSRF (double-submit cookie)
+    ├── cookies.ts        # Signed cookie helpers
+    ├── rate-limit.ts     # In-memory rate limiter
+    ├── http-flash.ts     # Flash/JSON error responses shared by both surfaces
+    ├── html.ts           # escapeHtml / escapeJsInAttr — the escaping boundary
+    ├── theme.ts          # Shared dark-theme colour tokens
+    ├── audit.ts          # recordAudit() — one WebAuditLog row per write
+    ├── metrics.ts        # Prometheus /metrics registry and collectors
+    ├── bootstrap-vars.ts # BOOTSTRAP_VARS / PROTECTED_KEYS (env vars, not DB keys)
+    ├── read-only-routes.ts  # Admin dashboard, Bootstrap, Settings, etc. (GET)
+    ├── write-routes.ts   # Mounts the admin write routers behind session/role/CSRF
+    ├── routes/write/     # One POST router per domain (settings, polls, …) + helpers.ts
+    ├── admin-layout.ts   # Shared admin layout (re-exports the html.ts escapers)
+    ├── admin-views.ts    # Page renderers for the admin pages
+    ├── user-routes.ts    # The /me self-service routes (prefs, rewind, birthday, …)
+    ├── user-layout.ts    # /me nav, page shell and per-page body renderers
+    └── views.ts          # Sign-in / sign-out / invalid-link views
 ```
 
 ### Service Layer
@@ -80,9 +89,15 @@ PermissionsService         // re-checked on every /admin/* request
 The Web UI is the only admin surface from v1.0 onward. It mounts on the
 **same Express server** that already exposes `/health` (port 3000 inside
 the container). When `WEBUI_ENABLED=true` and the required `WEBUI_*` env
-vars are set, `src/index.ts` calls `createWebRouter(client)` and
-`app.use("/admin", router)`. When `WEBUI_ENABLED` is false, the router
-is never created and `/admin/*` returns 404.
+vars are set, `src/index.ts` mounts two routers from `src/web/index.ts`:
+
+```typescript
+healthApp.use("/admin", createWebRouter(client));      // admin surface
+healthApp.use("/me", createUserWebRouter(client));     // self-service surface
+```
+
+When `WEBUI_ENABLED` is false neither router is created and both prefixes
+return 404.
 
 ### Auth flow
 
@@ -129,6 +144,30 @@ The `/admin/s/<token>` redemption endpoint is rate-limited to 10
 attempts per minute per IP; `/admin/finish` to 30. To make this work
 behind a reverse proxy, operators set `WEBUI_TRUST_PROXY` to the hop
 count.
+
+### The `/me` self-service surface
+
+`/me/*` is the member-facing half of the Web UI (#481) — close to 3,000 lines
+across two modules, not an appendix to the admin panel. Routes live in
+`user-routes.ts`; `user-layout.ts` holds `USER_NAV_ITEMS`, the `renderUserPage`
+shell and one `renderUser*Body` function per page. `createUserWebRouter` in
+`src/web/index.ts` composes them.
+
+It shares the admin surface's session cookie (path `/`, set by magic-link
+redemption at `/admin/s/:token`) and its CSRF middleware, but differs in two
+ways:
+
+- **Both roles reach it.** A `user`-role session can only use `/me/*`; an
+  `admin`-role session can use both, and redemption sends admins to `/admin/`
+  with an in-page link across to `/me`.
+- **Every handler is self-scoped.** `assertSelfScope` restricts reads and
+  writes to rows keyed by the session's own `(userId, guildId)`. A violation
+  throws `SelfScopeError`, which `userWebErrorHandler` turns into a 403 — never
+  a generic 500. Any new `/me` handler must go through it.
+
+The pages it serves today: notification preferences, timezone, birthday, voice
+presets and name pattern, Rewind, and privacy / data export. Page-level detail
+is in `WEBUI.md`.
 
 ### Views
 
@@ -640,23 +679,53 @@ toggles take effect on the next read.
 `WEBUI_*` secrets), it goes in `.env`. Anything else lives in MongoDB
 and is edited through the Web UI's Settings page.
 
-`process.env` is read at boot by a known set of modules — `src/index.ts`,
-`src/web/index.ts`, `src/web/session.ts`, `src/web/csrf.ts`,
-`src/web/admin-layout.ts`, `src/web/read-only-routes.ts` (bootstrap
-page), `src/services/config-service.ts` (for the env→bootstrap-key
-mappings), `src/services/web-session-service.ts`,
-`src/services/discord-logger.ts`, `src/services/startup-migrator.ts`,
-and `src/utils/logger.ts`. New service code should prefer reading
-through `ConfigService` so the same lookup path serves both surfaces;
-add new direct `process.env` reads only when the value is genuinely a
-startup-only secret.
+#### Reading environment variables: `src/config/env.ts`
 
-The protected-keys list lives in `src/web/bootstrap-vars.ts`
-(`PROTECTED_KEYS`, enforced by `src/web/routes/write/settings.ts`). It is hand-maintained — when you add a new
-**bootstrap** env var (something whose value should never round-trip
-through YAML import/export), add it to that set so imports can't
-overwrite it. Operational tuning vars like `WEBUI_TRUST_PROXY` don't
-need to be there since they aren't represented as DB-backed keys.
+**`src/config/env.ts` is the only module in `src/` that reads `process.env`.**
+Nothing else — no service, no route, no script — touches it directly. That
+buys three things: defaults live in one place instead of being re-derived at
+each call site, missing required vars fail fast with a named error instead of
+surfacing as a silent `undefined` deep in application logic, and tests inject
+configuration by mocking the module rather than mutating the process
+environment.
+
+The module calls `dotenv` on import, so importing it anywhere is enough to
+populate the environment. What it exports:
+
+| Export | Use it for |
+| --- | --- |
+| `env` | The typed, defaulted view of the known vars — `env.discordToken`, `env.mongoUri`, `env.isProduction`, `env.webui.*`, `env.metrics.*`. Prefer this. |
+| `requireEnv(key)` | A var the caller cannot continue without; throws a named error. Fail-fast startup paths and one-shot scripts. |
+| `getEnv(key)` | The one sanctioned dynamic accessor, for keys not known at compile time (e.g. config-key lookups). |
+| `getEnvConfigValue(key)` | Read a var *as a config value* — `"true"`/`"false"` → boolean, numeric strings → number, blank → `null`. Shared by `ConfigService`'s env fallback and `validate-config` so the two can't disagree. |
+| `hasEnv(key)` | Presence check, including vars set to an empty string. |
+| `REQUIRED_VARS` / `getMissingRequiredEnv()` | The vars the bot cannot start without, and the startup check that reports which are absent. |
+| `DEFAULT_MONGODB_URI` | The fallback connection string; `utils/mongo.ts` shares it rather than re-inlining the literal (#851). |
+
+The accessors on `env` are lazy getters, not values frozen at import time — a
+few consumers (and their tests) mutate the environment after startup and expect
+the current value.
+
+**Adding a new bootstrap env var:**
+
+1. Add a getter to `env` (or use `getEnv` if the key is dynamic). Do not read
+   `process.env` from the consuming module.
+2. If the bot cannot start without it, add it to `REQUIRED_VARS`.
+3. Add it to `.env.example` with a comment, and to `BOOTSTRAP_VARS` in
+   `src/web/bootstrap-vars.ts` so the admin Bootstrap page shows it and YAML
+   import can't overwrite it.
+4. Document it in `WEBUI.md` if it gates the Web UI.
+
+Anything that is *not* a startup-only secret belongs in the schema and is read
+through `ConfigService` instead — one lookup path serves both the slash-command
+surface and the Web UI.
+
+`src/web/bootstrap-vars.ts` holds the hand-maintained `BOOTSTRAP_VARS` list
+(key, category, `isSecret`), which the admin Bootstrap page renders and from
+which `PROTECTED_KEYS` is derived. `src/web/routes/write/settings.ts` and
+`routes/write/helpers.ts` reject those keys in YAML import/export, since a DB
+row for a bootstrap var would have no effect and could mask the real value held
+in the environment.
 
 #### Adding New Config Keys
 
@@ -752,8 +821,10 @@ discovers settings from `defaultConfig` automatically.
 
 ## Operational Scripts
 
-These are one-shot maintenance tools in `src/scripts/`, not runtime services or
-Discord commands. They run against **compiled** output, so build first:
+These are one-shot maintenance tools, not runtime services or Discord commands.
+Four live in `src/scripts/`; `unregister-guild-commands` predates that directory
+and still sits at `src/unregister-guild-commands.ts`. They run against
+**compiled** output, so build first:
 
 ```bash
 npm run build
