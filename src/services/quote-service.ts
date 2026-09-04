@@ -330,13 +330,13 @@ export class QuoteService {
     // last write. Stamping that delta is what makes "most-liked this week"
     // answerable for a quote added long ago (#817).
     const existing = await this.model.findOne({ messageId });
-    const previousLikes = existing?.likes ?? 0;
-    const delta = existing ? nextLikes - previousLikes : 0;
-
-    if (delta === 0) {
+    if (!existing) {
       await this.model.findOneAndUpdate({ messageId }, tallies);
       return;
     }
+
+    const previousLikes = existing.likes ?? 0;
+    const delta = nextLikes - previousLikes;
 
     // Vote writes are debounced and fired without being awaited, so two
     // persists for the same message can overlap. The delta was measured
@@ -345,25 +345,32 @@ export class QuoteService {
     // read-modify-write of the array), and a loser — whose delta is now
     // measured against a stale count — records the latest tallies without
     // stamping rather than double-counting or clobbering the history.
-    const stamped = await this.model.findOneAndUpdate(
-      { messageId, likes: previousLikes },
-      {
-        $set: tallies,
-        $push: {
-          likeEvents: {
-            $each: [{ at: new Date(), delta }],
-            $slice: -MAX_LIKE_EVENTS,
+    const stamped =
+      delta !== 0 &&
+      Boolean(
+        await this.model.findOneAndUpdate(
+          { messageId, likes: previousLikes },
+          {
+            $set: tallies,
+            $push: {
+              likeEvents: {
+                $each: [{ at: new Date(), delta }],
+                $slice: -MAX_LIKE_EVENTS,
+              },
+            },
           },
-        },
-      },
-    );
+        ),
+      );
 
     if (!stamped) {
       await this.model.findOneAndUpdate({ messageId }, tallies);
-      return;
     }
 
-    await this.pruneLikeEvents(messageId, existing?.likeEvents);
+    // Every persist is an opportunity to enforce retention, not just one that
+    // stamped: a quote whose 👍 tally has settled (only 👎 changed, or a burst
+    // came back to where it started) would otherwise keep expired history
+    // indefinitely, bounded by the entry cap but never by age.
+    await this.pruneLikeEvents(messageId, existing.likeEvents);
   }
 
   /**

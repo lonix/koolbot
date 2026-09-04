@@ -90,6 +90,24 @@ describe("QuoteService backup & vote persistence", () => {
       expect(update.$push.likeEvents.$each[0].delta).toBe(-2);
     });
 
+    it("prunes expired history even when the like tally is unchanged (#817)", async () => {
+      // A quote whose 👍 count has settled (only 👎 changed, or a burst came
+      // back to where it started) must still have its history aged out.
+      model.findOne.mockResolvedValue({
+        likes: 3,
+        dislikes: 0,
+        likeEvents: [{ at: new Date("2020-01-01T00:00:00Z"), delta: 1 }],
+      });
+      model.findOneAndUpdate.mockResolvedValue({});
+
+      await service.setVoteCountsByMessageId("msg1", 3, 1);
+
+      expect(model.updateOne).toHaveBeenCalledTimes(1);
+      expect(
+        model.updateOne.mock.calls[0][1].$pull.likeEvents.at.$lt,
+      ).toBeInstanceOf(Date);
+    });
+
     it("writes no vote history when the tally is unchanged (#817)", async () => {
       model.findOne.mockResolvedValue({
         likes: 3,
@@ -125,6 +143,7 @@ describe("QuoteService backup & vote persistence", () => {
         { messageId: "msg1" },
         { likes: 4, dislikes: 0 },
       ]);
+      // Nothing has aged out, so no prune write either.
       expect(model.updateOne).not.toHaveBeenCalled();
     });
 
