@@ -35,29 +35,31 @@ To add a command:
 **Common Pitfall:** Do not re-introduce a per-method command list in `CommandManager` or hand-written
 command metadata in `help.ts` — both drift from the registry (see issue #845).
 
-## Setup Wizard
+## Setup Wizard (Web UI)
 
-The `/setup wizard` command provides interactive onboarding for configuring features. When adding new features:
+The Setup Wizard is a Web UI page at `/admin/wizard`, not a slash command — `/setup` was retired in the
+Web UI migration and must not be re-added.
 
 **User-Facing Features:** Consider adding wizard support for user-facing features that require configuration.
 
-- Add feature configuration to `src/commands/setup-wizard.ts` in the `FEATURES` constant
-- Implement feature-specific configuration function (e.g., `configureMyFeature`)
-- Add interaction handlers in `src/handlers/wizard-*-handler.ts` if needed
-- Update auto-detection logic in `src/utils/channel-detector.ts` for resource discovery
+- List the feature's config keys in `WIZARD_FEATURE_SETTINGS` in `src/web/routes/write/helpers.ts`
+  (key order determines form order), and place the feature in `WIZARD_FEATURE_ORDER` in the same file
+- The step, review and apply routes in `src/web/routes/write/wizard.ts` render those keys from
+  `settingsMetadata` / `defaultConfig`, so no per-feature rendering code is needed
+- Only touch the views when a setting needs a control the shared renderer does not cover
+  (`WEBUI.md` documents that renderer)
 
 **Wizard Architecture:**
 
-- Ephemeral interactions in server (not DMs)
-- Session-based state management via `WizardService` (15-min timeout)
-- Button/select menu/modal interactions for multi-step configuration
-- Auto-detects existing channels/categories to avoid duplicates
-- Bulk configuration with single `ConfigService.triggerReload()` on completion
+- Session-based state management via `WizardService` (`src/services/wizard-service.ts`, 15-min timeout)
+- Multi-step HTML forms, mounted behind the admin session check, admin-role check and CSRF middleware
+- Applies are audit-logged (`recordAudit`) and end with a single `ConfigService.triggerReload()`
 
-**When to Use Wizard vs Manual Config:**
+**When to Use Wizard vs the Settings Page:**
 
 - Wizard: Multi-setting features requiring guided setup (voice channels, tracking, quotes)
-- Manual `/config set`: Single-setting features or advanced configuration
+- Settings page: Single settings or advanced configuration — it discovers keys from `defaultConfig`
+  automatically, so no wiring is required
 
 ## Configuration Conventions
 
