@@ -67,8 +67,8 @@ export interface ScheduledServiceOptions {
  * @typeParam TSummary What one run reports. Services that return a summary
  * object for the WebUI's "run now" buttons pass it here; services whose runs
  * report nothing use the `void` default. `runNow()` widens it with `null`,
- * which means "no run happened" — the feature was disabled, or another run
- * was already in flight.
+ * which means "no run happened" because the feature is disabled — a caller
+ * that arrives while a run is in flight joins that run and gets its result.
  */
 export abstract class ScheduledService<TSummary = void> {
   protected readonly client: Client;

@@ -28,7 +28,12 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 }));
 
 // Keep the real `CronTime` so cron expressions are validated for real, but
-// stub `CronJob` so no test ever arms a live timer.
+// stub `CronJob` so no test ever arms a live timer. Reading `CronTime` out of
+// the real module here is safe: what decides whether the service gets the stub
+// is that `unstable_mockModule` runs before `scheduled-service.js` is imported
+// below, not whether the real module was loaded first — the two live in
+// separate registries. "arms a job on the resolved schedule" is the canary: it
+// asserts the stub was constructed, so it fails if the real `CronJob` leaks in.
 const { CronTime } = await import("cron");
 const mockJobStart = jest.fn();
 const mockJobStop = jest.fn();
