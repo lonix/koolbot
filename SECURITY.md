@@ -2,12 +2,18 @@
 
 ## Supported Versions
 
-We release patches for security vulnerabilities for the following versions:
+We release security patches for the **latest released minor version** of KoolBot — that is, the
+newest `x.y.z` on the [Releases](https://github.com/lonix/koolbot/releases) page, and any subsequent
+patch releases on that same `x.y` line. Older minor versions are not patched; if you are running one,
+upgrade to the latest release before reporting a vulnerability, and check whether it still reproduces.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.0.x   | :white_check_mark: |
-| < 1.0   | :x:                |
+| Version                               | Supported          |
+| ------------------------------------- | ------------------ |
+| Latest released minor version (`x.y`) | :white_check_mark: |
+| Any older minor version               | :x:                |
+
+This policy is deliberately written without a hard-coded version number so that it stays accurate
+across releases.
 
 ## Reporting a Vulnerability
 
