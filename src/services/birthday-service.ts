@@ -1,25 +1,18 @@
 import { Client, Guild, TextChannel } from "discord.js";
-import { CronJob } from "cron";
 import { formatInTimeZone } from "date-fns-tz";
-import { ConfigService } from "./config-service.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import { UserBirthday, type IUserBirthday } from "../models/user-birthday.js";
 import { resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
-import {
-  sanitizeCronExpression,
-  validateCronExpression,
-} from "../utils/cron.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
  * Birthday celebrations service (#657).
  *
- * Mirrors the cron lifecycle of `DigestService` /
- * `ScheduledAnnouncementService`: the interval handle is stored, every
- * tick is wrapped so a failure is logged and never crashes the process,
- * and a reload callback re-reads the gate on `/config reload`.
+ * The cron lifecycle — arming the job, coalescing runs, reloading on
+ * `/config reload` — comes from `ScheduledService`.
  *
  * The job runs on a sub-daily cadence (hourly by default) and, for each
  * member with a birthday on file, decides whether "today" matches in
@@ -166,39 +159,24 @@ export function renderBirthdayMessage(
   return result;
 }
 
-export class BirthdayService {
+export class BirthdayService extends ScheduledService<BirthdayRunSummary | null> {
   private static instance: BirthdayService;
-  private client: Client;
-  private configService: ConfigService;
-  private job: CronJob | null = null;
-  private isInitialized = false;
-  private isRunning = false;
-  private inFlight: Promise<BirthdayRunSummary | null> | null = null;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-
-    this.configService.registerReloadCallback(async () => {
-      try {
-        logger.info("Birthday configuration changed, reloading...");
-        const enabled = await this.configService.getBoolean(
-          "birthdays.enabled",
-          false,
-        );
-        if (!enabled && this.isInitialized) {
-          logger.info("Birthdays disabled, stopping cron job...");
-          this.destroy();
-        } else if (enabled) {
-          await this.reload();
-        }
-      } catch (error) {
-        logger.error(
-          "Error reloading birthday service after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Birthday service",
+      disabledMessage: "Birthdays are disabled",
+      cronContext: "birthdays",
+      runLabel: "Birthday run",
     });
+  }
+
+  protected async isEnabled(): Promise<boolean> {
+    return this.configService.getBoolean("birthdays.enabled", false);
+  }
+
+  protected async resolveSchedule(): Promise<string> {
+    return this.configService.getString("birthdays.cron", DEFAULT_CRON);
   }
 
   public static getInstance(client: Client): BirthdayService {
@@ -307,219 +285,134 @@ export class BirthdayService {
   // Cron lifecycle
   // ---------------------------------------------------------------
 
-  public async start(): Promise<void> {
-    if (this.isInitialized) {
-      logger.warn("Birthday service is already initialized, skipping...");
-      return;
-    }
-    try {
-      const enabled = await this.configService.getBoolean(
-        "birthdays.enabled",
-        false,
-      );
-      if (!enabled) {
-        logger.info("Birthdays are disabled");
-        this.isInitialized = true;
-        return;
-      }
-
-      const rawCron = await this.configService.getString(
-        "birthdays.cron",
-        DEFAULT_CRON,
-      );
-      const cronExpression = sanitizeCronExpression(rawCron);
-      if (!validateCronExpression(cronExpression, "birthdays")) {
-        logger.error(`Birthday service not started: invalid cron "${rawCron}"`);
-        this.isInitialized = true;
-        return;
-      }
-
-      this.job = new CronJob(cronExpression, async () => {
-        try {
-          await this.runNow();
-        } catch (error) {
-          logger.error("Error running birthday job:", error);
-        }
-      });
-      this.job.start();
-
-      const nextRun = this.job.nextDate();
-      logger.info(
-        `Birthday service started (cron: "${cronExpression}", next run: ${nextRun.toLocaleString()})`,
-      );
-      this.isInitialized = true;
-    } catch (error) {
-      logger.error("Error starting birthday service:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Run the birthday job immediately. Concurrent invocations coalesce
-   * onto the first one so a slow run and the next cron tick can't
-   * double-post (in addition to the per-row `lastAnnouncedYear` guard).
-   */
-  public async runNow(): Promise<BirthdayRunSummary | null> {
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.runOnce();
-    try {
-      return await this.inFlight;
-    } finally {
-      this.inFlight = null;
-    }
-  }
-
-  private async runOnce(): Promise<BirthdayRunSummary | null> {
-    if (this.isRunning) {
-      logger.warn("Birthday run already in progress, skipping");
+  protected async runOnce(): Promise<BirthdayRunSummary | null> {
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) {
+      logger.error("Birthday run aborted: GUILD_ID not configured");
       return null;
     }
-    this.isRunning = true;
-    try {
-      const enabled = await this.configService.getBoolean(
-        "birthdays.enabled",
-        false,
-      );
-      if (!enabled) {
-        logger.info("Birthday run aborted: feature disabled");
-        return null;
-      }
 
-      const guildId = await this.configService.getString("GUILD_ID", "");
-      if (!guildId) {
-        logger.error("Birthday run aborted: GUILD_ID not configured");
-        return null;
-      }
+    const channelId = await this.configService.getString(
+      "birthdays.channel_id",
+      "",
+    );
+    if (!channelId) {
+      logger.warn("Birthday run aborted: birthdays.channel_id not configured");
+      return null;
+    }
 
-      const channelId = await this.configService.getString(
-        "birthdays.channel_id",
-        "",
+    // Both fetches reject rather than resolving null when the id is stale or
+    // the bot lacks access, so the guards below only ever run if the rejection
+    // is converted first. Mirrors `EventService`'s scan.
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+      logger.error(`Birthday run aborted: guild ${guildId} not found`);
+      return null;
+    }
+
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel || !(channel instanceof TextChannel)) {
+      logger.error(
+        `Birthday run aborted: channel ${sanitizeForLog(channelId)} not found or not a text channel`,
       );
-      if (!channelId) {
-        logger.warn(
-          "Birthday run aborted: birthdays.channel_id not configured",
+      return null;
+    }
+
+    const messageTemplate = await this.configService.getString(
+      "birthdays.message",
+      DEFAULT_MESSAGE,
+    );
+    const mention = await this.configService.getBoolean(
+      "birthdays.mention",
+      true,
+    );
+    const roleId = await this.configService.getString("birthdays.role_id", "");
+    const roleDurationHours = await this.configService.getNumber(
+      "birthdays.role_duration_hours",
+      DEFAULT_ROLE_DURATION_HOURS,
+    );
+
+    const summary: BirthdayRunSummary = {
+      ranAt: new Date(),
+      candidates: 0,
+      announced: 0,
+      rolesGranted: 0,
+      rolesRemoved: 0,
+      failed: 0,
+    };
+
+    // 1. Revoke expired birthday roles first so a member whose window
+    //    closed loses the role even if no one has a birthday today.
+    if (roleId) {
+      summary.rolesRemoved += await this.sweepExpiredRoles(
+        guild,
+        guildId,
+        roleId,
+        Math.max(0, roleDurationHours) * MS_PER_HOUR,
+        summary.ranAt,
+      );
+    }
+
+    // 2. Announce today's birthdays (in each member's own timezone).
+    const prefsService = UserNotificationPrefsService.getInstance();
+    const rows = await UserBirthday.find({ guildId });
+    summary.candidates = rows.length;
+
+    for (const row of rows) {
+      try {
+        const tz = resolveTimezone(
+          await prefsService.getTimezone(row.userId, guildId),
         );
-        return null;
-      }
+        const local = localYmdInZone(summary.ranAt, tz);
+        if (!shouldAnnounceBirthday(row, local)) continue;
 
-      const guild = await this.client.guilds.fetch(guildId);
-      if (!guild) {
-        logger.error(`Birthday run aborted: guild ${guildId} not found`);
-        return null;
-      }
-
-      const channel = await guild.channels.fetch(channelId);
-      if (!channel || !(channel instanceof TextChannel)) {
-        logger.error(
-          `Birthday run aborted: channel ${sanitizeForLog(channelId)} not found or not a text channel`,
-        );
-        return null;
-      }
-
-      const messageTemplate = await this.configService.getString(
-        "birthdays.message",
-        DEFAULT_MESSAGE,
-      );
-      const mention = await this.configService.getBoolean(
-        "birthdays.mention",
-        true,
-      );
-      const roleId = await this.configService.getString(
-        "birthdays.role_id",
-        "",
-      );
-      const roleDurationHours = await this.configService.getNumber(
-        "birthdays.role_duration_hours",
-        DEFAULT_ROLE_DURATION_HOURS,
-      );
-
-      const summary: BirthdayRunSummary = {
-        ranAt: new Date(),
-        candidates: 0,
-        announced: 0,
-        rolesGranted: 0,
-        rolesRemoved: 0,
-        failed: 0,
-      };
-
-      // 1. Revoke expired birthday roles first so a member whose window
-      //    closed loses the role even if no one has a birthday today.
-      if (roleId) {
-        summary.rolesRemoved += await this.sweepExpiredRoles(
-          guild,
-          guildId,
-          roleId,
-          Math.max(0, roleDurationHours) * MS_PER_HOUR,
-          summary.ranAt,
-        );
-      }
-
-      // 2. Announce today's birthdays (in each member's own timezone).
-      const prefsService = UserNotificationPrefsService.getInstance();
-      const rows = await UserBirthday.find({ guildId });
-      summary.candidates = rows.length;
-
-      for (const row of rows) {
-        try {
-          const tz = resolveTimezone(
-            await prefsService.getTimezone(row.userId, guildId),
-          );
-          const local = localYmdInZone(summary.ranAt, tz);
-          if (!shouldAnnounceBirthday(row, local)) continue;
-
-          const member = await guild.members
-            .fetch(row.userId)
-            .catch(() => null);
-          if (!member) {
-            // Member left the guild — mark as announced so we don't
-            // retry every tick, and skip.
-            row.lastAnnouncedYear = local.year;
-            await row.save();
-            continue;
-          }
-
-          const age =
-            typeof row.year === "number" ? local.year - row.year : null;
-          const content = renderBirthdayMessage(messageTemplate, {
-            userId: row.userId,
-            displayName: member.displayName,
-            age,
-          });
-
-          await channel.send({
-            content,
-            allowedMentions: mention ? { users: [row.userId] } : { parse: [] },
-          });
-          summary.announced += 1;
-
-          if (roleId) {
-            const granted = await this.grantBirthdayRole(member, roleId);
-            if (granted) {
-              row.roleAssignedAt = summary.ranAt;
-              summary.rolesGranted += 1;
-            }
-          }
-
+        const member = await guild.members.fetch(row.userId).catch(() => null);
+        if (!member) {
+          // Member left the guild — mark as announced so we don't
+          // retry every tick, and skip.
           row.lastAnnouncedYear = local.year;
           await row.save();
-        } catch (error) {
-          summary.failed += 1;
-          logger.error(
-            `Error processing birthday for user ${sanitizeForLog(row.userId)}:`,
-            error,
-          );
+          continue;
         }
-      }
 
-      logger.info(
-        `Birthday run complete: candidates=${summary.candidates} announced=${summary.announced} ` +
-          `roles_granted=${summary.rolesGranted} roles_removed=${summary.rolesRemoved} failed=${summary.failed}`,
-      );
-      await this.logSummary(summary);
-      return summary;
-    } finally {
-      this.isRunning = false;
+        const age = typeof row.year === "number" ? local.year - row.year : null;
+        const content = renderBirthdayMessage(messageTemplate, {
+          userId: row.userId,
+          displayName: member.displayName,
+          age,
+        });
+
+        await channel.send({
+          content,
+          allowedMentions: mention ? { users: [row.userId] } : { parse: [] },
+        });
+        summary.announced += 1;
+
+        if (roleId) {
+          const granted = await this.grantBirthdayRole(member, roleId);
+          if (granted) {
+            row.roleAssignedAt = summary.ranAt;
+            summary.rolesGranted += 1;
+          }
+        }
+
+        row.lastAnnouncedYear = local.year;
+        await row.save();
+      } catch (error) {
+        summary.failed += 1;
+        logger.error(
+          `Error processing birthday for user ${sanitizeForLog(row.userId)}:`,
+          error,
+        );
+      }
     }
+
+    logger.info(
+      `Birthday run complete: candidates=${summary.candidates} announced=${summary.announced} ` +
+        `roles_granted=${summary.rolesGranted} roles_removed=${summary.rolesRemoved} failed=${summary.failed}`,
+    );
+    await this.logSummary(summary);
+    return summary;
   }
 
   /**
@@ -602,24 +495,5 @@ export class BirthdayService {
     } catch (error) {
       logger.error("Birthdays: failed to post run summary to Discord:", error);
     }
-  }
-
-  public async reload(): Promise<void> {
-    logger.info("Reloading birthday service...");
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    await this.start();
-  }
-
-  public destroy(): void {
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    logger.info("Birthday service destroyed");
   }
 }

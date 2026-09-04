@@ -11,15 +11,13 @@ import {
   TextChannel,
   VoiceChannel,
 } from "discord.js";
-import { CronJob } from "cron";
 import { isValidObjectId } from "mongoose";
 import { formatInTimeZone } from "date-fns-tz";
-import { ConfigService } from "./config-service.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import { Event, type IEvent, type RsvpStatus } from "../models/event.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
-import { validateCronExpression } from "../utils/cron.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
@@ -192,39 +190,25 @@ function accentColor(state: IEvent["state"]): number {
   }
 }
 
-export class EventService {
+export class EventService extends ScheduledService {
   private static instance: EventService;
-  private client: Client;
-  private configService: ConfigService;
-  private job: CronJob | null = null;
-  private isInitialized = false;
-  private isRunning = false;
-  private inFlight: Promise<void> | null = null;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-
-    this.configService.registerReloadCallback(async () => {
-      try {
-        logger.info("Events configuration changed, reloading...");
-        const enabled = await this.configService.getBoolean(
-          "events.enabled",
-          false,
-        );
-        if (!enabled && this.isInitialized) {
-          logger.info("Events disabled, stopping scan job...");
-          this.destroy();
-        } else if (enabled) {
-          await this.reload();
-        }
-      } catch (error) {
-        logger.error(
-          "Error reloading event service after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Event service",
+      disabledMessage: "Events are disabled",
+      cronContext: "events",
+      runLabel: "Event scan",
     });
+  }
+
+  protected async isEnabled(): Promise<boolean> {
+    return this.configService.getBoolean("events.enabled", false);
+  }
+
+  /** Events are scanned on a fixed tick rather than an admin-set schedule. */
+  protected async resolveSchedule(): Promise<string> {
+    return TICK_CRON;
   }
 
   public static getInstance(client: Client): EventService {
@@ -246,144 +230,55 @@ export class EventService {
   }
 
   // ---------------------------------------------------------------
-  // Cron lifecycle
-  // ---------------------------------------------------------------
-
-  public async start(): Promise<void> {
-    if (this.isInitialized) {
-      logger.warn("Event service is already initialized, skipping...");
-      return;
-    }
-    try {
-      const enabled = await this.configService.getBoolean(
-        "events.enabled",
-        false,
-      );
-      if (!enabled) {
-        logger.info("Events are disabled");
-        this.isInitialized = true;
-        return;
-      }
-
-      if (!validateCronExpression(TICK_CRON, "events")) {
-        logger.error("Event service not started: invalid tick cron");
-        this.isInitialized = true;
-        return;
-      }
-
-      this.job = new CronJob(TICK_CRON, async () => {
-        try {
-          await this.runNow();
-        } catch (error) {
-          logger.error("Error running event scan:", error);
-        }
-      });
-      this.job.start();
-      logger.info(`Event service started (scan cron: "${TICK_CRON}")`);
-      this.isInitialized = true;
-    } catch (error) {
-      logger.error("Error starting event service:", error);
-      throw error;
-    }
-  }
-
-  public async reload(): Promise<void> {
-    logger.info("Reloading event service...");
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    await this.start();
-  }
-
-  public destroy(): void {
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    logger.info("Event service destroyed");
-  }
-
-  // ---------------------------------------------------------------
   // Scan
   // ---------------------------------------------------------------
 
-  /** Run the lifecycle scan immediately. Concurrent calls coalesce. */
-  public async runNow(): Promise<void> {
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.runOnce();
-    try {
-      await this.inFlight;
-    } finally {
-      this.inFlight = null;
-    }
-  }
-
-  private async runOnce(): Promise<void> {
-    if (this.isRunning) {
-      logger.warn("Event scan already in progress, skipping");
+  protected async runOnce(): Promise<void> {
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) {
+      logger.error("Event scan aborted: GUILD_ID not configured");
       return;
     }
-    this.isRunning = true;
-    try {
-      const enabled = await this.configService.getBoolean(
-        "events.enabled",
-        false,
-      );
-      if (!enabled) return;
 
-      const guildId = await this.configService.getString("GUILD_ID", "");
-      if (!guildId) {
-        logger.error("Event scan aborted: GUILD_ID not configured");
-        return;
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+      logger.error(`Event scan aborted: guild ${guildId} not found`);
+      return;
+    }
+
+    // Everything not yet finished, plus ended events whose channel still
+    // needs sweeping.
+    const events = await Event.find({
+      guildId,
+      $or: [
+        { state: { $in: ["scheduled", "active"] } },
+        { state: "ended", channelId: { $ne: null } },
+      ],
+    });
+
+    const reminderMs =
+      (await this.configService.getNumber("events.reminder_minutes", 30)) *
+      MS_PER_MINUTE;
+    const leadMs =
+      (await this.configService.getNumber("events.create_lead_minutes", 15)) *
+      MS_PER_MINUTE;
+    const graceMs =
+      (await this.configService.getNumber("events.channel_grace_minutes", 15)) *
+      MS_PER_MINUTE;
+
+    for (const event of events) {
+      try {
+        await this.processEvent(event, guild, new Date(), {
+          reminderMs,
+          leadMs,
+          graceMs,
+        });
+      } catch (error) {
+        logger.error(
+          `Error processing event ${sanitizeForLog(String(event._id))}:`,
+          error,
+        );
       }
-
-      const guild = await this.client.guilds.fetch(guildId).catch(() => null);
-      if (!guild) {
-        logger.error(`Event scan aborted: guild ${guildId} not found`);
-        return;
-      }
-
-      // Everything not yet finished, plus ended events whose channel still
-      // needs sweeping.
-      const events = await Event.find({
-        guildId,
-        $or: [
-          { state: { $in: ["scheduled", "active"] } },
-          { state: "ended", channelId: { $ne: null } },
-        ],
-      });
-
-      const reminderMs =
-        (await this.configService.getNumber("events.reminder_minutes", 30)) *
-        MS_PER_MINUTE;
-      const leadMs =
-        (await this.configService.getNumber("events.create_lead_minutes", 15)) *
-        MS_PER_MINUTE;
-      const graceMs =
-        (await this.configService.getNumber(
-          "events.channel_grace_minutes",
-          15,
-        )) * MS_PER_MINUTE;
-
-      for (const event of events) {
-        try {
-          await this.processEvent(event, guild, new Date(), {
-            reminderMs,
-            leadMs,
-            graceMs,
-          });
-        } catch (error) {
-          logger.error(
-            `Error processing event ${sanitizeForLog(String(event._id))}:`,
-            error,
-          );
-        }
-      }
-    } finally {
-      this.isRunning = false;
     }
   }
 

@@ -1,6 +1,5 @@
 import { Client, EmbedBuilder, type ColorResolvable } from "discord.js";
-import { CronJob } from "cron";
-import { ConfigService } from "./config-service.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
 import { UserNotificationPrefsService } from "./user-notification-prefs-service.js";
 import { AchievementsService } from "./achievements-service.js";
@@ -11,10 +10,6 @@ import { ACCOLADE_METADATA, type AccoladeType } from "../content/accolades.js";
 import { ACHIEVEMENT_METADATA } from "../content/achievements.js";
 import { formatInZone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
-import {
-  sanitizeCronExpression,
-  validateCronExpression,
-} from "../utils/cron.js";
 
 interface QualifyingUser {
   userId: string;
@@ -131,41 +126,24 @@ function pickMotivationalFooter(seed: number): string {
   return descriptions[index];
 }
 
-export class DigestService {
+export class DigestService extends ScheduledService<DigestRunSummary | null> {
   private static instance: DigestService;
-  private client: Client;
-  private configService: ConfigService;
-  private job: CronJob | null = null;
-  private isInitialized = false;
-  private isRunning = false;
-  private inFlight: Promise<DigestRunSummary | null> | null = null;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-
-    this.configService.registerReloadCallback(async () => {
-      try {
-        logger.info("Weekly digest configuration changed, reloading...");
-
-        const enabled = await this.configService.getBoolean(
-          "digest.enabled",
-          false,
-        );
-
-        if (!enabled && this.isInitialized) {
-          logger.info("Weekly digest disabled, stopping cron job...");
-          this.destroy();
-        } else if (enabled) {
-          await this.reload();
-        }
-      } catch (error) {
-        logger.error(
-          "Error reloading weekly digest service after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Digest service",
+      disabledMessage: "Weekly digest is disabled",
+      cronContext: "digest",
+      runLabel: "Digest run",
     });
+  }
+
+  protected async isEnabled(): Promise<boolean> {
+    return this.configService.getBoolean("digest.enabled", false);
+  }
+
+  protected async resolveSchedule(): Promise<string> {
+    return this.configService.getString("digest.cron", DEFAULT_CRON);
   }
 
   public static getInstance(client: Client): DigestService {
@@ -186,234 +164,144 @@ export class DigestService {
     DigestService.instance = undefined as unknown as DigestService;
   }
 
-  public async start(): Promise<void> {
-    if (this.isInitialized) {
-      logger.warn("Digest service is already initialized, skipping...");
-      return;
-    }
-
-    try {
-      const enabled = await this.configService.getBoolean(
-        "digest.enabled",
-        false,
+  protected async runOnce(): Promise<DigestRunSummary | null> {
+    // Voice tracking is a hard dependency (#659): the digest ranks members
+    // by tracked voice time, so without it every DM would report empty/stale
+    // rankings. Mirror voice-channel-announcer.ts and short-circuit.
+    const trackingEnabled = await this.configService.getBoolean(
+      "voicetracking.enabled",
+      false,
+    );
+    if (!trackingEnabled) {
+      logger.warn(
+        "Digest run aborted: voice tracking is disabled (voicetracking.enabled=false).",
       );
-
-      if (!enabled) {
-        logger.info("Weekly digest is disabled");
-        this.isInitialized = true;
-        return;
-      }
-
-      const rawCron = await this.configService.getString(
-        "digest.cron",
-        DEFAULT_CRON,
-      );
-      const cronExpression = sanitizeCronExpression(rawCron);
-
-      if (!validateCronExpression(cronExpression, "digest")) {
-        logger.error(`Digest service not started: invalid cron "${rawCron}"`);
-        this.isInitialized = true;
-        return;
-      }
-
-      this.job = new CronJob(cronExpression, async () => {
-        try {
-          await this.runNow();
-        } catch (error) {
-          logger.error("Error running weekly digest job:", error);
-        }
-      });
-      this.job.start();
-
-      const nextRun = this.job.nextDate();
-      logger.info(
-        `Digest service started (cron: "${cronExpression}", next run: ${nextRun.toLocaleString()})`,
-      );
-
-      this.isInitialized = true;
-    } catch (error) {
-      logger.error("Error starting digest service:", error);
-      throw error;
-    }
-  }
-
-  /**
-   * Run the digest job immediately. Used by the cron handler and by
-   * future admin "send now" triggers. Concurrent invocations coalesce
-   * onto the first one so a slow run + the next cron tick can't
-   * double-deliver.
-   */
-  public async runNow(): Promise<DigestRunSummary | null> {
-    if (this.inFlight) return this.inFlight;
-    this.inFlight = this.runOnce();
-    try {
-      return await this.inFlight;
-    } finally {
-      this.inFlight = null;
-    }
-  }
-
-  private async runOnce(): Promise<DigestRunSummary | null> {
-    if (this.isRunning) {
-      logger.warn("Digest run already in progress, skipping");
       return null;
     }
-    this.isRunning = true;
-    try {
-      const enabled = await this.configService.getBoolean(
-        "digest.enabled",
-        false,
-      );
-      if (!enabled) {
-        logger.info("Digest run aborted: feature disabled");
-        return null;
-      }
 
-      // Voice tracking is a hard dependency (#659): the digest ranks members
-      // by tracked voice time, so without it every DM would report empty/stale
-      // rankings. Mirror voice-channel-announcer.ts and short-circuit.
-      const trackingEnabled = await this.configService.getBoolean(
-        "voicetracking.enabled",
-        false,
-      );
-      if (!trackingEnabled) {
-        logger.warn(
-          "Digest run aborted: voice tracking is disabled (voicetracking.enabled=false).",
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) {
+      logger.error("Digest run aborted: GUILD_ID not configured");
+      return null;
+    }
+
+    const minActiveMinutes = await this.configService.getNumber(
+      "digest.min_active_minutes",
+      30,
+    );
+    const streakMinMinutes = await this.configService.getNumber(
+      "digest.streak_min_minutes",
+      30,
+    );
+    const includeAchievements = await this.configService.getBoolean(
+      "digest.include_achievements",
+      true,
+    );
+
+    const minActiveSeconds = Math.max(0, minActiveMinutes) * SECONDS_PER_MINUTE;
+    const streakMinSeconds = Math.max(0, streakMinMinutes) * SECONDS_PER_MINUTE;
+
+    const prefsService = UserNotificationPrefsService.getInstance();
+    // Ensure the singleton is alive so a guild that flips this on
+    // without ever having earned an accolade still has the service
+    // ready when we look up weekly rows below.
+    AchievementsService.getInstance(this.client);
+
+    const qualifying = await this.getQualifyingUsers(minActiveSeconds);
+
+    const summary: DigestRunSummary = {
+      ranAt: new Date(),
+      qualifying: qualifying.length,
+      sent: 0,
+      skippedOptOut: 0,
+      skippedDmsClosed: 0,
+      failed: 0,
+    };
+
+    for (const user of qualifying) {
+      try {
+        // One read for both the opt-in flag and the display timezone
+        // (used for the week range), so the cron loop stays at a single
+        // prefs query per user even for large guilds (#524).
+        const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
+          user.userId,
+          guildId,
         );
-        return null;
-      }
+        if (!prefs.digest) {
+          summary.skippedOptOut += 1;
+          continue;
+        }
 
-      const guildId = await this.configService.getString("GUILD_ID", "");
-      if (!guildId) {
-        logger.error("Digest run aborted: GUILD_ID not configured");
-        return null;
-      }
+        const previousState = await DigestState.findOne({
+          userId: user.userId,
+          guildId,
+        });
 
-      const minActiveMinutes = await this.configService.getNumber(
-        "digest.min_active_minutes",
-        30,
-      );
-      const streakMinMinutes = await this.configService.getNumber(
-        "digest.streak_min_minutes",
-        30,
-      );
-      const includeAchievements = await this.configService.getBoolean(
-        "digest.include_achievements",
-        true,
-      );
+        const streakWeeks = this.computeStreak(
+          user.totalTime,
+          streakMinSeconds,
+          previousState?.lastSentAt ?? null,
+          previousState?.streakWeeks ?? 0,
+          summary.ranAt,
+        );
 
-      const minActiveSeconds =
-        Math.max(0, minActiveMinutes) * SECONDS_PER_MINUTE;
-      const streakMinSeconds =
-        Math.max(0, streakMinMinutes) * SECONDS_PER_MINUTE;
-
-      const prefsService = UserNotificationPrefsService.getInstance();
-      // Ensure the singleton is alive so a guild that flips this on
-      // without ever having earned an accolade still has the service
-      // ready when we look up weekly rows below.
-      AchievementsService.getInstance(this.client);
-
-      const qualifying = await this.getQualifyingUsers(minActiveSeconds);
-
-      const summary: DigestRunSummary = {
-        ranAt: new Date(),
-        qualifying: qualifying.length,
-        sent: 0,
-        skippedOptOut: 0,
-        skippedDmsClosed: 0,
-        failed: 0,
-      };
-
-      for (const user of qualifying) {
-        try {
-          // One read for both the opt-in flag and the display timezone
-          // (used for the week range), so the cron loop stays at a single
-          // prefs query per user even for large guilds (#524).
-          const { prefs, timezone } = await prefsService.getPrefsWithTimezone(
+        let weeklyAchievements: Array<{
+          emoji: string;
+          name: string;
+          description: string;
+        }> = [];
+        if (includeAchievements) {
+          weeklyAchievements = await this.collectWeeklyAchievements(
             user.userId,
-            guildId,
-          );
-          if (!prefs.digest) {
-            summary.skippedOptOut += 1;
-            continue;
-          }
-
-          const previousState = await DigestState.findOne({
-            userId: user.userId,
-            guildId,
-          });
-
-          const streakWeeks = this.computeStreak(
-            user.totalTime,
-            streakMinSeconds,
-            previousState?.lastSentAt ?? null,
-            previousState?.streakWeeks ?? 0,
             summary.ranAt,
           );
-
-          let weeklyAchievements: Array<{
-            emoji: string;
-            name: string;
-            description: string;
-          }> = [];
-          if (includeAchievements) {
-            weeklyAchievements = await this.collectWeeklyAchievements(
-              user.userId,
-              summary.ranAt,
-            );
-          }
-
-          const embed = this.buildEmbed({
-            user,
-            previousState,
-            streakWeeks,
-            includeAchievements,
-            weeklyAchievements,
-            ranAt: summary.ranAt,
-            timezone,
-          });
-
-          const delivered = await this.sendDigestDM(user.userId, embed);
-          if (!delivered) {
-            summary.skippedDmsClosed += 1;
-            continue;
-          }
-
-          summary.sent += 1;
-
-          await DigestState.findOneAndUpdate(
-            { userId: user.userId, guildId },
-            {
-              $set: {
-                userId: user.userId,
-                guildId,
-                lastSentAt: summary.ranAt,
-                lastWeekTotalTime: user.totalTime,
-                lastWeekRank: user.rank,
-                streakWeeks,
-              },
-            },
-            { upsert: true, new: true, setDefaultsOnInsert: true },
-          );
-        } catch (error) {
-          summary.failed += 1;
-          logger.error(
-            `Error processing digest for user ${user.userId}:`,
-            error,
-          );
         }
+
+        const embed = this.buildEmbed({
+          user,
+          previousState,
+          streakWeeks,
+          includeAchievements,
+          weeklyAchievements,
+          ranAt: summary.ranAt,
+          timezone,
+        });
+
+        const delivered = await this.sendDigestDM(user.userId, embed);
+        if (!delivered) {
+          summary.skippedDmsClosed += 1;
+          continue;
+        }
+
+        summary.sent += 1;
+
+        await DigestState.findOneAndUpdate(
+          { userId: user.userId, guildId },
+          {
+            $set: {
+              userId: user.userId,
+              guildId,
+              lastSentAt: summary.ranAt,
+              lastWeekTotalTime: user.totalTime,
+              lastWeekRank: user.rank,
+              streakWeeks,
+            },
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true },
+        );
+      } catch (error) {
+        summary.failed += 1;
+        logger.error(`Error processing digest for user ${user.userId}:`, error);
       }
-
-      logger.info(
-        `Weekly digest complete: qualifying=${summary.qualifying} sent=${summary.sent} ` +
-          `opted_out=${summary.skippedOptOut} dms_closed=${summary.skippedDmsClosed} failed=${summary.failed}`,
-      );
-
-      await this.logSummary(summary);
-      return summary;
-    } finally {
-      this.isRunning = false;
     }
+
+    logger.info(
+      `Weekly digest complete: qualifying=${summary.qualifying} sent=${summary.sent} ` +
+        `opted_out=${summary.skippedOptOut} dms_closed=${summary.skippedDmsClosed} failed=${summary.failed}`,
+    );
+
+    await this.logSummary(summary);
+    return summary;
   }
 
   /**
@@ -788,24 +676,5 @@ export class DigestService {
     } catch (error) {
       logger.error("Digest: failed to post run summary to Discord:", error);
     }
-  }
-
-  public async reload(): Promise<void> {
-    logger.info("Reloading digest service...");
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    await this.start();
-  }
-
-  public destroy(): void {
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-    this.isInitialized = false;
-    logger.info("Digest service destroyed");
   }
 }
