@@ -377,8 +377,9 @@ npm test -- path/to/test.test.ts
 
 ### Test Coverage
 
-- **Enforced floors**: statements 54% / branches 49% / functions 63% / lines 54%
-  (`coverageThreshold.global` in `jest.config.js`) — CI fails below these
+- **Enforced floors**: `coverageThreshold.global` in `jest.config.js` — CI fails below these. The
+  current numbers are listed in [TESTING.md](TESTING.md#coverage-reports); they are deliberately not
+  repeated here, so there is only one place to update when they are raised
 - **Target coverage**: 70-80% for critical modules
 - **Focus on**: Commands, services, utilities
 - **Coverage reports** are generated in `coverage/` directory
