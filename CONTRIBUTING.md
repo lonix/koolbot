@@ -399,17 +399,29 @@ We use **conventional commits** format:
 <footer>
 ```
 
-**Types:**
+**Types:** (kept in sync with the `types=` alternation in
+[`.github/workflows/pr-title-lint.yml`](.github/workflows/pr-title-lint.yml), which is the source of
+truth, and with the changelog sections in `release-please-config.json`)
 
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, no logic change)
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Build process, tooling, dependencies
-- `perf`: Performance improvements
-- `ci`: CI/CD changes
+| Type | Use for | Release impact |
+| --- | --- | --- |
+| `feat` | New feature | minor |
+| `fix` | Bug fix | patch |
+| `perf` | Performance improvements | patch |
+| `revert` | Reverting a previous change | patch |
+| `refactor` | Code restructuring with no behaviour change | none |
+| `docs` | Documentation changes | none |
+| `deps` | Dependency updates | none |
+| `test` | Adding or updating tests | none |
+| `build` | Build system, Dockerfiles, packaging | none |
+| `ci` | CI/CD workflow changes | none |
+| `chore` | Tooling and other maintenance | none |
+
+Add `!` after the type/scope (e.g. `feat(config)!: …`) or a `BREAKING CHANGE:` footer for a breaking
+change — that forces a **major** bump regardless of type.
+
+There is no `style` type: `pr-title-lint` rejects it. Put formatting-only changes under `chore`
+(e.g. `chore: run prettier over src/web`), or `refactor` when the change touches code structure.
 
 **Examples:**
 
