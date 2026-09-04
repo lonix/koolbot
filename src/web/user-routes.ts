@@ -39,6 +39,7 @@ import {
   renderUserNotificationsBody,
   renderUserPage,
   renderUserFeatureDisabledNotice,
+  renderUserPrivacyBody,
   renderUserRewindBody,
   renderUserTimezoneBody,
   renderUserVoiceBody,
@@ -61,6 +62,16 @@ import {
   formatHoursMinutes,
 } from "../services/rewind-service.js";
 import { PollParticipationTracker } from "../services/poll-participation-tracker.js";
+import {
+  createExportProgress,
+  UserDataExportService,
+} from "../services/user-data-export-service.js";
+import {
+  EXCLUDED_USER_DATA,
+  EXPORTABLE_USER_DATA,
+  summariseByCollection,
+} from "../services/user-data-registry.js";
+import { createRateLimiter } from "./rate-limit.js";
 import { recordAudit } from "./audit.js";
 import { renderSignedOut } from "./views.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -240,18 +251,30 @@ async function isBirthdayFeatureEnabled(): Promise<boolean> {
 }
 
 /**
+ * Whether the self-service data export (`/me/privacy` + its download) is
+ * enabled (#719). Defaults to `false`, following the repo's opt-in
+ * feature-gate convention: until an operator opts in, the page shows the
+ * shared "off" banner and the export route refuses.
+ */
+async function isPrivacyExportEnabled(): Promise<boolean> {
+  return ConfigService.getInstance().getBoolean("privacy.enabled", false);
+}
+
+/**
  * Resolve the enabled-state of every feature-gated `/me/*` surface in one
  * shot (#709). Threaded into `renderUserPage` (and the overview body) on
  * every page so the nav renders a consistent "off" badge for whichever
  * features are disabled — regardless of which page you're on.
  */
 async function readUserFeatureFlags(): Promise<Required<UserFeatureFlags>> {
-  const [rewindEnabled, presetsEnabled, birthdayEnabled] = await Promise.all([
-    isRewindFeatureEnabled(),
-    isVoicePresetsEnabled(),
-    isBirthdayFeatureEnabled(),
-  ]);
-  return { rewindEnabled, presetsEnabled, birthdayEnabled };
+  const [rewindEnabled, presetsEnabled, birthdayEnabled, privacyEnabled] =
+    await Promise.all([
+      isRewindFeatureEnabled(),
+      isVoicePresetsEnabled(),
+      isBirthdayFeatureEnabled(),
+      isPrivacyExportEnabled(),
+    ]);
+  return { rewindEnabled, presetsEnabled, birthdayEnabled, privacyEnabled };
 }
 
 /**
@@ -328,6 +351,49 @@ function parseYearParam(raw: unknown, fallback: number): number {
   return n;
 }
 
+/**
+ * Write one chunk, waiting for the socket to drain when the kernel buffer is
+ * full. Without this the "stream" would just accumulate in Node's memory,
+ * which is the thing the export is streamed to avoid (#719).
+ *
+ * Returns false once the response can take no more — the client hung up, or
+ * the socket errored. `drain` never fires on a dead socket, so waiting on it
+ * alone would park the handler forever: the audit row would never be written
+ * and the export's Mongo reads would keep running for a reader that is gone.
+ * `close` and `error` therefore release the wait too, and the caller stops
+ * pulling data.
+ */
+async function writeChunk(res: Response, chunk: string): Promise<boolean> {
+  if (res.writableEnded || res.destroyed) return false;
+
+  const flushed = res.write(chunk);
+  if (flushed !== false || typeof res.once !== "function") return true;
+
+  await new Promise<void>((resolve) => {
+    const release = (): void => {
+      res.off?.("drain", release);
+      res.off?.("close", release);
+      res.off?.("error", release);
+      resolve();
+    };
+    res.once("drain", release);
+    res.once("close", release);
+    res.once("error", release);
+  });
+
+  return !res.writableEnded && !res.destroyed;
+}
+
+/**
+ * Filename for the downloaded export. The user id comes from the validated
+ * session (a Discord snowflake), but it is still scrubbed of anything that
+ * could break out of the quoted `filename=` parameter.
+ */
+function exportFilename(userId: string): string {
+  const safeId = userId.replace(/[^A-Za-z0-9_-]/g, "");
+  return `koolbot-export-${safeId}-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
 export function createUserRouter(
   client: Client,
   requireSession: RequestHandler,
@@ -342,6 +408,15 @@ export function createUserRouter(
   // the same reason the admin copy is: the ping itself does its own
   // (non-mutating) cookie + DB validation and must NOT bump `act`.
   router.get("/session/ping", createSessionPingHandler());
+
+  // The data export is the most expensive read a member can trigger — it
+  // touches every per-user collection — so it gets its own bucket rather
+  // than sharing the surface's general allowance (#719).
+  const exportLimiter = createRateLimiter({
+    windowMs: 60_000,
+    max: 3,
+    keyName: "me-export",
+  });
 
   router.use(requireSession);
 
@@ -1175,6 +1250,134 @@ export function createUserRouter(
         };
       },
     ),
+  );
+
+  // ---------- Privacy / data export (#719) ----------
+  // `GET /me/privacy` describes what is stored; `GET /me/privacy/export`
+  // serves the JSON file. Both are self-scoped like every other `/me/*`
+  // handler, and the download is the most expensive read a member can
+  // trigger, so it carries its own rate limiter on top.
+
+  router.get(
+    "/privacy/export",
+    exportLimiter,
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      const { userId, guildId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      // Unlike the gated *pages*, the download refuses outright when the
+      // feature is off: there is nothing to pre-set here, and serving the
+      // file anyway would make the config key decorative.
+      if (!(await isPrivacyExportEnabled())) {
+        await recordAudit(session, {
+          action: "user.privacy.export",
+          targetId: userId,
+          details: { reason: "feature-disabled" },
+          result: "failure",
+          errorMessage: "privacy.enabled is off",
+        });
+        res
+          .status(403)
+          .type("text/plain")
+          .send("The self-service data export is not enabled on this server.");
+        return;
+      }
+
+      const progress = createExportProgress();
+      // Serve as a downloaded file, never as a rendered page: `nosniff` so a
+      // browser can't be talked into treating the JSON as HTML, and
+      // `no-store` so a shared machine's cache doesn't keep a copy.
+      res.status(200);
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${exportFilename(userId)}"`,
+      );
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("Cache-Control", "no-store");
+
+      let errorMessage: string | null = null;
+      let aborted = false;
+      try {
+        for await (const chunk of UserDataExportService.getInstance().streamJson(
+          userId,
+          guildId,
+          progress,
+        )) {
+          if (!(await writeChunk(res, chunk))) {
+            // The reader is gone. Stop pulling collections rather than
+            // finishing an export nobody will receive.
+            aborted = true;
+            break;
+          }
+        }
+      } catch (err) {
+        errorMessage = err instanceof Error ? err.message : String(err);
+        logger.error(
+          `Failed to stream user data export: ${sanitizeForLog(errorMessage)}`,
+        );
+      }
+      if (aborted && errorMessage === null) {
+        errorMessage = "client disconnected before the export completed";
+      }
+      // The response is already committed by the time a reader can fail, so
+      // a mid-stream error can only truncate the file — the audit row is what
+      // records that it happened. A disconnect leaves nothing to close.
+      if (!res.writableEnded && !res.destroyed) res.end();
+
+      await recordAudit(session, {
+        action: "user.privacy.export",
+        targetId: userId,
+        details: {
+          collections: progress.collections,
+          truncated: progress.truncated,
+          ...(aborted ? { aborted: true } : {}),
+        },
+        result: errorMessage === null ? "success" : "failure",
+        errorMessage,
+      });
+    }),
+  );
+
+  router.get(
+    "/privacy",
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+      const flags = await readUserFeatureFlags();
+      const maxItems = await UserDataExportService.getInstance().getMaxItems();
+
+      res.type("text/html").send(
+        renderUserPage({
+          title: "Privacy",
+          active: "/me/privacy",
+          body: renderUserPrivacyBody({
+            featureEnabled: flags.privacyEnabled,
+            included: summariseByCollection(EXPORTABLE_USER_DATA),
+            excluded: summariseByCollection(EXCLUDED_USER_DATA),
+            maxItems,
+          }),
+          csrfToken: getCsrfToken(req),
+          remainingMs: getDisplayedRemainingMs(session),
+          isAdmin: session.role === "admin",
+          ...flags,
+        }),
+      );
+    }),
   );
 
   // ---------- Finish (sign out) ----------

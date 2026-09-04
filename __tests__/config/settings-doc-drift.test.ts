@@ -32,6 +32,9 @@ const NON_CONFIG_DOTTED_NAMES = new Set<string>([
   // Per-user notification opt-ins stored on the user document, not in config.
   "prefs.digest",
   "prefs.rewind",
+  // WebUI audit-log action name written by the /me/privacy export (#719),
+  // not a setting.
+  "user.privacy.export",
 ]);
 
 /**

@@ -924,6 +924,7 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row.  |
 | **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.      |
+| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you and download all of it as one JSON file. Gated by `privacy.enabled`; each download records a `WebAuditLog` row.          |
 
 **Disabled-feature handling is uniform across `/me/*` (#709).** A
 feature-gated page whose feature an admin has turned off is never hidden
@@ -1027,6 +1028,53 @@ or two of the year isn't captured. Snapshot creation is idempotent
 runs as part of the nudge cron, so it follows `rewind.nudge.enabled`
 (with the legacy `rewind.enabled` fallback). A `schemaVersion` is stored so the view can
 render older snapshots even after the summary shape gains new fields.
+
+### Privacy and the "my data" export (`/me/privacy`, #719)
+
+The **Privacy** page describes what Koolbot has stored about the signed-in
+member and hands it over as a single JSON file from
+`GET /me/privacy/export`. It is a *record*, not a recap — Rewind is the
+narrative version.
+
+What the file contains is decided by an explicit allowlist registry in
+`src/services/user-data-registry.ts`, not by whatever the export code
+happened to remember to query. Every field in the codebase that carries a
+Discord user id is classified there as included or excluded, with the
+reason, and a drift test
+(`__tests__/config/user-data-registry-drift.test.ts`) scans `src/models/*.ts`
+and `src/database/schema.ts` and fails the build when a user-id-shaped
+field is not classified. A new per-user model therefore has to be triaged
+before it can ship — the same forcing function `SETTINGS.md` has for config
+keys. The page renders its two tables straight from that registry, so the
+description and the file cannot drift apart.
+
+**Included:** voice history, message and reaction activity, poll
+participation, achievements and accolades, birthday, timezone and
+notification opt-ins, voice presets, Rewind snapshots and nudge state,
+digest state, reminders, event RSVPs, leaderboard role membership, quotes
+(both the ones attributed to you and the ones you saved), and channel
+invites.
+
+**Excluded, deliberately:** the moderation log, the Discord command audit
+log, the Web UI audit log, session rows, ephemeral channel-ownership state,
+and admin-authored config objects that merely record who created them. A
+warned member must not be able to read their own moderation history — or
+learn which moderator acted — out of a self-service endpoint.
+
+Three collections are shared aggregates (poll turnout, event RSVPs,
+leaderboard role rosters). Their rows are projected down to the member's
+own slice before they reach the file, so an export can never become a
+roster of everyone else on the server.
+
+Operationally: the response is served as an attachment with
+`X-Content-Type-Options: nosniff` and `Cache-Control: no-store`, never
+rendered as a page; it is emitted as a stream of chunks rather than
+buffered into one string; append-only histories are capped at
+`privacy.export.max_items` per collection with anything clipped named under
+`truncated` in the file; the route has its own rate-limit bucket (3 per
+minute per client); and every attempt — including one refused because the
+feature is off — writes a `user.privacy.export` row to the Web UI audit
+log. Deletion is out of scope here and tracked separately in issue #906.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

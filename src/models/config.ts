@@ -29,6 +29,7 @@ export const CONFIG_CATEGORIES = [
   "notices",
   "ping",
   "polls",
+  "privacy",
   "quotes",
   "ratelimit",
   "reactionroles",

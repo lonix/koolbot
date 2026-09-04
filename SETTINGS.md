@@ -42,6 +42,7 @@ Complete configuration reference for all KoolBot settings.
 - [Birthdays](#-birthdays)
 - [Events](#-events)
 - [Reminders](#-reminders)
+- [Privacy & Data Export](#-privacy--data-export)
 - [Moderation](#-moderation)
 - [Reaction Roles](#-reaction-roles)
 - [Leaderboard Role Rewards](#-leaderboard-role-rewards)
@@ -744,6 +745,44 @@ beyond the on/off switch and the per-member cap.
 - `0 0 * * 1` — Every Monday at midnight
 - `0 12 * * *` — Every day at noon
 - `*/30 * * * *` — Every 30 minutes
+
+---
+
+## 🔒 Privacy & Data Export
+
+A member self-service **"my data" download**. When enabled, `/me/privacy`
+shows what KoolBot stores about the signed-in member and offers it as a
+single JSON file. Web UI only — there is no slash command for it.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `privacy.enabled` | `false` | Master switch — enables the `/me/privacy` page and its download |
+| `privacy.export.max_items` | `5000` | Ceiling on rows (and append-only array entries) per collection in one export |
+
+**Notes:**
+
+- **What's in it** is an explicit allowlist in `src/services/user-data-registry.ts`:
+  voice history, message/reaction activity, poll participation, achievements,
+  birthday, timezone and notification opt-ins, voice presets, Rewind
+  snapshots, digest state, reminders, event RSVPs, leaderboard role
+  membership, quotes and channel invites.
+- **What's not** is just as deliberate: moderation records, the Discord and
+  Web UI audit logs, and session rows are never included. A warned member
+  cannot read their own moderation history — or find out which moderator
+  acted — out of this endpoint. Ask a moderator instead.
+- Rows shared with other members (poll turnout, event RSVPs, leaderboard
+  role rosters) are cut down to the member's own slice, so an export can
+  never become a roster of everyone else.
+- A build-time drift check fails if a model carrying a Discord user id is
+  not classified in the registry, so a new per-user collection has to be
+  triaged before it ships.
+- Long histories are capped at `privacy.export.max_items` **per collection**;
+  the file names anything it clipped under `truncated`, and reports the true
+  stored count alongside the trimmed array.
+- The download is rate-limited (3 per minute per client) and records a
+  `user.privacy.export` row in the Web UI audit log naming which collections
+  were served.
+- Deletion is **not** part of this — see issue #906.
 
 ---
 
