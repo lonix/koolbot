@@ -67,8 +67,13 @@ export interface ScheduledServiceOptions {
  * @typeParam TSummary What one run reports. Services that return a summary
  * object for the WebUI's "run now" buttons pass it here; services whose runs
  * report nothing use the `void` default. `runNow()` widens it with `null`,
- * which means "no run happened" because the feature is disabled — a caller
- * that arrives while a run is in flight joins that run and gets its result.
+ * which the base class returns when the feature is disabled and no run
+ * happened; a caller arriving while a run is in flight joins that run and
+ * gets its result instead. `null` is not exclusively the base class's signal,
+ * though — several services declare `TSummary` as `Summary | null` and return
+ * `null` from `runOnce()` for their own abort reasons (a missing `GUILD_ID`,
+ * say), so a `null` from `runNow()` means "no summary", not specifically
+ * "disabled".
  */
 export abstract class ScheduledService<TSummary = void> {
   protected readonly client: Client;

@@ -321,6 +321,44 @@ describe("BirthdayService", () => {
       expect(await svc.runNow()).toBeNull();
       expect(mockBirthdayFind).not.toHaveBeenCalled();
     });
+
+    it("aborts rather than throwing when the guild cannot be fetched", async () => {
+      // `guilds.fetch` rejects on a stale id or missing access — it does not
+      // resolve null — so the abort guard only runs if that is converted.
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "birthdays.channel_id") return "chan-1";
+        return "";
+      });
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockRejectedValue(
+        new Error("Unknown Guild"),
+      );
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+
+      expect(await svc.runNow()).toBeNull();
+      expect(mockBirthdayFind).not.toHaveBeenCalled();
+    });
+
+    it("aborts rather than throwing when the channel cannot be fetched", async () => {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "birthdays.channel_id") return "chan-1";
+        return "";
+      });
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        channels: {
+          fetch: jest.fn(() => Promise.reject(new Error("no access"))),
+        },
+      });
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+
+      expect(await svc.runNow()).toBeNull();
+      expect(mockBirthdayFind).not.toHaveBeenCalled();
+    });
   });
 
   describe("getBirthday / setBirthday storage", () => {

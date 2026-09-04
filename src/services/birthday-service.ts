@@ -301,13 +301,16 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       return null;
     }
 
-    const guild = await this.client.guilds.fetch(guildId);
+    // Both fetches reject rather than resolving null when the id is stale or
+    // the bot lacks access, so the guards below only ever run if the rejection
+    // is converted first. Mirrors `EventService`'s scan.
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
     if (!guild) {
       logger.error(`Birthday run aborted: guild ${guildId} not found`);
       return null;
     }
 
-    const channel = await guild.channels.fetch(channelId);
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
     if (!channel || !(channel instanceof TextChannel)) {
       logger.error(
         `Birthday run aborted: channel ${sanitizeForLog(channelId)} not found or not a text channel`,
