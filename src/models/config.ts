@@ -22,7 +22,7 @@ export const CONFIG_CATEGORIES = [
   "events",
   "fun", // Kept for backward compatibility; key removed but legacy rows may exist
   "gamification", // Kept for backward compatibility during migration
-  "help",
+  "help", // No settings use it today; kept so legacy `help.*` rows survive the cleanup sweep
   "leaderboard_roles",
   "messagetracking",
   "moderation",
