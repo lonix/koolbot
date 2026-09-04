@@ -146,6 +146,12 @@ describe("ScheduledService", () => {
       await expect(service.start()).resolves.toBeUndefined();
 
       expect(mockCronJob).not.toHaveBeenCalled();
+      // Exactly one line, emitted by `validateCronExpression` against the
+      // configured context — the lifecycle must not log the rejection again.
+      expect(mockLogger.error).toHaveBeenCalledTimes(1);
+      expect(mockLogger.error.mock.calls[0][0]).toContain(
+        "Invalid cron expression for tests",
+      );
     });
 
     it("is idempotent — a second start does not stack a second job", async () => {

@@ -6,7 +6,6 @@ import {
   sanitizeCronExpression,
   validateCronExpression,
 } from "../utils/cron.js";
-import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 /**
  * Per-service wording for the shared lifecycle logs.
@@ -133,10 +132,10 @@ export abstract class ScheduledService<TSummary = void> {
 
       const rawCron = await this.resolveSchedule();
       const cronExpression = sanitizeCronExpression(rawCron);
+      // `validateCronExpression` logs the rejected value against `cronContext`
+      // itself, so nothing is logged here — a second line would duplicate it
+      // in a different format. The service stays initialized-but-idle.
       if (!validateCronExpression(cronExpression, this.options.cronContext)) {
-        logger.error(
-          `${this.options.label} not started: invalid cron "${sanitizeForLog(rawCron)}"`,
-        );
         this.initialized = true;
         return;
       }
