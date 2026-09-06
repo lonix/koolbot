@@ -43,10 +43,10 @@ export type UserDataDeletePolicy =
   "hard-delete" | "pull-member" | "anonymise" | "retain" | "expires";
 
 /**
- * Whether a field makes the member the row's *subject*, or merely mentions
- * them inside a row that belongs to someone else.
+ * Whether a match on this field is the requesting member's own data to erase
+ * (`self`), or the member is merely referenced inside someone else's data
+ * (`mention`).
  */
-export type UserDataSubject = "self" | "mention";
 
 export interface UserDataField {
   /** File declaring the schema, repo-relative (the drift scan reads it). */
