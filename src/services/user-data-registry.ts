@@ -31,8 +31,8 @@ export type UserDataSource = `src/${string}.ts`;
  * How a purge treats rows matched by a field.
  *
  * - `hard-delete` — the row is the member's; delete the document.
- * - `pull-member` — the row is a shared aggregate; `$pull` the member's id
- *   and leave the rest of the row standing.
+ * - `pull-member` — the row is a shared aggregate; remove the member's entry
+ *   (typically via `$pull`) and leave the rest of the row standing.
  * - `anonymise`   — the row belongs to someone else but attributes an action
  *   to the member; clear the attribution, keep the row.
  * - `retain`      — deliberately kept: moderation record, audit trail,
