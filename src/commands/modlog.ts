@@ -6,7 +6,7 @@ import {
   MessageFlags,
 } from "discord.js";
 import { ModerationService } from "../services/moderation-service.js";
-import type { ModerationAction } from "../models/moderation-log.js";
+import { actionLabel } from "../utils/moderation-format.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
@@ -24,26 +24,6 @@ export const PAGE_SIZE = 10;
  * limit while still showing the vast majority of reasons untouched.
  */
 export const MAX_REASON_DISPLAY_LENGTH = 300;
-
-/** Emoji + label shown for each action in the history embed. */
-export function actionLabel(action: ModerationAction): string {
-  switch (action) {
-    case "warn":
-      return "⚠️ Warn";
-    case "kick":
-      return "👢 Kick";
-    case "ban":
-      return "🔨 Ban";
-    case "unban":
-      return "🕊️ Unban";
-    case "timeout":
-      return "⏳ Timeout";
-    case "untimeout":
-      return "✅ Timeout lifted";
-    default:
-      return action;
-  }
-}
 
 export const data = new SlashCommandBuilder()
   .setName("modlog")

@@ -159,6 +159,8 @@ export interface ConfigSchema {
   "core.config.channel_id": string;
   "core.cron.enabled": boolean;
   "core.cron.channel_id": string;
+  "core.moderation.enabled": boolean;
+  "core.moderation.channel_id": string;
 
   // Discord slash-command audit log (issue #459)
   "core.command_audit.enabled": boolean;
@@ -411,6 +413,10 @@ export const defaultConfig: ConfigSchema = {
   "core.config.channel_id": "",
   "core.cron.enabled": false,
   "core.cron.channel_id": "",
+  // Moderation context notices (#907) ride the same category machinery: off
+  // until an operator names a mod-log channel to post them to.
+  "core.moderation.enabled": false,
+  "core.moderation.channel_id": "",
 
   // WebUI audit log retention default (#756). WebAuditLog rows are written
   // unconditionally on every state-changing WebUI request, so there's no
@@ -1751,6 +1757,20 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Cron log channel",
     description:
       "Text channel that receives cron log embeds. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
+  },
+  "core.moderation.enabled": {
+    label: "Moderation log to Discord",
+    description:
+      "Post a summary embed to the moderation log channel whenever a moderation action is recorded (a /warn, or a native kick/ban/unban/timeout mirrored from the audit log), including the member's prior history. Requires moderation.enabled.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.moderation.channel_id": {
+    label: "Moderation log channel",
+    description:
+      "Text channel that receives moderation action embeds. Nothing is posted while this is empty.",
     category: "core",
     type: "channel",
   },

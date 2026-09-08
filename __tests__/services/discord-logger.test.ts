@@ -71,6 +71,7 @@ describe("DiscordLogger (#844)", () => {
         "config",
         "cron",
         "errors",
+        "moderation",
         "startup",
       ]);
       for (const type of DISCORD_LOG_TYPES) {
@@ -124,6 +125,33 @@ describe("DiscordLogger (#844)", () => {
     });
   });
 
+  describe("isCategoryEnabled()", () => {
+    it("is true only when the category is on and has a channel id", async () => {
+      stubConfig({
+        "core.moderation.enabled": true,
+        "core.moderation.channel_id": "555",
+        "core.errors.enabled": true,
+        "core.cron.channel_id": "666",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({}));
+      await logger.initialize();
+
+      await expect(logger.isCategoryEnabled("moderation")).resolves.toBe(true);
+      // Enabled but no channel id.
+      await expect(logger.isCategoryEnabled("errors")).resolves.toBe(false);
+      // Channel id but disabled.
+      await expect(logger.isCategoryEnabled("cron")).resolves.toBe(false);
+    });
+
+    it("is false for a category that is not schema-declared", async () => {
+      stubConfig({ "core.nonsense.enabled": true });
+      const logger = DiscordLogger.getInstance(makeClient({}));
+      await logger.initialize();
+
+      await expect(logger.isCategoryEnabled("nonsense")).resolves.toBe(false);
+    });
+  });
+
   describe("logToChannel()", () => {
     it("posts an embed to the configured channel when the category is enabled", async () => {
       const send = jest.fn(async () => undefined);
@@ -141,6 +169,26 @@ describe("DiscordLogger (#844)", () => {
         embeds: unknown[];
       };
       expect(payload.embeds).toHaveLength(1);
+    });
+
+    // Copilot review on #944: log embeds carry untrusted text (a moderation
+    // reason, an error message), so a log channel must never become a way to
+    // ping @everyone.
+    it("suppresses every mention on the messages it sends", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.startup.enabled": true,
+        "core.startup.channel_id": "111",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "111": { send } }));
+      await logger.initialize();
+
+      await logger.logBotStartup();
+
+      const payload = (send.mock.calls[0] as unknown[])[0] as {
+        allowedMentions?: { parse?: string[] };
+      };
+      expect(payload.allowedMentions).toEqual({ parse: [] });
     });
 
     it("stays silent when the category is disabled", async () => {

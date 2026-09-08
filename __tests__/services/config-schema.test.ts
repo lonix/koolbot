@@ -523,6 +523,9 @@ describe("Config Schema", () => {
       "core.cleanup.enabled": false,
       "core.config.enabled": false,
       "core.cron.enabled": false,
+      // Moderation context notices (#907) — same opt-in posture, and they
+      // additionally require the `moderation.enabled` master gate.
+      "core.moderation.enabled": false,
       // Persisted command metrics (#648) — same rationale as audit logging:
       // a cross-cutting operator-visibility feature, on by default so fresh
       // installs get historical command analytics out of the box.

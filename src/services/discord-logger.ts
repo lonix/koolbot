@@ -134,6 +134,20 @@ export class DiscordLogger {
   }
 
   /**
+   * Whether one category is currently switched on and pointed at a channel.
+   *
+   * Callers that have to do work to build a message (a DB roll-up, an extra
+   * query) use this to skip that work when nothing would be posted anyway,
+   * instead of duplicating the `core.<type>.*` key names. Unknown categories
+   * are always false.
+   */
+  public async isCategoryEnabled(logType: string): Promise<boolean> {
+    if (!DISCORD_LOG_TYPES.includes(logType)) return false;
+    const { enabled, channelId } = await this.resolveLogChannel(logType);
+    return enabled && Boolean(channelId);
+  }
+
+  /**
    * Send a log message to a specific core channel
    */
   public async logToChannel(
@@ -207,7 +221,15 @@ export class DiscordLogger {
         embed.setFooter({ text: message.footer });
       }
 
-      await channel.send({ embeds: [embed] });
+      // Suppress every mention this message could resolve. Log embeds carry
+      // untrusted text — a moderation reason, an error message — and a log
+      // channel must never be a way to ping @everyone. Mentions still render
+      // as names (allowed_mentions governs notification, not rendering), so
+      // the moderation notice's `<@id>` references read as usual.
+      await channel.send({
+        embeds: [embed],
+        allowedMentions: { parse: [] },
+      });
       logger.info(
         `Discord logger: Log message sent to ${logType}: ${message.title}`,
       );

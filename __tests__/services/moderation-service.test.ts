@@ -21,6 +21,8 @@ const createMock = jest.fn<(doc: unknown) => Promise<unknown>>();
 const findMock = jest.fn();
 const countExecMock = jest.fn<() => Promise<number>>();
 const countDocumentsMock = jest.fn(() => ({ exec: countExecMock }));
+const aggregateExecMock = jest.fn<() => Promise<unknown[]>>();
+const aggregateMock = jest.fn(() => ({ exec: aggregateExecMock }));
 
 function makeQuery(result: unknown[]): Record<string, unknown> {
   const q: Record<string, unknown> = {};
@@ -37,6 +39,23 @@ jest.unstable_mockModule("../../src/models/moderation-log.js", () => ({
     create: createMock,
     find: findMock,
     countDocuments: countDocumentsMock,
+    aggregate: aggregateMock,
+  },
+}));
+
+// The context notice (#907) posts through DiscordLogger. Stub it so the
+// service's gating and payload can be asserted without a gateway.
+const isReadyMock = jest.fn<() => boolean>();
+const isCategoryEnabledMock = jest.fn<() => Promise<boolean>>();
+const logToChannelMock = jest.fn<() => Promise<void>>();
+
+jest.unstable_mockModule("../../src/services/discord-logger.js", () => ({
+  DiscordLogger: {
+    getInstance: jest.fn(() => ({
+      isReady: isReadyMock,
+      isCategoryEnabled: isCategoryEnabledMock,
+      logToChannel: logToChannelMock,
+    })),
   },
 }));
 
@@ -67,6 +86,10 @@ function freshService(): InstanceType<typeof ModerationService> {
 beforeEach(() => {
   jest.clearAllMocks();
   findMock.mockImplementation(() => makeQuery([]));
+  aggregateExecMock.mockResolvedValue([]);
+  // Notices off by default: the tests that care opt in explicitly.
+  isReadyMock.mockReturnValue(false);
+  isCategoryEnabledMock.mockResolvedValue(false);
 });
 
 describe("mapAuditLogEntry", () => {
@@ -290,5 +313,279 @@ describe("ModerationService query helpers", () => {
 
     expect(countDocumentsMock).toHaveBeenCalledWith({ guildId: "g1" });
     expect(total).toBe(7);
+  });
+});
+
+describe("ModerationService.summarizeHistory (#907)", () => {
+  it("rolls the history up into per-action counts and the newest timestamp", async () => {
+    const older = new Date("2026-01-02T00:00:00.000Z");
+    const newest = new Date("2026-05-08T12:00:00.000Z");
+    aggregateExecMock.mockResolvedValueOnce([
+      { _id: "warn", count: 2, mostRecent: older },
+      { _id: "timeout", count: 1, mostRecent: newest },
+    ]);
+    const service = freshService();
+
+    const summary = await service.summarizeHistory("g1", "u1");
+
+    expect(summary).toEqual({
+      total: 3,
+      counts: { warn: 2, timeout: 1 },
+      mostRecent: newest,
+    });
+  });
+
+  it("is empty when the member has no history", async () => {
+    aggregateExecMock.mockResolvedValueOnce([]);
+    const service = freshService();
+
+    await expect(service.summarizeHistory("g1", "u1")).resolves.toEqual({
+      total: 0,
+      counts: {},
+      mostRecent: null,
+    });
+  });
+
+  it("issues a single aggregation matched on guild + user", async () => {
+    const service = freshService();
+
+    await service.summarizeHistory("g1", "u1");
+
+    expect(aggregateMock).toHaveBeenCalledTimes(1);
+    const pipeline = aggregateMock.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(pipeline[0]).toEqual({ $match: { guildId: "g1", userId: "u1" } });
+    expect(pipeline[1]).toHaveProperty("$group");
+  });
+
+  it("excludes the row just written so the roll-up reads as prior history", async () => {
+    const service = freshService();
+
+    await service.summarizeHistory("g1", "u1", { excludeId: "row-1" });
+
+    const pipeline = aggregateMock.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(pipeline[0]).toEqual({
+      $match: { guildId: "g1", userId: "u1", _id: { $ne: "row-1" } },
+    });
+  });
+
+  it("does not add an _id filter when there is nothing to exclude", async () => {
+    const service = freshService();
+
+    await service.summarizeHistory("g1", "u1", { excludeId: undefined });
+
+    const pipeline = aggregateMock.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(pipeline[0]).toEqual({ $match: { guildId: "g1", userId: "u1" } });
+  });
+});
+
+describe("ModerationService context notice (#907)", () => {
+  const guild = { id: "g1" } as never;
+
+  function enableNotices(): void {
+    isReadyMock.mockReturnValue(true);
+    isCategoryEnabledMock.mockResolvedValue(true);
+  }
+
+  function noticePayload(): {
+    title: string;
+    description: string;
+    fields: Array<{ name: string; value: string }>;
+  } {
+    return logToChannelMock.mock.calls[0][1] as never;
+  }
+
+  it("posts a summary with prior history when a native action is mirrored", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    createMock.mockResolvedValueOnce({ _id: "row-9" });
+    const mostRecent = new Date("2026-05-08T12:00:00.000Z");
+    aggregateExecMock.mockResolvedValueOnce([
+      { _id: "warn", count: 2, mostRecent: new Date("2026-01-01T00:00:00Z") },
+      { _id: "timeout", count: 1, mostRecent },
+    ]);
+    enableNotices();
+    const service = freshService();
+
+    await service.handleAuditLogEntry(
+      {
+        action: AuditLogEvent.MemberKick,
+        reason: "Repeated spam after warnings",
+        changes: [],
+        targetId: "u1",
+        executorId: "m1",
+      } as never,
+      guild,
+    );
+
+    expect(logToChannelMock).toHaveBeenCalledTimes(1);
+    expect(logToChannelMock.mock.calls[0][0]).toBe("moderation");
+    const payload = noticePayload();
+    expect(payload.title).toContain("Kick");
+    expect(payload.description).toBe("<@u1> · by <@m1>");
+    expect(payload.fields[0]).toEqual({
+      name: "Reason",
+      value: "Repeated spam after warnings",
+    });
+    expect(payload.fields[1].name).toBe("Prior history");
+    expect(payload.fields[1].value).toBe(
+      `2 warns, 1 timeout (most recent <t:${Math.floor(
+        mostRecent.getTime() / 1000,
+      )}:R>)`,
+    );
+  });
+
+  it("excludes the row just written from the prior-history roll-up", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    createMock.mockResolvedValueOnce({ _id: "row-9" });
+    enableNotices();
+    const service = freshService();
+
+    await service.handleAuditLogEntry(
+      {
+        action: AuditLogEvent.MemberBanAdd,
+        reason: null,
+        changes: [],
+        targetId: "u1",
+        executorId: "m1",
+      } as never,
+      guild,
+    );
+
+    const pipeline = aggregateMock.mock.calls[0][0] as Array<
+      Record<string, unknown>
+    >;
+    expect(pipeline[0]).toEqual({
+      $match: { guildId: "g1", userId: "u1", _id: { $ne: "row-9" } },
+    });
+  });
+
+  it("says so when the member has no prior history, and when the executor is hidden", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    createMock.mockResolvedValueOnce({ _id: "row-9" });
+    aggregateExecMock.mockResolvedValueOnce([]);
+    enableNotices();
+    const service = freshService();
+
+    await service.handleAuditLogEntry(
+      {
+        action: AuditLogEvent.MemberKick,
+        reason: null,
+        changes: [],
+        targetId: "u1",
+        executorId: null,
+      } as never,
+      guild,
+    );
+
+    const payload = noticePayload();
+    expect(payload.description).toBe("<@u1> · by Unknown");
+    expect(payload.fields[0].value).toBe("No reason given");
+    expect(payload.fields[1].value).toBe("No prior entries");
+  });
+
+  it("also posts for a bot-issued /warn", async () => {
+    createMock.mockResolvedValueOnce({ _id: "row-w" });
+    enableNotices();
+    const service = freshService();
+
+    await service.logWarn({
+      guildId: "g1",
+      userId: "u1",
+      moderatorId: "m1",
+      reason: "being rude",
+    });
+
+    expect(logToChannelMock).toHaveBeenCalledTimes(1);
+    expect(noticePayload().title).toContain("Warn");
+  });
+
+  it("runs no roll-up query when the notice category is disabled", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    createMock.mockResolvedValueOnce({ _id: "row-9" });
+    isReadyMock.mockReturnValue(true);
+    isCategoryEnabledMock.mockResolvedValue(false);
+    const service = freshService();
+
+    await service.handleAuditLogEntry(
+      {
+        action: AuditLogEvent.MemberKick,
+        reason: null,
+        changes: [],
+        targetId: "u1",
+        executorId: "m1",
+      } as never,
+      guild,
+    );
+
+    // The row is still recorded — only the announcement is skipped.
+    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(aggregateMock).not.toHaveBeenCalled();
+    expect(logToChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("skips the notice while the Discord logger is not ready", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    createMock.mockResolvedValueOnce({ _id: "row-9" });
+    isReadyMock.mockReturnValue(false);
+    isCategoryEnabledMock.mockResolvedValue(true);
+    const service = freshService();
+
+    await service.handleAuditLogEntry(
+      {
+        action: AuditLogEvent.MemberKick,
+        reason: null,
+        changes: [],
+        targetId: "u1",
+        executorId: "m1",
+      } as never,
+      guild,
+    );
+
+    expect(isCategoryEnabledMock).not.toHaveBeenCalled();
+    expect(logToChannelMock).not.toHaveBeenCalled();
+  });
+
+  it("never lets a notice failure reach the caller", async () => {
+    createMock.mockResolvedValueOnce({ _id: "row-w" });
+    enableNotices();
+    logToChannelMock.mockRejectedValueOnce(new Error("discord down"));
+    const service = freshService();
+
+    // /warn must still report success: the durable row is already written.
+    await expect(
+      service.logWarn({
+        guildId: "g1",
+        userId: "u1",
+        moderatorId: "m1",
+        reason: "being rude",
+      }),
+    ).resolves.toEqual({ _id: "row-w" });
+  });
+
+  it("never lets a roll-up failure reach the gateway handler", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    createMock.mockResolvedValueOnce({ _id: "row-9" });
+    aggregateExecMock.mockRejectedValueOnce(new Error("aggregate failed"));
+    enableNotices();
+    const service = freshService();
+
+    await expect(
+      service.handleAuditLogEntry(
+        {
+          action: AuditLogEvent.MemberKick,
+          reason: null,
+          changes: [],
+          targetId: "u1",
+          executorId: "m1",
+        } as never,
+        guild,
+      ),
+    ).resolves.toBeUndefined();
+    expect(logToChannelMock).not.toHaveBeenCalled();
   });
 });
