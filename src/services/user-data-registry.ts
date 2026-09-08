@@ -47,6 +47,7 @@ export type UserDataDeletePolicy =
  * (`self`), or the member is merely referenced inside someone else's data
  * (`mention`).
  */
+export type UserDataSubject = "self" | "mention";
 
 export interface UserDataField {
   /** File declaring the schema, repo-relative (the drift scan reads it). */
