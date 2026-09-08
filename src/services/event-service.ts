@@ -15,7 +15,12 @@ import { isValidObjectId } from "mongoose";
 import { formatInTimeZone } from "date-fns-tz";
 import { ScheduledService } from "./scheduled-service.js";
 import { DiscordLogger } from "./discord-logger.js";
-import { Event, type IEvent, type RsvpStatus } from "../models/event.js";
+import {
+  Event,
+  type EventState,
+  type IEvent,
+  type RsvpStatus,
+} from "../models/event.js";
 import { parseZonedDateTime, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
@@ -52,6 +57,15 @@ const COLOR_SCHEDULED = 0x5865f2; // blurple
 const COLOR_ACTIVE = 0x57f287; // green
 const COLOR_ENDED = 0x99aab5; // grey
 const COLOR_CANCELLED = 0xed4245; // red
+
+/**
+ * `ended` and `cancelled` are terminal: the event is over either way, so
+ * nothing that happens afterwards can change what its announcement should
+ * say.
+ */
+function isTerminalState(state: EventState): boolean {
+  return state === "ended" || state === "cancelled";
+}
 
 export interface RsvpCounts {
   going: number;
@@ -460,6 +474,50 @@ export class EventService extends ScheduledService {
     );
   }
 
+  /**
+   * Remove a member's RSVP from every event in the guild (#914).
+   *
+   * `setRsvp` cannot be reused for this. It filters on
+   * `state: { $nin: ["cancelled", "ended"] }`, and a purge has to clear
+   * RSVPs from ended and cancelled events too — which is most of a member's
+   * RSVP history.
+   *
+   * The `$pull` runs server-side per event, for the same lost-update reason
+   * `setRsvp`'s aggregation pipeline exists: a fetch/modify/save of the whole
+   * `rsvps` array would silently drop RSVPs recorded in between.
+   *
+   * Only non-terminal events get their announcement re-rendered. Editing an
+   * ended or cancelled event's post is churn nobody reads, and
+   * `updateAnnouncement` already no-ops when the message is gone.
+   *
+   * Returns the number of events the RSVP was pulled from.
+   */
+  public async removeRsvp(guildId: string, userId: string): Promise<number> {
+    const matches = await Event.find({ guildId, "rsvps.userId": userId });
+    if (matches.length === 0) return 0;
+
+    let removed = 0;
+    for (const match of matches) {
+      // `{ new: true }` hands back the post-pull document, which is what the
+      // re-render needs for correct attendee counts.
+      const updated = await Event.findByIdAndUpdate(
+        match._id,
+        { $pull: { rsvps: { userId } } },
+        { new: true },
+      );
+      if (!updated) continue;
+      removed++;
+      if (!isTerminalState(updated.state)) {
+        await this.updateAnnouncement(updated);
+      }
+    }
+
+    logger.info(
+      `Removed RSVPs for user ${sanitizeForLog(userId)} from ${removed} event(s)`,
+    );
+    return removed;
+  }
+
   // ---------------------------------------------------------------
   // Announcement rendering
   // ---------------------------------------------------------------
@@ -471,7 +529,7 @@ export class EventService extends ScheduledService {
     components: ActionRowBuilder<ButtonBuilder>[];
   } {
     const counts = countRsvps(event.rsvps);
-    const finished = event.state === "cancelled" || event.state === "ended";
+    const finished = isTerminalState(event.state);
 
     const embed = new EmbedBuilder()
       .setColor(accentColor(event.state))

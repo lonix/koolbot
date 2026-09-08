@@ -82,6 +82,42 @@ export class VoiceChannelTracker {
     return session ? { channelName: session.channelName } : null;
   }
 
+  /**
+   * Drop every trace of a member's *in-flight* voice session from memory
+   * (#914). Idempotent: a member with no open session is a no-op.
+   *
+   * A per-user purge needs this because `endTracking` persists with
+   * `upsert: true`. Delete a member's `voice-channel-tracking` row while they
+   * are still sitting in a voice channel and the row is *recreated* the
+   * moment they disconnect, carrying `totalTime` for the whole session —
+   * including the hours logged before the purge — and that resurrected total
+   * is then fed straight into `checkAndAwardAccolades`. The race window is
+   * the length of their current session: hours, not milliseconds.
+   *
+   * Evicting the member from `activeSessions` is what closes it: the
+   * disconnect handler finds no session and returns before it writes. The
+   * five companion maps are cleared alongside it so the eviction leaves no
+   * orphaned co-presence state behind for a later session to inherit.
+   *
+   * The maps are private, so this cannot be done from outside the service.
+   */
+  public forgetActiveSession(userId: string): void {
+    const hadSession = this.activeSessions.has(userId);
+
+    this.activeSessions.delete(userId);
+    this.userChannels.delete(userId);
+    this.encounteredUsers.delete(userId);
+    this.companionSince.delete(userId);
+    this.companionSeconds.delete(userId);
+    this.sessionFirsts.delete(userId);
+
+    if (hadSession) {
+      logger.info(
+        `Discarded in-flight voice session for user ${userId}; the disconnect handler will not persist it`,
+      );
+    }
+  }
+
   public async handleVoiceStateUpdate(
     oldState: VoiceState,
     newState: VoiceState,

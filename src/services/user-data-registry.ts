@@ -43,6 +43,25 @@ export type UserDataDeletePolicy =
   "hard-delete" | "pull-member" | "anonymise" | "retain" | "expires";
 
 /**
+ * What an `anonymise` purge writes into a user-id field in place of the real
+ * id (#914).
+ *
+ * It is a sentinel rather than `null` because every field carrying this
+ * policy is declared `required: true` (`quote.addedById`,
+ * `channel-invite.invitedBy`). A `$set: { field: null }` throws
+ * `ValidationError` on a validated write — and worse, `updateMany` and
+ * `updateOne` do not run validators by default, so the naive fix quietly
+ * writes an invalid document that only blows up later on some unrelated
+ * `.save()`.
+ *
+ * A sentinel needs no migration and no nullable field, and every existing
+ * reader keeps working unchanged because they all compare a real id for
+ * equality (`getQuotesAddedByUser`, the export's `yourRole` marker): "0" is
+ * not a valid Discord snowflake, so it matches nobody.
+ */
+export const ANONYMISED_USER_ID = "0";
+
+/**
  * Whether a match on this field is the requesting member's own data to erase
  * (`self`), or the member is merely referenced inside someone else's data
  * (`mention`).
