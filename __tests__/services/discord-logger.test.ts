@@ -171,6 +171,26 @@ describe("DiscordLogger (#844)", () => {
       expect(payload.embeds).toHaveLength(1);
     });
 
+    // Copilot review on #944: log embeds carry untrusted text (a moderation
+    // reason, an error message), so a log channel must never become a way to
+    // ping @everyone.
+    it("suppresses every mention on the messages it sends", async () => {
+      const send = jest.fn(async () => undefined);
+      stubConfig({
+        "core.startup.enabled": true,
+        "core.startup.channel_id": "111",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({ "111": { send } }));
+      await logger.initialize();
+
+      await logger.logBotStartup();
+
+      const payload = (send.mock.calls[0] as unknown[])[0] as {
+        allowedMentions?: { parse?: string[] };
+      };
+      expect(payload.allowedMentions).toEqual({ parse: [] });
+    });
+
     it("stays silent when the category is disabled", async () => {
       const send = jest.fn(async () => undefined);
       stubConfig({
