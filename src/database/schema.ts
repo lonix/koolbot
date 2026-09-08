@@ -19,7 +19,11 @@ export const quoteLikeEventSchema = new Schema(
 export const quoteSchema = new Schema({
   content: { type: String, required: true },
   authorId: { type: String, required: true }, // Discord user ID who said the quote
-  addedById: { type: String, required: true }, // Discord user ID who added the quote
+  // Discord user ID who added the quote. `required: true`, so a per-user
+  // purge cannot null it out — it writes the `ANONYMISED_USER_ID` sentinel
+  // ("0", see `services/user-data-registry.ts`) instead, which keeps the
+  // quote standing while dropping the saver's identity (#914).
+  addedById: { type: String, required: true },
   channelId: { type: String, required: true }, // Channel where quote was said
   messageId: { type: String, required: true }, // Original message ID
   createdAt: { type: Date, required: true, default: Date.now },
@@ -33,3 +37,9 @@ export const quoteSchema = new Schema({
 });
 
 quoteSchema.index({ "likeEvents.at": -1 });
+// Both user fields are queried directly by the per-user export and purge
+// (`{ $or: [{ authorId }, { addedById }] }`), and the achievement counters
+// hit them on every quote added. Without these the schema declared no
+// user-field index at all and each of those was a collection scan (#914).
+quoteSchema.index({ authorId: 1 });
+quoteSchema.index({ addedById: 1 });

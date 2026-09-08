@@ -35,7 +35,9 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 
 const { Event } = await import("../../src/models/event.js");
 const EventMock = Event as unknown as jest.Mock & {
+  find: jest.Mock;
   findById: jest.Mock;
+  findByIdAndUpdate: jest.Mock;
   findOneAndUpdate: jest.Mock;
 };
 
@@ -293,6 +295,143 @@ describe("setRsvp", () => {
 
     expect(result).toBeNull();
     expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// #914. A purge has to clear RSVPs from ended and cancelled events too, so
+// `setRsvp` cannot be reused — its `state: { $nin: ["cancelled", "ended"] }`
+// filter excludes most of a member's RSVP history.
+describe("removeRsvp", () => {
+  beforeEach(() => {
+    EventService.reset();
+  });
+
+  function buildService(): InstanceType<typeof EventService> {
+    return EventService.getInstance({} as never);
+  }
+
+  function stubEvents(
+    rows: Array<{ _id: string; state: string }>,
+  ): jest.Mock {
+    EventMock.find = jest.fn(async () => rows);
+    const updated = jest.fn(async (id: unknown) => {
+      const row = rows.find((r) => r._id === id);
+      return row ? { ...row, rsvps: [], guildId: "guild-1" } : null;
+    });
+    EventMock.findByIdAndUpdate = updated;
+    return updated;
+  }
+
+  it("pulls the RSVP server-side, matching on the nested user id", async () => {
+    stubEvents([{ _id: "e1", state: "scheduled" }]);
+    const svc = buildService();
+    const render = jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(undefined);
+
+    const removed = await svc.removeRsvp("guild-1", "user-1");
+
+    expect(removed).toBe(1);
+    expect(EventMock.find).toHaveBeenCalledWith({
+      guildId: "guild-1",
+      "rsvps.userId": "user-1",
+    });
+    // Server-side `$pull` — the same lost-update defence `setRsvp`'s
+    // aggregation pipeline exists for.
+    expect(EventMock.findByIdAndUpdate).toHaveBeenCalledWith(
+      "e1",
+      { $pull: { rsvps: { userId: "user-1" } } },
+      { new: true },
+    );
+    expect(render).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not filter on state, so ended and cancelled events are cleared too", async () => {
+    stubEvents([
+      { _id: "e1", state: "ended" },
+      { _id: "e2", state: "cancelled" },
+      { _id: "e3", state: "active" },
+    ]);
+    const svc = buildService();
+    jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(undefined);
+
+    const removed = await svc.removeRsvp("guild-1", "user-1");
+
+    expect(removed).toBe(3);
+    const [filter] = EventMock.find.mock.calls[0] as [Record<string, unknown>];
+    expect(filter).not.toHaveProperty("state");
+  });
+
+  it("re-renders a scheduled event but not an ended one", async () => {
+    stubEvents([
+      { _id: "e-ended", state: "ended" },
+      { _id: "e-live", state: "scheduled" },
+    ]);
+    const svc = buildService();
+    const render = jest
+      .spyOn(
+        svc as unknown as {
+          updateAnnouncement: (event: { _id: string }) => Promise<void>;
+        },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(undefined);
+
+    await svc.removeRsvp("guild-1", "user-1");
+
+    // Editing a finished event's post is churn nobody reads.
+    expect(render).toHaveBeenCalledTimes(1);
+    expect(
+      (render.mock.calls[0] as [{ _id: string }])[0]._id,
+    ).toBe("e-live");
+  });
+
+  it("re-renders from the post-pull document so the counts are right", async () => {
+    EventMock.find = jest.fn(async () => [{ _id: "e1", state: "scheduled" }]);
+    const afterPull = { _id: "e1", state: "scheduled", rsvps: [] };
+    EventMock.findByIdAndUpdate = jest.fn(async () => afterPull);
+    const svc = buildService();
+    const render = jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: (e: unknown) => Promise<void> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(undefined);
+
+    await svc.removeRsvp("guild-1", "user-1");
+
+    expect(render).toHaveBeenCalledWith(afterPull);
+  });
+
+  it("returns 0 without writing when the member has no RSVPs", async () => {
+    stubEvents([]);
+    const svc = buildService();
+
+    expect(await svc.removeRsvp("guild-1", "user-1")).toBe(0);
+    expect(EventMock.findByIdAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("skips an event that vanished between the scan and the pull", async () => {
+    EventMock.find = jest.fn(async () => [{ _id: "gone", state: "scheduled" }]);
+    EventMock.findByIdAndUpdate = jest.fn(async () => null);
+    const svc = buildService();
+    const render = jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(undefined);
+
+    expect(await svc.removeRsvp("guild-1", "user-1")).toBe(0);
+    expect(render).not.toHaveBeenCalled();
   });
 });
 
