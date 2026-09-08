@@ -39,6 +39,8 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/remind](#remind)
 - [Moderation commands](#-moderation-commands)
   - [/warn](#warn)
+  - [/timeout](#timeout)
+  - [/ban](#ban)
   - [/modlog](#modlog)
 - [Web UI launcher](#-web-ui-launcher)
   - [/config](#config)
@@ -625,16 +627,27 @@ default); cancel one to make room.
 
 ## 🚨 Moderation commands
 
-A lightweight, queryable **moderation log**. KoolBot records warnings issued
-with `/warn` and mirrors native kick / ban / unban / timeout actions from the
-guild audit log into one place, so you can answer "has this person been
-warned before / what's their history?" without scrolling Discord's native
-audit log (which only retains ~45 days and has no per-user warn concept).
+A lightweight, queryable **moderation log**. KoolBot records the actions you
+take with `/warn`, `/timeout` and `/ban`, and mirrors native kick / ban /
+unban / timeout actions from the guild audit log into one place, so you can
+answer "has this person been warned before / what's their history?" without
+scrolling Discord's native audit log (which only retains ~45 days and has no
+per-user warn concept).
 
-Gated by the `moderation.enabled` feature flag. Both commands default to
-members with the **Moderate Members** permission (and administrators);
-additional roles can be granted from the Web UI's **Permissions** page.
-Server-wide history is also viewable on the `/admin/moderation` page.
+Gated by the `moderation.enabled` feature flag. `/warn`, `/timeout` and
+`/modlog` default to members with the **Moderate Members** permission and
+`/ban` to **Ban Members** (administrators always have both); additional roles
+can be granted from the Web UI's **Permissions** page. Server-wide history is
+also viewable on the `/admin/moderation` page.
+
+`/timeout` and `/ban` act through the bot, so two things follow. The bot's own
+role must sit **above** the target's and hold the matching permission — if it
+doesn't, the command says so and does nothing. And because Discord records
+**KoolBot** as the executor of anything the bot does, your name is prefixed
+onto the reason it sends (`yourname#0001: Repeated spam`), so you stay visible
+in Discord's own audit log as well as in KoolBot's. Actions the bot took are
+not mirrored a second time from the audit log — each one lands in the log
+exactly once. Nothing is recorded if Discord rejects the action.
 
 Capturing native actions requires the bot to have the **View Audit Log**
 permission. See [SETTINGS.md](SETTINGS.md#moderation).
@@ -659,6 +672,52 @@ DM'd.
 
 - `user` (required) — the member to warn
 - `reason` (required) — why the member is being warned (up to 512 characters)
+
+### `/timeout`
+
+Time a member out (Discord's "mute") for any duration from **1 minute to 28
+days**, and record it. Discord's own member menu offers only six preset
+durations — 60 seconds, 5 minutes, 10 minutes, 1 hour, 1 day and 1 week — so
+this is the only way to set, say, three hours. The confirmation is shown only
+to you (ephemeral) and includes when the timeout expires; the member is not
+DM'd.
+
+```text
+/timeout user:@SomeMember duration:180 reason:"Cooling off after a heated argument"
+```
+
+**Options:**
+
+- `user` (required) — the member to time out
+- `duration` (required) — how long, in minutes (1–40320, i.e. up to 28 days)
+- `reason` (required) — why the member is being timed out (up to 512 characters)
+
+To lift a timeout early, clear it from Discord's member menu — the lift is
+mirrored into the log as a "timeout lifted" entry.
+
+### `/ban`
+
+Ban a member and record it. Optionally deletes their recent messages, the same
+way Discord's own ban dialog does. The confirmation is shown only to you
+(ephemeral); the member is not DM'd.
+
+You can ban someone who has already left the server (or was never in it) by
+picking them by id — Discord accepts that, and so does this command.
+
+```text
+/ban user:@SomeMember reason:"Repeated spam after warnings"
+/ban user:@SomeMember reason:"Raiding" delete_days:7
+```
+
+**Options:**
+
+- `user` (required) — the member to ban
+- `reason` (required) — why the member is being banned (up to 512 characters)
+- `delete_days` (optional) — days of the member's recent messages to delete
+  (0–7; defaults to 0, i.e. keep them)
+
+To unban, use Discord's **Server Settings → Bans** list — the unban is
+mirrored into the log.
 
 ### `/modlog`
 
@@ -953,11 +1012,17 @@ surfaces share the same validation.
 | `/event` create/cancel/start   | Administrator    | Events enabled                |
 | `/remind`                      | Everyone\*       | Reminders enabled             |
 | `/warn`                        | Moderate Members | Moderation log enabled        |
+| `/timeout`                     | Moderate Members | Moderation log enabled        |
+| `/ban`                         | Ban Members      | Moderation log enabled        |
 | `/modlog`                      | Moderate Members | Moderation log enabled        |
 
 \* Per-command role gating can be added in the Web UI's **Permissions** page.
-`/warn` and `/modlog` default to members with the **Moderate Members**
-permission (and administrators); grant additional roles from the same page.
+`/warn`, `/timeout` and `/modlog` default to members with the **Moderate
+Members** permission and `/ban` to **Ban Members** (administrators have both);
+grant additional roles from the same page. `/timeout` and `/ban` additionally
+re-check that your own highest role sits above the target's, which is the rule
+Discord applies in its native menu but cannot apply to an action the bot
+executes on your behalf.
 
 ### Web UI launcher permissions
 
@@ -1029,6 +1094,8 @@ when its message, role, category, or channel is deleted.
 
 - View Audit Log (so native kick / ban / timeout actions can be mirrored
   into the log; `/warn` works without it)
+- Moderate Members for `/timeout`, Ban Members for `/ban` — and the bot's
+  role must sit above the members it acts on
 
 ---
 
@@ -1051,6 +1118,8 @@ when its message, role, category, or channel is deleted.
 /remind list                        # Your pending reminders
 /remind cancel id:"..."             # Cancel one of your reminders
 /warn user:@User reason:"..."       # (mod) record a warning
+/timeout user:@User duration:180 reason:"..."  # (mod) time out for 1m-28d
+/ban user:@User reason:"..." [delete_days:N]   # (mod) ban and record it
 /modlog user:@User [page:N]         # (mod) view a member's moderation history
 ```
 
@@ -1073,7 +1142,7 @@ Once in the admin Web UI (admin sessions):
 | Database        | `/dbtrunk status`, `/dbtrunk run`                                   |
 | Command Audit   | (new — slash-command audit log)                                     |
 | Command Metrics | (new — per-command usage metrics)                                   |
-| Moderation      | (new — warning log browser; `/warn` and `/modlog` stay in Discord)  |
+| Moderation      | (new — history browser; the moderation commands stay in Discord)    |
 | Bootstrap       | (new — read-only `.env` diagnostics)                                |
 | Settings        | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
 | Permissions     | `/permissions set/add/remove/clear/list/view`                       |

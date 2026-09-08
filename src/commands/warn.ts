@@ -8,8 +8,7 @@ import {
 import { ModerationService } from "../services/moderation-service.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
-
-const MAX_REASON_LENGTH = 512;
+import { MAX_REASON_LENGTH } from "../utils/moderation-guards.js";
 
 export const data = new SlashCommandBuilder()
   .setName("warn")

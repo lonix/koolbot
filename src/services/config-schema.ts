@@ -917,7 +917,7 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   moderation: {
     title: "Moderation",
     description:
-      "Lightweight moderation log: record warnings via /warn, mirror native kick/ban/timeout actions from the guild audit log, and query per-member history with /modlog or the admin page.",
+      "Lightweight moderation log: record actions via /warn, /timeout and /ban, mirror native kick/ban/timeout actions from the guild audit log, and query per-member history with /modlog or the admin page.",
   },
   other: {
     title: "Other",
