@@ -89,7 +89,7 @@ export interface IModerationCase extends Document {
   /** Moderator who took the originating action, copied from the origin entry. May be null. */
   originModeratorId: string | null;
   /** Staff member who opened the case (not necessarily the same person). */
-  openedBy: string;
+  openedByUserId: string;
   /** The `ModerationLog` row that enacted a readmission (the `unban`), once one exists. */
   resolutionEntryId: Types.ObjectId | null;
   /** Append-only trail *inside* the case: every transition, who, when, why. */
@@ -339,7 +339,7 @@ how `moderation-log` is already classified there:
 | Field | `exportable` | `subject` | `onDelete` |
 | --- | --- | --- | --- |
 | `userId` | `false` | `self` | `retain` |
-| `openedBy` | `false` | `mention` | `retain` |
+| `openedByUserId` | `false` | `mention` | `retain` |
 | `originModeratorId` | `false` | `mention` | `retain` |
 | `events[].byUserId` | `false` | `mention` | `retain` |
 
