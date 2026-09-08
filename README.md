@@ -358,6 +358,7 @@ both are set. Available log categories:
 | `core.cleanup.*` | Data maintenance | Cleanup results, sessions removed |
 | `core.config.*` | Settings changes | Configuration reloads, value updates |
 | `core.cron.*` | Scheduled tasks | Announcement triggers, cleanup runs |
+| `core.moderation.*` | Moderation actions | A recorded warn/kick/ban/timeout plus the member's prior history |
 
 You can point each category at the same channel for one consolidated log,
 or split them between `#bot-status`, `#admin-alerts`, `#bot-logs`, etc.

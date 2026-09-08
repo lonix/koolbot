@@ -639,6 +639,11 @@ Server-wide history is also viewable on the `/admin/moderation` page.
 Capturing native actions requires the bot to have the **View Audit Log**
 permission. See [SETTINGS.md](SETTINGS.md#moderation).
 
+Turn on `core.moderation.enabled` (plus a channel id) and KoolBot also posts
+each recorded action to a mod channel with the member's prior history
+attached — so the next person handling them has the context without anyone
+having to run `/modlog` first.
+
 ### `/warn`
 
 Record a warning against a member. Warnings are KoolBot's own record —

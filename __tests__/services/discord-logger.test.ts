@@ -71,6 +71,7 @@ describe("DiscordLogger (#844)", () => {
         "config",
         "cron",
         "errors",
+        "moderation",
         "startup",
       ]);
       for (const type of DISCORD_LOG_TYPES) {
@@ -121,6 +122,33 @@ describe("DiscordLogger (#844)", () => {
       await logger.initialize();
 
       expect(mockRegisterReloadCallback).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("isCategoryEnabled()", () => {
+    it("is true only when the category is on and has a channel id", async () => {
+      stubConfig({
+        "core.moderation.enabled": true,
+        "core.moderation.channel_id": "555",
+        "core.errors.enabled": true,
+        "core.cron.channel_id": "666",
+      });
+      const logger = DiscordLogger.getInstance(makeClient({}));
+      await logger.initialize();
+
+      await expect(logger.isCategoryEnabled("moderation")).resolves.toBe(true);
+      // Enabled but no channel id.
+      await expect(logger.isCategoryEnabled("errors")).resolves.toBe(false);
+      // Channel id but disabled.
+      await expect(logger.isCategoryEnabled("cron")).resolves.toBe(false);
+    });
+
+    it("is false for a category that is not schema-declared", async () => {
+      stubConfig({ "core.nonsense.enabled": true });
+      const logger = DiscordLogger.getInstance(makeClient({}));
+      await logger.initialize();
+
+      await expect(logger.isCategoryEnabled("nonsense")).resolves.toBe(false);
     });
   });
 

@@ -812,12 +812,24 @@ administrators); grant additional roles from the **Permissions** page. See
 | --- | --- | --- |
 | `moderation.enabled` | `false` | Master switch — enables the `/warn` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page |
 | `moderation.retention_days` | `365` | Days to keep moderation-log rows before the daily cleanup prunes them. Set to `0` to keep history forever |
+| `core.moderation.enabled` | `false` | Post an embed to the moderation log channel each time an action is recorded, with the member's prior history attached |
+| `core.moderation.channel_id` | `""` | Text channel that receives those embeds. Nothing is posted while this is empty |
 
 **Notes:**
 
 - Warnings are KoolBot's own record — Discord has no native warning action,
   so `/warn` is the only place they exist. The warned member is **not** DM'd
   (consistent with the opt-in-only DM posture).
+- **Context notices** (`core.moderation.*`): with these on, every recorded
+  action — a `/warn`, or a native kick / ban / unban / timeout mirrored from
+  the audit log — is announced in the configured channel together with the
+  member's prior history, e.g. _"Prior history: 2 warns, 1 timeout (most
+  recent 4 months ago)"_. That is the context Discord cannot give you: its
+  audit log keeps ~45 days and filters by the moderator, not the target, so
+  this surfaces KoolBot's own history at the moment someone is making a
+  decision — without anyone having to remember to run `/modlog`. The count
+  excludes the action being announced, and a failure to post never affects
+  the recorded row. Requires `moderation.enabled`.
 - Mirroring native actions requires the bot to have the **View Audit Log**
   permission and the `GuildModeration` gateway intent (enabled by default in
   the bot). `/warn` works without View Audit Log.
@@ -1359,6 +1371,8 @@ leave the graph in a broken state.
 
 - `moderation.enabled` (bool, default: false)
 - `moderation.retention_days` (number, default: 365)
+- `core.moderation.enabled` (bool, default: false)
+- `core.moderation.channel_id` (string, default: "")
 
 #### Cleanup
 
@@ -1430,6 +1444,7 @@ apply to the next log message — no restart is needed.
 | `core.cleanup.enabled` / `core.cleanup.channel_id` | bool / channel | `false` / `""` | Voice-session cleanup results (rows removed / aggregated) |
 | `core.config.enabled` / `core.config.channel_id` | bool / channel | `false` / `""` | Configuration reloads and their outcome |
 | `core.cron.enabled` / `core.cron.channel_id` | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks) |
+| `core.moderation.enabled` / `core.moderation.channel_id` | bool / channel | `false` / `""` | Recorded moderation actions plus the member's prior history (needs `moderation.enabled`) |
 
 Point every category at one channel for a single consolidated log, or split
 them (e.g. `#bot-status` for startup, `#admin-alerts` for errors).

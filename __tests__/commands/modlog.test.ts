@@ -28,8 +28,9 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { data, actionLabel, execute, PAGE_SIZE, MAX_REASON_DISPLAY_LENGTH } =
-  await import("../../src/commands/modlog.js");
+const { data, execute, PAGE_SIZE, MAX_REASON_DISPLAY_LENGTH } = await import(
+  "../../src/commands/modlog.js"
+);
 
 function makeInteraction(
   page: number | null = null,
@@ -99,17 +100,6 @@ describe("Modlog Command", () => {
   it("defaults to the Moderate Members permission", () => {
     const json = data.toJSON();
     expect(json.default_member_permissions).toBe((1n << 40n).toString());
-  });
-
-  describe("actionLabel", () => {
-    it("renders a label for every action", () => {
-      expect(actionLabel("warn")).toContain("Warn");
-      expect(actionLabel("kick")).toContain("Kick");
-      expect(actionLabel("ban")).toContain("Ban");
-      expect(actionLabel("unban")).toContain("Unban");
-      expect(actionLabel("timeout")).toContain("Timeout");
-      expect(actionLabel("untimeout")).toContain("lifted");
-    });
   });
 
   // #840: a page of 10 entries each carrying a 512-char reason overflows the

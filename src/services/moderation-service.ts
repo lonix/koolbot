@@ -7,6 +7,17 @@ import {
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { ConfigService } from "./config-service.js";
+import { DiscordLogger } from "./discord-logger.js";
+import {
+  actionColor,
+  actionLabel,
+  formatHistorySummary,
+  type ModerationHistorySummary,
+} from "../utils/moderation-format.js";
+import {
+  truncateText,
+  DISCORD_EMBED_FIELD_VALUE_LIMIT,
+} from "../utils/discord-limits.js";
 import {
   ModerationLog,
   type IModerationLog,
@@ -28,6 +39,21 @@ export interface ModerationHistoryQuery {
 export interface RecentQuery extends ModerationHistoryQuery {
   action?: ModerationAction;
   userId?: string;
+}
+
+/**
+ * The action that was just recorded, as the context notice needs to describe
+ * it. `entryId` is the `_id` of the row that was written, so the prior-history
+ * roll-up can exclude it and read as history rather than counting the action
+ * being announced (#907).
+ */
+export interface ActionContext {
+  guildId: string;
+  userId: string;
+  moderatorId: string | null;
+  action: ModerationAction;
+  reason: string | null;
+  entryId: unknown;
 }
 
 /**
@@ -92,6 +118,10 @@ export function mapAuditLogEntry(entry: {
  *     actions from `GuildAuditLogEntryCreate`, following the same "aggregate
  *     what already happens" pattern the activity trackers use.
  *
+ * Both write paths also announce the action, with the target's prior history
+ * attached, to the `core.moderation` Discord log channel (#907) — see
+ * {@link postActionContext}.
+ *
  * The whole feature is gated behind `moderation.enabled` (default off). There
  * are no timers to own, so the service needs no start/destroy — it is a thin
  * façade over the model plus the config gate, constructed with the standard
@@ -153,6 +183,14 @@ export class ModerationService {
         input.guildId,
       )}`,
     );
+    await this.postActionContext({
+      guildId: input.guildId,
+      userId: input.userId,
+      moderatorId: input.moderatorId,
+      action: "warn",
+      reason: input.reason,
+      entryId: entry._id,
+    });
     return entry;
   }
 
@@ -184,7 +222,7 @@ export class ModerationService {
         return;
       }
 
-      await ModerationLog.create({
+      const row = await ModerationLog.create({
         guildId: guild.id,
         userId: targetId,
         moderatorId: entry.executorId ?? null,
@@ -197,6 +235,14 @@ export class ModerationService {
           targetId,
         )} from audit log in guild ${sanitizeForLog(guild.id)}`,
       );
+      await this.postActionContext({
+        guildId: guild.id,
+        userId: targetId,
+        moderatorId: entry.executorId ?? null,
+        action: mapped.action,
+        reason: mapped.reason,
+        entryId: row?._id,
+      });
     } catch (error) {
       logger.error("Error mirroring moderation audit-log entry:", error);
     }
@@ -218,6 +264,110 @@ export class ModerationService {
 
   public async countHistory(guildId: string, userId: string): Promise<number> {
     return ModerationLog.countDocuments({ guildId, userId }).exec();
+  }
+
+  /**
+   * Collapse a member's history to per-action counts plus the newest
+   * timestamp, in a single aggregation over the `(guildId, userId, createdAt)`
+   * index. `excludeId` drops one row from the roll-up so the context notice
+   * can report *prior* history rather than counting the action it announces
+   * (#907).
+   */
+  public async summarizeHistory(
+    guildId: string,
+    userId: string,
+    options: { excludeId?: unknown } = {},
+  ): Promise<ModerationHistorySummary> {
+    const match: Record<string, unknown> = { guildId, userId };
+    if (options.excludeId !== undefined && options.excludeId !== null) {
+      match._id = { $ne: options.excludeId };
+    }
+
+    const rows = await ModerationLog.aggregate<{
+      _id: ModerationAction;
+      count: number;
+      mostRecent: Date;
+    }>([
+      { $match: match },
+      {
+        $group: {
+          _id: "$action",
+          count: { $sum: 1 },
+          mostRecent: { $max: "$createdAt" },
+        },
+      },
+    ]).exec();
+
+    const counts: Partial<Record<ModerationAction, number>> = {};
+    let total = 0;
+    let mostRecent: Date | null = null;
+
+    for (const row of rows) {
+      counts[row._id] = row.count;
+      total += row.count;
+      const when = row.mostRecent ? new Date(row.mostRecent) : null;
+      if (when && (!mostRecent || when > mostRecent)) {
+        mostRecent = when;
+      }
+    }
+
+    return { total, counts, mostRecent };
+  }
+
+  /**
+   * Announce a just-recorded action to the `core.moderation` log channel with
+   * the member's prior history attached (#907).
+   *
+   * Discord cannot answer "what has this member done before?" natively — its
+   * audit log keeps 45 days and filters by executor, not target — so this is
+   * the point where KoolBot's own history becomes visible to the moderator
+   * who is making a decision, without them having to think to run `/modlog`.
+   *
+   * Cheap and best-effort by design: the channel gate is checked before the
+   * roll-up runs (so a disabled notice costs no query), only one aggregation
+   * is issued, and every failure is swallowed — neither the gateway handler
+   * nor `/warn` may fail because a log embed could not be posted.
+   */
+  private async postActionContext(context: ActionContext): Promise<void> {
+    try {
+      const discordLogger = DiscordLogger.getInstance(this.client);
+      if (!discordLogger.isReady()) return;
+      if (!(await discordLogger.isCategoryEnabled("moderation"))) return;
+
+      const summary = await this.summarizeHistory(
+        context.guildId,
+        context.userId,
+        { excludeId: context.entryId },
+      );
+
+      const moderator = context.moderatorId
+        ? `<@${context.moderatorId}>`
+        : "Unknown";
+
+      await discordLogger.logToChannel("moderation", {
+        title: actionLabel(context.action),
+        description: `<@${context.userId}> · by ${moderator}`,
+        color: actionColor(context.action),
+        fields: [
+          {
+            name: "Reason",
+            value: context.reason
+              ? truncateText(context.reason, DISCORD_EMBED_FIELD_VALUE_LIMIT)
+              : "No reason given",
+          },
+          {
+            name: "Prior history",
+            value: truncateText(
+              formatHistorySummary(summary),
+              DISCORD_EMBED_FIELD_VALUE_LIMIT,
+            ),
+          },
+        ],
+        footer: "Use /modlog for the full history",
+      });
+    } catch (error) {
+      logger.error("Moderation: failed to post action context notice:", error);
+    }
   }
 
   /** Server-wide recent actions, newest first. Backs the admin page. */

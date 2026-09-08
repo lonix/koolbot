@@ -134,6 +134,20 @@ export class DiscordLogger {
   }
 
   /**
+   * Whether one category is currently switched on and pointed at a channel.
+   *
+   * Callers that have to do work to build a message (a DB roll-up, an extra
+   * query) use this to skip that work when nothing would be posted anyway,
+   * instead of duplicating the `core.<type>.*` key names. Unknown categories
+   * are always false.
+   */
+  public async isCategoryEnabled(logType: string): Promise<boolean> {
+    if (!DISCORD_LOG_TYPES.includes(logType)) return false;
+    const { enabled, channelId } = await this.resolveLogChannel(logType);
+    return enabled && Boolean(channelId);
+  }
+
+  /**
    * Send a log message to a specific core channel
    */
   public async logToChannel(
