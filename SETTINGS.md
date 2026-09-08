@@ -795,22 +795,23 @@ single JSON file. Web UI only — there is no slash command for it.
 
 ## 🚨 Moderation
 
-A lightweight, queryable **moderation log**. Records warnings issued with
-`/warn` and mirrors native kick / ban / unban / timeout actions from the
-guild audit log into one place, so moderators can answer "has this person
-been warned before / what's their history?" without scrolling Discord's
-native audit log (which only retains ~45 days and has no per-user warn
-concept).
+A lightweight, queryable **moderation log**. Records the actions moderators
+take with `/warn`, `/timeout` and `/ban`, and mirrors native kick / ban /
+unban / timeout actions from the guild audit log into one place, so moderators
+can answer "has this person been warned before / what's their history?"
+without scrolling Discord's native audit log (which only retains ~45 days and
+has no per-user warn concept).
 
 Query per-member history in Discord with **`/modlog`**, or browse
-server-wide history on the **`/admin/moderation`** page. Both `/warn` and
-`/modlog` default to members with the **Moderate Members** permission (and
-administrators); grant additional roles from the **Permissions** page. See
+server-wide history on the **`/admin/moderation`** page. `/warn`, `/timeout`
+and `/modlog` default to members with the **Moderate Members** permission and
+`/ban` to **Ban Members** (administrators have both); grant additional roles
+from the **Permissions** page. See
 [COMMANDS.md](COMMANDS.md#-moderation-commands).
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `moderation.enabled` | `false` | Master switch — enables the `/warn` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page |
+| `moderation.enabled` | `false` | Master switch — enables the `/warn`, `/timeout`, `/ban` and `/modlog` commands, mirroring of native kick/ban/timeout actions from the guild audit log, and the `/admin/moderation` page |
 | `moderation.retention_days` | `365` | Days to keep moderation-log rows before the daily cleanup prunes them. Set to `0` to keep history forever |
 | `core.moderation.enabled` | `false` | Post an embed to the moderation log channel each time an action is recorded, with the member's prior history attached |
 | `core.moderation.channel_id` | `""` | Text channel that receives those embeds. Nothing is posted while this is empty |
@@ -819,7 +820,19 @@ administrators); grant additional roles from the **Permissions** page. See
 
 - Warnings are KoolBot's own record — Discord has no native warning action,
   so `/warn` is the only place they exist. The warned member is **not** DM'd
-  (consistent with the opt-in-only DM posture).
+  (consistent with the opt-in-only DM posture), and neither is a member who is
+  timed out or banned by command.
+- **`/timeout` and `/ban`** act through the bot, so the bot's role must sit
+  above the target's and hold Moderate Members / Ban Members; when it doesn't,
+  the command refuses and records nothing. Each command also re-checks that the
+  invoking moderator outranks the target — the rule Discord enforces natively
+  but cannot enforce for an action the bot executes on someone's behalf. The
+  moderator's name is prefixed onto the reason sent to Discord, so they stay
+  visible in the native audit log even though KoolBot is its executor.
+  `/timeout` accepts any duration from 1 minute to 28 days, which Discord's own
+  member menu (six fixed presets) cannot do.
+- Actions the bot itself executed are **not** mirrored a second time from the
+  audit log, so a `/ban` produces exactly one row.
 - **Context notices** (`core.moderation.*`): with these on, every recorded
   action — a `/warn`, or a native kick / ban / unban / timeout mirrored from
   the audit log — is announced in the configured channel together with the

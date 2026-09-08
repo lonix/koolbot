@@ -3544,7 +3544,7 @@ export function renderModerationPage(props: ModerationProps): string {
 
   const body = `
 <h1>Moderation log</h1>
-<p class="subtitle">Warnings recorded via <code>/warn</code> plus native kick/ban/timeout actions mirrored from the guild audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
+<p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus native kick/ban/timeout actions mirrored from the guild audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
 
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
 
