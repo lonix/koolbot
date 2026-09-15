@@ -12,6 +12,7 @@ import {
   MAX_MESSAGE_DELETE_DAYS,
   MAX_REASON_LENGTH,
   checkHierarchy,
+  fetchMemberOrNull,
   formatAuditReason,
 } from "../utils/moderation-guards.js";
 import { getErrorMessage } from "../utils/error-guards.js";
@@ -84,6 +85,17 @@ export async function execute(
       return;
     }
 
+    // Discord's maxLength doesn't stop a whitespace-only reason, which trims to
+    // "" — an invalid embed field value. Refusing here, before the ban, keeps
+    // the failure in front of the action rather than after it.
+    if (!reason) {
+      await interaction.reply({
+        content: "Please give a reason for the ban.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     // Acknowledge before any DB or REST work so the ban + write + count cannot
     // miss Discord's 3-second ACK window (`10062 Unknown interaction`, #842).
     // Every response below is ephemeral, and visibility is fixed here.
@@ -111,11 +123,11 @@ export async function execute(
     }
 
     const invoker = await guild.members.fetch(interaction.user.id);
-    // A ban may target someone who already left, so a missing member is fine
-    // here — Discord accepts a ban by user id.
-    const targetMember = await guild.members
-      .fetch(targetUser.id)
-      .catch(() => null);
+    // A ban may target someone who already left, so a confirmed-absent member
+    // is fine here — Discord accepts a ban by user id. Any other lookup failure
+    // is rethrown rather than read as absence, which would skip the hierarchy
+    // check below.
+    const targetMember = await fetchMemberOrNull(guild, targetUser.id);
 
     const refusal = checkHierarchy({
       guild,

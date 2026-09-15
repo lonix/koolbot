@@ -64,6 +64,17 @@ export async function execute(
       return;
     }
 
+    // Discord's maxLength doesn't stop a whitespace-only reason, which trims to
+    // "" — an invalid embed field value, and a recorded warning with no reason.
+    // Refusing here keeps the failure in front of the write.
+    if (!reason) {
+      await interaction.reply({
+        content: "Please give a reason for the warning.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     // Acknowledge before any DB work so the write + count cannot miss
     // Discord's 3-second ACK window (`10062 Unknown interaction`, #842).
     // Every response below is ephemeral, and visibility is fixed here.

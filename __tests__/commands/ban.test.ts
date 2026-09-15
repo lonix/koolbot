@@ -1,5 +1,9 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import {
+  DiscordAPIError,
+  MessageFlags,
+  type ChatInputCommandInteraction,
+} from "discord.js";
 
 const mockIsEnabled = jest.fn<() => Promise<boolean>>();
 const mockLogAction = jest.fn<() => Promise<unknown>>();
@@ -53,6 +57,8 @@ function makeInteraction(
     deleteDays?: number | null;
     targetMember?: Record<string, unknown> | null;
     guild?: unknown;
+    reason?: string;
+    memberFetchError?: unknown;
   } = {},
 ): MockInteraction {
   const target = overrides.target ?? {
@@ -71,9 +77,13 @@ function makeInteraction(
           id: "guild-1",
           ownerId: "owner-1",
           members: {
-            fetch: jest.fn(async (id: string) =>
-              id === "mod-1" ? makeMember("mod-1", 9) : targetMember,
-            ),
+            fetch: jest.fn(async (id: string) => {
+              if (id === "mod-1") return makeMember("mod-1", 9);
+              if (overrides.memberFetchError !== undefined) {
+                throw overrides.memberFetchError;
+              }
+              return targetMember;
+            }),
           },
           bans: { create: banCreate },
         }
@@ -84,7 +94,7 @@ function makeInteraction(
     guild,
     options: {
       getUser: () => target,
-      getString: () => "  raiding  ",
+      getString: () => overrides.reason ?? "  raiding  ",
       getInteger: () => overrides.deleteDays ?? null,
     },
     user: { id: "mod-1", tag: "mod#0001" },
@@ -297,6 +307,81 @@ describe("Ban Command", () => {
       await execute(interaction);
 
       expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "There was an error banning the member.",
+        }),
+      );
+    });
+  });
+  describe("input guards", () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      mockIsEnabled.mockResolvedValue(true);
+      mockLogAction.mockResolvedValue({});
+      mockCountHistory.mockResolvedValue(3);
+    });
+
+    // Discord's maxLength doesn't stop a whitespace-only reason; it trims to
+    // "", which is an invalid embed field value. The old flow banned first and
+    // only failed when rendering the confirmation.
+    it("refuses a whitespace-only reason before banning", async () => {
+      const interaction = makeInteraction({ reason: "   " });
+
+      await execute(interaction);
+
+      expect(interaction.deferReply).not.toHaveBeenCalled();
+      expect(interaction.banCreate).not.toHaveBeenCalled();
+      expect(mockLogAction).not.toHaveBeenCalled();
+      expect(interaction.reply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "Please give a reason for the ban.",
+        }),
+      );
+    });
+
+    it("treats Unknown Member as absence and bans by id", async () => {
+      mockIsEnabled.mockResolvedValue(true);
+      mockCountHistory.mockResolvedValue(1);
+      const interaction = makeInteraction({
+        memberFetchError: new DiscordAPIError(
+          { code: 10007, message: "Unknown Member" },
+          10007,
+          404,
+          "GET",
+          "",
+          {},
+        ),
+      });
+
+      await execute(interaction);
+
+      expect(interaction.banCreate).toHaveBeenCalled();
+      expect(mockLogAction).toHaveBeenCalled();
+    });
+
+    // A blanket catch would read this as "member absent", and a null target
+    // skips the hierarchy check — so a rate limit could let the ban through.
+    it("does not ban when the member lookup fails for another reason", async () => {
+      mockIsEnabled.mockResolvedValue(true);
+      const interaction = makeInteraction({
+        memberFetchError: new DiscordAPIError(
+          { code: 0, message: "rate limited" },
+          0,
+          429,
+          "GET",
+          "",
+          {},
+        ),
+      });
+      interaction.deferReply.mockImplementation(async () => {
+        (interaction as { deferred: boolean }).deferred = true;
+      });
+
+      await execute(interaction);
+
+      expect(interaction.banCreate).not.toHaveBeenCalled();
+      expect(mockLogAction).not.toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
           content: "There was an error banning the member.",

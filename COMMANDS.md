@@ -671,7 +671,8 @@ DM'd.
 **Options:**
 
 - `user` (required) — the member to warn
-- `reason` (required) — why the member is being warned (up to 512 characters)
+- `reason` (required) — why the member is being warned (up to 512 characters) —
+  must contain more than whitespace
 
 ### `/timeout`
 
@@ -690,7 +691,8 @@ DM'd.
 
 - `user` (required) — the member to time out
 - `duration` (required) — how long, in minutes (1–40320, i.e. up to 28 days)
-- `reason` (required) — why the member is being timed out (up to 512 characters)
+- `reason` (required) — why the member is being timed out (up to 512 characters) —
+  must contain more than whitespace
 
 To lift a timeout early, clear it from Discord's member menu — the lift is
 mirrored into the log as a "timeout lifted" entry.
@@ -712,7 +714,8 @@ picking them by id — Discord accepts that, and so does this command.
 **Options:**
 
 - `user` (required) — the member to ban
-- `reason` (required) — why the member is being banned (up to 512 characters)
+- `reason` (required) — why the member is being banned (up to 512 characters) —
+  must contain more than whitespace
 - `delete_days` (optional) — days of the member's recent messages to delete
   (0–7; defaults to 0, i.e. keep them)
 

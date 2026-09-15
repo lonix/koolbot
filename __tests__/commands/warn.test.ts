@@ -36,6 +36,7 @@ function makeInteraction(
   overrides: {
     guildId?: string | null;
     target?: { id: string; tag: string; bot: boolean };
+    reason?: string;
   } = {},
 ): MockInteraction {
   const target = overrides.target ?? {
@@ -47,7 +48,7 @@ function makeInteraction(
     guildId: overrides.guildId === undefined ? "guild-1" : overrides.guildId,
     options: {
       getUser: () => target,
-      getString: () => "  spamming  ",
+      getString: () => overrides.reason ?? "  spamming  ",
     },
     user: { id: "mod-1" },
     client: {},
@@ -189,5 +190,22 @@ describe("Warn Command", () => {
         }),
       );
     });
+  });
+  // Discord's maxLength doesn't stop a whitespace-only reason; it trims to "",
+  // which records a warning with no reason and then fails to render the
+  // confirmation embed.
+  it("refuses a whitespace-only reason before recording anything", async () => {
+    jest.clearAllMocks();
+    const interaction = makeInteraction({ reason: "   " });
+
+    await execute(interaction);
+
+    expect(interaction.deferReply).not.toHaveBeenCalled();
+    expect(mockLogWarn).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Please give a reason for the warning.",
+      }),
+    );
   });
 });

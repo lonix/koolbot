@@ -1,4 +1,4 @@
-import type { Guild, GuildMember } from "discord.js";
+import { DiscordAPIError, type Guild, type GuildMember } from "discord.js";
 import { truncateText } from "./discord-limits.js";
 
 /**
@@ -51,6 +51,40 @@ export function formatAuditReason(
   reason: string,
 ): string {
   return truncateText(`${moderatorTag}: ${reason}`, MAX_REASON_LENGTH);
+}
+
+/**
+ * Discord codes that genuinely mean "this user is not a member of this guild":
+ * 10007 Unknown Member, 10013 Unknown User. Any other failure (a rate limit, a
+ * network blip, missing access) says nothing about membership.
+ */
+const ABSENT_MEMBER_ERROR_CODES = new Set<unknown>([10007, 10013]);
+
+/**
+ * Fetch a guild member, returning `null` only when Discord confirms they are
+ * not in the guild.
+ *
+ * A blanket `.catch(() => null)` would fold a transient lookup failure into
+ * "member absent", and a `null` target skips {@link checkHierarchy} entirely —
+ * so a rate limit at the wrong moment could let `/ban` reach a present member
+ * who outranks the caller. Rethrowing instead lands in the command's own catch,
+ * which refuses without acting.
+ */
+export async function fetchMemberOrNull(
+  guild: Guild,
+  userId: string,
+): Promise<GuildMember | null> {
+  try {
+    return await guild.members.fetch(userId);
+  } catch (error) {
+    if (
+      error instanceof DiscordAPIError &&
+      ABSENT_MEMBER_ERROR_CODES.has(error.code)
+    ) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 export interface HierarchyCheckInput {

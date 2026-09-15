@@ -1,9 +1,11 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
+import { DiscordAPIError } from "discord.js";
 import {
   MAX_MESSAGE_DELETE_DAYS,
   MAX_REASON_LENGTH,
   MAX_TIMEOUT_MINUTES,
   checkHierarchy,
+  fetchMemberOrNull,
   formatAuditReason,
 } from "../../src/utils/moderation-guards.js";
 
@@ -130,5 +132,71 @@ describe("checkHierarchy", () => {
         targetMember: member("target", 2, { moderatable: false }),
       }),
     ).toContain("I can't time out");
+  });
+});
+
+describe("fetchMemberOrNull", () => {
+  function guildFetching(result: () => Promise<unknown>): never {
+    return { members: { fetch: jest.fn(result) } } as never;
+  }
+
+  function apiError(code: number, status: number): DiscordAPIError {
+    return new DiscordAPIError(
+      { code, message: "x" },
+      code,
+      status,
+      "GET",
+      "",
+      {},
+    );
+  }
+
+  it("returns the member when the lookup succeeds", async () => {
+    const found = { id: "u1" };
+    await expect(
+      fetchMemberOrNull(
+        guildFetching(async () => found),
+        "u1",
+      ),
+    ).resolves.toBe(found);
+  });
+
+  it.each([
+    ["Unknown Member", 10007],
+    ["Unknown User", 10013],
+  ])("returns null when Discord reports %s", async (_label, code) => {
+    await expect(
+      fetchMemberOrNull(
+        guildFetching(async () => {
+          throw apiError(code, 404);
+        }),
+        "u1",
+      ),
+    ).resolves.toBeNull();
+  });
+
+  // Folding these into "absent" would skip the hierarchy check downstream.
+  it("rethrows any other Discord failure rather than reporting absence", async () => {
+    const rateLimited = apiError(0, 429);
+    await expect(
+      fetchMemberOrNull(
+        guildFetching(async () => {
+          throw rateLimited;
+        }),
+        "u1",
+      ),
+    ).rejects.toBe(rateLimited);
+  });
+
+  it("rethrows non-Discord errors", async () => {
+    const boom = new Error("socket hang up");
+    await expect(
+      fetchMemberOrNull(
+        guildFetching(async () => {
+          throw boom;
+        }),
+        "u1",
+      ),
+    ).rejects.toBe(boom);
   });
 });

@@ -12,6 +12,7 @@ import {
   MAX_REASON_LENGTH,
   MAX_TIMEOUT_MINUTES,
   checkHierarchy,
+  fetchMemberOrNull,
   formatAuditReason,
 } from "../utils/moderation-guards.js";
 import { getErrorMessage } from "../utils/error-guards.js";
@@ -88,6 +89,17 @@ export async function execute(
       return;
     }
 
+    // Discord's maxLength doesn't stop a whitespace-only reason, which trims to
+    // "" — an invalid embed field value. Refusing here, before the timeout,
+    // keeps the failure in front of the action rather than after it.
+    if (!reason) {
+      await interaction.reply({
+        content: "Please give a reason for the timeout.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
     // Acknowledge before any DB or REST work so the timeout + write + count
     // cannot miss Discord's 3-second ACK window (`10062 Unknown interaction`,
     // #842). Every response below is ephemeral, and visibility is fixed here.
@@ -115,10 +127,10 @@ export async function execute(
     }
 
     const invoker = await guild.members.fetch(interaction.user.id);
-    // Unlike a ban, a timeout only exists on a present member.
-    const targetMember = await guild.members
-      .fetch(targetUser.id)
-      .catch(() => null);
+    // Unlike a ban, a timeout only exists on a present member. A lookup failure
+    // that isn't Discord confirming absence is rethrown, so "they aren't a
+    // member" is never shown for what was really a transient error.
+    const targetMember = await fetchMemberOrNull(guild, targetUser.id);
     if (!targetMember) {
       await interaction.editReply({
         content: `**${targetUser.tag}** isn't a member of this server.`,
