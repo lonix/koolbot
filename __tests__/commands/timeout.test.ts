@@ -37,6 +37,9 @@ type MockInteraction = ChatInputCommandInteraction & {
   applyTimeout: jest.Mock;
 };
 
+/** Fixed expiry Discord reports back, in ms. */
+const TIMEOUT_EXPIRY = 1_800_000_000_000;
+
 function makeMember(
   id: string,
   position: number,
@@ -49,7 +52,11 @@ function makeMember(
     moderatable: options.moderatable ?? true,
     timeout:
       options.timeout ??
-      jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+      jest
+        .fn<() => Promise<unknown>>()
+        .mockResolvedValue({
+          communicationDisabledUntilTimestamp: TIMEOUT_EXPIRY,
+        }),
   };
 }
 
@@ -68,9 +75,11 @@ function makeInteraction(
     tag: "bob#0001",
     bot: false,
   };
+  // discord.js resolves `member.timeout()` with the updated member, whose
+  // `communicationDisabledUntil` is the authoritative expiry the embed renders.
   const applyTimeout = jest
-    .fn<() => Promise<void>>()
-    .mockResolvedValue(undefined);
+    .fn<() => Promise<unknown>>()
+    .mockResolvedValue({ communicationDisabledUntilTimestamp: TIMEOUT_EXPIRY });
   const targetMember =
     overrides.targetMember === undefined
       ? makeMember(target.id, 2, { timeout: applyTimeout })
@@ -165,6 +174,7 @@ describe("Timeout Command", () => {
       });
       interaction.applyTimeout.mockImplementation(async () => {
         order.push("timeout");
+        return { communicationDisabledUntilTimestamp: TIMEOUT_EXPIRY };
       });
       mockLogAction.mockImplementation(async () => {
         order.push("logAction");
@@ -281,7 +291,29 @@ describe("Timeout Command", () => {
       );
     });
 
+    // A failure *before* Discord is asked to act: the member was not timed out,
+    // so the plain refusal is the honest message.
     it("delivers the error message via editReply once deferred", async () => {
+      mockIsEnabled.mockRejectedValue(new Error("boom"));
+      const interaction = makeInteraction();
+      interaction.deferReply.mockImplementation(async () => {
+        (interaction as { deferred: boolean }).deferred = true;
+      });
+
+      await execute(interaction);
+
+      expect(interaction.applyTimeout).not.toHaveBeenCalled();
+      expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "There was an error timing the member out.",
+        }),
+      );
+    });
+
+    // ...but once Discord has applied the timeout, saying it failed would send
+    // the moderator back to re-run an action that already landed.
+    it("says the timeout landed when only the recording failed", async () => {
       mockLogAction.mockRejectedValue(new Error("boom"));
       const interaction = makeInteraction();
       interaction.deferReply.mockImplementation(async () => {
@@ -290,11 +322,27 @@ describe("Timeout Command", () => {
 
       await execute(interaction);
 
-      expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.applyTimeout).toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: "There was an error timing the member out.",
+          content:
+            "The member was timed out, but I couldn't record it or show the confirmation. Don't run this again — check /modlog.",
         }),
+      );
+    });
+
+    // Discord starts the timeout before the log write and history query, so the
+    // expiry must come from Discord, not from the clock after those awaits.
+    it("renders Discord's own expiry, not one computed after the DB work", async () => {
+      const interaction = makeInteraction();
+
+      await execute(interaction);
+
+      const payload = interaction.editReply.mock.calls[0][0] as {
+        embeds: Array<{ data: { description: string } }>;
+      };
+      expect(payload.embeds[0].data.description).toContain(
+        `<t:${Math.floor(TIMEOUT_EXPIRY / 1000)}:R>`,
       );
     });
   });

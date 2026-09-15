@@ -60,6 +60,12 @@ export const data = new SlashCommandBuilder()
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  // Set once Discord has accepted the timeout, so the catch below can tell a
+  // failed timeout apart from a timeout that landed but whose recording or
+  // confirmation failed. Telling a moderator the action failed when it didn't
+  // invites them to run it again.
+  let timedOut = false;
+
   try {
     if (!interaction.guildId) {
       await interaction.reply({
@@ -156,10 +162,14 @@ export async function execute(
       durationMs,
       formatAuditReason(interaction.user.tag, reason),
     );
-    if (applied !== true) {
+    if (typeof applied === "string") {
       await interaction.editReply({ content: applied });
       return;
     }
+
+    // Everything past this point runs after Discord has already timed the
+    // member out, so a failure here must not read as "the timeout failed".
+    timedOut = true;
 
     await moderationService.logAction({
       guildId: interaction.guildId,
@@ -175,8 +185,15 @@ export async function execute(
     );
 
     // A relative Discord timestamp so every viewer reads the expiry in their
-    // own locale without the bot doing any date maths.
-    const expiresAt = Math.floor((Date.now() + durationMs) / 1000);
+    // own locale without the bot doing any date maths. Taken from Discord's
+    // own `communicationDisabledUntil` rather than computed from `Date.now()`
+    // here — the timeout started before the log write and history query above,
+    // so a slow database would otherwise push the displayed expiry past the
+    // real one.
+    const expiresAt = Math.floor(
+      (applied.communicationDisabledUntilTimestamp ?? Date.now() + durationMs) /
+        1000,
+    );
 
     const embed = new EmbedBuilder()
       .setColor(actionColor("timeout"))
@@ -199,27 +216,29 @@ export async function execute(
   } catch (error) {
     logger.error("Error in timeout command:", error);
     await safeReply(interaction, {
-      content: "There was an error timing the member out.",
+      content: timedOut
+        ? "The member was timed out, but I couldn't record it or show the confirmation. Don't run this again — check /modlog."
+        : "There was an error timing the member out.",
       flags: MessageFlags.Ephemeral,
     });
   }
 }
 
 /**
- * Apply the timeout, returning `true` on success or the message to show the
- * moderator when Discord rejected it. Kept separate so a REST refusal reads as
- * a clear refusal rather than falling into the command's generic error path —
- * nothing has been logged at this point, so the moderator needs to know the
- * timeout did not happen.
+ * Apply the timeout, returning the updated member on success or the message to
+ * show the moderator when Discord rejected it. Kept separate so a REST refusal
+ * reads as a clear refusal rather than falling into the command's generic error
+ * path — nothing has been logged at this point, so the moderator needs to know
+ * the timeout did not happen. The returned member carries Discord's own
+ * `communicationDisabledUntil`, which is the authoritative expiry.
  */
 async function applyTimeout(
   member: GuildMember,
   durationMs: number,
   auditReason: string,
-): Promise<true | string> {
+): Promise<GuildMember | string> {
   try {
-    await member.timeout(durationMs, auditReason);
-    return true;
+    return await member.timeout(durationMs, auditReason);
   } catch (error) {
     logger.error("Timeout command: Discord rejected the timeout:", error);
     return `Discord rejected the timeout (${getErrorMessage(

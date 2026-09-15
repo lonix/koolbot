@@ -56,6 +56,12 @@ export const data = new SlashCommandBuilder()
 export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
+  // Set once Discord has accepted the ban, so the catch below can tell a failed
+  // ban apart from a ban that landed but whose recording or confirmation
+  // failed. Telling a moderator the action failed when it didn't invites them
+  // to run it again.
+  let banned = false;
+
   try {
     if (!interaction.guildId) {
       await interaction.reply({
@@ -141,14 +147,18 @@ export async function execute(
       return;
     }
 
-    const banned = await banMember(guild, targetUser.id, {
+    const applied = await banMember(guild, targetUser.id, {
       auditReason: formatAuditReason(interaction.user.tag, reason),
       deleteDays,
     });
-    if (banned !== true) {
-      await interaction.editReply({ content: banned });
+    if (applied !== true) {
+      await interaction.editReply({ content: applied });
       return;
     }
+
+    // Everything past this point runs after Discord has already banned the
+    // member, so a failure here must not read as "the ban failed".
+    banned = true;
 
     await moderationService.logAction({
       guildId: interaction.guildId,
@@ -189,7 +199,9 @@ export async function execute(
   } catch (error) {
     logger.error("Error in ban command:", error);
     await safeReply(interaction, {
-      content: "There was an error banning the member.",
+      content: banned
+        ? "The member was banned, but I couldn't record it or show the confirmation. Don't run this again — check /modlog."
+        : "There was an error banning the member.",
       flags: MessageFlags.Ephemeral,
     });
   }

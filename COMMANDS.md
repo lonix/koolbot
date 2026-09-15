@@ -635,10 +635,13 @@ scrolling Discord's native audit log (which only retains ~45 days and has no
 per-user warn concept).
 
 Gated by the `moderation.enabled` feature flag. `/warn`, `/timeout` and
-`/modlog` default to members with the **Moderate Members** permission and
-`/ban` to **Ban Members** (administrators always have both); additional roles
-can be granted from the Web UI's **Permissions** page. Server-wide history is
-also viewable on the `/admin/moderation` page.
+`/modlog` are shown to members with the **Moderate Members** permission and
+`/ban` to **Ban Members** (administrators always have both). That visibility is
+Discord's to decide: to reach a role without those permissions, an
+administrator has to override the command in the server's **Integrations**
+settings — the Web UI's **Permissions** page narrows who may run a command the
+bot already received, it cannot widen Discord's own gate. Server-wide history
+is also viewable on the `/admin/moderation` page.
 
 `/timeout` and `/ban` act through the bot, so two things follow. The bot's own
 role must sit **above** the target's and hold the matching permission — if it
@@ -1019,13 +1022,15 @@ surfaces share the same validation.
 | `/ban`                         | Ban Members      | Moderation log enabled        |
 | `/modlog`                      | Moderate Members | Moderation log enabled        |
 
-\* Per-command role gating can be added in the Web UI's **Permissions** page.
-`/warn`, `/timeout` and `/modlog` default to members with the **Moderate
-Members** permission and `/ban` to **Ban Members** (administrators have both);
-grant additional roles from the same page. `/timeout` and `/ban` additionally
-re-check that your own highest role sits above the target's, which is the rule
-Discord applies in its native menu but cannot apply to an action the bot
-executes on your behalf.
+\* `/warn`, `/timeout` and `/modlog` are shown to members with the **Moderate
+Members** permission and `/ban` to **Ban Members** (administrators have both).
+The Web UI's **Permissions** page restricts which roles may run a command once
+Discord has delivered it; it does not change Discord's own visibility gate, so
+reaching a role without those permissions needs a command override in the
+server's **Integrations** settings. `/timeout` and `/ban` additionally re-check
+that your own highest role sits above the target's, which is the rule Discord
+applies in its native menu but cannot apply to an action the bot executes on
+your behalf.
 
 ### Web UI launcher permissions
 

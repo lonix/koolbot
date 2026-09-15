@@ -804,9 +804,11 @@ has no per-user warn concept).
 
 Query per-member history in Discord with **`/modlog`**, or browse
 server-wide history on the **`/admin/moderation`** page. `/warn`, `/timeout`
-and `/modlog` default to members with the **Moderate Members** permission and
-`/ban` to **Ban Members** (administrators have both); grant additional roles
-from the **Permissions** page. See
+and `/modlog` are shown to members with the **Moderate Members** permission and
+`/ban` to **Ban Members** (administrators have both). As with `/config`, the
+Web UI's **Permissions** page only narrows who may run these once Discord has
+admitted the interaction — reaching a role without those permissions needs a
+command override in **Server Settings → Integrations → KoolBot**. See
 [COMMANDS.md](COMMANDS.md#-moderation-commands).
 
 | Setting | Default | Description |

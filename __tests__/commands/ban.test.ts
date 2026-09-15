@@ -297,7 +297,29 @@ describe("Ban Command", () => {
       );
     });
 
+    // A failure *before* Discord is asked to act: nobody was banned, so the
+    // plain refusal is the honest message.
     it("delivers the error message via editReply once deferred", async () => {
+      mockIsEnabled.mockRejectedValue(new Error("boom"));
+      const interaction = makeInteraction();
+      interaction.deferReply.mockImplementation(async () => {
+        (interaction as { deferred: boolean }).deferred = true;
+      });
+
+      await execute(interaction);
+
+      expect(interaction.banCreate).not.toHaveBeenCalled();
+      expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "There was an error banning the member.",
+        }),
+      );
+    });
+
+    // ...but once Discord has banned the member, saying it failed would send
+    // the moderator back to re-run an action that already landed.
+    it("says the ban landed when only the recording failed", async () => {
       mockLogAction.mockRejectedValue(new Error("boom"));
       const interaction = makeInteraction();
       interaction.deferReply.mockImplementation(async () => {
@@ -306,10 +328,11 @@ describe("Ban Command", () => {
 
       await execute(interaction);
 
-      expect(interaction.reply).not.toHaveBeenCalled();
+      expect(interaction.banCreate).toHaveBeenCalled();
       expect(interaction.editReply).toHaveBeenCalledWith(
         expect.objectContaining({
-          content: "There was an error banning the member.",
+          content:
+            "The member was banned, but I couldn't record it or show the confirmation. Don't run this again — check /modlog.",
         }),
       );
     });
