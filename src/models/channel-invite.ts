@@ -14,6 +14,10 @@ const ChannelInviteSchema = new Schema(
   {
     channelId: { type: String, required: true, index: true },
     userId: { type: String, required: true, index: true },
+    // User who sent the invite. `required: true`, so a per-user purge writes
+    // the `ANONYMISED_USER_ID` sentinel ("0", see
+    // `services/user-data-registry.ts`) rather than nulling the field — the
+    // recipient's access has to survive the sender's reset (#914).
     invitedBy: { type: String, required: true },
     status: {
       type: String,

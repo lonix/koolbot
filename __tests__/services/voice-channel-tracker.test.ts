@@ -217,6 +217,151 @@ describe("VoiceChannelTracker", () => {
     });
   });
 
+  // #914: a member sitting in a voice channel when their data is purged
+  // must not have the row resurrected by `endTracking`'s `upsert: true` —
+  // which would carry back `totalTime` for the hours before the purge and
+  // feed it to the accolade check.
+  describe("forgetActiveSession (#914)", () => {
+    function memberIn(id: string): GuildMember {
+      return {
+        id,
+        displayName: id,
+        guild: {
+          channels: { cache: { get: jest.fn().mockReturnValue(null) } },
+        },
+      } as unknown as GuildMember;
+    }
+
+    async function joinChannel(
+      tracker: VoiceChannelTracker,
+      member: GuildMember,
+      channel: VoiceChannel,
+    ): Promise<void> {
+      await tracker.handleVoiceStateUpdate(
+        { member, channel: null } as unknown as VoiceState,
+        { member, channel } as unknown as VoiceState,
+      );
+    }
+
+    async function leaveChannel(
+      tracker: VoiceChannelTracker,
+      member: GuildMember,
+      channel: VoiceChannel,
+    ): Promise<void> {
+      await tracker.handleVoiceStateUpdate(
+        { member, channel } as unknown as VoiceState,
+        { member, channel: null } as unknown as VoiceState,
+      );
+    }
+
+    it("stops the disconnect handler from writing a row for an in-flight session", async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+
+      await joinChannel(tracker, member, channel);
+      expect(tracker.getActiveSession("user123")).not.toBeNull();
+
+      tracker.forgetActiveSession("user123");
+      expect(tracker.getActiveSession("user123")).toBeNull();
+
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      await leaveChannel(tracker, member, channel);
+
+      // No session left to close, so nothing is persisted — and in
+      // particular no `upsert` recreates the purged document.
+      expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("is a no-op for a member with no active session", () => {
+      const { tracker } = createTracker(mockClient);
+      expect(() => tracker.forgetActiveSession("nobody")).not.toThrow();
+      expect(tracker.getActiveSession("nobody")).toBeNull();
+    });
+
+    it("leaves other members' in-flight sessions alone", async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+      await joinChannel(tracker, memberIn("user123"), channel);
+      await joinChannel(tracker, memberIn("user456"), channel);
+
+      tracker.forgetActiveSession("user123");
+
+      expect(tracker.getActiveSession("user123")).toBeNull();
+      expect(tracker.getActiveSession("user456")?.channelName).toBe(
+        "TestChannel",
+      );
+    });
+
+    it("drops the companion state so a later session starts clean", async () => {
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      // Companions on, so `endTracking` reads the companion maps.
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const members = new Map([["user456", { id: "user456" }]]);
+      const populated = {
+        id: "channel123",
+        name: "TestChannel",
+        members,
+      } as unknown as VoiceChannel;
+      const member = {
+        id: "user123",
+        displayName: "user123",
+        guild: {
+          channels: { cache: { get: jest.fn().mockReturnValue(populated) } },
+        },
+      } as unknown as GuildMember;
+
+      await joinChannel(tracker, member, populated);
+      tracker.forgetActiveSession("user123");
+
+      // Re-join and disconnect properly: the persisted session must carry
+      // only the new session's companions, never the forgotten one's.
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      const empty = {
+        id: "channel789",
+        name: "OtherChannel",
+        members: new Map(),
+      } as unknown as VoiceChannel;
+      const soloMember = {
+        id: "user123",
+        displayName: "user123",
+        guild: {
+          channels: { cache: { get: jest.fn().mockReturnValue(empty) } },
+        },
+      } as unknown as GuildMember;
+
+      await joinChannel(tracker, soloMember, empty);
+      await leaveChannel(tracker, soloMember, empty);
+
+      expect(VoiceChannelTracking.findOneAndUpdate).toHaveBeenCalledTimes(1);
+      const [, update] = (VoiceChannelTracking.findOneAndUpdate as jest.Mock)
+        .mock.calls[0] as [unknown, { $push: { sessions: any } }];
+      expect(update.$push.sessions.otherUsers).toEqual([]);
+      expect(update.$push.sessions.companions).toEqual([]);
+      expect(update.$push.sessions.wasFirst).toBe(true);
+    });
+  });
+
   describe("companion overlap & voice firsts (#570)", () => {
     // Builds a member whose guild channel cache returns a channel populated
     // with `presentIds` so startTracking can snapshot co-present users.

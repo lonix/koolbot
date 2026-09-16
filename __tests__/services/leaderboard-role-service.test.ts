@@ -20,6 +20,8 @@ const mockClientGuildsFetch = jest.fn();
 
 const mockAssignmentFindOne = jest.fn();
 const mockAssignmentFindOneAndUpdate = jest.fn();
+const mockAssignmentFind = jest.fn();
+const mockAssignmentUpdateOne = jest.fn();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -43,6 +45,8 @@ jest.unstable_mockModule(
     LeaderboardRoleAssignment: {
       findOne: mockAssignmentFindOne,
       findOneAndUpdate: mockAssignmentFindOneAndUpdate,
+      find: mockAssignmentFind,
+      updateOne: mockAssignmentUpdateOne,
     },
   }),
 );
@@ -136,6 +140,8 @@ describe("LeaderboardRoleService", () => {
     });
     mockAssignmentFindOne.mockResolvedValue(null);
     mockAssignmentFindOneAndUpdate.mockResolvedValue({});
+    mockAssignmentFind.mockResolvedValue([]);
+    mockAssignmentUpdateOne.mockResolvedValue({ modifiedCount: 1 });
   });
 
   describe("singleton", () => {
@@ -464,6 +470,147 @@ describe("LeaderboardRoleService", () => {
       expect(result!.tiers[0].skippedReason).toBe("role-not-found");
       expect(mockRolesAdd).not.toHaveBeenCalled();
       expect(mockAssignmentFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  // #914. `reconcileTier` only ever walks the persisted `userIds[]` when
+  // deciding what to revoke (the bot has no GuildMembers intent), so pulling
+  // an id before the Discord role is actually gone strands the role on the
+  // member forever. These tests pin the ordering.
+  describe("revokeForUser", () => {
+    beforeEach(() => {
+      // `jest.clearAllMocks()` clears calls but keeps implementations, so a
+      // rejection set by the revoke-failure test would leak into the next.
+      mockRolesRemove.mockResolvedValue(undefined);
+    });
+
+    function rosterRows(...roleIds: string[]): void {
+      mockAssignmentFind.mockResolvedValue(
+        roleIds.map((roleId) => ({
+          guildId: "guild-1",
+          roleId,
+          topN: 1,
+          userIds: ["u1"],
+        })),
+      );
+    }
+
+    it("revokes on Discord first, then pulls the id server-side", async () => {
+      rosterRows("99999001");
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result).toEqual({ revoked: ["99999001"], retained: [] });
+      expect(mockRolesRemove).toHaveBeenCalledTimes(1);
+      // `$pull`, not a read-modify-write: a concurrent reconcile writes the
+      // whole `userIds` array, and would clobber a rewritten one.
+      expect(mockAssignmentUpdateOne).toHaveBeenCalledWith(
+        { guildId: "guild-1", roleId: "99999001" },
+        { $pull: { userIds: "u1" } },
+      );
+      // Ordering: the role removal has to have landed before the pull.
+      expect(mockRolesRemove.mock.invocationCallOrder[0]).toBeLessThan(
+        mockAssignmentUpdateOne.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("leaves the id in userIds[] when the Discord revoke fails", async () => {
+      rosterRows("99999001");
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+      mockRolesRemove.mockRejectedValue(new Error("Missing Permissions"));
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result).toEqual({ revoked: [], retained: ["99999001"] });
+      // The id stays on the roster so the next reconcile retries the revoke
+      // instead of the member keeping the reward role permanently.
+      expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
+      expect(mockLoggerWarn).toHaveBeenCalled();
+    });
+
+    it("pulls the id when the member has left the guild", async () => {
+      rosterRows("99999001");
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+      mockGuildMembersFetch.mockRejectedValue(new Error("Unknown member"));
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      // The role went with them, so there is nothing for a retry to fix.
+      expect(result.revoked).toEqual(["99999001"]);
+      expect(mockRolesRemove).not.toHaveBeenCalled();
+      expect(mockAssignmentUpdateOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("pulls the id when the role itself no longer exists", async () => {
+      rosterRows("99999001");
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockResolvedValue(null) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result.revoked).toEqual(["99999001"]);
+      expect(mockAssignmentUpdateOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("retains every row when the guild is unreachable", async () => {
+      rosterRows("99999001", "99999002");
+      mockClientGuildsFetch.mockRejectedValue(new Error("Unknown guild"));
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result).toEqual({
+        revoked: [],
+        retained: ["99999001", "99999002"],
+      });
+      expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
+    });
+
+    it("handles every tier the member holds", async () => {
+      rosterRows("99999001", "99999002");
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result.revoked).toEqual(["99999001", "99999002"]);
+      expect(mockRolesRemove).toHaveBeenCalledTimes(2);
+      expect(mockAssignmentUpdateOne).toHaveBeenCalledTimes(2);
+    });
+
+    it("does nothing and touches no Discord API when the member holds no roles", async () => {
+      mockAssignmentFind.mockResolvedValue([]);
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result).toEqual({ revoked: [], retained: [] });
+      expect(mockClientGuildsFetch).not.toHaveBeenCalled();
+      expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
     });
   });
 });

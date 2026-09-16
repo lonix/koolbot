@@ -33,6 +33,20 @@ export interface LeaderboardRoleRunSummary {
   }>;
 }
 
+/**
+ * Outcome of a per-member revocation (#914). Reported per assignment row
+ * because a member can hold several tiers' roles at once.
+ */
+export interface LeaderboardRoleRevokeResult {
+  /** Role ids the member was revoked from and pulled off the roster for. */
+  revoked: string[];
+  /**
+   * Role ids the member is still listed against because the Discord revoke
+   * failed. Deliberately left on the roster so the next reconcile retries.
+   */
+  retained: string[];
+}
+
 export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunSummary | null> {
   private static instance: LeaderboardRoleService;
 
@@ -316,6 +330,111 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       added,
       removed,
     };
+  }
+
+  /**
+   * Revoke every leaderboard reward role a member currently holds and take
+   * them off the persisted rosters (#914).
+   *
+   * **The ordering here is load-bearing, not stylistic.** `reconcileTier`
+   * uses the persisted `userIds[]` as its *only* source of truth for who
+   * already holds a role, because the bot does not request the privileged
+   * `GuildMembers` intent and so cannot read `role.members`. Its revoke loop
+   * walks nothing but that array. So a bare `$pull` would remove the member
+   * from `previousHolders`, the next run would find they no longer qualify
+   * either (their voice data having been purged too), and the revoke loop
+   * would never look at them again: **the member keeps the reward role
+   * permanently and nothing will ever take it back.**
+   *
+   * Hence: revoke on Discord first, and only pull the id once that
+   * succeeded. On failure the id stays put and the next reconcile retries —
+   * the same recovery `reconcileTier` already applies to its own failures
+   * (`finalHolders.add(userId)` in its catch).
+   *
+   * The pull runs server-side as a `$pull` rather than a read-modify-write:
+   * `reconcileTier` writes the whole `userIds` array in one
+   * `findOneAndUpdate`, so a reconcile landing between our read and our write
+   * would be clobbered by a read-modify-write purge.
+   */
+  public async revokeForUser(
+    guildId: string,
+    userId: string,
+  ): Promise<LeaderboardRoleRevokeResult> {
+    const result: LeaderboardRoleRevokeResult = { revoked: [], retained: [] };
+
+    const rows = await LeaderboardRoleAssignment.find({
+      guildId,
+      userIds: userId,
+    });
+    if (rows.length === 0) return result;
+
+    const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) {
+      // No guild, no way to revoke. Leaving every id in place is the safe
+      // failure: a later run can still take the roles back.
+      logger.warn(
+        `Leaderboard role revoke for ${userId}: guild ${guildId} unreachable; left ${rows.length} roster row(s) intact for retry`,
+      );
+      result.retained.push(...rows.map((row) => row.roleId));
+      return result;
+    }
+
+    for (const row of rows) {
+      if (await this.revokeOneRole(guild, row.roleId, userId)) {
+        await LeaderboardRoleAssignment.updateOne(
+          { guildId, roleId: row.roleId },
+          { $pull: { userIds: userId } },
+        );
+        result.revoked.push(row.roleId);
+      } else {
+        result.retained.push(row.roleId);
+      }
+    }
+
+    logger.info(
+      `Leaderboard role revoke for ${userId}: removed ${result.revoked.length} role(s), ${result.retained.length} left for retry`,
+    );
+    return result;
+  }
+
+  /**
+   * Take one reward role off a member. Returns true when it is safe to drop
+   * their id from the roster — either the role is gone, or the member is, or
+   * the removal landed. Returns false only when the member is reachable and
+   * still holds the role, which is the case that must be retried.
+   */
+  private async revokeOneRole(
+    guild: Guild,
+    roleId: string,
+    userId: string,
+  ): Promise<boolean> {
+    const role = await guild.roles.fetch(roleId).catch(() => null);
+    if (!role) {
+      // The role itself no longer exists, so there is no grant left to take
+      // back and nothing for a retry to fix.
+      logger.warn(
+        `Leaderboard role revoke for ${userId}: role ${roleId} not found in guild; dropping the roster entry`,
+      );
+      return true;
+    }
+
+    const member = await this.safeFetchMember(guild, userId);
+    if (!member) {
+      // Left the guild: the role went with them. Same call `reconcileTier`
+      // makes when a previous holder is unreachable.
+      return true;
+    }
+
+    try {
+      await member.roles.remove(role, "Per-user data reset (leaderboard role)");
+      return true;
+    } catch (error) {
+      logger.warn(
+        `Failed to revoke leaderboard role ${role.name} from ${member.user.tag} (${userId}); keeping the roster entry so the next reconcile retries:`,
+        error,
+      );
+      return false;
+    }
   }
 
   private async safeFetchMember(

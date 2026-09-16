@@ -8,6 +8,7 @@ function isValidObjectId(id: string): boolean {
 }
 import { quoteSchema } from "../database/schema.js";
 import { ConfigService } from "./config-service.js";
+import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { CooldownManager } from "./cooldown-manager.js";
 
 const configService = ConfigService.getInstance();
@@ -34,6 +35,27 @@ function normalizeUserId(input: string): string {
 
   // Return original if we can't parse it (might be a username)
   return input;
+}
+
+/**
+ * Every stored form a user id may appear in, for matching against
+ * `authorId` / `addedById`.
+ *
+ * Quotes imported before ids were normalised carry `<@123>`, `<@!123>` or
+ * `@123` rather than a bare snowflake, so a query that matches only the
+ * clean id silently misses them. Shared by the achievement counters, the
+ * "most liked" lookups and the purge — the purge in particular must match
+ * exactly what the readers do, or a reset would leave rows the member can
+ * still see counted against them.
+ */
+function userIdMatchForms(userId: string): string[] {
+  const normalizedId = normalizeUserId(userId);
+  return [
+    normalizedId,
+    `<@${normalizedId}>`,
+    `<@!${normalizedId}>`,
+    `@${normalizedId}`,
+  ];
 }
 
 /** One timestamped change to a quote's 👍 tally (#817). */
@@ -143,6 +165,27 @@ export interface QuoteImportResult {
   imported: number;
   skipped: number;
   errors: string[];
+}
+
+/**
+ * The one thing the purge needs from `QuoteChannelManager`, injected rather
+ * than imported: `quote-channel-manager.ts` already imports this module's
+ * singleton, so a static import back would be a cycle. It is a required
+ * argument, not an optional one, because skipping it is precisely the bug
+ * described below — a deleted row whose Discord post lives on forever.
+ */
+export interface QuoteMessageDeleter {
+  deleteQuoteMessage(messageId: string): Promise<void>;
+}
+
+/** What a per-user quote purge did (#914). */
+export interface QuotePurgeResult {
+  /** Quotes attributed to the member, deleted outright. */
+  deleted: number;
+  /** Quote-channel posts deleted alongside those rows. */
+  messagesDeleted: number;
+  /** Quotes the member saved for someone else, attribution cleared. */
+  anonymised: number;
 }
 
 export class QuoteService {
@@ -589,21 +632,86 @@ export class QuoteService {
   }
 
   /**
+   * Erase a member from the quote collection (#914).
+   *
+   * The two user fields on a quote row are two different people, so they get
+   * two different treatments — which is why this is one method rather than a
+   * `deleteMany`:
+   *
+   * - `authorId === userId` — the quote is a record of what *they* said, so
+   *   the row goes, **and so does the bot's post in the quote channel.**
+   *   Deleting only the row would leave the member's words visible in Discord
+   *   forever: `quote-channel-manager.cleanupUnauthorizedMessages()` sweeps
+   *   only messages whose author is *not* the bot, so a bot-posted quote
+   *   orphaned by a database delete is never collected by anything.
+   * - `addedById === userId` — the quote belongs to whoever said it, so the
+   *   row stays and only the saver's attribution is cleared, to the
+   *   `ANONYMISED_USER_ID` sentinel (the field is `required: true` and cannot
+   *   be nulled).
+   *
+   * Authored rows are removed first so a quote the member both said *and*
+   * saved is deleted rather than anonymised.
+   *
+   * This deliberately does not route through `deleteQuote`, which enforces
+   * `quotes.delete_roles`: a member erasing their own data is not a
+   * moderator deleting someone else's quote, and the call site must not be
+   * the place that decides to skip a permission check.
+   */
+  async purgeForUser(
+    userId: string,
+    messages: QuoteMessageDeleter,
+  ): Promise<QuotePurgeResult> {
+    const idForms = userIdMatchForms(userId);
+
+    const authored = await this.model.find({ authorId: { $in: idForms } });
+
+    let messagesDeleted = 0;
+    for (const quote of authored) {
+      if (!quote.messageId) continue;
+      // `messageId` is overloaded: it starts life as the *original* Discord
+      // message id and is overwritten by `updateQuoteMessageId` with the
+      // quote-channel post id. So it may well point at a message that is not
+      // in the quote channel, or is long gone — a miss is expected, and must
+      // not stop the row from being deleted.
+      try {
+        await messages.deleteQuoteMessage(quote.messageId);
+        messagesDeleted++;
+      } catch (error) {
+        logger.warn(
+          `Could not delete quote message ${quote.messageId} while purging user ${userId}; deleting the row anyway:`,
+          error,
+        );
+      }
+    }
+
+    const removal = await this.model.deleteMany({
+      authorId: { $in: idForms },
+    });
+
+    const anonymisation = await this.model.updateMany(
+      { addedById: { $in: idForms } },
+      { $set: { addedById: ANONYMISED_USER_ID } },
+    );
+
+    const result: QuotePurgeResult = {
+      deleted: removal?.deletedCount ?? 0,
+      messagesDeleted,
+      anonymised: anonymisation?.modifiedCount ?? 0,
+    };
+
+    logger.info(
+      `Purged quotes for user ${userId}: deleted ${result.deleted} row(s) and ${result.messagesDeleted} channel post(s), anonymised ${result.anonymised} row(s)`,
+    );
+    return result;
+  }
+
+  /**
    * Get the count of quotes added by a specific user
    * Handles legacy quote data with various ID formats (<@123>, <@!123>, @123, 123)
    */
   async getQuotesAddedByUser(userId: string): Promise<number> {
-    const normalizedId = normalizeUserId(userId);
-    // Query for both normalized ID and common legacy formats
     return this.model.countDocuments({
-      addedById: {
-        $in: [
-          normalizedId,
-          `<@${normalizedId}>`,
-          `<@!${normalizedId}>`,
-          `@${normalizedId}`,
-        ],
-      },
+      addedById: { $in: userIdMatchForms(userId) },
     });
   }
 
@@ -612,17 +720,8 @@ export class QuoteService {
    * Handles legacy quote data with various ID formats (<@123>, <@!123>, @123, 123)
    */
   async getQuotesAuthoredByUser(userId: string): Promise<number> {
-    const normalizedId = normalizeUserId(userId);
-    // Query for both normalized ID and common legacy formats
     return this.model.countDocuments({
-      authorId: {
-        $in: [
-          normalizedId,
-          `<@${normalizedId}>`,
-          `<@!${normalizedId}>`,
-          `@${normalizedId}`,
-        ],
-      },
+      authorId: { $in: userIdMatchForms(userId) },
     });
   }
 
@@ -631,18 +730,8 @@ export class QuoteService {
    * Handles legacy quote data with various ID formats
    */
   async getMostLikedQuoteByAuthor(authorId: string): Promise<IQuote | null> {
-    const normalizedId = normalizeUserId(authorId);
     return this.model
-      .findOne({
-        authorId: {
-          $in: [
-            normalizedId,
-            `<@${normalizedId}>`,
-            `<@!${normalizedId}>`,
-            `@${normalizedId}`,
-          ],
-        },
-      })
+      .findOne({ authorId: { $in: userIdMatchForms(authorId) } })
       .sort({ likes: -1 });
   }
 
@@ -654,16 +743,8 @@ export class QuoteService {
     authorId: string,
     minLikes: number,
   ): Promise<boolean> {
-    const normalizedId = normalizeUserId(authorId);
     const count = await this.model.countDocuments({
-      authorId: {
-        $in: [
-          normalizedId,
-          `<@${normalizedId}>`,
-          `<@!${normalizedId}>`,
-          `@${normalizedId}`,
-        ],
-      },
+      authorId: { $in: userIdMatchForms(authorId) },
       likes: { $gte: minLikes },
     });
     return count > 0;

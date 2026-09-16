@@ -102,4 +102,9 @@ const EventSchema = new Schema<IEvent>(
   },
 );
 
+// The per-user export and purge both look up events by nested RSVP
+// (`{ guildId, "rsvps.userId": userId }`), which was otherwise a collection
+// scan (#914).
+EventSchema.index({ "rsvps.userId": 1 });
+
 export const Event = mongoose.model<IEvent>("Event", EventSchema);
