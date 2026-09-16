@@ -79,7 +79,7 @@ const { ModerationService, mapAuditLogEntry } =
 // leaking a stale client across the suite.
 function freshService(): InstanceType<typeof ModerationService> {
   ModerationService.reset();
-  const client = { tag: "fake-client" } as never;
+  const client = { tag: "fake-client", user: { id: "bot-self" } } as never;
   return ModerationService.getInstance(client);
 }
 
@@ -188,6 +188,46 @@ describe("ModerationService.logWarn", () => {
   });
 });
 
+describe("ModerationService.logAction (#857)", () => {
+  it("writes the requested action with source=command", async () => {
+    createMock.mockResolvedValue({ _id: "row-9" });
+    const service = freshService();
+
+    await service.logAction({
+      guildId: "g1",
+      userId: "u1",
+      moderatorId: "m1",
+      action: "ban",
+      reason: "raiding",
+    });
+
+    expect(createMock).toHaveBeenCalledWith({
+      guildId: "g1",
+      userId: "u1",
+      moderatorId: "m1",
+      action: "ban",
+      reason: "raiding",
+      source: "command",
+    });
+  });
+
+  it("logWarn stays a thin wrapper over it", async () => {
+    createMock.mockResolvedValue({ _id: "row-10" });
+    const service = freshService();
+
+    await service.logWarn({
+      guildId: "g1",
+      userId: "u1",
+      moderatorId: "m1",
+      reason: "spam",
+    });
+
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "warn", source: "command" }),
+    );
+  });
+});
+
 describe("ModerationService.handleAuditLogEntry", () => {
   const guild = { id: "g1" } as never;
 
@@ -232,6 +272,47 @@ describe("ModerationService.handleAuditLogEntry", () => {
       reason: "raiding",
       source: "audit",
     });
+  });
+
+  // `/ban` and `/timeout` write their own `source: "command"` row and then
+  // produce a native audit entry whose executor is the bot; mirroring that too
+  // would double-log every bot-issued action (#857).
+  it("skips an entry the bot executed itself, so a bot-issued action lands once", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    const service = freshService();
+
+    await service.handleAuditLogEntry(
+      {
+        action: AuditLogEvent.MemberBanAdd,
+        reason: "mod#0001: raiding",
+        changes: [],
+        targetId: "u9",
+        executorId: "bot-self",
+      } as never,
+      guild,
+    );
+
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("still mirrors an action a human executed", async () => {
+    getBooleanMock.mockResolvedValue(true);
+    const service = freshService();
+
+    await service.handleAuditLogEntry(
+      {
+        action: AuditLogEvent.MemberKick,
+        reason: "spam",
+        changes: [],
+        targetId: "u9",
+        executorId: "human-mod",
+      } as never,
+      guild,
+    );
+
+    expect(createMock).toHaveBeenCalledWith(
+      expect.objectContaining({ moderatorId: "human-mod", source: "audit" }),
+    );
   });
 
   it("skips entries with no target", async () => {

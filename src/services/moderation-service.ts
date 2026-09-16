@@ -31,6 +31,16 @@ export interface WarnInput {
   reason: string | null;
 }
 
+/**
+ * A bot-issued action to record. `/warn` writes only a row; `/ban` and
+ * `/timeout` (#857) act on the member through Discord's API first and then
+ * write their own row, so the command's reply is authoritative and immediate
+ * rather than waiting on the async audit-log mirror.
+ */
+export interface CommandActionInput extends WarnInput {
+  action: ModerationAction;
+}
+
 export interface ModerationHistoryQuery {
   limit: number;
   skip: number;
@@ -112,11 +122,16 @@ export function mapAuditLogEntry(entry: {
  * `ModerationLog` collection and the read paths that `/modlog` and the admin
  * `/admin/moderation` page consume:
  *
- *   - `/warn` calls {@link logWarn} directly — bot-issued warnings are not a
- *     native Discord action, so KoolBot is the only place they exist.
+ *   - the bot-issued commands call {@link logAction} directly — `/warn`
+ *     (warnings are not a native Discord action, so KoolBot is the only place
+ *     they exist) and, since #857, `/ban` and `/timeout` once Discord has
+ *     accepted the action, so the command's own reply is authoritative rather
+ *     than waiting on the mirror below.
  *   - {@link handleAuditLogEntry} mirrors native kick/ban/unban/timeout
  *     actions from `GuildAuditLogEntryCreate`, following the same "aggregate
- *     what already happens" pattern the activity trackers use.
+ *     what already happens" pattern the activity trackers use. Entries the
+ *     bot executed itself are skipped there, so a bot-issued action lands
+ *     exactly once.
  *
  * Both write paths also announce the action, with the target's prior history
  * attached, to the `core.moderation` Discord log channel (#907) — see
@@ -164,20 +179,22 @@ export class ModerationService {
   }
 
   /**
-   * Record a bot-issued warning. Called by the `/warn` command. Returns the
-   * persisted row so the caller can surface a confirmation.
+   * Record a bot-issued action as a `source: "command"` row and announce it.
+   * Called by `/warn`, and by `/ban` and `/timeout` once Discord has accepted
+   * the action (#857). Returns the persisted row so the caller can surface a
+   * confirmation.
    */
-  public async logWarn(input: WarnInput): Promise<IModerationLog> {
+  public async logAction(input: CommandActionInput): Promise<IModerationLog> {
     const entry = await ModerationLog.create({
       guildId: input.guildId,
       userId: input.userId,
       moderatorId: input.moderatorId,
-      action: "warn",
+      action: input.action,
       reason: input.reason,
       source: "command",
     });
     logger.info(
-      `Moderation: warn recorded for user ${sanitizeForLog(
+      `Moderation: ${input.action} recorded for user ${sanitizeForLog(
         input.userId,
       )} by ${sanitizeForLog(input.moderatorId)} in guild ${sanitizeForLog(
         input.guildId,
@@ -187,11 +204,16 @@ export class ModerationService {
       guildId: input.guildId,
       userId: input.userId,
       moderatorId: input.moderatorId,
-      action: "warn",
+      action: input.action,
       reason: input.reason,
       entryId: entry._id,
     });
     return entry;
+  }
+
+  /** Record a bot-issued warning. Called by the `/warn` command. */
+  public async logWarn(input: WarnInput): Promise<IModerationLog> {
+    return this.logAction({ ...input, action: "warn" });
   }
 
   /**
@@ -213,6 +235,20 @@ export class ModerationService {
         changes: entry.changes,
       });
       if (!mapped) return;
+
+      // De-dupe bot-issued actions (#857). `/ban` and `/timeout` write their
+      // own `source: "command"` row and then produce a native audit-log entry
+      // whose executor is KoolBot — mirroring that too would double-log every
+      // action the bot takes. Anything KoolBot executed, KoolBot has already
+      // recorded, so drop it here. Actions taken by a *human* (or another bot)
+      // keep flowing through unchanged.
+      const botId = this.client.user?.id;
+      if (botId && entry.executorId === botId) {
+        logger.debug(
+          `Moderation: skipping ${mapped.action} audit entry executed by the bot itself`,
+        );
+        return;
+      }
 
       const targetId = entry.targetId;
       if (!targetId) {

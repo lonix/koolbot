@@ -8,8 +8,7 @@ import {
 import { ModerationService } from "../services/moderation-service.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
-
-const MAX_REASON_LENGTH = 512;
+import { MAX_REASON_LENGTH } from "../utils/moderation-guards.js";
 
 export const data = new SlashCommandBuilder()
   .setName("warn")
@@ -60,6 +59,17 @@ export async function execute(
     if (targetUser.id === interaction.user.id) {
       await interaction.reply({
         content: "You can't warn yourself.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
+
+    // Discord's maxLength doesn't stop a whitespace-only reason, which trims to
+    // "" — an invalid embed field value, and a recorded warning with no reason.
+    // Refusing here keeps the failure in front of the write.
+    if (!reason) {
+      await interaction.reply({
+        content: "Please give a reason for the warning.",
         flags: MessageFlags.Ephemeral,
       });
       return;

@@ -155,6 +155,8 @@ commands always registered):
 - `/event` — Create, browse and RSVP to server events (`events.enabled`)
 - `/remind` — Set personal one-off reminders KoolBot DMs when due (`reminders.enabled`)
 - `/warn` — Record a moderation warning (`moderation.enabled`)
+- `/timeout` — Time a member out for any duration up to 28 days (`moderation.enabled`)
+- `/ban` — Ban a member and record it (`moderation.enabled`)
 - `/modlog` — Look up a member's moderation history (`moderation.enabled`)
 
 A fresh install only sees `/help` and `/config` in Discord until you
