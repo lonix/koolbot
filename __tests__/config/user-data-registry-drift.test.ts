@@ -3,11 +3,17 @@ import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
   DELETABLE_COLLECTIONS,
+  DELETABLE_USER_DATA,
   EXPORTABLE_COLLECTIONS,
   USER_DATA_REGISTRY,
   isUserIdFieldName,
 } from "../../src/services/user-data-registry.js";
 import { READER_COLLECTIONS } from "../../src/services/user-data-export-service.js";
+import {
+  DELETER_ACTIONS,
+  DELETER_COLLECTIONS,
+  PURGE_ORDER,
+} from "../../src/services/user-data-deletion-service.js";
 
 /**
  * Guards the per-user data registry against drifting away from the schemas
@@ -230,6 +236,43 @@ describe("user-data registry / schema drift", () => {
     expect([...READER_COLLECTIONS].sort()).toEqual(
       [...EXPORTABLE_COLLECTIONS].sort(),
     );
+  });
+
+  it("has a deleter for exactly the collections a purge acts on", () => {
+    // The delete-side counterpart of the reader parity test above, and the
+    // same forcing function: a collection classified as purgeable with no
+    // deleter is data a member was told would be erased and was not.
+    expect([...DELETER_COLLECTIONS].sort()).toEqual(
+      [...DELETABLE_COLLECTIONS].sort(),
+    );
+  });
+
+  it("implements every delete policy the registry declares", () => {
+    // Per collection is not enough: `quote` and `channel-invite` each carry
+    // two user fields under two different policies, so a deleter that
+    // hard-deletes but forgets to anonymise would pass a collection-level
+    // check while leaving the member's attribution on someone else's row.
+    const expected = new Map<string, string[]>();
+    for (const entry of DELETABLE_USER_DATA) {
+      const actions = expected.get(entry.collection) ?? [];
+      if (!actions.includes(entry.onDelete)) actions.push(entry.onDelete);
+      expected.set(entry.collection, actions);
+    }
+
+    for (const [collection, actions] of expected) {
+      expect([...(DELETER_ACTIONS[collection] ?? [])].sort()).toEqual(
+        [...actions].sort(),
+      );
+    }
+  });
+
+  it("runs every deleter exactly once, in a declared order", () => {
+    // Without transactions the order is the contract (Discord side-effects
+    // before the rows that record them), so it is declared rather than left
+    // to `Object.keys` — which makes it possible to drop a collection from
+    // the run while its deleter still exists.
+    expect([...PURGE_ORDER].sort()).toEqual([...DELETER_COLLECTIONS].sort());
+    expect(new Set(PURGE_ORDER).size).toBe(PURGE_ORDER.length);
   });
 });
 

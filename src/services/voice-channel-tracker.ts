@@ -100,8 +100,13 @@ export class VoiceChannelTracker {
    * orphaned co-presence state behind for a later session to inherit.
    *
    * The maps are private, so this cannot be done from outside the service.
+   *
+   * Returns whether an in-flight session was actually discarded, so the
+   * purge coordinator (#916) can record it in its report — a purge that
+   * caught a member mid-session is exactly the case an operator reading a
+   * partial purge wants to see.
    */
-  public forgetActiveSession(userId: string): void {
+  public forgetActiveSession(userId: string): boolean {
     const hadSession = this.activeSessions.has(userId);
 
     this.activeSessions.delete(userId);
@@ -116,6 +121,7 @@ export class VoiceChannelTracker {
         `Discarded in-flight voice session for user ${userId}; the disconnect handler will not persist it`,
       );
     }
+    return hadSession;
   }
 
   public async handleVoiceStateUpdate(

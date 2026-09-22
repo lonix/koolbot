@@ -1,0 +1,563 @@
+import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+
+/**
+ * The coordinating per-user purge (#916).
+ *
+ * The registry drift test guards *which* collections are touched and under
+ * which policy; this suite guards the four properties the coordinator itself
+ * has to hold to, none of which a per-collection test can see:
+ *
+ *  - **order** — the in-memory voice eviction first, Discord side-effects
+ *    before the rows that record them, the web session revoke last;
+ *  - **independence** — one step throwing neither aborts the rest nor
+ *    disappears from the report;
+ *  - **idempotence** — there are no transactions, so a member who hits an
+ *    error and clicks again must not be able to make things worse;
+ *  - **scope** — guild-scoped collections are filtered on the guild, the
+ *    five that have no `guildId` at all are not.
+ *
+ * Every model and owning service is mocked, so nothing here needs Mongo or a
+ * gateway connection.
+ */
+
+/** Every model/service call in the order it happened, for the ordering tests. */
+const CALLS: string[] = [];
+/** Per-model filters, for the scope assertions. */
+const FILTERS: Record<string, unknown> = {};
+/** Per-model update documents, for the `$pull` assertions. */
+const UPDATES: Record<string, unknown> = {};
+/** Per-model results, set per test. */
+const RESULTS: Record<string, unknown> = {};
+/** Model names told to throw, and with what message. */
+const THROWS: Record<string, string> = {};
+
+function model(name: string): Record<string, unknown> {
+  return {
+    deleteMany: async (filter: unknown) => {
+      CALLS.push(`${name}.deleteMany`);
+      FILTERS[`${name}.deleteMany`] = filter;
+      if (THROWS[`${name}.deleteMany`]) {
+        throw new Error(THROWS[`${name}.deleteMany`]);
+      }
+      return RESULTS[`${name}.deleteMany`] ?? { deletedCount: 0 };
+    },
+    updateMany: async (filter: unknown, update: unknown) => {
+      CALLS.push(`${name}.updateMany`);
+      FILTERS[`${name}.updateMany`] = filter;
+      UPDATES[`${name}.updateMany`] = update;
+      if (THROWS[`${name}.updateMany`]) {
+        throw new Error(THROWS[`${name}.updateMany`]);
+      }
+      return RESULTS[`${name}.updateMany`] ?? { matchedCount: 0, modifiedCount: 0 };
+    },
+  };
+}
+
+jest.unstable_mockModule("../../src/utils/logger.js", () => ({
+  default: {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  },
+}));
+
+for (const [path, exportName, label] of [
+  ["voice-channel-tracking", "VoiceChannelTracking", "voice-channel-tracking"],
+  [
+    "message-activity-tracking",
+    "MessageActivityTracking",
+    "message-activity-tracking",
+  ],
+  [
+    "reaction-activity-tracking",
+    "ReactionActivityTracking",
+    "reaction-activity-tracking",
+  ],
+  [
+    "poll-participation-tracking",
+    "PollParticipationTracking",
+    "poll-participation-tracking",
+  ],
+  ["poll-turnout", "PollTurnout", "poll-turnout"],
+  ["user-achievements", "UserAchievements", "user-achievements"],
+  ["user-birthday", "UserBirthday", "user-birthday"],
+  ["user-notification-prefs", "UserNotificationPrefs", "user-notification-prefs"],
+  ["user-voice-preferences", "UserVoicePreferences", "user-voice-preferences"],
+  ["rewind-snapshot", "RewindSnapshot", "rewind-snapshot"],
+  ["rewind-nudge-state", "RewindNudgeState", "rewind-nudge-state"],
+  ["digest-state", "DigestState", "digest-state"],
+  ["reminder", "Reminder", "reminder"],
+  ["channel-invite", "ChannelInvite", "channel-invite"],
+] as const) {
+  jest.unstable_mockModule(`../../src/models/${path}.js`, () => ({
+    [exportName]: model(label),
+  }));
+}
+
+const forgetActiveSession = jest.fn<(userId: string) => boolean>();
+const revokeForUser =
+  jest.fn<
+    (
+      guildId: string,
+      userId: string,
+    ) => Promise<{ revoked: string[]; retained: string[] }>
+  >();
+const removeRsvp =
+  jest.fn<(guildId: string, userId: string) => Promise<number>>();
+const purgeForUser =
+  jest.fn<
+    (
+      userId: string,
+      messages: unknown,
+    ) => Promise<{
+      deleted: number;
+      messagesDeleted: number;
+      anonymised: number;
+    }>
+  >();
+const revokeSessionsForUser =
+  jest.fn<(userId: string) => Promise<number>>();
+
+jest.unstable_mockModule("../../src/services/voice-channel-tracker.js", () => ({
+  VoiceChannelTracker: {
+    getInstance: () => ({
+      forgetActiveSession: (userId: string) => {
+        CALLS.push("voice.forgetActiveSession");
+        return forgetActiveSession(userId);
+      },
+    }),
+  },
+}));
+
+jest.unstable_mockModule(
+  "../../src/services/leaderboard-role-service.js",
+  () => ({
+    LeaderboardRoleService: {
+      getInstance: () => ({
+        revokeForUser: async (guildId: string, userId: string) => {
+          CALLS.push("leaderboard.revokeForUser");
+          return revokeForUser(guildId, userId);
+        },
+      }),
+    },
+  }),
+);
+
+jest.unstable_mockModule("../../src/services/event-service.js", () => ({
+  EventService: {
+    getInstance: () => ({
+      removeRsvp: async (guildId: string, userId: string) => {
+        CALLS.push("event.removeRsvp");
+        return removeRsvp(guildId, userId);
+      },
+    }),
+  },
+}));
+
+jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
+  QuoteChannelManager: { getInstance: () => ({ deleteQuoteMessage: jest.fn() }) },
+}));
+
+jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
+  quoteService: {
+    purgeForUser: async (userId: string, messages: unknown) => {
+      CALLS.push("quote.purgeForUser");
+      return purgeForUser(userId, messages);
+    },
+  },
+}));
+
+jest.unstable_mockModule("../../src/services/web-session-service.js", () => ({
+  WebSessionService: {
+    getInstance: () => ({
+      revokeForUser: async (userId: string) => {
+        CALLS.push("session.revokeForUser");
+        return revokeSessionsForUser(userId);
+      },
+    }),
+  },
+}));
+
+const {
+  UserDataDeletionService,
+  DELETER_COLLECTIONS,
+  PURGE_ORDER,
+  VOICE_SESSION_CACHE,
+} = await import("../../src/services/user-data-deletion-service.js");
+const { ANONYMISED_USER_ID } = await import(
+  "../../src/services/user-data-registry.js"
+);
+
+type PurgeStep = {
+  collection: string;
+  action: string;
+  matched: number;
+  removed: number;
+  error?: string;
+  note?: string;
+};
+
+const USER = "member-1";
+const GUILD = "guild-1";
+
+const client = {} as never;
+
+function service(): { purge: (u: string, g: string) => Promise<{ steps: PurgeStep[]; ok: boolean }> } {
+  UserDataDeletionService.reset();
+  return UserDataDeletionService.getInstance(client) as never;
+}
+
+/** Steps for one collection, in emission order. */
+function stepsFor(
+  report: { steps: PurgeStep[] },
+  collection: string,
+): PurgeStep[] {
+  return report.steps.filter((step) => step.collection === collection);
+}
+
+describe("UserDataDeletionService.purge", () => {
+  beforeEach(() => {
+    CALLS.length = 0;
+    for (const store of [FILTERS, UPDATES, RESULTS, THROWS]) {
+      for (const key of Object.keys(store)) delete store[key];
+    }
+    forgetActiveSession.mockReset().mockReturnValue(false);
+    revokeForUser.mockReset().mockResolvedValue({ revoked: [], retained: [] });
+    removeRsvp.mockReset().mockResolvedValue(0);
+    purgeForUser
+      .mockReset()
+      .mockResolvedValue({ deleted: 0, messagesDeleted: 0, anonymised: 0 });
+    revokeSessionsForUser.mockReset().mockResolvedValue(0);
+  });
+
+  describe("step order", () => {
+    it("evicts the in-memory voice session before anything is written", async () => {
+      // `endTracking` persists with `upsert: true`, so a member still sitting
+      // in a channel would have their tracking row recreated on disconnect —
+      // carrying the whole session's total, purge included.
+      const report = await service().purge(USER, GUILD);
+
+      expect(CALLS[0]).toBe("voice.forgetActiveSession");
+      expect(report.steps[0]).toMatchObject({
+        collection: VOICE_SESSION_CACHE,
+        action: "evict",
+      });
+    });
+
+    it("revokes the leaderboard role on Discord before any collection is touched", async () => {
+      // A Discord grant with no record that it is still owed is the one
+      // failure a retry cannot see, so the side-effect goes first.
+      await service().purge(USER, GUILD);
+
+      const revoke = CALLS.indexOf("leaderboard.revokeForUser");
+      const firstDelete = CALLS.findIndex((call) =>
+        call.endsWith(".deleteMany"),
+      );
+      expect(revoke).toBeGreaterThan(-1);
+      expect(revoke).toBeLessThan(firstDelete);
+    });
+
+    it("deletes quote-channel posts before the inert collections", async () => {
+      await service().purge(USER, GUILD);
+
+      expect(CALLS.indexOf("quote.purgeForUser")).toBeLessThan(
+        CALLS.indexOf("voice-channel-tracking.deleteMany"),
+      );
+    });
+
+    it("removes RSVPs after the Discord revokes and before the inert collections", async () => {
+      await service().purge(USER, GUILD);
+
+      expect(CALLS.indexOf("event.removeRsvp")).toBeGreaterThan(
+        CALLS.indexOf("leaderboard.revokeForUser"),
+      );
+      expect(CALLS.indexOf("event.removeRsvp")).toBeLessThan(
+        CALLS.indexOf("reminder.deleteMany"),
+      );
+    });
+
+    it("re-checks the voice tracking row after the rest of the purge", async () => {
+      // Belt and braces against a disconnect racing the eviction.
+      const report = await service().purge(USER, GUILD);
+
+      const indexes = CALLS.flatMap((call, index) =>
+        call === "voice-channel-tracking.deleteMany" ? [index] : [],
+      );
+      expect(indexes).toHaveLength(2);
+      expect(indexes[1]).toBeGreaterThan(
+        CALLS.indexOf("channel-invite.updateMany"),
+      );
+      expect(stepsFor(report, "voice-channel-tracking")[1].note).toBe(
+        "post-purge re-check",
+      );
+    });
+
+    it("revokes web sessions last", async () => {
+      // Any earlier and it kills the session the caller still needs to
+      // render its own result.
+      const report = await service().purge(USER, GUILD);
+
+      expect(CALLS[CALLS.length - 1]).toBe("session.revokeForUser");
+      expect(report.steps[report.steps.length - 1]).toMatchObject({
+        collection: "web-session",
+        action: "revoke",
+      });
+    });
+
+    it("runs every declared deleter once, in the declared order", () => {
+      expect([...PURGE_ORDER].sort()).toEqual([...DELETER_COLLECTIONS].sort());
+    });
+  });
+
+  describe("scope", () => {
+    it("filters guild-scoped collections on the guild", async () => {
+      await service().purge(USER, GUILD);
+
+      for (const name of [
+        "message-activity-tracking",
+        "reaction-activity-tracking",
+        "poll-participation-tracking",
+        "user-birthday",
+        "user-notification-prefs",
+        "rewind-snapshot",
+        "rewind-nudge-state",
+        "digest-state",
+        "reminder",
+      ]) {
+        expect(FILTERS[`${name}.deleteMany`]).toEqual({
+          userId: USER,
+          guildId: GUILD,
+        });
+      }
+      expect(FILTERS["poll-turnout.updateMany"]).toEqual({
+        guildId: GUILD,
+        voterIds: USER,
+      });
+    });
+
+    it("keys the collections with no guildId on the user id alone", async () => {
+      // The registry's `guildScoped: false` entries: moot while the bot is
+      // single-guild, and the exact list a multi-guild change has to revisit.
+      await service().purge(USER, GUILD);
+
+      for (const name of [
+        "voice-channel-tracking",
+        "user-achievements",
+        "user-voice-preferences",
+        "channel-invite",
+      ]) {
+        expect(FILTERS[`${name}.deleteMany`]).toEqual({ userId: USER });
+      }
+    });
+  });
+
+  describe("policies", () => {
+    it("pulls the member out of the shared poll turnout without touching votesCast", async () => {
+      // `votesCast` counts vote *events*, not people, and is legitimately
+      // higher than the voter count on a multiselect poll.
+      RESULTS["poll-turnout.updateMany"] = {
+        matchedCount: 3,
+        modifiedCount: 3,
+      };
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(UPDATES["poll-turnout.updateMany"]).toEqual({
+        $pull: { voterIds: USER },
+      });
+      expect(JSON.stringify(UPDATES["poll-turnout.updateMany"])).not.toContain(
+        "votesCast",
+      );
+      expect(stepsFor(report, "poll-turnout")[0]).toMatchObject({
+        action: "pull-member",
+        matched: 3,
+        removed: 3,
+      });
+    });
+
+    it("deletes invites the member received and anonymises the ones they sent", async () => {
+      // `invitedBy` is `required: true`, so the sender attribution takes the
+      // sentinel rather than a null — the recipient's access has to survive.
+      RESULTS["channel-invite.deleteMany"] = { deletedCount: 2 };
+      RESULTS["channel-invite.updateMany"] = {
+        matchedCount: 4,
+        modifiedCount: 4,
+      };
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(UPDATES["channel-invite.updateMany"]).toEqual({
+        $set: { invitedBy: ANONYMISED_USER_ID },
+      });
+      expect(stepsFor(report, "channel-invite")).toMatchObject([
+        { action: "hard-delete", matched: 2, removed: 2 },
+        { action: "anonymise", matched: 4, removed: 4 },
+      ]);
+      // Delete first: a row matching both ends up gone, not anonymised.
+      expect(CALLS.indexOf("channel-invite.deleteMany")).toBeLessThan(
+        CALLS.indexOf("channel-invite.updateMany"),
+      );
+    });
+
+    it("reports both halves of the quote purge", async () => {
+      purgeForUser.mockResolvedValue({
+        deleted: 5,
+        messagesDeleted: 4,
+        anonymised: 2,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "quote")).toMatchObject([
+        {
+          action: "hard-delete",
+          matched: 5,
+          removed: 5,
+          note: "4 quote-channel post(s) deleted",
+        },
+        { action: "anonymise", matched: 2, removed: 2 },
+      ]);
+    });
+
+    it("reports a leaderboard role whose Discord revoke failed as a partial step", async () => {
+      // The id stays on the roster so the next reconcile retries — but the
+      // member is still wearing the role, which the report has to say.
+      revokeForUser.mockResolvedValue({
+        revoked: ["role-a"],
+        retained: ["role-b"],
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      const step = stepsFor(report, "leaderboard-role-assignment")[0];
+      expect(step).toMatchObject({ matched: 2, removed: 1 });
+      expect(step.note).toContain("role-b");
+      // A partial step is not an error: nothing threw and the retry is
+      // already scheduled by the next reconcile.
+      expect(step.error).toBeUndefined();
+      expect(report.ok).toBe(true);
+    });
+
+    it("records the in-flight voice session it discarded", async () => {
+      forgetActiveSession.mockReturnValue(true);
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, VOICE_SESSION_CACHE)[0]).toMatchObject({
+        action: "evict",
+        matched: 1,
+        removed: 1,
+      });
+    });
+
+    it("deletes a tracking row recreated mid-purge", async () => {
+      RESULTS["voice-channel-tracking.deleteMany"] = { deletedCount: 1 };
+
+      const report = await service().purge(USER, GUILD);
+
+      const [first, recheck] = stepsFor(report, "voice-channel-tracking");
+      expect(first.removed).toBe(1);
+      expect(recheck).toMatchObject({ removed: 1, note: "post-purge re-check" });
+    });
+  });
+
+  describe("failures", () => {
+    it("records a failing step and keeps going", async () => {
+      // There are no transactions and nothing to roll back to, so the useful
+      // behaviour is to finish and say which step is still owed.
+      THROWS["user-achievements.deleteMany"] = "mongo is down";
+
+      const report = await service().purge(USER, GUILD);
+
+      const step = stepsFor(report, "user-achievements")[0];
+      expect(step).toMatchObject({
+        action: "hard-delete",
+        matched: 0,
+        removed: 0,
+        error: "mongo is down",
+      });
+      expect(report.ok).toBe(false);
+      // Everything after it still ran, including the last step of all.
+      expect(CALLS).toContain("reminder.deleteMany");
+      expect(CALLS[CALLS.length - 1]).toBe("session.revokeForUser");
+    });
+
+    it("keeps the rest of the purge when a Discord side-effect fails", async () => {
+      revokeForUser.mockRejectedValue(new Error("discord unreachable"));
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "leaderboard-role-assignment")[0]).toMatchObject({
+        action: "pull-member",
+        error: "discord unreachable",
+      });
+      expect(report.ok).toBe(false);
+      expect(CALLS).toContain("quote.purgeForUser");
+      expect(CALLS).toContain("event.removeRsvp");
+    });
+
+    it("reports one step per collection even when nothing matched", async () => {
+      const report = await service().purge(USER, GUILD);
+
+      expect(report.ok).toBe(true);
+      // One per registry collection, plus the two quote/channel-invite
+      // second policies, plus the eviction, the re-check and the revoke.
+      for (const collection of DELETER_COLLECTIONS) {
+        expect(stepsFor(report, collection).length).toBeGreaterThan(0);
+      }
+      expect(stepsFor(report, VOICE_SESSION_CACHE)).toHaveLength(1);
+      expect(stepsFor(report, "web-session")).toHaveLength(1);
+      expect(report.steps.every((step) => step.matched === 0)).toBe(true);
+    });
+  });
+
+  describe("idempotence", () => {
+    it("is a no-op the second time", async () => {
+      // First run: everything matches.
+      RESULTS["voice-channel-tracking.deleteMany"] = { deletedCount: 1 };
+      RESULTS["user-achievements.deleteMany"] = { deletedCount: 1 };
+      RESULTS["poll-turnout.updateMany"] = { matchedCount: 2, modifiedCount: 2 };
+      RESULTS["channel-invite.deleteMany"] = { deletedCount: 1 };
+      RESULTS["channel-invite.updateMany"] = {
+        matchedCount: 1,
+        modifiedCount: 1,
+      };
+      forgetActiveSession.mockReturnValue(true);
+      revokeForUser.mockResolvedValue({ revoked: ["role-a"], retained: [] });
+      removeRsvp.mockResolvedValue(2);
+      purgeForUser.mockResolvedValue({
+        deleted: 3,
+        messagesDeleted: 3,
+        anonymised: 1,
+      });
+      revokeSessionsForUser.mockResolvedValue(1);
+
+      const instance = service();
+      const first = await instance.purge(USER, GUILD);
+      expect(first.ok).toBe(true);
+      expect(first.steps.some((step) => step.removed > 0)).toBe(true);
+
+      // Second run: the rows are gone, so every step matches nothing. The
+      // mocks stand in for the database having been emptied by the first.
+      for (const key of Object.keys(RESULTS)) delete RESULTS[key];
+      forgetActiveSession.mockReturnValue(false);
+      revokeForUser.mockResolvedValue({ revoked: [], retained: [] });
+      removeRsvp.mockResolvedValue(0);
+      purgeForUser.mockResolvedValue({
+        deleted: 0,
+        messagesDeleted: 0,
+        anonymised: 0,
+      });
+      revokeSessionsForUser.mockResolvedValue(0);
+
+      const second = await instance.purge(USER, GUILD);
+
+      expect(second.ok).toBe(true);
+      expect(second.steps.map((step) => step.collection)).toEqual(
+        first.steps.map((step) => step.collection),
+      );
+      expect(second.steps.every((step) => step.removed === 0)).toBe(true);
+    });
+  });
+});
