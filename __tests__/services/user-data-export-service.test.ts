@@ -50,7 +50,8 @@ function listModel(name: string): Record<string, unknown> {
   };
 }
 
-const mockGetNumber = jest.fn<(key: string, fallback: number) => Promise<number>>();
+const mockGetNumber =
+  jest.fn<(key: string, fallback: number) => Promise<number>>();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: { getInstance: jest.fn(() => ({ getNumber: mockGetNumber })) },
@@ -134,12 +135,16 @@ jest.unstable_mockModule("../../src/models/channel-invite.js", () => ({
 
 const { UserDataExportService, createExportProgress, DEFAULT_MAX_ITEMS } =
   await import("../../src/services/user-data-export-service.js");
-const { EXPORTABLE_COLLECTIONS, EXCLUDED_USER_DATA } = await import(
-  "../../src/services/user-data-registry.js"
-);
+const { EXPORTABLE_COLLECTIONS, EXCLUDED_USER_DATA } =
+  await import("../../src/services/user-data-registry.js");
 
 const USER = "member-1";
 const GUILD = "guild-1";
+
+/** The four stored forms a user id may appear in, per `utils/user-id.ts`. */
+function idForms(userId: string): string[] {
+  return [userId, `<@${userId}>`, `<@!${userId}>`, `@${userId}`];
+}
 
 interface ExportPayload {
   schemaVersion: number;
@@ -153,7 +158,7 @@ interface ExportPayload {
   truncated: string[];
 }
 
-async function runExport(): Promise<{
+async function runExport(userId: string = USER): Promise<{
   payload: ExportPayload;
   progress: { collections: string[]; truncated: string[] };
   raw: string;
@@ -162,7 +167,7 @@ async function runExport(): Promise<{
   const progress = createExportProgress();
   const chunks: string[] = [];
   for await (const chunk of UserDataExportService.getInstance().streamJson(
-    USER,
+    userId,
     GUILD,
     progress,
   )) {
@@ -184,9 +189,7 @@ describe("UserDataExportService", () => {
     for (const key of Object.keys(LIMITS)) delete LIMITS[key];
     mockGetNumber.mockReset();
     mockGetNumber.mockResolvedValue(100);
-    (
-      UserDataExportService as unknown as { instance: unknown }
-    ).instance = null;
+    (UserDataExportService as unknown as { instance: unknown }).instance = null;
   });
 
   it("emits a parseable envelope with one key per exportable collection", async () => {
@@ -316,7 +319,11 @@ describe("UserDataExportService", () => {
       __v: 3,
       userId: USER,
       sessions: [
-        { _id: "session-id", channelId: "c1", companions: [{ _id: "x", userId: "friend-1" }] },
+        {
+          _id: "session-id",
+          channelId: "c1",
+          companions: [{ _id: "x", userId: "friend-1" }],
+        },
       ],
       monthlyTotals: [{ _id: "month-id", month: "2026-01", totalTime: 60 }],
     };
@@ -516,8 +523,50 @@ describe("UserDataExportService", () => {
       "said-and-added",
     ]);
     expect(FILTERS.quote).toEqual({
-      $or: [{ authorId: USER }, { addedById: USER }],
+      $or: [
+        { authorId: { $in: idForms(USER) } },
+        { addedById: { $in: idForms(USER) } },
+      ],
     });
+  });
+
+  // #958: quotes imported before ids were normalised store `<@123>` /
+  // `<@!123>` / `@123`. `QuoteService.purgeForUser` deletes all of those
+  // forms, so an export that matched only the bare snowflake would show the
+  // member less than a deletion would erase.
+  it("finds quotes stored with legacy mention-format ids", async () => {
+    const snowflake = "123456789012345678";
+    DATA.quote = [
+      {
+        content: "said it",
+        authorId: `<@${snowflake}>`,
+        addedById: "curator-1",
+      },
+      {
+        content: "saved it",
+        authorId: "speaker-1",
+        addedById: `@${snowflake}`,
+      },
+      { content: "both", authorId: `<@!${snowflake}>`, addedById: snowflake },
+    ];
+
+    const { payload } = await runExport(snowflake);
+
+    expect(FILTERS.quote).toEqual({
+      $or: [
+        { authorId: { $in: idForms(snowflake) } },
+        { addedById: { $in: idForms(snowflake) } },
+      ],
+    });
+    const quotes = payload.data.quote as Array<{
+      content: string;
+      yourRole: string;
+    }>;
+    expect(quotes.map((q) => q.yourRole)).toEqual([
+      "said",
+      "added",
+      "said-and-added",
+    ]);
   });
 
   it("covers both sides of a channel invite", async () => {

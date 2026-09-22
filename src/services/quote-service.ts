@@ -10,53 +10,9 @@ import { quoteSchema } from "../database/schema.js";
 import { ConfigService } from "./config-service.js";
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { CooldownManager } from "./cooldown-manager.js";
+import { normalizeUserId, userIdMatchForms } from "../utils/user-id.js";
 
 const configService = ConfigService.getInstance();
-
-/**
- * Normalize a Discord user ID from various formats to a clean numeric ID
- * Handles: <@123>, <@!123>, @username, or plain 123
- * Returns the numeric ID or the original string if not parseable
- */
-function normalizeUserId(input: string): string {
-  // Extract ID from mention formats: <@123> or <@!123>
-  const mentionMatch = input.match(/^<@!?(\d+)>$/);
-  if (mentionMatch) {
-    return mentionMatch[1];
-  }
-
-  // Remove leading @ if present
-  const cleanInput = input.replace(/^@/, "");
-
-  // If it's a numeric ID, return it
-  if (/^\d+$/.test(cleanInput)) {
-    return cleanInput;
-  }
-
-  // Return original if we can't parse it (might be a username)
-  return input;
-}
-
-/**
- * Every stored form a user id may appear in, for matching against
- * `authorId` / `addedById`.
- *
- * Quotes imported before ids were normalised carry `<@123>`, `<@!123>` or
- * `@123` rather than a bare snowflake, so a query that matches only the
- * clean id silently misses them. Shared by the achievement counters, the
- * "most liked" lookups and the purge — the purge in particular must match
- * exactly what the readers do, or a reset would leave rows the member can
- * still see counted against them.
- */
-function userIdMatchForms(userId: string): string[] {
-  const normalizedId = normalizeUserId(userId);
-  return [
-    normalizedId,
-    `<@${normalizedId}>`,
-    `<@!${normalizedId}>`,
-    `@${normalizedId}`,
-  ];
-}
 
 /** One timestamped change to a quote's 👍 tally (#817). */
 export interface QuoteLikeEvent {

@@ -33,6 +33,7 @@ import {
   summariseByCollection,
 } from "./user-data-registry.js";
 import { quoteSchema } from "../database/schema.js";
+import { isSameUserId, userIdMatchForms } from "../utils/user-id.js";
 import { ChannelInvite } from "../models/channel-invite.js";
 import { DigestState } from "../models/digest-state.js";
 import { Event } from "../models/event.js";
@@ -338,8 +339,16 @@ const READERS: Record<string, CollectionReader> = {
   // quote is already public in the quote channel, so rows are kept as stored
   // with a `role` marker saying which side of the row matched.
   quote: async ({ userId, maxItems }) => {
+    // Legacy rows store `<@123>` / `<@!123>` / `@123` rather than a bare
+    // snowflake, so a plain-equality match under-reports what the member
+    // actually has — and the purge (`QuoteService.purgeForUser`) matches all
+    // the forms, so an export that did not would show less than a deletion
+    // would remove (#775, #958).
+    const idForms = userIdMatchForms(userId);
     const rows = await quoteModel()
-      .find({ $or: [{ authorId: userId }, { addedById: userId }] })
+      .find({
+        $or: [{ authorId: { $in: idForms } }, { addedById: { $in: idForms } }],
+      })
       .sort({ addedAt: -1 })
       .limit(maxItems + 1)
       .lean();
@@ -347,8 +356,8 @@ const READERS: Record<string, CollectionReader> = {
     return {
       value: kept.map((row) => {
         const plain = toPlain(row);
-        const said = plain.authorId === userId;
-        const added = plain.addedById === userId;
+        const said = isSameUserId(plain.authorId, userId);
+        const added = isSameUserId(plain.addedById, userId);
         return {
           ...plain,
           yourRole: said && added ? "said-and-added" : said ? "said" : "added",
