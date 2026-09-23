@@ -41,6 +41,17 @@ interface VoiceSession {
   startTime: Date;
   channelId: string;
   channelName: string;
+  /**
+   * Set while an `endTracking` call is persisting this session (#916).
+   *
+   * Discord's emitter does not await its handlers, so a switch still waiting
+   * on its write and a disconnect arriving behind it both read the *same*
+   * session out of `activeSessions` — and both would `$inc totalTime` and
+   * `$push` it, counting one session twice. The flag is a synchronous
+   * test-and-set on the session object, so only the first call persists it;
+   * it is cleared again if that call fails, so the next disconnect retries.
+   */
+  persisting?: boolean;
 }
 
 /**
@@ -649,6 +660,14 @@ export class VoiceChannelTracker {
       await this.mongo.ensureConnection();
 
       session = this.activeSessions.get(userId);
+      if (session?.persisting) {
+        // Another handler is already writing this very session. Persisting
+        // it again would double-count it (#916).
+        logger.info(
+          `Skipping end-tracking for user ${userId}: this session is already being persisted`,
+        );
+        return;
+      }
       if (!session) {
         if (debugModeEnabled) {
           logger.info(
@@ -665,6 +684,9 @@ export class VoiceChannelTracker {
       // count the new session's co-presence into this document and then wipe
       // it along with this one, so the rejoin's own disconnect would find
       // nothing to record.
+      // Claimed synchronously, before the first await below, so a handler
+      // arriving behind this one sees the flag rather than the session.
+      session.persisting = true;
       claimed = {
         encountered: this.encounteredUsers.get(userId),
         since: this.companionSince.get(userId),
@@ -825,6 +847,9 @@ export class VoiceChannelTracker {
     claimed: ClaimedSessionState | undefined,
   ): void {
     if (!session || !claimed) return;
+    // Released either way: the session stays in `activeSessions` for the
+    // next disconnect to retry, and a retry has to be allowed to run.
+    session.persisting = false;
     if (this.activeSessions.get(userId) !== session) return;
 
     if (claimed.encountered && !this.encounteredUsers.has(userId)) {

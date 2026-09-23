@@ -525,8 +525,26 @@ export class EventService extends ScheduledService {
       // is what actually happened, and the shortfall against `matched` is
       // what makes a partial removal visible in the purge report.
       try {
-        // `{ new: true }` hands back the post-pull document, which is what
-        // the re-render needs for correct attendee counts.
+        // The announcement first, then the row (#916). `rsvps.userId` is the
+        // only way this event can be found again, so pulling first and then
+        // failing to refresh leaves the member listed on a public post that
+        // nothing will ever select. Redrawing first can only show the
+        // announcement without them slightly before the database agrees, and
+        // the event stays selectable until it does.
+        if (!isTerminalState(match.state)) {
+          // Rendered from the document as it will be, not as it is: the
+          // RSVP is dropped in memory only — nothing is saved — so the embed
+          // shows the post-pull attendees.
+          match.rsvps = match.rsvps.filter((rsvp) => rsvp.userId !== userId);
+          if (!(await this.updateAnnouncement(match))) {
+            rendersFailed++;
+            logger.warn(
+              `Announcement for event ${match._id} could not be refreshed; keeping the RSVP of ${sanitizeForLog(userId)} so a retry can still find it`,
+            );
+            continue;
+          }
+        }
+
         const updated = await Event.findByIdAndUpdate(
           match._id,
           { $pull: { rsvps: { userId } } },
@@ -534,15 +552,6 @@ export class EventService extends ScheduledService {
         );
         if (!updated) continue;
         removed++;
-        // The row is gone, but the announcement may still show the member as
-        // attending — that is their data, still public, so a failed refresh
-        // is counted rather than swallowed.
-        if (
-          !isTerminalState(updated.state) &&
-          !(await this.updateAnnouncement(updated))
-        ) {
-          rendersFailed++;
-        }
       } catch (error) {
         logger.error(
           `Failed to remove the RSVP of ${sanitizeForLog(userId)} from event ${match._id}:`,

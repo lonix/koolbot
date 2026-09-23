@@ -795,17 +795,25 @@ export class QuoteService {
       logger.error(`Failed to look up quotes authored by ${userId}:`, error);
     }
 
+    // Rows whose post is confirmed gone — or that never had one. Only these
+    // are deleted below: the row holds the only `messageId`/`postChannelId`
+    // by which a post can be found, so deleting it after a failed delete
+    // strands the post for good and leaves a retry nothing to work with
+    // (#916). The same call the birthday purge makes for a role it could not
+    // revoke.
+    const clearable: IQuote[] = [];
+
     for (const quote of authored) {
-      if (!quote.messageId) continue;
+      if (!quote.messageId) {
+        clearable.push(quote);
+        continue;
+      }
       messagesAttempted++;
       // `messageId` is overloaded: it starts life as the *original* Discord
       // message id and is overwritten by `updateQuoteMessageId` with the
       // quote-channel post id. So it may well point at a message that is not
-      // in the quote channel, or is long gone — a miss is expected, and must
-      // not stop the row from being deleted. Neither must a failure: a member
-      // erasing their own data cannot be held up by a stale id. But a failure
-      // is counted as a failure, not as a deletion, so the caller can say the
-      // post may still be visible instead of claiming it is gone (#916).
+      // in the quote channel, or is long gone — a miss is expected, and is
+      // reported as gone rather than as a failure.
       try {
         if (
           await messages.deleteQuoteMessage(
@@ -814,16 +822,17 @@ export class QuoteService {
           )
         ) {
           messagesDeleted++;
+          clearable.push(quote);
         } else {
           messagesFailed++;
           logger.warn(
-            `Quote message ${quote.messageId} could not be deleted while purging user ${userId}; deleting the row anyway`,
+            `Quote message ${quote.messageId} could not be deleted while purging user ${userId}; keeping the row so a retry can still find the post`,
           );
         }
       } catch (error) {
         messagesFailed++;
         logger.warn(
-          `Could not delete quote message ${quote.messageId} while purging user ${userId}; deleting the row anyway:`,
+          `Could not delete quote message ${quote.messageId} while purging user ${userId}; keeping the row so a retry can still find the post:`,
           error,
         );
       }
@@ -835,7 +844,7 @@ export class QuoteService {
     // `$or: []` is rejected by MongoDB, and a member who only ever saved
     // other people's quotes has an empty snapshot — so the delete is skipped
     // rather than issued with a filter the server refuses.
-    if (!deleteError && authored.length > 0) {
+    if (!deleteError && clearable.length > 0) {
       try {
         // By `_id` *and* the `messageId` we inspected, not by a fresh
         // `authorId` re-match (#916). Two orderings to survive:
@@ -850,14 +859,14 @@ export class QuoteService {
         //    side never saw the post — so the row survives with its cleanup
         //    metadata and the next purge collects both.
         const removal = await this.model.deleteMany({
-          $or: authored.map((quote) => ({
+          $or: clearable.map((quote) => ({
             _id: quote._id,
             messageId: quote.messageId ?? null,
           })),
         });
         deleted = removal?.deletedCount ?? 0;
-        if (deleted < authored.length) {
-          const stranded = authored.length - deleted;
+        if (deleted < clearable.length) {
+          const stranded = clearable.length - deleted;
           deleteError = `${stranded} quote(s) were published while the purge ran and were left in place rather than orphaning their channel posts; run the reset again to clear them`;
           logger.warn(
             `Purge for ${userId}: ${stranded} quote row(s) changed mid-purge and were kept`,
@@ -867,6 +876,10 @@ export class QuoteService {
         deleteError = getErrorMessage(error);
         logger.error(`Failed to delete quotes authored by ${userId}:`, error);
       }
+    }
+
+    if (!deleteError && messagesFailed > 0) {
+      deleteError = `${messagesFailed} quote(s) were kept because their channel post could not be deleted; the row is the only handle left on that post, so a retry can still remove both`;
     }
 
     let anonymised = 0;
@@ -896,8 +909,17 @@ export class QuoteService {
     // with nothing left that could ever select it again. Redrawing first can
     // only show the sentinel on a post slightly before the database catches
     // up, and the row stays selectable until it does.
+    // Only rows whose post no longer names the member get the sentinel
+    // below. The sentinel is what makes a row invisible to the next purge,
+    // so writing it over a post that still credits them would leave that
+    // embed standing with nothing able to select it again (#916).
+    const repaired: IQuote[] = [];
+
     for (const quote of saved) {
-      if (!quote.messageId) continue;
+      if (!quote.messageId) {
+        repaired.push(quote);
+        continue;
+      }
       try {
         await messages.updateQuoteMessage(
           quote.messageId,
@@ -908,6 +930,7 @@ export class QuoteService {
           quote.postChannelId,
         );
         attributionsRerendered++;
+        repaired.push(quote);
       } catch (error) {
         if (isMissingPostError(error)) {
           // Nothing to re-render and nothing on screen: the post, or the
@@ -915,19 +938,20 @@ export class QuoteService {
           // the purge report failing over a member's name that no longer
           // appears anywhere (#916).
           attributionsGone++;
+          repaired.push(quote);
           continue;
         }
-        // The row is anonymised anyway below — an unreachable post must not
-        // hold up the erasure — but the embed still names them, so say so.
+        // The embed still names them, so the row keeps the real saver and
+        // stays selectable: anonymising it would make the post unfindable.
         attributionsStale++;
         logger.warn(
-          `Could not re-render quote post ${quote.messageId} after anonymising ${userId}; it still shows them as the saver:`,
+          `Could not re-render quote post ${quote.messageId} while anonymising ${userId}; keeping the row so a retry can still repair it:`,
           error,
         );
       }
     }
 
-    if (!anonymiseError && saved.length > 0) {
+    if (!anonymiseError && repaired.length > 0) {
       try {
         // Pinned to the rows just inspected, and to the `messageId` each one
         // had when its post was redrawn — the same CAS the authored delete
@@ -938,7 +962,7 @@ export class QuoteService {
         // retry can find.
         const anonymisation = await this.model.updateMany(
           {
-            $or: saved.map((quote) => ({
+            $or: repaired.map((quote) => ({
               _id: quote._id,
               messageId: quote.messageId ?? null,
             })),
@@ -946,8 +970,8 @@ export class QuoteService {
           { $set: { addedById: ANONYMISED_USER_ID } },
         );
         anonymised = anonymisation?.modifiedCount ?? 0;
-        if (anonymised < saved.length) {
-          const kept = saved.length - anonymised;
+        if (anonymised < repaired.length) {
+          const kept = repaired.length - anonymised;
           anonymiseError = `${kept} quote(s) the member saved changed while the purge ran and were left attributed rather than stranding a fresh post; run the reset again to clear them`;
           logger.warn(
             `Purge for ${userId}: ${kept} saved-quote row(s) changed mid-purge and were kept`,

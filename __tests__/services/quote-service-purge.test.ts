@@ -110,22 +110,38 @@ describe("QuoteService.purgeForUser", () => {
       expect(result.deleted).toBe(2);
     });
 
-    it("still deletes the row when the message is already gone", async () => {
-      // `messageId` is overloaded — it starts as the original message id and
-      // is only later overwritten with the quote-channel post id — so a miss
-      // is expected, not exceptional.
+    it("keeps the row when its post could not be deleted", async () => {
+      // The row holds the only `messageId`/`postChannelId` by which that
+      // post can be found. Deleting it anyway would strand the post for
+      // good and leave a retry with nothing to work from (#916).
       model.find.mockResolvedValue([{ _id: "q1", messageId: "m1" }]);
-      model.deleteMany.mockResolvedValue({ deletedCount: 1 });
-      messages.deleteQuoteMessage.mockRejectedValue(
-        new Error("Unknown Message"),
-      );
+      messages.deleteQuoteMessage.mockRejectedValue(new Error("no access"));
 
       const result = await service.purgeForUser("123", messages);
 
-      expect(result.deleted).toBe(1);
-      expect(result.messagesDeleted).toBe(0);
       expect(result.messagesFailed).toBe(1);
-      expect(model.deleteMany).toHaveBeenCalledTimes(1);
+      expect(result.deleted).toBe(0);
+      expect(model.deleteMany).not.toHaveBeenCalled();
+      expect(result.deleteError).toContain("could not be deleted");
+    });
+
+    it("deletes the rows whose posts are gone even when another fails", async () => {
+      // One failure must not hold up the rest of the erasure.
+      model.find.mockResolvedValue([
+        { _id: "q1", messageId: "m1" },
+        { _id: "q2", messageId: "m2" },
+      ]);
+      model.deleteMany.mockResolvedValue({ deletedCount: 1 });
+      messages.deleteQuoteMessage.mockResolvedValueOnce(true);
+      messages.deleteQuoteMessage.mockResolvedValueOnce(false);
+
+      const result = await service.purgeForUser("123", messages);
+
+      expect(model.deleteMany).toHaveBeenCalledWith({
+        $or: [{ _id: "q1", messageId: "m1" }],
+      });
+      expect(result.deleted).toBe(1);
+      expect(result.messagesFailed).toBe(1);
     });
 
     it("skips the message delete for a row with no messageId", async () => {
@@ -207,9 +223,11 @@ describe("QuoteService.purgeForUser", () => {
 
       const result = await service.purgeForUser("123", messages);
 
-      // The row is anonymised either way — an unreachable post must not hold
-      // up the erasure — but the embed still shows them.
-      expect(result.anonymised).toBe(1);
+      // The row keeps the real saver and stays selectable: the sentinel is
+      // what makes it invisible to the next purge, and the embed still names
+      // them (#916).
+      expect(result.anonymised).toBe(0);
+      expect(model.updateMany).not.toHaveBeenCalled();
       expect(result.attributionsRerendered).toBe(0);
       expect(result.attributionsStale).toBe(1);
     });

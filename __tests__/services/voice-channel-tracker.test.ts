@@ -557,6 +557,44 @@ describe("VoiceChannelTracker", () => {
       expect(tracker.getActiveSession("user123")?.channelName).toBe("B");
     });
 
+    it("persists a session once even when two handlers overlap (#916)", async () => {
+      // Discord does not await its handlers, so a switch still waiting on
+      // its write and a disconnect arriving behind it both read the same
+      // session — and both would `$inc totalTime` and `$push` it.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = { id: "channel-a", name: "A" } as unknown as VoiceChannel;
+      await joinChannel(tracker, member, channel);
+
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((started) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              releaseWrite = () => resolve({});
+              started();
+            }),
+        );
+      });
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+
+      const first = leaveChannel(tracker, member, channel);
+      await writeStarted;
+      const second = leaveChannel(tracker, member, channel);
+      releaseWrite();
+      await Promise.all([first, second]);
+
+      expect(
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock.calls.length,
+      ).toBe(1);
+    });
+
     it("hands the session's bookkeeping back when the persist fails (#916)", async () => {
       // `activeSessions` is deliberately kept on a failed write so the next
       // disconnect retries it — and the retry has to see the companions and

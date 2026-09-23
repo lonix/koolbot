@@ -247,9 +247,9 @@ const DELETERS: Record<string, CollectionDeleter> = {
       // The Discord posts get a step of their own rather than a note on the
       // rows: they are a different thing being erased, they can fail on
       // their own, and a post still visible in the channel is the half a
-      // member would actually notice. `QuoteService` deletes the row anyway
-      // (a stale `messageId` must not block an erasure), so this is the only
-      // place the shortfall is recorded.
+      // member would actually notice. A row whose post could not be deleted
+      // is kept — it holds the only handle on that post — so the shortfall
+      // shows up on both steps, which is exactly what a retry needs.
       emit({
         action: "hard-delete",
         matched: result.messagesAttempted,
