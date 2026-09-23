@@ -17,6 +17,7 @@
  * environment after startup and expect the latest value to be read.
  */
 import { config as dotenvConfig } from "dotenv";
+import { getSchemaDefault } from "../services/config-schema.js";
 
 // Load `.env` as early as the first consumer imports this module so that
 // every other module observes a populated `process.env`.
@@ -31,19 +32,27 @@ export function getEnv(key: string): string | undefined {
 }
 
 /**
- * Read an env var as a *config* value, coercing the string form the way the
- * config layer does: `"true"` / `"false"` become booleans, numeric strings
- * become numbers, anything else stays a string. Returns `null` when the
- * variable is unset or blank.
+ * Read an env var as a *config* value. Returns `null` when the variable is
+ * unset or blank.
  *
- * Shared by `ConfigService.get()`'s env fallback and the `validate-config`
- * script so the two cannot disagree about how an env-supplied setting reads.
+ * When `key` is declared in the config schema with a string default (channel,
+ * role and category ids, names, cron expressions, ...) the raw string is
+ * returned verbatim. A Discord snowflake such as `123456789012345678` looks
+ * numeric but exceeds `Number.MAX_SAFE_INTEGER`, so `Number(raw)` would
+ * silently round it to a different id. For every other key the string form is
+ * coerced the way the config layer does: `"true"` / `"false"` become
+ * booleans, numeric strings become numbers, anything else stays a string.
+ *
+ * Shared by `ConfigService.get()`'s env fallback, the Web UI and the
+ * `validate-config` script so they cannot disagree about how an env-supplied
+ * setting reads.
  */
 export function getEnvConfigValue(
   key: string,
 ): string | number | boolean | null {
   const raw = process.env[key];
   if (raw === undefined || raw.trim() === "") return null;
+  if (typeof getSchemaDefault(key) === "string") return raw;
   if (raw === "true" || raw === "false") return raw === "true";
   const num = Number(raw);
   if (!Number.isNaN(num)) return num;

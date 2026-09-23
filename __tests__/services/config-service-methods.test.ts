@@ -152,6 +152,27 @@ describe("ConfigService - Methods", () => {
       expect(result).toBe("hello world");
     });
 
+    it("keeps an env-supplied snowflake id as the exact string", async () => {
+      // 123456789012345678 > Number.MAX_SAFE_INTEGER, so Number() would
+      // round it to 123456789012345680 — a different channel.
+      process.env["voicechannels.category_id"] = "123456789012345678";
+      mockFindOne.mockResolvedValue(null);
+
+      const result = await service.get("voicechannels.category_id");
+      expect(result).toBe("123456789012345678");
+      await expect(
+        service.getString("voicechannels.category_id"),
+      ).resolves.toBe("123456789012345678");
+    });
+
+    it("still coerces a numeric schema key from the environment", async () => {
+      process.env["quotes.max_length"] = "1000";
+      mockFindOne.mockResolvedValue(null);
+
+      const result = await service.get("quotes.max_length");
+      expect(result).toBe(1000);
+    });
+
     it("should treat empty-string env var as absent (not numeric 0)", async () => {
       process.env["TEST_EMPTY_KEY"] = "";
       mockFindOne.mockResolvedValue(null);
