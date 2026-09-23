@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import type { Client } from "discord.js";
+import { DiscordAPIError, TextChannel, type Client } from "discord.js";
 
 const mockRegisterReloadCallback = jest.fn();
 const mockConfigGetBoolean = jest.fn();
@@ -22,6 +22,8 @@ const mockBirthdayFindOne = jest.fn();
 const mockBirthdayFindOneAndUpdate = jest.fn();
 const mockBirthdayDeleteOne = jest.fn();
 const mockBirthdayFind = jest.fn();
+const mockBirthdayUpdateOne = jest.fn();
+const mockBirthdayDeleteMany = jest.fn();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -50,7 +52,9 @@ jest.unstable_mockModule("../../src/models/user-birthday.js", () => ({
     findOne: mockBirthdayFindOne,
     findOneAndUpdate: mockBirthdayFindOneAndUpdate,
     deleteOne: mockBirthdayDeleteOne,
+    deleteMany: mockBirthdayDeleteMany,
     find: mockBirthdayFind,
+    updateOne: mockBirthdayUpdateOne,
   },
 }));
 
@@ -84,7 +88,20 @@ function resetSingleton(): void {
 function makeClient(): Client {
   return {
     guilds: { fetch: jest.fn() },
+    channels: { fetch: jest.fn() },
   } as unknown as Client;
+}
+
+/** A real `DiscordAPIError` with the given code, as discord.js throws. */
+function apiError(code: number): DiscordAPIError {
+  return new DiscordAPIError(
+    { code, message: "nope" },
+    code,
+    400,
+    "DELETE",
+    "",
+    {},
+  );
 }
 
 describe("birthday pure helpers", () => {
@@ -361,6 +378,118 @@ describe("BirthdayService", () => {
     });
   });
 
+  describe("runOnce announcement bookkeeping (#916)", () => {
+    beforeEach(() => {
+      jest.clearAllMocks();
+      resetSingleton();
+      mockConfigGetBoolean.mockResolvedValue(true);
+      mockConfigGetNumber.mockResolvedValue(24);
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "birthdays.channel_id") return "chan-1";
+        // No birthday role: this is about the post, not the grant.
+        return "";
+      });
+      mockGetTimezone.mockResolvedValue("UTC");
+      mockBirthdayUpdateOne.mockResolvedValue({ matchedCount: 1 });
+    });
+
+    it("records the post it made so a later purge can delete it", async () => {
+      // Without this the message id lives only in the run's local variable:
+      // the row is erased on a purge and the public post — naming the member
+      // and often their age — stays up for good.
+      const today = new Date();
+      const row = {
+        _id: "row-1",
+        userId: "user-1",
+        guildId: "guild-1",
+        month: today.getUTCMonth() + 1,
+        day: today.getUTCDate(),
+      };
+      // The sweep queries first (no grants), then the announce loop.
+      mockBirthdayFind
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([row as never]);
+
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        id: string;
+        send: jest.Mock;
+      };
+      channel.id = "chan-1";
+      channel.send = jest.fn(async () => ({
+        id: "msg-9",
+        delete: jest.fn(async () => undefined),
+      }));
+
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        channels: { fetch: jest.fn(async () => channel) },
+        members: {
+          fetch: jest.fn(async () => ({ displayName: "Ada", id: "user-1" })),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const summary = await svc.runNow();
+
+      expect(summary?.announced).toBe(1);
+      expect(mockBirthdayUpdateOne).toHaveBeenCalledWith(
+        { _id: "row-1" },
+        expect.objectContaining({
+          $set: expect.objectContaining({
+            announcements: [
+              expect.objectContaining({
+                channelId: "chan-1",
+                messageId: "msg-9",
+              }),
+            ],
+          }),
+        }),
+      );
+    });
+
+    it("withdraws the post when the bookkeeping write throws", async () => {
+      // A rejected write leaves the same orphan as a purged row: the post is
+      // up and nothing persisted can find it. Falling through to the outer
+      // catch would leave it there for good (#916).
+      const today = new Date();
+      mockBirthdayFind.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          _id: "row-1",
+          userId: "user-1",
+          guildId: "guild-1",
+          month: today.getUTCMonth() + 1,
+          day: today.getUTCDate(),
+        } as never,
+      ]);
+      mockBirthdayUpdateOne.mockRejectedValue(new Error("write conflict"));
+
+      const del = jest.fn(async () => undefined);
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        id: string;
+        send: jest.Mock;
+      };
+      channel.id = "chan-1";
+      channel.send = jest.fn(async () => ({ id: "msg-9", delete: del }));
+
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        channels: { fetch: jest.fn(async () => channel) },
+        members: {
+          fetch: jest.fn(async () => ({ displayName: "Ada", id: "user-1" })),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const summary = await svc.runNow();
+
+      expect(del).toHaveBeenCalled();
+      // Withdrawn, so it is not an announcement that happened.
+      expect(summary?.announced).toBe(0);
+    });
+  });
+
   describe("getBirthday / setBirthday storage", () => {
     it("returns null when no row exists", async () => {
       mockBirthdayFindOne.mockResolvedValue(null);
@@ -561,6 +690,358 @@ describe("BirthdayService", () => {
       expect(removed).toBe(0);
       expect(row.roleAssignedAt).toBeDefined();
       expect(row.save).not.toHaveBeenCalled();
+    });
+  });
+
+  /** A purge that had no recorded birthday posts to take down. */
+  const NO_POSTS = {
+    announcementsAttempted: 0,
+    announcementsDeleted: 0,
+    announcementsFailed: 0,
+  };
+
+  describe("purgeForUser (#916)", () => {
+    /** A guild whose member holds (or does not hold) the birthday role. */
+    function guildWithMember(hasRole: boolean): {
+      guild: unknown;
+      remove: jest.Mock;
+    } {
+      const remove = jest.fn(async () => undefined);
+      return {
+        guild: {
+          members: {
+            fetch: jest.fn(async () => ({
+              roles: { cache: { has: () => hasRole }, remove },
+            })),
+          },
+        },
+        remove,
+      };
+    }
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      resetSingleton();
+      mockConfigGetString.mockResolvedValue("role-1");
+      mockBirthdayDeleteMany.mockResolvedValue({ deletedCount: 1 });
+    });
+
+    it("takes the role back before deleting the row that records it", async () => {
+      // `roleAssignedAt` is the expiry sweep's only handle on the grant, so
+      // deleting the row first would leave the role on the member forever.
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      const { guild, remove } = guildWithMember(true);
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(guild);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({
+        matched: 1,
+        removed: 1,
+        roleRevoked: true,
+        ...NO_POSTS,
+      });
+      expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+        mockBirthdayDeleteMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("deletes the recorded birthday posts before the row that names them", async () => {
+      // The row's `announcements` list is the only handle anything has on
+      // those messages, and each one names the member — and often their age
+      // — in a channel the whole guild reads (#916).
+      mockBirthdayFind.mockResolvedValue([
+        {
+          roleAssignedAt: undefined,
+          announcements: [
+            { channelId: "chan-1", messageId: "msg-1", year: 2025 },
+            { channelId: "chan-1", messageId: "msg-2", year: 2026 },
+          ],
+        },
+      ]);
+      const client = makeClient();
+      const del = jest.fn(async () => undefined);
+      (client.channels.fetch as jest.Mock).mockResolvedValue({
+        isTextBased: () => true,
+        messages: { delete: del },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(del).toHaveBeenCalledWith("msg-1");
+      expect(del).toHaveBeenCalledWith("msg-2");
+      expect(result).toEqual({
+        matched: 1,
+        removed: 1,
+        roleRevoked: false,
+        announcementsAttempted: 2,
+        announcementsDeleted: 2,
+        announcementsFailed: 0,
+      });
+      expect(del.mock.invocationCallOrder[0]).toBeLessThan(
+        mockBirthdayDeleteMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("counts an already-deleted post as gone", async () => {
+      // Nothing left naming the member is the whole point; a post someone
+      // tidied away by hand must not fail the purge forever.
+      mockBirthdayFind.mockResolvedValue([
+        {
+          roleAssignedAt: undefined,
+          announcements: [
+            { channelId: "chan-1", messageId: "msg-1", year: 2026 },
+          ],
+        },
+      ]);
+      const client = makeClient();
+      (client.channels.fetch as jest.Mock).mockResolvedValue({
+        isTextBased: () => true,
+        messages: {
+          delete: jest.fn(async () => {
+            throw apiError(10008); // Unknown Message
+          }),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result.announcementsDeleted).toBe(1);
+      expect(result.announcementsFailed).toBe(0);
+      expect(result.removed).toBe(1);
+    });
+
+    it("keeps the row when a post could not be deleted", async () => {
+      // The row holds the only ids by which that message can ever be found,
+      // so dropping it now would leave it public for good.
+      mockBirthdayFind.mockResolvedValue([
+        {
+          roleAssignedAt: undefined,
+          announcements: [
+            { channelId: "chan-1", messageId: "msg-1", year: 2026 },
+          ],
+        },
+      ]);
+      const client = makeClient();
+      (client.channels.fetch as jest.Mock).mockResolvedValue({
+        isTextBased: () => true,
+        messages: {
+          delete: jest.fn(async () => {
+            throw apiError(50013); // Missing Permissions
+          }),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result.announcementsFailed).toBe(1);
+      expect(result.removed).toBe(0);
+      expect(result.error).toContain("may still be public");
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("keeps the row when the role could not be taken back", async () => {
+      // Dropping it would strand the grant: the sweep would never see it.
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(null);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result.removed).toBe(0);
+      expect(result.error).toBeDefined();
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("just deletes the row when no role was ever granted", async () => {
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: undefined }]);
+      const client = makeClient();
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({
+        matched: 1,
+        removed: 1,
+        roleRevoked: false,
+        ...NO_POSTS,
+      });
+      expect(client.guilds.fetch).not.toHaveBeenCalled();
+    });
+
+    it("keeps the revoke on the record when the delete then fails", async () => {
+      // Throwing would collapse a real Discord change into a bare 0/0 in the
+      // purge report, and an operator retrying would not know the role had
+      // already come off (#916).
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      mockBirthdayDeleteMany.mockRejectedValue(new Error("write conflict"));
+      const client = makeClient();
+      const { guild } = guildWithMember(true);
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(guild);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({
+        matched: 1,
+        removed: 0,
+        roleRevoked: true,
+        ...NO_POSTS,
+        error: "write conflict",
+      });
+    });
+
+    it("keeps the row when the member lookup merely failed", async () => {
+      // A rate limit is not proof they left. Reading it as one would delete
+      // the only marker and strand a role still on a present member (#916).
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        members: {
+          fetch: jest.fn(async () => {
+            throw new Error("rate limited");
+          }),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result.removed).toBe(0);
+      expect(result.error).toBeDefined();
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("does not count the same post twice across retries", async () => {
+      // The `announcements` list stays on the row until the delete lands, so
+      // every pass re-reads it and the second one gets an Unknown Message
+      // for a post the first already removed. Summing the passes would
+      // report one deletion as two (#916).
+      const posts = [{ channelId: "chan-1", messageId: "msg-1", year: 2026 }];
+      mockBirthdayFind
+        .mockResolvedValueOnce([
+          { _id: "b1", roleAssignedAt: undefined, announcements: posts },
+        ])
+        .mockResolvedValueOnce([
+          { _id: "b1", roleAssignedAt: undefined, announcements: posts },
+        ]);
+      mockBirthdayDeleteMany
+        .mockResolvedValueOnce({ deletedCount: 0 }) // changed under us
+        .mockResolvedValueOnce({ deletedCount: 1 });
+
+      const client = makeClient();
+      const del = jest
+        .fn<() => Promise<undefined>>()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(apiError(10008)); // already gone on pass two
+      (client.channels.fetch as jest.Mock).mockResolvedValue({
+        isTextBased: () => true,
+        messages: { delete: del },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(del).toHaveBeenCalledTimes(2);
+      expect(result.announcementsAttempted).toBe(1);
+      expect(result.announcementsDeleted).toBe(1);
+      expect(result.removed).toBe(1);
+    });
+
+    it("retries when the run wrote a new role marker mid-purge", async () => {
+      // The reverse ordering: we snapshot a row with no marker, the run
+      // grants a role and saves one, and our conditional delete then matches
+      // nothing. Deleting unconditionally would strand that fresh grant.
+      const withMarker = { _id: "b1", roleAssignedAt: new Date() };
+      mockBirthdayFind
+        .mockResolvedValueOnce([{ _id: "b1", roleAssignedAt: undefined }])
+        .mockResolvedValueOnce([withMarker]);
+      mockBirthdayDeleteMany
+        .mockResolvedValueOnce({ deletedCount: 0 }) // changed under us
+        .mockResolvedValueOnce({ deletedCount: 1 });
+      const client = makeClient();
+      const { guild, remove } = guildWithMember(true);
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(guild);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      // Second pass saw the marker and revoked the role the run just granted.
+      expect(remove).toHaveBeenCalled();
+      expect(result).toEqual({
+        matched: 1,
+        removed: 1,
+        roleRevoked: true,
+        ...NO_POSTS,
+      });
+    });
+
+    it("revokes the role that was granted, not whatever is configured now", async () => {
+      // `birthdays.role_id` can change while a grant is live. Revoking the
+      // configured role would leave the real one on the member and then
+      // delete its only marker (#916).
+      mockBirthdayFind.mockResolvedValue([
+        { _id: "b1", roleAssignedAt: new Date(), roleAssignedId: "old-role" },
+      ]);
+      mockConfigGetString.mockResolvedValue("new-role");
+      const remove = jest.fn(async () => undefined);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        members: {
+          fetch: jest.fn(async () => ({
+            roles: {
+              cache: { has: (id: string) => id === "old-role" },
+              remove,
+            },
+          })),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(remove).toHaveBeenCalledWith("old-role", expect.any(String));
+      expect(result.roleRevoked).toBe(true);
+    });
+
+    it("reports zeros for a member with no birthday", async () => {
+      mockBirthdayFind.mockResolvedValue([]);
+      const client = makeClient();
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+
+      expect(await svc.purgeForUser("guild-1", "user-1")).toEqual({
+        matched: 0,
+        removed: 0,
+        roleRevoked: false,
+        ...NO_POSTS,
+      });
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("drops the row when the member has already left", async () => {
+      // No member, no grant left for the sweep to chase.
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        members: { fetch: jest.fn(async () => null) },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({
+        matched: 1,
+        removed: 1,
+        roleRevoked: true,
+        ...NO_POSTS,
+      });
     });
   });
 });

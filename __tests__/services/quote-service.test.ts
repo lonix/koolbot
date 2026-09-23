@@ -75,8 +75,9 @@ describe("QuoteService", () => {
       expect(quoteService.getQuoteById.length).toBe(1);
     });
 
-    it("updateQuoteMessageId should accept quote ID and message ID", () => {
-      expect(quoteService.updateQuoteMessageId.length).toBe(2);
+    it("updateQuoteMessageId should accept quote ID, message ID and channel", () => {
+      // The channel the post went to is recorded alongside its id (#916).
+      expect(quoteService.updateQuoteMessageId.length).toBe(3);
     });
 
     it("getAllQuotes should accept no parameters", () => {

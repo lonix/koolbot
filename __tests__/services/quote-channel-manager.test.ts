@@ -62,8 +62,10 @@ describe("QuoteChannelManager", () => {
       expect(manager.postQuote.length).toBe(5);
     });
 
-    it("deleteQuoteMessage should accept message ID", () => {
-      expect(manager.deleteQuoteMessage.length).toBe(1);
+    it("deleteQuoteMessage should accept message ID and its channel", () => {
+      // The channel the post went to, so it is still found after the quote
+      // channel is moved (#916).
+      expect(manager.deleteQuoteMessage.length).toBe(2);
     });
 
     it("updateQuoteReactions should accept message ID", () => {

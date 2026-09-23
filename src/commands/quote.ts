@@ -175,6 +175,11 @@ async function handleAdd(
   const quoteText = interaction.options.getString("text", true);
   const author = interaction.options.getUser("author", true);
 
+  // Acknowledge before the database insert and the Discord round-trips that
+  // follow: Discord invalidates an interaction left unanswered for 3 seconds
+  // and the resulting 10062 cannot be recovered (#842).
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   // Add quote to database
   const quote = await quoteService.addQuote(
     quoteText,
@@ -188,25 +193,87 @@ async function handleAdd(
   const quoteChannelManager = QuoteChannelManager.getInstance(
     interaction.client,
   );
-  const messageId = await quoteChannelManager.postQuote(
+  const post = await quoteChannelManager.postQuote(
     quote._id.toString(),
     quote.content,
     quote.authorId,
     quote.addedById,
   );
 
-  if (messageId) {
-    // Update quote with message ID
-    await quoteService.updateQuoteMessageId(quote._id.toString(), messageId);
-    await interaction.reply({
+  if (post) {
+    // Update quote with the message ID *and* the channel it went to, so the
+    // post can still be found after an admin moves the quote channel (#916).
+    const { messageId, channelId } = post;
+    const { stillExists, attributionCleared, recorded } =
+      await quoteService.updateQuoteMessageId(
+        quote._id.toString(),
+        messageId,
+        channelId,
+      );
+    if (!stillExists) {
+      // The row was purged between `addQuote` and the post going up (#916).
+      // Nothing else will ever collect this message — the sweep ignores bot
+      // posts, and the row that pointed at it is gone — so take it down here
+      // rather than leave the quote publicly readable after an erasure.
+      const removed = await quoteChannelManager.deleteQuoteMessage(
+        messageId,
+        channelId,
+      );
+      await interaction.editReply({
+        content: removed
+          ? "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted."
+          : "⚠️ The quote could not be saved — the author's data was reset while it was being added — and the post could not be removed from the quote channel. Please delete it manually.",
+      });
+      return;
+    }
+    if (!recorded) {
+      // The post's id never reached the row, so nothing points at it — the
+      // channel sweep ignores bot messages — and a purge could never find
+      // it. Take it down here (#916).
+      const removed = await quoteChannelManager.deleteQuoteMessage(
+        messageId,
+        channelId,
+      );
+      await interaction.editReply({
+        content: removed
+          ? "⚠️ The quote was saved, but the post could not be recorded and has been removed from the quote channel. Try `/quote add` again."
+          : "⚠️ The quote was saved, but the post could not be recorded and could not be removed from the quote channel either. Please delete it manually.",
+      });
+      return;
+    }
+    if (attributionCleared) {
+      // The saver's data was reset between `addQuote` and the post going up
+      // (#916). The row already carries the anonymisation sentinel, so no
+      // later purge will find it — but the post was drawn from the values
+      // held here and still names them, so repair it now.
+      const repair = await quoteChannelManager.clearSaverAttribution(
+        messageId,
+        quote._id.toString(),
+        quote.content,
+        quote.authorId,
+        channelId,
+      );
+      // Three different things to say: the post is up without the credit,
+      // there is no post at all (the redraw failed and it was taken down),
+      // or it is up and still names them.
+      const outcome = {
+        edited:
+          "✅ Quote added and posted, but your data was reset while it was being added, so the post does not credit you.",
+        missing:
+          "⚠️ Quote added, but your data was reset while it was being added and the post could not be updated, so it was removed from the quote channel.",
+        failed:
+          "⚠️ Quote added and posted, but your data was reset while it was being added and the post still credits you. Please delete it manually.",
+      }[repair];
+      await interaction.editReply({ content: outcome });
+      return;
+    }
+    await interaction.editReply({
       content: "✅ Quote added successfully and posted to the quote channel!",
-      flags: MessageFlags.Ephemeral,
     });
   } else {
-    await interaction.reply({
+    await interaction.editReply({
       content:
         "✅ Quote added to database, but could not post to channel. Check quote channel configuration.",
-      flags: MessageFlags.Ephemeral,
     });
   }
 }

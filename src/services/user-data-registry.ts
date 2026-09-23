@@ -233,7 +233,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     onDelete: "hard-delete",
     subject: "self",
     deleteNote:
-      "Self-declared personal data the member entered themselves; the clearest possible hard delete.",
+      "Self-declared personal data the member entered themselves. Not quite the simple delete it looks: this row is the only record of two things the bot did in Discord — `roleAssignedAt`/`roleAssignedId` for the temporary birthday role, and `announcements` for every birthday message it posted about the member. Both have to be undone before the row goes, or the expiry sweep can never find the grant and the posts naming them (and often their age) stay up for good (#916).",
   },
   {
     source: "src/models/user-notification-prefs.ts",

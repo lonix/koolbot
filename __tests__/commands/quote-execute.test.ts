@@ -20,14 +20,24 @@ import {
 } from "../test-utils.js";
 
 const mockAddQuote = jest.fn<() => Promise<unknown>>();
-const mockUpdateQuoteMessageId = jest.fn<() => Promise<unknown>>();
+const mockUpdateQuoteMessageId = jest.fn<
+  () => Promise<{
+    stillExists: boolean;
+    attributionCleared: boolean;
+    recorded: boolean;
+  }>
+>();
 const mockGetQuoteById = jest.fn<() => Promise<unknown>>();
 const mockEditQuote = jest.fn<() => Promise<unknown>>();
 const mockExportQuotes = jest.fn<() => Promise<unknown>>();
 const mockImportQuotes = jest.fn<() => Promise<unknown>>();
-const mockPostQuote = jest.fn<() => Promise<string | null>>();
+const mockPostQuote =
+  jest.fn<() => Promise<{ messageId: string; channelId: string } | null>>();
 const mockUpdateQuoteMessage = jest.fn<() => Promise<unknown>>();
 const mockResetChannel = jest.fn<() => Promise<{ reposted: number }>>();
+const mockDeleteQuoteMessage = jest.fn<() => Promise<boolean>>();
+const mockClearSaverAttribution =
+  jest.fn<() => Promise<"edited" | "missing" | "failed">>();
 
 jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
   quoteService: {
@@ -46,6 +56,8 @@ jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
       postQuote: mockPostQuote,
       updateQuoteMessage: mockUpdateQuoteMessage,
       resetChannel: mockResetChannel,
+      deleteQuoteMessage: mockDeleteQuoteMessage,
+      clearSaverAttribution: mockClearSaverAttribution,
     }),
   },
 }));
@@ -77,8 +89,17 @@ beforeEach(() => {
     authorId: "author-1",
     addedById: "user-1",
   });
-  mockPostQuote.mockResolvedValue("message-1");
-  mockUpdateQuoteMessageId.mockResolvedValue(undefined);
+  mockPostQuote.mockResolvedValue({
+    messageId: "message-1",
+    channelId: "quote-channel",
+  });
+  mockUpdateQuoteMessageId.mockResolvedValue({
+    stillExists: true,
+    attributionCleared: false,
+    recorded: true,
+  });
+  mockClearSaverAttribution.mockResolvedValue("edited");
+  mockDeleteQuoteMessage.mockResolvedValue(true);
   mockUpdateQuoteMessage.mockResolvedValue(undefined);
   mockEditQuote.mockResolvedValue(undefined);
   mockResetChannel.mockResolvedValue({ reposted: 4 });
@@ -113,10 +134,113 @@ describe("/quote add", () => {
     expect(mockUpdateQuoteMessageId).toHaveBeenCalledWith(
       "quote-1",
       "message-1",
+      "quote-channel",
     );
-    expect(it_.reply).toHaveBeenCalledWith(
+    // Deferred before the DB insert and the Discord round-trips: an
+    // unacknowledged interaction is invalidated after 3 seconds (#842).
+    expect(it_.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(it_.editReply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("✅") }),
     );
+  });
+
+  it("takes the post down when the row was purged mid-add (#916)", async () => {
+    // `addQuote` saves the row before the post goes up. A per-user purge in
+    // that window deletes the row, and nothing else ever collects the post:
+    // the channel sweep ignores bot messages and the row that pointed at it
+    // is gone. So the add path compensates for its own orphan.
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: false,
+      attributionCleared: false,
+      recorded: false,
+    });
+    const it_ = interaction(options);
+    await execute(it_);
+
+    expect(mockDeleteQuoteMessage).toHaveBeenCalledWith(
+      "message-1",
+      "quote-channel",
+    );
+    expect(it_.editReply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("⚠️") }),
+    );
+  });
+
+  it("redraws the post when the saver was purged mid-add (#916)", async () => {
+    // The purge anonymised the row and re-rendered the post it could see —
+    // which is the *originating* message, since `messageId` only becomes the
+    // quote-channel post id on the write above. The post made here is
+    // invisible to it and still credits the member, and the row now holds
+    // the sentinel so no later purge will find it either.
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: true,
+      recorded: true,
+    });
+    const it_ = interaction(options);
+    await execute(it_);
+
+    expect(mockClearSaverAttribution).toHaveBeenCalledWith(
+      "message-1",
+      "quote-1",
+      "Hello",
+      "author-1",
+      "quote-channel",
+    );
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("does not credit you");
+  });
+
+  it("asks for manual cleanup when the redraw fails (#916)", async () => {
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: true,
+      recorded: true,
+    });
+    mockClearSaverAttribution.mockResolvedValue("failed");
+    const it_ = interaction(options);
+    await execute(it_);
+
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("still credits you");
+  });
+
+  it("does not claim a post exists when the redraw removed it (#916)", async () => {
+    // `clearSaverAttribution` falls back to deleting the post it could not
+    // redraw, so "posted, but it does not credit you" would be a lie.
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: true,
+      recorded: true,
+    });
+    mockClearSaverAttribution.mockResolvedValue("missing");
+    const it_ = interaction(options);
+    await execute(it_);
+
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("removed from the quote channel");
+    expect(reply.content).not.toContain("does not credit you");
+  });
+
+  it("removes a post whose id could not be recorded (#916)", async () => {
+    // Nothing points at it and nothing ever will: the channel sweep only
+    // collects non-bot messages.
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: false,
+      recorded: false,
+    });
+    const it_ = interaction(options);
+    await execute(it_);
+
+    expect(mockDeleteQuoteMessage).toHaveBeenCalledWith(
+      "message-1",
+      "quote-channel",
+    );
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("could not be recorded");
   });
 
   it("still confirms the DB write when the channel post failed", async () => {
@@ -125,7 +249,7 @@ describe("/quote add", () => {
     await execute(it_);
 
     expect(mockUpdateQuoteMessageId).not.toHaveBeenCalled();
-    const reply = it_.reply.mock.calls[0][0] as { content: string };
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
     expect(reply.content).toContain("could not post to channel");
   });
 

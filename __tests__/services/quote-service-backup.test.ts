@@ -225,6 +225,42 @@ describe("QuoteService backup & vote persistence", () => {
         dislikes: 1,
       });
     });
+
+    it("round-trips the channel a post went to (#916)", async () => {
+      // Without it a restored row cannot say where its post is, and a purge
+      // would look in whichever channel is configured at the time.
+      model.find.mockReturnValue({
+        sort: jest.fn().mockResolvedValue([
+          {
+            _id: { toString: () => VALID_ID },
+            content: "hi",
+            authorId: "a",
+            addedById: "b",
+            channelId: "c",
+            messageId: "m",
+            postChannelId: "quote-channel",
+            likes: 0,
+            dislikes: 0,
+          },
+        ]),
+      });
+
+      const out = await service.exportQuotes();
+
+      expect(out.quotes[0].postChannelId).toBe("quote-channel");
+
+      model.findOne.mockResolvedValue(null);
+      model.create.mockResolvedValue({});
+      await service.importQuotes({
+        version: 1,
+        exportedAt: "x",
+        quotes: out.quotes,
+      });
+
+      expect(model.create).toHaveBeenCalledWith(
+        expect.objectContaining({ postChannelId: "quote-channel" }),
+      );
+    });
   });
 
   describe("importQuotes", () => {

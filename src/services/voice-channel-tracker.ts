@@ -41,6 +41,108 @@ interface VoiceSession {
   startTime: Date;
   channelId: string;
   channelName: string;
+  /**
+   * Set while an `endTracking` call is persisting this session (#916).
+   *
+   * Discord's emitter does not await its handlers, so a switch still waiting
+   * on its write and a disconnect arriving behind it both read the *same*
+   * session out of `activeSessions` — and both would `$inc totalTime` and
+   * `$push` it, counting one session twice. The flag is a synchronous
+   * test-and-set on the session object, so only the first call persists it;
+   * it is cleared again if that call fails, so the next disconnect retries.
+   */
+  persisting?: boolean;
+}
+
+/**
+ * How many times `forgetActiveSession` will re-check for newly registered
+ * persists before giving up. One round is enough once the session maps are
+ * empty; the rest is belt and braces against an unbounded wait.
+ */
+const MAX_DRAIN_ROUNDS = 10;
+
+/**
+ * The per-session bookkeeping an `endTracking` call takes out of the shared
+ * per-user maps before it starts awaiting (#916).
+ */
+interface ClaimedSessionState {
+  encountered: Set<string> | undefined;
+  since: Map<string, number> | undefined;
+  seconds: Map<string, number> | undefined;
+  firsts: { wasFirst: boolean; joinedExisting: string[] } | undefined;
+}
+
+/**
+ * Close every still-open companion interval on one session's own maps.
+ *
+ * The same work as `accumulateCompanion`, but against maps a caller has
+ * already claimed rather than the live per-user ones — which, by the time a
+ * persist finishes, may belong to a session that started after it (#916).
+ */
+function closeCompanionIntervals(
+  since: Map<string, number>,
+  seconds: Map<string, number>,
+): void {
+  const now = Date.now();
+  for (const [companionId, start] of Array.from(since.entries())) {
+    const elapsed = Math.max(0, Math.floor((now - start) / 1000));
+    seconds.set(companionId, (seconds.get(companionId) ?? 0) + elapsed);
+    since.delete(companionId);
+  }
+}
+
+/**
+ * How long a purge will wait for in-flight persists before giving up on them.
+ *
+ * The round count alone does not bound the wait: an `endTracking` call keeps
+ * going after its Mongo write — Discord fetches, accolade checks,
+ * notifications — and one stalled call would otherwise hang the whole purge,
+ * so the later collection deletes and the web-session revoke never run. A
+ * timeout turns that into one incomplete step instead of a stuck purge.
+ */
+const DRAIN_TIMEOUT_MS = 15_000;
+
+/** What `forgetActiveSession` had to do for a member (#916). */
+export interface ForgottenSession {
+  /** An in-memory session was dropped before it could be persisted. */
+  discarded: boolean;
+  /**
+   * A persist that had already read its session was waited out rather than
+   * left to land after the purge's delete.
+   */
+  drained: boolean;
+  /**
+   * A persist was still running when the wait timed out. Its write may yet
+   * land after the purge's delete, so the caller reports the voice step as
+   * incomplete — and carries on with the rest of the purge rather than
+   * hanging on it.
+   */
+  timedOut: boolean;
+}
+
+/**
+ * Wait for every promise to settle, or give up after `timeoutMs`. Returns
+ * whether they all settled in time. `endTracking` swallows its own errors,
+ * but `allSettled` is used anyway so one rejection cannot abandon the rest.
+ */
+async function settleWithin(
+  promises: Iterable<Promise<unknown>>,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+    // Do not hold the process open just to time a drain out.
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([
+      Promise.allSettled([...promises]).then(() => true),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export class VoiceChannelTracker {
@@ -61,6 +163,35 @@ export class VoiceChannelTracker {
     string,
     { wasFirst: boolean; joinedExisting: string[] }
   > = new Map();
+  /**
+   * In-flight `endTracking` calls, keyed by user id (#916).
+   *
+   * `endTracking` reads `activeSessions` at its top and only reaches its
+   * `upsert: true` write many awaits later, so evicting the maps does not
+   * stop a persist that already got past that read: its write can land
+   * *after* a purge deleted the row and resurrect it. `forgetActiveSession`
+   * drains this map so the purge can wait the window out rather than race it.
+   *
+   * It is a **set** per user, not one promise. `voiceStateUpdate` handlers
+   * are async and the emitter does not serialise them, so a switch followed
+   * closely by a disconnect can leave two `endTracking` calls running for
+   * one member. Keeping only the latest meant the newer one finishing first
+   * would clear the entry while the older write was still pending, and the
+   * drain would sail straight past it.
+   */
+  private endingSessions: Map<string, Set<Promise<void>>> = new Map();
+  /**
+   * Bumped every time a member is evicted by a purge (#916).
+   *
+   * Draining `endTracking` is not enough on its own: a channel *switch*
+   * awaits `endTracking` and then calls `startTracking`, so an update that
+   * began before the eviction can restart tracking after the drain finished
+   * — and the next disconnect upserts the row the purge just deleted. A
+   * voice-state update reads this counter when it starts and checks it again
+   * before restarting tracking; a bump in between means a purge happened and
+   * the restart is abandoned.
+   */
+  private purgeGenerations: Map<string, number> = new Map();
   private client: Client;
   private mongo = new MongoConnectionGuard("voice channel tracker");
   private configService: ConfigService;
@@ -100,9 +231,28 @@ export class VoiceChannelTracker {
    * orphaned co-presence state behind for a later session to inherit.
    *
    * The maps are private, so this cannot be done from outside the service.
+   *
+   * **Eviction alone is not enough**, which is why this is async. A
+   * disconnect that reached `endTracking` before the eviction has already
+   * read its session out of the map, and its `upsert: true` write is still
+   * to come — clearing the maps cannot call that write back. So after
+   * evicting, this waits for any persist already in flight for the member to
+   * finish. The purge's own delete then runs strictly after it, and the row
+   * stays deleted.
+   *
+   * Returns what it had to do, so the purge coordinator (#916) can record it:
+   * a purge that caught a member mid-session is exactly the case an operator
+   * reading a partial purge wants to see.
    */
-  public forgetActiveSession(userId: string): void {
+  public async forgetActiveSession(userId: string): Promise<ForgottenSession> {
     const hadSession = this.activeSessions.has(userId);
+
+    // Evict first: from here on, a disconnect finds no session and returns
+    // before it writes anything. Only a persist already past that read is
+    // left, and that is what the drain below waits for.
+    // Bump first: an update already past its own read will now see a
+    // different generation and abandon any restart.
+    this.purgeGenerations.set(userId, this.purgeGeneration(userId) + 1);
 
     this.activeSessions.delete(userId);
     this.userChannels.delete(userId);
@@ -111,11 +261,66 @@ export class VoiceChannelTracker {
     this.companionSeconds.delete(userId);
     this.sessionFirsts.delete(userId);
 
+    const { drained, timedOut } = await this.drainEndingSessions(userId);
+
     if (hadSession) {
       logger.info(
         `Discarded in-flight voice session for user ${userId}; the disconnect handler will not persist it`,
       );
     }
+    return { discarded: hadSession, drained, timedOut };
+  }
+
+  /**
+   * Wait for every `endTracking` still running for a member.
+   *
+   * Loops rather than awaiting one snapshot: a call registered while we were
+   * waiting on the previous batch would otherwise slip through. It
+   * terminates because the eviction above has already emptied
+   * `activeSessions`, so any call starting from here returns before it
+   * writes — the bound is belt and braces against an unforeseen source of
+   * new work, not a case we expect to hit.
+   */
+  private async drainEndingSessions(
+    userId: string,
+  ): Promise<{ drained: boolean; timedOut: boolean }> {
+    let drainedAny = false;
+    const deadline = Date.now() + DRAIN_TIMEOUT_MS;
+
+    for (let round = 0; round < MAX_DRAIN_ROUNDS; round++) {
+      const pending = this.endingSessions.get(userId);
+      if (!pending || pending.size === 0) {
+        return { drained: drainedAny, timedOut: false };
+      }
+
+      if (!drainedAny) {
+        logger.info(
+          `Waiting for ${pending.size} in-flight voice session persist(s) for user ${userId} before the purge continues`,
+        );
+      }
+      drainedAny = true;
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || !(await settleWithin(pending, remaining))) {
+        // An `endTracking` call does more than its write — Discord fetches,
+        // accolade checks — so a stall there must not take the rest of the
+        // purge down with it. Report it and move on.
+        logger.warn(
+          `Timed out waiting for in-flight voice session persist(s) for user ${userId}; the purge will continue and report the step as incomplete`,
+        );
+        return { drained: drainedAny, timedOut: true };
+      }
+    }
+
+    logger.warn(
+      `Gave up draining in-flight voice session persists for user ${userId} after ${MAX_DRAIN_ROUNDS} rounds`,
+    );
+    return { drained: drainedAny, timedOut: true };
+  }
+
+  /** The member's current purge generation (see `purgeGenerations`). */
+  private purgeGeneration(userId: string): number {
+    return this.purgeGenerations.get(userId) ?? 0;
   }
 
   public async handleVoiceStateUpdate(
@@ -123,6 +328,18 @@ export class VoiceChannelTracker {
     newState: VoiceState,
   ): Promise<void> {
     try {
+      const member = newState.member || oldState.member; // Try to get member from either state
+      if (!member) {
+        logger.info(`No member found in voice state update`);
+        return;
+      }
+      // Before the first await, not after: a handler that yielded on the
+      // config read below and resumed after a purge would otherwise read the
+      // *new* generation and be waved through, installing a session for an
+      // event that predates the erasure. Reading it here means every handler
+      // already in flight carries a pre-purge token (#916).
+      const generation = this.purgeGeneration(member.id);
+
       // Check if voice tracking is enabled
       const isEnabled = await this.configService.getBoolean(
         "voicetracking.enabled",
@@ -130,12 +347,6 @@ export class VoiceChannelTracker {
       );
       if (!isEnabled) {
         return; // Voice tracking is disabled
-      }
-
-      const member = newState.member || oldState.member; // Try to get member from either state
-      if (!member) {
-        logger.info(`No member found in voice state update`);
-        return;
       }
 
       const oldChannel = oldState.channel;
@@ -159,18 +370,31 @@ export class VoiceChannelTracker {
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in channel ${newChannel.name}`,
         );
-        await this.startTracking(member, newChannel.id, newChannel.name);
+        await this.startTracking(
+          member,
+          newChannel.id,
+          newChannel.name,
+          generation,
+        );
       }
       // User switched channels
       else if (oldChannel && newChannel) {
         logger.info(
           `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
         );
-        await this.endTracking(member.id);
+        await this.endTrackingTracked(member.id);
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
         );
-        await this.startTracking(member, newChannel.id, newChannel.name);
+        // `startTracking` re-checks `generation` immediately before it
+        // writes, so a purge landing anywhere in this transition — including
+        // during its own config reads — cannot leave a session behind.
+        await this.startTracking(
+          member,
+          newChannel.id,
+          newChannel.name,
+          generation,
+        );
       }
       // User left a channel (disconnect) - handle both cases:
       // 1. oldChannel exists but newChannel is null (direct disconnect)
@@ -188,7 +412,7 @@ export class VoiceChannelTracker {
             `Found active session in channel ${activeSession.channelName} (${activeSession.channelId})`,
           );
         }
-        await this.endTracking(member.id);
+        await this.endTrackingTracked(member.id);
       }
 
       // Track users joining/leaving channels where we have active sessions
@@ -321,10 +545,18 @@ export class VoiceChannelTracker {
     }
   }
 
+  /**
+   * @param generation the caller's purge generation, read before it started.
+   *   Checked again immediately before the session maps are written: the
+   *   config and Mongo work above yields to the event loop, so a purge can
+   *   evict *between* the caller's own check and this write, and the session
+   *   we are about to create would outlive it (#916).
+   */
   private async startTracking(
     member: GuildMember,
     channelId: string,
     channelName: string,
+    generation: number,
   ): Promise<void> {
     try {
       const debugModeEnabled = isDebugMode();
@@ -337,6 +569,15 @@ export class VoiceChannelTracker {
             `[DEBUG] Channel ${channelName} (${channelId}) is excluded from tracking`,
           );
         }
+        return;
+      }
+
+      // Last possible moment before the write, so nothing can slip between
+      // the check and the mutation.
+      if (this.purgeGeneration(member.id) !== generation) {
+        logger.info(
+          `Not starting tracking for user ${member.id}: their data was reset while this update was in flight`,
+        );
         return;
       }
 
@@ -389,12 +630,44 @@ export class VoiceChannelTracker {
     }
   }
 
+  /**
+   * Run `endTracking` while recording it as in flight, so
+   * `forgetActiveSession` can wait for it (#916). Every call site goes
+   * through here; calling `endTracking` directly reopens the race.
+   */
+  private async endTrackingTracked(userId: string): Promise<void> {
+    const pending = this.endingSessions.get(userId) ?? new Set();
+    this.endingSessions.set(userId, pending);
+
+    const running: Promise<void> = this.endTracking(userId).finally(() => {
+      pending.delete(running);
+      if (pending.size === 0) this.endingSessions.delete(userId);
+    });
+    pending.add(running);
+    await running;
+  }
+
   private async endTracking(userId: string): Promise<void> {
+    // Hoisted so the failure path can hand the claimed bookkeeping back:
+    // `activeSessions` is deliberately left in place when the persist throws,
+    // so the session is retried on the next disconnect, and it has to be
+    // retried with the co-presence it was claimed with (#916).
+    let session: VoiceSession | undefined;
+    let claimed: ClaimedSessionState | undefined;
+
     try {
       const debugModeEnabled = isDebugMode();
       await this.mongo.ensureConnection();
 
-      const session = this.activeSessions.get(userId);
+      session = this.activeSessions.get(userId);
+      if (session?.persisting) {
+        // Another handler is already writing this very session. Persisting
+        // it again would double-count it (#916).
+        logger.info(
+          `Skipping end-tracking for user ${userId}: this session is already being persisted`,
+        );
+        return;
+      }
       if (!session) {
         if (debugModeEnabled) {
           logger.info(
@@ -403,6 +676,27 @@ export class VoiceChannelTracker {
         }
         return;
       }
+
+      // Take this session's bookkeeping out of the shared per-user maps in
+      // one synchronous step (#916). Everything below awaits — a user fetch,
+      // a config read, the write itself — and a rejoin in that window
+      // installs a *new* session against the same keys. Sharing them would
+      // count the new session's co-presence into this document and then wipe
+      // it along with this one, so the rejoin's own disconnect would find
+      // nothing to record.
+      // Claimed synchronously, before the first await below, so a handler
+      // arriving behind this one sees the flag rather than the session.
+      session.persisting = true;
+      claimed = {
+        encountered: this.encounteredUsers.get(userId),
+        since: this.companionSince.get(userId),
+        seconds: this.companionSeconds.get(userId),
+        firsts: this.sessionFirsts.get(userId),
+      };
+      this.encounteredUsers.delete(userId);
+      this.companionSince.delete(userId);
+      this.companionSeconds.delete(userId);
+      this.sessionFirsts.delete(userId);
 
       const endTime = new Date();
       const duration = Math.floor(
@@ -423,9 +717,8 @@ export class VoiceChannelTracker {
       }
 
       // Get accumulated users from the encountered users Set
-      const encounteredSet = this.encounteredUsers.get(userId);
-      const otherUsers: string[] = encounteredSet
-        ? Array.from(encounteredSet)
+      const otherUsers: string[] = claimed.encountered
+        ? Array.from(claimed.encountered)
         : [];
 
       // Build the optional companion/firsts payload only when the feature is
@@ -444,26 +737,27 @@ export class VoiceChannelTracker {
         otherUsers,
       };
       if (companionsEnabled) {
-        // Close any still-open companion intervals so the final session reflects
-        // everyone who was co-present right up to the disconnect.
-        const stillOpen = this.companionSince.get(userId);
-        if (stillOpen) {
-          for (const companionId of Array.from(stillOpen.keys())) {
-            this.accumulateCompanion(userId, companionId);
-          }
-        }
-        const seconds = this.companionSeconds.get(userId);
-        sessionDoc.companions = seconds
-          ? Array.from(seconds.entries()).map(([id, secs]) => ({
-              userId: id,
-              seconds: secs,
-            }))
-          : [];
-        const firsts = this.sessionFirsts.get(userId);
-        sessionDoc.wasFirst = firsts
-          ? firsts.wasFirst
+        // Close any still-open companion intervals so the final session
+        // reflects everyone who was co-present right up to the disconnect.
+        // On copies of the claimed maps: `accumulateCompanion` reads
+        // `this.companionSince`, which by now may belong to a rejoin, and
+        // the claimed maps themselves must survive intact in case the write
+        // below fails and this session is handed back for a retry.
+        const since = new Map(claimed.since ?? []);
+        const seconds = new Map(claimed.seconds ?? []);
+        closeCompanionIntervals(since, seconds);
+        sessionDoc.companions = Array.from(seconds.entries()).map(
+          ([id, secs]) => ({
+            userId: id,
+            seconds: secs,
+          }),
+        );
+        sessionDoc.wasFirst = claimed.firsts
+          ? claimed.firsts.wasFirst
           : otherUsers.length === 0;
-        sessionDoc.joinedExisting = firsts ? firsts.joinedExisting : [];
+        sessionDoc.joinedExisting = claimed.firsts
+          ? claimed.firsts.joinedExisting
+          : [];
       }
 
       // Update or create user tracking record
@@ -482,12 +776,15 @@ export class VoiceChannelTracker {
         { upsert: true, new: true },
       );
 
-      this.activeSessions.delete(userId);
-      this.userChannels.delete(userId);
-      this.encounteredUsers.delete(userId);
-      this.companionSince.delete(userId);
-      this.companionSeconds.delete(userId);
-      this.sessionFirsts.delete(userId);
+      // Only the session this call actually persisted. A rejoin during the
+      // write above installs a new one, and clearing that here would lose it
+      // outright — its own disconnect would find no session to record (#916).
+      // The companion maps need no cleanup: they were claimed at the top, so
+      // anything under these keys now belongs to a later session.
+      if (this.activeSessions.get(userId) === session) {
+        this.activeSessions.delete(userId);
+        this.userChannels.delete(userId);
+      }
 
       if (debugModeEnabled) {
         logger.info(
@@ -529,6 +826,43 @@ export class VoiceChannelTracker {
       }
     } catch (error: unknown) {
       logger.error("Error ending voice tracking:", error);
+      // The session stays in `activeSessions` for the next disconnect to
+      // retry, so its bookkeeping has to go back too — otherwise the retry
+      // persists a session with no companions and no encountered users.
+      this.returnClaimedState(userId, session, claimed);
+    }
+  }
+
+  /**
+   * Hand a failed persist's claimed bookkeeping back to the live maps.
+   *
+   * Only while the same session still owns the key: a rejoin that started
+   * during the failed persist has its own, newer state under these keys and
+   * must not be overwritten by a session that is already over. Each map is
+   * restored only if nothing has been put there since, for the same reason.
+   */
+  private returnClaimedState(
+    userId: string,
+    session: VoiceSession | undefined,
+    claimed: ClaimedSessionState | undefined,
+  ): void {
+    if (!session || !claimed) return;
+    // Released either way: the session stays in `activeSessions` for the
+    // next disconnect to retry, and a retry has to be allowed to run.
+    session.persisting = false;
+    if (this.activeSessions.get(userId) !== session) return;
+
+    if (claimed.encountered && !this.encounteredUsers.has(userId)) {
+      this.encounteredUsers.set(userId, claimed.encountered);
+    }
+    if (claimed.since && !this.companionSince.has(userId)) {
+      this.companionSince.set(userId, claimed.since);
+    }
+    if (claimed.seconds && !this.companionSeconds.has(userId)) {
+      this.companionSeconds.set(userId, claimed.seconds);
+    }
+    if (claimed.firsts && !this.sessionFirsts.has(userId)) {
+      this.sessionFirsts.set(userId, claimed.firsts);
     }
   }
 

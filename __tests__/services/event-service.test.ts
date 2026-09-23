@@ -310,10 +310,12 @@ describe("removeRsvp", () => {
     return EventService.getInstance({} as never);
   }
 
-  function stubEvents(
-    rows: Array<{ _id: string; state: string }>,
-  ): jest.Mock {
-    EventMock.find = jest.fn(async () => rows);
+  function stubEvents(rows: Array<{ _id: string; state: string }>): jest.Mock {
+    // Every matched row carries the RSVP being removed: the announcement is
+    // now rendered from the row with it dropped in memory, before the pull.
+    EventMock.find = jest.fn(async () =>
+      rows.map((row) => ({ ...row, rsvps: [{ userId: "user-1" }] })),
+    );
     const updated = jest.fn(async (id: unknown) => {
       const row = rows.find((r) => r._id === id);
       return row ? { ...row, rsvps: [], guildId: "guild-1" } : null;
@@ -327,14 +329,14 @@ describe("removeRsvp", () => {
     const svc = buildService();
     const render = jest
       .spyOn(
-        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     const removed = await svc.removeRsvp("guild-1", "user-1");
 
-    expect(removed).toBe(1);
+    expect(removed).toEqual({ matched: 1, removed: 1, rendersFailed: 0 });
     expect(EventMock.find).toHaveBeenCalledWith({
       guildId: "guild-1",
       "rsvps.userId": "user-1",
@@ -358,14 +360,14 @@ describe("removeRsvp", () => {
     const svc = buildService();
     jest
       .spyOn(
-        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     const removed = await svc.removeRsvp("guild-1", "user-1");
 
-    expect(removed).toBe(3);
+    expect(removed).toEqual({ matched: 3, removed: 3, rendersFailed: 0 });
     const [filter] = EventMock.find.mock.calls[0] as [Record<string, unknown>];
     expect(filter).not.toHaveProperty("state");
   });
@@ -383,55 +385,189 @@ describe("removeRsvp", () => {
         },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     await svc.removeRsvp("guild-1", "user-1");
 
     // Editing a finished event's post is churn nobody reads.
     expect(render).toHaveBeenCalledTimes(1);
-    expect(
-      (render.mock.calls[0] as [{ _id: string }])[0]._id,
-    ).toBe("e-live");
+    expect((render.mock.calls[0] as [{ _id: string }])[0]._id).toBe("e-live");
   });
 
-  it("re-renders from the post-pull document so the counts are right", async () => {
-    EventMock.find = jest.fn(async () => [{ _id: "e1", state: "scheduled" }]);
-    const afterPull = { _id: "e1", state: "scheduled", rsvps: [] };
-    EventMock.findByIdAndUpdate = jest.fn(async () => afterPull);
+  it("re-renders without the member, before the pull that removes them", async () => {
+    // The announcement goes first: `rsvps.userId` is the only way back to
+    // this event, so pulling and then failing to render would leave the
+    // member listed on a post nothing can select again (#916). The embed is
+    // built from the row with the RSVP dropped in memory, never saved.
+    EventMock.find = jest.fn(async () => [
+      {
+        _id: "e1",
+        state: "scheduled",
+        rsvps: [{ userId: "user-1" }, { userId: "user-2" }],
+      },
+    ]);
+    EventMock.findByIdAndUpdate = jest.fn(async () => ({
+      _id: "e1",
+      state: "scheduled",
+      rsvps: [{ userId: "user-2" }],
+    }));
     const svc = buildService();
     const render = jest
       .spyOn(
         svc as unknown as { updateAnnouncement: (e: unknown) => Promise<void> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     await svc.removeRsvp("guild-1", "user-1");
 
-    expect(render).toHaveBeenCalledWith(afterPull);
+    const rendered = (render.mock.calls[0] as [{ rsvps: unknown[] }])[0];
+    expect(rendered.rsvps).toEqual([{ userId: "user-2" }]);
+    expect(render.mock.invocationCallOrder[0]).toBeLessThan(
+      (EventMock.findByIdAndUpdate as jest.Mock).mock.invocationCallOrder[0],
+    );
+  });
+
+  it("keeps the RSVP when the announcement could not be refreshed", async () => {
+    // Leaving it in place is what keeps the event findable by
+    // `rsvps.userId`, so a retry can still take the member off the post.
+    stubEvents([{ _id: "e1", state: "scheduled" }]);
+    const svc = buildService();
+    jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(false);
+
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 1,
+      removed: 0,
+      rendersFailed: 1,
+    });
+    expect(EventMock.findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("returns 0 without writing when the member has no RSVPs", async () => {
     stubEvents([]);
     const svc = buildService();
 
-    expect(await svc.removeRsvp("guild-1", "user-1")).toBe(0);
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 0,
+      removed: 0,
+      rendersFailed: 0,
+    });
     expect(EventMock.findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
   it("skips an event that vanished between the scan and the pull", async () => {
-    EventMock.find = jest.fn(async () => [{ _id: "gone", state: "scheduled" }]);
+    EventMock.find = jest.fn(async () => [
+      { _id: "gone", state: "scheduled", rsvps: [{ userId: "user-1" }] },
+    ]);
     EventMock.findByIdAndUpdate = jest.fn(async () => null);
     const svc = buildService();
     const render = jest
       .spyOn(
-        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
-    expect(await svc.removeRsvp("guild-1", "user-1")).toBe(0);
-    expect(render).not.toHaveBeenCalled();
+    // Matched but not removed: the scan found it, the pull did not. A
+    // shortfall like this is what makes a partial removal visible in the
+    // purge report instead of passing as a smaller success (#916).
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 1,
+      removed: 0,
+      rendersFailed: 0,
+    });
+    // The render happens before the pull now, so it did run.
+    expect(render).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps clearing the other events when one pull throws", async () => {
+    // A throw used to reject the whole call, so the purge report said
+    // nothing had happened even though RSVPs really had been cleared (#916).
+    EventMock.find = jest.fn(async () => [
+      { _id: "e1", state: "scheduled", rsvps: [{ userId: "user-1" }] },
+      { _id: "e2", state: "scheduled", rsvps: [{ userId: "user-1" }] },
+      { _id: "e3", state: "scheduled", rsvps: [{ userId: "user-1" }] },
+    ]);
+    EventMock.findByIdAndUpdate = jest.fn(async (id: unknown) => {
+      if (id === "e2") throw new Error("write conflict");
+      return { _id: id, state: "ended", rsvps: [] };
+    });
+    // The failed pull is re-read: the RSVP is still there, so the write
+    // really did not apply and the announcement is not stale.
+    EventMock.findById = jest.fn(async (id: unknown) => ({
+      _id: id,
+      state: "scheduled",
+      rsvps: [{ userId: "user-1" }],
+    }));
+    const svc = buildService();
+    jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(true);
+
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 3,
+      removed: 2,
+      rendersFailed: 0,
+    });
+  });
+
+  it("refreshes the announcement when a failed pull actually applied", async () => {
+    // A write can apply and still reject — a lost acknowledgement is enough.
+    // The row is then clean, so no retry ever matches this event on
+    // `rsvps.userId` again, and the announcement would list the member for
+    // good unless this path redraws it (#916).
+    EventMock.find = jest.fn(async () => [
+      { _id: "e1", state: "scheduled", rsvps: [{ userId: "user-1" }] },
+    ]);
+    EventMock.findByIdAndUpdate = jest.fn(async () => {
+      throw new Error("connection reset");
+    });
+    EventMock.findById = jest.fn(async (id: unknown) => ({
+      _id: id,
+      state: "scheduled",
+      rsvps: [], // the pull did land
+    }));
+    const svc = buildService();
+    const render = jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(true);
+
+    const result = await svc.removeRsvp("guild-1", "user-1");
+
+    expect(render).toHaveBeenCalled();
+    // The write is still reported as failed — `removed` stays 0 — but the
+    // public post no longer lists them, so nothing is owed on that side.
+    expect(result).toEqual({ matched: 1, removed: 0, rendersFailed: 0 });
+  });
+
+  it("counts an unverifiable failed pull as an announcement still owed", async () => {
+    EventMock.find = jest.fn(async () => [
+      { _id: "e1", state: "scheduled", rsvps: [{ userId: "user-1" }] },
+    ]);
+    EventMock.findByIdAndUpdate = jest.fn(async () => {
+      throw new Error("connection reset");
+    });
+    EventMock.findById = jest.fn(async () => {
+      throw new Error("still down");
+    });
+    const svc = buildService();
+
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 1,
+      removed: 0,
+      rendersFailed: 1,
+    });
   });
 });
 

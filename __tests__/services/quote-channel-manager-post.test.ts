@@ -25,6 +25,9 @@ jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
 
 function makeChannel(message: any) {
   return {
+    // The id is reported back with the message id: a post has to stay
+    // findable after the quote channel is moved (#916).
+    id: "quote-channel",
     isTextBased: jest.fn().mockReturnValue(true),
     isDMBased: jest.fn().mockReturnValue(false),
     send: jest.fn().mockResolvedValue(message),
@@ -62,7 +65,10 @@ describe("QuoteChannelManager.postQuote - reaction failure handling", () => {
     const manager = await loadManager();
     const result = await manager.postQuote("q1", "hello", "author1", "adder1");
 
-    expect(result).toBe("msg123");
+    expect(result).toEqual({
+      messageId: "msg123",
+      channelId: "quote-channel",
+    });
     expect(channel.send).toHaveBeenCalledTimes(1);
     expect(message.react).toHaveBeenCalledWith("👍");
     expect(message.react).toHaveBeenCalledWith("👎");
@@ -80,7 +86,10 @@ describe("QuoteChannelManager.postQuote - reaction failure handling", () => {
     const result = await manager.postQuote("q2", "world", "author2", "adder2");
 
     // The message was posted; a reaction hiccup must not orphan it (issue #776).
-    expect(result).toBe("msg456");
+    expect(result).toEqual({
+      messageId: "msg456",
+      channelId: "quote-channel",
+    });
     expect(channel.send).toHaveBeenCalledTimes(1);
     expect(message.react).toHaveBeenCalled();
   });

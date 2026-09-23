@@ -11,6 +11,7 @@ import { VoiceChannelTracker, TimePeriod } from "./voice-channel-tracker.js";
 import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
+import { fetchMemberOrNull } from "../utils/moderation-guards.js";
 
 /** Weekly, Monday 00:00 — the schedule leaderboard roles ship with. */
 const DEFAULT_CRON = "0 0 * * 1";
@@ -351,6 +352,10 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
    * the same recovery `reconcileTier` already applies to its own failures
    * (`finalHolders.add(userId)` in its catch).
    *
+   * Each role is handled independently: a failure on one is recorded as
+   * retained and the rest still run, so a partial revoke is reported as a
+   * partial revoke rather than thrown away (#916).
+   *
    * The pull runs server-side as a `$pull` rather than a read-modify-write:
    * `reconcileTier` writes the whole `userIds` array in one
    * `findOneAndUpdate`, so a reconcile landing between our read and our write
@@ -380,13 +385,27 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     }
 
     for (const row of rows) {
-      if (await this.revokeOneRole(guild, row.roleId, userId)) {
-        await LeaderboardRoleAssignment.updateOne(
-          { guildId, roleId: row.roleId },
-          { $pull: { userIds: userId } },
+      // Per role, so one failure cannot discard the record of the roles
+      // already taken back (#916). A throw here used to reject the whole
+      // method, and the purge report then said nothing had happened at all
+      // — while the member really had lost roles on Discord.
+      try {
+        if (await this.revokeOneRole(guild, row.roleId, userId)) {
+          await LeaderboardRoleAssignment.updateOne(
+            { guildId, roleId: row.roleId },
+            { $pull: { userIds: userId } },
+          );
+          result.revoked.push(row.roleId);
+        } else {
+          result.retained.push(row.roleId);
+        }
+      } catch (error) {
+        // Retained is the safe classification either way: the id stays on
+        // the roster, so the next reconcile retries the whole role.
+        logger.error(
+          `Leaderboard role revoke for ${userId}: role ${row.roleId} failed; left on the roster for retry:`,
+          error,
         );
-        result.revoked.push(row.roleId);
-      } else {
         result.retained.push(row.roleId);
       }
     }
@@ -418,7 +437,13 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       return true;
     }
 
-    const member = await this.safeFetchMember(guild, userId);
+    // `fetchMemberOrNull`, not the service's own `safeFetchMember`: that one
+    // swallows every error, so a rate limit would read as "they left" and the
+    // roster entry — the only handle anything has on this grant — would be
+    // dropped while the role sat on a member who is still here (#916). This
+    // returns null only for a definitive 10007/10013 and rethrows the rest,
+    // which the caller classifies as retained.
+    const member = await fetchMemberOrNull(guild, userId);
     if (!member) {
       // Left the guild: the role went with them. Same call `reconcileTier`
       // makes when a previous holder is unreachable.

@@ -271,7 +271,12 @@ describe("VoiceChannelTracker", () => {
       await joinChannel(tracker, member, channel);
       expect(tracker.getActiveSession("user123")).not.toBeNull();
 
-      tracker.forgetActiveSession("user123");
+      const forgotten = await tracker.forgetActiveSession("user123");
+      expect(forgotten).toEqual({
+        discarded: true,
+        drained: false,
+        timedOut: false,
+      });
       expect(tracker.getActiveSession("user123")).toBeNull();
 
       (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
@@ -282,10 +287,388 @@ describe("VoiceChannelTracker", () => {
       expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
-    it("is a no-op for a member with no active session", () => {
+    it("is a no-op for a member with no active session", async () => {
       const { tracker } = createTracker(mockClient);
-      expect(() => tracker.forgetActiveSession("nobody")).not.toThrow();
+      await expect(tracker.forgetActiveSession("nobody")).resolves.toEqual({
+        discarded: false,
+        drained: false,
+        timedOut: false,
+      });
       expect(tracker.getActiveSession("nobody")).toBeNull();
+    });
+
+    it("waits for a persist that already read its session (#916)", async () => {
+      // Evicting the maps cannot call back an `endTracking` that is already
+      // past its `activeSessions.get`: its `upsert: true` write is still to
+      // come, and if it lands after the purge's delete the row — and the
+      // whole session's `totalTime` — is resurrected. So the eviction has to
+      // wait that write out rather than race it.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+      await joinChannel(tracker, member, channel);
+
+      // Hold the persist open so the eviction lands while it is in flight.
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((startResolve) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () => {
+            startResolve();
+            return new Promise((writeResolve) => {
+              releaseWrite = () => writeResolve({});
+            });
+          },
+        );
+      });
+
+      const disconnect = leaveChannel(tracker, member, channel);
+      await writeStarted;
+
+      let forgetSettled = false;
+      const forgetting = tracker
+        .forgetActiveSession("user123")
+        .then((result) => {
+          forgetSettled = true;
+          return result;
+        });
+
+      // Still blocked: the write has not finished, so neither has the purge's
+      // permission to delete the row.
+      await Promise.resolve();
+      expect(forgetSettled).toBe(false);
+
+      releaseWrite();
+      await disconnect;
+
+      await expect(forgetting).resolves.toEqual({
+        // Both at once, which is exactly the dangerous shape: the map still
+        // held the session (`endTracking` only clears it after the write),
+        // so eviction alone would have looked like a clean discard while the
+        // write it could not call back was still on its way.
+        discarded: true,
+        drained: true,
+        timedOut: false,
+      });
+      expect(VoiceChannelTracking.findOneAndUpdate).toHaveBeenCalled();
+    });
+
+    it("drains every overlapping persist, not just the newest (#916)", async () => {
+      // `voiceStateUpdate` handlers are async and the emitter does not
+      // serialise them, so a switch followed closely by a disconnect can
+      // leave two `endTracking` calls running for one member. Keeping only
+      // the latest meant the newer one finishing first cleared the entry
+      // while the older write was still pending — and the drain sailed
+      // straight past it, letting that write recreate the purged row.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+
+      // Each persist hangs until its own release is called.
+      const releases: Array<() => void> = [];
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+        () => new Promise((resolve) => releases.push(() => resolve({}))),
+      );
+
+      /** Yield until `count` persists have reached their write. */
+      async function writesStarted(count: number): Promise<void> {
+        for (let tick = 0; tick < 100 && releases.length < count; tick++) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        expect(releases.length).toBe(count);
+      }
+
+      // Two overlapping persists for the same member.
+      await joinChannel(tracker, member, channel);
+      const first = leaveChannel(tracker, member, channel);
+      await writesStarted(1);
+      await joinChannel(tracker, member, channel);
+      const second = leaveChannel(tracker, member, channel);
+      await writesStarted(2);
+
+      // The newer one finishes first — the case that used to clear the entry.
+      releases[1]();
+      await second;
+
+      let forgetSettled = false;
+      const forgetting = tracker
+        .forgetActiveSession("user123")
+        .then((result) => {
+          forgetSettled = true;
+          return result;
+        });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(forgetSettled).toBe(false);
+
+      releases[0]();
+      await first;
+
+      await expect(forgetting).resolves.toMatchObject({ drained: true });
+    });
+
+    it("gives up on a persist that never settles, rather than hanging (#916)", async () => {
+      // `endTracking` keeps going past its Mongo write — Discord fetches,
+      // accolade checks — so one stalled call must not take the rest of the
+      // purge with it. The wait is bounded and the step is reported as
+      // incomplete instead.
+      jest.useFakeTimers();
+      try {
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        mockConfigService.getBoolean.mockResolvedValue(true);
+        mockConfigService.get.mockResolvedValue(null);
+        (mockClient.users as any).fetch = jest
+          .fn()
+          .mockResolvedValue({ username: "user123", id: "user123" });
+
+        const member = memberIn("user123");
+        const channel = {
+          id: "channel123",
+          name: "TestChannel",
+        } as unknown as VoiceChannel;
+
+        // This persist never resolves.
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () => new Promise(() => {}),
+        );
+
+        await joinChannel(tracker, member, channel);
+        void leaveChannel(tracker, member, channel);
+        // Let the disconnect reach its (hanging) write.
+        await jest.advanceTimersByTimeAsync(0);
+
+        const forgetting = tracker.forgetActiveSession("user123");
+        // Nothing settles on its own; only the timeout releases the wait.
+        await jest.advanceTimersByTimeAsync(20_000);
+
+        await expect(forgetting).resolves.toMatchObject({
+          drained: true,
+          timedOut: true,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it("does not restart tracking for a switch interrupted by a purge (#916)", async () => {
+      // A channel switch awaits `endTracking` and then calls `startTracking`.
+      // Without a generation check the restart lands after the eviction, and
+      // the next disconnect upserts the row the purge just deleted.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const oldChannel = {
+        id: "channel-a",
+        name: "A",
+      } as unknown as VoiceChannel;
+      const newChannel = {
+        id: "channel-b",
+        name: "B",
+      } as unknown as VoiceChannel;
+
+      await joinChannel(tracker, member, oldChannel);
+
+      // Hold the switch inside `endTracking`, evict, then release it.
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((started) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              releaseWrite = () => resolve({});
+              started();
+            }),
+        );
+      });
+
+      const switching = tracker.handleVoiceStateUpdate(
+        { member, channel: oldChannel } as unknown as VoiceState,
+        { member, channel: newChannel } as unknown as VoiceState,
+      );
+      await writeStarted;
+
+      const forgetting = tracker.forgetActiveSession("user123");
+      releaseWrite();
+      await forgetting;
+      await switching;
+
+      // The switch gave up instead of re-opening a session the purge closed.
+      expect(tracker.getActiveSession("user123")).toBeNull();
+    });
+
+    it("keeps a rejoin that lands while the old persist is still running (#916)", async () => {
+      // `endTracking` captures its session at the top and only writes many
+      // awaits later. Clearing the per-user maps at the end of that call used
+      // to wipe whatever was there — including a session started by a rejoin
+      // in the meantime, whose own disconnect would then record nothing.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const first = { id: "channel-a", name: "A" } as unknown as VoiceChannel;
+      const second = { id: "channel-b", name: "B" } as unknown as VoiceChannel;
+
+      await joinChannel(tracker, member, first);
+
+      // Hold the disconnect's persist open, rejoin, then release it.
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((started) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              releaseWrite = () => resolve({});
+              started();
+            }),
+        );
+      });
+
+      const leaving = leaveChannel(tracker, member, first);
+      await writeStarted;
+      await joinChannel(tracker, member, second);
+      releaseWrite();
+      await leaving;
+
+      // The rejoin survived the old call's cleanup.
+      expect(tracker.getActiveSession("user123")?.channelName).toBe("B");
+    });
+
+    it("persists a session once even when two handlers overlap (#916)", async () => {
+      // Discord does not await its handlers, so a switch still waiting on
+      // its write and a disconnect arriving behind it both read the same
+      // session — and both would `$inc totalTime` and `$push` it.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = { id: "channel-a", name: "A" } as unknown as VoiceChannel;
+      await joinChannel(tracker, member, channel);
+
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((started) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              releaseWrite = () => resolve({});
+              started();
+            }),
+        );
+      });
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+
+      const first = leaveChannel(tracker, member, channel);
+      await writeStarted;
+      const second = leaveChannel(tracker, member, channel);
+      releaseWrite();
+      await Promise.all([first, second]);
+
+      expect(
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock.calls.length,
+      ).toBe(1);
+    });
+
+    it("hands the session's bookkeeping back when the persist fails (#916)", async () => {
+      // `activeSessions` is deliberately kept on a failed write so the next
+      // disconnect retries it — and the retry has to see the companions and
+      // encountered users the failed attempt had claimed, not an empty
+      // session.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = { id: "channel-a", name: "A" } as unknown as VoiceChannel;
+      await joinChannel(tracker, member, channel);
+      await joinChannel(tracker, memberIn("user456"), channel);
+
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock)
+        .mockRejectedValueOnce(new Error("write conflict"))
+        .mockResolvedValue({});
+
+      await leaveChannel(tracker, member, channel);
+      // The session survived the failure, as before.
+      expect(tracker.getActiveSession("user123")).not.toBeNull();
+
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      await leaveChannel(tracker, member, channel);
+
+      const pushed = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+        .calls[0][1].$push.sessions;
+      expect(pushed.otherUsers).toEqual(["user456"]);
+    });
+
+    it("does not start tracking for a join that predates the purge (#916)", async () => {
+      // The handler yields on the enablement lookup before it ever reaches
+      // `startTracking`. Reading the generation after that await would hand
+      // the resumed handler the *post*-purge value, and it would install a
+      // session for an event from before the erasure.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.get.mockResolvedValue(null);
+
+      // Park only the first lookup — the one the handler hits before it can
+      // reach `startTracking`; later ones resolve normally.
+      let allowEnablement: () => void = () => {};
+      let parked = false;
+      const enablementAsked = new Promise<void>((asked) => {
+        mockConfigService.getBoolean.mockImplementation(() => {
+          if (parked) return Promise.resolve(true);
+          parked = true;
+          return new Promise((resolve) => {
+            allowEnablement = (): void => resolve(true);
+            asked();
+          });
+        });
+      });
+
+      const member = memberIn("user123");
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+
+      const joining = tracker.handleVoiceStateUpdate(
+        { member, channel: null } as unknown as VoiceState,
+        { member, channel } as unknown as VoiceState,
+      );
+      await enablementAsked;
+
+      // The purge lands while the handler is parked on the config read.
+      await tracker.forgetActiveSession("user123");
+      allowEnablement();
+      await joining;
+
+      expect(tracker.getActiveSession("user123")).toBeNull();
     });
 
     it("leaves other members' in-flight sessions alone", async () => {

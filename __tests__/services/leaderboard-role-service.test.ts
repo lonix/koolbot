@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import type { Client } from "discord.js";
+import { DiscordAPIError, type Client } from "discord.js";
 
 const mockRegisterReloadCallback = jest.fn();
 const mockConfigGetBoolean = jest.fn();
@@ -519,6 +519,31 @@ describe("LeaderboardRoleService", () => {
       );
     });
 
+    it("keeps going when one role throws, retaining just that one", async () => {
+      // A throw used to reject the whole method, so the purge report said
+      // nothing had happened — while the member really had lost the roles
+      // handled before it (#916).
+      rosterRows("99999001", "99999002");
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+      mockAssignmentUpdateOne.mockImplementation(
+        async (filter: { roleId: string }) => {
+          if (filter.roleId === "99999002") throw new Error("write conflict");
+          return { modifiedCount: 1 };
+        },
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result.revoked).toContain("99999001");
+      // Retained is the safe classification: the id stays on the roster, so
+      // the next reconcile retries the whole role.
+      expect(result.retained).toEqual(["99999002"]);
+    });
+
     it("leaves the id in userIds[] when the Discord revoke fails", async () => {
       rosterRows("99999001");
       mockClientGuildsFetch.mockResolvedValue(
@@ -537,12 +562,44 @@ describe("LeaderboardRoleService", () => {
       expect(mockLoggerWarn).toHaveBeenCalled();
     });
 
+    /** A real `DiscordAPIError` with the given code, as discord.js throws. */
+    function apiError(code: number): DiscordAPIError {
+      return new DiscordAPIError(
+        { code, message: "nope" },
+        code,
+        400,
+        "GET",
+        "",
+        {},
+      );
+    }
+
+    it("keeps the roster entry when the member lookup merely failed", async () => {
+      // A rate limit is not proof they left. Reading it as one would drop the
+      // roster id — the only handle on the grant — while the role sat on a
+      // member who is still here (#916).
+      rosterRows("99999001");
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+      mockGuildMembersFetch.mockRejectedValue(new Error("rate limited"));
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result.retained).toEqual(["99999001"]);
+      expect(result.revoked).toEqual([]);
+      expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
+    });
+
     it("pulls the id when the member has left the guild", async () => {
       rosterRows("99999001");
       mockClientGuildsFetch.mockResolvedValue(
         makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
       );
-      mockGuildMembersFetch.mockRejectedValue(new Error("Unknown member"));
+      // 10007 Unknown Member — definitive, unlike a transient failure.
+      mockGuildMembersFetch.mockRejectedValue(apiError(10007));
 
       const svc: ServiceInstance =
         LeaderboardRoleService.getInstance(makeClient());
