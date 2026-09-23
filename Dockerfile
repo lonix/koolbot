@@ -38,9 +38,9 @@ WORKDIR /app
 RUN npm install -g npm@latest --no-audit --no-fund && npm cache clean --force
 
 # Copy only runtime artifacts
-COPY --from=builder --chown=node:node /app/package*.json ./
-COPY --from=builder --chown=node:node /app/dist ./dist
-COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=1000:1000 /app/package*.json ./
+COPY --from=builder --chown=1000:1000 /app/dist ./dist
+COPY --from=prod-deps --chown=1000:1000 /app/node_modules ./node_modules
 
 # Set environment variables
 ENV NODE_ENV=production
@@ -48,8 +48,10 @@ ENV NODE_ENV=production
 # Expose health check port
 EXPOSE 3000
 
-# Drop root privileges — run as the built-in node user (uid 1000)
-USER node
+# Drop root privileges — run as the built-in node user (uid/gid 1000). Numeric
+# form so tools that read only the image config (e.g. Kubernetes
+# runAsNonRoot) can verify the user is non-root without resolving /etc/passwd.
+USER 1000:1000
 
 # Health check — uses the readiness endpoint (/ready, gated on Discord +
 # MongoDB). Kubernetes deployments should point a livenessProbe at /live
