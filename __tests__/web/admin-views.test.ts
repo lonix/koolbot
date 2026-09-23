@@ -101,6 +101,37 @@ describe("renderBootstrapPage", () => {
 });
 
 describe("renderSettingsPage", () => {
+  it("replaces the section forms with a notice when settings are unavailable", () => {
+    const html = renderSettingsPage({
+      ...COMMON,
+      settingsUnavailable: true,
+      groups: [
+        {
+          category: "voicechannels",
+          rows: [
+            {
+              key: "voicechannels.enabled",
+              label: "Voice Channel Management enabled",
+              current: false,
+              defaultValue: false,
+              type: "boolean",
+              description: "Enable VC mgmt",
+              category: "voicechannels",
+            },
+          ],
+        },
+      ],
+    });
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain(
+      '<form method="POST" action="/admin/settings/save-section"',
+    );
+    expect(html).not.toContain('name="value_voicechannels.enabled"');
+    // Import (diff-previewed) and reset (confirmed) don't pre-fill values,
+    // so they stay available.
+    expect(html).toContain('action="/admin/settings/import"');
+  });
+
   it("renders the human label as primary text and the dotted key as a muted reference", () => {
     const html = renderSettingsPage({
       ...COMMON,
@@ -1898,6 +1929,30 @@ describe("renderVoiceChannelsPage", () => {
     expect(html).toContain("Voice channel category not found");
   });
 
+  it("shows a notice in place of the settings card when settings are unavailable", () => {
+    const html = renderVoiceChannelsPage({
+      ...COMMON,
+      enabled: true,
+      controlPanelEnabled: true,
+      categoryName: "Voice",
+      lobbyName: "Lobby",
+      offlineLobbyName: "Offline Lobby",
+      prefix: "🎮",
+      totalManaged: 0,
+      totalEmpty: 0,
+      channels: [],
+      categoryFound: true,
+      settingRows: [],
+      settingsUnavailable: true,
+      categoryChannels: [],
+    });
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain(
+      '<form method="POST" action="/admin/settings/save-section"',
+    );
+    expect(html).not.toContain('name="value_voicechannels.');
+  });
+
   it("renders managed channels with lobby/dynamic/live tags and cleanup actions", () => {
     const html = renderVoiceChannelsPage({
       ...COMMON,
@@ -2072,6 +2127,33 @@ describe("renderFeatureSettingsCard (#971)", () => {
 
   it("renders nothing when there are no rows", () => {
     expect(renderFeatureSettingsCard({ ...BASE, settingRows: [] })).toBe("");
+  });
+
+  it("renders a notice instead of controls when settings are unavailable", () => {
+    const html = renderFeatureSettingsCard({
+      ...BASE,
+      title: "Digest settings",
+      unavailable: true,
+      settingRows: [
+        row({ key: "digest.cron", type: "cron", current: "0 9 * * 1" }),
+      ],
+    });
+    expect(html).toContain("<h2>Digest settings</h2>");
+    expect(html).toContain("Settings could not be loaded");
+    // No form, so nothing can post schema defaults over the stored values.
+    expect(html).not.toContain("<form");
+    expect(html).not.toContain("save-section");
+    expect(html).not.toContain('name="keys"');
+  });
+
+  it("renders the notice even when no rows were built", () => {
+    const html = renderFeatureSettingsCard({
+      ...BASE,
+      unavailable: true,
+      settingRows: [],
+    });
+    expect(html).toContain("<h2>Settings</h2>");
+    expect(html).toContain("Settings could not be loaded");
   });
 
   it("posts through save-section with CSRF, category and the page redirect", () => {

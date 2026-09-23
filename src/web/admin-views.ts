@@ -313,6 +313,12 @@ export interface SettingsProps extends CommonProps {
    * not just that something was.
    */
   invalidKeys?: string[];
+  /**
+   * The stored config could not be read. The per-section forms are replaced
+   * by a notice: rendering them from schema defaults would let a save
+   * overwrite the real stored values.
+   */
+  settingsUnavailable?: boolean;
 }
 
 /**
@@ -1097,7 +1103,11 @@ export function renderSettingsPage(props: SettingsProps): string {
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
 ${actionBar}
-${sections}
+${
+  props.settingsUnavailable
+    ? `<div class="card">${renderSettingsUnavailableNotice()}</div>`
+    : sections
+}
 ${importSection}
 ${dangerSection}
 `;
@@ -2935,6 +2945,11 @@ export interface VoiceChannelsProps extends CommonProps {
    * picker, text fields, toggles, etc.
    */
   settingRows: SettingRow[];
+  /**
+   * The stored config could not be read, so the settings card is replaced by
+   * a notice rather than rendering schema defaults a save would write back.
+   */
+  settingsUnavailable?: boolean;
   /** Category options backing the `voicechannels.category_id` picker. */
   categoryChannels: ChannelOption[];
   flash?: FlashMessage | null;
@@ -2977,6 +2992,21 @@ export interface FeatureSettingsCardProps {
    * Without it an off-card dependency counts as unmet and locks the control.
    */
   dependencyState?: ReadonlyMap<string, boolean>;
+  /**
+   * The stored config snapshot could not be read. The card then renders a
+   * notice instead of controls: rows built from an empty snapshot would show
+   * schema defaults as if they were stored, and saving them would overwrite
+   * the real values.
+   */
+  unavailable?: boolean;
+}
+
+/**
+ * Notice shown in place of editable settings when the stored config could not
+ * be read, so no form pre-filled with schema defaults is ever offered.
+ */
+export function renderSettingsUnavailableNotice(): string {
+  return `<div class="notice warn" role="status">Settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>`;
 }
 
 /**
@@ -3011,6 +3041,13 @@ export function findFeatureMasterKey(rows: SettingRow[]): string | null {
 export function renderFeatureSettingsCard(
   props: FeatureSettingsCardProps,
 ): string {
+  if (props.unavailable) {
+    return `
+<div class="card">
+  <h2>${escapeHtml(props.title ?? "Settings")}</h2>
+  ${renderSettingsUnavailableNotice()}
+</div>`;
+  }
   if (props.settingRows.length === 0) return "";
   const pickers = {
     textChannels: props.pickers?.textChannels ?? [],
@@ -3113,6 +3150,7 @@ function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
     pickers: { categoryChannels: props.categoryChannels },
     returnTo: "/admin/voice-channels",
     csrfToken: props.csrfToken,
+    unavailable: props.settingsUnavailable,
   });
 }
 

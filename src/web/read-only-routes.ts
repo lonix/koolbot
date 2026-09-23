@@ -170,6 +170,12 @@ export interface FeatureSettingsData {
   settingRows: SettingRow[];
   pickers: FeatureSettingsPickers;
   dependencyState: Map<string, boolean>;
+  /**
+   * The stored config snapshot could not be read. `settingRows` is then empty
+   * and the card must render a notice (pass this as its `unavailable` prop)
+   * rather than schema defaults that a save would write back.
+   */
+  unavailable: boolean;
 }
 
 type StoredConfigRow = {
@@ -186,7 +192,10 @@ type StoredConfigRow = {
  * `category`, roles for `role` / `role_list`), and resolves the on/off state
  * of any off-card dependency so the card's dependency locks (#666) agree with
  * the Settings page. Pass `stored` when the handler already loaded
- * `config.getAll()`; otherwise it is fetched here. Picker fetches are
+ * `config.getAll()` (or `null` when that read failed); otherwise it is
+ * fetched here. A failed read fails closed: no rows, `unavailable: true`, and
+ * no picker fetches, so the page can't offer defaults as stored values. Picker
+ * fetches are
  * best-effort (see `fetchChannelData` / `fetchRoleData`), so a Discord outage
  * degrades to empty dropdowns rather than a failed page.
  */
@@ -194,13 +203,25 @@ export async function loadFeatureSettings(
   client: Client,
   guildId: string,
   keys: readonly string[],
-  stored?: ReadonlyArray<StoredConfigRow>,
+  stored?: ReadonlyArray<StoredConfigRow> | null,
 ): Promise<FeatureSettingsData> {
   const storedRows =
-    stored ??
-    (await ConfigService.getInstance()
-      .getAll()
-      .catch((): StoredConfigRow[] => []));
+    stored === undefined
+      ? await ConfigService.getInstance()
+          .getAll()
+          .catch((err: unknown) => {
+            logger.warn("feature settings: config snapshot read failed", err);
+            return null;
+          })
+      : stored;
+  if (storedRows === null) {
+    return {
+      settingRows: [],
+      pickers: {},
+      dependencyState: new Map(),
+      unavailable: true,
+    };
+  }
   const settingRows = buildSettingRows(keys, storedRows);
 
   const needsChannels = settingRows.some(
@@ -239,7 +260,7 @@ export async function loadFeatureSettings(
       dependencyState.set(dep, isEnabledValue(value));
     }
   }
-  return { settingRows, pickers, dependencyState };
+  return { settingRows, pickers, dependencyState, unavailable: false };
 }
 
 function getCsrfToken(req: Request): string {
@@ -551,7 +572,15 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
-      const stored = await config.getAll().catch(() => []);
+      // A failed read must not fall back to `[]`: every section would then
+      // render schema defaults as editable values, and saving one would
+      // overwrite the real stored config. Flag it and hide the forms instead.
+      let settingsUnavailable = false;
+      const stored = await config.getAll().catch((err: unknown) => {
+        logger.warn("settings: config snapshot read failed", err);
+        settingsUnavailable = true;
+        return [];
+      });
       const storedByKey = new Map(stored.map((s) => [s.key, s]));
 
       // Description and category come from the static settingsMetadata
@@ -638,6 +667,7 @@ export function createReadOnlyRouter(
       res.type("text/html").send(
         renderSettingsPage({
           ...common,
+          settingsUnavailable,
           groups,
           textChannels,
           voiceChannels,
@@ -1150,11 +1180,20 @@ export function createReadOnlyRouter(
         config.getString("voicechannels.lobby.name", "Lobby"),
         config.getString("voicechannels.lobby.offlinename", "Offline Lobby"),
         config.getString("voicechannels.channel.prefix", "🎮"),
-        config.getAll().catch(() => []),
+        // `null` (not `[]`) on failure: an empty snapshot would render the
+        // schema defaults as if they were stored, and saving the card would
+        // then overwrite the real values with them.
+        config.getAll().catch((err: unknown) => {
+          logger.warn("voice channels: config snapshot read failed", err);
+          return null;
+        }),
       ]);
       // Editable `voicechannels.*` settings rendered in place on this page
-      // (#705), built the same way the Settings page builds its rows.
-      const settingRows = buildSettingRows(VOICE_CHANNELS_SETTING_KEYS, stored);
+      // (#705), built the same way the Settings page builds its rows. Fails
+      // closed when the snapshot is unavailable: no editable card, a notice.
+      const settingRows = stored
+        ? buildSettingRows(VOICE_CHANNELS_SETTING_KEYS, stored)
+        : [];
       // Resolved below from the configured `voicechannels.category_id`;
       // falls back to "(not configured)" so the renderer always has
       // a string to show.
@@ -1227,6 +1266,7 @@ export function createReadOnlyRouter(
           channels,
           categoryFound,
           settingRows,
+          settingsUnavailable: stored === null,
           categoryChannels,
           flash: readFlash(req),
         }),
