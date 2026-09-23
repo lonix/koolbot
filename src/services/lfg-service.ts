@@ -59,6 +59,18 @@ const DISCORD_UNKNOWN_MESSAGE = 10008;
  */
 const CLOSED_ROW_RETENTION_MS = LFG_ROW_TTL_SECONDS * 1000;
 
+/**
+ * Most posts one sweep will close, and likewise the most it will retry.
+ *
+ * Renders are serial, so an unbounded query after an outage could hold
+ * thousands of rows in memory and run for many minutes — and because ticks
+ * coalesce, newly due posts would not even be queried until that backlog
+ * drained. A bounded, oldest-first batch keeps each tick short; the rest is
+ * picked up by the next one. Mirrors `ReminderService`'s `SCAN_BATCH_SIZE`,
+ * which exists for exactly this reason.
+ */
+const SCAN_BATCH_SIZE = 100;
+
 /** Smallest party worth advertising: the host plus one. */
 export const MIN_PARTY_SIZE = 2;
 /** Roster mentions have to stay inside one embed field. */
@@ -234,7 +246,9 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     const due = await LfgPost.find({
       state: "open",
       expiresAt: { $lte: now },
-    });
+    })
+      .sort({ expiresAt: 1 })
+      .limit(SCAN_BATCH_SIZE);
 
     for (const post of due) {
       try {
@@ -257,7 +271,9 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     const unrendered = await LfgPost.find({
       state: "closed",
       closeRendered: false,
-    });
+    })
+      .sort({ updatedAt: 1 })
+      .limit(SCAN_BATCH_SIZE);
     for (const post of unrendered) {
       try {
         if (await this.renderClosed(post)) summary.retried += 1;
@@ -528,6 +544,11 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       guildId: post.guildId,
       hostId: post.hostId,
       state: "open",
+      // Same condition the interactive writes use: a post that has run past
+      // its closing time accepts nobody, so it must not hold a slot either.
+      // Without this a member is locked out of /lfg for up to a minute after
+      // their own post died, waiting on the sweep to relabel it.
+      expiresAt: { $gt: new Date() },
       _id: { $lt: post._id },
     });
     return older < limit;

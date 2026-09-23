@@ -114,6 +114,16 @@ function post(overrides: Partial<PostLike> = {}): PostLike {
   };
 }
 
+/**
+ * A stand-in for the chainable query the sweep builds: both of its `find`
+ * calls are bounded, oldest-first batches (`.sort().limit()`).
+ */
+function queryReturning(rows: PostLike[]): {
+  sort: () => { limit: () => Promise<PostLike[]> };
+} {
+  return { sort: () => ({ limit: async () => rows }) };
+}
+
 /** Shared stand-in client: `getInstance` rejects a second, different one. */
 const CLIENT = {} as never;
 
@@ -126,7 +136,7 @@ beforeEach(() => {
   configValues.booleans = {};
   configValues.strings = {};
   configValues.numbers = {};
-  LfgPostMock.find = jest.fn(async () => []);
+  LfgPostMock.find = jest.fn(() => queryReturning([]));
   LfgPostMock.findById = jest.fn(async () => null);
   LfgPostMock.findOneAndUpdate = jest.fn(async () => null);
   LfgPostMock.countDocuments = jest.fn(async () => 0);
@@ -377,9 +387,9 @@ describe("sweep (runOnce)", () => {
   /** `find` is called twice per sweep: due posts, then unrendered closed. */
   function stubFinds(due: PostLike[], unrendered: PostLike[] = []): jest.Mock {
     const find = jest
-      .fn<(...args: unknown[]) => Promise<unknown>>()
-      .mockResolvedValueOnce(due)
-      .mockResolvedValueOnce(unrendered);
+      .fn<(...args: unknown[]) => unknown>()
+      .mockReturnValueOnce(queryReturning(due))
+      .mockReturnValueOnce(queryReturning(unrendered));
     LfgPostMock.find = find;
     return find as jest.Mock;
   }
@@ -580,6 +590,8 @@ describe("createPost", () => {
       guildId: "guild-1",
       hostId: "host-1",
       state: "open",
+      // An expired post accepts nobody, so it must not hold a slot either.
+      expiresAt: { $gt: expect.any(Date) },
       _id: { $lt: POST_ID },
     });
     // The reservation is given back, and no post goes out.
@@ -1099,5 +1111,62 @@ describe("closedSummary wording", () => {
     // An expired post may well have had joiners; it just never filled.
     expect(closedSummary("expired")).not.toMatch(/nobody/i);
     expect(closedSummary("expired")).toMatch(/filled/i);
+  });
+});
+
+// The cap counts the same posts the buttons will accept. Otherwise a member
+// whose post expired seconds ago is refused a new one until the sweep gets
+// round to relabelling the dead one.
+describe("the cap and the buttons agree on what 'open' means", () => {
+  it("does not let an expired post hold its host's slot", async () => {
+    const channel = {
+      id: "chan-1",
+      isTextBased: () => true,
+      isDMBased: () => false,
+      send: jest.fn(async () => ({ id: "msg-9" })),
+    };
+    const client = { channels: { fetch: jest.fn(async () => channel) } };
+    configValues.numbers["lfg.max_active_per_user"] = 1;
+    // Nothing *unexpired* is open, so the count comes back empty and the post
+    // is allowed even though a dead row is still sitting there.
+    LfgPostMock.countDocuments = jest.fn(async () => 0);
+    LfgPostMock.mockImplementation(function (
+      this: Record<string, unknown>,
+      doc: Record<string, unknown>,
+    ) {
+      Object.assign(this, doc, { _id: POST_ID, save: jest.fn(async () => {}) });
+    } as never);
+
+    const result = await LfgService.getInstance(client as never).createPost({
+      guildId: "guild-1",
+      hostId: "host-1",
+      game: "Valorant",
+      note: "",
+      partySize: 4,
+      fallbackChannelId: "chan-1",
+    });
+
+    expect(result.status).toBe("created");
+    const filter = LfgPostMock.countDocuments.mock.calls[0][0] as {
+      expiresAt: unknown;
+    };
+    expect(filter.expiresAt).toEqual({ $gt: expect.any(Date) });
+  });
+});
+
+describe("the sweep works in bounded batches", () => {
+  it("takes the oldest due posts first, in a capped batch", async () => {
+    const limit = jest.fn(async () => []);
+    const sort = jest.fn(() => ({ limit }));
+    LfgPostMock.find = jest.fn(() => ({ sort }));
+    configValues.booleans["lfg.enabled"] = true;
+
+    await buildService().runNow();
+
+    // Unbounded, a backlog after an outage would hold every row in memory and
+    // starve newly due posts, since ticks coalesce.
+    expect(sort).toHaveBeenCalledWith({ expiresAt: 1 });
+    expect(limit).toHaveBeenCalledWith(100);
+    expect(sort).toHaveBeenCalledWith({ updatedAt: 1 });
   });
 });
