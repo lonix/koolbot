@@ -413,6 +413,9 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           const granted = await this.grantBirthdayRole(member, roleId);
           if (granted) {
             row.roleAssignedAt = summary.ranAt;
+            // Which role, not just when: the configured id can change while
+            // this grant is live (#916).
+            row.roleAssignedId = roleId;
             summary.rolesGranted += 1;
           }
         }
@@ -439,8 +442,20 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           });
           summary.announced -= 1;
           if (roleId && row.roleAssignedAt) {
-            await this.revokeBirthdayRole(row.guildId, row.userId, roleId);
-            summary.rolesGranted -= 1;
+            if (
+              await this.revokeBirthdayRole(row.guildId, row.userId, roleId)
+            ) {
+              summary.rolesGranted -= 1;
+            } else {
+              // The grant stands and its row is gone, so nothing will ever
+              // sweep it. There is no row left to record a retry against —
+              // re-creating one would restore data the member just erased —
+              // so the loudest available signal is the honest one.
+              summary.failed += 1;
+              logger.error(
+                `Birthday role for ${sanitizeForLog(row.userId)} could not be taken back after their data was reset mid-run; it is stranded on the member and no sweep can find it`,
+              );
+            }
           }
         }
       } catch (error) {
@@ -535,13 +550,20 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       return { matched: 0, removed: 0, roleRevoked: false, retry: false };
     }
 
-    const held = rows.some((row) => row.roleAssignedAt);
+    const held = rows.find((row) => row.roleAssignedAt);
     let roleRevoked = false;
 
     if (held) {
-      let roleId: string;
+      // The role recorded on the grant, not whatever is configured now: the
+      // two differ whenever `birthdays.role_id` changed while this grant was
+      // live, and revoking the configured one would leave the real grant in
+      // place while deleting its only marker (#916). Rows written before
+      // that field existed fall back to the configured id.
+      let roleId = held.roleAssignedId ?? "";
       try {
-        roleId = await this.configService.getString("birthdays.role_id", "");
+        if (!roleId) {
+          roleId = await this.configService.getString("birthdays.role_id", "");
+        }
       } catch (error) {
         // Without the id there is no safe way to revoke, and the row has to
         // stay so the sweep can still find the grant.
@@ -665,9 +687,14 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       if (!row.roleAssignedAt) continue;
       if (now.getTime() - row.roleAssignedAt.getTime() < durationMs) continue;
       try {
+        // The role this row actually recorded, falling back to the
+        // configured one for rows written before the id was stored. Using
+        // the configured id blindly would miss a grant made under a
+        // previous `birthdays.role_id` and then clear its marker (#916).
+        const grantedRoleId = row.roleAssignedId ?? roleId;
         const member = await guild.members.fetch(row.userId).catch(() => null);
-        if (member && member.roles.cache.has(roleId)) {
-          await member.roles.remove(roleId, "Birthday role expired");
+        if (member && member.roles.cache.has(grantedRoleId)) {
+          await member.roles.remove(grantedRoleId, "Birthday role expired");
           removed += 1;
         }
       } catch (error) {
@@ -679,6 +706,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         // Clear the marker regardless: if the role is already gone or the
         // member left, there's nothing more to sweep.
         row.roleAssignedAt = undefined;
+        row.roleAssignedId = undefined;
         await row
           .save()
           .catch((error) =>
@@ -704,7 +732,12 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       {
         $set: {
           lastAnnouncedYear: row.lastAnnouncedYear,
-          ...(row.roleAssignedAt ? { roleAssignedAt: row.roleAssignedAt } : {}),
+          ...(row.roleAssignedAt
+            ? {
+                roleAssignedAt: row.roleAssignedAt,
+                roleAssignedId: row.roleAssignedId,
+              }
+            : {}),
         },
       },
     );

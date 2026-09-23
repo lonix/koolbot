@@ -750,7 +750,10 @@ export class QuoteService {
     // Each write stands on its own, and by this point Discord posts have
     // already been deleted — so none of them may take the whole call down
     // and leave the caller believing nothing happened (#916).
-    if (!deleteError) {
+    // `$or: []` is rejected by MongoDB, and a member who only ever saved
+    // other people's quotes has an empty snapshot — so the delete is skipped
+    // rather than issued with a filter the server refuses.
+    if (!deleteError && authored.length > 0) {
       try {
         // By `_id` *and* the `messageId` we inspected, not by a fresh
         // `authorId` re-match (#916). Two orderings to survive:

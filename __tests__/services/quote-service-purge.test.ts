@@ -146,9 +146,11 @@ describe("QuoteService.purgeForUser", () => {
         { $set: { addedById: ANONYMISED_USER_ID } },
       );
       expect(result.anonymised).toBe(3);
-      // The quote itself belongs to its author and survives — this member
-      // authored none, so the delete has an empty snapshot to work from.
-      expect(model.deleteMany).toHaveBeenCalledWith({ $or: [] });
+      // The quote itself belongs to its author and survives. This member
+      // authored none, so the delete is skipped entirely: `$or: []` is a
+      // filter MongoDB rejects, and issuing it would fail every purge for
+      // someone who only ever saved other people's quotes (#916).
+      expect(model.deleteMany).not.toHaveBeenCalled();
     });
 
     it("uses a sentinel no real member can match", () => {
@@ -181,6 +183,9 @@ describe("QuoteService.purgeForUser", () => {
 
   it("reports zeros for a member with no quotes", async () => {
     const result = await service.purgeForUser("123", messages);
+
+    // No snapshot, no delete — see the sentinel test above.
+    expect(model.deleteMany).not.toHaveBeenCalled();
 
     expect(result).toEqual({
       authored: 0,

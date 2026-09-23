@@ -19,7 +19,13 @@ import mongoose, { Document, Schema } from "mongoose";
  * `roleAssignedAt` records when the temporary "birthday" role was last
  * granted to the member, so the daily sweep can revoke it once the
  * configured duration has elapsed even if the process restarted in
- * between (the grant is not held in memory).
+ * between (the grant is not held in memory). `roleAssignedId` records
+ * *which* role that was: `birthdays.role_id` can be changed or cleared
+ * while a grant is live, and without the id the sweep and a per-user purge
+ * would revoke the wrong role — or none — and then drop the only marker,
+ * leaving the old role on the member for good (#916). Rows written before
+ * that field existed have no id; the configured role is the best available
+ * fallback for them.
  */
 export interface IUserBirthday extends Document {
   userId: string;
@@ -29,6 +35,7 @@ export interface IUserBirthday extends Document {
   year?: number; // optional — omitted means "don't show/compute age"
   lastAnnouncedYear?: number; // year (in the member's tz) last announced
   roleAssignedAt?: Date; // when the temp birthday role was granted
+  roleAssignedId?: string; // which role that was (see the note above)
   updatedAt: Date;
 }
 
@@ -42,6 +49,7 @@ const UserBirthdaySchema = new Schema<IUserBirthday>(
     year: { type: Number, required: false },
     lastAnnouncedYear: { type: Number, required: false },
     roleAssignedAt: { type: Date, required: false },
+    roleAssignedId: { type: String, required: false },
     updatedAt: { type: Date, required: true, default: Date.now },
   },
   { timestamps: false },

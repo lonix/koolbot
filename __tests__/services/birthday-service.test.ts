@@ -699,6 +699,34 @@ describe("BirthdayService", () => {
       expect(result).toEqual({ matched: 1, removed: 1, roleRevoked: true });
     });
 
+    it("revokes the role that was granted, not whatever is configured now", async () => {
+      // `birthdays.role_id` can change while a grant is live. Revoking the
+      // configured role would leave the real one on the member and then
+      // delete its only marker (#916).
+      mockBirthdayFind.mockResolvedValue([
+        { _id: "b1", roleAssignedAt: new Date(), roleAssignedId: "old-role" },
+      ]);
+      mockConfigGetString.mockResolvedValue("new-role");
+      const remove = jest.fn(async () => undefined);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        members: {
+          fetch: jest.fn(async () => ({
+            roles: {
+              cache: { has: (id: string) => id === "old-role" },
+              remove,
+            },
+          })),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(remove).toHaveBeenCalledWith("old-role", expect.any(String));
+      expect(result.roleRevoked).toBe(true);
+    });
+
     it("reports zeros for a member with no birthday", async () => {
       mockBirthdayFind.mockResolvedValue([]);
       const client = makeClient();
