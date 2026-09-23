@@ -21,6 +21,7 @@ import logger from "../utils/logger.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 
 const configService = ConfigService.getInstance();
 
@@ -69,6 +70,22 @@ export async function resolveManagedCategory(
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
+  /**
+   * Serialises "does this member have a channel, and make one if not" per
+   * owner.
+   *
+   * Both entry points — the lobby join and `createDynamicChannel` — read
+   * `userChannels` and then create, which is a check-then-act on a map that
+   * the other path writes. Two of them for the same member (a lobby join
+   * landing while `/lfg` is attaching a channel, or simply two joins in quick
+   * succession) each see no channel and each make one; the second write wins
+   * the map and the first room is left unowned for the empty-channel sweep to
+   * delete, possibly out from under something that just linked it.
+   *
+   * The lock makes the pair atomic, so the one-channel-per-owner invariant
+   * this map already assumes actually holds.
+   */
+  private readonly ownerChannelLock = createKeyedLock();
   private ownershipQueue: Map<string, string[]> = new Map(); // channelId -> array of userIds
   private customChannelNames: Map<string, string> = new Map(); // channelId -> custom name
   private channelsBeingDeleted: Set<string> = new Set(); // channelIds currently being deleted
@@ -1053,6 +1070,14 @@ export class VoiceChannelManager {
   }
 
   private async createUserChannel(member: GuildMember): Promise<void> {
+    // Same turn as `createDynamicChannel`: the check below and the creation
+    // that follows it must not interleave with the other path.
+    return this.ownerChannelLock.run(member.id, () =>
+      this.createUserChannelUnlocked(member),
+    );
+  }
+
+  private async createUserChannelUnlocked(member: GuildMember): Promise<void> {
     try {
       // Check if user already has a channel
       if (this.userChannels.has(member.id)) {
@@ -1502,6 +1527,26 @@ export class VoiceChannelManager {
    * Create a new dynamic voice channel when a user joins the lobby
    */
   public async createDynamicChannel(
+    guild: Guild,
+    userId: string,
+    channelName?: string,
+  ): Promise<VoiceChannel | null> {
+    return this.ownerChannelLock.run(userId, async () => {
+      // Re-checked inside the turn: another path may have made this member's
+      // channel while this call was waiting, and a second one would orphan
+      // the first.
+      const existing = this.userChannels.get(userId);
+      if (existing) {
+        logger.info(
+          `User ${userId} already has a dynamic channel; reusing it instead of creating another`,
+        );
+        return existing;
+      }
+      return this.createDynamicChannelUnlocked(guild, userId, channelName);
+    });
+  }
+
+  private async createDynamicChannelUnlocked(
     guild: Guild,
     userId: string,
     channelName?: string,

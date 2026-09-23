@@ -616,6 +616,8 @@ describe("createPost", () => {
       state: "open",
       messageId: "msg-9",
       voiceChannelId: null,
+      // The lifetime is measured from here, not from the reservation.
+      expiresAt: expect.any(Date),
     });
   });
 
@@ -1434,6 +1436,7 @@ describe("a post is not live until its message exists", () => {
           state: "open",
           messageId: "msg-9",
           voiceChannelId: null,
+          expiresAt: expect.any(Date),
         },
       },
       { new: true },
@@ -1647,5 +1650,73 @@ describe("opening a post and switching the feature off take turns", () => {
 
     // The drain did not clear reservations until the post was fully out.
     expect(order).toEqual(["send:start", "send:done", "drain:reservations"]);
+  });
+});
+
+// `expiresAt` is set when the row is reserved, but a post is not live until
+// its message exists — and getting there is three Discord round-trips.
+describe("the advertised lifetime starts when the post goes up", () => {
+  it("restarts the clock in the promotion, not at reservation", async () => {
+    const channel = {
+      id: "chan-1",
+      isTextBased: () => true,
+      isDMBased: () => false,
+      send: jest.fn(async () => {
+        // Discord being slow: at the one-minute minimum this would otherwise
+        // eat most of the post's life before anyone could see it.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { id: "msg-9", delete: jest.fn() };
+      }),
+    };
+    const client = { channels: { fetch: jest.fn(async () => channel) } };
+    configValues.numbers["lfg.expiry_minutes"] = 1;
+    const { saved, promoted } = stubSavedPosts();
+    LfgPostMock.countDocuments = jest.fn(async () => 0);
+
+    await LfgService.getInstance(client as never).createPost({
+      guildId: "guild-1",
+      hostId: "host-1",
+      game: "Valorant",
+      note: "",
+      partySize: 4,
+      fallbackChannelId: "chan-1",
+    });
+
+    const reserved = saved[0].expiresAt as Date;
+    const opened = promoted[0].expiresAt as Date;
+    expect(opened.getTime()).toBeGreaterThan(reserved.getTime());
+  });
+});
+
+describe("the disable drain survives a failing post", () => {
+  async function triggerReload(): Promise<void> {
+    for (const cb of reloadCallbacks) await cb();
+  }
+
+  it("keeps closing the rest when one row throws", async () => {
+    const svc = buildService();
+    configValues.booleans["lfg.enabled"] = false;
+    const rows = [post({ _id: "a" }), post({ _id: "b" })] as PostLike[];
+    let call = 0;
+    LfgPostMock.find = jest.fn(() => queryReturning(call++ === 0 ? rows : []));
+    LfgPostMock.countDocuments = jest.fn(async () => 0);
+    const closed: string[] = [];
+    LfgPostMock.findOneAndUpdate = jest.fn(async (filter: unknown) => {
+      const id = (filter as { _id: string })._id;
+      if (id === "a") throw new Error("mongo blinked");
+      closed.push(id);
+      return { ...post({ _id: id }), state: "closed" as const };
+    });
+    LfgPostMock.findById = jest.fn(async () => ({
+      ...post(),
+      state: "closed" as const,
+    }));
+    jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+
+    await triggerReload();
+
+    // The cron is already stopped, so abandoning the batch on the first
+    // failure would leave every post behind it live-looking until its TTL.
+    expect(closed).toEqual(["b"]);
   });
 });

@@ -335,9 +335,17 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
 
       let closedThisPass = 0;
       for (const post of open) {
-        const row = await this.closeAndSettle(String(post._id), "disabled");
-        if (!row) continue;
-        closedThisPass += 1;
+        // Per row, as the scheduled sweep does: the cron is already stopped,
+        // so one failure here would otherwise abandon every post behind it.
+        try {
+          const row = await this.closeAndSettle(String(post._id), "disabled");
+          if (row) closedThisPass += 1;
+        } catch (error) {
+          logger.error(
+            `Error closing LFG post ${sanitizeForLog(String(post._id))} on disable:`,
+            error,
+          );
+        }
       }
       // Nothing moved, so another identical pass would not move anything.
       if (closedThisPass === 0) break;
@@ -355,7 +363,14 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
 
       let rendered = 0;
       for (const post of pending) {
-        if (await this.renderAndSettle(post)) rendered += 1;
+        try {
+          if (await this.renderAndSettle(post)) rendered += 1;
+        } catch (error) {
+          logger.error(
+            `Error re-rendering LFG post ${sanitizeForLog(String(post._id))} on disable:`,
+            error,
+          );
+        }
       }
       // Every edit in the batch failed — the channel is gone, or Discord is
       // refusing. Hammering it further will not help.
@@ -552,6 +567,17 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
             // Resolved after the reservation was saved, so it rides along
             // here rather than in a save of its own.
             voiceChannelId: post.voiceChannelId,
+            // Restarted here, so the advertised lifetime is measured from
+            // the post going up rather than from the row being reserved.
+            // Creating a voice channel, moving the host and sending the
+            // embed are three Discord round-trips; at the one-minute minimum
+            // they could otherwise eat a visible share of the lifetime, or
+            // on a bad day publish a post that had already expired. The
+            // reservation's own `expiresAt` still stands as the TTL backstop
+            // for a row abandoned before it ever gets here.
+            expiresAt: new Date(
+              Date.now() + Math.max(1, expiryMinutes) * MS_PER_MINUTE,
+            ),
           },
         },
         { new: true },
