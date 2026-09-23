@@ -5,11 +5,13 @@ import {
   fetchChannelData,
   loadFeatureSettings,
   VOICE_CHANNELS_SETTING_KEYS,
+  REACTION_ROLES_SETTING_KEYS,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
 import {
   defaultConfig,
+  getDependencies,
   settingsMetadata,
 } from "../../src/services/config-schema.js";
 
@@ -118,6 +120,35 @@ describe("buildSettingRows (#705)", () => {
     );
     expect(rows[0].current).toBe("General");
     expect(rows[0].description).toBe("custom");
+  });
+
+  it("includes the reactionroles.enabled master and style options (#974)", () => {
+    expect(REACTION_ROLES_SETTING_KEYS).toEqual([
+      "reactionroles.enabled",
+      "reactionroles.message_channel_id",
+      "reactionroles.style",
+    ]);
+    const [enabled, channel, style] = buildSettingRows(
+      REACTION_ROLES_SETTING_KEYS,
+      [],
+    );
+    expect(enabled.type).toBe("boolean");
+    expect(channel.type).toBe("channel");
+    expect(style.current).toBe("reaction");
+    expect(style.options?.map((o) => o.value)).toEqual([
+      "reaction",
+      "button",
+      "select",
+    ]);
+  });
+
+  it("keeps the reactionroles keys free of dependsOn (#974)", () => {
+    // The Reaction Roles route builds its rows with `buildSettingRows` and
+    // passes no dependency state. If one of these keys gains a dependency,
+    // switch that route to `loadFeatureSettings`.
+    for (const key of REACTION_ROLES_SETTING_KEYS) {
+      expect(getDependencies(key)).toEqual([]);
+    }
   });
 
   it("excludes the feature master voicechannels.enabled from the key list", () => {

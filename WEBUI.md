@@ -754,7 +754,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Announcements**  | `/announce create`, `list`, `delete`                                                                |
 | **Events**         | `/event create`, `list`, `cancel`, `start`                                                          |
 | **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items`                   |
-| **Reaction Roles** | `/reactrole create`, `archive`, `unarchive`, `delete`, `list`, `status`                             |
+| **Reaction Roles** | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync`                                                             |
 | **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels** | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
@@ -788,6 +788,14 @@ target) and surface an actionable error instead of silently failing at reaction
 time. Rows are tagged **managed** (bot-created; delete tears down the role +
 category + channel) or **bound** (points at a pre-existing role; *Remove* only
 unbinds the mapping and never deletes the role).
+
+Its **Settings** card (#974) edits `reactionroles.enabled`, the message channel
+(`reactionroles.message_channel_id`, a text-channel picker) and the surface
+style (`reactionroles.style`) in place, saving through the shared
+`/admin/settings/save-section` route and returning to the page. The enable
+toggle is the form's cascade master: unticking it greys out the other two, and
+saving then writes only `reactionroles.enabled = false`, so turning the feature
+off from here leaves its channel and style untouched.
 
 On the **Settings** page, a toggle whose feature declares a hard dependency
 (`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an

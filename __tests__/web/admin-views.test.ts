@@ -1676,6 +1676,104 @@ describe("renderReactionRolesPage", () => {
     expect(html).not.toContain("/admin/reaction-roles/archive");
   });
 
+  it("renders an editable settings card with the enable toggle, channel picker and style select (#974)", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: { name: "roles", id: "chan-1" },
+      active: [],
+      archived: [],
+      textChannels: [
+        { id: "chan-1", name: "roles" },
+        { id: "chan-2", name: "general" },
+      ],
+      settingRows: [
+        {
+          key: "reactionroles.enabled",
+          label: "Reaction roles enabled",
+          current: true,
+          defaultValue: false,
+          type: "boolean",
+          description: "Enable the reaction-role system.",
+          category: "reactionroles",
+        },
+        {
+          key: "reactionroles.message_channel_id",
+          label: "Reaction-role message channel",
+          current: "chan-1",
+          defaultValue: "",
+          type: "channel",
+          description: "Channel ID where reaction-role messages are posted.",
+          category: "reactionroles",
+        },
+        {
+          key: "reactionroles.style",
+          label: "Self-assign surface style",
+          current: "button",
+          defaultValue: "reaction",
+          type: "string",
+          description: "Surface style.",
+          category: "reactionroles",
+          options: [
+            { value: "reaction", label: "Emoji reaction (classic)" },
+            { value: "button", label: "Button" },
+            { value: "select", label: "Select menu" },
+          ],
+        },
+      ],
+    });
+    // Posts through the shared settings route back to this page. The master
+    // is part of the form, so the cascade stays on: unticking it greys the
+    // other controls and the server writes only the master.
+    expect(html).toContain(
+      '<form method="POST" action="/admin/settings/save-section" data-cascade-scope>',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/reaction-roles">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="reactionroles">',
+    );
+    expect(html).not.toContain('name="no_cascade"');
+    expect(html).toContain(
+      `<input type="hidden" name="_csrf" value="${COMMON.csrfToken}">`,
+    );
+    for (const key of [
+      "reactionroles.enabled",
+      "reactionroles.message_channel_id",
+      "reactionroles.style",
+    ]) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+    }
+    // Enable toggle is a checked checkbox acting as the cascade master.
+    expect(html).toMatch(
+      /<input type="checkbox"[^>]*name="value_reactionroles\.enabled" value="true" checked data-cascade-master>/,
+    );
+    // Channel is a text-channel picker with the current channel selected.
+    expect(html).toMatch(
+      /<select[^>]*name="value_reactionroles\.message_channel_id"/,
+    );
+    expect(html).toContain('<option value="chan-1" selected>#roles</option>');
+    expect(html).toContain("#general</option>");
+    // Style is a select built from the schema options.
+    expect(html).toMatch(/<select[^>]*name="value_reactionroles\.style"/);
+    expect(html).toContain('<option value="button" selected>Button</option>');
+    expect(html).toContain(">Save settings</button>");
+  });
+
+  it("omits the settings card when no setting rows are supplied", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: false,
+      configChannel: null,
+      active: [],
+      archived: [],
+    });
+    expect(html).not.toContain(">Save settings</button>");
+  });
+
   it("renders unarchive control for archived rows", () => {
     const html = renderReactionRolesPage({
       ...COMMON,

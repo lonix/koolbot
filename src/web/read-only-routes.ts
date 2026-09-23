@@ -130,6 +130,18 @@ export const VOICE_CHANNELS_SETTING_KEYS = [
 ] as const;
 
 /**
+ * The `reactionroles.*` keys surfaced as editable controls on the Reaction
+ * Roles feature page (#974). Unlike Voice Channels, the feature master
+ * `reactionroles.enabled` is included so the page can turn the feature off as
+ * well as on; it renders as the settings card's cascade master.
+ */
+export const REACTION_ROLES_SETTING_KEYS = [
+  "reactionroles.enabled",
+  "reactionroles.message_channel_id",
+  "reactionroles.style",
+] as const;
+
+/**
  * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
  * the Settings page derives label/type/description from `settingsMetadata` with
  * a stored DB row taking precedence. Lets a feature page render its own keys
@@ -846,7 +858,7 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
       const service = ReactionRoleService.getInstance(client);
-      const [enabled, configChannelId, all, archived, channelData] =
+      const [enabled, configChannelId, all, archived, channelData, stored] =
         await Promise.all([
           config.getBoolean("reactionroles.enabled", false),
           config.getString("reactionroles.message_channel_id", ""),
@@ -856,7 +868,14 @@ export function createReadOnlyRouter(
             .limit(50)
             .lean(),
           fetchChannelData(client, common.guildId),
+          config.getAll().catch(() => []),
         ]);
+      // Editable `reactionroles.*` settings (#974). Built directly rather than
+      // through `loadFeatureSettings`: the page already fetched the channel
+      // list above (a second fetch would repeat the Discord round-trip), and
+      // none of these keys has a `dependsOn`, so there is no off-card
+      // dependency state to resolve.
+      const settingRows = buildSettingRows(REACTION_ROLES_SETTING_KEYS, stored);
       const channelNames = channelData.names;
 
       const active = all.filter((rr) => !rr.isArchived);
@@ -906,6 +925,8 @@ export function createReadOnlyRouter(
             : null,
           active: active.map(shape),
           archived: archived.map(shape),
+          settingRows,
+          textChannels: channelData.textChannels,
           flash: readFlash(req),
         }),
       );
