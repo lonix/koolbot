@@ -3,10 +3,15 @@ import { ChannelType } from "discord.js";
 import {
   buildSettingRows,
   fetchChannelData,
+  loadFeatureSettings,
   VOICE_CHANNELS_SETTING_KEYS,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
+import {
+  defaultConfig,
+  settingsMetadata,
+} from "../../src/services/config-schema.js";
 
 /**
  * Build a minimal mock Client whose single guild exposes the given channels
@@ -118,6 +123,104 @@ describe("buildSettingRows (#705)", () => {
   it("excludes the feature master voicechannels.enabled from the key list", () => {
     expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
     expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");
+  });
+});
+
+// Issue #971: the route-side one-liner behind every feature-page settings
+// card. It must fetch only the picker lists the card's keys render, and
+// resolve off-card dependencies the same way the Settings page does.
+describe("loadFeatureSettings (#971)", () => {
+  function countingClient(): {
+    client: any;
+    calls: { channels: number; roles: number };
+  } {
+    const calls = { channels: 0, roles: 0 };
+    const guild = {
+      id: "guild-1",
+      channels: {
+        fetch: async (): Promise<void> => {
+          calls.channels += 1;
+        },
+        cache: createMockCollection([
+          ["t1", { id: "t1", name: "general", type: ChannelType.GuildText }],
+          ["c1", { id: "c1", name: "Voice", type: ChannelType.GuildCategory }],
+        ]),
+      },
+      roles: {
+        fetch: async (): Promise<void> => {
+          calls.roles += 1;
+        },
+        cache: createMockCollection([
+          ["guild-1", { id: "guild-1", name: "@everyone" }],
+          ["r1", { id: "r1", name: "Mods" }],
+        ]),
+      },
+    };
+    return {
+      client: { guilds: { fetch: async () => guild } },
+      calls,
+    };
+  }
+
+  it("skips every guild fetch when no key needs a picker", async () => {
+    const { client, calls } = countingClient();
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      ["quotes.enabled", "quotes.max_length"],
+      [{ key: "quotes.max_length", value: 99 }],
+    );
+    expect(calls).toEqual({ channels: 0, roles: 0 });
+    expect(data.pickers).toEqual({});
+    expect(data.settingRows.map((r) => r.key)).toEqual([
+      "quotes.enabled",
+      "quotes.max_length",
+    ]);
+    expect(data.settingRows[1].current).toBe(99);
+  });
+
+  it("fetches channels for a category key but not roles", async () => {
+    const { client, calls } = countingClient();
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      ["voicechannels.category_id"],
+      [],
+    );
+    expect(calls).toEqual({ channels: 1, roles: 0 });
+    expect(data.pickers.categoryChannels).toEqual([
+      { id: "c1", name: "Voice" },
+    ]);
+    expect(data.pickers.textChannels).toEqual([{ id: "t1", name: "general" }]);
+    expect(data.pickers.roles).toBeUndefined();
+  });
+
+  it("fetches roles (minus @everyone) for a role key", async () => {
+    const roleKey = Object.keys(defaultConfig).find(
+      (k) =>
+        settingsMetadata[k as keyof typeof settingsMetadata]?.type === "role",
+    );
+    expect(roleKey).toBeDefined();
+    const { client, calls } = countingClient();
+    const data = await loadFeatureSettings(client, "guild-1", [roleKey!], []);
+    expect(calls.roles).toBe(1);
+    expect(data.pickers.roles).toEqual([{ id: "r1", name: "Mods" }]);
+  });
+
+  it("resolves off-card dependencies from stored rows, else the schema default", async () => {
+    const { client } = countingClient();
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      ["digest.enabled", "digest.include_achievements"],
+      [{ key: "voicetracking.enabled", value: true }],
+    );
+    expect(data.dependencyState.get("voicetracking.enabled")).toBe(true);
+    expect(data.dependencyState.get("achievements.enabled")).toBe(
+      defaultConfig["achievements.enabled"] === true,
+    );
+    // Keys on the card judge themselves from their own rows.
+    expect(data.dependencyState.has("digest.enabled")).toBe(false);
   });
 });
 

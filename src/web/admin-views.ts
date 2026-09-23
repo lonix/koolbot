@@ -2941,35 +2941,110 @@ export interface VoiceChannelsProps extends CommonProps {
 }
 
 /**
- * The editable settings card on the Voice Channels feature page (#705). Renders
- * the `voicechannels.*` keys with the same control renderer the Settings page
- * uses, so category is a picker, lobby names / prefix / suffix are text fields,
- * and the control-panel / presets flags are toggles. Posts through the shared
- * `/admin/settings/save-section` route with `redirect` back to this page and
- * `no_cascade` set — this form has no section master toggle (that is
- * `voicechannels.enabled`, owned by the enable notice above), so every
- * submitted key must be written rather than skipped by the cascade rule.
+ * Picker option lists a {@link renderFeatureSettingsCard} needs. Every list is
+ * optional: a feature page only fetches (and passes) the lists its own keys
+ * render — a card with no role keys never needs the guild's roles (#971).
  */
-function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
+export interface FeatureSettingsPickers {
+  textChannels?: ChannelOption[];
+  voiceChannels?: ChannelOption[];
+  categoryChannels?: ChannelOption[];
+  roles?: RoleOption[];
+}
+
+export interface FeatureSettingsCardProps {
+  /** Card heading. Defaults to "Settings". */
+  title?: string;
+  /** Plain-text line under the heading (escaped on output). */
+  intro?: string;
+  /**
+   * Settings category the form reports to `save-section` — used in the flash
+   * text and the audit row's `targetId`, not for key selection.
+   */
+  category: string;
+  /** Rows to render, typically from `buildSettingRows(KEYS, stored)`. */
+  settingRows: SettingRow[];
+  pickers?: FeatureSettingsPickers;
+  /** Admin path `save-section` redirects back to after the save. */
+  returnTo: string;
+  csrfToken: string;
+  /** Submit button text. Defaults to "Save settings". */
+  submitLabel?: string;
+  /**
+   * On/off state of keys the card does *not* render but its rows depend on
+   * (e.g. `voicetracking.enabled` for a Digest card). Rendered rows always
+   * judge their own state from `settingRows`, so this only fills the gaps.
+   * Without it an off-card dependency counts as unmet and locks the control.
+   */
+  dependencyState?: ReadonlyMap<string, boolean>;
+}
+
+/**
+ * The feature's top-level master toggle among a card's rows, or null. Only a
+ * two-segment `<feature>.enabled` key counts: a card that carries just
+ * sub-toggles (Voice Channels' `voicechannels.controlpanel.enabled`) has no
+ * master, even though `findCascadeMasterKey` would pick that sub-toggle.
+ * `findSectionMasterKey` on the server picks the same key from the submitted
+ * set, so the cascade the page renders is the one the save applies.
+ */
+export function findFeatureMasterKey(rows: SettingRow[]): string | null {
+  const key = findCascadeMasterKey(rows);
+  return key !== null && key.split(".").length === 2 ? key : null;
+}
+
+/**
+ * Generic in-place settings card for a feature page (#705, #971). Renders the
+ * given rows with the same control renderer, caption / description wiring
+ * (#854, #856), `warnBelow` hints and dependency locks (#666) the Settings
+ * page uses, and posts through the shared `/admin/settings/save-section` route
+ * with `redirect` back to the feature page.
+ *
+ * Enable / disable: when the rows include the feature master
+ * (`<feature>.enabled`, see {@link findFeatureMasterKey}) it renders as a
+ * normal toggle and the form behaves like a Settings section — the master is
+ * the cascade master, unchecking it greys the other controls, and the save
+ * writes only the master flag so the dependents keep their stored values
+ * rather than being blanked (#485). Without a master the form sets
+ * `no_cascade`, so every submitted key is written rather than a sub-toggle
+ * being mistaken for the section master.
+ */
+export function renderFeatureSettingsCard(
+  props: FeatureSettingsCardProps,
+): string {
   if (props.settingRows.length === 0) return "";
   const pickers = {
-    textChannels: [] as ChannelOption[],
-    voiceChannels: [] as ChannelOption[],
-    categoryChannels: props.categoryChannels,
-    roles: [] as RoleOption[],
+    textChannels: props.pickers?.textChannels ?? [],
+    voiceChannels: props.pickers?.voiceChannels ?? [],
+    categoryChannels: props.pickers?.categoryChannels ?? [],
+    roles: props.pickers?.roles ?? [],
   };
+  const masterKey = findFeatureMasterKey(props.settingRows);
+  const enabledByKey = new Map<string, boolean>(props.dependencyState ?? []);
+  for (const r of props.settingRows) {
+    enabledByKey.set(r.key, isEnabledValue(r.current));
+  }
   // Same caption / description wiring as the Settings page (#854): the
   // control carries the row's id so the caption can be a real `<label for>`
   // and the description cell is announced with it. Without this the in-place
   // controls announced as "edit text, blank" (#856).
   const rows = props.settingRows
     .map((r) => {
+      const unmet = unmetDependenciesFor(r.key, enabledByKey);
+      const depLocked = unmet.length > 0;
       const controlId = settingControlId(r.key);
       const labelId = `${controlId}-label`;
       const helpId = `${controlId}-help`;
       const warnId = `${controlId}-warn`;
+      const depId = `${controlId}-dep`;
       const warnHtml = renderWarnBelow(r, warnId);
-      const describedBy = [r.description ? helpId : "", warnHtml ? warnId : ""]
+      // No `#section-` anchors to jump to on a feature page, so the hint
+      // names the dependency without linking it.
+      const depHtml = renderDependencyHint(unmet, false, depId);
+      const describedBy = [
+        r.description ? helpId : "",
+        warnHtml ? warnId : "",
+        depHtml ? depId : "",
+      ]
         .filter(Boolean)
         .join(" ");
       const a11y: ControlA11y = {
@@ -2985,36 +3060,60 @@ function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
         r.type === "cron"
           ? `<div id="${labelId}">${caption}</div>`
           : `<div><label id="${labelId}" for="${escapeHtml(controlId)}">${caption}</label></div>`;
-      return `<tr>
+      const rowClass = depLocked ? ' class="dep-off"' : "";
+      return `<tr${rowClass}>
 <td>
   ${captionHtml}
   <code class="mono muted" style="font-size:.85em">${escapeHtml(r.key)}</code>
   <input type="hidden" name="keys" value="${escapeHtml(r.key)}">
 </td>
-<td class="settings-value">${renderControlInput(r, pickers, false, false, a11y)}${renderResetButton(r.key, r.label)}${warnHtml}</td>
+<td class="settings-value">${renderSettingControl(r, pickers, r.key === masterKey, depLocked, a11y)}${renderResetButton(r.key, r.label)}${warnHtml}${depHtml}</td>
 <td><span class="tag tag-info">${escapeHtml(r.type)}</span></td>
 <td class="muted" id="${helpId}">${escapeHtml(r.description)}</td>
 </tr>`;
     })
     .join("");
+  const introHtml = props.intro
+    ? `\n  <p class="muted" style="margin:.25rem 0 .75rem">${escapeHtml(props.intro)}</p>`
+    : "";
+  const scopeAttr = masterKey ? " data-cascade-scope" : "";
+  const cascadeInput = masterKey
+    ? ""
+    : `\n    <input type="hidden" name="no_cascade" value="1">`;
   return `
 <div class="card">
-  <h2>Settings</h2>
-  <p class="muted" style="margin:.25rem 0 .75rem">Change voice-channel settings here without leaving the page. Saved through the shared settings route.</p>
-  <form method="POST" action="/admin/settings/save-section">
+  <h2>${escapeHtml(props.title ?? "Settings")}</h2>${introHtml}
+  <form method="POST" action="/admin/settings/save-section"${scopeAttr}>
     <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
-    <input type="hidden" name="category" value="voicechannels">
-    <input type="hidden" name="redirect" value="/admin/voice-channels">
-    <input type="hidden" name="no_cascade" value="1">
+    <input type="hidden" name="category" value="${escapeHtml(props.category)}">
+    <input type="hidden" name="redirect" value="${escapeHtml(props.returnTo)}">${cascadeInput}
     <table>
       <thead><tr><th scope="col">Setting</th><th scope="col">Edit</th><th scope="col">Type</th><th scope="col">Description</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     <div class="actions" style="margin-top:.75rem">
-      <button type="submit" class="btn btn-primary">Save settings</button>
+      <button type="submit" class="btn btn-primary">${escapeHtml(props.submitLabel ?? "Save settings")}</button>
     </div>
   </form>
 </div>`;
+}
+
+/**
+ * The editable settings card on the Voice Channels feature page (#705), built
+ * on {@link renderFeatureSettingsCard}. Its keys exclude
+ * `voicechannels.enabled` (owned by the enable notice), so the card has no
+ * master and posts with `no_cascade`.
+ */
+function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
+  return renderFeatureSettingsCard({
+    intro:
+      "Change voice-channel settings here without leaving the page. Saved through the shared settings route.",
+    category: "voicechannels",
+    settingRows: props.settingRows,
+    pickers: { categoryChannels: props.categoryChannels },
+    returnTo: "/admin/voice-channels",
+    csrfToken: props.csrfToken,
+  });
 }
 
 export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {

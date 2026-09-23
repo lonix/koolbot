@@ -493,6 +493,93 @@ describe("POST /settings/save-section", () => {
   });
 });
 
+// Issue #971: a feature-page settings card includes its `<feature>.enabled`
+// master, so disabling works from the page. The card keeps the cascade (no
+// `no_cascade`), so these pin what switching the master off does to the
+// dependents submitted alongside it.
+describe("POST /settings/save-section — feature card with its master (#971)", () => {
+  const CARD = {
+    category: "digest",
+    redirect: "/admin/digest",
+    keys: ["digest.enabled", "digest.min_active_minutes", "digest.cron"],
+  };
+
+  it("writes the master and every dependent when the feature is on", async () => {
+    const res = await harness.post("/settings/save-section", {
+      ...CARD,
+      "value_digest.enabled": "true",
+      "value_digest.min_active_minutes": "45",
+      "value_digest.cron": "0 9 * * 1",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      ["digest.enabled", true],
+      ["digest.min_active_minutes", 45],
+      ["digest.cron", "0 9 * * 1"],
+    ]);
+  });
+
+  it("disabling writes only the master — greyed dependents are not wiped", async () => {
+    // The cascade script disables the dependents, so the browser omits them.
+    // Under `no_cascade` they would coerce to "" / blank and be rejected or
+    // clobbered; with the cascade they are left exactly as stored.
+    const res = await harness.post("/settings/save-section", CARD);
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 1 setting in digest.");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("digest.enabled");
+    expect(mockConfigSet.mock.calls[0][1]).toBe(false);
+    // Only the master reaches dependency validation.
+    expect(mockFindDependencyIssues).toHaveBeenCalledWith({
+      "digest.enabled": false,
+    });
+  });
+
+  it("disabling without JS skips dependents even though they were submitted", async () => {
+    // No-JS path: nothing greys out, so the dependents arrive — possibly
+    // edited. The save matches what the JS page shows (dependents inert
+    // while off) and never applies a half-edited dependent.
+    const res = await harness.post("/settings/save-section", {
+      ...CARD,
+      "value_digest.min_active_minutes": "5",
+      "value_digest.cron": "0 9 * * 1",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("digest.enabled");
+  });
+
+  it("disabling is refused, not silently half-applied, while a dependent still needs the master", async () => {
+    // `voicetracking.announcements.enabled` hard-depends on
+    // `voicetracking.enabled`. The skipped sub-toggle stays on, so the
+    // reverse dependency rule (#663) blocks the disable and says why,
+    // instead of leaving announcements on over a disabled tracker.
+    mockFindDependencyIssues.mockResolvedValue([
+      {
+        key: "voicetracking.enabled",
+        message:
+          "Cannot disable Voice tracking: Voice announcements still depends on it.",
+      },
+    ]);
+    const res = await harness.post("/settings/save-section", {
+      category: "voicetracking",
+      keys: ["voicetracking.enabled", "voicetracking.announcements.enabled"],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(mockFindDependencyIssues).toHaveBeenCalledWith({
+      "voicetracking.enabled": false,
+    });
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("still depends on it");
+    expect(flash.invalid).toEqual(["voicetracking.enabled"]);
+    expect(mockConfigSet).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /settings/reload", () => {
   it("re-registers the commands and audits the reload", async () => {
     mockRegisterCommands.mockResolvedValue(undefined);

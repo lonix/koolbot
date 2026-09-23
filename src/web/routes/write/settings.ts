@@ -339,7 +339,9 @@ export function createSettingsRouter(client: Client): Router {
       // reusing this route has no such master — its master lives elsewhere
       // (e.g. `voicechannels.enabled`, owned by the enable notice) and is not
       // among the submitted keys — so it opts out with `no_cascade`, meaning
-      // every submitted key is written rather than skipped.
+      // every submitted key is written rather than skipped. A feature card
+      // that *does* include its `<feature>.enabled` master keeps the cascade
+      // (#971), so disabling from the page writes only the master.
       const noCascade = getCheckbox(req, "no_cascade");
 
       const rawKeys = body.keys;
