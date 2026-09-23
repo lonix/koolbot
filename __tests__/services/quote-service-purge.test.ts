@@ -141,6 +141,12 @@ describe("QuoteService.purgeForUser", () => {
 
   describe("quotes the member saved for someone else", () => {
     it("writes the sentinel instead of deleting or nulling", async () => {
+      // No authored quotes, three saved for other people.
+      model.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        { _id: "q1", messageId: null, content: "a", authorId: "999" },
+        { _id: "q2", messageId: null, content: "b", authorId: "999" },
+        { _id: "q3", messageId: null, content: "c", authorId: "999" },
+      ]);
       model.updateMany.mockResolvedValue({ modifiedCount: 3 });
 
       const result = await service.purgeForUser("123", messages);
@@ -148,8 +154,18 @@ describe("QuoteService.purgeForUser", () => {
       // `addedById` is `required: true`, so `$set: { addedById: null }` would
       // throw on a validated write — and `updateMany` skips validators by
       // default, quietly persisting an invalid document instead.
+      //
+      // Pinned to the rows inspected and the `messageId` each had when its
+      // post was redrawn, so a row that gained a post in between is left
+      // attributed rather than stranded behind a sentinel (#916).
       expect(model.updateMany).toHaveBeenCalledWith(
-        { addedById: { $in: ID_FORMS } },
+        {
+          $or: [
+            { _id: "q1", messageId: null },
+            { _id: "q2", messageId: null },
+            { _id: "q3", messageId: null },
+          ],
+        },
         { $set: { addedById: ANONYMISED_USER_ID } },
       );
       expect(result.anonymised).toBe(3);
@@ -243,6 +259,39 @@ describe("QuoteService.purgeForUser", () => {
       expect(result.anonymiseError).toBe("connection reset");
     });
 
+    it("redraws the post before it writes the sentinel", async () => {
+      // The sentinel is what makes a row invisible to the next purge, so
+      // writing it first means anything that fails in between leaves an
+      // embed naming the member with nothing left to select it (#916).
+      model.find.mockResolvedValue([
+        { _id: "q1", messageId: "m1", content: "Hi", authorId: "999" },
+      ]);
+      model.updateMany.mockResolvedValue({ modifiedCount: 1 });
+
+      await service.purgeForUser("123", messages);
+
+      expect(
+        messages.updateQuoteMessage.mock.invocationCallOrder[0],
+      ).toBeLessThan(model.updateMany.mock.invocationCallOrder[0]);
+    });
+
+    it("keeps a row that gained a post mid-purge, and says so", async () => {
+      // Its `messageId` no longer matches what was inspected, so the write
+      // skips it: anonymising it would leave a fresh post crediting the
+      // member behind a sentinel row no retry can find.
+      model.find.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        { _id: "q1", messageId: null, content: "a", authorId: "999" },
+        { _id: "q2", messageId: null, content: "b", authorId: "999" },
+      ]);
+      model.updateMany.mockResolvedValue({ modifiedCount: 1 });
+
+      const result = await service.purgeForUser("123", messages);
+
+      expect(result.saverMatched).toBe(2);
+      expect(result.anonymised).toBe(1);
+      expect(result.anonymiseError).toContain("run the reset again");
+    });
+
     it("uses a sentinel no real member can match", () => {
       expect(ANONYMISED_USER_ID).toBe("0");
       expect(ANONYMISED_USER_ID).not.toMatch(/^\d{17,20}$/);
@@ -265,10 +314,7 @@ describe("QuoteService.purgeForUser", () => {
     await service.purgeForUser("<@!123>", messages);
 
     expect(model.find).toHaveBeenCalledWith({ authorId: { $in: ID_FORMS } });
-    expect(model.updateMany).toHaveBeenCalledWith(
-      { addedById: { $in: ID_FORMS } },
-      { $set: { addedById: ANONYMISED_USER_ID } },
-    );
+    expect(model.find).toHaveBeenCalledWith({ addedById: { $in: ID_FORMS } });
   });
 
   it("reports zeros for a member with no quotes", async () => {
@@ -284,6 +330,7 @@ describe("QuoteService.purgeForUser", () => {
       messagesAttempted: 0,
       messagesDeleted: 0,
       messagesFailed: 0,
+      saverMatched: 0,
       anonymised: 0,
       attributionsRerendered: 0,
       attributionsStale: 0,
@@ -324,7 +371,10 @@ describe("QuoteService.purgeForUser", () => {
     // Only the authored lookup fails; the anonymise half takes its own
     // snapshot and must still run.
     model.find.mockRejectedValueOnce(new Error("no primary"));
-    model.find.mockResolvedValue([]);
+    model.find.mockResolvedValue([
+      { _id: "q1", messageId: null, content: "a", authorId: "999" },
+      { _id: "q2", messageId: null, content: "b", authorId: "999" },
+    ]);
     model.updateMany.mockResolvedValue({ modifiedCount: 2 });
 
     const result = await service.purgeForUser("123", messages);

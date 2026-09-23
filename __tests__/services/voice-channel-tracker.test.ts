@@ -517,6 +517,46 @@ describe("VoiceChannelTracker", () => {
       expect(tracker.getActiveSession("user123")).toBeNull();
     });
 
+    it("keeps a rejoin that lands while the old persist is still running (#916)", async () => {
+      // `endTracking` captures its session at the top and only writes many
+      // awaits later. Clearing the per-user maps at the end of that call used
+      // to wipe whatever was there — including a session started by a rejoin
+      // in the meantime, whose own disconnect would then record nothing.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const first = { id: "channel-a", name: "A" } as unknown as VoiceChannel;
+      const second = { id: "channel-b", name: "B" } as unknown as VoiceChannel;
+
+      await joinChannel(tracker, member, first);
+
+      // Hold the disconnect's persist open, rejoin, then release it.
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((started) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              releaseWrite = () => resolve({});
+              started();
+            }),
+        );
+      });
+
+      const leaving = leaveChannel(tracker, member, first);
+      await writeStarted;
+      await joinChannel(tracker, member, second);
+      releaseWrite();
+      await leaving;
+
+      // The rejoin survived the old call's cleanup.
+      expect(tracker.getActiveSession("user123")?.channelName).toBe("B");
+    });
+
     it("does not start tracking for a join that predates the purge (#916)", async () => {
       // The handler yields on the enablement lookup before it ever reaches
       // `startTracking`. Reading the generation after that await would hand

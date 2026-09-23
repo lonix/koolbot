@@ -233,7 +233,13 @@ export interface QuotePurgeResult {
    * count a failed delete as a success.
    */
   messagesFailed: number;
-  /** Quotes the member saved for someone else, attribution cleared. */
+  /** Quotes the member saved for someone else that the purge found. */
+  saverMatched: number;
+  /**
+   * Of those, the ones whose attribution was actually cleared. A row that
+   * changed between the snapshot and the write is deliberately kept — see
+   * `purgeForUser` — so a shortfall here is a purge that has to be run again.
+   */
   anonymised: number;
   /**
    * Of those, the quote-channel posts re-rendered so the embed stops naming
@@ -855,31 +861,28 @@ export class QuoteService {
     let attributionsRerendered = 0;
     let attributionsStale = 0;
     let attributionsGone = 0;
-    // Snapshot first: after the update these rows no longer match, and
-    // their posts still print "Added by @member" until they are redrawn.
+
+    // Snapshot the rows this pass will act on. Everything below works from
+    // it: the posts are redrawn from these values, and the write is pinned
+    // to exactly these rows as they were read.
     let saved: IQuote[] = [];
     try {
       saved = await this.model.find({ addedById: { $in: idForms } });
-      const anonymisation = await this.model.updateMany(
-        { addedById: { $in: idForms } },
-        { $set: { addedById: ANONYMISED_USER_ID } },
-      );
-      anonymised = anonymisation?.modifiedCount ?? 0;
     } catch (error) {
       anonymiseError = getErrorMessage(error);
       logger.error(
-        `Failed to clear the saver attribution of ${userId}:`,
+        `Failed to find the quotes ${userId} saved for others:`,
         error,
       );
     }
 
-    // The posts are redrawn whether or not that write reported success. A
-    // multi-document update can modify rows and still reject — a lost
-    // acknowledgement is enough — and those rows now hold the sentinel, so
-    // no retry will ever select them again while their embeds go on naming
-    // the member (#916). Redrawing a post whose row was *not* updated is the
-    // harmless direction: it shows the sentinel a little early, and the next
-    // attempt anonymises the row it belongs to.
+    // Posts first, rows second (#916). The sentinel is what makes a row
+    // invisible to the next purge, so writing it before the post is repaired
+    // means anything that goes wrong in between — a rejected edit, a lost
+    // acknowledgement, the process dying — leaves an embed naming the member
+    // with nothing left that could ever select it again. Redrawing first can
+    // only show the sentinel on a post slightly before the database catches
+    // up, and the row stays selectable until it does.
     for (const quote of saved) {
       if (!quote.messageId) continue;
       try {
@@ -900,11 +903,46 @@ export class QuoteService {
           attributionsGone++;
           continue;
         }
-        // The row is anonymised regardless — an unreachable post must not
+        // The row is anonymised anyway below — an unreachable post must not
         // hold up the erasure — but the embed still names them, so say so.
         attributionsStale++;
         logger.warn(
           `Could not re-render quote post ${quote.messageId} after anonymising ${userId}; it still shows them as the saver:`,
+          error,
+        );
+      }
+    }
+
+    if (!anonymiseError && saved.length > 0) {
+      try {
+        // Pinned to the rows just inspected, and to the `messageId` each one
+        // had when its post was redrawn — the same CAS the authored delete
+        // uses. A row that gained a post in between does not match, so it
+        // keeps the real saver and stays selectable, and the next purge
+        // redraws *that* post before clearing it. Anonymising it here would
+        // leave a fresh post crediting the member with a sentinel row no
+        // retry can find.
+        const anonymisation = await this.model.updateMany(
+          {
+            $or: saved.map((quote) => ({
+              _id: quote._id,
+              messageId: quote.messageId ?? null,
+            })),
+          },
+          { $set: { addedById: ANONYMISED_USER_ID } },
+        );
+        anonymised = anonymisation?.modifiedCount ?? 0;
+        if (anonymised < saved.length) {
+          const kept = saved.length - anonymised;
+          anonymiseError = `${kept} quote(s) the member saved changed while the purge ran and were left attributed rather than stranding a fresh post; run the reset again to clear them`;
+          logger.warn(
+            `Purge for ${userId}: ${kept} saved-quote row(s) changed mid-purge and were kept`,
+          );
+        }
+      } catch (error) {
+        anonymiseError = getErrorMessage(error);
+        logger.error(
+          `Failed to clear the saver attribution of ${userId}:`,
           error,
         );
       }
@@ -917,6 +955,7 @@ export class QuoteService {
       messagesAttempted,
       messagesDeleted,
       messagesFailed,
+      saverMatched: saved.length,
       anonymised,
       attributionsRerendered,
       attributionsStale,

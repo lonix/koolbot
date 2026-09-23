@@ -51,6 +51,26 @@ interface VoiceSession {
 const MAX_DRAIN_ROUNDS = 10;
 
 /**
+ * Close every still-open companion interval on one session's own maps.
+ *
+ * The same work as `accumulateCompanion`, but against maps a caller has
+ * already claimed rather than the live per-user ones — which, by the time a
+ * persist finishes, may belong to a session that started after it (#916).
+ */
+function closeCompanionIntervals(
+  since: Map<string, number> | undefined,
+  seconds: Map<string, number> | undefined,
+): void {
+  if (!since || !seconds) return;
+  const now = Date.now();
+  for (const [companionId, start] of Array.from(since.entries())) {
+    const elapsed = Math.max(0, Math.floor((now - start) / 1000));
+    seconds.set(companionId, (seconds.get(companionId) ?? 0) + elapsed);
+    since.delete(companionId);
+  }
+}
+
+/**
  * How long a purge will wait for in-flight persists before giving up on them.
  *
  * The round count alone does not bound the wait: an `endTracking` call keeps
@@ -621,6 +641,24 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // Take this session's bookkeeping out of the shared per-user maps in
+      // one synchronous step (#916). Everything below awaits — a user fetch,
+      // a config read, the write itself — and a rejoin in that window
+      // installs a *new* session against the same keys. Sharing them would
+      // count the new session's co-presence into this document and then wipe
+      // it along with this one, so the rejoin's own disconnect would find
+      // nothing to record.
+      const claimed = {
+        encountered: this.encounteredUsers.get(userId),
+        since: this.companionSince.get(userId),
+        seconds: this.companionSeconds.get(userId),
+        firsts: this.sessionFirsts.get(userId),
+      };
+      this.encounteredUsers.delete(userId);
+      this.companionSince.delete(userId);
+      this.companionSeconds.delete(userId);
+      this.sessionFirsts.delete(userId);
+
       const endTime = new Date();
       const duration = Math.floor(
         (endTime.getTime() - session.startTime.getTime()) / 1000,
@@ -640,9 +678,8 @@ export class VoiceChannelTracker {
       }
 
       // Get accumulated users from the encountered users Set
-      const encounteredSet = this.encounteredUsers.get(userId);
-      const otherUsers: string[] = encounteredSet
-        ? Array.from(encounteredSet)
+      const otherUsers: string[] = claimed.encountered
+        ? Array.from(claimed.encountered)
         : [];
 
       // Build the optional companion/firsts payload only when the feature is
@@ -661,26 +698,23 @@ export class VoiceChannelTracker {
         otherUsers,
       };
       if (companionsEnabled) {
-        // Close any still-open companion intervals so the final session reflects
-        // everyone who was co-present right up to the disconnect.
-        const stillOpen = this.companionSince.get(userId);
-        if (stillOpen) {
-          for (const companionId of Array.from(stillOpen.keys())) {
-            this.accumulateCompanion(userId, companionId);
-          }
-        }
-        const seconds = this.companionSeconds.get(userId);
-        sessionDoc.companions = seconds
-          ? Array.from(seconds.entries()).map(([id, secs]) => ({
+        // Close any still-open companion intervals so the final session
+        // reflects everyone who was co-present right up to the disconnect.
+        // On the claimed maps, not the live ones: `accumulateCompanion`
+        // reads `this.companionSince`, which by now may belong to a rejoin.
+        closeCompanionIntervals(claimed.since, claimed.seconds);
+        sessionDoc.companions = claimed.seconds
+          ? Array.from(claimed.seconds.entries()).map(([id, secs]) => ({
               userId: id,
               seconds: secs,
             }))
           : [];
-        const firsts = this.sessionFirsts.get(userId);
-        sessionDoc.wasFirst = firsts
-          ? firsts.wasFirst
+        sessionDoc.wasFirst = claimed.firsts
+          ? claimed.firsts.wasFirst
           : otherUsers.length === 0;
-        sessionDoc.joinedExisting = firsts ? firsts.joinedExisting : [];
+        sessionDoc.joinedExisting = claimed.firsts
+          ? claimed.firsts.joinedExisting
+          : [];
       }
 
       // Update or create user tracking record
@@ -699,12 +733,15 @@ export class VoiceChannelTracker {
         { upsert: true, new: true },
       );
 
-      this.activeSessions.delete(userId);
-      this.userChannels.delete(userId);
-      this.encounteredUsers.delete(userId);
-      this.companionSince.delete(userId);
-      this.companionSeconds.delete(userId);
-      this.sessionFirsts.delete(userId);
+      // Only the session this call actually persisted. A rejoin during the
+      // write above installs a new one, and clearing that here would lose it
+      // outright — its own disconnect would find no session to record (#916).
+      // The companion maps need no cleanup: they were claimed at the top, so
+      // anything under these keys now belongs to a later session.
+      if (this.activeSessions.get(userId) === session) {
+        this.activeSessions.delete(userId);
+        this.userChannels.delete(userId);
+      }
 
       if (debugModeEnabled) {
         logger.info(

@@ -262,7 +262,10 @@ const DELETERS: Record<string, CollectionDeleter> = {
       });
       emit({
         action: "anonymise",
-        matched: result.anonymised,
+        // What it found, against what it actually cleared: a row that
+        // changed mid-purge is kept rather than stranding a fresh post, and
+        // that shortfall has to fail the report so the purge is run again.
+        matched: result.saverMatched,
         removed: result.anonymised,
         note:
           result.attributionsRerendered > 0

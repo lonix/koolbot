@@ -133,6 +133,7 @@ const purgeForUser = jest.fn<
     messagesAttempted: number;
     messagesDeleted: number;
     messagesFailed: number;
+    saverMatched: number;
     anonymised: number;
   }>
 >();
@@ -289,6 +290,7 @@ describe("UserDataDeletionService.purge", () => {
       messagesAttempted: 0,
       messagesDeleted: 0,
       messagesFailed: 0,
+      saverMatched: 0,
       anonymised: 0,
       attributionsRerendered: 0,
       attributionsStale: 0,
@@ -477,6 +479,7 @@ describe("UserDataDeletionService.purge", () => {
         messagesAttempted: 5,
         messagesDeleted: 5,
         messagesFailed: 0,
+        saverMatched: 2,
         anonymised: 2,
         attributionsRerendered: 0,
         attributionsStale: 0,
@@ -506,6 +509,7 @@ describe("UserDataDeletionService.purge", () => {
         messagesAttempted: 0,
         messagesDeleted: 0,
         messagesFailed: 0,
+        saverMatched: 2,
         anonymised: 2,
         attributionsRerendered: 1,
         attributionsStale: 1,
@@ -528,6 +532,7 @@ describe("UserDataDeletionService.purge", () => {
         messagesAttempted: 3,
         messagesDeleted: 1,
         messagesFailed: 2,
+        saverMatched: 0,
         anonymised: 0,
         attributionsRerendered: 0,
         attributionsStale: 0,
@@ -552,6 +557,7 @@ describe("UserDataDeletionService.purge", () => {
         messagesAttempted: 4,
         messagesDeleted: 4,
         messagesFailed: 0,
+        saverMatched: 1,
         anonymised: 1,
         attributionsRerendered: 0,
         attributionsStale: 0,
@@ -692,6 +698,27 @@ describe("UserDataDeletionService.purge", () => {
       expect(stepsFor(report, "user-birthday")[0].error).toContain(
         "may still name this member",
       );
+      expect(report.ok).toBe(false);
+    });
+
+    it("fails the purge when a saved-quote row was kept mid-purge", async () => {
+      // The row gained a post between the snapshot and the write, so it is
+      // left attributed rather than stranding that post. The caller has to
+      // see that and run the purge again (#916).
+      purgeForUser.mockResolvedValue({
+        authored: 0,
+        deleted: 0,
+        messagesAttempted: 0,
+        messagesDeleted: 0,
+        messagesFailed: 0,
+        saverMatched: 2,
+        anonymised: 1,
+        attributionsRerendered: 2,
+        attributionsStale: 0,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
       expect(report.ok).toBe(false);
     });
 
@@ -906,6 +933,7 @@ describe("UserDataDeletionService.purge", () => {
         messagesAttempted: 3,
         messagesDeleted: 3,
         messagesFailed: 0,
+        saverMatched: 1,
         anonymised: 1,
         attributionsRerendered: 0,
         attributionsStale: 0,
@@ -942,6 +970,7 @@ describe("UserDataDeletionService.purge", () => {
         messagesAttempted: 0,
         messagesDeleted: 0,
         messagesFailed: 0,
+        saverMatched: 0,
         anonymised: 0,
         attributionsRerendered: 0,
         attributionsStale: 0,
