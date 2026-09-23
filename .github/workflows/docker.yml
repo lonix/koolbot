@@ -6,6 +6,10 @@ on:
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+  # Weekly rebuild so a quiet main still picks up refreshed base images and
+  # the Trivy scan sees newly published advisories (#963).
+  schedule:
+    - cron: '17 4 * * 1'
 
 # Cancel in-progress runs for the same workflow and ref (except on tags)
 concurrency:
@@ -166,6 +170,9 @@ jobs:
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
+          # trivy-action ignores `severity` for SARIF output unless this is
+          # set, which let Medium findings through to the Security tab (#963).
+          limit-severities-for-sarif: true
           ignore-unfixed: true
           exit-code: '0'
 
