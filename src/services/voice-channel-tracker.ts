@@ -69,10 +69,9 @@ interface ClaimedSessionState {
  * persist finishes, may belong to a session that started after it (#916).
  */
 function closeCompanionIntervals(
-  since: Map<string, number> | undefined,
-  seconds: Map<string, number> | undefined,
+  since: Map<string, number>,
+  seconds: Map<string, number>,
 ): void {
-  if (!since || !seconds) return;
   const now = Date.now();
   for (const [companionId, start] of Array.from(since.entries())) {
     const elapsed = Math.max(0, Math.floor((now - start) / 1000));
