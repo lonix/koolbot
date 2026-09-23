@@ -6,11 +6,15 @@ import {
   loadFeatureSettings,
   POLLS_SETTING_KEYS,
   VOICE_CHANNELS_SETTING_KEYS,
+  REACTION_ROLES_SETTING_KEYS,
+  NOTICES_SETTING_KEYS,
+  envSettingFallback,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
 import {
   defaultConfig,
+  getDependencies,
   settingsMetadata,
 } from "../../src/services/config-schema.js";
 
@@ -121,9 +125,125 @@ describe("buildSettingRows (#705)", () => {
     expect(rows[0].description).toBe("custom");
   });
 
+  it("includes the reactionroles.enabled master and style options (#974)", () => {
+    expect(REACTION_ROLES_SETTING_KEYS).toEqual([
+      "reactionroles.enabled",
+      "reactionroles.message_channel_id",
+      "reactionroles.style",
+    ]);
+    const [enabled, channel, style] = buildSettingRows(
+      REACTION_ROLES_SETTING_KEYS,
+      [],
+    );
+    expect(enabled.type).toBe("boolean");
+    expect(channel.type).toBe("channel");
+    expect(style.current).toBe("reaction");
+    expect(style.options?.map((o) => o.value)).toEqual([
+      "reaction",
+      "button",
+      "select",
+    ]);
+  });
+
+  it("keeps the reactionroles keys free of dependsOn (#974)", () => {
+    // The Reaction Roles route builds its rows with `buildSettingRows` and
+    // passes no dependency state. If one of these keys gains a dependency,
+    // switch that route to `loadFeatureSettings`.
+    for (const key of REACTION_ROLES_SETTING_KEYS) {
+      expect(getDependencies(key)).toEqual([]);
+    }
+  });
+
+  it("falls back to an env-supplied value before the schema default (#972)", () => {
+    // Same order as ConfigService.get and the Settings page: stored row,
+    // then env, then default.
+    const prev = process.env["notices.enabled"];
+    process.env["notices.enabled"] = "true";
+    try {
+      const [fromEnv] = buildSettingRows(["notices.enabled"], []);
+      expect(fromEnv.current).toBe(true);
+      const [fromDb] = buildSettingRows(
+        ["notices.enabled"],
+        [{ key: "notices.enabled", value: false }],
+      );
+      expect(fromDb.current).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env["notices.enabled"];
+      else process.env["notices.enabled"] = prev;
+    }
+  });
+
+  it("keeps an env-supplied snowflake id as the exact string", () => {
+    const prev = process.env["notices.channel_id"];
+    process.env["notices.channel_id"] = "123456789012345678";
+    try {
+      const [row] = buildSettingRows(["notices.channel_id"], []);
+      expect(row.current).toBe("123456789012345678");
+    } finally {
+      if (prev === undefined) delete process.env["notices.channel_id"];
+      else process.env["notices.channel_id"] = prev;
+    }
+  });
+
+  it("envSettingFallback coerces only non-string keys", () => {
+    const prev = process.env["quotes.max_length"];
+    process.env["quotes.max_length"] = "500";
+    try {
+      expect(envSettingFallback("quotes.max_length", 1000)).toBe(500);
+      expect(envSettingFallback("quotes.max_length", "")).toBe("500");
+    } finally {
+      if (prev === undefined) delete process.env["quotes.max_length"];
+      else process.env["quotes.max_length"] = prev;
+    }
+    expect(envSettingFallback("definitely.unset.key", "")).toBeNull();
+  });
+
+  it("envSettingFallback reads a boolean key the way getBoolean does", () => {
+    const prev = process.env["notices.header_enabled"];
+    try {
+      for (const [raw, expected] of [
+        ["1", true],
+        ["0", false],
+        ["true", true],
+        ["false", false],
+        ["yes", false],
+      ] as const) {
+        process.env["notices.header_enabled"] = raw;
+        expect(envSettingFallback("notices.header_enabled", true)).toBe(
+          expected,
+        );
+      }
+      // Unset keeps null so the schema default still applies.
+      delete process.env["notices.header_enabled"];
+      expect(envSettingFallback("notices.header_enabled", true)).toBeNull();
+      process.env["notices.header_enabled"] = "1";
+      const [row] = buildSettingRows(["notices.header_enabled"], []);
+      expect(row.current).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env["notices.header_enabled"];
+      else process.env["notices.header_enabled"] = prev;
+    }
+  });
+
   it("excludes the feature master voicechannels.enabled from the key list", () => {
     expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
     expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");
+  });
+
+  it("lists every editable notices key, master included, bookkeeping excluded (#972)", () => {
+    expect([...NOTICES_SETTING_KEYS]).toEqual([
+      "notices.enabled",
+      "notices.channel_id",
+      "notices.header_enabled",
+      "notices.header_pin_enabled",
+    ]);
+    const rows = buildSettingRows(NOTICES_SETTING_KEYS, []);
+    expect(rows.map((r) => r.type)).toEqual([
+      "boolean",
+      "channel",
+      "boolean",
+      "boolean",
+    ]);
   });
 });
 

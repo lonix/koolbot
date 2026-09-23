@@ -144,10 +144,69 @@ export const POLLS_SETTING_KEYS = [
 ] as const;
 
 /**
+ * The `reactionroles.*` keys surfaced as editable controls on the Reaction
+ * Roles feature page (#974). Unlike Voice Channels, the feature master
+ * `reactionroles.enabled` is included so the page can turn the feature off as
+ * well as on; it renders as the settings card's cascade master.
+ */
+export const REACTION_ROLES_SETTING_KEYS = [
+  "reactionroles.enabled",
+  "reactionroles.message_channel_id",
+  "reactionroles.style",
+] as const;
+
+/**
+ * The `notices.*` keys editable in place on the Notices page (#972). Includes
+ * the feature master so the page can switch notices off as well as on; the
+ * auto-managed `notices.header_message_id` is bookkeeping and stays out.
+ */
+export const NOTICES_SETTING_KEYS = [
+  "notices.enabled",
+  "notices.channel_id",
+  "notices.header_enabled",
+  "notices.header_pin_enabled",
+] as const;
+
+/**
+ * The env-var fallback a settings row shows for `key` when no DB row exists.
+ * `getEnvConfigValue` coerces every digit-only string to a number, which
+ * rounds a Discord snowflake past 2^53 and leaves an id picker with no
+ * selection. A key whose schema default is a string keeps the raw text; a
+ * boolean key is read the way `ConfigService.getBoolean` reads it.
+ */
+export function envSettingFallback(
+  key: string,
+  defaultValue: unknown,
+): unknown {
+  if (typeof defaultValue === "boolean") {
+    // `getBoolean` reads `1` as on; a raw number would leave the checkbox
+    // unticked and a save would store `false`.
+    const value = getEnvConfigValue(key);
+    return value === null ? null : isEnabledValue(value);
+  }
+  if (typeof defaultValue === "number") {
+    // Read the way `ConfigService.getNumber` reads it: a boolean is 1 / 0 and
+    // an unparsable string falls back to the default rather than rendering
+    // text in a number input (#973).
+    const value = getEnvConfigValue(key);
+    if (typeof value === "boolean") return value ? 1 : 0;
+    return typeof value === "number" ? value : null;
+  }
+  if (typeof defaultValue !== "string") return getEnvConfigValue(key);
+  const raw = getEnv(key);
+  return raw === undefined || raw.trim() === "" ? null : raw;
+}
+
+/**
  * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
  * the Settings page derives label/type/description from `settingsMetadata` with
  * a stored DB row taking precedence. Lets a feature page render its own keys
  * with the shared control renderer (#705).
+ *
+ * `current` resolves in the order `ConfigService.get` (and the Settings page)
+ * use: stored row, then an env var named after the key, then the schema
+ * default. Skipping the env step would show (and let a save persist) the
+ * default over an env-supplied value (#972).
  */
 export function buildSettingRows(
   keys: readonly string[],
@@ -166,7 +225,9 @@ export function buildSettingRows(
     return {
       key,
       label: meta?.label ?? key,
-      current: dbEntry ? dbEntry.value : defaultValue,
+      current: dbEntry
+        ? dbEntry.value
+        : (envSettingFallback(key, defaultValue) ?? defaultValue),
       defaultValue,
       type: meta?.type ?? describeType(defaultValue),
       description: dbEntry?.description ?? meta?.description ?? "",
@@ -177,27 +238,6 @@ export function buildSettingRows(
       channelKind: meta?.channelKind,
     };
   });
-}
-
-/**
- * Coerce an env-supplied value to the type of the key's schema default, the
- * way `ConfigService.getBoolean` / `getNumber` / `getString` read it at
- * runtime. The controls compare strictly (a toggle is checked only for
- * `true`), so an uncoerced `polls.enabled=1` would render the master
- * unchecked while the bot treats the feature as on (#973).
- */
-function coerceEnvValue(
-  value: string | number | boolean,
-  defaultValue: unknown,
-): unknown {
-  if (typeof defaultValue === "boolean") return isEnabledValue(value);
-  if (typeof defaultValue === "number") {
-    if (typeof value === "number") return value;
-    if (typeof value === "boolean") return value ? 1 : 0;
-    return defaultValue;
-  }
-  if (typeof defaultValue === "string") return String(value);
-  return value;
 }
 
 /** Everything a {@link renderFeatureSettingsCard} needs besides page props. */
@@ -236,18 +276,7 @@ export async function loadFeatureSettings(
     (await ConfigService.getInstance()
       .getAll()
       .catch((): StoredConfigRow[] => []));
-  const storedByKey = new Map(storedRows.map((s) => [s.key, s.value]));
-  // A key with no stored row takes its env-supplied value before the schema
-  // default, the order `ConfigService.get` uses at runtime (#973). Otherwise
-  // a master switched on through the environment renders unchecked, locks
-  // its dependents, and a save writes it back as `false`.
-  const settingRows = buildSettingRows(keys, storedRows).map((row) => {
-    if (storedByKey.has(row.key)) return row;
-    const envValue = getEnvConfigValue(row.key);
-    return envValue === null
-      ? row
-      : { ...row, current: coerceEnvValue(envValue, row.defaultValue) };
-  });
+  const settingRows = buildSettingRows(keys, storedRows);
 
   const needsChannels = settingRows.some(
     (r) =>
@@ -274,6 +303,7 @@ export async function loadFeatureSettings(
   // `ConfigService.get` uses at runtime: stored row, then an env var named
   // after the key, then the schema default. Skipping the env step would lock
   // a control whose dependency is switched on through the environment.
+  const storedByKey = new Map(storedRows.map((s) => [s.key, s.value]));
   const dependencyState = new Map<string, boolean>();
   for (const key of keys) {
     for (const dep of getDependencies(key as keyof ConfigSchema)) {
@@ -614,7 +644,9 @@ export function createReadOnlyRouter(
           return {
             key,
             label: meta?.label ?? key,
-            current: dbEntry ? dbEntry.value : defaultValue,
+            current: dbEntry
+              ? dbEntry.value
+              : (envSettingFallback(key, defaultValue) ?? defaultValue),
             defaultValue,
             type: meta?.type ?? describeType(defaultValue),
             description: dbEntry?.description ?? meta?.description ?? "",
@@ -896,7 +928,7 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
       const service = ReactionRoleService.getInstance(client);
-      const [enabled, configChannelId, all, archived, channelData] =
+      const [enabled, configChannelId, all, archived, channelData, stored] =
         await Promise.all([
           config.getBoolean("reactionroles.enabled", false),
           config.getString("reactionroles.message_channel_id", ""),
@@ -906,7 +938,23 @@ export function createReadOnlyRouter(
             .limit(50)
             .lean(),
           fetchChannelData(client, common.guildId),
+          // `null` (not `[]`) on failure: an empty snapshot would render the
+          // schema defaults as if they were stored, and saving the card would
+          // then overwrite the real values with them.
+          config.getAll().catch((err: unknown) => {
+            logger.warn("reaction roles: config snapshot read failed", err);
+            return null;
+          }),
         ]);
+      // Editable `reactionroles.*` settings (#974). Built directly rather than
+      // through `loadFeatureSettings`: the page already fetched the channel
+      // list above (a second fetch would repeat the Discord round-trip), and
+      // none of these keys has a `dependsOn`, so there is no off-card
+      // dependency state to resolve. Fails closed when the snapshot is
+      // unavailable: no editable card, just a notice.
+      const settingRows = stored
+        ? buildSettingRows(REACTION_ROLES_SETTING_KEYS, stored)
+        : [];
       const channelNames = channelData.names;
 
       const active = all.filter((rr) => !rr.isArchived);
@@ -956,6 +1004,9 @@ export function createReadOnlyRouter(
             : null,
           active: active.map(shape),
           archived: archived.map(shape),
+          settingRows,
+          settingsUnavailable: stored === null,
+          textChannels: channelData.textChannels,
           flash: readFlash(req),
         }),
       );
@@ -968,15 +1019,23 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
-      const [enabled, channelId, headerEnabled, notices, channelData] =
+      const [enabled, channelId, stored, notices, channelData] =
         await Promise.all([
           config.getBoolean("notices.enabled", false),
           config.getString("notices.channel_id", ""),
-          config.getBoolean("notices.header_enabled", true),
+          // `null` (not `[]`) on failure: rendering schema defaults here would
+          // let a save overwrite the real values, so the card is withheld.
+          config.getAll().catch(() => null),
           Notice.find({}).sort({ category: 1, order: 1 }).lean(),
           fetchChannelData(client, common.guildId),
         ]);
       const channelNames = channelData.names;
+      // Editable `notices.*` settings rendered in place on this page (#972).
+      // The picker reuses the channel fetch above, and none of these keys has
+      // a `dependsOn`, so `loadFeatureSettings` would only add a second fetch.
+      const settingRows = stored
+        ? buildSettingRows(NOTICES_SETTING_KEYS, stored)
+        : [];
 
       const grouped = new Map<string, typeof notices>();
       for (const n of notices) {
@@ -1013,8 +1072,10 @@ export function createReadOnlyRouter(
           channel: channelId
             ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
             : null,
-          headerEnabled,
           total: notices.length,
+          settingRows,
+          settingsUnavailable: stored === null,
+          textChannels: channelData.textChannels,
           groups,
           categoryOptions,
           flash: readFlash(req),

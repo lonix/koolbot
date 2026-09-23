@@ -1763,6 +1763,131 @@ describe("renderReactionRolesPage", () => {
     expect(html).not.toContain("/admin/reaction-roles/archive");
   });
 
+  it("renders an editable settings card with the enable toggle, channel picker and style select (#974)", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: { name: "roles", id: "chan-1" },
+      active: [],
+      archived: [],
+      textChannels: [
+        { id: "chan-1", name: "roles" },
+        { id: "chan-2", name: "general" },
+      ],
+      settingRows: [
+        {
+          key: "reactionroles.enabled",
+          label: "Reaction roles enabled",
+          current: true,
+          defaultValue: false,
+          type: "boolean",
+          description: "Enable the reaction-role system.",
+          category: "reactionroles",
+        },
+        {
+          key: "reactionroles.message_channel_id",
+          label: "Reaction-role message channel",
+          current: "chan-1",
+          defaultValue: "",
+          type: "channel",
+          description: "Channel ID where reaction-role messages are posted.",
+          category: "reactionroles",
+        },
+        {
+          key: "reactionroles.style",
+          label: "Self-assign surface style",
+          current: "button",
+          defaultValue: "reaction",
+          type: "string",
+          description: "Surface style.",
+          category: "reactionroles",
+          options: [
+            { value: "reaction", label: "Emoji reaction (classic)" },
+            { value: "button", label: "Button" },
+            { value: "select", label: "Select menu" },
+          ],
+        },
+      ],
+    });
+    // Posts through the shared settings route back to this page. The master
+    // is part of the form, so the cascade stays on: unticking it greys the
+    // other controls and the server writes only the master.
+    expect(html).toContain(
+      '<form method="POST" action="/admin/settings/save-section" data-cascade-scope>',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/reaction-roles">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="reactionroles">',
+    );
+    expect(html).not.toContain('name="no_cascade"');
+    expect(html).toContain(
+      `<input type="hidden" name="_csrf" value="${COMMON.csrfToken}">`,
+    );
+    for (const key of [
+      "reactionroles.enabled",
+      "reactionroles.message_channel_id",
+      "reactionroles.style",
+    ]) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+    }
+    // Enable toggle is a checked checkbox acting as the cascade master.
+    expect(html).toMatch(
+      /<input type="checkbox"[^>]*name="value_reactionroles\.enabled" value="true" checked data-cascade-master>/,
+    );
+    // Channel is a text-channel picker with the current channel selected.
+    expect(html).toMatch(
+      /<select[^>]*name="value_reactionroles\.message_channel_id"/,
+    );
+    expect(html).toContain('<option value="chan-1" selected>#roles</option>');
+    expect(html).toContain("#general</option>");
+    // Style is a select built from the schema options.
+    expect(html).toMatch(/<select[^>]*name="value_reactionroles\.style"/);
+    expect(html).toContain('<option value="button" selected>Button</option>');
+    expect(html).toContain(">Save settings</button>");
+  });
+
+  it("fails closed with a notice when the stored settings could not be read", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: null,
+      active: [],
+      archived: [],
+      settingsUnavailable: true,
+      settingRows: [
+        {
+          key: "reactionroles.style",
+          label: "Self-assign surface style",
+          current: "reaction",
+          defaultValue: "reaction",
+          type: "string",
+          description: "Surface style.",
+          category: "reactionroles",
+        },
+      ],
+    });
+    // No editable controls, so a save can't write schema defaults over the
+    // real stored values.
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain('name="value_reactionroles.style"');
+    expect(html).not.toContain(">Save settings</button>");
+  });
+
+  it("omits the settings card when no setting rows are supplied", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: false,
+      configChannel: null,
+      active: [],
+      archived: [],
+    });
+    expect(html).not.toContain(">Save settings</button>");
+  });
+
   it("renders unarchive control for archived rows", () => {
     const html = renderReactionRolesPage({
       ...COMMON,
@@ -1802,10 +1927,11 @@ describe("renderNoticesPage", () => {
       ...COMMON,
       enabled: false,
       channel: null,
-      headerEnabled: false,
       total: 0,
       groups: [],
       categoryOptions: NOTICE_CATEGORY_OPTIONS,
+      settingRows: [],
+      textChannels: [],
     });
     expect(html).toContain("No notices stored");
     expect(html).toContain("Create a notice");
@@ -1816,8 +1942,9 @@ describe("renderNoticesPage", () => {
       ...COMMON,
       enabled: true,
       channel: { name: "notices", id: "c1" },
-      headerEnabled: true,
       total: 1,
+      settingRows: [],
+      textChannels: [],
       groups: [
         {
           category: "rules",
@@ -1844,6 +1971,83 @@ describe("renderNoticesPage", () => {
     expect(html).toContain("/admin/notices/n1/delete");
     expect(html).toContain("/admin/notices/n1/order");
     expect(html).toContain("/admin/notices/sync");
+  });
+
+  it("renders editable notices settings that post back to the page (#972)", () => {
+    const row = (key: string, type: string, current: unknown): SettingRow => ({
+      key,
+      label: key,
+      current,
+      defaultValue: current,
+      type,
+      description: `${key} help`,
+      category: "notices",
+    });
+    const html = renderNoticesPage({
+      ...COMMON,
+      enabled: true,
+      channel: { name: "notices", id: "c1" },
+      total: 3,
+      groups: [],
+      categoryOptions: NOTICE_CATEGORY_OPTIONS,
+      textChannels: [
+        { id: "c1", name: "notices" },
+        { id: "c2", name: "rules" },
+      ],
+      settingRows: [
+        row("notices.enabled", "boolean", true),
+        row("notices.channel_id", "channel", "c1"),
+        row("notices.header_enabled", "boolean", true),
+        row("notices.header_pin_enabled", "boolean", false),
+      ],
+    });
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/notices">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="notices">',
+    );
+    // `notices.enabled` is on the card, so it is the cascade master: the
+    // form keeps the save-section cascade instead of posting no_cascade.
+    expect(html).not.toContain('name="no_cascade"');
+    // Every non-bookkeeping key is submitted and has a control, including
+    // the feature master, so the page can switch notices off.
+    for (const key of [
+      "notices.enabled",
+      "notices.channel_id",
+      "notices.header_enabled",
+      "notices.header_pin_enabled",
+    ]) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+      expect(html).toContain(`name="value_${key}"`);
+    }
+    expect(html).not.toContain("notices.header_message_id");
+    // The channel key renders as a text-channel picker.
+    expect(html).toContain('<option value="c1" selected>#notices</option>');
+    expect(html).toContain('<option value="c2">#rules</option>');
+    // Moving the channel points the admin at Resync.
+    expect(html).toContain("Changing the channel does not move notices");
+    // Total count and the resync action stay.
+    expect(html).toContain("<dt>Total notices</dt><dd>3</dd>");
+    expect(html).toContain("Resync notices to channel");
+  });
+
+  it("withholds the settings card when stored config could not be read", () => {
+    const html = renderNoticesPage({
+      ...COMMON,
+      enabled: true,
+      channel: null,
+      total: 0,
+      groups: [],
+      categoryOptions: NOTICE_CATEGORY_OPTIONS,
+      textChannels: [],
+      settingRows: [],
+      settingsUnavailable: true,
+    });
+    expect(html).toContain("Notices settings could not be loaded");
+    expect(html).not.toContain('name="value_notices.enabled"');
   });
 });
 
