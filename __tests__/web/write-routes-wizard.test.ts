@@ -33,7 +33,8 @@ const mockCreateSession = jest.fn();
 const mockAddConfiguration = jest.fn();
 const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
-const mockConfigGetAll = jest.fn<() => Promise<unknown>>(async () => new Map());
+const mockConfigGetAll = jest.fn<() => Promise<unknown>>(async () => []);
+const mockConfigGet = jest.fn(async () => null);
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -67,7 +68,7 @@ jest.unstable_mockModule("../../src/services/wizard-service.js", () => ({
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
-      get: jest.fn(async () => null),
+      get: mockConfigGet,
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
       getBoolean: jest.fn(async () => false),
@@ -99,7 +100,7 @@ function wizardState(
 beforeEach(async () => {
   jest.clearAllMocks();
   mockGetSession.mockReturnValue(null);
-  mockConfigGetAll.mockImplementation(async () => new Map());
+  mockConfigGetAll.mockImplementation(async () => []);
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -179,6 +180,20 @@ describe("GET /wizard?step=n", () => {
     expect(res.status).toBe(200);
     expect(html).toContain('<form method="POST" action="/admin/wizard/step/0"');
     expect(html).not.toContain("Settings could not be loaded");
+  });
+
+  it("pre-fills from the snapshot rather than per-key reads", async () => {
+    // A per-key `config.get` failure would come back as null (blank
+    // controls), so values must come from the one snapshot read.
+    mockConfigGetAll.mockResolvedValue([
+      { key: "quotes.max_length", value: 777 },
+    ]);
+    mockGetSession.mockReturnValue(wizardState(["quotes"]));
+    const res = await harness.get("/wizard?step=0");
+    const html = await res.text();
+    expect(res.status).toBe(200);
+    expect(html).toMatch(/name="value_quotes\.max_length"[^>]*value="777"/);
+    expect(mockConfigGet).not.toHaveBeenCalled();
   });
 
   it("fails closed with a notice when the stored config can't be read", async () => {

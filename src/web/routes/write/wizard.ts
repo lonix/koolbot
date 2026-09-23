@@ -17,6 +17,7 @@ import {
   getDependencies,
   isEnabledValue,
 } from "../../../services/config-schema.js";
+import { getEnvConfigValue } from "../../../config/env.js";
 import { FLASH_MAX } from "../../http-flash.js";
 import { recordAudit } from "../../audit.js";
 import { getDisplayedRemainingMs } from "../../admin-layout.js";
@@ -95,18 +96,16 @@ export function createWizardRouter(client: Client): Router {
           const settingKeys = WIZARD_FEATURE_SETTINGS[featureKey] ?? [];
           const config = ConfigService.getInstance();
 
-          // `config.get` below swallows read errors and returns `null`, which
-          // would render as blank / unchecked controls that the apply step
-          // then persists. Probe the store once and fail closed if it can't
-          // be read, like the Settings and feature pages do.
-          const readable = await config.getAll().then(
-            () => true,
-            (err: unknown) => {
-              logger.warn("wizard: config snapshot read failed", err);
-              return false;
-            },
-          );
-          if (!readable) {
+          // Read the store once and resolve every value from that snapshot.
+          // `config.get` swallows read errors and returns `null`, which would
+          // render as blank / unchecked controls that the apply step then
+          // persists, so a failed read fails closed here instead, like the
+          // Settings and feature pages do.
+          const snapshot = await config.getAll().catch((err: unknown) => {
+            logger.warn("wizard: config snapshot read failed", err);
+            return null;
+          });
+          if (snapshot === null) {
             res.type("text/html").send(
               renderWizardStepPage({
                 csrfToken,
@@ -134,27 +133,30 @@ export function createWizardRouter(client: Client): Router {
             return;
           }
 
+          const storedByKey = new Map(snapshot.map((r) => [r.key, r.value]));
+
           // Resolve a key's effective current value: prefer what the admin
-          // already entered earlier in this wizard run, then the persisted
-          // config, then the schema default. Used for both the visible fields
-          // and the cross-feature dependency targets below.
-          const resolveCurrent = async (k: string): Promise<unknown> => {
+          // already entered earlier in this wizard run, then the stored row
+          // from the snapshot, then an env var named after the key (the order
+          // `ConfigService.get` uses), then the schema default. Used for both
+          // the visible fields and the cross-feature dependency targets below.
+          const resolveCurrent = (k: string): unknown => {
             const fromWizard = wizard.getConfiguration(
               session.discordUserId,
               session.guildId,
               k,
             );
             if (fromWizard !== undefined) return fromWizard;
-            try {
-              return await config.get(k);
-            } catch {
-              return defaultConfig[k as keyof typeof defaultConfig];
-            }
+            if (storedByKey.has(k)) return storedByKey.get(k);
+            return (
+              getEnvConfigValue(k) ??
+              defaultConfig[k as keyof typeof defaultConfig]
+            );
           };
 
           const currentValues: Record<string, unknown> = {};
           for (const k of settingKeys) {
-            currentValues[k] = await resolveCurrent(k);
+            currentValues[k] = resolveCurrent(k);
           }
 
           // Enabled-state of this step's keys plus any dependency targets they
@@ -170,7 +172,7 @@ export function createWizardRouter(client: Client): Router {
               k as keyof typeof defaultConfig,
             )) {
               if (dep in enabledByKey) continue;
-              enabledByKey[dep] = isEnabledValue(await resolveCurrent(dep));
+              enabledByKey[dep] = isEnabledValue(resolveCurrent(dep));
             }
           }
           // Guild picker lists so channel/category/role keys render as real
