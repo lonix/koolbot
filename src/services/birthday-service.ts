@@ -8,6 +8,10 @@ import { resolveTimezone } from "../utils/timezone.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import {
+  isUnknownChannelError,
+  isUnknownMessageError,
+} from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
 
 /**
@@ -49,6 +53,16 @@ export interface BirthdayPurgeResult {
   removed: number;
   /** Whether a live birthday-role grant was taken back on Discord. */
   roleRevoked: boolean;
+  /** Recorded birthday posts about the member that the purge tried to delete. */
+  announcementsAttempted: number;
+  /** Of those, the ones confirmed gone from Discord. */
+  announcementsDeleted: number;
+  /**
+   * Of those, the ones that may still be public. The row is kept when this
+   * is non-zero — it holds the only ids by which those posts can ever be
+   * found — so a retry can finish the job.
+   */
+  announcementsFailed: number;
   /** Why the purge is incomplete, when it is. */
   error?: string;
 }
@@ -424,6 +438,17 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         }
 
         row.lastAnnouncedYear = local.year;
+        // Record the post so a later per-user purge can take it down. It
+        // names the member and often their age, and nothing else on the
+        // server knows the bot wrote it (#916).
+        row.announcements = [
+          ...(row.announcements ?? []),
+          {
+            channelId: channel.id,
+            messageId: announcement.id,
+            year: local.year,
+          },
+        ];
         // If the row was purged while this run was working (#916), the save
         // matches nothing and the grant above would have no marker — the
         // expiry sweep could never find it and the role would sit on the
@@ -517,11 +542,24 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     userId: string,
   ): Promise<BirthdayPurgeResult> {
     let roleRevoked = false;
+    let announcementsDeleted = 0;
 
     for (let attempt = 0; attempt < MAX_PURGE_ATTEMPTS; attempt++) {
       const { retry, ...pass } = await this.purgeAttempt(guildId, userId);
       roleRevoked = roleRevoked || pass.roleRevoked;
-      if (!retry) return { ...pass, roleRevoked };
+      // Posts taken down on an earlier pass are gone for good, so they count
+      // even though the pass that removed them did not finish.
+      announcementsDeleted += pass.announcementsDeleted;
+      if (!retry)
+        return {
+          ...pass,
+          roleRevoked,
+          announcementsDeleted,
+          announcementsAttempted: Math.max(
+            pass.announcementsAttempted,
+            announcementsDeleted,
+          ),
+        };
 
       // The row changed under us — the scheduled run granted a role and
       // wrote its marker between our read and our delete. Go round again
@@ -535,6 +573,9 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       matched: 1,
       removed: 0,
       roleRevoked,
+      announcementsAttempted: announcementsDeleted,
+      announcementsDeleted,
+      announcementsFailed: 0,
       error: `the birthday row kept changing mid-purge; gave up after ${MAX_PURGE_ATTEMPTS} attempts, so the expiry sweep still owns any live grant`,
     };
   }
@@ -548,6 +589,12 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     guildId: string,
     userId: string,
   ): Promise<BirthdayPurgeResult & { retry: boolean }> {
+    const none = {
+      announcementsAttempted: 0,
+      announcementsDeleted: 0,
+      announcementsFailed: 0,
+    };
+
     let rows: IUserBirthday[];
     try {
       rows = await UserBirthday.find({ userId, guildId });
@@ -557,12 +604,25 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         removed: 0,
         roleRevoked: false,
         retry: false,
+        ...none,
         error: getErrorMessage(error),
       };
     }
     if (rows.length === 0) {
-      return { matched: 0, removed: 0, roleRevoked: false, retry: false };
+      return {
+        matched: 0,
+        removed: 0,
+        roleRevoked: false,
+        retry: false,
+        ...none,
+      };
     }
+
+    // Before anything else: the posts. They are the loudest copy of this
+    // member's data — their name and often their age, in a channel the
+    // whole guild reads — and the row about to be deleted holds the only
+    // ids by which they can ever be found again (#916).
+    const posts = await this.withdrawAnnouncements(rows);
 
     const held = rows.find((row) => row.roleAssignedAt);
     let roleRevoked = false;
@@ -586,6 +646,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           removed: 0,
           roleRevoked: false,
           retry: false,
+          ...posts,
           error: getErrorMessage(error),
         };
       }
@@ -599,6 +660,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
             removed: 0,
             roleRevoked: false,
             retry: false,
+            ...posts,
             error: `could not take back the birthday role; the row is kept so the expiry sweep can still revoke it`,
           };
         }
@@ -606,6 +668,20 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       }
       // No role configured any more: nothing to revoke, so the marker is
       // just stale bookkeeping and the row can go.
+    }
+
+    if (posts.announcementsFailed > 0) {
+      // Keep the row: its `announcements` list is the only handle anything
+      // has on those posts, so deleting it now would leave them up for good.
+      // The purge is reported incomplete, and a retry finishes the job.
+      return {
+        matched: rows.length,
+        removed: 0,
+        roleRevoked,
+        retry: false,
+        ...posts,
+        error: `${posts.announcementsFailed} birthday announcement(s) could not be deleted and may still be public; the row is kept so a retry can find them`,
+      };
     }
 
     try {
@@ -618,6 +694,12 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         $or: rows.map((row) => ({
           _id: row._id,
           roleAssignedAt: row.roleAssignedAt ?? null,
+          // And on the announcement bookkeeping: a run that posted between
+          // the read and here appended to `announcements` and stamped
+          // `lastAnnouncedYear`, and with no role configured the marker
+          // above would not have moved. Deleting then would drop the only
+          // record of a message that names the member (#916).
+          lastAnnouncedYear: row.lastAnnouncedYear ?? null,
         })),
       });
       const removed = removal?.deletedCount ?? 0;
@@ -626,6 +708,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         removed,
         roleRevoked,
         retry: removed < rows.length,
+        ...posts,
       };
     } catch (error) {
       // The revoke above may already have taken the role off Discord.
@@ -640,9 +723,68 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         removed: 0,
         roleRevoked,
         retry: false,
+        ...posts,
         error: getErrorMessage(error),
       };
     }
+  }
+
+  /**
+   * Delete every birthday post recorded on these rows.
+   *
+   * A post that is already gone — `10008 Unknown Message`, or a channel
+   * deleted out from under it — counts as deleted: there is nothing left
+   * naming the member, which is the whole point. Anything else (an
+   * unreachable channel, a refused delete) counts as failed, because the
+   * message may well still be up, and the caller keeps the row so its ids
+   * survive for a retry.
+   *
+   * Never throws: a post taken down before a later one failed is exactly
+   * the state the purge report has to carry.
+   */
+  private async withdrawAnnouncements(rows: IUserBirthday[]): Promise<{
+    announcementsAttempted: number;
+    announcementsDeleted: number;
+    announcementsFailed: number;
+  }> {
+    const posts = rows.flatMap((row) => row.announcements ?? []);
+    let deleted = 0;
+    let failed = 0;
+
+    for (const post of posts) {
+      try {
+        const channel = await this.client.channels.fetch(post.channelId);
+        if (!channel || !channel.isTextBased()) {
+          // Not a channel we can read messages from any more; the post may
+          // still be there, so this is not a success.
+          failed += 1;
+          logger.warn(
+            `Could not delete birthday announcement ${post.messageId}: channel ${post.channelId} is unavailable`,
+          );
+          continue;
+        }
+        await channel.messages.delete(post.messageId);
+        deleted += 1;
+      } catch (error) {
+        if (isUnknownMessageError(error) || isUnknownChannelError(error)) {
+          // Already gone, or the channel that held it is — either way the
+          // member is not named there any more.
+          deleted += 1;
+          continue;
+        }
+        failed += 1;
+        logger.error(
+          `Failed to delete birthday announcement ${post.messageId}; it may still be public:`,
+          error,
+        );
+      }
+    }
+
+    return {
+      announcementsAttempted: posts.length,
+      announcementsDeleted: deleted,
+      announcementsFailed: failed,
+    };
   }
 
   /**
@@ -762,6 +904,10 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       {
         $set: {
           lastAnnouncedYear: row.lastAnnouncedYear,
+          // The post this run just made, so a later purge can take it down.
+          // Leaving it off would record the announcement in memory only and
+          // the message would outlive every erasure (#916).
+          ...(row.announcements ? { announcements: row.announcements } : {}),
           ...(row.roleAssignedAt
             ? {
                 roleAssignedAt: row.roleAssignedAt,

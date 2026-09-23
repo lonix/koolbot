@@ -291,6 +291,21 @@ const DELETERS: Record<string, CollectionDeleter> = {
         guildId,
         userId,
       );
+      // The posts get a step of their own: they are Discord side-effects
+      // with their own failure mode, and rolling them into the row count
+      // would hide a message that still names the member (#916).
+      if (result.announcementsAttempted > 0) {
+        emit({
+          action: "hard-delete",
+          matched: result.announcementsAttempted,
+          removed: result.announcementsDeleted,
+          note: "birthday announcements",
+          error:
+            result.announcementsFailed > 0
+              ? `${result.announcementsFailed} birthday announcement(s) could not be deleted and may still name this member`
+              : undefined,
+        });
+      }
       emit({
         action: "hard-delete",
         matched: result.matched,

@@ -136,6 +136,13 @@ const purgeForUser = jest.fn<
     anonymised: number;
   }>
 >();
+/** A birthday purge with no recorded posts to take down. */
+const NO_BIRTHDAY_POSTS = {
+  announcementsAttempted: 0,
+  announcementsDeleted: 0,
+  announcementsFailed: 0,
+};
+
 const birthdayPurgeForUser = jest.fn<
   (
     guildId: string,
@@ -144,6 +151,9 @@ const birthdayPurgeForUser = jest.fn<
     matched: number;
     removed: number;
     roleRevoked: boolean;
+    announcementsAttempted: number;
+    announcementsDeleted: number;
+    announcementsFailed: number;
     error?: string;
   }>
 >();
@@ -283,9 +293,12 @@ describe("UserDataDeletionService.purge", () => {
       attributionsRerendered: 0,
       attributionsStale: 0,
     });
-    birthdayPurgeForUser
-      .mockReset()
-      .mockResolvedValue({ matched: 0, removed: 0, roleRevoked: false });
+    birthdayPurgeForUser.mockReset().mockResolvedValue({
+      matched: 0,
+      removed: 0,
+      roleRevoked: false,
+      ...NO_BIRTHDAY_POSTS,
+    });
     revokeSessionsForUser.mockReset().mockResolvedValue(0);
   });
 
@@ -623,6 +636,7 @@ describe("UserDataDeletionService.purge", () => {
         matched: 1,
         removed: 1,
         roleRevoked: true,
+        ...NO_BIRTHDAY_POSTS,
       });
 
       const report = await service().purge(USER, GUILD);
@@ -637,11 +651,56 @@ describe("UserDataDeletionService.purge", () => {
       );
     });
 
+    it("gives the birthday posts a step of their own", async () => {
+      // Each one names the member, and often their age, in a channel the
+      // whole guild reads — rolling them into the row count would hide a
+      // message that is still up (#916).
+      birthdayPurgeForUser.mockResolvedValue({
+        matched: 1,
+        removed: 1,
+        roleRevoked: false,
+        announcementsAttempted: 2,
+        announcementsDeleted: 2,
+        announcementsFailed: 0,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      const steps = stepsFor(report, "user-birthday");
+      expect(steps[0]).toMatchObject({
+        matched: 2,
+        removed: 2,
+        note: "birthday announcements",
+      });
+      expect(steps[1]).toMatchObject({ matched: 1, removed: 1 });
+      expect(report.ok).toBe(true);
+    });
+
+    it("fails the purge when a birthday post is still public", async () => {
+      birthdayPurgeForUser.mockResolvedValue({
+        matched: 1,
+        removed: 0,
+        roleRevoked: false,
+        announcementsAttempted: 2,
+        announcementsDeleted: 1,
+        announcementsFailed: 1,
+        error: "1 birthday announcement(s) could not be deleted",
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "user-birthday")[0].error).toContain(
+        "may still name this member",
+      );
+      expect(report.ok).toBe(false);
+    });
+
     it("fails the purge when the birthday role could not be taken back", async () => {
       birthdayPurgeForUser.mockResolvedValue({
         matched: 1,
         removed: 0,
         roleRevoked: false,
+        ...NO_BIRTHDAY_POSTS,
         error: "could not take back the birthday role",
       });
 
