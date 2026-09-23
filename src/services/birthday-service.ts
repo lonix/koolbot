@@ -5,6 +5,7 @@ import { UserNotificationPrefsService } from "./user-notification-prefs-service.
 import { DiscordLogger } from "./discord-logger.js";
 import { UserBirthday, type IUserBirthday } from "../models/user-birthday.js";
 import { resolveTimezone } from "../utils/timezone.js";
+import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -445,12 +446,26 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
    *
    * A failed revoke leaves the row in place so the sweep still expires it
    * later, and is reported as an incomplete purge rather than swallowed.
+   *
+   * Nothing here throws: a revoke that succeeded before a later step failed
+   * is exactly the state the caller must be told about, and a rejection
+   * would collapse it into a bare 0/0 in the purge report.
    */
   public async purgeForUser(
     guildId: string,
     userId: string,
   ): Promise<BirthdayPurgeResult> {
-    const rows = await UserBirthday.find({ userId, guildId });
+    let rows: Array<{ roleAssignedAt?: Date }>;
+    try {
+      rows = await UserBirthday.find({ userId, guildId });
+    } catch (error) {
+      return {
+        matched: 0,
+        removed: 0,
+        roleRevoked: false,
+        error: getErrorMessage(error),
+      };
+    }
     if (rows.length === 0) {
       return { matched: 0, removed: 0, roleRevoked: false };
     }
@@ -459,10 +474,19 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     let roleRevoked = false;
 
     if (held) {
-      const roleId = await this.configService.getString(
-        "birthdays.role_id",
-        "",
-      );
+      let roleId: string;
+      try {
+        roleId = await this.configService.getString("birthdays.role_id", "");
+      } catch (error) {
+        // Without the id there is no safe way to revoke, and the row has to
+        // stay so the sweep can still find the grant.
+        return {
+          matched: rows.length,
+          removed: 0,
+          roleRevoked: false,
+          error: getErrorMessage(error),
+        };
+      }
       if (roleId) {
         const revoked = await this.revokeBirthdayRole(guildId, userId, roleId);
         if (!revoked) {
@@ -481,12 +505,28 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       // just stale bookkeeping and the row can go.
     }
 
-    const removal = await UserBirthday.deleteMany({ userId, guildId });
-    return {
-      matched: rows.length,
-      removed: removal?.deletedCount ?? 0,
-      roleRevoked,
-    };
+    try {
+      const removal = await UserBirthday.deleteMany({ userId, guildId });
+      return {
+        matched: rows.length,
+        removed: removal?.deletedCount ?? 0,
+        roleRevoked,
+      };
+    } catch (error) {
+      // The revoke above may already have taken the role off Discord.
+      // Throwing would lose that: the coordinator would record a bare 0/0
+      // and an operator retrying would not know the role was already gone.
+      logger.error(
+        `Failed to delete the birthday row for ${sanitizeForLog(userId)}:`,
+        error,
+      );
+      return {
+        matched: rows.length,
+        removed: 0,
+        roleRevoked,
+        error: getErrorMessage(error),
+      };
+    }
   }
 
   /**

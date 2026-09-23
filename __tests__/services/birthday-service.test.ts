@@ -634,6 +634,27 @@ describe("BirthdayService", () => {
       expect(client.guilds.fetch).not.toHaveBeenCalled();
     });
 
+    it("keeps the revoke on the record when the delete then fails", async () => {
+      // Throwing would collapse a real Discord change into a bare 0/0 in the
+      // purge report, and an operator retrying would not know the role had
+      // already come off (#916).
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      mockBirthdayDeleteMany.mockRejectedValue(new Error("write conflict"));
+      const client = makeClient();
+      const { guild } = guildWithMember(true);
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(guild);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({
+        matched: 1,
+        removed: 0,
+        roleRevoked: true,
+        error: "write conflict",
+      });
+    });
+
     it("reports zeros for a member with no birthday", async () => {
       mockBirthdayFind.mockResolvedValue([]);
       const client = makeClient();
