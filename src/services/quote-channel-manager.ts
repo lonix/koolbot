@@ -57,10 +57,18 @@ function normalizeUserId(input: string): string {
 
 /** Discord's "Unknown Message": the post is already gone. */
 const DISCORD_UNKNOWN_MESSAGE = 10008;
+/** Discord's "Unknown Channel": the channel, and everything in it, is gone. */
+const DISCORD_UNKNOWN_CHANNEL = 10003;
 
 function isUnknownMessage(error: unknown): boolean {
   return (
     error instanceof DiscordAPIError && error.code === DISCORD_UNKNOWN_MESSAGE
+  );
+}
+
+function isUnknownChannel(error: unknown): boolean {
+  return (
+    error instanceof DiscordAPIError && error.code === DISCORD_UNKNOWN_CHANNEL
   );
 }
 
@@ -555,25 +563,41 @@ export class QuoteChannelManager {
   }
 
   private async getQuoteChannel(): Promise<TextChannel | null> {
+    return (await this.getQuoteChannelDetailed()).channel;
+  }
+
+  /**
+   * As `getQuoteChannel`, but says *why* there is no channel.
+   *
+   * A purge has to tell "the channel was deleted, so every quote post went
+   * with it" apart from "we could not reach it this time": the first owes
+   * nothing, the second leaves the member's words publicly readable (#916).
+   */
+  private async getQuoteChannelDetailed(): Promise<{
+    channel: TextChannel | null;
+    gone: boolean;
+  }> {
     try {
       const channelId = await this.configService.getString(
         "quotes.channel_id",
         "",
       );
       if (!channelId) {
-        return null;
+        return { channel: null, gone: false };
       }
 
       const channel = await this.client.channels.fetch(channelId);
-      if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+      if (!channel) return { channel: null, gone: true };
+      if (!channel.isTextBased() || channel.isDMBased()) {
         logger.error("Quote channel is not a text channel");
-        return null;
+        return { channel: null, gone: false };
       }
 
-      return channel as TextChannel;
+      return { channel: channel as TextChannel, gone: false };
     } catch (error) {
+      if (isUnknownChannel(error)) return { channel: null, gone: true };
       logger.error("Error fetching quote channel:", error);
-      return null;
+      return { channel: null, gone: false };
     }
   }
 
@@ -654,7 +678,8 @@ export class QuoteChannelManager {
    * it anyway would tell someone their words are gone from Discord while
    * they are still on screen.
    *
-   * A message that is already missing counts as gone: `messageId` is
+   * A deleted quote channel counts as gone too — it took every post with
+   * it. A message that is already missing counts as gone: `messageId` is
    * overloaded (it starts life as the *original* message id and is
    * overwritten by `updateQuoteMessageId` with the quote-channel post id), so
    * a miss is the expected case for older rows, not a failure. Anything
@@ -662,8 +687,11 @@ export class QuoteChannelManager {
    * is a real failure, because the post may well still be visible.
    */
   public async deleteQuoteMessage(messageId: string): Promise<boolean> {
-    const channel = await this.getQuoteChannel();
+    const { channel, gone } = await this.getQuoteChannelDetailed();
     if (!channel) {
+      // A deleted channel took every post in it, this one included, so
+      // there is nothing left to remove and nothing to report.
+      if (gone) return true;
       logger.warn(
         `Could not delete quote message ${messageId}: quote channel unavailable`,
       );

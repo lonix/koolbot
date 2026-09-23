@@ -183,6 +183,19 @@ export interface QuoteMessageDeleter {
    * as posts removed, so "no exception escaped" is not good enough.
    */
   deleteQuoteMessage(messageId: string): Promise<boolean>;
+  /**
+   * Re-render a quote-channel post from the row's current values. A purge
+   * needs this because the embed prints "Added by @member": anonymising the
+   * row alone leaves the member's name on a public post (#916). Rejects when
+   * the edit did not land.
+   */
+  updateQuoteMessage(
+    messageId: string,
+    quoteId: string,
+    content: string,
+    authorId: string,
+    addedById: string,
+  ): Promise<void>;
 }
 
 /** What a per-user quote purge did (#914). */
@@ -210,6 +223,16 @@ export interface QuotePurgeResult {
   messagesFailed: number;
   /** Quotes the member saved for someone else, attribution cleared. */
   anonymised: number;
+  /**
+   * Of those, the quote-channel posts re-rendered so the embed stops naming
+   * the member as the saver (#916).
+   */
+  attributionsRerendered: number;
+  /**
+   * Posts that still print the member's name because the edit failed. The
+   * row is anonymised either way, so this is the visible half left behind.
+   */
+  attributionsStale: number;
   /** Why the anonymisation did not finish, when it did not (#916). */
   anonymiseError?: string;
 }
@@ -685,7 +708,9 @@ export class QuoteService {
    * - `addedById === userId` — the quote belongs to whoever said it, so the
    *   row stays and only the saver's attribution is cleared, to the
    *   `ANONYMISED_USER_ID` sentinel (the field is `required: true` and cannot
-   *   be nulled).
+   *   be nulled). **The channel post is re-rendered too**: its embed prints
+   *   "Added by @member", so clearing the row alone would leave the member
+   *   named on a public message (#916).
    *
    * Authored rows are removed first so a quote the member both said *and*
    * saved is deleted rather than anonymised.
@@ -789,12 +814,39 @@ export class QuoteService {
 
     let anonymised = 0;
     let anonymiseError: string | undefined;
+    let attributionsRerendered = 0;
+    let attributionsStale = 0;
     try {
+      // Snapshot first: after the update these rows no longer match, and
+      // their posts still print "Added by @member" until they are redrawn.
+      const saved = await this.model.find({ addedById: { $in: idForms } });
       const anonymisation = await this.model.updateMany(
         { addedById: { $in: idForms } },
         { $set: { addedById: ANONYMISED_USER_ID } },
       );
       anonymised = anonymisation?.modifiedCount ?? 0;
+
+      for (const quote of saved) {
+        if (!quote.messageId) continue;
+        try {
+          await messages.updateQuoteMessage(
+            quote.messageId,
+            quote._id.toString(),
+            quote.content,
+            quote.authorId,
+            ANONYMISED_USER_ID,
+          );
+          attributionsRerendered++;
+        } catch (error) {
+          // The row is anonymised regardless — an unreachable post must not
+          // hold up the erasure — but the embed still names them, so say so.
+          attributionsStale++;
+          logger.warn(
+            `Could not re-render quote post ${quote.messageId} after anonymising ${userId}; it still shows them as the saver:`,
+            error,
+          );
+        }
+      }
     } catch (error) {
       anonymiseError = getErrorMessage(error);
       logger.error(
@@ -811,12 +863,15 @@ export class QuoteService {
       messagesDeleted,
       messagesFailed,
       anonymised,
+      attributionsRerendered,
+      attributionsStale,
       anonymiseError,
     };
 
     logger.info(
       `Purged quotes for user ${userId}: deleted ${result.deleted} row(s) and ${result.messagesDeleted} channel post(s) ` +
-        `(${result.messagesFailed} post(s) could not be deleted), anonymised ${result.anonymised} row(s)`,
+        `(${result.messagesFailed} post(s) could not be deleted), anonymised ${result.anonymised} row(s) ` +
+        `and re-rendered ${result.attributionsRerendered} post(s) (${result.attributionsStale} still naming them)`,
     );
     return result;
   }

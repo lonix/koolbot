@@ -17,6 +17,7 @@ jest.mock("../../src/utils/logger.js");
 describe("QuoteChannelManager.deleteQuoteMessage", () => {
   let mockClient: Client;
   let channel: { messages: { fetch: jest.Mock } } | null;
+  let channelGone: boolean;
 
   async function manager(): Promise<{
     deleteQuoteMessage(messageId: string): Promise<boolean>;
@@ -24,11 +25,17 @@ describe("QuoteChannelManager.deleteQuoteMessage", () => {
     const { QuoteChannelManager } =
       await import("../../src/services/quote-channel-manager.js");
     const instance = QuoteChannelManager.getInstance(mockClient);
-    // `getQuoteChannel` resolves config and the gateway; stub it so these
-    // cases are about the delete outcome alone.
+    // `getQuoteChannelDetailed` resolves config and the gateway; stub it so
+    // these cases are about the delete outcome alone. `gone` distinguishes a
+    // deleted channel (nothing left to remove) from an unreachable one.
     (
-      instance as unknown as { getQuoteChannel: () => Promise<unknown> }
-    ).getQuoteChannel = async () => channel;
+      instance as unknown as {
+        getQuoteChannelDetailed: () => Promise<unknown>;
+      }
+    ).getQuoteChannelDetailed = async () => ({
+      channel,
+      gone: channelGone,
+    });
     return instance;
   }
 
@@ -51,6 +58,7 @@ describe("QuoteChannelManager.deleteQuoteMessage", () => {
       channels: { fetch: jest.fn() },
     } as unknown as Client;
     channel = { messages: { fetch: jest.fn() } };
+    channelGone = false;
   });
 
   it("reports true when the post is deleted", async () => {
@@ -93,6 +101,17 @@ describe("QuoteChannelManager.deleteQuoteMessage", () => {
 
     await expect((await manager()).deleteQuoteMessage("m1")).resolves.toBe(
       false,
+    );
+  });
+
+  it("reports true when the quote channel itself was deleted", async () => {
+    // Deleting the channel took every post in it, this one included, so
+    // there is nothing left to remove and nothing to report (#916).
+    channel = null;
+    channelGone = true;
+
+    await expect((await manager()).deleteQuoteMessage("m1")).resolves.toBe(
+      true,
     );
   });
 });

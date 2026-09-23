@@ -32,7 +32,10 @@ describe("QuoteService.purgeForUser", () => {
     deleteMany: jest.Mock;
     updateMany: jest.Mock;
   };
-  let messages: { deleteQuoteMessage: jest.Mock };
+  let messages: {
+    deleteQuoteMessage: jest.Mock;
+    updateQuoteMessage: jest.Mock;
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -44,7 +47,10 @@ describe("QuoteService.purgeForUser", () => {
     } as never;
     // Replace the (mongoose-mocked) model with a controllable stub.
     (service as never as { model: unknown }).model = model;
-    messages = { deleteQuoteMessage: jest.fn(async () => true) };
+    messages = {
+      deleteQuoteMessage: jest.fn(async () => true),
+      updateQuoteMessage: jest.fn(async () => undefined),
+    };
   });
 
   const ID_FORMS = ["123", "<@123>", "<@!123>", "@123"];
@@ -153,6 +159,43 @@ describe("QuoteService.purgeForUser", () => {
       expect(model.deleteMany).not.toHaveBeenCalled();
     });
 
+    it("re-renders the channel post so it stops naming them as the saver", async () => {
+      // The embed prints "Added by @member": clearing only the row leaves
+      // the member's name on a public message (#916).
+      model.find.mockResolvedValue([
+        { _id: "q1", messageId: "m1", content: "Hi", authorId: "999" },
+      ]);
+      model.updateMany.mockResolvedValue({ modifiedCount: 1 });
+
+      const result = await service.purgeForUser("123", messages);
+
+      expect(messages.updateQuoteMessage).toHaveBeenCalledWith(
+        "m1",
+        "q1",
+        "Hi",
+        "999",
+        ANONYMISED_USER_ID,
+      );
+      expect(result.attributionsRerendered).toBe(1);
+      expect(result.attributionsStale).toBe(0);
+    });
+
+    it("counts a post it could not re-render as still naming them", async () => {
+      model.find.mockResolvedValue([
+        { _id: "q1", messageId: "m1", content: "Hi", authorId: "999" },
+      ]);
+      model.updateMany.mockResolvedValue({ modifiedCount: 1 });
+      messages.updateQuoteMessage.mockRejectedValue(new Error("no perms"));
+
+      const result = await service.purgeForUser("123", messages);
+
+      // The row is anonymised either way — an unreachable post must not hold
+      // up the erasure — but the embed still shows them.
+      expect(result.anonymised).toBe(1);
+      expect(result.attributionsRerendered).toBe(0);
+      expect(result.attributionsStale).toBe(1);
+    });
+
     it("uses a sentinel no real member can match", () => {
       expect(ANONYMISED_USER_ID).toBe("0");
       expect(ANONYMISED_USER_ID).not.toMatch(/^\d{17,20}$/);
@@ -195,6 +238,8 @@ describe("QuoteService.purgeForUser", () => {
       messagesDeleted: 0,
       messagesFailed: 0,
       anonymised: 0,
+      attributionsRerendered: 0,
+      attributionsStale: 0,
       anonymiseError: undefined,
     });
     expect(messages.deleteQuoteMessage).not.toHaveBeenCalled();
@@ -228,7 +273,10 @@ describe("QuoteService.purgeForUser", () => {
   it("still anonymises when the authored lookup itself fails", async () => {
     // The lookup only the authored half needs must not be able to skip the
     // independent anonymisation (#916).
-    model.find.mockRejectedValue(new Error("no primary"));
+    // Only the authored lookup fails; the anonymise half takes its own
+    // snapshot and must still run.
+    model.find.mockRejectedValueOnce(new Error("no primary"));
+    model.find.mockResolvedValue([]);
     model.updateMany.mockResolvedValue({ modifiedCount: 2 });
 
     const result = await service.purgeForUser("123", messages);

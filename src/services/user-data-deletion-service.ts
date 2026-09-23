@@ -264,7 +264,17 @@ const DELETERS: Record<string, CollectionDeleter> = {
         action: "anonymise",
         matched: result.anonymised,
         removed: result.anonymised,
-        error: result.anonymiseError,
+        note:
+          result.attributionsRerendered > 0
+            ? `${result.attributionsRerendered} quote post(s) re-rendered`
+            : undefined,
+        // The row is anonymised but the embed still prints their name, so
+        // the erasure is not finished where anyone can actually see it.
+        error:
+          result.anonymiseError ??
+          (result.attributionsStale > 0
+            ? `${result.attributionsStale} quote post(s) still name this member as the saver`
+            : undefined),
       });
     },
   },

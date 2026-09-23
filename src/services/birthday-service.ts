@@ -364,15 +364,18 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
 
     // 1. Revoke expired birthday roles first so a member whose window
     //    closed loses the role even if no one has a birthday today.
-    if (roleId) {
-      summary.rolesRemoved += await this.sweepExpiredRoles(
-        guild,
-        guildId,
-        roleId,
-        Math.max(0, roleDurationHours) * MS_PER_HOUR,
-        summary.ranAt,
-      );
-    }
+    //    Unconditionally: each row records the role it was granted
+    //    (`roleAssignedId`), so clearing `birthdays.role_id` must not strand
+    //    the grants already out there — the sweep is the only thing that
+    //    ever takes them back (#916). The configured id stays as the
+    //    fallback for rows written before that field existed.
+    summary.rolesRemoved += await this.sweepExpiredRoles(
+      guild,
+      guildId,
+      roleId,
+      Math.max(0, roleDurationHours) * MS_PER_HOUR,
+      summary.ranAt,
+    );
 
     // 2. Announce today's birthdays (in each member's own timezone).
     const prefsService = UserNotificationPrefsService.getInstance();
@@ -434,13 +437,24 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           logger.warn(
             `Birthday row for ${sanitizeForLog(row.userId)} vanished mid-run; withdrawing the announcement and any role just granted`,
           );
-          await announcement.delete().catch((error) => {
-            logger.error(
-              `Failed to withdraw the birthday announcement for ${sanitizeForLog(row.userId)}; it is still public:`,
-              error,
-            );
-          });
-          summary.announced -= 1;
+          const withdrawn = await announcement
+            .delete()
+            .then(() => true)
+            .catch((error) => {
+              logger.error(
+                `Failed to withdraw the birthday announcement for ${sanitizeForLog(row.userId)}; it is still public:`,
+                error,
+              );
+              return false;
+            });
+          if (withdrawn) {
+            summary.announced -= 1;
+          } else {
+            // The message is still up, naming a member who just erased their
+            // data. Counting it as withdrawn would let the summary read
+            // "0 announced, 0 failed" over a live privacy failure.
+            summary.failed += 1;
+          }
           if (roleId && row.roleAssignedAt) {
             if (
               await this.revokeBirthdayRole(row.guildId, row.userId, roleId)
@@ -692,6 +706,15 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         // the configured id blindly would miss a grant made under a
         // previous `birthdays.role_id` and then clear its marker (#916).
         const grantedRoleId = row.roleAssignedId ?? roleId;
+        if (!grantedRoleId) {
+          // Pre-`roleAssignedId` row and no configured role to fall back on:
+          // there is no way to know what to revoke. Clearing the marker below
+          // at least stops it being re-examined every run.
+          logger.warn(
+            `Birthday role marker for ${sanitizeForLog(row.userId)} names no role and none is configured; clearing it`,
+          );
+          continue;
+        }
         const member = await guild.members.fetch(row.userId).catch(() => null);
         if (member && member.roles.cache.has(grantedRoleId)) {
           await member.roles.remove(grantedRoleId, "Birthday role expired");

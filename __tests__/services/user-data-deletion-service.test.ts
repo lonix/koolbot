@@ -280,6 +280,8 @@ describe("UserDataDeletionService.purge", () => {
       messagesDeleted: 0,
       messagesFailed: 0,
       anonymised: 0,
+      attributionsRerendered: 0,
+      attributionsStale: 0,
     });
     birthdayPurgeForUser
       .mockReset()
@@ -463,6 +465,8 @@ describe("UserDataDeletionService.purge", () => {
         messagesDeleted: 5,
         messagesFailed: 0,
         anonymised: 2,
+        attributionsRerendered: 0,
+        attributionsStale: 0,
       });
 
       const report = await service().purge(USER, GUILD);
@@ -480,6 +484,28 @@ describe("UserDataDeletionService.purge", () => {
       expect(report.ok).toBe(true);
     });
 
+    it("fails the purge when a quote post still names the member as saver", async () => {
+      // The row is anonymised but the embed prints "Added by @member", so
+      // the erasure is unfinished where anyone can actually see it (#916).
+      purgeForUser.mockResolvedValue({
+        authored: 0,
+        deleted: 0,
+        messagesAttempted: 0,
+        messagesDeleted: 0,
+        messagesFailed: 0,
+        anonymised: 2,
+        attributionsRerendered: 1,
+        attributionsStale: 1,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      const step = stepsFor(report, "quote")[2];
+      expect(step).toMatchObject({ action: "anonymise", removed: 2 });
+      expect(step.error).toContain("still name this member");
+      expect(report.ok).toBe(false);
+    });
+
     it("fails the purge when a quote post may still be visible", async () => {
       // The row is deleted either way, so this step is the only record that
       // the member's words are still on screen in Discord.
@@ -490,6 +516,8 @@ describe("UserDataDeletionService.purge", () => {
         messagesDeleted: 1,
         messagesFailed: 2,
         anonymised: 0,
+        attributionsRerendered: 0,
+        attributionsStale: 0,
       });
 
       const report = await service().purge(USER, GUILD);
@@ -512,6 +540,8 @@ describe("UserDataDeletionService.purge", () => {
         messagesDeleted: 4,
         messagesFailed: 0,
         anonymised: 1,
+        attributionsRerendered: 0,
+        attributionsStale: 0,
       });
 
       const report = await service().purge(USER, GUILD);
@@ -818,6 +848,8 @@ describe("UserDataDeletionService.purge", () => {
         messagesDeleted: 3,
         messagesFailed: 0,
         anonymised: 1,
+        attributionsRerendered: 0,
+        attributionsStale: 0,
       });
       birthdayPurgeForUser.mockResolvedValue({
         matched: 1,
@@ -852,6 +884,8 @@ describe("UserDataDeletionService.purge", () => {
         messagesDeleted: 0,
         messagesFailed: 0,
         anonymised: 0,
+        attributionsRerendered: 0,
+        attributionsStale: 0,
       });
       birthdayPurgeForUser.mockResolvedValue({
         matched: 0,
