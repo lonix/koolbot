@@ -20,6 +20,7 @@ import {
   clampToLimit,
   DISCORD_EMBED_FIELD_VALUE_LIMIT,
 } from "../utils/discord-limits.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -70,6 +71,19 @@ const CLOSED_ROW_RETENTION_MS = LFG_ROW_TTL_SECONDS * 1000;
  * which exists for exactly this reason.
  */
 const SCAN_BATCH_SIZE = 100;
+
+/**
+ * Serialises voice-channel resolution per host.
+ *
+ * `VoiceChannelManager` tracks one dynamic channel per owner, and the check
+ * for an existing one is not atomic with creating a new one. Where
+ * `lfg.max_active_per_user` allows a second post, two `/lfg` runs by the same
+ * member could both look while the other was still awaiting Discord, and each
+ * make a room — leaving one empty, pointed at by a live post, for the
+ * empty-channel sweep to delete out from under it. Taking turns per host is
+ * enough: the second run then sees the room the first one made.
+ */
+const voiceResolution = createKeyedLock();
 
 /** Smallest party worth advertising: the host plus one. */
 export const MIN_PARTY_SIZE = 2;
@@ -255,7 +269,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
         const closed = await this.closePost(String(post._id), "expired");
         if (!closed) continue;
         summary.expired += 1;
-        await this.renderClosed(closed);
+        await this.renderAndSettle(closed);
       } catch (error) {
         logger.error(
           `Error expiring LFG post ${sanitizeForLog(String(post._id))}:`,
@@ -264,32 +278,35 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       }
     }
 
-    // A close whose edit failed (or a restart between the two) leaves a post
-    // that still reads as open. Nothing else would ever look at it again —
-    // every other query here selects open rows — so retry it here until the
+    // Any post whose message is known to disagree with its row: a close whose
+    // edit failed, a restart between the two, or a click whose edit failed on
+    // a post that is still open. Nothing else would ever look at these again —
+    // every other query here is on the expiry path — so retry until the
     // message agrees with the row.
-    const unrendered = await LfgPost.find({
-      state: "closed",
-      closeRendered: false,
-    })
-      .sort({ updatedAt: 1 })
+    //
+    // Ordered by when each was last attempted (never-attempted rows sort
+    // first, since a missing field sorts before any value), so a row that
+    // keeps failing rotates to the back of the batch rather than occupying it
+    // and starving every newer post behind it.
+    const pending = await LfgPost.find({ renderPending: true })
+      .sort({ lastRenderAttemptAt: 1 })
       .limit(SCAN_BATCH_SIZE);
-    for (const post of unrendered) {
+    for (const post of pending) {
       try {
-        if (await this.renderClosed(post)) summary.retried += 1;
+        if (await this.renderAndSettle(post)) summary.retried += 1;
       } catch (error) {
         logger.error(
-          `Error re-rendering closed LFG post ${sanitizeForLog(String(post._id))}:`,
+          `Error re-rendering LFG post ${sanitizeForLog(String(post._id))}:`,
           error,
         );
       }
     }
 
     // Only rows whose message has been confirmed closed are dropped: purging
-    // an unrendered one would strand a post that still looks open forever.
+    // a pending one would strand a post that still looks open forever.
     const purge = await LfgPost.deleteMany({
       state: "closed",
-      closeRendered: true,
+      renderPending: false,
       updatedAt: { $lte: new Date(now.getTime() - CLOSED_ROW_RETENTION_MS) },
     });
     summary.purged = purge.deletedCount ?? 0;
@@ -347,10 +364,8 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       };
     }
 
-    const voiceChannelId = await this.resolveVoiceChannel(
-      input.guildId,
-      input.hostId,
-      input.game,
+    const voiceChannelId = await voiceResolution.run(input.hostId, () =>
+      this.resolveVoiceChannel(input.guildId, input.hostId, input.game),
     );
     if (voiceChannelId) post.voiceChannelId = voiceChannelId;
 
@@ -575,7 +590,9 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     if (hostId) filter.hostId = hostId;
     return LfgPost.findOneAndUpdate(
       filter,
-      { $set: { state: "closed", closeReason: reason } },
+      // The embed still reads as open until something re-renders it, so the
+      // close itself records that the message is out of date.
+      { $set: { state: "closed", closeReason: reason, renderPending: true } },
       { new: true },
     );
   }
@@ -681,29 +698,52 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
   }
 
   /**
-   * Re-render a closed post and record that its message agrees with the row,
-   * so the sweep stops retrying it and may eventually purge it.
+   * Re-render a post and record the outcome: cleared when the message now
+   * agrees with the row, and either way stamped with the attempt so a row
+   * that keeps failing cannot hold the front of the retry batch.
    */
-  private async renderClosed(post: ILfgPost): Promise<boolean> {
-    if (!(await this.renderToMessage(post))) return false;
-    await this.markCloseRendered(String(post._id));
-    return true;
+  private async renderAndSettle(post: ILfgPost): Promise<boolean> {
+    const rendered = await this.renderToMessage(post);
+    await this.recordRenderAttempt(String(post._id), rendered);
+    return rendered;
   }
 
   /**
-   * Record that a closed post's message has been re-rendered.
+   * Record a render attempt: stamp it, and clear the pending flag if the
+   * message now matches.
    *
    * Public because the button handlers render by acknowledging their own
-   * interaction rather than through `renderToMessage`, and an unmarked row
-   * would have the sweep edit the same message again a minute later.
+   * interaction rather than through `renderToMessage`, so only they know how
+   * their edit went. They call this only when there is something to change —
+   * a post they just closed, or one carrying a previous failure — so an
+   * ordinary click still costs one write, not two.
    */
-  public async markCloseRendered(postId: string): Promise<void> {
+  public async recordRenderAttempt(
+    postId: string,
+    rendered: boolean,
+  ): Promise<void> {
+    if (!isValidObjectId(postId)) return;
+    const update: Record<string, unknown> = { lastRenderAttemptAt: new Date() };
+    if (rendered) update.renderPending = false;
+    await LfgPost.updateOne({ _id: postId }, { $set: update }).catch((error) =>
+      logger.error("Failed to record an LFG render attempt:", error),
+    );
+  }
+
+  /**
+   * Flag a post's message as out of date, for the sweep to re-render.
+   *
+   * The button handlers call this when their own edit failed: the write is
+   * already committed, so without it the visible roster would disagree with
+   * the row until someone else clicked or the post closed.
+   */
+  public async markRenderPending(postId: string): Promise<void> {
     if (!isValidObjectId(postId)) return;
     await LfgPost.updateOne(
-      { _id: postId, state: "closed" },
-      { $set: { closeRendered: true } },
+      { _id: postId },
+      { $set: { renderPending: true, lastRenderAttemptAt: new Date() } },
     ).catch((error) =>
-      logger.error("Failed to mark an LFG post as re-rendered:", error),
+      logger.error("Failed to flag an LFG post for re-rendering:", error),
     );
   }
 

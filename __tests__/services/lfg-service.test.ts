@@ -88,7 +88,8 @@ interface PostLike {
   voiceChannelId: string | null;
   state: "open" | "closed";
   closeReason: "expired" | "full" | "cancelled" | null;
-  closeRendered: boolean;
+  renderPending: boolean;
+  lastRenderAttemptAt: Date | null;
   expiresAt: Date;
 }
 
@@ -106,7 +107,8 @@ function post(overrides: Partial<PostLike> = {}): PostLike {
     voiceChannelId: null,
     state: "open",
     closeReason: null,
-    closeRendered: false,
+    renderPending: false,
+    lastRenderAttemptAt: null,
     // Comfortably in the future: every interactive mutation now refuses a
     // post that has run past its advertised closing time.
     expiresAt: new Date(Date.now() + 30 * 60 * 1000),
@@ -361,7 +363,14 @@ describe("closeByHost", () => {
     });
     expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: POST_ID, state: "open", hostId: "host-1" },
-      { $set: { state: "closed", closeReason: "cancelled" } },
+      // The close itself records that the embed is now out of date.
+      {
+        $set: {
+          state: "closed",
+          closeReason: "cancelled",
+          renderPending: true,
+        },
+      },
       { new: true },
     );
   });
@@ -417,10 +426,10 @@ describe("sweep (runOnce)", () => {
       state: "open",
       expiresAt: { $lte: expect.any(Date) },
     });
-    // Only rows whose message is confirmed closed are purged.
+    // Only rows whose message is confirmed up to date are purged.
     expect(LfgPostMock.deleteMany).toHaveBeenCalledWith({
       state: "closed",
-      closeRendered: true,
+      renderPending: false,
       updatedAt: { $lte: expect.any(Date) },
     });
   });
@@ -438,8 +447,13 @@ describe("sweep (runOnce)", () => {
     await svc.runNow();
 
     expect(LfgPostMock.updateOne).toHaveBeenCalledWith(
-      { _id: POST_ID, state: "closed" },
-      { $set: { closeRendered: true } },
+      { _id: POST_ID },
+      {
+        $set: {
+          lastRenderAttemptAt: expect.any(Date),
+          renderPending: false,
+        },
+      },
     );
   });
 
@@ -458,11 +472,20 @@ describe("sweep (runOnce)", () => {
     const summary = await svc.runNow();
 
     expect(summary.expired).toBe(1);
-    expect(LfgPostMock.updateOne).not.toHaveBeenCalled();
+    // The attempt is stamped so the row rotates to the back of the retry
+    // batch, but `renderPending` stays set so a later tick tries again.
+    expect(LfgPostMock.updateOne).toHaveBeenCalledWith(
+      { _id: POST_ID },
+      { $set: { lastRenderAttemptAt: expect.any(Date) } },
+    );
   });
 
-  it("retries closed posts whose message never got re-rendered", async () => {
-    const stale = post({ state: "closed", closeReason: "cancelled" });
+  it("retries any post whose message never got re-rendered", async () => {
+    const stale = post({
+      state: "closed",
+      closeReason: "cancelled",
+      renderPending: true,
+    });
     stubFinds([], [stale]);
 
     const svc = buildService();
@@ -473,9 +496,10 @@ describe("sweep (runOnce)", () => {
 
     expect(summary).toEqual({ expired: 0, retried: 1, purged: 0 });
     expect(render).toHaveBeenCalledWith(stale);
+    // Not filtered by state: a click whose edit failed leaves an *open* post
+    // showing a stale roster, and nothing else would re-read it either.
     expect(LfgPostMock.find).toHaveBeenNthCalledWith(2, {
-      state: "closed",
-      closeRendered: false,
+      renderPending: true,
     });
   });
 
@@ -1167,6 +1191,76 @@ describe("the sweep works in bounded batches", () => {
     // starve newly due posts, since ticks coalesce.
     expect(sort).toHaveBeenCalledWith({ expiresAt: 1 });
     expect(limit).toHaveBeenCalledWith(100);
-    expect(sort).toHaveBeenCalledWith({ updatedAt: 1 });
+    // Oldest attempt first, so a row whose edits keep failing rotates to the
+    // back instead of occupying the batch and starving newer posts.
+    expect(sort).toHaveBeenCalledWith({ lastRenderAttemptAt: 1 });
+  });
+});
+
+// `VoiceChannelManager` tracks one dynamic channel per owner, and the check
+// for an existing one is not atomic with creating a new one. Where the cap
+// allows a second post, two `/lfg` runs by one member could otherwise both
+// look while the other was still awaiting Discord and each make a room.
+describe("one member's concurrent posts resolve voice one at a time", () => {
+  it("lets the second run see the room the first one made", async () => {
+    configValues.booleans["voicechannels.enabled"] = true;
+    configValues.numbers["lfg.max_active_per_user"] = 0; // no cap
+    const owned: { id: string }[] = [];
+    const createDynamicChannel = jest.fn(async () => {
+      // Creating is slow (a Discord round-trip); the ownership map only
+      // updates once it returns.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const channel = { id: "voice-new" };
+      owned.push(channel);
+      return channel;
+    });
+    VcmMock.getInstance = jest.fn(() => ({
+      getUserChannel: jest.fn(() => owned[0]),
+      createDynamicChannel,
+    }));
+
+    const channel = {
+      id: "chan-1",
+      isTextBased: () => true,
+      isDMBased: () => false,
+      send: jest.fn(async () => ({ id: "msg-9" })),
+    };
+    const client = {
+      channels: { fetch: jest.fn(async () => channel) },
+      guilds: {
+        fetch: jest.fn(async () => ({
+          id: "guild-1",
+          members: {
+            fetch: jest.fn(async () => ({
+              voice: {
+                channelId: owned[0]?.id ?? "voice-lobby",
+                setChannel: jest.fn(async () => undefined),
+              },
+            })),
+          },
+        })),
+      },
+    };
+    LfgPostMock.mockImplementation(function (
+      this: Record<string, unknown>,
+      doc: Record<string, unknown>,
+    ) {
+      Object.assign(this, doc, { _id: POST_ID, save: jest.fn(async () => {}) });
+    } as never);
+
+    const service = LfgService.getInstance(client as never);
+    const input = {
+      guildId: "guild-1",
+      hostId: "host-1",
+      game: "Valorant",
+      note: "",
+      partySize: 4,
+      fallbackChannelId: "chan-1",
+    };
+    await Promise.all([service.createPost(input), service.createPost(input)]);
+
+    // The second run took its turn after the first, so it adopted the room
+    // rather than making a second one for the sweep to delete.
+    expect(createDynamicChannel).toHaveBeenCalledTimes(1);
   });
 });

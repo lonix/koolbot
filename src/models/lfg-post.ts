@@ -59,14 +59,24 @@ export interface ILfgPost extends Document {
   state: LfgState;
   closeReason: LfgCloseReason | null;
   /**
-   * Whether the closed post's message has been re-rendered as closed.
+   * Whether the message is known to disagree with this row.
    *
-   * Without it a swallowed edit failure would strand a post that still looks
-   * open — the sweep only ever selects open rows, so nothing would try again.
-   * The sweep retries any closed row still marked false, and only purges rows
-   * it has confirmed rendered.
+   * Set when a post closes (its embed still reads as open until re-rendered)
+   * and whenever an edit fails, open or closed. Without it a swallowed edit
+   * failure would strand a post showing a stale roster, or worse a closed one
+   * still showing live buttons: nothing else re-reads a row once it is off the
+   * expiry path. The sweep retries every pending row and only purges rows it
+   * has confirmed rendered.
    */
-  closeRendered: boolean;
+  renderPending: boolean;
+  /**
+   * When the last render was attempted, successful or not; null until one is.
+   *
+   * The retry pass is a bounded batch, so it orders by this: a row whose
+   * channel is gone or whose edits keep failing rotates to the back instead of
+   * occupying the batch and starving every newer post behind it.
+   */
+  lastRenderAttemptAt: Date | null;
   /** When the sweep should close the post if it is still open. */
   expiresAt: Date;
   createdAt: Date;
@@ -95,7 +105,8 @@ const LfgPostSchema = new Schema<ILfgPost>(
       enum: ["expired", "full", "cancelled", null],
       default: null,
     },
-    closeRendered: { type: Boolean, default: false },
+    renderPending: { type: Boolean, default: false },
+    lastRenderAttemptAt: { type: Date, default: null },
     expiresAt: { type: Date, required: true },
   },
   {
@@ -110,6 +121,10 @@ const LfgPostSchema = new Schema<ILfgPost>(
 // member's open posts on every /lfg.
 LfgPostSchema.index({ state: 1, expiresAt: 1 });
 LfgPostSchema.index({ guildId: 1, hostId: 1, state: 1 });
+
+// The retry pass: every row whose message is known to be out of date, oldest
+// attempt first.
+LfgPostSchema.index({ renderPending: 1, lastRenderAttemptAt: 1 });
 
 // Backstop for the sweep, which only runs while `lfg.enabled` is on: turning
 // the feature off mid-post would otherwise leave that post's host and roster

@@ -1,5 +1,6 @@
 import { ButtonInteraction, MessageFlags } from "discord.js";
 import { LfgService, spotsLeft } from "../services/lfg-service.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 import type { ILfgPost } from "../models/lfg-post.js";
 import logger from "../utils/logger.js";
 
@@ -22,40 +23,16 @@ import logger from "../utils/logger.js";
 const ACTIONS = new Set(["join", "leave", "close"]);
 
 /**
- * One in-flight chain per post, so clicks on the same post are handled one
- * after another.
+ * Clicks on one post take turns.
  *
  * Each click renders the snapshot its own database write returned. Left
  * unordered, two clicks in the same instant can have their Discord edits land
  * in the opposite order from their Mongo writes, and the older roster wins the
- * message — permanently, because nothing re-renders a post that is still open.
- * Serialising the whole mutate-then-render step keeps the last edit the last
- * write. The interaction is already deferred by then, so waiting a turn costs
- * the clicker nothing.
- *
- * In-process is the right scope: the bot runs as a single process (the voice
- * manager's in-memory ownership maps assume the same), and the writes
- * themselves stay atomic regardless.
+ * message. Serialising the whole mutate-then-render step keeps the last edit
+ * the last write. The interaction is already deferred by then, so waiting a
+ * turn costs the clicker nothing.
  */
-const postChains = new Map<string, Promise<void>>();
-
-function withPostLock(
-  postId: string,
-  work: () => Promise<void>,
-): Promise<void> {
-  const previous = postChains.get(postId) ?? Promise.resolve();
-  // `catch` first: one click's failure must not poison the next click's turn.
-  const next = previous.catch(() => undefined).then(work);
-  postChains.set(postId, next);
-  void next
-    .catch(() => undefined)
-    .finally(() => {
-      // Only the tail clears the entry, so the map cannot grow with every click
-      // and a chain still running is never dropped.
-      if (postChains.get(postId) === next) postChains.delete(postId);
-    });
-  return next;
-}
+const postLock = createKeyedLock();
 
 /** Tell just the clicker something, whatever the interaction's state. */
 async function replyQuietly(
@@ -91,7 +68,7 @@ export async function handleLfgButton(
   // three-second window.
   await interaction.deferUpdate();
 
-  await withPostLock(postId, () =>
+  await postLock.run(postId, () =>
     handleAction(interaction, service, action, postId),
   );
 }
@@ -103,14 +80,25 @@ async function handleAction(
   postId: string,
 ): Promise<void> {
   /**
-   * Re-render the post. A post that has just closed also gets marked as
-   * rendered, so the sweep neither retries this edit nor purges the row
-   * while its message still reads as open.
+   * Re-render the post, and tell the service how the edit went.
+   *
+   * The write is already committed by the time we get here, so a failed edit
+   * must leave the row flagged for the sweep to re-render — otherwise the
+   * visible roster disagrees with the row until someone else clicks. The
+   * success path only writes when there is something to clear (a post this
+   * click closed, or one carrying an earlier failure), so an ordinary click
+   * still costs one write.
    */
   const refresh = async (post: ILfgPost): Promise<void> => {
-    await interaction.editReply(service.buildPayload(post));
-    if (post.state === "closed") {
-      await service.markCloseRendered(String(post._id));
+    const postId = String(post._id);
+    try {
+      await interaction.editReply(service.buildPayload(post));
+    } catch (error) {
+      await service.markRenderPending(postId);
+      throw error;
+    }
+    if (post.renderPending) {
+      await service.recordRenderAttempt(postId, true);
     }
   };
 

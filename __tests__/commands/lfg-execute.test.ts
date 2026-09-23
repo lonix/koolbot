@@ -23,7 +23,8 @@ const mockJoinPost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockLeavePost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockCloseByHost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockBuildPayload = jest.fn(() => ({ content: "refreshed" }));
-const mockMarkCloseRendered = jest.fn<() => Promise<void>>();
+const mockRecordRenderAttempt = jest.fn<() => Promise<void>>();
+const mockMarkRenderPending = jest.fn<() => Promise<void>>();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -69,7 +70,8 @@ jest.unstable_mockModule("../../src/services/lfg-service.js", () => ({
       leavePost: mockLeavePost,
       closeByHost: mockCloseByHost,
       buildPayload: mockBuildPayload,
-      markCloseRendered: mockMarkCloseRendered,
+      recordRenderAttempt: mockRecordRenderAttempt,
+      markRenderPending: mockMarkRenderPending,
     }),
   },
 }));
@@ -128,7 +130,8 @@ beforeEach(() => {
   mockConfigGetBoolean.mockResolvedValue(true);
   mockConfigGetNumber.mockResolvedValue(4);
   mockCreatePost.mockResolvedValue({ status: "created", post: post() });
-  mockMarkCloseRendered.mockResolvedValue(undefined);
+  mockRecordRenderAttempt.mockResolvedValue(undefined);
+  mockMarkRenderPending.mockResolvedValue(undefined);
 });
 
 describe("/lfg", () => {
@@ -280,23 +283,27 @@ describe("LFG buttons", () => {
     expect(followUp.content).toContain("<#voice-1>");
   });
 
-  // The handler renders by acknowledging its own interaction, so it has to
-  // tell the service — otherwise the sweep would edit the same message again
+  // The handler renders by acknowledging its own interaction, so only it knows
+  // how the edit went — otherwise the sweep would edit the same message again
   // a minute later, or purge a row whose message still read as open.
-  it("marks a post it just closed as re-rendered", async () => {
+  it("clears the pending flag on a post it just closed", async () => {
     mockCloseByHost.mockResolvedValue({
       status: "closed",
-      post: post({ state: "closed", closeReason: "cancelled" }),
+      post: post({
+        state: "closed",
+        closeReason: "cancelled",
+        renderPending: true,
+      }),
     });
     const btn = buttonInteraction(`lfg_close_${POST_ID}`);
 
     await handleLfgButton(btn);
 
     expect(btn.editReply).toHaveBeenCalledWith({ content: "refreshed" });
-    expect(mockMarkCloseRendered).toHaveBeenCalledWith(POST_ID);
+    expect(mockRecordRenderAttempt).toHaveBeenCalledWith(POST_ID, true);
   });
 
-  it("does not mark a post that is still open", async () => {
+  it("writes nothing extra for an ordinary click", async () => {
     mockJoinPost.mockResolvedValue({
       status: "joined",
       post: post({ memberIds: ["user-1", "user-2"] }),
@@ -305,7 +312,31 @@ describe("LFG buttons", () => {
 
     await handleLfgButton(buttonInteraction(`lfg_join_${POST_ID}`));
 
-    expect(mockMarkCloseRendered).not.toHaveBeenCalled();
+    // Nothing to settle, so a join costs one write, not two.
+    expect(mockRecordRenderAttempt).not.toHaveBeenCalled();
+    expect(mockMarkRenderPending).not.toHaveBeenCalled();
+  });
+
+  // The roster write is already committed by the time the edit runs, so a
+  // failed edit has to leave the row flagged or the visible post disagrees
+  // with it until someone else clicks.
+  it("flags the post for the sweep when its own edit fails", async () => {
+    mockJoinPost.mockResolvedValue({
+      status: "joined",
+      post: post({ memberIds: ["user-1", "user-2"] }),
+      filled: false,
+    });
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
+    (btn.editReply as jest.Mock).mockImplementation(async () => {
+      throw new Error("discord is having a moment");
+    });
+
+    await handleLfgButton(btn);
+
+    expect(mockMarkRenderPending).toHaveBeenCalledWith(POST_ID);
+    expect(
+      (btn.followUp.mock.calls[0][0] as { content: string }).content,
+    ).toContain("error updating this LFG post");
   });
 
   it.each([
