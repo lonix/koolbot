@@ -6,6 +6,7 @@ import {
   loadFeatureSettings,
   VOICE_CHANNELS_SETTING_KEYS,
   REACTION_ROLES_SETTING_KEYS,
+  NOTICES_SETTING_KEYS,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
@@ -154,6 +155,22 @@ describe("buildSettingRows (#705)", () => {
   it("excludes the feature master voicechannels.enabled from the key list", () => {
     expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
     expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");
+  });
+
+  it("lists every editable notices key, master included, bookkeeping excluded (#972)", () => {
+    expect([...NOTICES_SETTING_KEYS]).toEqual([
+      "notices.enabled",
+      "notices.channel_id",
+      "notices.header_enabled",
+      "notices.header_pin_enabled",
+    ]);
+    const rows = buildSettingRows(NOTICES_SETTING_KEYS, []);
+    expect(rows.map((r) => r.type)).toEqual([
+      "boolean",
+      "channel",
+      "boolean",
+      "boolean",
+    ]);
   });
 });
 

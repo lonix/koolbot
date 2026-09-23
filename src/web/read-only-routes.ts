@@ -142,6 +142,18 @@ export const REACTION_ROLES_SETTING_KEYS = [
 ] as const;
 
 /**
+ * The `notices.*` keys editable in place on the Notices page (#972). Includes
+ * the feature master so the page can switch notices off as well as on; the
+ * auto-managed `notices.header_message_id` is bookkeeping and stays out.
+ */
+export const NOTICES_SETTING_KEYS = [
+  "notices.enabled",
+  "notices.channel_id",
+  "notices.header_enabled",
+  "notices.header_pin_enabled",
+] as const;
+
+/**
  * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
  * the Settings page derives label/type/description from `settingsMetadata` with
  * a stored DB row taking precedence. Lets a feature page render its own keys
@@ -949,15 +961,23 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
-      const [enabled, channelId, headerEnabled, notices, channelData] =
+      const [enabled, channelId, stored, notices, channelData] =
         await Promise.all([
           config.getBoolean("notices.enabled", false),
           config.getString("notices.channel_id", ""),
-          config.getBoolean("notices.header_enabled", true),
+          // `null` (not `[]`) on failure: rendering schema defaults here would
+          // let a save overwrite the real values, so the card is withheld.
+          config.getAll().catch(() => null),
           Notice.find({}).sort({ category: 1, order: 1 }).lean(),
           fetchChannelData(client, common.guildId),
         ]);
       const channelNames = channelData.names;
+      // Editable `notices.*` settings rendered in place on this page (#972).
+      // The picker reuses the channel fetch above, and none of these keys has
+      // a `dependsOn`, so `loadFeatureSettings` would only add a second fetch.
+      const settingRows = stored
+        ? buildSettingRows(NOTICES_SETTING_KEYS, stored)
+        : [];
 
       const grouped = new Map<string, typeof notices>();
       for (const n of notices) {
@@ -994,8 +1014,10 @@ export function createReadOnlyRouter(
           channel: channelId
             ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
             : null,
-          headerEnabled,
           total: notices.length,
+          settingRows,
+          settingsUnavailable: stored === null,
+          textChannels: channelData.textChannels,
           groups,
           categoryOptions,
           flash: readFlash(req),

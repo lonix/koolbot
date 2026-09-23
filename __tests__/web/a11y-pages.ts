@@ -476,8 +476,28 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         enabled: true,
         channel: { name: "rules", id: "c1" },
-        headerEnabled: true,
         total: 1,
+        textChannels: [{ id: "c1", name: "rules" }],
+        settingRows: [
+          {
+            key: "notices.enabled",
+            label: "Notices system enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable the notices system.",
+            category: "notices",
+          },
+          {
+            key: "notices.channel_id",
+            label: "Notices channel",
+            current: "c1",
+            defaultValue: "",
+            type: "channel",
+            description: "Channel ID where notice messages are posted.",
+            category: "notices",
+          },
+        ],
         groups: [
           {
             category: "rules",

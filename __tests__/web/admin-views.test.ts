@@ -1840,10 +1840,11 @@ describe("renderNoticesPage", () => {
       ...COMMON,
       enabled: false,
       channel: null,
-      headerEnabled: false,
       total: 0,
       groups: [],
       categoryOptions: NOTICE_CATEGORY_OPTIONS,
+      settingRows: [],
+      textChannels: [],
     });
     expect(html).toContain("No notices stored");
     expect(html).toContain("Create a notice");
@@ -1854,8 +1855,9 @@ describe("renderNoticesPage", () => {
       ...COMMON,
       enabled: true,
       channel: { name: "notices", id: "c1" },
-      headerEnabled: true,
       total: 1,
+      settingRows: [],
+      textChannels: [],
       groups: [
         {
           category: "rules",
@@ -1882,6 +1884,83 @@ describe("renderNoticesPage", () => {
     expect(html).toContain("/admin/notices/n1/delete");
     expect(html).toContain("/admin/notices/n1/order");
     expect(html).toContain("/admin/notices/sync");
+  });
+
+  it("renders editable notices settings that post back to the page (#972)", () => {
+    const row = (key: string, type: string, current: unknown): SettingRow => ({
+      key,
+      label: key,
+      current,
+      defaultValue: current,
+      type,
+      description: `${key} help`,
+      category: "notices",
+    });
+    const html = renderNoticesPage({
+      ...COMMON,
+      enabled: true,
+      channel: { name: "notices", id: "c1" },
+      total: 3,
+      groups: [],
+      categoryOptions: NOTICE_CATEGORY_OPTIONS,
+      textChannels: [
+        { id: "c1", name: "notices" },
+        { id: "c2", name: "rules" },
+      ],
+      settingRows: [
+        row("notices.enabled", "boolean", true),
+        row("notices.channel_id", "channel", "c1"),
+        row("notices.header_enabled", "boolean", true),
+        row("notices.header_pin_enabled", "boolean", false),
+      ],
+    });
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/notices">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="notices">',
+    );
+    // `notices.enabled` is on the card, so it is the cascade master: the
+    // form keeps the save-section cascade instead of posting no_cascade.
+    expect(html).not.toContain('name="no_cascade"');
+    // Every non-bookkeeping key is submitted and has a control, including
+    // the feature master, so the page can switch notices off.
+    for (const key of [
+      "notices.enabled",
+      "notices.channel_id",
+      "notices.header_enabled",
+      "notices.header_pin_enabled",
+    ]) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+      expect(html).toContain(`name="value_${key}"`);
+    }
+    expect(html).not.toContain("notices.header_message_id");
+    // The channel key renders as a text-channel picker.
+    expect(html).toContain('<option value="c1" selected>#notices</option>');
+    expect(html).toContain('<option value="c2">#rules</option>');
+    // Moving the channel points the admin at Resync.
+    expect(html).toContain("Changing the channel does not move notices");
+    // Total count and the resync action stay.
+    expect(html).toContain("<dt>Total notices</dt><dd>3</dd>");
+    expect(html).toContain("Resync notices to channel");
+  });
+
+  it("withholds the settings card when stored config could not be read", () => {
+    const html = renderNoticesPage({
+      ...COMMON,
+      enabled: true,
+      channel: null,
+      total: 0,
+      groups: [],
+      categoryOptions: NOTICE_CATEGORY_OPTIONS,
+      textChannels: [],
+      settingRows: [],
+      settingsUnavailable: true,
+    });
+    expect(html).toContain("Notices settings could not be loaded");
+    expect(html).not.toContain('name="value_notices.enabled"');
   });
 });
 
