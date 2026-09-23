@@ -123,6 +123,9 @@ function post(
     channelId: "channel-1",
     messageId: "msg-1",
     voiceChannelId: null,
+    // What a mutation's returned row carries: the message is out of date
+    // until this click renders it.
+    renderPending: true,
     ...overrides,
   };
 }
@@ -312,17 +315,20 @@ describe("LFG buttons", () => {
     expect(mockRecordRenderAttempt).toHaveBeenCalledWith(POST_ID, true);
   });
 
-  it("writes nothing extra for an ordinary click", async () => {
+  // Every mutation marks the row `renderPending` in its own write, so a real
+  // click always comes back with it set and always settles it here. An
+  // earlier version of this test modelled a row without the flag and asserted
+  // no settlement write — a snapshot production cannot produce.
+  it("settles the flag every mutation sets", async () => {
     mockJoinPost.mockResolvedValue({
       status: "joined",
-      post: post({ memberIds: ["user-1", "user-2"] }),
+      post: post({ memberIds: ["user-1", "user-2"], renderPending: true }),
       filled: false,
     });
 
     await handleLfgButton(buttonInteraction(`lfg_join_${POST_ID}`));
 
-    // Nothing to settle, so a join costs one write, not two.
-    expect(mockRecordRenderAttempt).not.toHaveBeenCalled();
+    expect(mockRecordRenderAttempt).toHaveBeenCalledWith(POST_ID, true);
     expect(mockMarkRenderPending).not.toHaveBeenCalled();
   });
 
@@ -419,9 +425,11 @@ describe("LFG buttons", () => {
     await handleLfgButton(btn);
 
     expect(mockJoinPost).not.toHaveBeenCalled();
-    expect(btn.deferUpdate).not.toHaveBeenCalled();
+    // The click is still acknowledged first: the feature check is itself a
+    // config read that can reach Mongo, so it must not precede the ACK.
+    expect(btn.deferUpdate).toHaveBeenCalled();
     expect(
-      (btn.reply.mock.calls[0][0] as { content: string }).content,
+      (btn.followUp.mock.calls[0][0] as { content: string }).content,
     ).toContain("switched off");
   });
 

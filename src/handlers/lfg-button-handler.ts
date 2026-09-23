@@ -48,6 +48,15 @@ export async function handleLfgButton(
   }
 
   const [, action, postId] = parts;
+  const service = LfgService.getInstance(interaction.client);
+
+  // Acknowledge before *any* awaited work, and without changing the message:
+  // the branches below decide whether it changes at all. Even the feature
+  // check below is a config read that can reach Mongo on a cache miss, and
+  // Discord invalidates an interaction left unacknowledged for three seconds
+  // (#842). This also happens outside the per-post lock, so a queued click
+  // still beats that window.
+  await interaction.deferUpdate();
 
   // A post outlives the feature switch: the row is closed and re-rendered
   // when LFG is turned off, but an edit that could not go through leaves a
@@ -59,14 +68,6 @@ export async function handleLfgButton(
     );
     return;
   }
-
-  const service = LfgService.getInstance(interaction.client);
-
-  // Acknowledge before the first database round-trip, and without changing
-  // the message: the branches below decide whether it changes at all. This
-  // happens outside the per-post lock so a queued click still beats Discord's
-  // three-second window.
-  await interaction.deferUpdate();
 
   // Take the post's turn: clicks on one post are handled one after another,
   // and the sweep's retries take the same turn, so no edit can land out of
@@ -87,10 +88,12 @@ async function handleAction(
    *
    * The write is already committed by the time we get here, so a failed edit
    * must leave the row flagged for the sweep to re-render — otherwise the
-   * visible roster disagrees with the row until someone else clicks. The
-   * success path only writes when there is something to clear (a post this
-   * click closed, or one carrying an earlier failure), so an ordinary click
-   * still costs one write.
+   * visible roster disagrees with the row until someone else clicks.
+   *
+   * Every mutation marks the row `renderPending` in its own write (that is
+   * what makes a crash mid-click recoverable), so a successful click settles
+   * it here and costs a second write. That is the price of the row and the
+   * message never silently disagreeing.
    */
   const refresh = async (post: ILfgPost): Promise<void> => {
     const postId = String(post._id);

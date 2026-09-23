@@ -92,6 +92,12 @@ export async function execute(
       fallbackChannelId: interaction.channelId,
     });
 
+    if (result.status === "disabled") {
+      await interaction.editReply(
+        "❌ LFG was switched off while your post was going up. Nothing was posted.",
+      );
+      return;
+    }
     if (result.status === "at_limit") {
       await interaction.editReply(
         result.limit === 1

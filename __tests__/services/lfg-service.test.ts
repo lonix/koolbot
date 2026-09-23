@@ -175,7 +175,8 @@ function stubSavedPosts(): {
 beforeEach(() => {
   LfgService.reset();
   reloadCallbacks.length = 0;
-  configValues.booleans = {};
+  // The feature being on is the normal case; the drain suites turn it off.
+  configValues.booleans = { "lfg.enabled": true };
   configValues.strings = {};
   configValues.numbers = {};
   LfgPostMock.find = jest.fn(() => queryReturning([]));
@@ -637,9 +638,10 @@ describe("createPost", () => {
     expect(LfgPostMock.countDocuments).toHaveBeenCalledWith({
       guildId: "guild-1",
       hostId: "host-1",
-      // A reservation counts too, so a member cannot outrun their own cap by
-      // running /lfg twice in the same instant.
-      state: { $in: ["creating", "open"] },
+      // Reservations deliberately do not count: creation is serialised by
+      // the lifecycle turn, and one abandoned by a crash would otherwise
+      // lock its host out for the post's whole lifetime.
+      state: "open",
       // An expired post accepts nobody, so it must not hold a slot either.
       expiresAt: { $gt: expect.any(Date) },
       _id: { $lt: POST_ID },

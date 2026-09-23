@@ -150,6 +150,7 @@ export interface CreateLfgInput {
 
 export type CreateLfgResult =
   | { status: "created"; post: ILfgPost }
+  | { status: "disabled" }
   | { status: "at_limit"; limit: number }
   | { status: "no_channel" }
   | { status: "post_failed" };
@@ -481,6 +482,12 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
 
   /** The body of `createPost`, run while holding the lifecycle turn. */
   private async openPost(input: CreateLfgInput): Promise<CreateLfgResult> {
+    // The command checked this before queueing, and a disable drain may have
+    // run in between — the lock orders the two but does not make the earlier
+    // answer true again. Without re-reading it here, a command that waited
+    // out the drain would open a post the stopped cron never closes.
+    if (!(await this.isEnabled())) return { status: "disabled" };
+
     const channelId =
       (await this.configService.getString("lfg.channel_id", "")) ||
       input.fallbackChannelId;
@@ -733,9 +740,12 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     const older = await LfgPost.countDocuments({
       guildId: post.guildId,
       hostId: post.hostId,
-      // A reservation counts: it is about to become a post, and the member
-      // should not be able to outrun their own cap by running /lfg twice.
-      state: { $in: ["creating", "open"] },
+      // Reservations deliberately do not count. They cannot be raced into
+      // existence — the lifecycle turn serialises creation — and one
+      // abandoned by a crash mid-send has no usable post behind it, so
+      // counting it would lock its host out of /lfg for the whole of
+      // `lfg.expiry_minutes` over a row nobody can see.
+      state: "open",
       // Same condition the interactive writes use: a post that has run past
       // its closing time accepts nobody, so it must not hold a slot either.
       // Without this a member is locked out of /lfg for up to a minute after
