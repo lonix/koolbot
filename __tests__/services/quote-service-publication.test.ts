@@ -26,21 +26,28 @@ jest.mock("../../src/utils/logger.js", () => ({
  */
 describe("QuoteService.updateQuoteMessageId", () => {
   let service: QuoteService;
-  let model: { findByIdAndUpdate: jest.Mock };
+  let model: { findByIdAndUpdate: jest.Mock; findById: jest.Mock };
 
   beforeEach(() => {
     jest.clearAllMocks();
     service = new QuoteService();
-    model = { findByIdAndUpdate: jest.fn(async () => null) } as never;
+    model = {
+      findByIdAndUpdate: jest.fn(async () => null),
+      findById: jest.fn(async () => null),
+    } as never;
     (service as never as { model: unknown }).model = model;
   });
 
   it("confirms an ordinary publication", async () => {
-    model.findByIdAndUpdate.mockResolvedValue({ addedById: "123" });
+    model.findByIdAndUpdate.mockResolvedValue({
+      addedById: "123",
+      messageId: "m1",
+    });
 
     await expect(service.updateQuoteMessageId("q1", "m1")).resolves.toEqual({
       stillExists: true,
       attributionCleared: false,
+      recorded: true,
     });
     // Returning the updated document is what makes the attribution check
     // below see the purge's write rather than the pre-purge value.
@@ -57,6 +64,7 @@ describe("QuoteService.updateQuoteMessageId", () => {
     await expect(service.updateQuoteMessageId("q1", "m1")).resolves.toEqual({
       stillExists: false,
       attributionCleared: false,
+      recorded: false,
     });
   });
 
@@ -68,11 +76,43 @@ describe("QuoteService.updateQuoteMessageId", () => {
     // find it either.
     model.findByIdAndUpdate.mockResolvedValue({
       addedById: ANONYMISED_USER_ID,
+      messageId: "m1",
     });
 
     await expect(service.updateQuoteMessageId("q1", "m1")).resolves.toEqual({
       stillExists: true,
       attributionCleared: true,
+      recorded: true,
+    });
+  });
+
+  it("re-reads the row when the write rejects, and reports what it finds", async () => {
+    // The write can apply and lose only its acknowledgement, and a purge can
+    // have anonymised the row in between — the publisher is the only party
+    // that can still repair the post it just made (#916).
+    model.findByIdAndUpdate.mockRejectedValue(new Error("connection reset"));
+    model.findById.mockResolvedValue({
+      addedById: ANONYMISED_USER_ID,
+      messageId: "m1",
+    });
+
+    await expect(service.updateQuoteMessageId("q1", "m1")).resolves.toEqual({
+      stillExists: true,
+      attributionCleared: true,
+      recorded: true,
+    });
+  });
+
+  it("reports the post as unrecorded when the write cannot be verified", async () => {
+    // Nothing points at it, so the caller takes it down rather than leave a
+    // bot post nothing will ever collect.
+    model.findByIdAndUpdate.mockRejectedValue(new Error("connection reset"));
+    model.findById.mockRejectedValue(new Error("still down"));
+
+    await expect(service.updateQuoteMessageId("q1", "m1")).resolves.toEqual({
+      stillExists: true,
+      attributionCleared: false,
+      recorded: false,
     });
   });
 });

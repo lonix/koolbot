@@ -20,10 +20,13 @@ import {
 } from "../test-utils.js";
 
 const mockAddQuote = jest.fn<() => Promise<unknown>>();
-const mockUpdateQuoteMessageId =
-  jest.fn<
-    () => Promise<{ stillExists: boolean; attributionCleared: boolean }>
-  >();
+const mockUpdateQuoteMessageId = jest.fn<
+  () => Promise<{
+    stillExists: boolean;
+    attributionCleared: boolean;
+    recorded: boolean;
+  }>
+>();
 const mockGetQuoteById = jest.fn<() => Promise<unknown>>();
 const mockEditQuote = jest.fn<() => Promise<unknown>>();
 const mockExportQuotes = jest.fn<() => Promise<unknown>>();
@@ -93,6 +96,7 @@ beforeEach(() => {
   mockUpdateQuoteMessageId.mockResolvedValue({
     stillExists: true,
     attributionCleared: false,
+    recorded: true,
   });
   mockClearSaverAttribution.mockResolvedValue("edited");
   mockDeleteQuoteMessage.mockResolvedValue(true);
@@ -150,6 +154,7 @@ describe("/quote add", () => {
     mockUpdateQuoteMessageId.mockResolvedValue({
       stillExists: false,
       attributionCleared: false,
+      recorded: false,
     });
     const it_ = interaction(options);
     await execute(it_);
@@ -172,6 +177,7 @@ describe("/quote add", () => {
     mockUpdateQuoteMessageId.mockResolvedValue({
       stillExists: true,
       attributionCleared: true,
+      recorded: true,
     });
     const it_ = interaction(options);
     await execute(it_);
@@ -191,6 +197,7 @@ describe("/quote add", () => {
     mockUpdateQuoteMessageId.mockResolvedValue({
       stillExists: true,
       attributionCleared: true,
+      recorded: true,
     });
     mockClearSaverAttribution.mockResolvedValue("failed");
     const it_ = interaction(options);
@@ -206,6 +213,7 @@ describe("/quote add", () => {
     mockUpdateQuoteMessageId.mockResolvedValue({
       stillExists: true,
       attributionCleared: true,
+      recorded: true,
     });
     mockClearSaverAttribution.mockResolvedValue("missing");
     const it_ = interaction(options);
@@ -214,6 +222,25 @@ describe("/quote add", () => {
     const reply = it_.editReply.mock.calls[0][0] as { content: string };
     expect(reply.content).toContain("removed from the quote channel");
     expect(reply.content).not.toContain("does not credit you");
+  });
+
+  it("removes a post whose id could not be recorded (#916)", async () => {
+    // Nothing points at it and nothing ever will: the channel sweep only
+    // collects non-bot messages.
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: false,
+      recorded: false,
+    });
+    const it_ = interaction(options);
+    await execute(it_);
+
+    expect(mockDeleteQuoteMessage).toHaveBeenCalledWith(
+      "message-1",
+      "quote-channel",
+    );
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("could not be recorded");
   });
 
   it("still confirms the DB write when the channel post failed", async () => {

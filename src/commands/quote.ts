@@ -204,7 +204,7 @@ async function handleAdd(
     // Update quote with the message ID *and* the channel it went to, so the
     // post can still be found after an admin moves the quote channel (#916).
     const { messageId, channelId } = post;
-    const { stillExists, attributionCleared } =
+    const { stillExists, attributionCleared, recorded } =
       await quoteService.updateQuoteMessageId(
         quote._id.toString(),
         messageId,
@@ -223,6 +223,21 @@ async function handleAdd(
         content: removed
           ? "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted."
           : "⚠️ The quote could not be saved — the author's data was reset while it was being added — and the post could not be removed from the quote channel. Please delete it manually.",
+      });
+      return;
+    }
+    if (!recorded) {
+      // The post's id never reached the row, so nothing points at it — the
+      // channel sweep ignores bot messages — and a purge could never find
+      // it. Take it down here (#916).
+      const removed = await quoteChannelManager.deleteQuoteMessage(
+        messageId,
+        channelId,
+      );
+      await interaction.editReply({
+        content: removed
+          ? "⚠️ The quote was saved, but the post could not be recorded and has been removed from the quote channel. Try `/quote add` again."
+          : "⚠️ The quote was saved, but the post could not be recorded and could not be removed from the quote channel either. Please delete it manually.",
       });
       return;
     }

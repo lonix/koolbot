@@ -11,6 +11,7 @@ import { VoiceChannelTracker, TimePeriod } from "./voice-channel-tracker.js";
 import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
+import { fetchMemberOrNull } from "../utils/moderation-guards.js";
 
 /** Weekly, Monday 00:00 — the schedule leaderboard roles ship with. */
 const DEFAULT_CRON = "0 0 * * 1";
@@ -436,7 +437,13 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       return true;
     }
 
-    const member = await this.safeFetchMember(guild, userId);
+    // `fetchMemberOrNull`, not the service's own `safeFetchMember`: that one
+    // swallows every error, so a rate limit would read as "they left" and the
+    // roster entry — the only handle anything has on this grant — would be
+    // dropped while the role sat on a member who is still here (#916). This
+    // returns null only for a definitive 10007/10013 and rethrows the rest,
+    // which the caller classifies as retained.
+    const member = await fetchMemberOrNull(guild, userId);
     if (!member) {
       // Left the guild: the role went with them. Same call `reconcileTier`
       // makes when a previous holder is unreachable.

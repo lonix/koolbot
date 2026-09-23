@@ -1093,7 +1093,7 @@ export class QuoteChannelManager {
         if (post) {
           const { messageId, channelId } = post;
           // Update quote with message ID in database
-          const { stillExists, attributionCleared } =
+          const { stillExists, attributionCleared, recorded } =
             await quoteService.updateQuoteMessageId(
               quote._id.toString(),
               messageId,
@@ -1114,6 +1114,17 @@ export class QuoteChannelManager {
             // Still public, with no row pointing at it. Counting it as
             // reposted would report a clean rebuild over an orphan, so the
             // sync says how many it could not account for instead.
+            orphaned++;
+            continue;
+          }
+          if (!recorded) {
+            // Nothing points at the post just made, and nothing ever will:
+            // the sweep ignores bot messages. Same compensation as a purged
+            // row (#916).
+            logger.warn(
+              `Quote ${quote._id} could not record its new post; removing the post just created`,
+            );
+            if (await this.deleteQuoteMessage(messageId, channelId)) continue;
             orphaned++;
             continue;
           }

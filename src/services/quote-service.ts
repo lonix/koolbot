@@ -213,6 +213,13 @@ export interface QuotePublicationResult {
    * the post just published names someone whose data has been erased.
    */
   attributionCleared: boolean;
+  /**
+   * False when the row does not carry this post's id — the write did not
+   * land, or could not be verified. Nothing then points at the post, and the
+   * channel sweep only collects non-bot messages, so the caller has to take
+   * it down itself.
+   */
+  recorded: boolean;
 }
 
 /** What a per-user quote purge did (#914). */
@@ -268,6 +275,21 @@ export interface QuotePurgeResult {
   attributionsGone: number;
   /** Why the anonymisation did not finish, when it did not (#916). */
   anonymiseError?: string;
+}
+
+/** Read a publication's outcome off the row as it now stands (#916). */
+function publicationOutcome(
+  row: IQuote | null,
+  messageId: string,
+): QuotePublicationResult {
+  if (!row) {
+    return { stillExists: false, attributionCleared: false, recorded: false };
+  }
+  return {
+    stillExists: true,
+    attributionCleared: row.addedById === ANONYMISED_USER_ID,
+    recorded: row.messageId === messageId,
+  };
 }
 
 export class QuoteService {
@@ -447,18 +469,46 @@ export class QuoteService {
     messageId: string,
     postChannelId?: string,
   ): Promise<QuotePublicationResult> {
-    const updated = await this.model.findByIdAndUpdate(
-      quoteId,
-      // The channel goes with the id: without it nothing can find this post
-      // again once the quote channel is moved (#916).
-      postChannelId ? { messageId, postChannelId } : { messageId },
-      { new: true },
-    );
-    if (!updated) return { stillExists: false, attributionCleared: false };
-    return {
-      stillExists: true,
-      attributionCleared: updated.addedById === ANONYMISED_USER_ID,
-    };
+    try {
+      const updated = await this.model.findByIdAndUpdate(
+        quoteId,
+        // The channel goes with the id: without it nothing can find this post
+        // again once the quote channel is moved (#916).
+        postChannelId ? { messageId, postChannelId } : { messageId },
+        { new: true },
+      );
+      return publicationOutcome(updated, messageId);
+    } catch (error) {
+      // The write may have applied and lost only its acknowledgement, and a
+      // concurrent purge may have anonymised the row in the meantime — in
+      // which case the post just made names an erased member behind a
+      // sentinel row no later purge can select. Re-read and report what is
+      // actually there; the caller repairs or removes the post from that.
+      logger.error(
+        `Failed to record the quote-channel post for quote ${quoteId}:`,
+        error,
+      );
+      try {
+        return publicationOutcome(
+          await this.model.findById(quoteId),
+          messageId,
+        );
+      } catch (reread) {
+        logger.error(
+          `Could not re-read quote ${quoteId} after a failed publication write:`,
+          reread,
+        );
+        // Unverifiable: treat the post as unrecorded, which has the caller
+        // take it down. A row left pointing at a deleted message is the
+        // recoverable direction — `/quote reset` republishes it — while an
+        // orphaned post is not.
+        return {
+          stillExists: true,
+          attributionCleared: false,
+          recorded: false,
+        };
+      }
+    }
   }
 
   /**
