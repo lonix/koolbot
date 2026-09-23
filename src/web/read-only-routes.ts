@@ -154,6 +154,21 @@ export const NOTICES_SETTING_KEYS = [
 ] as const;
 
 /**
+ * The env-var fallback a settings row shows for `key` when no DB row exists.
+ * `getEnvConfigValue` coerces every digit-only string to a number, which
+ * rounds a Discord snowflake past 2^53 and leaves an id picker with no
+ * selection. A key whose schema default is a string keeps the raw text.
+ */
+export function envSettingFallback(
+  key: string,
+  defaultValue: unknown,
+): unknown {
+  if (typeof defaultValue !== "string") return getEnvConfigValue(key);
+  const raw = getEnv(key);
+  return raw === undefined || raw.trim() === "" ? null : raw;
+}
+
+/**
  * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
  * the Settings page derives label/type/description from `settingsMetadata` with
  * a stored DB row taking precedence. Lets a feature page render its own keys
@@ -183,7 +198,7 @@ export function buildSettingRows(
       label: meta?.label ?? key,
       current: dbEntry
         ? dbEntry.value
-        : (getEnvConfigValue(key) ?? defaultValue),
+        : (envSettingFallback(key, defaultValue) ?? defaultValue),
       defaultValue,
       type: meta?.type ?? describeType(defaultValue),
       description: dbEntry?.description ?? meta?.description ?? "",
@@ -602,7 +617,7 @@ export function createReadOnlyRouter(
             label: meta?.label ?? key,
             current: dbEntry
               ? dbEntry.value
-              : (getEnvConfigValue(key) ?? defaultValue),
+              : (envSettingFallback(key, defaultValue) ?? defaultValue),
             defaultValue,
             type: meta?.type ?? describeType(defaultValue),
             description: dbEntry?.description ?? meta?.description ?? "",

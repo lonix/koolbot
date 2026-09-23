@@ -7,6 +7,7 @@ import {
   VOICE_CHANNELS_SETTING_KEYS,
   REACTION_ROLES_SETTING_KEYS,
   NOTICES_SETTING_KEYS,
+  envSettingFallback,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
@@ -169,6 +170,31 @@ describe("buildSettingRows (#705)", () => {
       if (prev === undefined) delete process.env["notices.enabled"];
       else process.env["notices.enabled"] = prev;
     }
+  });
+
+  it("keeps an env-supplied snowflake id as the exact string", () => {
+    const prev = process.env["notices.channel_id"];
+    process.env["notices.channel_id"] = "123456789012345678";
+    try {
+      const [row] = buildSettingRows(["notices.channel_id"], []);
+      expect(row.current).toBe("123456789012345678");
+    } finally {
+      if (prev === undefined) delete process.env["notices.channel_id"];
+      else process.env["notices.channel_id"] = prev;
+    }
+  });
+
+  it("envSettingFallback coerces only non-string keys", () => {
+    const prev = process.env["quotes.max_length"];
+    process.env["quotes.max_length"] = "500";
+    try {
+      expect(envSettingFallback("quotes.max_length", 1000)).toBe(500);
+      expect(envSettingFallback("quotes.max_length", "")).toBe("500");
+    } finally {
+      if (prev === undefined) delete process.env["quotes.max_length"];
+      else process.env["quotes.max_length"] = prev;
+    }
+    expect(envSettingFallback("definitely.unset.key", "")).toBeNull();
   });
 
   it("excludes the feature master voicechannels.enabled from the key list", () => {
