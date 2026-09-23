@@ -215,7 +215,16 @@ export async function loadFeatureSettings(
     (await ConfigService.getInstance()
       .getAll()
       .catch((): StoredConfigRow[] => []));
-  const settingRows = buildSettingRows(keys, storedRows);
+  const storedByKey = new Map(storedRows.map((s) => [s.key, s.value]));
+  // A key with no stored row takes its env-supplied value before the schema
+  // default, the order `ConfigService.get` uses at runtime (#973). Otherwise
+  // a master switched on through the environment renders unchecked, locks
+  // its dependents, and a save writes it back as `false`.
+  const settingRows = buildSettingRows(keys, storedRows).map((row) => {
+    if (storedByKey.has(row.key)) return row;
+    const envValue = getEnvConfigValue(row.key);
+    return envValue === null ? row : { ...row, current: envValue };
+  });
 
   const needsChannels = settingRows.some(
     (r) =>
@@ -242,7 +251,6 @@ export async function loadFeatureSettings(
   // `ConfigService.get` uses at runtime: stored row, then an env var named
   // after the key, then the schema default. Skipping the env step would lock
   // a control whose dependency is switched on through the environment.
-  const storedByKey = new Map(storedRows.map((s) => [s.key, s.value]));
   const dependencyState = new Map<string, boolean>();
   for (const key of keys) {
     for (const dep of getDependencies(key as keyof ConfigSchema)) {

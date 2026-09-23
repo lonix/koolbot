@@ -235,6 +235,36 @@ describe("loadFeatureSettings (#971)", () => {
     }
   });
 
+  it("renders an env-supplied value for a key with no stored row (#973)", async () => {
+    const { client } = countingClient();
+    const previous = process.env["polls.enabled"];
+    process.env["polls.enabled"] = "true";
+    try {
+      const data = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["polls.enabled", "polls.cooldown_days"],
+        [],
+      );
+      expect(data.settingRows[0].current).toBe(true);
+      // Keys without an env var still fall back to the schema default.
+      expect(data.settingRows[1].current).toBe(
+        defaultConfig["polls.cooldown_days"],
+      );
+      // A stored row still wins over the environment.
+      const stored = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["polls.enabled"],
+        [{ key: "polls.enabled", value: false }],
+      );
+      expect(stored.settingRows[0].current).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env["polls.enabled"];
+      else process.env["polls.enabled"] = previous;
+    }
+  });
+
   it("resolves off-card dependencies from stored rows, else the schema default", async () => {
     const { client } = countingClient();
     const data = await loadFeatureSettings(
