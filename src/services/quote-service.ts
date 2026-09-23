@@ -612,6 +612,10 @@ export class QuoteService {
         addedById: q.addedById,
         channelId: q.channelId,
         messageId: q.messageId,
+        // Goes with `messageId`: without it a restored row cannot say which
+        // channel its post is in, and a purge would look in whichever one is
+        // configured at the time (#916).
+        ...(q.postChannelId ? { postChannelId: q.postChannelId } : {}),
         likes: q.likes ?? 0,
         dislikes: q.dislikes ?? 0,
         createdAt: q.createdAt?.toISOString(),
@@ -677,6 +681,11 @@ export class QuoteService {
           // messageId is required by the schema; the channel re-sync overwrites
           // it with the real message ID once the quote is re-posted.
           messageId: entry.messageId || `imported-${entry.id ?? i}`,
+          // Only when the backup carried one: inventing a channel would turn
+          // a guess into a recorded fact.
+          ...(entry.postChannelId
+            ? { postChannelId: entry.postChannelId }
+            : {}),
           createdAt: entry.createdAt ? new Date(entry.createdAt) : new Date(),
           addedAt: entry.addedAt ? new Date(entry.addedAt) : new Date(),
           likes: Math.max(0, entry.likes ?? 0),

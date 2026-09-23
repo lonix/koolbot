@@ -720,7 +720,14 @@ export class EventService extends ScheduledService {
       await message.edit(this.buildAnnouncementPayload(event));
       return true;
     } catch (error) {
-      if (this.isDiscardableError(error, DISCORD_UNKNOWN_MESSAGE)) {
+      // The message, or the channel holding it, can go between the fetch
+      // above and this edit. Either way there is no stale announcement left
+      // to fix, so the refresh is complete rather than failed (#916) — the
+      // same call the channel-fetch path above makes for `gone`.
+      if (
+        this.isDiscardableError(error, DISCORD_UNKNOWN_MESSAGE) ||
+        this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)
+      ) {
         logger.warn(
           `Event announcement message ${sanitizeForLog(event.announcementMessageId)} gone; skipping edit`,
         );

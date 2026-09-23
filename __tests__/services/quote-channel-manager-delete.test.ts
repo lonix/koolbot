@@ -97,6 +97,16 @@ describe("QuoteChannelManager.deleteQuoteMessage", () => {
     );
   });
 
+  it("reports true when the channel goes between the fetch and the delete", async () => {
+    // A deleted channel took the post with it, exactly as when the channel
+    // fetch itself reports it gone (#916).
+    channel!.messages.fetch.mockRejectedValue(apiError(10003));
+
+    await expect((await manager()).deleteQuoteMessage("m1")).resolves.toBe(
+      true,
+    );
+  });
+
   it("reports false when the delete is refused", async () => {
     channel!.messages.fetch.mockResolvedValue({
       delete: jest.fn(async () => {

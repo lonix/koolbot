@@ -723,7 +723,10 @@ export class QuoteChannelManager {
       logger.info(`Deleted quote message ${messageId}`);
       return true;
     } catch (error) {
-      if (isUnknownMessageError(error)) {
+      // The message, or the channel holding it, can go between the fetch
+      // above and here. Either proves the post is gone, which is what this
+      // reports — the same call `updateQuoteMessage` makes below (#916).
+      if (isUnknownMessageError(error) || isUnknownChannelError(error)) {
         // Nothing to delete — see the `messageId` note above.
         return true;
       }

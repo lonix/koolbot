@@ -828,6 +828,10 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     now: Date,
   ): Promise<number> {
     let removed = 0;
+    // Grants whose role cannot be named this run (see below). Counted rather
+    // than logged per row, so an unset `birthdays.role_id` does not print a
+    // line per member on every run.
+    let unidentified = 0;
     // Only rows with a stored grant timestamp can have a role to revoke.
     // (`$ne: null` already excludes missing fields in MongoDB; `$exists`
     // makes that intent explicit.)
@@ -845,13 +849,13 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       // `birthdays.role_id` and then clear its marker (#916).
       const grantedRoleId = row.roleAssignedId ?? roleId;
       if (!grantedRoleId) {
-        // Pre-`roleAssignedId` row with no configured role to fall back on:
-        // nothing identifies what to revoke, so clear the marker rather than
-        // re-examine it every run forever.
-        logger.warn(
-          `Birthday role marker for ${sanitizeForLog(row.userId)} names no role and none is configured; clearing it`,
-        );
-        await this.clearRoleMarker(row);
+        // A pre-`roleAssignedId` row while `birthdays.role_id` is unset:
+        // nothing identifies what to revoke *right now*. The marker is kept
+        // rather than cleared — the old role may still be on the member, and
+        // clearing it would lose the only record that a grant ever happened,
+        // so configuring a role again could never take it back (#916). Being
+        // re-examined every run is the cheaper half of that trade.
+        unidentified += 1;
         continue;
       }
 
@@ -883,6 +887,12 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       }
 
       if (settled) await this.clearRoleMarker(row);
+    }
+
+    if (unidentified > 0) {
+      logger.warn(
+        `Birthday sweep: ${unidentified} expired grant(s) name no role and none is configured; keeping their markers so they can still be revoked if birthdays.role_id is set again`,
+      );
     }
 
     return removed;
