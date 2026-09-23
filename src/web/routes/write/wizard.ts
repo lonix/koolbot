@@ -95,6 +95,45 @@ export function createWizardRouter(client: Client): Router {
           const settingKeys = WIZARD_FEATURE_SETTINGS[featureKey] ?? [];
           const config = ConfigService.getInstance();
 
+          // `config.get` below swallows read errors and returns `null`, which
+          // would render as blank / unchecked controls that the apply step
+          // then persists. Probe the store once and fail closed if it can't
+          // be read, like the Settings and feature pages do.
+          const readable = await config.getAll().then(
+            () => true,
+            (err: unknown) => {
+              logger.warn("wizard: config snapshot read failed", err);
+              return false;
+            },
+          );
+          if (!readable) {
+            res.type("text/html").send(
+              renderWizardStepPage({
+                csrfToken,
+                remainingMs,
+                navFeatureStatus,
+                stepIndex: step,
+                totalSteps: features.length,
+                featureKey,
+                settingKeys,
+                currentValues: {},
+                metadata: settingsMetadata,
+                defaultValues: defaultConfig as unknown as Record<
+                  string,
+                  unknown
+                >,
+                textChannels: [],
+                voiceChannels: [],
+                categoryChannels: [],
+                roles: [],
+                enabledByKey: {},
+                flash,
+                settingsUnavailable: true,
+              }),
+            );
+            return;
+          }
+
           // Resolve a key's effective current value: prefer what the admin
           // already entered earlier in this wizard run, then the persisted
           // config, then the schema default. Used for both the visible fields

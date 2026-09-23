@@ -33,6 +33,7 @@ const mockCreateSession = jest.fn();
 const mockAddConfiguration = jest.fn();
 const mockApplyConfiguration = jest.fn<() => Promise<unknown>>();
 const mockEndSession = jest.fn();
+const mockConfigGetAll = jest.fn<() => Promise<unknown>>(async () => new Map());
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -58,6 +59,7 @@ jest.unstable_mockModule("../../src/services/wizard-service.js", () => ({
       addConfiguration: mockAddConfiguration,
       applyConfiguration: mockApplyConfiguration,
       endSession: mockEndSession,
+      getConfiguration: (): undefined => undefined,
     }),
   },
 }));
@@ -69,7 +71,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       getString: jest.fn(async () => ""),
       getNumber: jest.fn(async () => 0),
       getBoolean: jest.fn(async () => false),
-      getAll: jest.fn(async () => new Map()),
+      getAll: mockConfigGetAll,
       registerReloadCallback: jest.fn(),
     }),
   },
@@ -97,6 +99,7 @@ function wizardState(
 beforeEach(async () => {
   jest.clearAllMocks();
   mockGetSession.mockReturnValue(null);
+  mockConfigGetAll.mockImplementation(async () => new Map());
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -165,6 +168,30 @@ describe("POST /wizard/start", () => {
     expect(lastAudit()).toMatchObject({
       details: { replacedExisting: false, discardedKeys: [] },
     });
+  });
+});
+
+describe("GET /wizard?step=n", () => {
+  it("renders the step form when the stored config can be read", async () => {
+    mockGetSession.mockReturnValue(wizardState(["quotes"]));
+    const res = await harness.get("/wizard?step=0");
+    const html = await res.text();
+    expect(res.status).toBe(200);
+    expect(html).toContain('<form method="POST" action="/admin/wizard/step/0"');
+    expect(html).not.toContain("Settings could not be loaded");
+  });
+
+  it("fails closed with a notice when the stored config can't be read", async () => {
+    // `config.get` would return null for every key, pre-filling blank
+    // controls that an apply would then persist.
+    mockConfigGetAll.mockRejectedValue(new Error("mongo down"));
+    mockGetSession.mockReturnValue(wizardState(["quotes"]));
+    const res = await harness.get("/wizard?step=0");
+    const html = await res.text();
+    expect(res.status).toBe(200);
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain('action="/admin/wizard/step/0"');
+    expect(html).toContain('href="/admin/wizard"');
   });
 });
 

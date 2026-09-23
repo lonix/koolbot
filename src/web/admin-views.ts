@@ -935,8 +935,13 @@ export function renderSettingsPage(props: SettingsProps): string {
     <button type="submit" class="btn">Reload commands</button>
   </form>
   <a href="/admin/settings/export" class="btn">Export YAML</a>
-  <a href="#import-section" class="btn">Import YAML</a>
-  <a href="/admin/wizard" class="btn">Setup wizard</a>
+  <a href="#import-section" class="btn">Import YAML</a>${
+    // The wizard pre-fills from the same store; don't point at it while the
+    // store can't be read.
+    props.settingsUnavailable
+      ? ""
+      : `\n  <a href="/admin/wizard" class="btn">Setup wizard</a>`
+  }
 </div>`;
 
   const pickers = {
@@ -1450,6 +1455,12 @@ export interface WizardStepPageProps extends CommonProps {
    */
   enabledByKey: Record<string, boolean>;
   flash?: FlashMessage | null;
+  /**
+   * The stored config could not be read, so `currentValues` can't be trusted
+   * (`ConfigService.get` returns `null` on a read error). The step form is
+   * replaced by a notice so blank values can't be carried into an apply.
+   */
+  settingsUnavailable?: boolean;
 }
 
 export function renderWizardStepPage(props: WizardStepPageProps): string {
@@ -1582,7 +1593,14 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
 <h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
 <p class="subtitle">${escapeHtml(info.desc)}</p>
 ${renderFlash(props.flash)}
-<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
+${
+  props.settingsUnavailable
+    ? `<div class="card">${renderSettingsUnavailableNotice()}</div>
+<div class="actions">
+  ${previousButton}
+  <a href="/admin/wizard" class="btn">← Back to features</a>
+</div>`
+    : `<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
   <input type="hidden" name="_csrf" value="${csrf}">
   <div class="card">${fields}</div>
   <div class="actions">
@@ -1590,7 +1608,8 @@ ${renderFlash(props.flash)}
     ${previousButton}
     <a href="/admin/wizard" class="btn">← Back to features</a>
   </div>
-</form>
+</form>`
+}
 `;
   return renderAdminPage({
     title: `Wizard — ${info.name}`,

@@ -130,6 +130,8 @@ describe("renderSettingsPage", () => {
     // Import (diff-previewed) and reset (confirmed) don't pre-fill values,
     // so they stay available.
     expect(html).toContain('action="/admin/settings/import"');
+    // The wizard pre-fills from the same store, so its link is hidden too.
+    expect(html).not.toContain(">Setup wizard</a>");
   });
 
   it("renders the human label as primary text and the dotted key as a muted reference", () => {
