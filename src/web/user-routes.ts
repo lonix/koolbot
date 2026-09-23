@@ -43,6 +43,7 @@ import {
   renderUserRewindBody,
   renderUserTimezoneBody,
   renderUserVoiceBody,
+  PRIVACY_RESET_CONFIRM_WORD,
   type UserFeatureFlags,
   type UserFlashMessage,
   type VoicePresetView,
@@ -72,7 +73,12 @@ import {
   summariseByCollection,
 } from "../services/user-data-registry.js";
 import { createRateLimiter } from "./rate-limit.js";
-import { recordAudit } from "./audit.js";
+import { recordAudit, recordAuditOrThrow } from "./audit.js";
+import { WebAuditLog } from "../models/web-audit-log.js";
+import {
+  UserDataDeletionService,
+  type PurgeReport,
+} from "../services/user-data-deletion-service.js";
 import { renderSignedOut } from "./views.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -261,6 +267,64 @@ async function isPrivacyExportEnabled(): Promise<boolean> {
 }
 
 /**
+ * Whether the self-service data reset (#917) is enabled. Its own opt-in
+ * gate, off by default: turning the export on is not consent to the
+ * destructive half. It also needs the export itself on — the reset lives
+ * on the `/me/privacy` page, which is hidden behind `privacy.enabled`.
+ */
+async function isPrivacyResetEnabled(): Promise<boolean> {
+  const config = ConfigService.getInstance();
+  const [exportOn, resetOn] = await Promise.all([
+    config.getBoolean("privacy.enabled", false),
+    config.getBoolean("privacy.delete.enabled", false),
+  ]);
+  return exportOn && resetOn;
+}
+
+/** `privacy.delete.cooldown_hours`, clamped to a non-negative number. */
+async function getPrivacyResetCooldownHours(): Promise<number> {
+  const hours = await ConfigService.getInstance().getNumber(
+    "privacy.delete.cooldown_hours",
+    168,
+  );
+  return Number.isFinite(hours) && hours > 0 ? hours : 0;
+}
+
+/** Audit action for every row the data reset writes (#917). */
+const PRIVACY_RESET_ACTION = "user.privacy.delete";
+
+/**
+ * When this member's last *completed* reset happened, if it is still inside
+ * the cooldown window — read back from the Web UI audit log rather than an
+ * in-memory map, so a restart or a second IP does not reset the clock.
+ *
+ * Only a completed, fully successful reset starts the cooldown: a purge that
+ * half-finished (or died before writing its completed row) is exactly the
+ * case where the member should be able to retry, and every purge step is
+ * idempotent so a retry is always safe. The audit log is `retain` in the
+ * registry, so the purge never erases the row this reads.
+ */
+async function findActiveResetCooldown(
+  userId: string,
+  guildId: string,
+  cooldownHours: number,
+): Promise<Date | null> {
+  if (cooldownHours <= 0) return null;
+  const since = new Date(Date.now() - cooldownHours * 60 * 60 * 1000);
+  const last = await WebAuditLog.findOne({
+    guildId,
+    discordUserId: userId,
+    action: PRIVACY_RESET_ACTION,
+    result: "success",
+    "details.phase": "completed",
+    createdAt: { $gte: since },
+  })
+    .sort({ createdAt: -1 })
+    .lean();
+  return last ? new Date(last.createdAt) : null;
+}
+
+/**
  * Resolve the enabled-state of every feature-gated `/me/*` surface in one
  * shot (#709). Threaded into `renderUserPage` (and the overview body) on
  * every page so the nav renders a consistent "off" badge for whichever
@@ -416,6 +480,16 @@ export function createUserRouter(
     windowMs: 60_000,
     max: 3,
     keyName: "me-export",
+  });
+
+  // The data reset (#917) gets a bucket of its own too. This is only the
+  // outer layer: it keys on client IP and lives in memory, so it resets on
+  // restart and is shared across a NAT. The real once-per-member limit is
+  // the persisted `privacy.delete.cooldown_hours` check in the handler.
+  const resetLimiter = createRateLimiter({
+    windowMs: 15 * 60_000,
+    max: 5,
+    keyName: "me-privacy-reset",
   });
 
   router.use(requireSession);
@@ -1360,6 +1434,10 @@ export function createUserRouter(
       });
       const flags = await readUserFeatureFlags();
       const maxItems = await UserDataExportService.getInstance().getMaxItems();
+      const [resetEnabled, cooldownHours] = await Promise.all([
+        isPrivacyResetEnabled(),
+        getPrivacyResetCooldownHours(),
+      ]);
 
       res.type("text/html").send(
         renderUserPage({
@@ -1370,13 +1448,218 @@ export function createUserRouter(
             included: summariseByCollection(EXPORTABLE_USER_DATA),
             excluded: summariseByCollection(EXCLUDED_USER_DATA),
             maxItems,
+            reset: {
+              enabled: resetEnabled,
+              cooldownHours,
+              csrfToken: getCsrfToken(req),
+            },
           }),
+          flash: readFlashFromQuery(req),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           ...flags,
         }),
       );
+    }),
+  );
+
+  // ---------- Privacy / self-service data reset (#917) ----------
+  // Destructive, so every refusal is audited and the order is fixed:
+  // gate → typed confirmation → persisted cooldown → intent row (refuse if
+  // it cannot be written) → purge → completed row → sign out. The purge
+  // revokes the member's web sessions as its own last step; the handler
+  // then clears the cookie and renders the terminal signed-out page, the
+  // same treatment as `POST /me/finish`.
+  router.post(
+    "/privacy/delete",
+    resetLimiter,
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      const { userId, guildId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      if (!(await isPrivacyResetEnabled())) {
+        await recordAudit(session, {
+          action: PRIVACY_RESET_ACTION,
+          targetId: userId,
+          details: { reason: "feature-disabled" },
+          result: "failure",
+          errorMessage: "privacy.delete.enabled is off",
+        });
+        res
+          .status(403)
+          .type("text/plain")
+          .send("The self-service data reset is not enabled on this server.");
+        return;
+      }
+
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const confirmText =
+        typeof body.confirm === "string" ? body.confirm.trim() : "";
+      if (confirmText !== PRIVACY_RESET_CONFIRM_WORD) {
+        await recordAudit(session, {
+          action: PRIVACY_RESET_ACTION,
+          targetId: userId,
+          details: { reason: "confirmation-mismatch" },
+          result: "failure",
+          errorMessage: "confirmation text did not match",
+        });
+        res.redirect(
+          303,
+          flashUrl("/me/privacy", {
+            type: "err",
+            text: `Reset cancelled — type ${PRIVACY_RESET_CONFIRM_WORD} exactly to confirm.`,
+          }),
+        );
+        return;
+      }
+
+      const cooldownHours = await getPrivacyResetCooldownHours();
+      let lastReset: Date | null;
+      try {
+        lastReset = await findActiveResetCooldown(
+          userId,
+          guildId,
+          cooldownHours,
+        );
+      } catch (err) {
+        // Fail closed: a cooldown that cannot be checked is not a cooldown
+        // that has passed.
+        logger.error(
+          `Privacy reset cooldown lookup failed for ${sanitizeForLog(userId)}`,
+          err,
+        );
+        res.redirect(
+          303,
+          flashUrl("/me/privacy", {
+            type: "err",
+            text: "Reset refused — could not check when you last reset. Nothing was changed; try again later.",
+          }),
+        );
+        return;
+      }
+      if (lastReset) {
+        const availableAt = new Date(
+          lastReset.getTime() + cooldownHours * 60 * 60 * 1000,
+        );
+        await recordAudit(session, {
+          action: PRIVACY_RESET_ACTION,
+          targetId: userId,
+          details: {
+            reason: "cooldown",
+            lastResetAt: lastReset.toISOString(),
+            availableAt: availableAt.toISOString(),
+          },
+          result: "failure",
+          errorMessage: "reset cooldown still active",
+        });
+        res.redirect(
+          303,
+          flashUrl("/me/privacy", {
+            type: "err",
+            text: `You already reset your data recently. You can reset again after ${availableAt.toUTCString()}.`,
+          }),
+        );
+        return;
+      }
+
+      // `recordAudit` swallows its own failures, which is right for most
+      // writes and wrong here: a purge nobody can see happened is the one
+      // thing an operator must never be left with. No intent row, no purge.
+      try {
+        await recordAuditOrThrow(session, {
+          action: PRIVACY_RESET_ACTION,
+          targetId: userId,
+          details: { phase: "intent" },
+          result: "success",
+        });
+      } catch (err) {
+        logger.error(
+          `Privacy reset refused for ${sanitizeForLog(userId)}: intent audit row could not be written`,
+          err,
+        );
+        res.redirect(
+          303,
+          flashUrl("/me/privacy", {
+            type: "err",
+            text: "Reset refused — it could not be recorded in the audit log. Nothing was changed; try again later.",
+          }),
+        );
+        return;
+      }
+
+      let report: PurgeReport;
+      try {
+        report = await UserDataDeletionService.getInstance(client).purge(
+          userId,
+          guildId,
+        );
+      } catch (err) {
+        // The coordinator records per-step failures itself and only throws
+        // on a programming error — but if it does, the intent row is
+        // already written, so close it with a failure rather than leave it
+        // dangling.
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        logger.error(
+          `Privacy reset for ${sanitizeForLog(userId)} failed: ${sanitizeForLog(errorMessage)}`,
+        );
+        await recordAudit(session, {
+          action: PRIVACY_RESET_ACTION,
+          targetId: userId,
+          details: { phase: "completed" },
+          result: "failure",
+          errorMessage,
+        });
+        res.redirect(
+          303,
+          flashUrl("/me/privacy", {
+            type: "err",
+            text: "The reset could not finish. Some of your data may already be gone; you can safely try again.",
+          }),
+        );
+        return;
+      }
+
+      await recordAudit(session, {
+        action: PRIVACY_RESET_ACTION,
+        targetId: userId,
+        details: { phase: "completed", report },
+        result: report.ok ? "success" : "failure",
+        errorMessage: report.ok
+          ? null
+          : `${report.steps.filter((step) => step.error || step.removed < step.matched).length} purge step(s) incomplete`,
+      });
+
+      // The purge's own last step revoked every session this member holds;
+      // revoke this one explicitly too (idempotent) so the terminal page is
+      // truthful even if that step reported an error.
+      try {
+        await WebSessionService.getInstance().revokeSession(session.sessionId);
+      } catch (err) {
+        logger.error(
+          `Failed to revoke session after privacy reset for ${sanitizeForLog(userId)}`,
+          err,
+        );
+      }
+      clearSessionCookie(res);
+      res
+        .status(200)
+        .type("text/html")
+        .send(
+          renderSignedOut(
+            report.ok
+              ? "Your Koolbot data on this server has been reset."
+              : "Your Koolbot data reset did not fully complete. Sign in again and retry — it is safe to run more than once.",
+          ),
+        );
     }),
   );
 

@@ -1410,6 +1410,67 @@ export interface PrivacyPageBodyOptions {
   excluded: PrivacyDataRow[];
   /** `privacy.export.max_items`, so the page states the ceiling up front. */
   maxItems: number;
+  /**
+   * The self-service reset (#917). Omitted — or `enabled: false` — when
+   * `privacy.delete.enabled` is off, in which case no danger zone renders.
+   */
+  reset?: {
+    enabled: boolean;
+    /** `privacy.delete.cooldown_hours`; 0 means no cooldown. */
+    cooldownHours: number;
+    csrfToken: string;
+  };
+}
+
+/** The word a member types to confirm the reset (#917). */
+export const PRIVACY_RESET_CONFIRM_WORD = "RESET";
+
+/**
+ * The danger-zone card for the self-service reset (#917). The copy is
+ * deliberately blunt about four things a member could otherwise assume the
+ * wrong way: tracking starts again, moderation records stay, other members'
+ * rows may still mention them, and preferences go back to defaults. The
+ * export link sits above the button — download first, then reset.
+ */
+function renderPrivacyResetCard(
+  reset: NonNullable<PrivacyPageBodyOptions["reset"]>,
+): string {
+  const word = PRIVACY_RESET_CONFIRM_WORD;
+  const cooldown =
+    reset.cooldownHours > 0
+      ? `<p class="muted">You can reset once every ${reset.cooldownHours} hour${reset.cooldownHours === 1 ? "" : "s"}.</p>`
+      : "";
+  return [
+    '<div id="reset" class="card" style="border-color:#7f1d1d">',
+    "<h2>Reset my data</h2>",
+    "<p>Wipes what Koolbot has stored about you on this server — voice history, activity " +
+      "counters, achievements, poll participation, Rewind, reminders, RSVPs and the rest of " +
+      "the collections listed above — then signs you out. It cannot be undone.</p>",
+    "<p>Before you go ahead, know that:</p>",
+    "<ul>",
+    "<li><strong>This is a reset, not a deletion.</strong> Koolbot starts recording again the " +
+      "next time you send a message, react or join a voice channel.</li>",
+    "<li><strong>Moderation records and audit logs are kept.</strong> Warnings, timeouts and " +
+      "the server's audit trail are not yours to erase — the reset itself is recorded there too.</li>",
+    "<li><strong>Other members' records may still mention you.</strong> Voice history rows " +
+      "belonging to people you shared a channel with can still name you as present.</li>",
+    "<li><strong>Your preferences go back to defaults.</strong> Timezone, notification opt-ins " +
+      "and voice presets are cleared; every DM goes back to off.</li>",
+    "</ul>",
+    '<div class="form-actions">',
+    '<a class="btn" href="/me/privacy/export" download>Download my data first (JSON)</a>',
+    "</div>",
+    cooldown,
+    `<form method="POST" action="/me/privacy/delete" class="stack" onsubmit="return confirm('Reset all of your Koolbot data on this server? This cannot be undone.');">`,
+    `<input type="hidden" name="_csrf" value="${escapeHtml(reset.csrfToken)}">`,
+    `<label>Type <code>${word}</code> to confirm: ` +
+      `<input type="text" name="confirm" autocomplete="off" placeholder="${word}" required></label>`,
+    '<div class="form-actions">',
+    '<button class="btn-danger" type="submit">Reset my data</button>',
+    "</div>",
+    "</form>",
+    "</div>",
+  ].join("");
 }
 
 function renderPrivacyTable(
@@ -1490,5 +1551,8 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     '<p class="muted" style="margin-top:.75rem">Moderation records in particular are not ' +
       "self-service: ask a server moderator if you need to know where you stand.</p>",
     "</div>",
+    opts.featureEnabled && opts.reset?.enabled
+      ? renderPrivacyResetCard(opts.reset)
+      : "",
   ].join("");
 }

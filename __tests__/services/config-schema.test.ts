@@ -497,6 +497,9 @@ describe("Config Schema", () => {
       "voicetracking.cleanup.enabled": false,
       "messagetracking.cleanup.enabled": false,
       "polls.participation.enabled": false,
+      // Self-service data reset (#917) — destructive, so its own opt-in
+      // on top of privacy.enabled.
+      "privacy.delete.enabled": false,
       // Rewind end-of-year DM nudge — auxiliary opt-in under the rewind
       // feature gate, independent of `rewind.enabled` (#608).
       "rewind.nudge.enabled": false,

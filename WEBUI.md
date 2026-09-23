@@ -932,7 +932,7 @@ existing achievements award detection. `celebrations.enabled` depends on
 | **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row.  |
 | **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
 | **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.      |
-| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you and download all of it as one JSON file. Gated by `privacy.enabled`; each download records a `WebAuditLog` row.          |
+| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.          |
 
 **Disabled-feature handling is uniform across `/me/*` (#709).** A
 feature-gated page whose feature an admin has turned off is never hidden
@@ -1082,7 +1082,33 @@ buffered into one string; append-only histories are capped at
 `truncated` in the file; the route has its own rate-limit bucket (3 per
 minute per client); and every attempt — including one refused because the
 feature is off — writes a `user.privacy.export` row to the Web UI audit
-log. Deletion is out of scope here and tracked separately in issue #906.
+log.
+
+#### Resetting your data (`POST /me/privacy/delete`, #917)
+
+When `privacy.delete.enabled` is also on, the page ends with a **Reset my
+data** danger-zone card. The export button is repeated above the reset
+button — download first, then reset. The card is explicit that:
+
+1. tracking starts again on the next message, reaction or voice join, so
+   this is a **reset, not a deletion**;
+2. moderation records and audit logs are **kept**;
+3. other members' voice records may still mention the member as co-present;
+4. timezone and notification preferences go back to defaults.
+
+The handler is CSRF-checked and self-scoped like every other `/me/*` write,
+and runs its steps in a fixed order: feature gate (refused with a `403` and a
+`feature-disabled` audit row when off) → typed confirmation (the member must
+type `RESET`; a JS `confirm()` guards the click too) → persisted per-member
+cooldown (`privacy.delete.cooldown_hours`, read back from the audit log) →
+an **intent** audit row, written with `recordAuditOrThrow` so the purge is
+refused if the row cannot be stored → the purge coordinator
+(`UserDataDeletionService`) → a **completed** audit row carrying its per-step
+`PurgeReport` → session revoke and the signed-out page. The route also has
+its own in-memory rate-limit bucket (5 per 15 minutes per client), separate
+from the export's; that is only an outer layer, the cooldown is the real
+once-per-member limit. `web-audit-log` stays out of the member's export, so
+the reset trail is admin-only.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

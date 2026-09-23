@@ -69,11 +69,17 @@ export function renderErrorPage(opts: {
   );
 }
 
-export function renderSignedOut(): string {
+/**
+ * Terminal "signed out" page. `message` is an optional plain-text paragraph
+ * shown above the standard copy — the data reset (#917) uses it to say what
+ * just happened before the member loses the page.
+ */
+export function renderSignedOut(message?: string): string {
   return pageShell(
     "Signed out",
     [
       "<h1>Signed out</h1>",
+      message ? `<p>${escapeHtml(message)}</p>` : "",
       "<p>Your session has been revoked. Run <code>/config</code> in Discord to start a new one.</p>",
     ].join(""),
   );
