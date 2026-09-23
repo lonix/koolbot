@@ -543,6 +543,18 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     );
     if (voiceChannelId) post.voiceChannelId = voiceChannelId;
 
+    // One opening expiry, fixed just before the send: the embed's countdown
+    // and the value the filters and the sweep enforce have to be the same
+    // instant. Setting it only in the promotion left the embed counting down
+    // from the reservation's earlier deadline, so a click could be refused
+    // after the displayed time but accepted before the stored one — or the
+    // reverse. The saved reservation keeps its own value until promotion, as
+    // the TTL backstop for a post that never opens.
+    const openingExpiresAt = new Date(
+      Date.now() + Math.max(1, expiryMinutes) * MS_PER_MINUTE,
+    );
+    post.expiresAt = openingExpiresAt;
+
     let message;
     try {
       message = await channel.send(this.buildPayload(post));
@@ -567,17 +579,13 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
             // Resolved after the reservation was saved, so it rides along
             // here rather than in a save of its own.
             voiceChannelId: post.voiceChannelId,
-            // Restarted here, so the advertised lifetime is measured from
-            // the post going up rather than from the row being reserved.
-            // Creating a voice channel, moving the host and sending the
-            // embed are three Discord round-trips; at the one-minute minimum
-            // they could otherwise eat a visible share of the lifetime, or
-            // on a bad day publish a post that had already expired. The
-            // reservation's own `expiresAt` still stands as the TTL backstop
-            // for a row abandoned before it ever gets here.
-            expiresAt: new Date(
-              Date.now() + Math.max(1, expiryMinutes) * MS_PER_MINUTE,
-            ),
+            // The same instant the embed is counting down to. Measured from
+            // the post going up rather than from the row being reserved:
+            // creating a voice channel, moving the host and sending the embed
+            // are three Discord round-trips, which at the one-minute minimum
+            // could otherwise eat a visible share of the lifetime, or on a bad
+            // day publish a post that had already expired.
+            expiresAt: openingExpiresAt,
           },
         },
         { new: true },
@@ -738,21 +746,20 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
    * Decide whether a freshly saved post keeps its slot under
    * `lfg.max_active_per_user`.
    *
-   * Counting before inserting would let two `/lfg` runs in the same instant
-   * both see a count below the cap and both post. Counting *after* the
-   * insert, over the member's older open rows only, cannot — and the reason
-   * is worth writing down, because it looks racy and is not.
+   * Nothing clever is needed here any more, and that is the point.
    *
-   * Each caller awaits its own insert before it counts, and reads go to the
-   * primary (the connection sets no read preference), so a caller's own row
-   * is committed before its count runs. For two callers to both accept, each
-   * would have to count before the other's insert committed:
+   * Two `/lfg` runs cannot overlap: `createPost` holds the lifecycle turn from
+   * reserving the row to promoting it, so by the time this counts, any other
+   * run has either finished (its post is `open` and counted) or has not
+   * started. This row is still `creating` and so is not counted as one of the
+   * member's own.
    *
-   *     A.insert < A.count < B.insert < B.count < A.insert
-   *
-   * which is a cycle, so at most one can accept. ObjectId monotonicity then
-   * decides *which*: the later one sees the earlier as older and stands down.
-   * Pointing the connection at a secondary would break the first premise.
+   * An earlier version compared `_id` to count only *older* rows, on the
+   * grounds that ObjectIds are monotonic. They are not, across a restart: the
+   * timestamp has one-second granularity and the rest of the id is a
+   * per-process random value, so a post created just before a restart can
+   * compare greater than one created just after and be missed. The lifecycle
+   * turn makes the comparison unnecessary rather than merely fixing it.
    *
    * A cap of 0 (or less) means no cap and skips the query entirely.
    */
@@ -763,11 +770,10 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     );
     if (limit <= 0) return true;
 
-    const older = await LfgPost.countDocuments({
+    const live = await LfgPost.countDocuments({
       guildId: post.guildId,
       hostId: post.hostId,
-      // Reservations deliberately do not count. They cannot be raced into
-      // existence — the lifecycle turn serialises creation — and one
+      // Reservations deliberately do not count — this row is one, and one
       // abandoned by a crash mid-send has no usable post behind it, so
       // counting it would lock its host out of /lfg for the whole of
       // `lfg.expiry_minutes` over a row nobody can see.
@@ -777,9 +783,8 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       // Without this a member is locked out of /lfg for up to a minute after
       // their own post died, waiting on the sweep to relabel it.
       expiresAt: { $gt: new Date() },
-      _id: { $lt: post._id },
     });
-    return older < limit;
+    return live < limit;
   }
 
   /**

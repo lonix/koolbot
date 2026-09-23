@@ -621,11 +621,10 @@ describe("createPost", () => {
     });
   });
 
-  // Counting before the insert would let two `/lfg` runs in the same instant
-  // both see a count below the cap. Counting the member's *older* open rows
-  // after inserting cannot: of two racing posts, exactly one sees the other
-  // as older, and that one stands down.
-  it("settles the cap against older rows, after reserving its own", async () => {
+  // The lifecycle turn serialises creation, so this is a plain count of the
+  // member's live posts — no ObjectId comparison, which would not survive a
+  // restart anyway (ids are only second-granular, then per-process random).
+  it("settles the cap against the member's live posts", async () => {
     const send = jest.fn(async () => ({ id: "msg-9", delete: jest.fn() }));
     const { client } = stubChannel(send as never);
     configValues.numbers["lfg.max_active_per_user"] = 2;
@@ -640,13 +639,12 @@ describe("createPost", () => {
     expect(LfgPostMock.countDocuments).toHaveBeenCalledWith({
       guildId: "guild-1",
       hostId: "host-1",
-      // Reservations deliberately do not count: creation is serialised by
-      // the lifecycle turn, and one abandoned by a crash would otherwise
-      // lock its host out for the post's whole lifetime.
+      // Reservations deliberately do not count: this row is one, and one
+      // abandoned by a crash would otherwise lock its host out for the
+      // post's whole lifetime.
       state: "open",
       // An expired post accepts nobody, so it must not hold a slot either.
       expiresAt: { $gt: expect.any(Date) },
-      _id: { $lt: POST_ID },
     });
     // The reservation is given back, and no post goes out.
     expect(LfgPostMock.deleteOne).toHaveBeenCalledWith({ _id: POST_ID });
@@ -1656,24 +1654,33 @@ describe("opening a post and switching the feature off take turns", () => {
 // `expiresAt` is set when the row is reserved, but a post is not live until
 // its message exists — and getting there is three Discord round-trips.
 describe("the advertised lifetime starts when the post goes up", () => {
-  it("restarts the clock in the promotion, not at reservation", async () => {
+  it("shows and enforces the same deadline", async () => {
     const channel = {
       id: "chan-1",
       isTextBased: () => true,
       isDMBased: () => false,
-      send: jest.fn(async () => {
-        // Discord being slow: at the one-minute minimum this would otherwise
-        // eat most of the post's life before anyone could see it.
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        return { id: "msg-9", delete: jest.fn() };
-      }),
+      send: jest.fn(async () => ({ id: "msg-9", delete: jest.fn() })),
     };
     const client = { channels: { fetch: jest.fn(async () => channel) } };
     configValues.numbers["lfg.expiry_minutes"] = 1;
     const { saved, promoted } = stubSavedPosts();
-    LfgPostMock.countDocuments = jest.fn(async () => 0);
+    // Everything between reserving the row and fixing the opening deadline —
+    // the cap check, the voice-channel setup — is time the post does not yet
+    // exist for. At the one-minute minimum it must not come out of its life.
+    LfgPostMock.countDocuments = jest.fn(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return 0;
+    });
 
-    await LfgService.getInstance(client as never).createPost({
+    const service = LfgService.getInstance(client as never);
+    // What the embed was actually built from.
+    let shownExpiry: Date | undefined;
+    jest.spyOn(service, "buildPayload").mockImplementation((p) => {
+      shownExpiry = p.expiresAt;
+      return { embeds: [], components: [] } as never;
+    });
+
+    await service.createPost({
       guildId: "guild-1",
       hostId: "host-1",
       game: "Valorant",
@@ -1685,6 +1692,10 @@ describe("the advertised lifetime starts when the post goes up", () => {
     const reserved = saved[0].expiresAt as Date;
     const opened = promoted[0].expiresAt as Date;
     expect(opened.getTime()).toBeGreaterThan(reserved.getTime());
+    // And the countdown in the embed is that same instant, so a click is
+    // never refused after the displayed deadline but accepted before the
+    // stored one, or the reverse.
+    expect(shownExpiry?.getTime()).toBe(opened.getTime());
   });
 });
 
