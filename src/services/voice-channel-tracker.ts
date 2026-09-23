@@ -139,6 +139,18 @@ export class VoiceChannelTracker {
    * drain would sail straight past it.
    */
   private endingSessions: Map<string, Set<Promise<void>>> = new Map();
+  /**
+   * Bumped every time a member is evicted by a purge (#916).
+   *
+   * Draining `endTracking` is not enough on its own: a channel *switch*
+   * awaits `endTracking` and then calls `startTracking`, so an update that
+   * began before the eviction can restart tracking after the drain finished
+   * — and the next disconnect upserts the row the purge just deleted. A
+   * voice-state update reads this counter when it starts and checks it again
+   * before restarting tracking; a bump in between means a purge happened and
+   * the restart is abandoned.
+   */
+  private purgeGenerations: Map<string, number> = new Map();
   private client: Client;
   private mongo = new MongoConnectionGuard("voice channel tracker");
   private configService: ConfigService;
@@ -197,6 +209,10 @@ export class VoiceChannelTracker {
     // Evict first: from here on, a disconnect finds no session and returns
     // before it writes anything. Only a persist already past that read is
     // left, and that is what the drain below waits for.
+    // Bump first: an update already past its own read will now see a
+    // different generation and abandon any restart.
+    this.purgeGenerations.set(userId, this.purgeGeneration(userId) + 1);
+
     this.activeSessions.delete(userId);
     this.userChannels.delete(userId);
     this.encounteredUsers.delete(userId);
@@ -261,6 +277,11 @@ export class VoiceChannelTracker {
     return { drained: drainedAny, timedOut: true };
   }
 
+  /** The member's current purge generation (see `purgeGenerations`). */
+  private purgeGeneration(userId: string): number {
+    return this.purgeGenerations.get(userId) ?? 0;
+  }
+
   public async handleVoiceStateUpdate(
     oldState: VoiceState,
     newState: VoiceState,
@@ -280,6 +301,10 @@ export class VoiceChannelTracker {
         logger.info(`No member found in voice state update`);
         return;
       }
+      // Read once, up front: a purge landing part-way through this update
+      // bumps it, and the switch path below refuses to restart tracking when
+      // it has moved (#916).
+      const generation = this.purgeGeneration(member.id);
 
       const oldChannel = oldState.channel;
       const newChannel = newState.channel;
@@ -310,6 +335,15 @@ export class VoiceChannelTracker {
           `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
         );
         await this.endTrackingTracked(member.id);
+        // A purge that landed while we were closing the old session has
+        // already evicted this member; restarting here would hand the next
+        // disconnect a session to upsert, undoing the purge.
+        if (this.purgeGeneration(member.id) !== generation) {
+          logger.info(
+            `Not restarting tracking for user ${member.id}: their data was reset mid-update`,
+          );
+          return;
+        }
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
         );

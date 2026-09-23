@@ -8,6 +8,7 @@ import { resolveTimezone } from "../utils/timezone.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
+import { fetchMemberOrNull } from "../utils/moderation-guards.js";
 
 /**
  * Birthday celebrations service (#657).
@@ -410,7 +411,18 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         }
 
         row.lastAnnouncedYear = local.year;
-        await row.save();
+        // If the row was purged while this run was working (#916), the save
+        // matches nothing and the grant above would have no marker — the
+        // expiry sweep could never find it and the role would sit on the
+        // member for good. Take it back rather than leave it stranded.
+        const persisted = await this.saveRunRow(row);
+        if (!persisted && roleId && row.roleAssignedAt) {
+          logger.warn(
+            `Birthday row for ${sanitizeForLog(row.userId)} vanished mid-run; taking the just-granted role back`,
+          );
+          await this.revokeBirthdayRole(row.guildId, row.userId, roleId);
+          summary.rolesGranted -= 1;
+        }
       } catch (error) {
         summary.failed += 1;
         logger.error(
@@ -532,7 +544,8 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
   /**
    * Take the birthday role off a member. True when it is safe to drop their
    * row — the guild, member or role being gone all count, since there is no
-   * grant left for the sweep to chase.
+   * grant left for the sweep to chase. A lookup that merely *failed* does
+   * not count: the row has to survive it, or the sweep loses the grant.
    */
   private async revokeBirthdayRole(
     guildId: string,
@@ -547,7 +560,11 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         );
         return false;
       }
-      const member = await guild.members.fetch(userId).catch(() => null);
+      // `fetchMemberOrNull` returns null only on Discord's definitive
+      // "not in the guild" codes and rethrows everything else. A blanket
+      // catch here would read a rate limit as "they left", delete the only
+      // marker, and strand a role that is still on a present member.
+      const member = await fetchMemberOrNull(guild, userId);
       if (!member) return true;
       if (!member.roles.cache.has(roleId)) return true;
       await member.roles.remove(roleId, "Birthday data reset");
@@ -605,6 +622,25 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       }
     }
     return removed;
+  }
+
+  /**
+   * Persist a row touched by the run. False when the document is no longer
+   * there — a per-user purge deleted it mid-run (#916) — as opposed to the
+   * save failing for some other reason, which propagates to the per-row
+   * catch as before.
+   */
+  private async saveRunRow(row: IUserBirthday): Promise<boolean> {
+    const result = await UserBirthday.updateOne(
+      { _id: row._id },
+      {
+        $set: {
+          lastAnnouncedYear: row.lastAnnouncedYear,
+          ...(row.roleAssignedAt ? { roleAssignedAt: row.roleAssignedAt } : {}),
+        },
+      },
+    );
+    return (result?.matchedCount ?? 0) > 0;
   }
 
   private async grantBirthdayRole(

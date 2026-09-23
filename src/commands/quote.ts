@@ -175,6 +175,11 @@ async function handleAdd(
   const quoteText = interaction.options.getString("text", true);
   const author = interaction.options.getUser("author", true);
 
+  // Acknowledge before the database insert and the Discord round-trips that
+  // follow: Discord invalidates an interaction left unanswered for 3 seconds
+  // and the resulting 10062 cannot be recovered (#842).
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   // Add quote to database
   const quote = await quoteService.addQuote(
     quoteText,
@@ -207,23 +212,20 @@ async function handleAdd(
       // posts, and the row that pointed at it is gone — so take it down here
       // rather than leave the quote publicly readable after an erasure.
       const removed = await quoteChannelManager.deleteQuoteMessage(messageId);
-      await interaction.reply({
+      await interaction.editReply({
         content: removed
           ? "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted."
           : "⚠️ The quote could not be saved — the author's data was reset while it was being added — and the post could not be removed from the quote channel. Please delete it manually.",
-        flags: MessageFlags.Ephemeral,
       });
       return;
     }
-    await interaction.reply({
+    await interaction.editReply({
       content: "✅ Quote added successfully and posted to the quote channel!",
-      flags: MessageFlags.Ephemeral,
     });
   } else {
-    await interaction.reply({
+    await interaction.editReply({
       content:
         "✅ Quote added to database, but could not post to channel. Check quote channel configuration.",
-      flags: MessageFlags.Ephemeral,
     });
   }
 }

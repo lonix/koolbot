@@ -655,6 +655,27 @@ describe("BirthdayService", () => {
       });
     });
 
+    it("keeps the row when the member lookup merely failed", async () => {
+      // A rate limit is not proof they left. Reading it as one would delete
+      // the only marker and strand a role still on a present member (#916).
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        members: {
+          fetch: jest.fn(async () => {
+            throw new Error("rate limited");
+          }),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result.removed).toBe(0);
+      expect(result.error).toBeDefined();
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
     it("reports zeros for a member with no birthday", async () => {
       mockBirthdayFind.mockResolvedValue([]);
       const client = makeClient();

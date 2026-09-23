@@ -117,7 +117,12 @@ describe("/quote add", () => {
       "quote-1",
       "message-1",
     );
-    expect(it_.reply).toHaveBeenCalledWith(
+    // Deferred before the DB insert and the Discord round-trips: an
+    // unacknowledged interaction is invalidated after 3 seconds (#842).
+    expect(it_.deferReply).toHaveBeenCalledWith({
+      flags: MessageFlags.Ephemeral,
+    });
+    expect(it_.editReply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("✅") }),
     );
   });
@@ -132,7 +137,7 @@ describe("/quote add", () => {
     await execute(it_);
 
     expect(mockDeleteQuoteMessage).toHaveBeenCalledWith("message-1");
-    expect(it_.reply).toHaveBeenCalledWith(
+    expect(it_.editReply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("⚠️") }),
     );
   });
@@ -143,7 +148,7 @@ describe("/quote add", () => {
     await execute(it_);
 
     expect(mockUpdateQuoteMessageId).not.toHaveBeenCalled();
-    const reply = it_.reply.mock.calls[0][0] as { content: string };
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
     expect(reply.content).toContain("could not post to channel");
   });
 

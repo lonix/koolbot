@@ -467,6 +467,56 @@ describe("VoiceChannelTracker", () => {
       }
     });
 
+    it("does not restart tracking for a switch interrupted by a purge (#916)", async () => {
+      // A channel switch awaits `endTracking` and then calls `startTracking`.
+      // Without a generation check the restart lands after the eviction, and
+      // the next disconnect upserts the row the purge just deleted.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const oldChannel = {
+        id: "channel-a",
+        name: "A",
+      } as unknown as VoiceChannel;
+      const newChannel = {
+        id: "channel-b",
+        name: "B",
+      } as unknown as VoiceChannel;
+
+      await joinChannel(tracker, member, oldChannel);
+
+      // Hold the switch inside `endTracking`, evict, then release it.
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((started) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () =>
+            new Promise((resolve) => {
+              releaseWrite = () => resolve({});
+              started();
+            }),
+        );
+      });
+
+      const switching = tracker.handleVoiceStateUpdate(
+        { member, channel: oldChannel } as unknown as VoiceState,
+        { member, channel: newChannel } as unknown as VoiceState,
+      );
+      await writeStarted;
+
+      const forgetting = tracker.forgetActiveSession("user123");
+      releaseWrite();
+      await forgetting;
+      await switching;
+
+      // The switch gave up instead of re-opening a session the purge closed.
+      expect(tracker.getActiveSession("user123")).toBeNull();
+    });
+
     it("leaves other members' in-flight sessions alone", async () => {
       const { tracker, mockConfigService } = createTracker(mockClient);
       mockConfigService.getBoolean.mockResolvedValue(true);
