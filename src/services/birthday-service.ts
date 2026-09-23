@@ -449,10 +449,11 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
             year: local.year,
           },
         ];
-        // If the row was purged while this run was working (#916), the save
-        // matches nothing and the grant above would have no marker — the
+        // If the row was purged while this run was working (#916) — or the
+        // write simply failed — nothing persisted records what this
+        // iteration just did: the grant above would have no marker, so the
         // expiry sweep could never find it and the role would sit on the
-        // member for good. Take it back rather than leave it stranded.
+        // member for good.
         const persisted = await this.saveRunRow(row);
         if (!persisted) {
           // Everything this iteration produced is now the member's data with
@@ -460,7 +461,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           // age) in a public channel, and the role has no marker for the
           // sweep to find. Both come back.
           logger.warn(
-            `Birthday row for ${sanitizeForLog(row.userId)} vanished mid-run; withdrawing the announcement and any role just granted`,
+            `Birthday bookkeeping for ${sanitizeForLog(row.userId)} did not persist; withdrawing the announcement and any role just granted`,
           );
           const withdrawn = await announcement
             .delete()
@@ -542,24 +543,19 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     userId: string,
   ): Promise<BirthdayPurgeResult> {
     let roleRevoked = false;
-    let announcementsDeleted = 0;
+    let lastPass: BirthdayPurgeResult | null = null;
 
     for (let attempt = 0; attempt < MAX_PURGE_ATTEMPTS; attempt++) {
       const { retry, ...pass } = await this.purgeAttempt(guildId, userId);
       roleRevoked = roleRevoked || pass.roleRevoked;
-      // Posts taken down on an earlier pass are gone for good, so they count
-      // even though the pass that removed them did not finish.
-      announcementsDeleted += pass.announcementsDeleted;
-      if (!retry)
-        return {
-          ...pass,
-          roleRevoked,
-          announcementsDeleted,
-          announcementsAttempted: Math.max(
-            pass.announcementsAttempted,
-            announcementsDeleted,
-          ),
-        };
+      // The posts are *not* summed across passes. Each pass re-reads the
+      // same `announcements` list — it stays on the row until the delete
+      // lands — so a post taken down on the first pass comes back as an
+      // Unknown Message on the next and would be counted again. The latest
+      // pass already covers every recorded post, so its counts are the
+      // whole picture (#916).
+      lastPass = { ...pass, roleRevoked };
+      if (!retry) return lastPass;
 
       // The row changed under us — the scheduled run granted a role and
       // wrote its marker between our read and our delete. Go round again
@@ -573,9 +569,9 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       matched: 1,
       removed: 0,
       roleRevoked,
-      announcementsAttempted: announcementsDeleted,
-      announcementsDeleted,
-      announcementsFailed: 0,
+      announcementsAttempted: lastPass?.announcementsAttempted ?? 0,
+      announcementsDeleted: lastPass?.announcementsDeleted ?? 0,
+      announcementsFailed: lastPass?.announcementsFailed ?? 0,
       error: `the birthday row kept changing mid-purge; gave up after ${MAX_PURGE_ATTEMPTS} attempts, so the expiry sweep still owns any live grant`,
     };
   }
@@ -899,6 +895,29 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
    * catch as before.
    */
   private async saveRunRow(row: IUserBirthday): Promise<boolean> {
+    try {
+      return await this.writeRunRow(row);
+    } catch (error) {
+      // A rejected write is the same problem as a row that vanished: the
+      // announcement is up and the role may be granted, with nothing
+      // persisted that could ever find either again. Reporting it as "not
+      // persisted" runs the compensation instead of dropping into the outer
+      // catch and leaving both orphaned (#916).
+      //
+      // A write that actually landed but failed to acknowledge is withdrawn
+      // needlessly — the member misses this year's announcement. That is the
+      // recoverable side: the row then names a deleted message and a revoked
+      // role, and both the purge and the expiry sweep already treat an
+      // already-absent target as settled.
+      logger.error(
+        `Failed to persist the birthday run row for ${sanitizeForLog(row.userId)}; withdrawing what this iteration produced:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  private async writeRunRow(row: IUserBirthday): Promise<boolean> {
     const result = await UserBirthday.updateOne(
       { _id: row._id },
       {

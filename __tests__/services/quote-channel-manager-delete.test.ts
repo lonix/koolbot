@@ -34,7 +34,7 @@ describe("QuoteChannelManager.deleteQuoteMessage", () => {
       quoteId: string,
       content: string,
       authorId: string,
-    ): Promise<boolean>;
+    ): Promise<"edited" | "missing" | "failed">;
   }> {
     const { QuoteChannelManager } =
       await import("../../src/services/quote-channel-manager.js");
@@ -156,11 +156,10 @@ describe("QuoteChannelManager attribution repair", () => {
       quoteId: string,
       content: string,
       authorId: string,
-    ): Promise<boolean>;
+    ): Promise<"edited" | "missing" | "failed">;
   }> {
-    const { QuoteChannelManager } = await import(
-      "../../src/services/quote-channel-manager.js"
-    );
+    const { QuoteChannelManager } =
+      await import("../../src/services/quote-channel-manager.js");
     const instance = QuoteChannelManager.getInstance(mockClient);
     (
       instance as unknown as {
@@ -224,7 +223,7 @@ describe("QuoteChannelManager attribution repair", () => {
 
     await expect(
       (await manager()).clearSaverAttribution("m1", "q1", "Hi", "999"),
-    ).resolves.toBe(true);
+    ).resolves.toBe("edited");
     expect(message.edit).toHaveBeenCalled();
   });
 
@@ -240,9 +239,11 @@ describe("QuoteChannelManager attribution repair", () => {
     };
     channel!.messages.fetch.mockResolvedValue(message);
 
+    // "missing", not "edited": nothing was redrawn, so a caller counting
+    // reposts must not count this one.
     await expect(
       (await manager()).clearSaverAttribution("m1", "q1", "Hi", "999"),
-    ).resolves.toBe(true);
+    ).resolves.toBe("missing");
     expect(message.delete).toHaveBeenCalled();
   });
 
@@ -259,7 +260,7 @@ describe("QuoteChannelManager attribution repair", () => {
 
     await expect(
       (await manager()).clearSaverAttribution("m1", "q1", "Hi", "999"),
-    ).resolves.toBe(false);
+    ).resolves.toBe("failed");
   });
 
   it("counts an already-gone post as nothing left to fix", async () => {
@@ -267,6 +268,6 @@ describe("QuoteChannelManager attribution repair", () => {
 
     await expect(
       (await manager()).clearSaverAttribution("m1", "q1", "Hi", "999"),
-    ).resolves.toBe(true);
+    ).resolves.toBe("missing");
   });
 });

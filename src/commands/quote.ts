@@ -222,17 +222,24 @@ async function handleAdd(
       // (#916). The row already carries the anonymisation sentinel, so no
       // later purge will find it — but the post was drawn from the values
       // held here and still names them, so repair it now.
-      const repaired = await quoteChannelManager.clearSaverAttribution(
+      const repair = await quoteChannelManager.clearSaverAttribution(
         messageId,
         quote._id.toString(),
         quote.content,
         quote.authorId,
       );
-      await interaction.editReply({
-        content: repaired
-          ? "✅ Quote added and posted, but your data was reset while it was being added, so the post does not credit you."
-          : "⚠️ Quote added and posted, but your data was reset while it was being added and the post still credits you. Please delete it manually.",
-      });
+      // Three different things to say: the post is up without the credit,
+      // there is no post at all (the redraw failed and it was taken down),
+      // or it is up and still names them.
+      const outcome = {
+        edited:
+          "✅ Quote added and posted, but your data was reset while it was being added, so the post does not credit you.",
+        missing:
+          "⚠️ Quote added, but your data was reset while it was being added and the post could not be updated, so it was removed from the quote channel.",
+        failed:
+          "⚠️ Quote added and posted, but your data was reset while it was being added and the post still credits you. Please delete it manually.",
+      }[repair];
+      await interaction.editReply({ content: outcome });
       return;
     }
     await interaction.editReply({

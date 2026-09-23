@@ -417,7 +417,10 @@ describe("BirthdayService", () => {
         send: jest.Mock;
       };
       channel.id = "chan-1";
-      channel.send = jest.fn(async () => ({ id: "msg-9" }));
+      channel.send = jest.fn(async () => ({
+        id: "msg-9",
+        delete: jest.fn(async () => undefined),
+      }));
 
       const client = makeClient();
       (client.guilds.fetch as jest.Mock).mockResolvedValue({
@@ -444,6 +447,46 @@ describe("BirthdayService", () => {
           }),
         }),
       );
+    });
+
+    it("withdraws the post when the bookkeeping write throws", async () => {
+      // A rejected write leaves the same orphan as a purged row: the post is
+      // up and nothing persisted can find it. Falling through to the outer
+      // catch would leave it there for good (#916).
+      const today = new Date();
+      mockBirthdayFind.mockResolvedValueOnce([]).mockResolvedValueOnce([
+        {
+          _id: "row-1",
+          userId: "user-1",
+          guildId: "guild-1",
+          month: today.getUTCMonth() + 1,
+          day: today.getUTCDate(),
+        } as never,
+      ]);
+      mockBirthdayUpdateOne.mockRejectedValue(new Error("write conflict"));
+
+      const del = jest.fn(async () => undefined);
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        id: string;
+        send: jest.Mock;
+      };
+      channel.id = "chan-1";
+      channel.send = jest.fn(async () => ({ id: "msg-9", delete: del }));
+
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        channels: { fetch: jest.fn(async () => channel) },
+        members: {
+          fetch: jest.fn(async () => ({ displayName: "Ada", id: "user-1" })),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const summary = await svc.runNow();
+
+      expect(del).toHaveBeenCalled();
+      // Withdrawn, so it is not an announcement that happened.
+      expect(summary?.announced).toBe(0);
     });
   });
 
@@ -873,6 +916,42 @@ describe("BirthdayService", () => {
       expect(result.removed).toBe(0);
       expect(result.error).toBeDefined();
       expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("does not count the same post twice across retries", async () => {
+      // The `announcements` list stays on the row until the delete lands, so
+      // every pass re-reads it and the second one gets an Unknown Message
+      // for a post the first already removed. Summing the passes would
+      // report one deletion as two (#916).
+      const posts = [{ channelId: "chan-1", messageId: "msg-1", year: 2026 }];
+      mockBirthdayFind
+        .mockResolvedValueOnce([
+          { _id: "b1", roleAssignedAt: undefined, announcements: posts },
+        ])
+        .mockResolvedValueOnce([
+          { _id: "b1", roleAssignedAt: undefined, announcements: posts },
+        ]);
+      mockBirthdayDeleteMany
+        .mockResolvedValueOnce({ deletedCount: 0 }) // changed under us
+        .mockResolvedValueOnce({ deletedCount: 1 });
+
+      const client = makeClient();
+      const del = jest
+        .fn<() => Promise<undefined>>()
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(apiError(10008)); // already gone on pass two
+      (client.channels.fetch as jest.Mock).mockResolvedValue({
+        isTextBased: () => true,
+        messages: { delete: del },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(del).toHaveBeenCalledTimes(2);
+      expect(result.announcementsAttempted).toBe(1);
+      expect(result.announcementsDeleted).toBe(1);
+      expect(result.removed).toBe(1);
     });
 
     it("retries when the run wrote a new role marker mid-purge", async () => {

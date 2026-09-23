@@ -61,6 +61,13 @@ function normalizeUserId(input: string): string {
   return input;
 }
 
+/**
+ * What happened to a post whose saver attribution had to be cleared:
+ * re-rendered without them, gone entirely, or still up and still naming
+ * them (#916).
+ */
+export type AttributionRepair = "edited" | "missing" | "failed";
+
 export class QuoteChannelManager {
   private static instance: QuoteChannelManager;
   private client: Client;
@@ -777,14 +784,19 @@ export class QuoteChannelManager {
    * instead, because a post naming an erased member is worse than a missing
    * quote.
    *
-   * Returns whether the post no longer names them, by either route.
+   * Says which of the two happened, because the callers report it to
+   * someone: `"edited"` means the post is still up without the
+   * attribution, `"missing"` means there is no post any more, and
+   * `"failed"` means it is up and still names them. Collapsing the first
+   * two into one boolean let `/quote add` tell a member their quote was
+   * posted when it had just been deleted.
    */
   public async clearSaverAttribution(
     messageId: string,
     quoteId: string,
     content: string,
     authorId: string,
-  ): Promise<boolean> {
+  ): Promise<AttributionRepair> {
     try {
       await this.updateQuoteMessage(
         messageId,
@@ -793,14 +805,14 @@ export class QuoteChannelManager {
         authorId,
         ANONYMISED_USER_ID,
       );
-      return true;
+      return "edited";
     } catch (error) {
-      if (isMissingPostError(error)) return true;
+      if (isMissingPostError(error)) return "missing";
       logger.warn(
         `Could not re-render quote post ${messageId} after its saver was erased; removing it instead:`,
         error,
       );
-      return this.deleteQuoteMessage(messageId);
+      return (await this.deleteQuoteMessage(messageId)) ? "missing" : "failed";
     }
   }
 
@@ -1082,15 +1094,23 @@ export class QuoteChannelManager {
             logger.warn(
               `Quote ${quote._id} lost its saver attribution mid-sync; repairing the post just created`,
             );
-            if (
-              !(await this.clearSaverAttribution(
-                messageId,
-                quote._id.toString(),
-                quote.content,
-                quote.authorId,
-              ))
-            ) {
+            const repair = await this.clearSaverAttribution(
+              messageId,
+              quote._id.toString(),
+              quote.content,
+              quote.authorId,
+            );
+            if (repair === "failed") {
               orphaned++;
+              continue;
+            }
+            if (repair === "missing") {
+              // The post had to be taken down rather than redrawn, so this
+              // quote is not part of the rebuild — counting it as reposted
+              // would report a post that is not there.
+              logger.warn(
+                `Quote ${quote._id} could not be redrawn after its saver was erased and was removed from the channel`,
+              );
               continue;
             }
           }

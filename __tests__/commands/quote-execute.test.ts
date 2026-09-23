@@ -32,7 +32,8 @@ const mockPostQuote = jest.fn<() => Promise<string | null>>();
 const mockUpdateQuoteMessage = jest.fn<() => Promise<unknown>>();
 const mockResetChannel = jest.fn<() => Promise<{ reposted: number }>>();
 const mockDeleteQuoteMessage = jest.fn<() => Promise<boolean>>();
-const mockClearSaverAttribution = jest.fn<() => Promise<boolean>>();
+const mockClearSaverAttribution =
+  jest.fn<() => Promise<"edited" | "missing" | "failed">>();
 
 jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
   quoteService: {
@@ -89,7 +90,7 @@ beforeEach(() => {
     stillExists: true,
     attributionCleared: false,
   });
-  mockClearSaverAttribution.mockResolvedValue(true);
+  mockClearSaverAttribution.mockResolvedValue("edited");
   mockDeleteQuoteMessage.mockResolvedValue(true);
   mockUpdateQuoteMessage.mockResolvedValue(undefined);
   mockEditQuote.mockResolvedValue(undefined);
@@ -182,12 +183,28 @@ describe("/quote add", () => {
       stillExists: true,
       attributionCleared: true,
     });
-    mockClearSaverAttribution.mockResolvedValue(false);
+    mockClearSaverAttribution.mockResolvedValue("failed");
     const it_ = interaction(options);
     await execute(it_);
 
     const reply = it_.editReply.mock.calls[0][0] as { content: string };
     expect(reply.content).toContain("still credits you");
+  });
+
+  it("does not claim a post exists when the redraw removed it (#916)", async () => {
+    // `clearSaverAttribution` falls back to deleting the post it could not
+    // redraw, so "posted, but it does not credit you" would be a lie.
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: true,
+    });
+    mockClearSaverAttribution.mockResolvedValue("missing");
+    const it_ = interaction(options);
+    await execute(it_);
+
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("removed from the quote channel");
+    expect(reply.content).not.toContain("does not credit you");
   });
 
   it("still confirms the DB write when the channel post failed", async () => {
