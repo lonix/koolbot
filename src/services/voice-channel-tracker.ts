@@ -327,7 +327,12 @@ export class VoiceChannelTracker {
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in channel ${newChannel.name}`,
         );
-        await this.startTracking(member, newChannel.id, newChannel.name);
+        await this.startTracking(
+          member,
+          newChannel.id,
+          newChannel.name,
+          generation,
+        );
       }
       // User switched channels
       else if (oldChannel && newChannel) {
@@ -335,19 +340,18 @@ export class VoiceChannelTracker {
           `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
         );
         await this.endTrackingTracked(member.id);
-        // A purge that landed while we were closing the old session has
-        // already evicted this member; restarting here would hand the next
-        // disconnect a session to upsert, undoing the purge.
-        if (this.purgeGeneration(member.id) !== generation) {
-          logger.info(
-            `Not restarting tracking for user ${member.id}: their data was reset mid-update`,
-          );
-          return;
-        }
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
         );
-        await this.startTracking(member, newChannel.id, newChannel.name);
+        // `startTracking` re-checks `generation` immediately before it
+        // writes, so a purge landing anywhere in this transition — including
+        // during its own config reads — cannot leave a session behind.
+        await this.startTracking(
+          member,
+          newChannel.id,
+          newChannel.name,
+          generation,
+        );
       }
       // User left a channel (disconnect) - handle both cases:
       // 1. oldChannel exists but newChannel is null (direct disconnect)
@@ -498,10 +502,18 @@ export class VoiceChannelTracker {
     }
   }
 
+  /**
+   * @param generation the caller's purge generation, read before it started.
+   *   Checked again immediately before the session maps are written: the
+   *   config and Mongo work above yields to the event loop, so a purge can
+   *   evict *between* the caller's own check and this write, and the session
+   *   we are about to create would outlive it (#916).
+   */
   private async startTracking(
     member: GuildMember,
     channelId: string,
     channelName: string,
+    generation: number,
   ): Promise<void> {
     try {
       const debugModeEnabled = isDebugMode();
@@ -514,6 +526,15 @@ export class VoiceChannelTracker {
             `[DEBUG] Channel ${channelName} (${channelId}) is excluded from tracking`,
           );
         }
+        return;
+      }
+
+      // Last possible moment before the write, so nothing can slip between
+      // the check and the mutation.
+      if (this.purgeGeneration(member.id) !== generation) {
+        logger.info(
+          `Not starting tracking for user ${member.id}: their data was reset while this update was in flight`,
+        );
         return;
       }
 

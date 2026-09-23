@@ -1,6 +1,5 @@
 import {
   Client,
-  DiscordAPIError,
   TextChannel,
   EmbedBuilder,
   MessageReaction,
@@ -11,8 +10,15 @@ import {
 import { CronJob } from "cron";
 import { ConfigService } from "./config-service.js";
 import logger from "../utils/logger.js";
-import { waitForClientReady } from "../utils/discord.js";
+import {
+  MissingPostError,
+  isMissingPostError,
+  isUnknownChannelError,
+  isUnknownMessageError,
+  waitForClientReady,
+} from "../utils/discord.js";
 import { quoteService } from "./quote-service.js";
+import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 
 // Internal sweep interval for purging unauthorised messages from the
 // quote channel. Demoted from `quotes.cleanup_interval` config key in
@@ -53,23 +59,6 @@ function normalizeUserId(input: string): string {
 
   // Return original if we can't parse it (might be a username)
   return input;
-}
-
-/** Discord's "Unknown Message": the post is already gone. */
-const DISCORD_UNKNOWN_MESSAGE = 10008;
-/** Discord's "Unknown Channel": the channel, and everything in it, is gone. */
-const DISCORD_UNKNOWN_CHANNEL = 10003;
-
-function isUnknownMessage(error: unknown): boolean {
-  return (
-    error instanceof DiscordAPIError && error.code === DISCORD_UNKNOWN_MESSAGE
-  );
-}
-
-function isUnknownChannel(error: unknown): boolean {
-  return (
-    error instanceof DiscordAPIError && error.code === DISCORD_UNKNOWN_CHANNEL
-  );
 }
 
 export class QuoteChannelManager {
@@ -595,7 +584,7 @@ export class QuoteChannelManager {
 
       return { channel: channel as TextChannel, gone: false };
     } catch (error) {
-      if (isUnknownChannel(error)) return { channel: null, gone: true };
+      if (isUnknownChannelError(error)) return { channel: null, gone: true };
       logger.error("Error fetching quote channel:", error);
       return { channel: null, gone: false };
     }
@@ -705,7 +694,7 @@ export class QuoteChannelManager {
       logger.info(`Deleted quote message ${messageId}`);
       return true;
     } catch (error) {
-      if (isUnknownMessage(error)) {
+      if (isUnknownMessageError(error)) {
         // Nothing to delete — see the `messageId` note above.
         return true;
       }
@@ -721,15 +710,22 @@ export class QuoteChannelManager {
     authorId: string,
     addedById: string,
   ): Promise<void> {
-    try {
-      const channel = await this.getQuoteChannel();
-      if (!channel) {
-        throw new Error("Quote channel not configured or not found");
+    const { channel, gone } = await this.getQuoteChannelDetailed();
+    if (!channel) {
+      if (gone) {
+        // The channel was deleted and took this post with it, so there is
+        // nothing left to re-render — and nothing left on screen either.
+        throw new MissingPostError(
+          `Quote channel is gone, so message ${messageId} is too`,
+        );
       }
+      throw new Error("Quote channel not configured or not found");
+    }
 
+    try {
       const message = await channel.messages.fetch(messageId);
       if (!message) {
-        throw new Error("Quote message not found");
+        throw new MissingPostError(`Quote message ${messageId} not found`);
       }
 
       // Normalize user IDs to handle legacy formats and prevent double @
@@ -757,8 +753,54 @@ export class QuoteChannelManager {
       await message.edit({ embeds: [embed] });
       logger.info(`Updated quote message ${messageId}`);
     } catch (error) {
+      if (isUnknownMessageError(error) || isUnknownChannelError(error)) {
+        // Already gone: the caller is told apart from a real failure so a
+        // purge does not report a post that no longer exists as one that
+        // still names the member (#916).
+        throw new MissingPostError(
+          `Quote message ${messageId} no longer exists`,
+        );
+      }
       logger.error(`Error updating quote message ${messageId}:`, error);
       throw error;
+    }
+  }
+
+  /**
+   * Strip the saver attribution from a post that was published into a purge
+   * (#916).
+   *
+   * The purge anonymises the row and re-renders the post it can see; a post
+   * that went up moments later is invisible to it, and the row now holds the
+   * sentinel so no later purge will find it. Redrawing it here is the only
+   * remaining chance — and if the redraw fails the post is taken down
+   * instead, because a post naming an erased member is worse than a missing
+   * quote.
+   *
+   * Returns whether the post no longer names them, by either route.
+   */
+  public async clearSaverAttribution(
+    messageId: string,
+    quoteId: string,
+    content: string,
+    authorId: string,
+  ): Promise<boolean> {
+    try {
+      await this.updateQuoteMessage(
+        messageId,
+        quoteId,
+        content,
+        authorId,
+        ANONYMISED_USER_ID,
+      );
+      return true;
+    } catch (error) {
+      if (isMissingPostError(error)) return true;
+      logger.warn(
+        `Could not re-render quote post ${messageId} after its saver was erased; removing it instead:`,
+        error,
+      );
+      return this.deleteQuoteMessage(messageId);
     }
   }
 
@@ -995,7 +1037,8 @@ export class QuoteChannelManager {
       const quotes = await quoteService.getAllQuotes();
 
       // Counted separately: a quote purged mid-rebuild whose post could not
-      // be taken down is not "reposted", it is an orphan (#916).
+      // be taken down — or whose post still names an erased saver — is not
+      // "reposted", it is an orphan (#916).
       let reposted = 0;
       let orphaned = 0;
 
@@ -1010,10 +1053,11 @@ export class QuoteChannelManager {
 
         if (messageId) {
           // Update quote with message ID in database
-          const stillExists = await quoteService.updateQuoteMessageId(
-            quote._id.toString(),
-            messageId,
-          );
+          const { stillExists, attributionCleared } =
+            await quoteService.updateQuoteMessageId(
+              quote._id.toString(),
+              messageId,
+            );
           if (!stillExists) {
             // A per-user purge removed the row after this rebuild
             // snapshotted it, so the post just made has nothing pointing at
@@ -1032,13 +1076,31 @@ export class QuoteChannelManager {
             orphaned++;
             continue;
           }
+          if (attributionCleared && quote.addedById !== ANONYMISED_USER_ID) {
+            // The saver was purged after this rebuild snapshotted the row,
+            // so the post above was drawn from a stale attribution (#916).
+            logger.warn(
+              `Quote ${quote._id} lost its saver attribution mid-sync; repairing the post just created`,
+            );
+            if (
+              !(await this.clearSaverAttribution(
+                messageId,
+                quote._id.toString(),
+                quote.content,
+                quote.authorId,
+              ))
+            ) {
+              orphaned++;
+              continue;
+            }
+          }
           reposted++;
         }
       }
 
       if (orphaned > 0) {
         logger.error(
-          `Synced ${reposted} quote(s) to channel, but ${orphaned} purged quote(s) could not be removed and remain publicly visible with no database row`,
+          `Synced ${reposted} quote(s) to channel, but ${orphaned} post(s) affected by a concurrent data reset remain publicly visible`,
         );
       } else {
         logger.info(`Synced ${reposted} quotes to channel`);

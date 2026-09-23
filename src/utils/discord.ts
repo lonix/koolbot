@@ -2,7 +2,7 @@
  * Shared Discord client helpers.
  */
 
-import type { Client } from "discord.js";
+import { DiscordAPIError, type Client } from "discord.js";
 import logger from "./logger.js";
 
 const DEFAULT_MAX_WAIT_MS = 30_000;
@@ -74,4 +74,52 @@ export async function waitForClientReady(
 
     client.once("ready", onReady);
   });
+}
+
+/** Discord's "Unknown Message": the post is already gone. */
+const DISCORD_UNKNOWN_MESSAGE = 10008;
+/** Discord's "Unknown Channel": the channel, and everything in it, is gone. */
+const DISCORD_UNKNOWN_CHANNEL = 10003;
+
+export function isUnknownMessageError(error: unknown): boolean {
+  return (
+    error instanceof DiscordAPIError && error.code === DISCORD_UNKNOWN_MESSAGE
+  );
+}
+
+export function isUnknownChannelError(error: unknown): boolean {
+  return (
+    error instanceof DiscordAPIError && error.code === DISCORD_UNKNOWN_CHANNEL
+  );
+}
+
+/**
+ * A post that was to be edited is definitively gone — the message itself, or
+ * the whole channel holding it.
+ *
+ * Thrown rather than returned because the callers of an edit want the normal
+ * path to be "it landed"; a caller that cares about the difference between
+ * "gone" and "failed" asks with {@link isMissingPostError}. That difference
+ * matters to a per-user purge (#916): re-rendering a post to strip someone's
+ * name is *complete* when the post no longer exists, and reporting it as a
+ * failure would tell the member their name is still on screen when nothing
+ * of the sort is left.
+ */
+export class MissingPostError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MissingPostError";
+  }
+}
+
+/**
+ * Whether a failed message operation failed because the post is gone, as
+ * opposed to a transient, permission or configuration failure.
+ */
+export function isMissingPostError(error: unknown): boolean {
+  return (
+    error instanceof MissingPostError ||
+    isUnknownMessageError(error) ||
+    isUnknownChannelError(error)
+  );
 }

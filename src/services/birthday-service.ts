@@ -700,46 +700,53 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     for (const row of expiredRows) {
       if (!row.roleAssignedAt) continue;
       if (now.getTime() - row.roleAssignedAt.getTime() < durationMs) continue;
+
+      // The role this row actually recorded, falling back to the configured
+      // one for rows written before the id was stored. Using the configured
+      // id blindly would miss a grant made under a previous
+      // `birthdays.role_id` and then clear its marker (#916).
+      const grantedRoleId = row.roleAssignedId ?? roleId;
+      if (!grantedRoleId) {
+        // Pre-`roleAssignedId` row with no configured role to fall back on:
+        // nothing identifies what to revoke, so clear the marker rather than
+        // re-examine it every run forever.
+        logger.warn(
+          `Birthday role marker for ${sanitizeForLog(row.userId)} names no role and none is configured; clearing it`,
+        );
+        await this.clearRoleMarker(row);
+        continue;
+      }
+
+      // Only clear the marker once the grant is definitively dealt with.
+      // Clearing it after a failed removal throws away the sweep's *only*
+      // handle on a role that is still on the member (#916): a permissions
+      // error or a rate limit would strand it for good. Leaving the marker
+      // means the next run tries again.
+      let settled = false;
       try {
-        // The role this row actually recorded, falling back to the
-        // configured one for rows written before the id was stored. Using
-        // the configured id blindly would miss a grant made under a
-        // previous `birthdays.role_id` and then clear its marker (#916).
-        const grantedRoleId = row.roleAssignedId ?? roleId;
-        if (!grantedRoleId) {
-          // Pre-`roleAssignedId` row and no configured role to fall back on:
-          // there is no way to know what to revoke. Clearing the marker below
-          // at least stops it being re-examined every run.
-          logger.warn(
-            `Birthday role marker for ${sanitizeForLog(row.userId)} names no role and none is configured; clearing it`,
-          );
-          continue;
-        }
-        const member = await guild.members.fetch(row.userId).catch(() => null);
-        if (member && member.roles.cache.has(grantedRoleId)) {
+        const member = await fetchMemberOrNull(guild, row.userId);
+        if (!member) {
+          // Definitively not in the guild: nothing to take back.
+          settled = true;
+        } else if (!member.roles.cache.has(grantedRoleId)) {
+          // They do not hold it — already removed by hand or by an earlier
+          // run — so the marker has done its job.
+          settled = true;
+        } else {
           await member.roles.remove(grantedRoleId, "Birthday role expired");
           removed += 1;
+          settled = true;
         }
       } catch (error) {
         logger.warn(
-          `Failed to remove expired birthday role from ${sanitizeForLog(row.userId)}:`,
+          `Failed to remove expired birthday role from ${sanitizeForLog(row.userId)}; keeping the marker so the next run retries:`,
           error,
         );
-      } finally {
-        // Clear the marker regardless: if the role is already gone or the
-        // member left, there's nothing more to sweep.
-        row.roleAssignedAt = undefined;
-        row.roleAssignedId = undefined;
-        await row
-          .save()
-          .catch((error) =>
-            logger.warn(
-              `Failed to clear roleAssignedAt for ${sanitizeForLog(row.userId)}:`,
-              error,
-            ),
-          );
       }
+
+      if (settled) await this.clearRoleMarker(row);
     }
+
     return removed;
   }
 
@@ -765,6 +772,24 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       },
     );
     return (result?.matchedCount ?? 0) > 0;
+  }
+
+  /**
+   * Drop a row's role markers once its grant is definitively dealt with.
+   * Never call this after a failure: the markers are the only record that
+   * the role is still out there (#916).
+   */
+  private async clearRoleMarker(row: IUserBirthday): Promise<void> {
+    row.roleAssignedAt = undefined;
+    row.roleAssignedId = undefined;
+    await row
+      .save()
+      .catch((error) =>
+        logger.warn(
+          `Failed to clear roleAssignedAt for ${sanitizeForLog(row.userId)}:`,
+          error,
+        ),
+      );
   }
 
   private async grantBirthdayRole(

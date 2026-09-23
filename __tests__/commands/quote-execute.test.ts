@@ -20,7 +20,10 @@ import {
 } from "../test-utils.js";
 
 const mockAddQuote = jest.fn<() => Promise<unknown>>();
-const mockUpdateQuoteMessageId = jest.fn<() => Promise<boolean>>();
+const mockUpdateQuoteMessageId =
+  jest.fn<
+    () => Promise<{ stillExists: boolean; attributionCleared: boolean }>
+  >();
 const mockGetQuoteById = jest.fn<() => Promise<unknown>>();
 const mockEditQuote = jest.fn<() => Promise<unknown>>();
 const mockExportQuotes = jest.fn<() => Promise<unknown>>();
@@ -29,6 +32,7 @@ const mockPostQuote = jest.fn<() => Promise<string | null>>();
 const mockUpdateQuoteMessage = jest.fn<() => Promise<unknown>>();
 const mockResetChannel = jest.fn<() => Promise<{ reposted: number }>>();
 const mockDeleteQuoteMessage = jest.fn<() => Promise<boolean>>();
+const mockClearSaverAttribution = jest.fn<() => Promise<boolean>>();
 
 jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
   quoteService: {
@@ -48,6 +52,7 @@ jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
       updateQuoteMessage: mockUpdateQuoteMessage,
       resetChannel: mockResetChannel,
       deleteQuoteMessage: mockDeleteQuoteMessage,
+      clearSaverAttribution: mockClearSaverAttribution,
     }),
   },
 }));
@@ -80,7 +85,11 @@ beforeEach(() => {
     addedById: "user-1",
   });
   mockPostQuote.mockResolvedValue("message-1");
-  mockUpdateQuoteMessageId.mockResolvedValue(true);
+  mockUpdateQuoteMessageId.mockResolvedValue({
+    stillExists: true,
+    attributionCleared: false,
+  });
+  mockClearSaverAttribution.mockResolvedValue(true);
   mockDeleteQuoteMessage.mockResolvedValue(true);
   mockUpdateQuoteMessage.mockResolvedValue(undefined);
   mockEditQuote.mockResolvedValue(undefined);
@@ -132,7 +141,10 @@ describe("/quote add", () => {
     // that window deletes the row, and nothing else ever collects the post:
     // the channel sweep ignores bot messages and the row that pointed at it
     // is gone. So the add path compensates for its own orphan.
-    mockUpdateQuoteMessageId.mockResolvedValue(false);
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: false,
+      attributionCleared: false,
+    });
     const it_ = interaction(options);
     await execute(it_);
 
@@ -140,6 +152,42 @@ describe("/quote add", () => {
     expect(it_.editReply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("⚠️") }),
     );
+  });
+
+  it("redraws the post when the saver was purged mid-add (#916)", async () => {
+    // The purge anonymised the row and re-rendered the post it could see —
+    // which is the *originating* message, since `messageId` only becomes the
+    // quote-channel post id on the write above. The post made here is
+    // invisible to it and still credits the member, and the row now holds
+    // the sentinel so no later purge will find it either.
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: true,
+    });
+    const it_ = interaction(options);
+    await execute(it_);
+
+    expect(mockClearSaverAttribution).toHaveBeenCalledWith(
+      "message-1",
+      "quote-1",
+      "Hello",
+      "author-1",
+    );
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("does not credit you");
+  });
+
+  it("asks for manual cleanup when the redraw fails (#916)", async () => {
+    mockUpdateQuoteMessageId.mockResolvedValue({
+      stillExists: true,
+      attributionCleared: true,
+    });
+    mockClearSaverAttribution.mockResolvedValue(false);
+    const it_ = interaction(options);
+    await execute(it_);
+
+    const reply = it_.editReply.mock.calls[0][0] as { content: string };
+    expect(reply.content).toContain("still credits you");
   });
 
   it("still confirms the DB write when the channel post failed", async () => {

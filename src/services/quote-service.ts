@@ -1,6 +1,7 @@
 import { Model, Document, model } from "mongoose";
 import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
+import { isMissingPostError } from "../utils/discord.js";
 
 /** A Mongo ObjectId is a 24-character hex string. Matching with a regex avoids
  * importing `mongoose.Types` (which the test suite's mongoose mock omits). */
@@ -198,6 +199,17 @@ export interface QuoteMessageDeleter {
   ): Promise<void>;
 }
 
+/** What a purge did to a quote row while its post was being published (#916). */
+export interface QuotePublicationResult {
+  /** False when the row was deleted before the post id could be recorded. */
+  stillExists: boolean;
+  /**
+   * True when the row's saver attribution is the anonymisation sentinel, so
+   * the post just published names someone whose data has been erased.
+   */
+  attributionCleared: boolean;
+}
+
 /** What a per-user quote purge did (#914). */
 export interface QuotePurgeResult {
   /** Quotes attributed to the member that the purge found. */
@@ -231,8 +243,18 @@ export interface QuotePurgeResult {
   /**
    * Posts that still print the member's name because the edit failed. The
    * row is anonymised either way, so this is the visible half left behind.
+   *
+   * Only genuine failures count here: a post that is already gone is a
+   * completed erasure, not a stale one (#916) — see `attributionsGone`.
    */
   attributionsStale: number;
+  /**
+   * Posts that needed no re-render because they no longer exist. Expected
+   * rather than exceptional: `messageId` starts life as the *original*
+   * message id and is only overwritten once the quote-channel post goes up,
+   * so an older row points at a message the purge has no business editing.
+   */
+  attributionsGone: number;
   /** Why the anonymisation did not finish, when it did not (#916). */
   anonymiseError?: string;
 }
@@ -395,18 +417,34 @@ export class QuoteService {
   /**
    * Record the quote-channel post id on a quote row.
    *
-   * Returns false when the row is gone — which means a per-user purge ran
-   * between the row being saved and its post going up (#916). The caller has
-   * to compensate by deleting the post it just made: nothing else ever will,
-   * since `cleanupUnauthorizedMessages` sweeps only non-bot messages, and
-   * the row that would have pointed at it no longer exists.
+   * Reports what the purge did to the row while the post was being published
+   * (#916), because the post is written from a snapshot taken before the
+   * insert and the publisher is the only one left who can repair it:
+   *
+   *  - `stillExists: false` — the row was deleted, so nothing will ever
+   *    point at the post just made (`cleanupUnauthorizedMessages` sweeps
+   *    only non-bot messages). The caller deletes it.
+   *  - `attributionCleared: true` — the row survived but its saver
+   *    attribution was anonymised, and the purge's own re-render aimed at
+   *    the *old* `messageId` (a quote row carries the originating message id
+   *    until this write overwrites it), so it never touched the post now on
+   *    screen. The row already holds the sentinel, so no later purge will
+   *    find it either. The caller redraws or removes the post.
    */
   async updateQuoteMessageId(
     quoteId: string,
     messageId: string,
-  ): Promise<boolean> {
-    const updated = await this.model.findByIdAndUpdate(quoteId, { messageId });
-    return updated !== null;
+  ): Promise<QuotePublicationResult> {
+    const updated = await this.model.findByIdAndUpdate(
+      quoteId,
+      { messageId },
+      { new: true },
+    );
+    if (!updated) return { stillExists: false, attributionCleared: false };
+    return {
+      stillExists: true,
+      attributionCleared: updated.addedById === ANONYMISED_USER_ID,
+    };
   }
 
   /**
@@ -816,6 +854,7 @@ export class QuoteService {
     let anonymiseError: string | undefined;
     let attributionsRerendered = 0;
     let attributionsStale = 0;
+    let attributionsGone = 0;
     try {
       // Snapshot first: after the update these rows no longer match, and
       // their posts still print "Added by @member" until they are redrawn.
@@ -838,6 +877,14 @@ export class QuoteService {
           );
           attributionsRerendered++;
         } catch (error) {
+          if (isMissingPostError(error)) {
+            // Nothing to re-render and nothing on screen: the post, or the
+            // whole quote channel, is gone. Counting it as stale would keep
+            // the purge report failing over a member's name that no longer
+            // appears anywhere (#916).
+            attributionsGone++;
+            continue;
+          }
           // The row is anonymised regardless — an unreachable post must not
           // hold up the erasure — but the embed still names them, so say so.
           attributionsStale++;
@@ -865,13 +912,15 @@ export class QuoteService {
       anonymised,
       attributionsRerendered,
       attributionsStale,
+      attributionsGone,
       anonymiseError,
     };
 
     logger.info(
       `Purged quotes for user ${userId}: deleted ${result.deleted} row(s) and ${result.messagesDeleted} channel post(s) ` +
         `(${result.messagesFailed} post(s) could not be deleted), anonymised ${result.anonymised} row(s) ` +
-        `and re-rendered ${result.attributionsRerendered} post(s) (${result.attributionsStale} still naming them)`,
+        `and re-rendered ${result.attributionsRerendered} post(s) ` +
+        `(${result.attributionsGone} post(s) already gone, ${result.attributionsStale} still naming them)`,
     );
     return result;
   }

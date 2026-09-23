@@ -202,10 +202,8 @@ async function handleAdd(
 
   if (messageId) {
     // Update quote with message ID
-    const stillExists = await quoteService.updateQuoteMessageId(
-      quote._id.toString(),
-      messageId,
-    );
+    const { stillExists, attributionCleared } =
+      await quoteService.updateQuoteMessageId(quote._id.toString(), messageId);
     if (!stillExists) {
       // The row was purged between `addQuote` and the post going up (#916).
       // Nothing else will ever collect this message — the sweep ignores bot
@@ -216,6 +214,24 @@ async function handleAdd(
         content: removed
           ? "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted."
           : "⚠️ The quote could not be saved — the author's data was reset while it was being added — and the post could not be removed from the quote channel. Please delete it manually.",
+      });
+      return;
+    }
+    if (attributionCleared) {
+      // The saver's data was reset between `addQuote` and the post going up
+      // (#916). The row already carries the anonymisation sentinel, so no
+      // later purge will find it — but the post was drawn from the values
+      // held here and still names them, so repair it now.
+      const repaired = await quoteChannelManager.clearSaverAttribution(
+        messageId,
+        quote._id.toString(),
+        quote.content,
+        quote.authorId,
+      );
+      await interaction.editReply({
+        content: repaired
+          ? "✅ Quote added and posted, but your data was reset while it was being added, so the post does not credit you."
+          : "⚠️ Quote added and posted, but your data was reset while it was being added and the post still credits you. Please delete it manually.",
       });
       return;
     }

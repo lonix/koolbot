@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { QuoteService } from "../../src/services/quote-service.js";
 import { ANONYMISED_USER_ID } from "../../src/services/user-data-registry.js";
+import { MissingPostError } from "../../src/utils/discord.js";
 
 jest.mock("mongoose");
 jest.mock("../../src/database/schema.js");
@@ -196,6 +197,28 @@ describe("QuoteService.purgeForUser", () => {
       expect(result.attributionsStale).toBe(1);
     });
 
+    it("does not count an already-deleted post as still naming them", async () => {
+      // `messageId` is overloaded: it holds the *originating* message id
+      // until the quote-channel post goes up, so the edit missing is the
+      // expected case for older rows, not a failure. Counting it as stale
+      // would keep the purge report failing over a name that appears
+      // nowhere (#916).
+      model.find.mockResolvedValue([
+        { _id: "q1", messageId: "m1", content: "Hi", authorId: "999" },
+      ]);
+      model.updateMany.mockResolvedValue({ modifiedCount: 1 });
+      messages.updateQuoteMessage.mockRejectedValue(
+        new MissingPostError("Quote message m1 no longer exists"),
+      );
+
+      const result = await service.purgeForUser("123", messages);
+
+      expect(result.anonymised).toBe(1);
+      expect(result.attributionsGone).toBe(1);
+      expect(result.attributionsStale).toBe(0);
+      expect(result.attributionsRerendered).toBe(0);
+    });
+
     it("uses a sentinel no real member can match", () => {
       expect(ANONYMISED_USER_ID).toBe("0");
       expect(ANONYMISED_USER_ID).not.toMatch(/^\d{17,20}$/);
@@ -240,6 +263,7 @@ describe("QuoteService.purgeForUser", () => {
       anonymised: 0,
       attributionsRerendered: 0,
       attributionsStale: 0,
+      attributionsGone: 0,
       anonymiseError: undefined,
     });
     expect(messages.deleteQuoteMessage).not.toHaveBeenCalled();
