@@ -351,6 +351,10 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
    * the same recovery `reconcileTier` already applies to its own failures
    * (`finalHolders.add(userId)` in its catch).
    *
+   * Each role is handled independently: a failure on one is recorded as
+   * retained and the rest still run, so a partial revoke is reported as a
+   * partial revoke rather than thrown away (#916).
+   *
    * The pull runs server-side as a `$pull` rather than a read-modify-write:
    * `reconcileTier` writes the whole `userIds` array in one
    * `findOneAndUpdate`, so a reconcile landing between our read and our write
@@ -380,13 +384,27 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     }
 
     for (const row of rows) {
-      if (await this.revokeOneRole(guild, row.roleId, userId)) {
-        await LeaderboardRoleAssignment.updateOne(
-          { guildId, roleId: row.roleId },
-          { $pull: { userIds: userId } },
+      // Per role, so one failure cannot discard the record of the roles
+      // already taken back (#916). A throw here used to reject the whole
+      // method, and the purge report then said nothing had happened at all
+      // — while the member really had lost roles on Discord.
+      try {
+        if (await this.revokeOneRole(guild, row.roleId, userId)) {
+          await LeaderboardRoleAssignment.updateOne(
+            { guildId, roleId: row.roleId },
+            { $pull: { userIds: userId } },
+          );
+          result.revoked.push(row.roleId);
+        } else {
+          result.retained.push(row.roleId);
+        }
+      } catch (error) {
+        // Retained is the safe classification either way: the id stays on
+        // the roster, so the next reconcile retries the whole role.
+        logger.error(
+          `Leaderboard role revoke for ${userId}: role ${row.roleId} failed; left on the roster for retry:`,
+          error,
         );
-        result.revoked.push(row.roleId);
-      } else {
         result.retained.push(row.roleId);
       }
     }

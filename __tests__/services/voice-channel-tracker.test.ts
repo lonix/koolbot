@@ -355,6 +355,69 @@ describe("VoiceChannelTracker", () => {
       expect(VoiceChannelTracking.findOneAndUpdate).toHaveBeenCalled();
     });
 
+    it("drains every overlapping persist, not just the newest (#916)", async () => {
+      // `voiceStateUpdate` handlers are async and the emitter does not
+      // serialise them, so a switch followed closely by a disconnect can
+      // leave two `endTracking` calls running for one member. Keeping only
+      // the latest meant the newer one finishing first cleared the entry
+      // while the older write was still pending — and the drain sailed
+      // straight past it, letting that write recreate the purged row.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+
+      // Each persist hangs until its own release is called.
+      const releases: Array<() => void> = [];
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+        () => new Promise((resolve) => releases.push(() => resolve({}))),
+      );
+
+      /** Yield until `count` persists have reached their write. */
+      async function writesStarted(count: number): Promise<void> {
+        for (let tick = 0; tick < 100 && releases.length < count; tick++) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        expect(releases.length).toBe(count);
+      }
+
+      // Two overlapping persists for the same member.
+      await joinChannel(tracker, member, channel);
+      const first = leaveChannel(tracker, member, channel);
+      await writesStarted(1);
+      await joinChannel(tracker, member, channel);
+      const second = leaveChannel(tracker, member, channel);
+      await writesStarted(2);
+
+      // The newer one finishes first — the case that used to clear the entry.
+      releases[1]();
+      await second;
+
+      let forgetSettled = false;
+      const forgetting = tracker
+        .forgetActiveSession("user123")
+        .then((result) => {
+          forgetSettled = true;
+          return result;
+        });
+
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(forgetSettled).toBe(false);
+
+      releases[0]();
+      await first;
+
+      await expect(forgetting).resolves.toMatchObject({ drained: true });
+    });
+
     it("leaves other members' in-flight sessions alone", async () => {
       const { tracker, mockConfigService } = createTracker(mockClient);
       mockConfigService.getBoolean.mockResolvedValue(true);

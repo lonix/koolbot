@@ -519,6 +519,31 @@ describe("LeaderboardRoleService", () => {
       );
     });
 
+    it("keeps going when one role throws, retaining just that one", async () => {
+      // A throw used to reject the whole method, so the purge report said
+      // nothing had happened — while the member really had lost the roles
+      // handled before it (#916).
+      rosterRows("99999001", "99999002");
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999001", roleName: "Top 1" }),
+      );
+      mockAssignmentUpdateOne.mockImplementation(
+        async (filter: { roleId: string }) => {
+          if (filter.roleId === "99999002") throw new Error("write conflict");
+          return { modifiedCount: 1 };
+        },
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result.revoked).toContain("99999001");
+      // Retained is the safe classification: the id stays on the roster, so
+      // the next reconcile retries the whole role.
+      expect(result.retained).toEqual(["99999002"]);
+    });
+
     it("leaves the id in userIds[] when the Discord revoke fails", async () => {
       rosterRows("99999001");
       mockClientGuildsFetch.mockResolvedValue(

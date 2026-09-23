@@ -111,7 +111,12 @@ const revokeForUser =
     ) => Promise<{ revoked: string[]; retained: string[] }>
   >();
 const removeRsvp =
-  jest.fn<(guildId: string, userId: string) => Promise<number>>();
+  jest.fn<
+    (
+      guildId: string,
+      userId: string,
+    ) => Promise<{ matched: number; removed: number }>
+  >();
 const purgeForUser = jest.fn<
   (
     userId: string,
@@ -236,8 +241,9 @@ describe("UserDataDeletionService.purge", () => {
       .mockReset()
       .mockReturnValue({ discarded: false, drained: false });
     revokeForUser.mockReset().mockResolvedValue({ revoked: [], retained: [] });
-    removeRsvp.mockReset().mockResolvedValue(0);
+    removeRsvp.mockReset().mockResolvedValue({ matched: 0, removed: 0 });
     purgeForUser.mockReset().mockResolvedValue({
+      authored: 0,
       deleted: 0,
       messagesAttempted: 0,
       messagesDeleted: 0,
@@ -418,6 +424,7 @@ describe("UserDataDeletionService.purge", () => {
 
     it("reports the rows, the Discord posts and the anonymisation separately", async () => {
       purgeForUser.mockResolvedValue({
+        authored: 5,
         deleted: 5,
         messagesAttempted: 5,
         messagesDeleted: 5,
@@ -444,6 +451,7 @@ describe("UserDataDeletionService.purge", () => {
       // The row is deleted either way, so this step is the only record that
       // the member's words are still on screen in Discord.
       purgeForUser.mockResolvedValue({
+        authored: 3,
         deleted: 3,
         messagesAttempted: 3,
         messagesDeleted: 1,
@@ -456,6 +464,47 @@ describe("UserDataDeletionService.purge", () => {
       const posts = stepsFor(report, "quote")[1];
       expect(posts).toMatchObject({ matched: 3, removed: 1 });
       expect(posts.error).toContain("still be visible");
+      expect(report.ok).toBe(false);
+    });
+
+    it("fails the purge when the quote row delete could not finish", async () => {
+      // The posts are already deleted by then, so the service reports the
+      // failure instead of throwing — and the coordinator has to carry it
+      // through rather than treat the smaller number as a success.
+      purgeForUser.mockResolvedValue({
+        authored: 4,
+        deleted: 0,
+        deleteError: "write conflict",
+        messagesAttempted: 4,
+        messagesDeleted: 4,
+        messagesFailed: 0,
+        anonymised: 1,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "quote")[0]).toMatchObject({
+        matched: 4,
+        removed: 0,
+        error: "write conflict",
+      });
+      // The anonymisation still ran and is still reported.
+      expect(stepsFor(report, "quote")[2]).toMatchObject({
+        action: "anonymise",
+        removed: 1,
+      });
+      expect(report.ok).toBe(false);
+    });
+
+    it("reports an RSVP removal that cleared only some of the events", async () => {
+      removeRsvp.mockResolvedValue({ matched: 3, removed: 2 });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "event-rsvp")[0]).toMatchObject({
+        matched: 3,
+        removed: 2,
+      });
       expect(report.ok).toBe(false);
     });
 
@@ -607,8 +656,9 @@ describe("UserDataDeletionService.purge", () => {
       };
       forgetActiveSession.mockReturnValue({ discarded: true, drained: true });
       revokeForUser.mockResolvedValue({ revoked: ["role-a"], retained: [] });
-      removeRsvp.mockResolvedValue(2);
+      removeRsvp.mockResolvedValue({ matched: 2, removed: 2 });
       purgeForUser.mockResolvedValue({
+        authored: 3,
         deleted: 3,
         messagesAttempted: 3,
         messagesDeleted: 3,
@@ -627,8 +677,9 @@ describe("UserDataDeletionService.purge", () => {
       for (const key of Object.keys(RESULTS)) delete RESULTS[key];
       forgetActiveSession.mockReturnValue({ discarded: false, drained: false });
       revokeForUser.mockResolvedValue({ revoked: [], retained: [] });
-      removeRsvp.mockResolvedValue(0);
+      removeRsvp.mockResolvedValue({ matched: 0, removed: 0 });
       purgeForUser.mockResolvedValue({
+        authored: 0,
         deleted: 0,
         messagesAttempted: 0,
         messagesDeleted: 0,

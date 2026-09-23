@@ -178,13 +178,45 @@ describe("QuoteService.purgeForUser", () => {
     const result = await service.purgeForUser("123", messages);
 
     expect(result).toEqual({
+      authored: 0,
       deleted: 0,
+      deleteError: undefined,
       messagesAttempted: 0,
       messagesDeleted: 0,
       messagesFailed: 0,
       anonymised: 0,
+      anonymiseError: undefined,
     });
     expect(messages.deleteQuoteMessage).not.toHaveBeenCalled();
+  });
+
+  it("still anonymises when the row delete fails, and records why", async () => {
+    // By this point the Discord posts are already deleted. Letting the row
+    // delete take the whole call down would lose that, and leave the saver
+    // attribution standing with the caller none the wiser (#916).
+    model.find.mockResolvedValue([{ _id: "q1", messageId: "m1" }]);
+    model.deleteMany.mockRejectedValue(new Error("write conflict"));
+    model.updateMany.mockResolvedValue({ modifiedCount: 2 });
+
+    const result = await service.purgeForUser("123", messages);
+
+    expect(result.authored).toBe(1);
+    expect(result.deleted).toBe(0);
+    expect(result.deleteError).toBe("write conflict");
+    expect(result.messagesDeleted).toBe(1);
+    expect(result.anonymised).toBe(2);
+  });
+
+  it("reports an anonymisation failure without losing the deleted rows", async () => {
+    model.find.mockResolvedValue([{ _id: "q1", messageId: "m1" }]);
+    model.deleteMany.mockResolvedValue({ deletedCount: 1 });
+    model.updateMany.mockRejectedValue(new Error("no primary"));
+
+    const result = await service.purgeForUser("123", messages);
+
+    expect(result.deleted).toBe(1);
+    expect(result.anonymised).toBe(0);
+    expect(result.anonymiseError).toBe("no primary");
   });
 
   it("does not route through deleteQuote, so no role check is consulted", async () => {

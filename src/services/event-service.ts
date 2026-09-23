@@ -49,6 +49,14 @@ const MS_PER_MINUTE = 60 * 1000;
 // under Discord's 2000-char message limit, and Discord only pings up to 100
 // users per message anyway. Extra RSVPs are summarised as "…and N more".
 const MAX_REMINDER_MENTIONS = 50;
+/** What a per-user RSVP removal found and what it managed to clear (#916). */
+export interface RsvpRemovalResult {
+  /** Events in the guild carrying the member's RSVP. */
+  matched: number;
+  /** Of those, the ones the RSVP was actually pulled from. */
+  removed: number;
+}
+
 const DISCORD_UNKNOWN_MESSAGE = 10008;
 const DISCORD_UNKNOWN_CHANNEL = 10003;
 
@@ -490,32 +498,48 @@ export class EventService extends ScheduledService {
    * ended or cancelled event's post is churn nobody reads, and
    * `updateAnnouncement` already no-ops when the message is gone.
    *
-   * Returns the number of events the RSVP was pulled from.
+   * Returns the events carrying the member's RSVP and how many were
+   * actually cleared — a shortfall between the two is a partial removal, and
+   * the caller reports it rather than losing it (#916).
    */
-  public async removeRsvp(guildId: string, userId: string): Promise<number> {
+  public async removeRsvp(
+    guildId: string,
+    userId: string,
+  ): Promise<RsvpRemovalResult> {
     const matches = await Event.find({ guildId, "rsvps.userId": userId });
-    if (matches.length === 0) return 0;
+    if (matches.length === 0) return { matched: 0, removed: 0 };
 
     let removed = 0;
     for (const match of matches) {
-      // `{ new: true }` hands back the post-pull document, which is what the
-      // re-render needs for correct attendee counts.
-      const updated = await Event.findByIdAndUpdate(
-        match._id,
-        { $pull: { rsvps: { userId } } },
-        { new: true },
-      );
-      if (!updated) continue;
-      removed++;
-      if (!isTerminalState(updated.state)) {
-        await this.updateAnnouncement(updated);
+      // Per event, so one failure neither stops the others nor discards the
+      // record of the RSVPs already pulled (#916). The count that comes back
+      // is what actually happened, and the shortfall against `matched` is
+      // what makes a partial removal visible in the purge report.
+      try {
+        // `{ new: true }` hands back the post-pull document, which is what
+        // the re-render needs for correct attendee counts.
+        const updated = await Event.findByIdAndUpdate(
+          match._id,
+          { $pull: { rsvps: { userId } } },
+          { new: true },
+        );
+        if (!updated) continue;
+        removed++;
+        if (!isTerminalState(updated.state)) {
+          await this.updateAnnouncement(updated);
+        }
+      } catch (error) {
+        logger.error(
+          `Failed to remove the RSVP of ${sanitizeForLog(userId)} from event ${match._id}:`,
+          error,
+        );
       }
     }
 
     logger.info(
-      `Removed RSVPs for user ${sanitizeForLog(userId)} from ${removed} event(s)`,
+      `Removed RSVPs for user ${sanitizeForLog(userId)} from ${removed} of ${matches.length} event(s)`,
     );
-    return removed;
+    return { matched: matches.length, removed };
   }
 
   // ---------------------------------------------------------------

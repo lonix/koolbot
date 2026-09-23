@@ -310,9 +310,7 @@ describe("removeRsvp", () => {
     return EventService.getInstance({} as never);
   }
 
-  function stubEvents(
-    rows: Array<{ _id: string; state: string }>,
-  ): jest.Mock {
+  function stubEvents(rows: Array<{ _id: string; state: string }>): jest.Mock {
     EventMock.find = jest.fn(async () => rows);
     const updated = jest.fn(async (id: unknown) => {
       const row = rows.find((r) => r._id === id);
@@ -334,7 +332,7 @@ describe("removeRsvp", () => {
 
     const removed = await svc.removeRsvp("guild-1", "user-1");
 
-    expect(removed).toBe(1);
+    expect(removed).toEqual({ matched: 1, removed: 1 });
     expect(EventMock.find).toHaveBeenCalledWith({
       guildId: "guild-1",
       "rsvps.userId": "user-1",
@@ -365,7 +363,7 @@ describe("removeRsvp", () => {
 
     const removed = await svc.removeRsvp("guild-1", "user-1");
 
-    expect(removed).toBe(3);
+    expect(removed).toEqual({ matched: 3, removed: 3 });
     const [filter] = EventMock.find.mock.calls[0] as [Record<string, unknown>];
     expect(filter).not.toHaveProperty("state");
   });
@@ -389,9 +387,7 @@ describe("removeRsvp", () => {
 
     // Editing a finished event's post is churn nobody reads.
     expect(render).toHaveBeenCalledTimes(1);
-    expect(
-      (render.mock.calls[0] as [{ _id: string }])[0]._id,
-    ).toBe("e-live");
+    expect((render.mock.calls[0] as [{ _id: string }])[0]._id).toBe("e-live");
   });
 
   it("re-renders from the post-pull document so the counts are right", async () => {
@@ -415,7 +411,10 @@ describe("removeRsvp", () => {
     stubEvents([]);
     const svc = buildService();
 
-    expect(await svc.removeRsvp("guild-1", "user-1")).toBe(0);
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 0,
+      removed: 0,
+    });
     expect(EventMock.findByIdAndUpdate).not.toHaveBeenCalled();
   });
 
@@ -430,8 +429,40 @@ describe("removeRsvp", () => {
       )
       .mockResolvedValue(undefined);
 
-    expect(await svc.removeRsvp("guild-1", "user-1")).toBe(0);
+    // Matched but not removed: the scan found it, the pull did not. A
+    // shortfall like this is what makes a partial removal visible in the
+    // purge report instead of passing as a smaller success (#916).
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 1,
+      removed: 0,
+    });
     expect(render).not.toHaveBeenCalled();
+  });
+
+  it("keeps clearing the other events when one pull throws", async () => {
+    // A throw used to reject the whole call, so the purge report said
+    // nothing had happened even though RSVPs really had been cleared (#916).
+    EventMock.find = jest.fn(async () => [
+      { _id: "e1", state: "scheduled" },
+      { _id: "e2", state: "scheduled" },
+      { _id: "e3", state: "scheduled" },
+    ]);
+    EventMock.findByIdAndUpdate = jest.fn(async (id: unknown) => {
+      if (id === "e2") throw new Error("write conflict");
+      return { _id: id, state: "ended", rsvps: [] };
+    });
+    const svc = buildService();
+    jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(undefined);
+
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 3,
+      removed: 2,
+    });
   });
 });
 

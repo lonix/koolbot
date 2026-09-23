@@ -228,8 +228,9 @@ const DELETERS: Record<string, CollectionDeleter> = {
       );
       emit({
         action: "hard-delete",
-        matched: result.deleted,
+        matched: result.authored,
         removed: result.deleted,
+        error: result.deleteError,
       });
       // The Discord posts get a step of their own rather than a note on the
       // rows: they are a different thing being erased, they can fail on
@@ -251,6 +252,7 @@ const DELETERS: Record<string, CollectionDeleter> = {
         action: "anonymise",
         matched: result.anonymised,
         removed: result.anonymised,
+        error: result.anonymiseError,
       });
     },
   },
@@ -264,11 +266,13 @@ const DELETERS: Record<string, CollectionDeleter> = {
   "event-rsvp": {
     actions: ["pull-member"],
     run: async ({ userId, guildId, client }, emit) => {
-      const removed = await EventService.getInstance(client).removeRsvp(
-        guildId,
-        userId,
-      );
-      emit({ action: "pull-member", matched: removed, removed });
+      // Reports what it found as well as what it cleared, so an event whose
+      // pull or re-render failed shows up as a shortfall rather than as a
+      // silently smaller success.
+      const { matched, removed } = await EventService.getInstance(
+        client,
+      ).removeRsvp(guildId, userId);
+      emit({ action: "pull-member", matched, removed });
     },
   },
 

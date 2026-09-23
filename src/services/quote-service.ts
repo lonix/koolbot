@@ -1,4 +1,5 @@
 import { Model, Document, model } from "mongoose";
+import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
 
 /** A Mongo ObjectId is a 24-character hex string. Matching with a regex avoids
@@ -186,8 +187,16 @@ export interface QuoteMessageDeleter {
 
 /** What a per-user quote purge did (#914). */
 export interface QuotePurgeResult {
-  /** Quotes attributed to the member, deleted outright. */
+  /** Quotes attributed to the member that the purge found. */
+  authored: number;
+  /** Of those, the ones actually deleted. */
   deleted: number;
+  /**
+   * Why the row delete did not finish, when it did not (#916). Recorded
+   * rather than thrown so the posts already deleted above it, and the
+   * anonymisation below it, are not lost with it.
+   */
+  deleteError?: string;
   /** Quote-channel posts the purge tried to delete (rows with a messageId). */
   messagesAttempted: number;
   /** Of those, the ones confirmed gone. */
@@ -201,6 +210,8 @@ export interface QuotePurgeResult {
   messagesFailed: number;
   /** Quotes the member saved for someone else, attribution cleared. */
   anonymised: number;
+  /** Why the anonymisation did not finish, when it did not (#916). */
+  anonymiseError?: string;
 }
 
 export class QuoteService {
@@ -714,21 +725,46 @@ export class QuoteService {
       }
     }
 
-    const removal = await this.model.deleteMany({
-      authorId: { $in: idForms },
-    });
+    // The two writes are independent, and by this point Discord posts have
+    // already been deleted — so neither may take the whole call down with it
+    // and leave the caller believing nothing happened (#916).
+    let deleted = 0;
+    let deleteError: string | undefined;
+    try {
+      const removal = await this.model.deleteMany({
+        authorId: { $in: idForms },
+      });
+      deleted = removal?.deletedCount ?? 0;
+    } catch (error) {
+      deleteError = getErrorMessage(error);
+      logger.error(`Failed to delete quotes authored by ${userId}:`, error);
+    }
 
-    const anonymisation = await this.model.updateMany(
-      { addedById: { $in: idForms } },
-      { $set: { addedById: ANONYMISED_USER_ID } },
-    );
+    let anonymised = 0;
+    let anonymiseError: string | undefined;
+    try {
+      const anonymisation = await this.model.updateMany(
+        { addedById: { $in: idForms } },
+        { $set: { addedById: ANONYMISED_USER_ID } },
+      );
+      anonymised = anonymisation?.modifiedCount ?? 0;
+    } catch (error) {
+      anonymiseError = getErrorMessage(error);
+      logger.error(
+        `Failed to clear the saver attribution of ${userId}:`,
+        error,
+      );
+    }
 
     const result: QuotePurgeResult = {
-      deleted: removal?.deletedCount ?? 0,
+      authored: authored.length,
+      deleted,
+      deleteError,
       messagesAttempted,
       messagesDeleted,
       messagesFailed,
-      anonymised: anonymisation?.modifiedCount ?? 0,
+      anonymised,
+      anonymiseError,
     };
 
     logger.info(

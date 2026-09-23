@@ -43,6 +43,13 @@ interface VoiceSession {
   channelName: string;
 }
 
+/**
+ * How many times `forgetActiveSession` will re-check for newly registered
+ * persists before giving up. One round is enough once the session maps are
+ * empty; the rest is belt and braces against an unbounded wait.
+ */
+const MAX_DRAIN_ROUNDS = 10;
+
 /** What `forgetActiveSession` had to do for a member (#916). */
 export interface ForgottenSession {
   /** An in-memory session was dropped before it could be persisted. */
@@ -80,8 +87,15 @@ export class VoiceChannelTracker {
    * stop a persist that already got past that read: its write can land
    * *after* a purge deleted the row and resurrect it. `forgetActiveSession`
    * drains this map so the purge can wait the window out rather than race it.
+   *
+   * It is a **set** per user, not one promise. `voiceStateUpdate` handlers
+   * are async and the emitter does not serialise them, so a switch followed
+   * closely by a disconnect can leave two `endTracking` calls running for
+   * one member. Keeping only the latest meant the newer one finishing first
+   * would clear the entry while the older write was still pending, and the
+   * drain would sail straight past it.
    */
-  private endingSessions: Map<string, Promise<void>> = new Map();
+  private endingSessions: Map<string, Set<Promise<void>>> = new Map();
   private client: Client;
   private mongo = new MongoConnectionGuard("voice channel tracker");
   private configService: ConfigService;
@@ -147,21 +161,48 @@ export class VoiceChannelTracker {
     this.companionSeconds.delete(userId);
     this.sessionFirsts.delete(userId);
 
-    const inFlight = this.endingSessions.get(userId);
-    if (inFlight) {
-      logger.info(
-        `Waiting for an in-flight voice session persist for user ${userId} before the purge continues`,
-      );
-      // `endTracking` swallows its own errors, so this settles either way.
-      await inFlight;
-    }
+    const drained = await this.drainEndingSessions(userId);
 
     if (hadSession) {
       logger.info(
         `Discarded in-flight voice session for user ${userId}; the disconnect handler will not persist it`,
       );
     }
-    return { discarded: hadSession, drained: inFlight !== undefined };
+    return { discarded: hadSession, drained };
+  }
+
+  /**
+   * Wait for every `endTracking` still running for a member.
+   *
+   * Loops rather than awaiting one snapshot: a call registered while we were
+   * waiting on the previous batch would otherwise slip through. It
+   * terminates because the eviction above has already emptied
+   * `activeSessions`, so any call starting from here returns before it
+   * writes — the bound is belt and braces against an unforeseen source of
+   * new work, not a case we expect to hit.
+   */
+  private async drainEndingSessions(userId: string): Promise<boolean> {
+    let drainedAny = false;
+
+    for (let round = 0; round < MAX_DRAIN_ROUNDS; round++) {
+      const pending = this.endingSessions.get(userId);
+      if (!pending || pending.size === 0) return drainedAny;
+
+      if (!drainedAny) {
+        logger.info(
+          `Waiting for ${pending.size} in-flight voice session persist(s) for user ${userId} before the purge continues`,
+        );
+      }
+      drainedAny = true;
+      // `endTracking` swallows its own errors, but settle either way rather
+      // than letting one rejection abandon the rest of the drain.
+      await Promise.allSettled([...pending]);
+    }
+
+    logger.warn(
+      `Gave up draining in-flight voice session persists for user ${userId} after ${MAX_DRAIN_ROUNDS} rounds`,
+    );
+    return drainedAny;
   }
 
   public async handleVoiceStateUpdate(
@@ -441,14 +482,14 @@ export class VoiceChannelTracker {
    * through here; calling `endTracking` directly reopens the race.
    */
   private async endTrackingTracked(userId: string): Promise<void> {
-    const running = this.endTracking(userId).finally(() => {
-      // Only clear our own entry: a later disconnect may already have
-      // replaced it.
-      if (this.endingSessions.get(userId) === running) {
-        this.endingSessions.delete(userId);
-      }
+    const pending = this.endingSessions.get(userId) ?? new Set();
+    this.endingSessions.set(userId, pending);
+
+    const running: Promise<void> = this.endTracking(userId).finally(() => {
+      pending.delete(running);
+      if (pending.size === 0) this.endingSessions.delete(userId);
     });
-    this.endingSessions.set(userId, running);
+    pending.add(running);
     await running;
   }
 
