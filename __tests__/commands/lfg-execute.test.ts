@@ -395,3 +395,98 @@ describe("LFG buttons", () => {
     ).toContain("error updating this LFG post");
   });
 });
+
+// Two clicks on the same post in the same instant each render the snapshot
+// their own write returned. Unordered, their Discord edits can land in the
+// opposite order and leave the older roster on screen for good, since nothing
+// re-renders a post that is still open.
+describe("concurrent clicks on one post", () => {
+  it("runs them one after another, so the last write is the last edit", async () => {
+    const order: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+
+    mockJoinPost
+      .mockImplementationOnce(async () => {
+        order.push("first:write");
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        return {
+          status: "joined",
+          post: post({ memberIds: ["user-1", "a"] }),
+          filled: false,
+        };
+      })
+      .mockImplementationOnce(async () => {
+        order.push("second:write");
+        return {
+          status: "joined",
+          post: post({ memberIds: ["user-1", "a", "b"] }),
+          filled: false,
+        };
+      });
+
+    const first = buttonInteraction(`lfg_join_${POST_ID}`);
+    (first.editReply as jest.Mock).mockImplementation(async () => {
+      order.push("first:edit");
+      return undefined;
+    });
+    const second = buttonInteraction(`lfg_join_${POST_ID}`);
+    (second.editReply as jest.Mock).mockImplementation(async () => {
+      order.push("second:edit");
+      return undefined;
+    });
+
+    const firstRun = handleLfgButton(first);
+    const secondRun = handleLfgButton(second);
+
+    // Let both clicks get as far as they can, then unblock the first. Without
+    // the lock the second would already have written and edited by now.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const queuedWhileFirstHeldTheLock = [...order];
+    releaseFirst?.();
+    await Promise.all([firstRun, secondRun]);
+
+    expect(queuedWhileFirstHeldTheLock).toEqual(["first:write"]);
+
+    expect(order).toEqual([
+      "first:write",
+      "first:edit",
+      "second:write",
+      "second:edit",
+    ]);
+  });
+
+  it("lets the next click through even when the one before it threw", async () => {
+    mockJoinPost
+      .mockRejectedValueOnce(new Error("mongo is down"))
+      .mockResolvedValueOnce({
+        status: "joined",
+        post: post({ memberIds: ["user-1", "b"] }),
+        filled: false,
+      });
+
+    const first = buttonInteraction(`lfg_join_${POST_ID}`);
+    const second = buttonInteraction(`lfg_join_${POST_ID}`);
+
+    await Promise.all([handleLfgButton(first), handleLfgButton(second)]);
+
+    expect(second.editReply).toHaveBeenCalledWith({ content: "refreshed" });
+  });
+
+  it("does not retain a chain once the clicks have drained", async () => {
+    mockJoinPost.mockResolvedValue({
+      status: "joined",
+      post: post({ memberIds: ["user-1", "a"] }),
+      filled: false,
+    });
+
+    await handleLfgButton(buttonInteraction(`lfg_join_${POST_ID}`));
+    // A fresh click still works, which is what a leaked or stuck chain would
+    // break; the map's own bookkeeping is internal.
+    const later = buttonInteraction(`lfg_join_${POST_ID}`);
+    await handleLfgButton(later);
+
+    expect(later.editReply).toHaveBeenCalledWith({ content: "refreshed" });
+  });
+});

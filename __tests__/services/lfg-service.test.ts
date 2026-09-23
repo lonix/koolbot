@@ -68,6 +68,7 @@ const {
   spotsLeft,
   closedSummary,
   formatRoster,
+  isStillOpen,
   MIN_PARTY_SIZE,
   MAX_PARTY_SIZE,
 } = await import("../../src/services/lfg-service.js");
@@ -106,7 +107,9 @@ function post(overrides: Partial<PostLike> = {}): PostLike {
     state: "open",
     closeReason: null,
     closeRendered: false,
-    expiresAt: new Date("2026-07-04T21:00:00Z"),
+    // Comfortably in the future: every interactive mutation now refuses a
+    // post that has run past its advertised closing time.
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
     ...overrides,
   };
 }
@@ -216,6 +219,7 @@ describe("joinPost", () => {
     expect(filter).toEqual({
       _id: POST_ID,
       state: "open",
+      expiresAt: { $gt: expect.any(Date) },
       memberIds: { $ne: "user-2" },
       $expr: { $lt: [{ $size: "$memberIds" }, "$partySize"] },
     });
@@ -306,6 +310,7 @@ describe("leavePost", () => {
       {
         _id: POST_ID,
         state: "open",
+        expiresAt: { $gt: expect.any(Date) },
         hostId: { $ne: "user-2" },
         memberIds: "user-2",
       },
@@ -608,6 +613,35 @@ describe("createPost", () => {
 
     expect(result.status).toBe("created");
     expect(LfgPostMock.countDocuments).not.toHaveBeenCalled();
+  });
+
+  // The message is already out by then, so dropping the row alone would leave
+  // a post that looks live but can never be joined, closed or expired.
+  it("takes the message down when its id cannot be recorded", async () => {
+    const del = jest.fn(async () => undefined);
+    const send = jest.fn(async () => ({ id: "msg-9", delete: del }));
+    const { client } = stubChannel(send as never);
+    let saves = 0;
+    LfgPostMock.mockImplementation(function (
+      this: Record<string, unknown>,
+      doc: Record<string, unknown>,
+    ) {
+      Object.assign(this, doc, {
+        _id: POST_ID,
+        save: jest.fn(async () => {
+          // The reservation save succeeds; recording the message id does not.
+          if (++saves > 1) throw new Error("connection reset");
+        }),
+      });
+    } as never);
+
+    const result = await LfgService.getInstance(client as never).createPost(
+      input,
+    );
+
+    expect(result).toEqual({ status: "post_failed" });
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(LfgPostMock.deleteOne).toHaveBeenCalledWith({ _id: POST_ID });
   });
 
   it("drops the row when the post cannot be sent, so no invisible post is left", async () => {
@@ -1009,5 +1043,61 @@ describe("voice channel attachment", () => {
 
     expect(result.status).toBe("created");
     expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+  });
+});
+
+// A post advertises when it closes. The sweep gets there within a minute, but
+// a click landing inside that minute — or at any point after, if the feature
+// was switched off and the sweep with it — must not be honoured.
+describe("expiry is enforced on interactive writes, not just by the sweep", () => {
+  const expired = () => post({ expiresAt: new Date(Date.now() - 60 * 1000) });
+
+  it("treats an expired post as closed on join", async () => {
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => null);
+    LfgPostMock.findById = jest.fn(async () => expired());
+
+    // Not `full`, and not a join that could close it as `full` — closed.
+    expect(await buildService().joinPost(POST_ID, "user-2")).toEqual({
+      status: "closed",
+    });
+  });
+
+  it("treats an expired post as closed on leave", async () => {
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => null);
+    LfgPostMock.findById = jest.fn(async () => expired());
+
+    expect(await buildService().leavePost(POST_ID, "user-2")).toEqual({
+      status: "closed",
+    });
+  });
+
+  it("does not mistake an expired post for one the member merely left", async () => {
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => null);
+    LfgPostMock.findById = jest.fn(async () =>
+      post({ expiresAt: new Date(Date.now() - 1), hostId: "user-2" }),
+    );
+
+    // The host branch would otherwise win and tell them to press Close.
+    expect(await buildService().leavePost(POST_ID, "user-2")).toEqual({
+      status: "closed",
+    });
+  });
+});
+
+describe("isStillOpen", () => {
+  it("is true only for an open post inside its window", () => {
+    const future = new Date(Date.now() + 1000);
+    const past = new Date(Date.now() - 1000);
+    expect(isStillOpen({ state: "open", expiresAt: future })).toBe(true);
+    expect(isStillOpen({ state: "open", expiresAt: past })).toBe(false);
+    expect(isStillOpen({ state: "closed", expiresAt: future })).toBe(false);
+  });
+});
+
+describe("closedSummary wording", () => {
+  it("does not claim nobody joined when some did", () => {
+    // An expired post may well have had joiners; it just never filled.
+    expect(closedSummary("expired")).not.toMatch(/nobody/i);
+    expect(closedSummary("expired")).toMatch(/filled/i);
   });
 });

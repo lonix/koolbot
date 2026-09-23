@@ -129,6 +129,23 @@ export function resolvePartySize(
   return Math.min(MAX_PARTY_SIZE, Math.max(MIN_PARTY_SIZE, rounded));
 }
 
+/**
+ * Whether a post is open *and* has not run past its advertised closing time.
+ *
+ * The sweep closes an expired post within a minute, but a click landing in
+ * that minute — or any time after, if the feature was switched off and the
+ * sweep with it — must not be accepted: the post says when it closes, and a
+ * late join could otherwise close it as `full` when it had already expired.
+ * Every interactive mutation therefore carries the same condition in its
+ * filter, and this is what the re-read uses to explain the miss.
+ */
+export function isStillOpen(
+  post: { state: string; expiresAt: Date },
+  now: Date = new Date(),
+): boolean {
+  return post.state === "open" && post.expiresAt.getTime() > now.getTime();
+}
+
 /** Whether the roster has reached the requested party size. */
 export function isPartyFull(post: {
   memberIds: string[];
@@ -153,7 +170,7 @@ export function closedSummary(reason: LfgCloseReason | null): string {
     case "cancelled":
       return "Closed by the host.";
     case "expired":
-      return "Expired — nobody else joined in time.";
+      return "Expired before the party filled.";
     default:
       return "Closed.";
   }
@@ -321,12 +338,33 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     );
     if (voiceChannelId) post.voiceChannelId = voiceChannelId;
 
+    let message;
     try {
-      const message = await channel.send(this.buildPayload(post));
-      post.messageId = message.id;
-      await post.save();
+      message = await channel.send(this.buildPayload(post));
     } catch (error) {
       logger.error("Failed to post LFG embed; dropping the post:", error);
+      await LfgPost.deleteOne({ _id: post._id }).catch(() => undefined);
+      return { status: "post_failed" };
+    }
+
+    post.messageId = message.id;
+    try {
+      await post.save();
+    } catch (error) {
+      // The message is already out. Dropping the row on its own would leave
+      // a post that looks live but can never be joined, closed or expired —
+      // nothing would reference it again — so take the message down first and
+      // only then release the row.
+      logger.error(
+        "Failed to record the LFG message id; removing the post again:",
+        error,
+      );
+      await message.delete().catch((deleteError) => {
+        logger.error(
+          "Failed to remove the orphaned LFG message; it will have to be deleted by hand:",
+          deleteError,
+        );
+      });
       await LfgPost.deleteOne({ _id: post._id }).catch(() => undefined);
       return { status: "post_failed" };
     }
@@ -362,6 +400,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       {
         _id: postId,
         state: "open",
+        expiresAt: { $gt: new Date() },
         memberIds: { $ne: userId },
         $expr: { $lt: [{ $size: "$memberIds" }, "$partySize"] },
       },
@@ -391,7 +430,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
 
     if (!joined) {
       const current = await LfgPost.findById(postId);
-      if (!current || current.state !== "open") return { status: "closed" };
+      if (!current || !isStillOpen(current)) return { status: "closed" };
       if (current.memberIds.includes(userId)) {
         return { status: "already_joined", post: current };
       }
@@ -419,6 +458,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       {
         _id: postId,
         state: "open",
+        expiresAt: { $gt: new Date() },
         hostId: { $ne: userId },
         memberIds: userId,
       },
@@ -428,7 +468,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     if (left) return { status: "left", post: left };
 
     const current = await LfgPost.findById(postId);
-    if (!current || current.state !== "open") return { status: "closed" };
+    if (!current || !isStillOpen(current)) return { status: "closed" };
     if (current.hostId === userId) return { status: "host", post: current };
     return { status: "not_joined", post: current };
   }
@@ -461,10 +501,21 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
    *
    * Counting before inserting would let two `/lfg` runs in the same instant
    * both see a count below the cap and both post. Counting *after* the
-   * insert, over the member's older open rows only, cannot: ObjectIds are
-   * monotonic, so of any two racing posts exactly one sees the other as
-   * older, and it is always the later one that stands down. A cap of 0 (or
-   * less) means no cap and skips the query entirely.
+   * insert, over the member's older open rows only, cannot — and the reason
+   * is worth writing down, because it looks racy and is not.
+   *
+   * Each caller awaits its own insert before it counts, and reads go to the
+   * primary (the connection sets no read preference), so a caller's own row
+   * is committed before its count runs. For two callers to both accept, each
+   * would have to count before the other's insert committed:
+   *
+   *     A.insert < A.count < B.insert < B.count < A.insert
+   *
+   * which is a cycle, so at most one can accept. ObjectId monotonicity then
+   * decides *which*: the later one sees the earlier as older and stands down.
+   * Pointing the connection at a secondary would break the first premise.
+   *
+   * A cap of 0 (or less) means no cap and skips the query entirely.
    */
   private async claimHostSlot(post: ILfgPost): Promise<boolean> {
     const limit = await this.configService.getNumber(
