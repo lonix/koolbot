@@ -1763,6 +1763,33 @@ describe("renderReactionRolesPage", () => {
     expect(html).toContain(">Save settings</button>");
   });
 
+  it("fails closed with a notice when the stored settings could not be read", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: null,
+      active: [],
+      archived: [],
+      settingsUnavailable: true,
+      settingRows: [
+        {
+          key: "reactionroles.style",
+          label: "Self-assign surface style",
+          current: "reaction",
+          defaultValue: "reaction",
+          type: "string",
+          description: "Surface style.",
+          category: "reactionroles",
+        },
+      ],
+    });
+    // No editable controls, so a save can't write schema defaults over the
+    // real stored values.
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain('name="value_reactionroles.style"');
+    expect(html).not.toContain(">Save settings</button>");
+  });
+
   it("omits the settings card when no setting rows are supplied", () => {
     const html = renderReactionRolesPage({
       ...COMMON,

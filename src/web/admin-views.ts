@@ -2333,6 +2333,11 @@ export interface ReactionRolesProps extends CommonProps {
    * off from this page. Omitted or empty hides the settings card.
    */
   settingRows?: SettingRow[];
+  /**
+   * The stored config could not be read, so the card is replaced by a notice
+   * rather than rendering schema defaults that a save would write back.
+   */
+  settingsUnavailable?: boolean;
   /** Text-channel options backing the `reactionroles.message_channel_id` picker. */
   textChannels?: ChannelOption[];
   flash?: FlashMessage | null;
@@ -2405,15 +2410,21 @@ export function renderReactionRolesPage(props: ReactionRolesProps): string {
     : `<dt>Message channel</dt><dd class="muted">unset — set <code>reactionroles.message_channel_id</code> before creating reaction roles.</dd>`;
   // `reactionroles.enabled` is among the rows, so the card treats it as the
   // cascade master: turning the feature off writes only that flag (#974).
-  const settingsCard = renderFeatureSettingsCard({
-    intro:
-      "Turn reaction roles on or off, pick the message channel and the surface style for new role messages. Turning the feature off keeps the other settings as they are.",
-    category: "reactionroles",
-    settingRows: props.settingRows ?? [],
-    pickers: { textChannels: props.textChannels },
-    returnTo: "/admin/reaction-roles",
-    csrfToken: props.csrfToken,
-  });
+  const settingsCard = props.settingsUnavailable
+    ? `
+<div class="card">
+  <h2>Settings</h2>
+  <div class="notice warn">Settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>
+</div>`
+    : renderFeatureSettingsCard({
+        intro:
+          "Turn reaction roles on or off, pick the message channel and the surface style for new role messages. Turning the feature off keeps the other settings as they are.",
+        category: "reactionroles",
+        settingRows: props.settingRows ?? [],
+        pickers: { textChannels: props.textChannels },
+        returnTo: "/admin/reaction-roles",
+        csrfToken: props.csrfToken,
+      });
 
   const body = `
 <h1>Reaction Roles</h1>

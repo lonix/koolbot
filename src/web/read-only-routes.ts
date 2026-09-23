@@ -868,14 +868,23 @@ export function createReadOnlyRouter(
             .limit(50)
             .lean(),
           fetchChannelData(client, common.guildId),
-          config.getAll().catch(() => []),
+          // `null` (not `[]`) on failure: an empty snapshot would render the
+          // schema defaults as if they were stored, and saving the card would
+          // then overwrite the real values with them.
+          config.getAll().catch((err: unknown) => {
+            logger.warn("reaction roles: config snapshot read failed", err);
+            return null;
+          }),
         ]);
       // Editable `reactionroles.*` settings (#974). Built directly rather than
       // through `loadFeatureSettings`: the page already fetched the channel
       // list above (a second fetch would repeat the Discord round-trip), and
       // none of these keys has a `dependsOn`, so there is no off-card
-      // dependency state to resolve.
-      const settingRows = buildSettingRows(REACTION_ROLES_SETTING_KEYS, stored);
+      // dependency state to resolve. Fails closed when the snapshot is
+      // unavailable: no editable card, just a notice.
+      const settingRows = stored
+        ? buildSettingRows(REACTION_ROLES_SETTING_KEYS, stored)
+        : [];
       const channelNames = channelData.names;
 
       const active = all.filter((rr) => !rr.isArchived);
@@ -926,6 +935,7 @@ export function createReadOnlyRouter(
           active: active.map(shape),
           archived: archived.map(shape),
           settingRows,
+          settingsUnavailable: stored === null,
           textChannels: channelData.textChannels,
           flash: readFlash(req),
         }),
