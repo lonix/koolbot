@@ -256,6 +256,10 @@ describe("joinPost", () => {
               "$closeReason",
             ],
           },
+          // Recorded in the same write, so a crash between the commit and the
+          // edit still leaves the post on the sweep's retry list — which is
+          // the only thing that would ever render a row this write closed.
+          renderPending: true,
         },
       },
     ]);
@@ -326,7 +330,7 @@ describe("leavePost", () => {
         hostId: { $ne: "user-2" },
         memberIds: "user-2",
       },
-      { $pull: { memberIds: "user-2" } },
+      { $pull: { memberIds: "user-2" }, $set: { renderPending: true } },
       { new: true },
     );
   });
@@ -412,6 +416,8 @@ describe("sweep (runOnce)", () => {
       closeReason: "expired" as const,
     };
     LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+    // What the sweep's re-read sees once the close has landed.
+    LfgPostMock.findById = jest.fn(async () => closed);
     LfgPostMock.deleteMany = jest.fn(async () => ({ deletedCount: 3 }));
 
     const svc = buildService();
@@ -439,6 +445,7 @@ describe("sweep (runOnce)", () => {
     stubFinds([due]);
     const closed = { ...due, state: "closed" as const };
     LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+    LfgPostMock.findById = jest.fn(async () => closed);
 
     const svc = buildService();
     jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
@@ -460,10 +467,9 @@ describe("sweep (runOnce)", () => {
   it("leaves a post unmarked when the edit failed, so a later tick retries", async () => {
     const due = post();
     stubFinds([due]);
-    LfgPostMock.findOneAndUpdate = jest.fn(async () => ({
-      ...due,
-      state: "closed" as const,
-    }));
+    const closed = { ...due, state: "closed" as const };
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+    LfgPostMock.findById = jest.fn(async () => closed);
 
     const svc = buildService();
     jest.spyOn(svc, "renderToMessage").mockResolvedValue(false);
@@ -487,6 +493,7 @@ describe("sweep (runOnce)", () => {
       renderPending: true,
     });
     stubFinds([], [stale]);
+    LfgPostMock.findById = jest.fn(async () => stale);
 
     const svc = buildService();
     const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
@@ -1262,5 +1269,75 @@ describe("one member's concurrent posts resolve voice one at a time", () => {
     // The second run took its turn after the first, so it adopted the room
     // rather than making a second one for the sweep to delete.
     expect(createDynamicChannel).toHaveBeenCalledTimes(1);
+  });
+});
+
+// The sweep and the button handlers both read a post, act on it and edit its
+// message. Interleaved, the sweep can edit a snapshot that a click has already
+// superseded — and worse, clear `renderPending` for it, leaving nothing to
+// retry.
+describe("the sweep takes the post's turn before rendering", () => {
+  it("re-reads the row inside the lock, so it renders what the row says now", async () => {
+    const due = post();
+    const closed = { ...due, state: "closed" as const, renderPending: true };
+    // What a click committed while the sweep's batch query was in flight.
+    const newer = { ...closed, memberIds: ["host-1", "late-joiner"] };
+    LfgPostMock.find = jest
+      .fn<(...args: unknown[]) => unknown>()
+      .mockReturnValueOnce({ sort: () => ({ limit: async () => [due] }) })
+      .mockReturnValueOnce({ sort: () => ({ limit: async () => [] }) });
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+    LfgPostMock.findById = jest.fn(async () => newer);
+
+    const svc = buildService();
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+    configValues.booleans["lfg.enabled"] = true;
+
+    await svc.runNow();
+
+    // The newer roster, not the snapshot the batch query returned.
+    expect(render).toHaveBeenCalledWith(newer);
+  });
+
+  it("renders nothing for a row that has since been purged", async () => {
+    const due = post();
+    LfgPostMock.find = jest
+      .fn<(...args: unknown[]) => unknown>()
+      .mockReturnValueOnce({ sort: () => ({ limit: async () => [due] }) })
+      .mockReturnValueOnce({ sort: () => ({ limit: async () => [] }) });
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => ({
+      ...due,
+      state: "closed" as const,
+    }));
+    LfgPostMock.findById = jest.fn(async () => null);
+
+    const svc = buildService();
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+    configValues.booleans["lfg.enabled"] = true;
+
+    await svc.runNow();
+
+    expect(render).not.toHaveBeenCalled();
+  });
+
+  it("serialises a sweep render against a click on the same post", async () => {
+    const order: string[] = [];
+    const svc = buildService();
+    const held = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        order.push("click:done");
+        resolve();
+      }, 10),
+    );
+
+    // A click holds the post's turn; the sweep's render has to wait for it.
+    const click = svc.runOnPost(POST_ID, () => held);
+    const sweep = svc.runOnPost(POST_ID, async () => {
+      order.push("sweep:render");
+    });
+
+    await Promise.all([click, sweep]);
+
+    expect(order).toEqual(["click:done", "sweep:render"]);
   });
 });

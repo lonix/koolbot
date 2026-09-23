@@ -85,6 +85,20 @@ const SCAN_BATCH_SIZE = 100;
  */
 const voiceResolution = createKeyedLock();
 
+/**
+ * Serialises everything that mutates or re-renders one post — button clicks
+ * and the sweep's retries alike.
+ *
+ * Two orderings depend on it. Clicks render the snapshot their own write
+ * returned, so unordered Discord edits could land in the opposite order from
+ * the Mongo writes and leave the older roster on the message. And the sweep
+ * renders a row it queried earlier, so without taking the same turn it could
+ * edit a stale snapshot over a newer one *and* clear `renderPending`, leaving
+ * nothing to retry. The sweep additionally re-reads the row once it holds the
+ * lock, so what it renders is what the row says now.
+ */
+const postLock = createKeyedLock();
+
 /** Smallest party worth advertising: the host plus one. */
 export const MIN_PARTY_SIZE = 2;
 /** Roster mentions have to stay inside one embed field. */
@@ -453,6 +467,12 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
                 "$closeReason",
               ],
             },
+            // The message is now out of date, and stays so until something
+            // renders it. Recording that in the same write is what makes the
+            // render survive the process dying between here and the edit —
+            // which matters most when this join closed the post, since a
+            // terminal row is on no other sweep query.
+            renderPending: true,
           },
         },
       ],
@@ -493,7 +513,8 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
         hostId: { $ne: userId },
         memberIds: userId,
       },
-      { $pull: { memberIds: userId } },
+      // Marked stale in the same write, for the same reason as a join.
+      { $pull: { memberIds: userId }, $set: { renderPending: true } },
       { new: true },
     );
     if (left) return { status: "left", post: left };
@@ -701,11 +722,34 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
    * Re-render a post and record the outcome: cleared when the message now
    * agrees with the row, and either way stamped with the attempt so a row
    * that keeps failing cannot hold the front of the retry batch.
+   *
+   * Runs under the post's lock and re-reads the row inside it, so a click
+   * that lands between the sweep's query and its edit is never overwritten by
+   * the older snapshot — and `renderPending` is only cleared for the version
+   * actually rendered.
    */
   private async renderAndSettle(post: ILfgPost): Promise<boolean> {
-    const rendered = await this.renderToMessage(post);
-    await this.recordRenderAttempt(String(post._id), rendered);
-    return rendered;
+    const postId = String(post._id);
+    return this.runOnPost(postId, async () => {
+      const fresh = await LfgPost.findById(postId);
+      // Purged in the meantime: there is no row left to disagree with.
+      if (!fresh) return false;
+      const rendered = await this.renderToMessage(fresh);
+      await this.recordRenderAttempt(postId, rendered);
+      return rendered;
+    });
+  }
+
+  /**
+   * Run `work` while holding a post's turn, so nothing else mutates or
+   * re-renders it in the middle.
+   *
+   * Public because the button handlers take the same turn: they and the sweep
+   * both read a post, act on it and edit its message, and the two interleaved
+   * are what leaves a stale roster on screen.
+   */
+  public runOnPost<T>(postId: string, work: () => Promise<T>): Promise<T> {
+    return postLock.run(postId, work);
   }
 
   /**

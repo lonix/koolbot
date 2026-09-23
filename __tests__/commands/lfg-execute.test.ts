@@ -15,6 +15,7 @@ import {
   type MockChatInputInteraction,
   type MockCommandOptions,
 } from "../test-utils.js";
+import { createKeyedLock } from "../../src/utils/keyed-lock.js";
 
 const mockConfigGetBoolean = jest.fn<() => Promise<boolean>>();
 const mockConfigGetNumber = jest.fn<() => Promise<number>>();
@@ -23,6 +24,12 @@ const mockJoinPost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockLeavePost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockCloseByHost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockBuildPayload = jest.fn(() => ({ content: "refreshed" }));
+/**
+ * The per-post turn-taking lives in the service now, and the handler routes
+ * through it. The mock uses the real lock so the ordering guarantee is still
+ * exercised end to end here.
+ */
+const serviceLock = createKeyedLock();
 const mockRecordRenderAttempt = jest.fn<() => Promise<void>>();
 const mockMarkRenderPending = jest.fn<() => Promise<void>>();
 
@@ -72,6 +79,8 @@ jest.unstable_mockModule("../../src/services/lfg-service.js", () => ({
       buildPayload: mockBuildPayload,
       recordRenderAttempt: mockRecordRenderAttempt,
       markRenderPending: mockMarkRenderPending,
+      runOnPost: <T>(postId: string, work: () => Promise<T>): Promise<T> =>
+        serviceLock.run(postId, work),
     }),
   },
 }));

@@ -1,6 +1,5 @@
 import { ButtonInteraction, MessageFlags } from "discord.js";
 import { LfgService, spotsLeft } from "../services/lfg-service.js";
-import { createKeyedLock } from "../utils/keyed-lock.js";
 import type { ILfgPost } from "../models/lfg-post.js";
 import logger from "../utils/logger.js";
 
@@ -21,18 +20,6 @@ import logger from "../utils/logger.js";
  */
 
 const ACTIONS = new Set(["join", "leave", "close"]);
-
-/**
- * Clicks on one post take turns.
- *
- * Each click renders the snapshot its own database write returned. Left
- * unordered, two clicks in the same instant can have their Discord edits land
- * in the opposite order from their Mongo writes, and the older roster wins the
- * message. Serialising the whole mutate-then-render step keeps the last edit
- * the last write. The interaction is already deferred by then, so waiting a
- * turn costs the clicker nothing.
- */
-const postLock = createKeyedLock();
 
 /** Tell just the clicker something, whatever the interaction's state. */
 async function replyQuietly(
@@ -68,7 +55,10 @@ export async function handleLfgButton(
   // three-second window.
   await interaction.deferUpdate();
 
-  await postLock.run(postId, () =>
+  // Take the post's turn: clicks on one post are handled one after another,
+  // and the sweep's retries take the same turn, so no edit can land out of
+  // order with a newer one and leave a stale roster on the message.
+  await service.runOnPost(postId, () =>
     handleAction(interaction, service, action, postId),
   );
 }
