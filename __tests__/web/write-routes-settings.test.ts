@@ -389,6 +389,49 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet).toHaveBeenCalledTimes(2);
   });
 
+  it("saves the Reaction Roles page card and returns to that page (#974)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "reactionroles",
+      redirect: "/admin/reaction-roles",
+      keys: [
+        "reactionroles.enabled",
+        "reactionroles.message_channel_id",
+        "reactionroles.style",
+      ],
+      "value_reactionroles.enabled": "true",
+      "value_reactionroles.message_channel_id": "chan-9",
+      "value_reactionroles.style": "button",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/reaction-roles");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      ["reactionroles.enabled", true],
+      ["reactionroles.message_channel_id", "chan-9"],
+      ["reactionroles.style", "button"],
+    ]);
+  });
+
+  it("disables Reaction Roles from its page without clobbering its settings (#974)", async () => {
+    // The master is unticked, so the browser greys out and omits the
+    // dependents; only the master may be written.
+    const res = await harness.post("/settings/save-section", {
+      category: "reactionroles",
+      redirect: "/admin/reaction-roles",
+      keys: [
+        "reactionroles.enabled",
+        "reactionroles.message_channel_id",
+        "reactionroles.style",
+      ],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/reaction-roles");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("reactionroles.enabled");
+    expect(mockConfigSet.mock.calls[0][1]).toBe(false);
+  });
+
   it("de-duplicates repeated keys so a doubled input can't double-write", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "quotes",
