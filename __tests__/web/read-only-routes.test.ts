@@ -4,6 +4,7 @@ import {
   buildSettingRows,
   fetchChannelData,
   loadFeatureSettings,
+  POLLS_SETTING_KEYS,
   VOICE_CHANNELS_SETTING_KEYS,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
@@ -248,6 +249,40 @@ describe("loadFeatureSettings (#971)", () => {
     );
     // Keys on the card judge themselves from their own rows.
     expect(data.dependencyState.has("digest.enabled")).toBe(false);
+  });
+});
+
+// Issue #973: the Polls page edits every `polls.*` key in place.
+describe("POLLS_SETTING_KEYS (#973)", () => {
+  it("lists every polls.* key in the schema, master first", () => {
+    const schemaKeys = Object.keys(defaultConfig).filter((k) =>
+      k.startsWith("polls."),
+    );
+    expect([...POLLS_SETTING_KEYS].sort()).toEqual(schemaKeys.sort());
+    expect(POLLS_SETTING_KEYS[0]).toBe("polls.enabled");
+  });
+
+  it("builds rows without any guild picker fetch", async () => {
+    let fetched = 0;
+    const client: any = {
+      guilds: {
+        fetch: async () => {
+          fetched += 1;
+          throw new Error("unexpected guild fetch");
+        },
+      },
+    };
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      POLLS_SETTING_KEYS,
+      [{ key: "polls.cooldown_days", value: 14 }],
+    );
+    expect(fetched).toBe(0);
+    expect(data.settingRows.map((r) => r.key)).toEqual([...POLLS_SETTING_KEYS]);
+    expect(
+      data.settingRows.find((r) => r.key === "polls.cooldown_days")?.current,
+    ).toBe(14);
   });
 });
 

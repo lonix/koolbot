@@ -24,6 +24,10 @@ import {
   renderWizardStepPage,
   type SettingRow,
 } from "../../src/web/admin-views.js";
+import {
+  defaultConfig,
+  settingsMetadata,
+} from "../../src/services/config-schema.js";
 
 const COMMON = { csrfToken: "csrf", remainingMs: 60_000 };
 
@@ -1378,6 +1382,7 @@ describe("renderPollsPage", () => {
       enabled: true,
       defaultDurationHours: 24,
       cooldownDays: 7,
+      settingRows: [],
       schedules: [],
       items: [],
       textChannels: [],
@@ -1393,6 +1398,7 @@ describe("renderPollsPage", () => {
       enabled: false,
       defaultDurationHours: 24,
       cooldownDays: 7,
+      settingRows: [],
       schedules: [],
       items: [],
       textChannels: [],
@@ -1415,6 +1421,7 @@ describe("renderPollsPage", () => {
       enabled: true,
       defaultDurationHours: 24,
       cooldownDays: 7,
+      settingRows: [],
       schedules: [],
       items: [],
       textChannels: [],
@@ -1431,6 +1438,7 @@ describe("renderPollsPage", () => {
       enabled: true,
       defaultDurationHours: 24,
       cooldownDays: 7,
+      settingRows: [],
       schedules: [
         {
           id: "s1",
@@ -1473,6 +1481,7 @@ describe("renderPollsPage", () => {
       enabled: true,
       defaultDurationHours: 24,
       cooldownDays: 7,
+      settingRows: [],
       schedules: [
         {
           id: "s1",
@@ -1521,6 +1530,7 @@ describe("renderPollsPage", () => {
       enabled: true,
       defaultDurationHours: 24,
       cooldownDays: 7,
+      settingRows: [],
       schedules: [
         {
           id: "s1",
@@ -1551,6 +1561,7 @@ describe("renderPollsPage", () => {
       enabled: true,
       defaultDurationHours: 24,
       cooldownDays: 7,
+      settingRows: [],
       schedules: [],
       items: [],
       textChannels: [{ id: "c1", name: "polls" }],
@@ -1563,6 +1574,82 @@ describe("renderPollsPage", () => {
     expect(html).toContain('id="poll-import-file"');
     expect(html).not.toContain('action="/admin/polls/items/import"');
     expect(html).not.toContain('name="url"');
+  });
+});
+
+describe("renderPollsPage settings card (#973)", () => {
+  const POLL_KEYS = [
+    "polls.enabled",
+    "polls.default_duration_hours",
+    "polls.cooldown_days",
+    "polls.participation.enabled",
+    "polls.participation.weekly_retention_weeks",
+    "polls.turnout.retention_days",
+  ] as const;
+  // Rows shaped the way `buildSettingRows` shapes them, from the schema.
+  const pollRows = (
+    overrides: Partial<Record<(typeof POLL_KEYS)[number], unknown>> = {},
+  ): SettingRow[] =>
+    POLL_KEYS.map((key) => ({
+      key,
+      label: settingsMetadata[key].label,
+      current: key in overrides ? overrides[key] : defaultConfig[key],
+      defaultValue: defaultConfig[key],
+      type: settingsMetadata[key].type,
+      description: settingsMetadata[key].description,
+      category: "polls",
+      min: settingsMetadata[key].min,
+    }));
+  const render = (settingRows: SettingRow[]) =>
+    renderPollsPage({
+      ...COMMON,
+      enabled: true,
+      defaultDurationHours: 24,
+      cooldownDays: 7,
+      settingRows,
+      schedules: [],
+      items: [],
+      textChannels: [],
+      roles: [],
+    });
+
+  it("renders an editable control for every polls.* key", () => {
+    const html = render(pollRows());
+    for (const key of POLL_KEYS) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+      expect(html).toContain(`name="value_${key}"`);
+    }
+  });
+
+  it("posts to save-section and returns to /admin/polls", () => {
+    const html = render(pollRows());
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="polls">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/polls">',
+    );
+    expect(html).toContain('<input type="hidden" name="_csrf" value="csrf">');
+  });
+
+  it("carries polls.enabled as the cascade master so the feature can be disabled here", () => {
+    const html = render(pollRows({ "polls.enabled": true }));
+    // The master is part of the card, so the form keeps the cascade rather
+    // than opting out of it: unchecking polls.enabled writes only the flag.
+    expect(html).toContain("data-cascade-scope");
+    expect(html).toMatch(
+      /name="value_polls\.enabled"[^>]*checked[^>]*data-cascade-master/,
+    );
+    expect(html).not.toContain('name="no_cascade"');
+  });
+
+  it("omits the card when no rows are supplied", () => {
+    expect(render([])).not.toContain(
+      '<form method="POST" action="/admin/settings/save-section"',
+    );
   });
 });
 

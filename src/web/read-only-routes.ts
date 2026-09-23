@@ -130,6 +130,20 @@ export const VOICE_CHANNELS_SETTING_KEYS = [
 ] as const;
 
 /**
+ * Every `polls.*` key, edited in place on the Polls feature page (#973).
+ * Includes the `polls.enabled` master, so the card cascades like a Settings
+ * section and the feature can be switched off from its own page.
+ */
+export const POLLS_SETTING_KEYS = [
+  "polls.enabled",
+  "polls.default_duration_hours",
+  "polls.cooldown_days",
+  "polls.participation.enabled",
+  "polls.participation.weekly_retention_weeks",
+  "polls.turnout.retention_days",
+] as const;
+
+/**
  * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
  * the Settings page derives label/type/description from `settingsMetadata` with
  * a stored DB row taking precedence. Lets a feature page render its own keys
@@ -791,6 +805,7 @@ export function createReadOnlyRouter(
         cooldownDays,
         channelData,
         roleData,
+        pollSettings,
       ] = await Promise.all([
         config.getBoolean("polls.enabled", false),
         service.listSchedules(common.guildId),
@@ -799,6 +814,8 @@ export function createReadOnlyRouter(
         config.getNumber("polls.cooldown_days", 7),
         fetchChannelData(client, common.guildId),
         fetchRoleData(client, common.guildId),
+        // Editable `polls.*` settings card (#973).
+        loadFeatureSettings(client, common.guildId, POLLS_SETTING_KEYS),
       ]);
 
       res.type("text/html").send(
@@ -807,6 +824,8 @@ export function createReadOnlyRouter(
           enabled,
           defaultDurationHours,
           cooldownDays,
+          settingRows: pollSettings.settingRows,
+          dependencyState: pollSettings.dependencyState,
           textChannels: channelData.textChannels,
           roles: roleData.roles,
           flash: readFlash(req),
