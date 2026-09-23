@@ -752,16 +752,32 @@ export class QuoteService {
     // and leave the caller believing nothing happened (#916).
     if (!deleteError) {
       try {
-        // By `_id`, not by a fresh `authorId` re-match: re-matching would
-        // delete a quote created *after* the snapshot above, whose
-        // quote-channel post was therefore never inspected — an orphaned
-        // public post, and a `removed` larger than the `matched` the caller
-        // was told about (#916). A row created after the snapshot is
-        // post-purge activity and keeps its cleanup metadata.
+        // By `_id` *and* the `messageId` we inspected, not by a fresh
+        // `authorId` re-match (#916). Two orderings to survive:
+        //
+        //  - a quote created *after* the snapshot would be deleted by an
+        //    `authorId` re-match without its post ever being inspected, so
+        //    the ids pin the delete to what we actually looked at;
+        //  - a quote whose post went up *between* the snapshot and here has
+        //    a new `messageId`, and deleting it would strand that post with
+        //    no row pointing at it. Matching on the old value means such a
+        //    row does not match, and `deleteQuoteMessage` on the caller's
+        //    side never saw the post — so the row survives with its cleanup
+        //    metadata and the next purge collects both.
         const removal = await this.model.deleteMany({
-          _id: { $in: authored.map((quote) => quote._id) },
+          $or: authored.map((quote) => ({
+            _id: quote._id,
+            messageId: quote.messageId ?? null,
+          })),
         });
         deleted = removal?.deletedCount ?? 0;
+        if (deleted < authored.length) {
+          const stranded = authored.length - deleted;
+          deleteError = `${stranded} quote(s) were published while the purge ran and were left in place rather than orphaning their channel posts; run the reset again to clear them`;
+          logger.warn(
+            `Purge for ${userId}: ${stranded} quote row(s) changed mid-purge and were kept`,
+          );
+        }
       } catch (error) {
         deleteError = getErrorMessage(error);
         logger.error(`Failed to delete quotes authored by ${userId}:`, error);

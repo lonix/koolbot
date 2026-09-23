@@ -63,7 +63,10 @@ describe("QuoteService.purgeForUser", () => {
       // would delete a quote created after the snapshot whose channel post
       // was never inspected, leaving a public orphan (#916).
       expect(model.deleteMany).toHaveBeenCalledWith({
-        _id: { $in: ["q1", "q2"] },
+        $or: [
+          { _id: "q1", messageId: "m1" },
+          { _id: "q2", messageId: "m2" },
+        ],
       });
       // Without this the member's words stay visible in Discord forever:
       // `cleanupUnauthorizedMessages` only sweeps non-bot messages, so a
@@ -145,7 +148,7 @@ describe("QuoteService.purgeForUser", () => {
       expect(result.anonymised).toBe(3);
       // The quote itself belongs to its author and survives — this member
       // authored none, so the delete has an empty snapshot to work from.
-      expect(model.deleteMany).toHaveBeenCalledWith({ _id: { $in: [] } });
+      expect(model.deleteMany).toHaveBeenCalledWith({ $or: [] });
     });
 
     it("uses a sentinel no real member can match", () => {
@@ -190,6 +193,31 @@ describe("QuoteService.purgeForUser", () => {
       anonymiseError: undefined,
     });
     expect(messages.deleteQuoteMessage).not.toHaveBeenCalled();
+  });
+
+  it("keeps a quote published mid-purge rather than orphaning its post", async () => {
+    // The reverse ordering of the add race: the purge inspected the old
+    // `messageId`, then the add posted and recorded the new one before this
+    // delete. Deleting anyway would strand a post nothing can find.
+    model.find.mockResolvedValue([
+      { _id: "q1", messageId: "m1" },
+      { _id: "q2", messageId: undefined },
+    ]);
+    // Only q1 still matches its snapshot; q2 gained a messageId in between.
+    model.deleteMany.mockResolvedValue({ deletedCount: 1 });
+
+    const result = await service.purgeForUser("123", messages);
+
+    expect(model.deleteMany).toHaveBeenCalledWith({
+      $or: [
+        { _id: "q1", messageId: "m1" },
+        { _id: "q2", messageId: null },
+      ],
+    });
+    expect(result.authored).toBe(2);
+    expect(result.deleted).toBe(1);
+    // Reported, not silently smaller: the row is still there to be swept.
+    expect(result.deleteError).toContain("published while the purge ran");
   });
 
   it("still anonymises when the authored lookup itself fails", async () => {

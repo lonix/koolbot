@@ -53,6 +53,13 @@ export interface BirthdayPurgeResult {
   error?: string;
 }
 
+/**
+ * How many read/revoke/delete passes a purge will make before giving up. A
+ * pass only repeats when the scheduled run wrote a new role marker between
+ * the read and the delete, which cannot keep happening.
+ */
+const MAX_PURGE_ATTEMPTS = 3;
+
 export interface BirthdayRunSummary {
   ranAt: Date;
   candidates: number;
@@ -396,7 +403,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           age,
         });
 
-        await channel.send({
+        const announcement = await channel.send({
           content,
           allowedMentions: mention ? { users: [row.userId] } : { parse: [] },
         });
@@ -416,12 +423,25 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         // expiry sweep could never find it and the role would sit on the
         // member for good. Take it back rather than leave it stranded.
         const persisted = await this.saveRunRow(row);
-        if (!persisted && roleId && row.roleAssignedAt) {
+        if (!persisted) {
+          // Everything this iteration produced is now the member's data with
+          // no row behind it: the announcement names them (and often their
+          // age) in a public channel, and the role has no marker for the
+          // sweep to find. Both come back.
           logger.warn(
-            `Birthday row for ${sanitizeForLog(row.userId)} vanished mid-run; taking the just-granted role back`,
+            `Birthday row for ${sanitizeForLog(row.userId)} vanished mid-run; withdrawing the announcement and any role just granted`,
           );
-          await this.revokeBirthdayRole(row.guildId, row.userId, roleId);
-          summary.rolesGranted -= 1;
+          await announcement.delete().catch((error) => {
+            logger.error(
+              `Failed to withdraw the birthday announcement for ${sanitizeForLog(row.userId)}; it is still public:`,
+              error,
+            );
+          });
+          summary.announced -= 1;
+          if (roleId && row.roleAssignedAt) {
+            await this.revokeBirthdayRole(row.guildId, row.userId, roleId);
+            summary.rolesGranted -= 1;
+          }
         }
       } catch (error) {
         summary.failed += 1;
@@ -467,7 +487,39 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     guildId: string,
     userId: string,
   ): Promise<BirthdayPurgeResult> {
-    let rows: Array<{ roleAssignedAt?: Date }>;
+    let roleRevoked = false;
+
+    for (let attempt = 0; attempt < MAX_PURGE_ATTEMPTS; attempt++) {
+      const { retry, ...pass } = await this.purgeAttempt(guildId, userId);
+      roleRevoked = roleRevoked || pass.roleRevoked;
+      if (!retry) return { ...pass, roleRevoked };
+
+      // The row changed under us — the scheduled run granted a role and
+      // wrote its marker between our read and our delete. Go round again
+      // against the new state so that grant is revoked rather than orphaned.
+      logger.warn(
+        `Birthday purge for ${sanitizeForLog(userId)}: the row changed mid-purge; retrying`,
+      );
+    }
+
+    return {
+      matched: 1,
+      removed: 0,
+      roleRevoked,
+      error: `the birthday row kept changing mid-purge; gave up after ${MAX_PURGE_ATTEMPTS} attempts, so the expiry sweep still owns any live grant`,
+    };
+  }
+
+  /**
+   * One read/revoke/delete pass. `retry` means the conditional delete found
+   * the row had changed since the read, so nothing was removed and the
+   * caller should try again against the new state.
+   */
+  private async purgeAttempt(
+    guildId: string,
+    userId: string,
+  ): Promise<BirthdayPurgeResult & { retry: boolean }> {
+    let rows: IUserBirthday[];
     try {
       rows = await UserBirthday.find({ userId, guildId });
     } catch (error) {
@@ -475,11 +527,12 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         matched: 0,
         removed: 0,
         roleRevoked: false,
+        retry: false,
         error: getErrorMessage(error),
       };
     }
     if (rows.length === 0) {
-      return { matched: 0, removed: 0, roleRevoked: false };
+      return { matched: 0, removed: 0, roleRevoked: false, retry: false };
     }
 
     const held = rows.some((row) => row.roleAssignedAt);
@@ -496,6 +549,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           matched: rows.length,
           removed: 0,
           roleRevoked: false,
+          retry: false,
           error: getErrorMessage(error),
         };
       }
@@ -508,6 +562,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
             matched: rows.length,
             removed: 0,
             roleRevoked: false,
+            retry: false,
             error: `could not take back the birthday role; the row is kept so the expiry sweep can still revoke it`,
           };
         }
@@ -518,11 +573,23 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     }
 
     try {
-      const removal = await UserBirthday.deleteMany({ userId, guildId });
+      // Conditional on the marker we just read. The scheduled run can grant
+      // a role and write `roleAssignedAt` between that read and this delete;
+      // an unconditional delete would remove the brand-new marker and strand
+      // the role for good. A row that changed under us matches nothing, and
+      // we go round again rather than delete blind.
+      const removal = await UserBirthday.deleteMany({
+        $or: rows.map((row) => ({
+          _id: row._id,
+          roleAssignedAt: row.roleAssignedAt ?? null,
+        })),
+      });
+      const removed = removal?.deletedCount ?? 0;
       return {
         matched: rows.length,
-        removed: removal?.deletedCount ?? 0,
+        removed,
         roleRevoked,
+        retry: removed < rows.length,
       };
     } catch (error) {
       // The revoke above may already have taken the role off Discord.
@@ -536,6 +603,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         matched: rows.length,
         removed: 0,
         roleRevoked,
+        retry: false,
         error: getErrorMessage(error),
       };
     }

@@ -676,6 +676,29 @@ describe("BirthdayService", () => {
       expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
     });
 
+    it("retries when the run wrote a new role marker mid-purge", async () => {
+      // The reverse ordering: we snapshot a row with no marker, the run
+      // grants a role and saves one, and our conditional delete then matches
+      // nothing. Deleting unconditionally would strand that fresh grant.
+      const withMarker = { _id: "b1", roleAssignedAt: new Date() };
+      mockBirthdayFind
+        .mockResolvedValueOnce([{ _id: "b1", roleAssignedAt: undefined }])
+        .mockResolvedValueOnce([withMarker]);
+      mockBirthdayDeleteMany
+        .mockResolvedValueOnce({ deletedCount: 0 }) // changed under us
+        .mockResolvedValueOnce({ deletedCount: 1 });
+      const client = makeClient();
+      const { guild, remove } = guildWithMember(true);
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(guild);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      // Second pass saw the marker and revoked the role the run just granted.
+      expect(remove).toHaveBeenCalled();
+      expect(result).toEqual({ matched: 1, removed: 1, roleRevoked: true });
+    });
+
     it("reports zeros for a member with no birthday", async () => {
       mockBirthdayFind.mockResolvedValue([]);
       const client = makeClient();
