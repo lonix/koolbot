@@ -2,10 +2,11 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-# Refresh the npm bundled in the base image so its undici/tar copies are patched
-# (mirrors the production Dockerfile; clears Trivy #142-#146 base-image findings).
-# hadolint ignore=DL3016
-RUN npm install -g npm@latest --no-audit --no-fund && npm cache clean --force
+# Refresh the npm bundled in the base image so its tar/undici/ip-address/
+# brace-expansion copies are patched. Pinned (not @latest) so the build cache
+# cannot freeze it — keep in sync with NPM_VERSION in the production Dockerfile (#963).
+ARG NPM_VERSION=12.1.0
+RUN npm install -g "npm@${NPM_VERSION}" --no-audit --no-fund && npm cache clean --force
 
 # Install development dependencies
 COPY package*.json ./

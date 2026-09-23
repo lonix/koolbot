@@ -29,13 +29,20 @@ FROM node:24-alpine
 
 WORKDIR /app
 
-# Refresh the npm bundled in the base image. node:24-alpine ships an npm whose
-# bundled undici/tar carry known advisories (Trivy #142-#146); upgrading to the
-# latest npm pulls in patched tar (>= 7.5.16) and undici. These live under
-# /usr/local/lib/node_modules/npm and are independent of our own node_modules,
-# so only refreshing npm clears them. Runs as root before the USER switch below.
-# hadolint ignore=DL3016
-RUN npm install -g npm@latest --no-audit --no-fund && npm cache clean --force
+# Refresh the npm bundled in the base image. The npm that ships in node:24-alpine
+# carries its own copies of tar/undici/ip-address/brace-expansion under
+# /usr/local/lib/node_modules/npm, independent of our node_modules, and Trivy
+# flags them whenever they fall behind (#142-#146, #963). Only upgrading npm
+# itself clears those findings.
+#
+# The version is pinned on purpose: an unpinned `npm@latest` never changes the
+# RUN line, so BuildKit serves the layer from the gha cache and npm silently
+# freezes at whatever was current the first time it was built (#963). Pinning
+# makes the cache key change exactly when npm should. Dependabot does not track
+# Dockerfile ARGs — bump this (and Dockerfile.dev) by hand when npm ships a
+# release that patches its bundled deps. Runs as root before the USER switch.
+ARG NPM_VERSION=12.1.0
+RUN npm install -g "npm@${NPM_VERSION}" --no-audit --no-fund && npm cache clean --force
 
 # Copy only runtime artifacts
 COPY --from=builder --chown=node:node /app/package*.json ./
