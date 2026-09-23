@@ -152,6 +152,25 @@ describe("buildSettingRows (#705)", () => {
     }
   });
 
+  it("falls back to an env-supplied value before the schema default (#972)", () => {
+    // Same order as ConfigService.get and the Settings page: stored row,
+    // then env, then default.
+    const prev = process.env["notices.enabled"];
+    process.env["notices.enabled"] = "true";
+    try {
+      const [fromEnv] = buildSettingRows(["notices.enabled"], []);
+      expect(fromEnv.current).toBe(true);
+      const [fromDb] = buildSettingRows(
+        ["notices.enabled"],
+        [{ key: "notices.enabled", value: false }],
+      );
+      expect(fromDb.current).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env["notices.enabled"];
+      else process.env["notices.enabled"] = prev;
+    }
+  });
+
   it("excludes the feature master voicechannels.enabled from the key list", () => {
     expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
     expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");

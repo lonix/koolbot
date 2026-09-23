@@ -158,6 +158,11 @@ export const NOTICES_SETTING_KEYS = [
  * the Settings page derives label/type/description from `settingsMetadata` with
  * a stored DB row taking precedence. Lets a feature page render its own keys
  * with the shared control renderer (#705).
+ *
+ * `current` resolves in the order `ConfigService.get` (and the Settings page)
+ * use: stored row, then an env var named after the key, then the schema
+ * default. Skipping the env step would show (and let a save persist) the
+ * default over an env-supplied value (#972).
  */
 export function buildSettingRows(
   keys: readonly string[],
@@ -176,7 +181,9 @@ export function buildSettingRows(
     return {
       key,
       label: meta?.label ?? key,
-      current: dbEntry ? dbEntry.value : defaultValue,
+      current: dbEntry
+        ? dbEntry.value
+        : (getEnvConfigValue(key) ?? defaultValue),
       defaultValue,
       type: meta?.type ?? describeType(defaultValue),
       description: dbEntry?.description ?? meta?.description ?? "",
@@ -593,7 +600,9 @@ export function createReadOnlyRouter(
           return {
             key,
             label: meta?.label ?? key,
-            current: dbEntry ? dbEntry.value : defaultValue,
+            current: dbEntry
+              ? dbEntry.value
+              : (getEnvConfigValue(key) ?? defaultValue),
             defaultValue,
             type: meta?.type ?? describeType(defaultValue),
             description: dbEntry?.description ?? meta?.description ?? "",
