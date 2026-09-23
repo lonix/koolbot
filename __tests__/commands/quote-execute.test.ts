@@ -20,7 +20,7 @@ import {
 } from "../test-utils.js";
 
 const mockAddQuote = jest.fn<() => Promise<unknown>>();
-const mockUpdateQuoteMessageId = jest.fn<() => Promise<unknown>>();
+const mockUpdateQuoteMessageId = jest.fn<() => Promise<boolean>>();
 const mockGetQuoteById = jest.fn<() => Promise<unknown>>();
 const mockEditQuote = jest.fn<() => Promise<unknown>>();
 const mockExportQuotes = jest.fn<() => Promise<unknown>>();
@@ -28,6 +28,7 @@ const mockImportQuotes = jest.fn<() => Promise<unknown>>();
 const mockPostQuote = jest.fn<() => Promise<string | null>>();
 const mockUpdateQuoteMessage = jest.fn<() => Promise<unknown>>();
 const mockResetChannel = jest.fn<() => Promise<{ reposted: number }>>();
+const mockDeleteQuoteMessage = jest.fn<() => Promise<boolean>>();
 
 jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
   quoteService: {
@@ -46,6 +47,7 @@ jest.unstable_mockModule("../../src/services/quote-channel-manager.js", () => ({
       postQuote: mockPostQuote,
       updateQuoteMessage: mockUpdateQuoteMessage,
       resetChannel: mockResetChannel,
+      deleteQuoteMessage: mockDeleteQuoteMessage,
     }),
   },
 }));
@@ -78,7 +80,8 @@ beforeEach(() => {
     addedById: "user-1",
   });
   mockPostQuote.mockResolvedValue("message-1");
-  mockUpdateQuoteMessageId.mockResolvedValue(undefined);
+  mockUpdateQuoteMessageId.mockResolvedValue(true);
+  mockDeleteQuoteMessage.mockResolvedValue(true);
   mockUpdateQuoteMessage.mockResolvedValue(undefined);
   mockEditQuote.mockResolvedValue(undefined);
   mockResetChannel.mockResolvedValue({ reposted: 4 });
@@ -116,6 +119,21 @@ describe("/quote add", () => {
     );
     expect(it_.reply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("✅") }),
+    );
+  });
+
+  it("takes the post down when the row was purged mid-add (#916)", async () => {
+    // `addQuote` saves the row before the post goes up. A per-user purge in
+    // that window deletes the row, and nothing else ever collects the post:
+    // the channel sweep ignores bot messages and the row that pointed at it
+    // is gone. So the add path compensates for its own orphan.
+    mockUpdateQuoteMessageId.mockResolvedValue(false);
+    const it_ = interaction(options);
+    await execute(it_);
+
+    expect(mockDeleteQuoteMessage).toHaveBeenCalledWith("message-1");
+    expect(it_.reply).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining("⚠️") }),
     );
   });
 

@@ -59,8 +59,11 @@ describe("QuoteService.purgeForUser", () => {
 
       const result = await service.purgeForUser("123", messages);
 
+      // By the snapshot's ids, not a fresh `authorId` re-match: re-matching
+      // would delete a quote created after the snapshot whose channel post
+      // was never inspected, leaving a public orphan (#916).
       expect(model.deleteMany).toHaveBeenCalledWith({
-        authorId: { $in: ID_FORMS },
+        _id: { $in: ["q1", "q2"] },
       });
       // Without this the member's words stay visible in Discord forever:
       // `cleanupUnauthorizedMessages` only sweeps non-bot messages, so a
@@ -140,10 +143,9 @@ describe("QuoteService.purgeForUser", () => {
         { $set: { addedById: ANONYMISED_USER_ID } },
       );
       expect(result.anonymised).toBe(3);
-      // The quote itself belongs to its author and survives.
-      expect(model.deleteMany).toHaveBeenCalledWith({
-        authorId: { $in: ID_FORMS },
-      });
+      // The quote itself belongs to its author and survives — this member
+      // authored none, so the delete has an empty snapshot to work from.
+      expect(model.deleteMany).toHaveBeenCalledWith({ _id: { $in: [] } });
     });
 
     it("uses a sentinel no real member can match", () => {

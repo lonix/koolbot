@@ -653,19 +653,22 @@ export class EventService extends ScheduledService {
    * as "no exception escaped" (#916). A purge re-renders to take the
    * member's RSVP off a message anyone in the guild can read, so an
    * unreachable channel or a failed edit leaves their answer publicly
-   * visible and has to be reported, not swallowed. Nothing to refresh
-   * (no announcement configured, or the message is already gone) counts as
-   * success: there is no stale post left to fix.
+   * visible and has to be reported, not swallowed. Nothing to refresh counts
+   * as success — no announcement configured, the message already gone
+   * (`10008`), or the whole channel deleted (`10003`) — because in each case
+   * there is no stale post left to fix.
    */
   private async updateAnnouncement(event: IEvent): Promise<boolean> {
     if (!event.announcementChannelId || !event.announcementMessageId) {
       return true;
     }
-    const channel = await this.fetchTextChannel(
+    const { channel, gone } = await this.fetchTextChannelDetailed(
       event.guildId,
       event.announcementChannelId,
     );
-    if (!channel) return false;
+    // A deleted channel took the announcement with it, so there is no stale
+    // post left to fix; anything else leaves one standing.
+    if (!channel) return gone;
     try {
       const message = await channel.messages.fetch(event.announcementMessageId);
       await message.edit(this.buildAnnouncementPayload(event));
@@ -870,17 +873,35 @@ export class EventService extends ScheduledService {
     guildId: string,
     channelId: string,
   ): Promise<TextChannel | null> {
+    return (await this.fetchTextChannelDetailed(guildId, channelId)).channel;
+  }
+
+  /**
+   * As `fetchTextChannel`, but says *why* there is no channel.
+   *
+   * A purge has to tell "the channel is gone, so the announcement — and the
+   * member's RSVP on it — is gone with it" apart from "we could not reach
+   * the channel this time", because the first owes nothing and the second is
+   * an unfinished erasure (#916).
+   */
+  private async fetchTextChannelDetailed(
+    guildId: string,
+    channelId: string,
+  ): Promise<{ channel: TextChannel | null; gone: boolean }> {
     try {
       const guild = await this.client.guilds.fetch(guildId);
       const channel = await guild.channels.fetch(channelId);
-      if (channel instanceof TextChannel) return channel;
+      if (channel instanceof TextChannel) return { channel, gone: false };
       logger.warn(
         `Event channel ${sanitizeForLog(channelId)} is not a text channel`,
       );
-      return null;
+      return { channel: null, gone: false };
     } catch (error) {
+      if (this.isDiscardableError(error, DISCORD_UNKNOWN_CHANNEL)) {
+        return { channel: null, gone: true };
+      }
       logger.error("Failed to fetch event text channel:", error);
-      return null;
+      return { channel: null, gone: false };
     }
   }
 

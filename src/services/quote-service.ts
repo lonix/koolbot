@@ -369,11 +369,21 @@ export class QuoteService {
     return this.model.findById(quoteId);
   }
 
+  /**
+   * Record the quote-channel post id on a quote row.
+   *
+   * Returns false when the row is gone — which means a per-user purge ran
+   * between the row being saved and its post going up (#916). The caller has
+   * to compensate by deleting the post it just made: nothing else ever will,
+   * since `cleanupUnauthorizedMessages` sweeps only non-bot messages, and
+   * the row that would have pointed at it no longer exists.
+   */
   async updateQuoteMessageId(
     quoteId: string,
     messageId: string,
-  ): Promise<void> {
-    await this.model.findByIdAndUpdate(quoteId, { messageId });
+  ): Promise<boolean> {
+    const updated = await this.model.findByIdAndUpdate(quoteId, { messageId });
+    return updated !== null;
   }
 
   /**
@@ -742,8 +752,14 @@ export class QuoteService {
     // and leave the caller believing nothing happened (#916).
     if (!deleteError) {
       try {
+        // By `_id`, not by a fresh `authorId` re-match: re-matching would
+        // delete a quote created *after* the snapshot above, whose
+        // quote-channel post was therefore never inspected — an orphaned
+        // public post, and a `removed` larger than the `matched` the caller
+        // was told about (#916). A row created after the snapshot is
+        // post-purge activity and keeps its cleanup metadata.
         const removal = await this.model.deleteMany({
-          authorId: { $in: idForms },
+          _id: { $in: authored.map((quote) => quote._id) },
         });
         deleted = removal?.deletedCount ?? 0;
       } catch (error) {

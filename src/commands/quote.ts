@@ -197,7 +197,23 @@ async function handleAdd(
 
   if (messageId) {
     // Update quote with message ID
-    await quoteService.updateQuoteMessageId(quote._id.toString(), messageId);
+    const stillExists = await quoteService.updateQuoteMessageId(
+      quote._id.toString(),
+      messageId,
+    );
+    if (!stillExists) {
+      // The row was purged between `addQuote` and the post going up (#916).
+      // Nothing else will ever collect this message — the sweep ignores bot
+      // posts, and the row that pointed at it is gone — so take it down here
+      // rather than leave the quote publicly readable after an erasure.
+      await quoteChannelManager.deleteQuoteMessage(messageId);
+      await interaction.reply({
+        content:
+          "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return;
+    }
     await interaction.reply({
       content: "✅ Quote added successfully and posted to the quote channel!",
       flags: MessageFlags.Ephemeral,

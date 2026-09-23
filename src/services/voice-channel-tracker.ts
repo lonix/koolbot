@@ -50,6 +50,17 @@ interface VoiceSession {
  */
 const MAX_DRAIN_ROUNDS = 10;
 
+/**
+ * How long a purge will wait for in-flight persists before giving up on them.
+ *
+ * The round count alone does not bound the wait: an `endTracking` call keeps
+ * going after its Mongo write — Discord fetches, accolade checks,
+ * notifications — and one stalled call would otherwise hang the whole purge,
+ * so the later collection deletes and the web-session revoke never run. A
+ * timeout turns that into one incomplete step instead of a stuck purge.
+ */
+const DRAIN_TIMEOUT_MS = 15_000;
+
 /** What `forgetActiveSession` had to do for a member (#916). */
 export interface ForgottenSession {
   /** An in-memory session was dropped before it could be persisted. */
@@ -59,6 +70,38 @@ export interface ForgottenSession {
    * left to land after the purge's delete.
    */
   drained: boolean;
+  /**
+   * A persist was still running when the wait timed out. Its write may yet
+   * land after the purge's delete, so the caller reports the voice step as
+   * incomplete — and carries on with the rest of the purge rather than
+   * hanging on it.
+   */
+  timedOut: boolean;
+}
+
+/**
+ * Wait for every promise to settle, or give up after `timeoutMs`. Returns
+ * whether they all settled in time. `endTracking` swallows its own errors,
+ * but `allSettled` is used anyway so one rejection cannot abandon the rest.
+ */
+async function settleWithin(
+  promises: Iterable<Promise<unknown>>,
+  timeoutMs: number,
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<false>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+    // Do not hold the process open just to time a drain out.
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([
+      Promise.allSettled([...promises]).then(() => true),
+      timeout,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export class VoiceChannelTracker {
@@ -161,14 +204,14 @@ export class VoiceChannelTracker {
     this.companionSeconds.delete(userId);
     this.sessionFirsts.delete(userId);
 
-    const drained = await this.drainEndingSessions(userId);
+    const { drained, timedOut } = await this.drainEndingSessions(userId);
 
     if (hadSession) {
       logger.info(
         `Discarded in-flight voice session for user ${userId}; the disconnect handler will not persist it`,
       );
     }
-    return { discarded: hadSession, drained };
+    return { discarded: hadSession, drained, timedOut };
   }
 
   /**
@@ -181,12 +224,17 @@ export class VoiceChannelTracker {
    * writes — the bound is belt and braces against an unforeseen source of
    * new work, not a case we expect to hit.
    */
-  private async drainEndingSessions(userId: string): Promise<boolean> {
+  private async drainEndingSessions(
+    userId: string,
+  ): Promise<{ drained: boolean; timedOut: boolean }> {
     let drainedAny = false;
+    const deadline = Date.now() + DRAIN_TIMEOUT_MS;
 
     for (let round = 0; round < MAX_DRAIN_ROUNDS; round++) {
       const pending = this.endingSessions.get(userId);
-      if (!pending || pending.size === 0) return drainedAny;
+      if (!pending || pending.size === 0) {
+        return { drained: drainedAny, timedOut: false };
+      }
 
       if (!drainedAny) {
         logger.info(
@@ -194,15 +242,23 @@ export class VoiceChannelTracker {
         );
       }
       drainedAny = true;
-      // `endTracking` swallows its own errors, but settle either way rather
-      // than letting one rejection abandon the rest of the drain.
-      await Promise.allSettled([...pending]);
+
+      const remaining = deadline - Date.now();
+      if (remaining <= 0 || !(await settleWithin(pending, remaining))) {
+        // An `endTracking` call does more than its write — Discord fetches,
+        // accolade checks — so a stall there must not take the rest of the
+        // purge down with it. Report it and move on.
+        logger.warn(
+          `Timed out waiting for in-flight voice session persist(s) for user ${userId}; the purge will continue and report the step as incomplete`,
+        );
+        return { drained: drainedAny, timedOut: true };
+      }
     }
 
     logger.warn(
       `Gave up draining in-flight voice session persists for user ${userId} after ${MAX_DRAIN_ROUNDS} rounds`,
     );
-    return drainedAny;
+    return { drained: drainedAny, timedOut: true };
   }
 
   public async handleVoiceStateUpdate(

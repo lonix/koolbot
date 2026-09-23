@@ -192,6 +192,16 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // whose revoke failed is deliberately left on the roster for the next
   // reconcile to retry — and reported here as a partial step, because a
   // member who asked to be forgotten is still wearing the role.
+  //
+  // **Known race, not closed here.** A scheduled reconcile that snapshotted
+  // the rankings *before* this revoke can write them back afterwards and
+  // re-grant the role. It is self-limiting — the member's voice data is gone
+  // by then, so the following reconcile finds they no longer qualify and
+  // revokes — but it means the role can survive one cron cycle past a purge
+  // the report called complete. Closing it needs the reconcile to exclude
+  // in-purge members at write time, which is a `LeaderboardRoleService`
+  // change belonging with the route that will call this (see the web-surface
+  // issue), not a coordinator one.
   "leaderboard-role-assignment": {
     actions: ["pull-member"],
     run: async ({ userId, guildId, client }, emit) => {
@@ -596,9 +606,10 @@ export class UserDataDeletionService {
     //    read its session is still to come — so `forgetActiveSession` also
     //    waits that persist out before returning.
     await this.runStep(steps, VOICE_SESSION_CACHE, "evict", async (emit) => {
-      const { discarded, drained } = await VoiceChannelTracker.getInstance(
-        this.client,
-      ).forgetActiveSession(userId);
+      const { discarded, drained, timedOut } =
+        await VoiceChannelTracker.getInstance(this.client).forgetActiveSession(
+          userId,
+        );
       const notes = [
         discarded
           ? "in-flight voice session discarded"
@@ -610,6 +621,13 @@ export class UserDataDeletionService {
         matched: discarded ? 1 : 0,
         removed: discarded ? 1 : 0,
         note: notes.join("; "),
+        // A persist still running when the wait timed out can land after the
+        // deletes below and resurrect the row. The re-check in step 5 may
+        // still catch it, but the purge cannot claim to have closed the
+        // window, so it says so rather than hanging on it.
+        error: timedOut
+          ? "timed out waiting for an in-flight voice session persist; a tracking row may be recreated after this purge"
+          : undefined,
       });
     });
 

@@ -272,7 +272,11 @@ describe("VoiceChannelTracker", () => {
       expect(tracker.getActiveSession("user123")).not.toBeNull();
 
       const forgotten = await tracker.forgetActiveSession("user123");
-      expect(forgotten).toEqual({ discarded: true, drained: false });
+      expect(forgotten).toEqual({
+        discarded: true,
+        drained: false,
+        timedOut: false,
+      });
       expect(tracker.getActiveSession("user123")).toBeNull();
 
       (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
@@ -288,6 +292,7 @@ describe("VoiceChannelTracker", () => {
       await expect(tracker.forgetActiveSession("nobody")).resolves.toEqual({
         discarded: false,
         drained: false,
+        timedOut: false,
       });
       expect(tracker.getActiveSession("nobody")).toBeNull();
     });
@@ -351,6 +356,7 @@ describe("VoiceChannelTracker", () => {
         // write it could not call back was still on its way.
         discarded: true,
         drained: true,
+        timedOut: false,
       });
       expect(VoiceChannelTracking.findOneAndUpdate).toHaveBeenCalled();
     });
