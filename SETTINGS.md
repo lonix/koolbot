@@ -746,6 +746,9 @@ self-service, so there is no admin page — just the settings below (see
 - Post rows are removed an hour after a post's expiry instant at the latest.
   That is enforced by a database TTL index as well as by the sweep, so
   turning the feature off mid-post does not leave roster IDs behind.
+- Turning `lfg.enabled` off closes any posts still open (they show as
+  "LFG was switched off on this server") rather than abandoning them with
+  buttons that no longer do anything.
 
 ---
 

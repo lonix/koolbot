@@ -11,10 +11,15 @@ const configValues: {
   numbers: Record<string, number>;
 } = { booleans: {}, strings: {}, numbers: {} };
 
+/** Reload callbacks the service registers, so tests can fire them. */
+const reloadCallbacks: Array<() => Promise<void>> = [];
+
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
-      registerReloadCallback: jest.fn(),
+      registerReloadCallback: jest.fn((cb: () => Promise<void>) => {
+        reloadCallbacks.push(cb);
+      }),
       getBoolean: jest.fn(async (key: string, fallback?: boolean) =>
         key in configValues.booleans ? configValues.booleans[key] : fallback,
       ),
@@ -135,6 +140,7 @@ function buildService(): InstanceType<typeof LfgService> {
 
 beforeEach(() => {
   LfgService.reset();
+  reloadCallbacks.length = 0;
   configValues.booleans = {};
   configValues.strings = {};
   configValues.numbers = {};
@@ -1339,5 +1345,64 @@ describe("the sweep takes the post's turn before rendering", () => {
     await Promise.all([click, sweep]);
 
     expect(order).toEqual(["click:done", "sweep:render"]);
+  });
+});
+
+// Disabling the feature stops the sweep — that is the base class doing its
+// job — but it would otherwise abandon every live post: the buttons start
+// refusing at expiry and the TTL removes the row, while the message sits
+// there looking open with enabled buttons for good.
+describe("turning the feature off closes what is still open", () => {
+  /** Fire the reload callbacks the service registered at construction. */
+  async function triggerReload(): Promise<void> {
+    for (const cb of reloadCallbacks) await cb();
+  }
+
+  it("closes and re-renders open posts when LFG is switched off", async () => {
+    const open = post();
+    const closed = {
+      ...open,
+      state: "closed" as const,
+      closeReason: "disabled" as const,
+      renderPending: true,
+    };
+    const svc = buildService();
+    configValues.booleans["lfg.enabled"] = false;
+    LfgPostMock.find = jest.fn(() => queryReturning([open]));
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+    LfgPostMock.findById = jest.fn(async () => closed);
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+
+    await triggerReload();
+
+    expect(LfgPostMock.find).toHaveBeenCalledWith({ state: "open" });
+    expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: POST_ID, state: "open" },
+      {
+        $set: {
+          state: "closed",
+          closeReason: "disabled",
+          renderPending: true,
+        },
+      },
+      { new: true },
+    );
+    expect(render).toHaveBeenCalledWith(closed);
+  });
+
+  it("does nothing while the feature is still on", async () => {
+    buildService();
+    configValues.booleans["lfg.enabled"] = true;
+    LfgPostMock.find = jest.fn(() => queryReturning([post()]));
+
+    await triggerReload();
+
+    // A reload that merely changed some other setting must not close posts.
+    expect(LfgPostMock.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  it("says so on the post rather than blaming the host", () => {
+    expect(closedSummary("disabled")).toMatch(/switched off/i);
+    expect(closedSummary("disabled")).not.toMatch(/host/i);
   });
 });

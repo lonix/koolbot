@@ -36,7 +36,7 @@ export const LFG_ROW_TTL_SECONDS = 60 * 60;
 export type LfgState = "open" | "closed";
 
 /** Why a post closed, for the closed embed's wording. */
-export type LfgCloseReason = "expired" | "full" | "cancelled";
+export type LfgCloseReason = "expired" | "full" | "cancelled" | "disabled";
 
 export interface ILfgPost extends Document {
   guildId: string;
@@ -102,7 +102,7 @@ const LfgPostSchema = new Schema<ILfgPost>(
     },
     closeReason: {
       type: String,
-      enum: ["expired", "full", "cancelled", null],
+      enum: ["expired", "full", "cancelled", "disabled", null],
       default: null,
     },
     renderPending: { type: Boolean, default: false },

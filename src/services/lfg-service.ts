@@ -209,6 +209,8 @@ export function closedSummary(reason: LfgCloseReason | null): string {
       return "Party filled up.";
     case "cancelled":
       return "Closed by the host.";
+    case "disabled":
+      return "Closed — LFG was switched off on this server.";
     case "expired":
       return "Expired before the party filled.";
     default:
@@ -236,6 +238,48 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       cronContext: "lfg",
       runLabel: "LFG sweep",
     });
+    // Registered after the base class's own reload callback, so the cron has
+    // already been stopped by the time this runs.
+    this.configService.registerReloadCallback(() => this.drainIfDisabled());
+  }
+
+  /**
+   * Close and re-render whatever is still open when an operator turns LFG off.
+   *
+   * Disabling the feature stops the sweep, which is what the base class is
+   * for — but it would otherwise abandon every live post: the buttons start
+   * refusing at `expiresAt` and the TTL eventually removes the row, while the
+   * message sits there looking open with enabled buttons for good. Draining
+   * on the way out is the one moment this can be put right, and it makes
+   * "disabled" mean the same thing on screen as it does in the database.
+   *
+   * Bounded like the sweep's own scans. A server with more than a batch of
+   * live posts at the instant it is switched off gets the rest on the next
+   * reload; nothing is lost either way, since the rows still expire.
+   */
+  private async drainIfDisabled(): Promise<void> {
+    try {
+      if (await this.isEnabled()) return;
+
+      const open = await LfgPost.find({ state: "open" })
+        .sort({ expiresAt: 1 })
+        .limit(SCAN_BATCH_SIZE);
+      if (open.length === 0) return;
+
+      let closed = 0;
+      for (const post of open) {
+        const row = await this.closePost(String(post._id), "disabled");
+        if (!row) continue;
+        closed += 1;
+        await this.renderAndSettle(row);
+      }
+      logger.info(`LFG disabled: closed ${closed} open post(s)`);
+    } catch (error) {
+      logger.error(
+        "Error closing LFG posts after the feature was disabled:",
+        error,
+      );
+    }
   }
 
   protected async isEnabled(): Promise<boolean> {
