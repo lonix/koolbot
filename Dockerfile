@@ -56,8 +56,12 @@ USER 1000:1000
 # Health check — uses the readiness endpoint (/ready, gated on Discord +
 # MongoDB). Kubernetes deployments should point a livenessProbe at /live
 # (always 200 once listening) and a readinessProbe at /ready.
+# Exec form (hadolint DL3025); the explicit shell keeps `|| exit 1` so wget's
+# non-zero codes (4/8) map onto Docker's 1 = unhealthy (2 is reserved).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/ready || exit 1
+  CMD ["/bin/sh", "-c", "wget --no-verbose --tries=1 --spider http://localhost:3000/ready || exit 1"]
 
-# Start the application
-CMD ["npm", "start"]
+# Start the application. Run node directly (what `npm start` does) so SIGTERM
+# from `docker stop` / Kubernetes reaches the bot's graceful-shutdown handler
+# instead of going through the npm CLI.
+CMD ["node", "dist/index.js"]
