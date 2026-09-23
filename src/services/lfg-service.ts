@@ -73,6 +73,18 @@ const CLOSED_ROW_RETENTION_MS = LFG_ROW_TTL_SECONDS * 1000;
 const SCAN_BATCH_SIZE = 100;
 
 /**
+ * Most batches the disable drain will work through, per phase.
+ *
+ * The drain is the last chance to tidy up before the sweep stops, so it keeps
+ * going rather than settling for one batch — but it runs inside a config
+ * reload, so it cannot run unbounded either. Ten batches is far more live
+ * posts than a server plausibly has at the instant it switches the feature
+ * off, and anything past it keeps `renderPending` set for whenever LFG is
+ * turned back on.
+ */
+const DRAIN_MAX_PASSES = 10;
+
+/**
  * Serialises voice-channel resolution per host.
  *
  * `VoiceChannelManager` tracks one dynamic channel per owner, and the check
@@ -261,19 +273,53 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     try {
       if (await this.isEnabled()) return;
 
-      const open = await LfgPost.find({ state: "open" })
-        .sort({ expiresAt: 1 })
-        .limit(SCAN_BATCH_SIZE);
-      if (open.length === 0) return;
-
+      // Phase 1: close what is still open. A `creating` row is skipped — its
+      // message does not exist yet, and `createPost` promotes it in a moment.
       let closed = 0;
-      for (const post of open) {
-        const row = await this.closePost(String(post._id), "disabled");
-        if (!row) continue;
-        closed += 1;
-        await this.renderAndSettle(row);
+      for (let pass = 0; pass < DRAIN_MAX_PASSES; pass++) {
+        const open = await LfgPost.find({ state: "open" })
+          .sort({ expiresAt: 1 })
+          .limit(SCAN_BATCH_SIZE);
+        if (open.length === 0) break;
+
+        let closedThisPass = 0;
+        for (const post of open) {
+          const row = await this.closePost(String(post._id), "disabled");
+          if (!row) continue;
+          closedThisPass += 1;
+          await this.renderAndSettle(row);
+        }
+        // Nothing moved, so another identical pass would not move anything.
+        if (closedThisPass === 0) break;
+        closed += closedThisPass;
       }
+
+      // Phase 2: retry every message still known to be out of date, including
+      // ones left over from earlier ticks — with the job stopped, this is the
+      // last attempt they will get until the feature comes back.
+      for (let pass = 0; pass < DRAIN_MAX_PASSES; pass++) {
+        const pending = await LfgPost.find({ renderPending: true })
+          .sort({ lastRenderAttemptAt: 1 })
+          .limit(SCAN_BATCH_SIZE);
+        if (pending.length === 0) break;
+
+        let rendered = 0;
+        for (const post of pending) {
+          if (await this.renderAndSettle(post)) rendered += 1;
+        }
+        // Every edit in the batch failed — the channel is gone, or Discord is
+        // refusing. Hammering it further will not help.
+        if (rendered === 0) break;
+      }
+
+      const stranded = await LfgPost.countDocuments({ renderPending: true });
       logger.info(`LFG disabled: closed ${closed} open post(s)`);
+      if (stranded > 0) {
+        logger.warn(
+          `LFG disabled: ${stranded} post(s) still show as open — their messages could not be edited. ` +
+            "Re-enable LFG to retry, or remove them by hand.",
+        );
+      }
     } catch (error) {
       logger.error(
         "Error closing LFG posts after the feature was disabled:",
@@ -407,7 +453,8 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       memberIds: [input.hostId],
       channelId: channel.id,
       voiceChannelId: null,
-      state: "open",
+      // Not live until its message exists — see `LfgState`.
+      state: "creating",
       expiresAt: new Date(
         Date.now() + Math.max(1, expiryMinutes) * MS_PER_MINUTE,
       ),
@@ -437,6 +484,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     }
 
     post.messageId = message.id;
+    post.state = "open";
     try {
       await post.save();
     } catch (error) {
@@ -623,7 +671,9 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     const older = await LfgPost.countDocuments({
       guildId: post.guildId,
       hostId: post.hostId,
-      state: "open",
+      // A reservation counts: it is about to become a post, and the member
+      // should not be able to outrun their own cap by running /lfg twice.
+      state: { $in: ["creating", "open"] },
       // Same condition the interactive writes use: a post that has run past
       // its closing time accepts nobody, so it must not hold a slot either.
       // Without this a member is locked out of /lfg for up to a minute after

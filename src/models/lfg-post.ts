@@ -32,8 +32,18 @@ import mongoose, { Schema, Document } from "mongoose";
  */
 export const LFG_ROW_TTL_SECONDS = 60 * 60;
 
-/** Lifecycle states. `open → closed`; `closed` is terminal. */
-export type LfgState = "open" | "closed";
+/**
+ * Lifecycle states: `creating → open → closed`, with `closed` terminal.
+ *
+ * `creating` is the moment between the row being reserved and its message
+ * existing. Nothing acts on a row in that state — not the expiry sweep, not
+ * the disable drain — because a post with no message cannot be rendered, and
+ * a sweep that "successfully" settled one would clear its pending flag and
+ * strand the message that is about to be sent. A row abandoned in `creating`
+ * (the process died mid-send) is invisible to everything and ages out with
+ * the TTL.
+ */
+export type LfgState = "creating" | "open" | "closed";
 
 /** Why a post closed, for the closed embed's wording. */
 export type LfgCloseReason = "expired" | "full" | "cancelled" | "disabled";
@@ -97,8 +107,8 @@ const LfgPostSchema = new Schema<ILfgPost>(
     state: {
       type: String,
       required: true,
-      enum: ["open", "closed"],
-      default: "open",
+      enum: ["creating", "open", "closed"],
+      default: "creating",
     },
     closeReason: {
       type: String,

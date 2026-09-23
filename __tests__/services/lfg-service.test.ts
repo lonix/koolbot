@@ -626,7 +626,9 @@ describe("createPost", () => {
     expect(LfgPostMock.countDocuments).toHaveBeenCalledWith({
       guildId: "guild-1",
       hostId: "host-1",
-      state: "open",
+      // A reservation counts too, so a member cannot outrun their own cap by
+      // running /lfg twice in the same instant.
+      state: { $in: ["creating", "open"] },
       // An expired post accepts nobody, so it must not hold a slot either.
       expiresAt: { $gt: expect.any(Date) },
       _id: { $lt: POST_ID },
@@ -1404,5 +1406,119 @@ describe("turning the feature off closes what is still open", () => {
   it("says so on the post rather than blaming the host", () => {
     expect(closedSummary("disabled")).toMatch(/switched off/i);
     expect(closedSummary("disabled")).not.toMatch(/host/i);
+  });
+});
+
+// The row exists before its message does. A sweep or drain that acted on it
+// in that window would "successfully" settle a post with no message to edit,
+// clear its pending flag, and strand the message that was about to be sent —
+// a closed row displayed with live buttons and nothing left to retry.
+describe("a post is not live until its message exists", () => {
+  function stubChannelClient(send: jest.Mock): unknown {
+    const channel = {
+      id: "chan-1",
+      isTextBased: () => true,
+      isDMBased: () => false,
+      send,
+    };
+    return { channels: { fetch: jest.fn(async () => channel) } };
+  }
+
+  const input = {
+    guildId: "guild-1",
+    hostId: "host-1",
+    game: "Valorant",
+    note: "",
+    partySize: 4,
+    fallbackChannelId: "chan-1",
+  };
+
+  it("reserves the row as `creating`, then promotes it once sent", async () => {
+    const saved: Record<string, unknown>[] = [];
+    LfgPostMock.mockImplementation(function (
+      this: Record<string, unknown>,
+      doc: Record<string, unknown>,
+    ) {
+      Object.assign(this, doc, {
+        _id: POST_ID,
+        save: jest.fn(async () => {
+          saved.push({ ...this });
+        }),
+      });
+    } as never);
+    const client = stubChannelClient(jest.fn(async () => ({ id: "msg-9" })));
+
+    await LfgService.getInstance(client as never).createPost(input);
+
+    expect(saved[0].state).toBe("creating");
+    expect(saved[0].messageId).toBeUndefined();
+    expect(saved[saved.length - 1].state).toBe("open");
+    expect(saved[saved.length - 1].messageId).toBe("msg-9");
+  });
+
+  it("keeps the expiry sweep off rows that have no message yet", async () => {
+    const find = jest
+      .fn<(...args: unknown[]) => unknown>()
+      .mockReturnValueOnce(queryReturning([]))
+      .mockReturnValueOnce(queryReturning([]));
+    LfgPostMock.find = find;
+    configValues.booleans["lfg.enabled"] = true;
+
+    await buildService().runNow();
+
+    // `creating` is not `open`, so a half-made post is never closed out from
+    // under `createPost`.
+    expect(find).toHaveBeenNthCalledWith(1, {
+      state: "open",
+      expiresAt: { $lte: expect.any(Date) },
+    });
+  });
+});
+
+describe("the disable drain keeps going until it is done", () => {
+  async function triggerReload(): Promise<void> {
+    for (const cb of reloadCallbacks) await cb();
+  }
+
+  it("works through more than one batch of open posts", async () => {
+    const svc = buildService();
+    configValues.booleans["lfg.enabled"] = false;
+    const batches = [[post()], [post()], []];
+    let call = 0;
+    LfgPostMock.find = jest.fn(() => {
+      const rows = batches[Math.min(call++, batches.length - 1)] ?? [];
+      return queryReturning(rows);
+    });
+    const closed = { ...post(), state: "closed" as const };
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+    LfgPostMock.findById = jest.fn(async () => closed);
+    LfgPostMock.countDocuments = jest.fn(async () => 0);
+    jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+
+    await triggerReload();
+
+    // One batch was never the whole job: a second pass ran, and a third found
+    // nothing and stopped.
+    expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it("stops rather than hammering a batch where every edit fails", async () => {
+    const svc = buildService();
+    configValues.booleans["lfg.enabled"] = false;
+    const stuck = post({ state: "closed", renderPending: true });
+    LfgPostMock.find = jest.fn((filter: unknown) =>
+      queryReturning(
+        (filter as { renderPending?: boolean }).renderPending ? [stuck] : [],
+      ),
+    );
+    LfgPostMock.findById = jest.fn(async () => stuck);
+    LfgPostMock.countDocuments = jest.fn(async () => 1);
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(false);
+
+    await triggerReload();
+
+    // One pass, not ten: nothing is getting through, so retrying the same
+    // batch nine more times inside a config reload helps nobody.
+    expect(render).toHaveBeenCalledTimes(1);
   });
 });
