@@ -446,6 +446,30 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Session infrastructure. `WebSessionService.revokeForUser` soft-revokes ($set revokedAt) rather than destroying rows, which is the right behaviour and matches the export's classification.",
   },
   {
+    source: "src/models/lfg-post.ts",
+    collection: "lfg-post",
+    field: "memberIds",
+    exportable: false,
+    guildScoped: true,
+    note: "Ephemeral runtime state: an LFG roster the member joined. The row is deleted shortly after the post closes, which is at most an hour or so after it opened.",
+    onDelete: "expires",
+    subject: "self",
+    deleteNote:
+      "Ephemeral runtime state: the whole post row is deleted by the LFG sweep shortly after the post closes, so a purge has nothing lasting to act on. Pulling a member mid-post would silently shrink a live party instead.",
+  },
+  {
+    source: "src/models/lfg-post.ts",
+    collection: "lfg-post",
+    field: "hostId",
+    exportable: false,
+    guildScoped: true,
+    note: "Ephemeral runtime state: who opened a short-lived LFG post. Gone with the row once the post closes.",
+    onDelete: "expires",
+    subject: "self",
+    deleteNote:
+      "Ephemeral runtime state: the row is deleted by the LFG sweep shortly after the post closes. Clearing the host mid-post would leave a live post nobody could close.",
+  },
+  {
     source: "src/models/voice-channel-ownership.ts",
     collection: "voice-channel-ownership",
     field: "ownerId",

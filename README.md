@@ -153,6 +153,7 @@ commands always registered):
 - `/achievements` — View earned accolades (`achievements.enabled`)
 - `/quote add` / `/quote edit` — Manage memorable quotes (`quotes.enabled`)
 - `/event` — Create, browse and RSVP to server events (`events.enabled`)
+- `/lfg` — Post a "looking for group" call for a game right now (`lfg.enabled`)
 - `/remind` — Set personal one-off reminders KoolBot DMs when due (`reminders.enabled`)
 - `/warn` — Record a moderation warning (`moderation.enabled`)
 - `/timeout` — Time a member out for any duration up to 28 days (`moderation.enabled`)
@@ -229,6 +230,7 @@ Web UI's Settings page once the bot is running.
 | **Rewind (Year-in-Review)** | End-of-year recap at `/me/rewind` plus a December nudge |
 | **Birthdays** | Timezone-aware birthday announcements and a temporary role |
 | **Events** | Scheduled events with RSVPs and temporary voice channels |
+| **LFG** | Ad-hoc "looking for group" posts with a live roster and Join buttons |
 | **Reminders** | Personal one-off `/remind` reminders, DM'd when due, with a per-member cap |
 | **Privacy** | Self-service data export: what KoolBot stores about a member, downloadable at `/me/privacy` |
 | **Reaction Roles** | Self-assignable role categories |

@@ -476,6 +476,7 @@ describe("Config Schema", () => {
       "rewind.enabled": false,
       "birthdays.enabled": false,
       "events.enabled": false,
+      "lfg.enabled": false,
       "reactionroles.enabled": false,
       "notices.enabled": false,
       "polls.enabled": false,
@@ -509,6 +510,10 @@ describe("Config Schema", () => {
       "digest.include_achievements": true,
       "notices.header_enabled": true,
       "notices.header_pin_enabled": true,
+      // LFG posts advertise a voice channel by default (#957); the
+      // channel itself is created and swept by voice channel management,
+      // so this is inert until that feature is on too.
+      "lfg.voice_channel.enabled": true,
 
       // ─── Core infrastructure (always on; not feature-gated) ─────────
       // Audit logging is a cross-cutting operator-visibility feature
@@ -543,6 +548,7 @@ describe("Config Schema", () => {
       "digest.include_achievements": "digest.enabled",
       "notices.header_enabled": "notices.enabled",
       "notices.header_pin_enabled": "notices.enabled",
+      "lfg.voice_channel.enabled": "lfg.enabled",
     };
 
     it("audits every `*enabled` key in defaultConfig (no drift)", () => {

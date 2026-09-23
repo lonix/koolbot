@@ -112,6 +112,14 @@ export interface ConfigSchema {
   "events.create_lead_minutes": number; // How long before start the temp channel is created
   "events.default_duration_minutes": number; // Default event length when none is given
   "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
+
+  // LFG — ad-hoc "looking for group" posts (#957)
+  "lfg.enabled": boolean;
+  "lfg.channel_id": string; // Channel LFG posts go to (empty → the channel /lfg was run in)
+  "lfg.expiry_minutes": number; // How long a post stays open before the sweep closes it
+  "lfg.default_size": number; // Party size used when the member doesn't give one
+  "lfg.max_active_per_user": number; // Cap on a member's simultaneously open posts (0 = no cap)
+  "lfg.voice_channel.enabled": boolean; // Attach a dynamic voice channel to each post
   "reminders.enabled": boolean;
   "reminders.max_pending": number; // Per-member cap on undelivered reminders
 
@@ -348,6 +356,14 @@ export const defaultConfig: ConfigSchema = {
   "events.create_lead_minutes": 15,
   "events.default_duration_minutes": 120,
   "events.channel_grace_minutes": 15,
+
+  // LFG (#957) — feature gate off by default (rule 1)
+  "lfg.enabled": false,
+  "lfg.channel_id": "", // Empty → post in the channel /lfg was run in
+  "lfg.expiry_minutes": 60,
+  "lfg.default_size": 4,
+  "lfg.max_active_per_user": 1,
+  "lfg.voice_channel.enabled": true, // Still gated on voicechannels.enabled
   "reminders.enabled": false,
   "reminders.max_pending": 10,
 
@@ -878,6 +894,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Events",
     description:
       "Schedule server events that spin up a temporary voice channel shortly before they start, let members RSVP with buttons, post a reminder beforehand, and tear the channel down once it ends. For servers without static voice channels. Manage from /admin/events or the /event command.",
+  },
+  lfg: {
+    title: "LFG",
+    description:
+      'Ad-hoc "looking for group" posts: a member runs /lfg to say what they want to play right now, others join from the post\'s buttons, and the post closes once the party fills or its timer runs out. The immediate counterpart to scheduled Events.',
   },
   reminders: {
     title: "Reminders",
@@ -1508,6 +1529,51 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How long after an event ends the bot waits before deleting its (now empty) voice channel.",
     category: "events",
     type: "number",
+  },
+  "lfg.enabled": {
+    label: "LFG enabled",
+    description:
+      'Enable ad-hoc "looking for group" posts and the /lfg command. A member posts what they want to play right now; others join from the post\'s buttons.',
+    category: "lfg",
+    type: "boolean",
+  },
+  "lfg.channel_id": {
+    label: "LFG channel",
+    description:
+      "Text channel LFG posts are sent to. Leave empty to post in whichever channel /lfg was run in.",
+    category: "lfg",
+    type: "channel",
+  },
+  "lfg.expiry_minutes": {
+    label: "Post lifetime (minutes)",
+    description:
+      "How long an LFG post stays open before it closes itself. A post that fills up closes as soon as it does.",
+    category: "lfg",
+    type: "number",
+    min: 1,
+  },
+  "lfg.default_size": {
+    label: "Default party size",
+    description:
+      "Party size (host included) used when the member doesn't pass one to /lfg.",
+    category: "lfg",
+    type: "number",
+    min: 2,
+  },
+  "lfg.max_active_per_user": {
+    label: "Open posts per member",
+    description:
+      "How many LFG posts one member may have open at a time. Set to 0 for no cap.",
+    category: "lfg",
+    type: "number",
+    min: 0,
+  },
+  "lfg.voice_channel.enabled": {
+    label: "Attach a voice channel",
+    description:
+      "Create a dynamic voice channel for each LFG post and link it from the post. Only takes effect while voice channel management is enabled, since that feature owns the channel's cleanup; a host who already owns a dynamic channel gets theirs linked instead of a second one.",
+    category: "lfg",
+    type: "boolean",
   },
   "reminders.enabled": {
     label: "Reminders enabled",

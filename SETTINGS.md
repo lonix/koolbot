@@ -41,6 +41,7 @@ Complete configuration reference for all KoolBot settings.
 - [Rewind (Year-in-Review)](#-rewind-year-in-review)
 - [Birthdays](#-birthdays)
 - [Events](#-events)
+- [LFG (Looking for Group)](#-lfg-looking-for-group)
 - [Reminders](#-reminders)
 - [Privacy & Data Export](#-privacy--data-export)
 - [Moderation](#-moderation)
@@ -700,6 +701,44 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 - Only administrators can create, cancel, or start events; `/event list`
   is open to everyone. A configurable creator role is a possible future
   enhancement. Recurring events are not yet supported.
+
+---
+
+## 🔎 LFG (Looking for Group)
+
+Ad-hoc **"looking for group"** posts — the immediate counterpart to
+scheduled [Events](#-events). A member runs **`/lfg`** to say what they
+want to play _right now_, KoolBot posts an embed with a live roster and
+**Join / Leave / Close** buttons, and the post closes itself as soon as
+the party fills, the host closes it, or its timer runs out. Member
+self-service, so there is no admin page — just the settings below (see
+[COMMANDS.md](COMMANDS.md#lfg)).
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `lfg.enabled` | `false` | Master switch — enables the feature and the `/lfg` command |
+| `lfg.channel_id` | `""` | Channel LFG posts are sent to. Empty posts in whichever channel `/lfg` was run in |
+| `lfg.expiry_minutes` | `60` | How long a post stays open before it closes itself |
+| `lfg.default_size` | `4` | Party size (host included) used when the member doesn't pass `size:` |
+| `lfg.max_active_per_user` | `1` | How many posts one member may have open at a time (`0` = no cap) |
+| `lfg.voice_channel.enabled` | `true` | Attach a voice channel to each post and link it from the embed |
+
+**Notes:**
+
+- Expiry is decided by a once-a-minute scan over the stored post, so it is
+  **restart-safe**: a post opened before a restart still closes on time,
+  and its buttons keep working afterwards.
+- The attached voice channel is a normal **dynamic voice channel** created
+  through the voice-channel manager, which also owns its cleanup — it is
+  removed by the usual empty-channel sweep once everyone leaves. Because of
+  that, `lfg.voice_channel.enabled` only takes effect while
+  `voicechannels.enabled` is on; with voice management off, posts are
+  published without a channel rather than leaving one nobody would sweep.
+- A host who already owns a dynamic voice channel gets **that** channel
+  linked instead of a second one.
+- Closing a post never deletes its voice channel — members may still be in
+  it.
+- Party size is clamped to 2–25 so the roster fits in one embed field.
 
 ---
 
