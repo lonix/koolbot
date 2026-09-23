@@ -111,6 +111,25 @@ const voiceResolution = createKeyedLock();
  */
 const postLock = createKeyedLock();
 
+/**
+ * Serialises opening a post against switching the feature off.
+ *
+ * The drain clears reservations, but only the ones that exist when it looks.
+ * A `/lfg` that passed the enablement gate a moment earlier could otherwise
+ * insert its reservation *behind* that sweep and promote it once the cron had
+ * already stopped, leaving a post nothing would ever close. Creation and the
+ * drain take turns instead, so a reservation is either gone before the post
+ * is sent (the promotion then fails and the message is withdrawn) or made
+ * after the drain has finished, which is simply a post opened while the
+ * feature was on.
+ *
+ * One key rather than one per guild: the drain is not guild-scoped, and
+ * `/lfg` is a human-paced command, so the contention is a member waiting out
+ * another member's send.
+ */
+const LIFECYCLE_KEY = "lfg-lifecycle";
+const lifecycleLock = createKeyedLock();
+
 /** Smallest party worth advertising: the host plus one. */
 export const MIN_PARTY_SIZE = 2;
 /** Roster mentions have to stay inside one embed field. */
@@ -285,64 +304,69 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
   private async drainIfDisabled(): Promise<void> {
     try {
       if (await this.isEnabled()) return;
-
-      // Phase 0: drop reservations. A `creating` row has no message to edit,
-      // and its `createPost` is still in flight — deleting it makes that
-      // caller's conditional promotion fail, which is how it learns to take
-      // its message back down instead of opening a post the stopped cron
-      // would never close.
-      await LfgPost.deleteMany({ state: "creating" });
-
-      // Phase 1: close what is still open.
-      let closed = 0;
-      for (let pass = 0; pass < DRAIN_MAX_PASSES; pass++) {
-        const open = await LfgPost.find({ state: "open" })
-          .sort({ expiresAt: 1 })
-          .limit(SCAN_BATCH_SIZE);
-        if (open.length === 0) break;
-
-        let closedThisPass = 0;
-        for (const post of open) {
-          const row = await this.closePost(String(post._id), "disabled");
-          if (!row) continue;
-          closedThisPass += 1;
-          await this.renderAndSettle(row);
-        }
-        // Nothing moved, so another identical pass would not move anything.
-        if (closedThisPass === 0) break;
-        closed += closedThisPass;
-      }
-
-      // Phase 2: retry every message still known to be out of date, including
-      // ones left over from earlier ticks — with the job stopped, this is the
-      // last attempt they will get until the feature comes back.
-      for (let pass = 0; pass < DRAIN_MAX_PASSES; pass++) {
-        const pending = await LfgPost.find({ renderPending: true })
-          .sort({ lastRenderAttemptAt: 1 })
-          .limit(SCAN_BATCH_SIZE);
-        if (pending.length === 0) break;
-
-        let rendered = 0;
-        for (const post of pending) {
-          if (await this.renderAndSettle(post)) rendered += 1;
-        }
-        // Every edit in the batch failed — the channel is gone, or Discord is
-        // refusing. Hammering it further will not help.
-        if (rendered === 0) break;
-      }
-
-      const stranded = await LfgPost.countDocuments({ renderPending: true });
-      logger.info(`LFG disabled: closed ${closed} open post(s)`);
-      if (stranded > 0) {
-        logger.warn(
-          `LFG disabled: ${stranded} post(s) still show as open — their messages could not be edited. ` +
-            "Re-enable LFG to retry, or remove them by hand.",
-        );
-      }
+      // Wait out any `/lfg` already between its gate check and its message,
+      // and keep the next one waiting until this has finished.
+      await lifecycleLock.run(LIFECYCLE_KEY, () => this.drain());
     } catch (error) {
       logger.error(
         "Error closing LFG posts after the feature was disabled:",
         error,
+      );
+    }
+  }
+
+  /** The drain itself, run while holding the lifecycle turn. */
+  private async drain(): Promise<void> {
+    // Phase 0: drop reservations. A `creating` row has no message to edit,
+    // and its `createPost` is still in flight — deleting it makes that
+    // caller's conditional promotion fail, which is how it learns to take
+    // its message back down instead of opening a post the stopped cron
+    // would never close.
+    await LfgPost.deleteMany({ state: "creating" });
+
+    // Phase 1: close what is still open.
+    let closed = 0;
+    for (let pass = 0; pass < DRAIN_MAX_PASSES; pass++) {
+      const open = await LfgPost.find({ state: "open" })
+        .sort({ expiresAt: 1 })
+        .limit(SCAN_BATCH_SIZE);
+      if (open.length === 0) break;
+
+      let closedThisPass = 0;
+      for (const post of open) {
+        const row = await this.closeAndSettle(String(post._id), "disabled");
+        if (!row) continue;
+        closedThisPass += 1;
+      }
+      // Nothing moved, so another identical pass would not move anything.
+      if (closedThisPass === 0) break;
+      closed += closedThisPass;
+    }
+
+    // Phase 2: retry every message still known to be out of date, including
+    // ones left over from earlier ticks — with the job stopped, this is the
+    // last attempt they will get until the feature comes back.
+    for (let pass = 0; pass < DRAIN_MAX_PASSES; pass++) {
+      const pending = await LfgPost.find({ renderPending: true })
+        .sort({ lastRenderAttemptAt: 1 })
+        .limit(SCAN_BATCH_SIZE);
+      if (pending.length === 0) break;
+
+      let rendered = 0;
+      for (const post of pending) {
+        if (await this.renderAndSettle(post)) rendered += 1;
+      }
+      // Every edit in the batch failed — the channel is gone, or Discord is
+      // refusing. Hammering it further will not help.
+      if (rendered === 0) break;
+    }
+
+    const stranded = await LfgPost.countDocuments({ renderPending: true });
+    logger.info(`LFG disabled: closed ${closed} open post(s)`);
+    if (stranded > 0) {
+      logger.warn(
+        `LFG disabled: ${stranded} post(s) still show as open — their messages could not be edited. ` +
+          "Re-enable LFG to retry, or remove them by hand.",
       );
     }
   }
@@ -389,10 +413,9 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
 
     for (const post of due) {
       try {
-        const closed = await this.closePost(String(post._id), "expired");
+        const closed = await this.closeAndSettle(String(post._id), "expired");
         if (!closed) continue;
         summary.expired += 1;
-        await this.renderAndSettle(closed);
       } catch (error) {
         logger.error(
           `Error expiring LFG post ${sanitizeForLog(String(post._id))}:`,
@@ -453,6 +476,11 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
    * rather than leaving a post nobody can see or close.
    */
   public async createPost(input: CreateLfgInput): Promise<CreateLfgResult> {
+    return lifecycleLock.run(LIFECYCLE_KEY, () => this.openPost(input));
+  }
+
+  /** The body of `createPost`, run while holding the lifecycle turn. */
+  private async openPost(input: CreateLfgInput): Promise<CreateLfgResult> {
     const channelId =
       (await this.configService.getString("lfg.channel_id", "")) ||
       input.fallbackChannelId;
@@ -851,21 +879,52 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
    * agrees with the row, and either way stamped with the attempt so a row
    * that keeps failing cannot hold the front of the retry batch.
    *
-   * Runs under the post's lock and re-reads the row inside it, so a click
-   * that lands between the sweep's query and its edit is never overwritten by
+   * Takes the post's turn and re-reads the row inside it, so a click that
+   * lands between the caller's query and this edit is never overwritten by
    * the older snapshot — and `renderPending` is only cleared for the version
    * actually rendered.
    */
   private async renderAndSettle(post: ILfgPost): Promise<boolean> {
     const postId = String(post._id);
+    return this.runOnPost(postId, () => this.settle(postId));
+  }
+
+  /**
+   * Close a post and re-render it as one indivisible step.
+   *
+   * Closing outside the post's turn is not enough, even though the render
+   * takes it: a click already mid-flight would render its own (open) snapshot
+   * and clear `renderPending` for a row this close had just changed
+   * underneath it. If the render that follows then fails, the row is left
+   * marked settled and the message keeps its live-looking buttons for good.
+   * Holding the turn across both makes the close invisible to a click until
+   * the message agrees with it.
+   *
+   * Returns the closed row when this call was the one that closed it.
+   */
+  private async closeAndSettle(
+    postId: string,
+    reason: LfgCloseReason,
+  ): Promise<ILfgPost | null> {
     return this.runOnPost(postId, async () => {
-      const fresh = await LfgPost.findById(postId);
-      // Purged in the meantime: there is no row left to disagree with.
-      if (!fresh) return false;
-      const rendered = await this.renderToMessage(fresh);
-      await this.recordRenderAttempt(postId, rendered);
-      return rendered;
+      const closed = await this.closePost(postId, reason);
+      if (!closed) return null;
+      await this.settle(postId);
+      return closed;
     });
+  }
+
+  /**
+   * Render a post from a fresh read and record how it went. Assumes the
+   * caller holds the post's turn.
+   */
+  private async settle(postId: string): Promise<boolean> {
+    const fresh = await LfgPost.findById(postId);
+    // Purged in the meantime: there is no row left to disagree with.
+    if (!fresh) return false;
+    const rendered = await this.renderToMessage(fresh);
+    await this.recordRenderAttempt(postId, rendered);
+    return rendered;
   }
 
   /**

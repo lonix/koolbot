@@ -1550,3 +1550,100 @@ describe("startup drains when the feature is already off", () => {
     expect(LfgPostMock.deleteMany).toHaveBeenCalledWith({ state: "creating" });
   });
 });
+
+// Closing outside the post's turn is not enough even when the render takes
+// it: a click already mid-flight renders its own (open) snapshot and clears
+// `renderPending` for a row the close had just changed underneath it. If the
+// render that follows then fails, the row is left marked settled and the
+// message keeps its live-looking buttons.
+describe("closing and re-rendering happen in one turn", () => {
+  it("holds the post's turn across the expiry close and its render", async () => {
+    const due = post();
+    const closed = { ...due, state: "closed" as const, renderPending: true };
+    let call = 0;
+    LfgPostMock.find = jest.fn(() => queryReturning(call++ === 0 ? [due] : []));
+    LfgPostMock.findById = jest.fn(async () => closed);
+
+    const svc = buildService();
+    const order: string[] = [];
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => {
+      order.push("close");
+      return closed;
+    });
+    jest.spyOn(svc, "renderToMessage").mockImplementation(async () => {
+      order.push("render");
+      return true;
+    });
+    configValues.booleans["lfg.enabled"] = true;
+
+    // Whichever of the two takes the turn first, the click must not land
+    // between the close and the render.
+    const sweep = svc.runNow();
+    const click = svc.runOnPost(POST_ID, async () => {
+      order.push("click");
+    });
+    await Promise.all([sweep, click]);
+
+    expect(order).toContain("click");
+    const closeAt = order.indexOf("close");
+    expect(closeAt).toBeGreaterThanOrEqual(0);
+    expect(order[closeAt + 1]).toBe("render");
+  });
+});
+
+// The drain clears reservations, but only the ones that exist when it looks.
+// A `/lfg` that passed the gate a moment earlier must not be able to insert
+// one behind that sweep and promote it after the cron has stopped.
+describe("opening a post and switching the feature off take turns", () => {
+  async function triggerReload(): Promise<void> {
+    for (const cb of reloadCallbacks) await cb();
+  }
+
+  it("makes the drain wait for a create that is already in flight", async () => {
+    const order: string[] = [];
+    let releaseSend: (() => void) | undefined;
+
+    const channel = {
+      id: "chan-1",
+      isTextBased: () => true,
+      isDMBased: () => false,
+      send: jest.fn(async () => {
+        order.push("send:start");
+        await new Promise<void>((resolve) => {
+          releaseSend = resolve;
+        });
+        order.push("send:done");
+        return { id: "msg-9", delete: jest.fn() };
+      }),
+    };
+    const client = { channels: { fetch: jest.fn(async () => channel) } };
+    const service = LfgService.getInstance(client as never);
+    stubSavedPosts();
+    LfgPostMock.countDocuments = jest.fn(async () => 0);
+    LfgPostMock.deleteMany = jest.fn(async () => {
+      order.push("drain:reservations");
+      return { deletedCount: 0 };
+    });
+    LfgPostMock.find = jest.fn(() => queryReturning([]));
+
+    const creating = service.createPost({
+      guildId: "guild-1",
+      hostId: "host-1",
+      game: "Valorant",
+      note: "",
+      partySize: 4,
+      fallbackChannelId: "chan-1",
+    });
+    // Let the create reach its send, then disable the feature.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    configValues.booleans["lfg.enabled"] = false;
+    const draining = triggerReload();
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    releaseSend?.();
+    await Promise.all([creating, draining]);
+
+    // The drain did not clear reservations until the post was fully out.
+    expect(order).toEqual(["send:start", "send:done", "drain:reservations"]);
+  });
+});
