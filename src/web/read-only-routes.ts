@@ -59,7 +59,7 @@ import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
-import { getEnv } from "../config/env.js";
+import { getEnv, getEnvConfigValue } from "../config/env.js";
 import {
   createSessionPingHandler,
   requireAdminRoleMiddleware,
@@ -224,8 +224,10 @@ export async function loadFeatureSettings(
   }
   if (roleData) pickers.roles = roleData.roles;
 
-  // Dependencies that live outside the card, judged from the same stored
-  // rows (falling back to the schema default) the Settings page shows.
+  // Dependencies that live outside the card, resolved in the same order
+  // `ConfigService.get` uses at runtime: stored row, then an env var named
+  // after the key, then the schema default. Skipping the env step would lock
+  // a control whose dependency is switched on through the environment.
   const storedByKey = new Map(storedRows.map((s) => [s.key, s.value]));
   const dependencyState = new Map<string, boolean>();
   for (const key of keys) {
@@ -233,7 +235,7 @@ export async function loadFeatureSettings(
       if (keys.includes(dep) || dependencyState.has(dep)) continue;
       const value = storedByKey.has(dep)
         ? storedByKey.get(dep)
-        : defaultConfig[dep];
+        : (getEnvConfigValue(dep) ?? defaultConfig[dep]);
       dependencyState.set(dep, isEnabledValue(value));
     }
   }

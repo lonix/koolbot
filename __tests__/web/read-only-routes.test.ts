@@ -207,6 +207,33 @@ describe("loadFeatureSettings (#971)", () => {
     expect(data.pickers.roles).toEqual([{ id: "r1", name: "Mods" }]);
   });
 
+  it("falls back to an env-supplied value before the schema default", async () => {
+    const { client } = countingClient();
+    const previous = process.env["achievements.enabled"];
+    const flipped = defaultConfig["achievements.enabled"] !== true;
+    process.env["achievements.enabled"] = String(flipped);
+    try {
+      const data = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["digest.include_achievements"],
+        [],
+      );
+      expect(data.dependencyState.get("achievements.enabled")).toBe(flipped);
+      // A stored row still wins over the environment.
+      const stored = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["digest.include_achievements"],
+        [{ key: "achievements.enabled", value: !flipped }],
+      );
+      expect(stored.dependencyState.get("achievements.enabled")).toBe(!flipped);
+    } finally {
+      if (previous === undefined) delete process.env["achievements.enabled"];
+      else process.env["achievements.enabled"] = previous;
+    }
+  });
+
   it("resolves off-card dependencies from stored rows, else the schema default", async () => {
     const { client } = countingClient();
     const data = await loadFeatureSettings(
