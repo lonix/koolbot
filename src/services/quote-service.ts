@@ -175,15 +175,30 @@ export interface QuoteImportResult {
  * described below — a deleted row whose Discord post lives on forever.
  */
 export interface QuoteMessageDeleter {
-  deleteQuoteMessage(messageId: string): Promise<void>;
+  /**
+   * Delete a quote-channel post. Resolves `true` only when the post is
+   * *gone* — an already-missing message counts, an unreachable channel or a
+   * refused delete does not (#916). A purge reports this back to the member
+   * as posts removed, so "no exception escaped" is not good enough.
+   */
+  deleteQuoteMessage(messageId: string): Promise<boolean>;
 }
 
 /** What a per-user quote purge did (#914). */
 export interface QuotePurgeResult {
   /** Quotes attributed to the member, deleted outright. */
   deleted: number;
-  /** Quote-channel posts deleted alongside those rows. */
+  /** Quote-channel posts the purge tried to delete (rows with a messageId). */
+  messagesAttempted: number;
+  /** Of those, the ones confirmed gone. */
   messagesDeleted: number;
+  /**
+   * Of those, the ones that may still be visible in Discord (#916). The row
+   * is deleted regardless — see `purgeForUser` — so this is the member's
+   * erasure being *incomplete*, and the caller has to report it rather than
+   * count a failed delete as a success.
+   */
+  messagesFailed: number;
   /** Quotes the member saved for someone else, attribution cleared. */
   anonymised: number;
 }
@@ -639,7 +654,9 @@ export class QuoteService {
    * `deleteMany`:
    *
    * - `authorId === userId` — the quote is a record of what *they* said, so
-   *   the row goes, **and so does the bot's post in the quote channel.**
+   *   the row goes, **and so does the bot's post in the quote channel** —
+   *   and when the post cannot be deleted the row still goes, but the
+   *   failure is counted as a failure so the caller can say so (#916).
    *   Deleting only the row would leave the member's words visible in Discord
    *   forever: `quote-channel-manager.cleanupUnauthorizedMessages()` sweeps
    *   only messages whose author is *not* the bot, so a bot-posted quote
@@ -665,18 +682,31 @@ export class QuoteService {
 
     const authored = await this.model.find({ authorId: { $in: idForms } });
 
+    let messagesAttempted = 0;
     let messagesDeleted = 0;
+    let messagesFailed = 0;
     for (const quote of authored) {
       if (!quote.messageId) continue;
+      messagesAttempted++;
       // `messageId` is overloaded: it starts life as the *original* Discord
       // message id and is overwritten by `updateQuoteMessageId` with the
       // quote-channel post id. So it may well point at a message that is not
       // in the quote channel, or is long gone — a miss is expected, and must
-      // not stop the row from being deleted.
+      // not stop the row from being deleted. Neither must a failure: a member
+      // erasing their own data cannot be held up by a stale id. But a failure
+      // is counted as a failure, not as a deletion, so the caller can say the
+      // post may still be visible instead of claiming it is gone (#916).
       try {
-        await messages.deleteQuoteMessage(quote.messageId);
-        messagesDeleted++;
+        if (await messages.deleteQuoteMessage(quote.messageId)) {
+          messagesDeleted++;
+        } else {
+          messagesFailed++;
+          logger.warn(
+            `Quote message ${quote.messageId} could not be deleted while purging user ${userId}; deleting the row anyway`,
+          );
+        }
       } catch (error) {
+        messagesFailed++;
         logger.warn(
           `Could not delete quote message ${quote.messageId} while purging user ${userId}; deleting the row anyway:`,
           error,
@@ -695,12 +725,15 @@ export class QuoteService {
 
     const result: QuotePurgeResult = {
       deleted: removal?.deletedCount ?? 0,
+      messagesAttempted,
       messagesDeleted,
+      messagesFailed,
       anonymised: anonymisation?.modifiedCount ?? 0,
     };
 
     logger.info(
-      `Purged quotes for user ${userId}: deleted ${result.deleted} row(s) and ${result.messagesDeleted} channel post(s), anonymised ${result.anonymised} row(s)`,
+      `Purged quotes for user ${userId}: deleted ${result.deleted} row(s) and ${result.messagesDeleted} channel post(s) ` +
+        `(${result.messagesFailed} post(s) could not be deleted), anonymised ${result.anonymised} row(s)`,
     );
     return result;
   }

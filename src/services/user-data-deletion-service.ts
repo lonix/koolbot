@@ -81,6 +81,7 @@ import { UserBirthday } from "../models/user-birthday.js";
 import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
+import { getErrorMessage } from "../utils/error-guards.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -116,7 +117,10 @@ export interface PurgeStep {
    * removed the row it matched or did not match it.
    */
   removed: number;
-  /** Present when the step threw. The purge continued regardless. */
+  /**
+   * Present when the step could not finish: it threw, or it left work
+   * plainly owed. The purge continued regardless, and `ok` goes false.
+   */
   error?: string;
   /** Free-text detail for the audit, when the counts do not tell it all. */
   note?: string;
@@ -124,7 +128,13 @@ export interface PurgeStep {
 
 export interface PurgeReport {
   steps: PurgeStep[];
-  /** True when every step completed without an error. */
+  /**
+   * True only when the purge finished *in full*: nothing threw, and no step
+   * left part of what it matched behind. A step that quietly reports
+   * `removed < matched` — a leaderboard role whose Discord revoke failed, a
+   * quote post still visible in the channel — is an incomplete erasure, so
+   * it must not be handed to the caller as a success (#916).
+   */
   ok: boolean;
 }
 
@@ -136,7 +146,10 @@ export interface PurgeContext {
 }
 
 /** One entry in a step a deleter produced; the coordinator adds the label. */
-export type PurgeOutcome = Omit<PurgeStep, "collection" | "error">;
+export type PurgeOutcome = Omit<PurgeStep, "collection">;
+
+/** How a deleter hands back each outcome as soon as it has one. */
+export type PurgeEmit = (outcome: PurgeOutcome) => void;
 
 export interface CollectionDeleter {
   /**
@@ -146,13 +159,21 @@ export interface CollectionDeleter {
    * declares both and emits one step for each.
    */
   actions: readonly CollectionPurgeAction[];
-  run(ctx: PurgeContext): Promise<PurgeOutcome[]>;
+  /**
+   * Outcomes are **emitted as they happen** rather than returned in a batch.
+   * A deleter with two policies does real work between them — `channel-invite`
+   * deletes the invites the member received and only then anonymises the ones
+   * they sent — so a throw in the second operation must not erase the record
+   * of the first, and must be reported against the policy that actually
+   * failed rather than the first one declared.
+   */
+  run(ctx: PurgeContext, emit: PurgeEmit): Promise<void>;
 }
 
 /** `deleteMany` reports one number; matched and removed are the same thing. */
-function deleted(count: number | undefined, note?: string): PurgeOutcome[] {
+function deleted(count: number | undefined, note?: string): PurgeOutcome {
   const n = count ?? 0;
-  return [{ action: "hard-delete", matched: n, removed: n, note }];
+  return { action: "hard-delete", matched: n, removed: n, note };
 }
 
 /**
@@ -173,22 +194,24 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // member who asked to be forgotten is still wearing the role.
   "leaderboard-role-assignment": {
     actions: ["pull-member"],
-    run: async ({ userId, guildId, client }) => {
+    run: async ({ userId, guildId, client }, emit) => {
       const result = await LeaderboardRoleService.getInstance(
         client,
       ).revokeForUser(guildId, userId);
       const matched = result.revoked.length + result.retained.length;
-      return [
-        {
-          action: "pull-member",
-          matched,
-          removed: result.revoked.length,
-          note:
-            result.retained.length > 0
-              ? `Discord revoke failed for role(s) ${result.retained.join(", ")}; left on the roster for the next reconcile to retry`
-              : undefined,
-        },
-      ];
+      emit({
+        action: "pull-member",
+        matched,
+        removed: result.revoked.length,
+        // A retained role means the member is still wearing a reward role
+        // they asked to be forgotten from. The next reconcile retries it,
+        // but the purge is not complete until it does, so this is an error
+        // on the step and not just a note.
+        error:
+          result.retained.length > 0
+            ? `Discord revoke failed for role(s) ${result.retained.join(", ")}; left on the roster for the next reconcile to retry`
+            : undefined,
+      });
     },
   },
 
@@ -198,24 +221,37 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // keep standing with the saver attribution cleared to the sentinel.
   quote: {
     actions: ["hard-delete", "anonymise"],
-    run: async ({ userId, client }) => {
+    run: async ({ userId, client }, emit) => {
       const result = await quoteService.purgeForUser(
         userId,
         QuoteChannelManager.getInstance(client),
       );
-      return [
-        {
-          action: "hard-delete",
-          matched: result.deleted,
-          removed: result.deleted,
-          note: `${result.messagesDeleted} quote-channel post(s) deleted`,
-        },
-        {
-          action: "anonymise",
-          matched: result.anonymised,
-          removed: result.anonymised,
-        },
-      ];
+      emit({
+        action: "hard-delete",
+        matched: result.deleted,
+        removed: result.deleted,
+      });
+      // The Discord posts get a step of their own rather than a note on the
+      // rows: they are a different thing being erased, they can fail on
+      // their own, and a post still visible in the channel is the half a
+      // member would actually notice. `QuoteService` deletes the row anyway
+      // (a stale `messageId` must not block an erasure), so this is the only
+      // place the shortfall is recorded.
+      emit({
+        action: "hard-delete",
+        matched: result.messagesAttempted,
+        removed: result.messagesDeleted,
+        note: QUOTE_CHANNEL_POSTS,
+        error:
+          result.messagesFailed > 0
+            ? `${result.messagesFailed} quote-channel post(s) could not be deleted and may still be visible`
+            : undefined,
+      });
+      emit({
+        action: "anonymise",
+        matched: result.anonymised,
+        removed: result.anonymised,
+      });
     },
   },
 
@@ -227,12 +263,12 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // the announcement of the non-terminal ones.
   "event-rsvp": {
     actions: ["pull-member"],
-    run: async ({ userId, guildId, client }) => {
+    run: async ({ userId, guildId, client }, emit) => {
       const removed = await EventService.getInstance(client).removeRsvp(
         guildId,
         userId,
       );
-      return [{ action: "pull-member", matched: removed, removed }];
+      emit({ action: "pull-member", matched: removed, removed });
     },
   },
 
@@ -243,35 +279,49 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // No `guildId` on the schema at all — a global unique index on `userId`.
   "voice-channel-tracking": {
     actions: ["hard-delete"],
-    run: async ({ userId }) =>
-      deleted((await VoiceChannelTracking.deleteMany({ userId })).deletedCount),
+    run: async ({ userId }, emit) => {
+      emit(
+        deleted(
+          (await VoiceChannelTracking.deleteMany({ userId })).deletedCount,
+        ),
+      );
+    },
   },
 
   "message-activity-tracking": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted(
-        (await MessageActivityTracking.deleteMany({ userId, guildId }))
-          .deletedCount,
-      ),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await MessageActivityTracking.deleteMany({ userId, guildId }))
+            .deletedCount,
+        ),
+      );
+    },
   },
 
   "reaction-activity-tracking": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted(
-        (await ReactionActivityTracking.deleteMany({ userId, guildId }))
-          .deletedCount,
-      ),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await ReactionActivityTracking.deleteMany({ userId, guildId }))
+            .deletedCount,
+        ),
+      );
+    },
   },
 
   "poll-participation-tracking": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted(
-        (await PollParticipationTracking.deleteMany({ userId, guildId }))
-          .deletedCount,
-      ),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await PollParticipationTracking.deleteMany({ userId, guildId }))
+            .deletedCount,
+        ),
+      );
+    },
   },
 
   // Shared per-poll aggregate: pull the id and nothing else. `votesCast`
@@ -280,18 +330,16 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // one known consequence with a wrong number.
   "poll-turnout": {
     actions: ["pull-member"],
-    run: async ({ userId, guildId }) => {
+    run: async ({ userId, guildId }, emit) => {
       const result = await PollTurnout.updateMany(
         { guildId, voterIds: userId },
         { $pull: { voterIds: userId } },
       );
-      return [
-        {
-          action: "pull-member",
-          matched: result?.matchedCount ?? 0,
-          removed: result?.modifiedCount ?? 0,
-        },
-      ];
+      emit({
+        action: "pull-member",
+        matched: result?.matchedCount ?? 0,
+        removed: result?.modifiedCount ?? 0,
+      });
     },
   },
 
@@ -299,82 +347,111 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // module docstring. Nothing here re-runs an achievement evaluation.
   "user-achievements": {
     actions: ["hard-delete"],
-    run: async ({ userId }) =>
-      deleted((await UserAchievements.deleteMany({ userId })).deletedCount),
+    run: async ({ userId }, emit) => {
+      emit(
+        deleted((await UserAchievements.deleteMany({ userId })).deletedCount),
+      );
+    },
   },
 
   "user-birthday": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted(
-        (await UserBirthday.deleteMany({ userId, guildId })).deletedCount,
-      ),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await UserBirthday.deleteMany({ userId, guildId })).deletedCount,
+        ),
+      );
+    },
   },
 
   "user-notification-prefs": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted(
-        (await UserNotificationPrefs.deleteMany({ userId, guildId }))
-          .deletedCount,
-      ),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await UserNotificationPrefs.deleteMany({ userId, guildId }))
+            .deletedCount,
+        ),
+      );
+    },
   },
 
   "user-voice-preferences": {
     actions: ["hard-delete"],
-    run: async ({ userId }) =>
-      deleted((await UserVoicePreferences.deleteMany({ userId })).deletedCount),
+    run: async ({ userId }, emit) => {
+      emit(
+        deleted(
+          (await UserVoicePreferences.deleteMany({ userId })).deletedCount,
+        ),
+      );
+    },
   },
 
   "rewind-snapshot": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted(
-        (await RewindSnapshot.deleteMany({ userId, guildId })).deletedCount,
-      ),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await RewindSnapshot.deleteMany({ userId, guildId })).deletedCount,
+        ),
+      );
+    },
   },
 
   "rewind-nudge-state": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted(
-        (await RewindNudgeState.deleteMany({ userId, guildId })).deletedCount,
-      ),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await RewindNudgeState.deleteMany({ userId, guildId })).deletedCount,
+        ),
+      );
+    },
   },
 
   "digest-state": {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted((await DigestState.deleteMany({ userId, guildId })).deletedCount),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted(
+          (await DigestState.deleteMany({ userId, guildId })).deletedCount,
+        ),
+      );
+    },
   },
 
   reminder: {
     actions: ["hard-delete"],
-    run: async ({ userId, guildId }) =>
-      deleted((await Reminder.deleteMany({ userId, guildId })).deletedCount),
+    run: async ({ userId, guildId }, emit) => {
+      emit(
+        deleted((await Reminder.deleteMany({ userId, guildId })).deletedCount),
+      );
+    },
   },
 
   // Both halves of the same schema, and no `guildId` on it. Invites the
   // member received go outright; invites they *sent* keep the recipient's
   // access and lose only the sender attribution — the field is
   // `required: true`, so it takes the sentinel rather than a null. Deleting
-  // first means a row matching both ends up deleted rather than anonymised.
+  // first means a row matching both ends up deleted rather than anonymised,
+  // and emitting the delete before starting the anonymise means a failure in
+  // the second half cannot erase the record of the first.
   "channel-invite": {
     actions: ["hard-delete", "anonymise"],
-    run: async ({ userId }) => {
+    run: async ({ userId }, emit) => {
       const removal = await ChannelInvite.deleteMany({ userId });
+      emit(deleted(removal?.deletedCount));
+
       const anonymisation = await ChannelInvite.updateMany(
         { invitedBy: userId },
         { $set: { invitedBy: ANONYMISED_USER_ID } },
       );
-      return [
-        ...deleted(removal?.deletedCount),
-        {
-          action: "anonymise",
-          matched: anonymisation?.matchedCount ?? 0,
-          removed: anonymisation?.modifiedCount ?? 0,
-        },
-      ];
+      emit({
+        action: "anonymise",
+        matched: anonymisation?.matchedCount ?? 0,
+        removed: anonymisation?.modifiedCount ?? 0,
+      });
     },
   },
 };
@@ -439,6 +516,9 @@ export const PURGE_ORDER: readonly string[] = [
 /** Pseudo-collection label for the in-memory voice eviction step. */
 export const VOICE_SESSION_CACHE = "voice-session-cache";
 
+/** Note marking the quote step that covers the Discord posts, not the rows. */
+export const QUOTE_CHANNEL_POSTS = "quote-channel posts";
+
 export class UserDataDeletionService {
   private static instance: UserDataDeletionService | null = null;
 
@@ -476,28 +556,37 @@ export class UserDataDeletionService {
     //    their row is deleted would have it recreated on disconnect —
     //    carrying the whole session's `totalTime`, including the hours
     //    before the purge, straight back into the accolade check.
-    await this.runStep(steps, VOICE_SESSION_CACHE, "evict", async () => {
-      const evicted = VoiceChannelTracker.getInstance(
+    //    Evicting the maps is not on its own enough — a persist that already
+    //    read its session is still to come — so `forgetActiveSession` also
+    //    waits that persist out before returning.
+    await this.runStep(steps, VOICE_SESSION_CACHE, "evict", async (emit) => {
+      const { discarded, drained } = await VoiceChannelTracker.getInstance(
         this.client,
       ).forgetActiveSession(userId);
-      return [
-        {
-          action: "evict",
-          matched: evicted ? 1 : 0,
-          removed: evicted ? 1 : 0,
-          note: evicted
-            ? "in-flight voice session discarded"
-            : "no in-flight voice session",
-        },
+      const notes = [
+        discarded
+          ? "in-flight voice session discarded"
+          : "no in-flight voice session",
       ];
+      if (drained) notes.push("waited for a persist already in flight");
+      emit({
+        action: "evict",
+        matched: discarded ? 1 : 0,
+        removed: discarded ? 1 : 0,
+        note: notes.join("; "),
+      });
     });
 
     // 2-4. The registry collections, in contract order.
     for (const collection of PURGE_ORDER) {
       const deleter = DELETERS[collection];
       if (!deleter) throw new Error(`No purge deleter for "${collection}"`);
-      await this.runStep(steps, collection, deleter.actions[0], () =>
-        deleter.run(ctx),
+      await this.runStep(
+        steps,
+        collection,
+        deleter.actions[0],
+        (emit) => deleter.run(ctx, emit),
+        deleter.actions,
       );
     }
 
@@ -509,7 +598,7 @@ export class UserDataDeletionService {
       steps,
       "voice-channel-tracking",
       "hard-delete",
-      async () => {
+      async (emit) => {
         const count =
           (await VoiceChannelTracking.deleteMany({ userId })).deletedCount ?? 0;
         if (count > 0) {
@@ -517,27 +606,24 @@ export class UserDataDeletionService {
             `Purge for ${sanitizeForLog(userId)}: a voice tracking row was recreated mid-purge and has been deleted again`,
           );
         }
-        return deleted(count, "post-purge re-check");
+        emit(deleted(count, "post-purge re-check"));
       },
     );
 
     // 6. Web sessions last: revoking earlier would kill the session the
     //    caller still needs to render its own result.
-    await this.runStep(steps, "web-session", "revoke", async () => {
+    await this.runStep(steps, "web-session", "revoke", async (emit) => {
       const revoked =
         await WebSessionService.getInstance().revokeForUser(userId);
-      return [{ action: "revoke", matched: revoked, removed: revoked }];
+      emit({ action: "revoke", matched: revoked, removed: revoked });
     });
 
-    const report: PurgeReport = {
-      steps,
-      ok: steps.every((step) => !step.error),
-    };
+    const report: PurgeReport = { steps, ok: steps.every(isComplete) };
 
-    const failed = steps.filter((step) => step.error).length;
+    const failed = steps.filter((step) => !isComplete(step)).length;
     logger.info(
       `Purge for ${sanitizeForLog(userId)} finished: ${steps.length} step(s), ` +
-        `${steps.reduce((sum, step) => sum + step.removed, 0)} item(s) removed, ${failed} failure(s)`,
+        `${steps.reduce((sum, step) => sum + step.removed, 0)} item(s) removed, ${failed} incomplete step(s)`,
     );
     return report;
   }
@@ -548,31 +634,51 @@ export class UserDataDeletionService {
    * is to keep going and hand the caller a report saying exactly which step
    * is still owed.
    *
-   * `action` is what the failure row is labelled with, since a throw tells
-   * us nothing about how far the step got. A deleter carrying two policies
-   * that fails therefore reports one failed step under the first of them
-   * rather than two — the collection name is what an operator retries on.
+   * **Outcomes already emitted are kept.** A deleter that deletes rows,
+   * emits, and then throws while anonymising really has deleted those rows;
+   * dropping that outcome because a later operation failed would report work
+   * as owed that is in fact done, and send a retry hunting for rows that are
+   * already gone.
+   *
+   * The failure row is labelled with the first declared policy the deleter
+   * did *not* reach, falling back to `action` — so the `anonymise` half of
+   * `channel-invite` failing is reported as an `anonymise` failure rather
+   * than as a phantom `hard-delete` one.
    */
   private async runStep(
     steps: PurgeStep[],
     collection: string,
     action: PurgeAction,
-    run: () => Promise<PurgeOutcome[]>,
+    run: (emit: PurgeEmit) => Promise<void>,
+    declared: readonly CollectionPurgeAction[] = [],
   ): Promise<void> {
+    const seen = new Set<PurgeAction>();
+    const emit: PurgeEmit = (outcome) => {
+      seen.add(outcome.action);
+      steps.push({ collection, ...outcome });
+    };
+
     try {
-      for (const outcome of await run()) {
-        steps.push({ collection, ...outcome });
-      }
+      await run(emit);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       logger.error(`Purge step "${collection}" failed:`, error);
       steps.push({
         collection,
-        action,
+        action: declared.find((candidate) => !seen.has(candidate)) ?? action,
         matched: 0,
         removed: 0,
-        error: message,
+        error: getErrorMessage(error),
       });
     }
   }
+}
+
+/**
+ * Whether a step finished everything it found. A step that threw did not,
+ * and neither did one that matched more than it removed: a partial step is
+ * an erasure the member asked for and did not fully get, so it must not be
+ * counted towards a successful purge.
+ */
+function isComplete(step: PurgeStep): boolean {
+  return !step.error && step.removed >= step.matched;
 }

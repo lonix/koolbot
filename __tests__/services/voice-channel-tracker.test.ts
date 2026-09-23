@@ -271,7 +271,8 @@ describe("VoiceChannelTracker", () => {
       await joinChannel(tracker, member, channel);
       expect(tracker.getActiveSession("user123")).not.toBeNull();
 
-      tracker.forgetActiveSession("user123");
+      const forgotten = await tracker.forgetActiveSession("user123");
+      expect(forgotten).toEqual({ discarded: true, drained: false });
       expect(tracker.getActiveSession("user123")).toBeNull();
 
       (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
@@ -282,10 +283,76 @@ describe("VoiceChannelTracker", () => {
       expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
     });
 
-    it("is a no-op for a member with no active session", () => {
+    it("is a no-op for a member with no active session", async () => {
       const { tracker } = createTracker(mockClient);
-      expect(() => tracker.forgetActiveSession("nobody")).not.toThrow();
+      await expect(tracker.forgetActiveSession("nobody")).resolves.toEqual({
+        discarded: false,
+        drained: false,
+      });
       expect(tracker.getActiveSession("nobody")).toBeNull();
+    });
+
+    it("waits for a persist that already read its session (#916)", async () => {
+      // Evicting the maps cannot call back an `endTracking` that is already
+      // past its `activeSessions.get`: its `upsert: true` write is still to
+      // come, and if it lands after the purge's delete the row — and the
+      // whole session's `totalTime` — is resurrected. So the eviction has to
+      // wait that write out rather than race it.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+      await joinChannel(tracker, member, channel);
+
+      // Hold the persist open so the eviction lands while it is in flight.
+      let releaseWrite: () => void = () => {};
+      const writeStarted = new Promise<void>((startResolve) => {
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () => {
+            startResolve();
+            return new Promise((writeResolve) => {
+              releaseWrite = () => writeResolve({});
+            });
+          },
+        );
+      });
+
+      const disconnect = leaveChannel(tracker, member, channel);
+      await writeStarted;
+
+      let forgetSettled = false;
+      const forgetting = tracker
+        .forgetActiveSession("user123")
+        .then((result) => {
+          forgetSettled = true;
+          return result;
+        });
+
+      // Still blocked: the write has not finished, so neither has the purge's
+      // permission to delete the row.
+      await Promise.resolve();
+      expect(forgetSettled).toBe(false);
+
+      releaseWrite();
+      await disconnect;
+
+      await expect(forgetting).resolves.toEqual({
+        // Both at once, which is exactly the dangerous shape: the map still
+        // held the session (`endTracking` only clears it after the write),
+        // so eviction alone would have looked like a clean discard while the
+        // write it could not call back was still on its way.
+        discarded: true,
+        drained: true,
+      });
+      expect(VoiceChannelTracking.findOneAndUpdate).toHaveBeenCalled();
     });
 
     it("leaves other members' in-flight sessions alone", async () => {

@@ -43,6 +43,17 @@ interface VoiceSession {
   channelName: string;
 }
 
+/** What `forgetActiveSession` had to do for a member (#916). */
+export interface ForgottenSession {
+  /** An in-memory session was dropped before it could be persisted. */
+  discarded: boolean;
+  /**
+   * A persist that had already read its session was waited out rather than
+   * left to land after the purge's delete.
+   */
+  drained: boolean;
+}
+
 export class VoiceChannelTracker {
   private static instance: VoiceChannelTracker;
   private activeSessions: Map<string, VoiceSession> = new Map();
@@ -61,6 +72,16 @@ export class VoiceChannelTracker {
     string,
     { wasFirst: boolean; joinedExisting: string[] }
   > = new Map();
+  /**
+   * In-flight `endTracking` calls, keyed by user id (#916).
+   *
+   * `endTracking` reads `activeSessions` at its top and only reaches its
+   * `upsert: true` write many awaits later, so evicting the maps does not
+   * stop a persist that already got past that read: its write can land
+   * *after* a purge deleted the row and resurrect it. `forgetActiveSession`
+   * drains this map so the purge can wait the window out rather than race it.
+   */
+  private endingSessions: Map<string, Promise<void>> = new Map();
   private client: Client;
   private mongo = new MongoConnectionGuard("voice channel tracker");
   private configService: ConfigService;
@@ -101,14 +122,24 @@ export class VoiceChannelTracker {
    *
    * The maps are private, so this cannot be done from outside the service.
    *
-   * Returns whether an in-flight session was actually discarded, so the
-   * purge coordinator (#916) can record it in its report — a purge that
-   * caught a member mid-session is exactly the case an operator reading a
-   * partial purge wants to see.
+   * **Eviction alone is not enough**, which is why this is async. A
+   * disconnect that reached `endTracking` before the eviction has already
+   * read its session out of the map, and its `upsert: true` write is still
+   * to come — clearing the maps cannot call that write back. So after
+   * evicting, this waits for any persist already in flight for the member to
+   * finish. The purge's own delete then runs strictly after it, and the row
+   * stays deleted.
+   *
+   * Returns what it had to do, so the purge coordinator (#916) can record it:
+   * a purge that caught a member mid-session is exactly the case an operator
+   * reading a partial purge wants to see.
    */
-  public forgetActiveSession(userId: string): boolean {
+  public async forgetActiveSession(userId: string): Promise<ForgottenSession> {
     const hadSession = this.activeSessions.has(userId);
 
+    // Evict first: from here on, a disconnect finds no session and returns
+    // before it writes anything. Only a persist already past that read is
+    // left, and that is what the drain below waits for.
     this.activeSessions.delete(userId);
     this.userChannels.delete(userId);
     this.encounteredUsers.delete(userId);
@@ -116,12 +147,21 @@ export class VoiceChannelTracker {
     this.companionSeconds.delete(userId);
     this.sessionFirsts.delete(userId);
 
+    const inFlight = this.endingSessions.get(userId);
+    if (inFlight) {
+      logger.info(
+        `Waiting for an in-flight voice session persist for user ${userId} before the purge continues`,
+      );
+      // `endTracking` swallows its own errors, so this settles either way.
+      await inFlight;
+    }
+
     if (hadSession) {
       logger.info(
         `Discarded in-flight voice session for user ${userId}; the disconnect handler will not persist it`,
       );
     }
-    return hadSession;
+    return { discarded: hadSession, drained: inFlight !== undefined };
   }
 
   public async handleVoiceStateUpdate(
@@ -172,7 +212,7 @@ export class VoiceChannelTracker {
         logger.info(
           `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
         );
-        await this.endTracking(member.id);
+        await this.endTrackingTracked(member.id);
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
         );
@@ -194,7 +234,7 @@ export class VoiceChannelTracker {
             `Found active session in channel ${activeSession.channelName} (${activeSession.channelId})`,
           );
         }
-        await this.endTracking(member.id);
+        await this.endTrackingTracked(member.id);
       }
 
       // Track users joining/leaving channels where we have active sessions
@@ -393,6 +433,23 @@ export class VoiceChannelTracker {
     } catch (error: unknown) {
       logger.error("Error starting voice tracking:", error);
     }
+  }
+
+  /**
+   * Run `endTracking` while recording it as in flight, so
+   * `forgetActiveSession` can wait for it (#916). Every call site goes
+   * through here; calling `endTracking` directly reopens the race.
+   */
+  private async endTrackingTracked(userId: string): Promise<void> {
+    const running = this.endTracking(userId).finally(() => {
+      // Only clear our own entry: a later disconnect may already have
+      // replaced it.
+      if (this.endingSessions.get(userId) === running) {
+        this.endingSessions.delete(userId);
+      }
+    });
+    this.endingSessions.set(userId, running);
+    await running;
   }
 
   private async endTracking(userId: string): Promise<void> {

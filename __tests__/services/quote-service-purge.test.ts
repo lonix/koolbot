@@ -44,7 +44,7 @@ describe("QuoteService.purgeForUser", () => {
     } as never;
     // Replace the (mongoose-mocked) model with a controllable stub.
     (service as never as { model: unknown }).model = model;
-    messages = { deleteQuoteMessage: jest.fn(async () => undefined) };
+    messages = { deleteQuoteMessage: jest.fn(async () => true) };
   });
 
   const ID_FORMS = ["123", "<@123>", "<@!123>", "@123"];
@@ -69,7 +69,32 @@ describe("QuoteService.purgeForUser", () => {
       expect(messages.deleteQuoteMessage).toHaveBeenCalledWith("m1");
       expect(messages.deleteQuoteMessage).toHaveBeenCalledWith("m2");
       expect(result.deleted).toBe(2);
+      expect(result.messagesAttempted).toBe(2);
       expect(result.messagesDeleted).toBe(2);
+      expect(result.messagesFailed).toBe(0);
+    });
+
+    it("counts a post it could not delete as a failure, not a deletion", async () => {
+      // `deleteQuoteMessage` resolving false means the post may still be
+      // visible in the quote channel. Counting it as deleted would tell the
+      // member their words are gone from Discord while they are on screen
+      // (#916).
+      model.find.mockResolvedValue([
+        { _id: "q1", messageId: "m1" },
+        { _id: "q2", messageId: "m2" },
+      ]);
+      model.deleteMany.mockResolvedValue({ deletedCount: 2 });
+      messages.deleteQuoteMessage.mockResolvedValueOnce(true);
+      messages.deleteQuoteMessage.mockResolvedValueOnce(false);
+
+      const result = await service.purgeForUser("123", messages);
+
+      expect(result.messagesAttempted).toBe(2);
+      expect(result.messagesDeleted).toBe(1);
+      expect(result.messagesFailed).toBe(1);
+      // The rows still go: a member's erasure is not held up by a stale
+      // `messageId` or an unreachable channel.
+      expect(result.deleted).toBe(2);
     });
 
     it("still deletes the row when the message is already gone", async () => {
@@ -86,6 +111,7 @@ describe("QuoteService.purgeForUser", () => {
 
       expect(result.deleted).toBe(1);
       expect(result.messagesDeleted).toBe(0);
+      expect(result.messagesFailed).toBe(1);
       expect(model.deleteMany).toHaveBeenCalledTimes(1);
     });
 
@@ -151,7 +177,13 @@ describe("QuoteService.purgeForUser", () => {
   it("reports zeros for a member with no quotes", async () => {
     const result = await service.purgeForUser("123", messages);
 
-    expect(result).toEqual({ deleted: 0, messagesDeleted: 0, anonymised: 0 });
+    expect(result).toEqual({
+      deleted: 0,
+      messagesAttempted: 0,
+      messagesDeleted: 0,
+      messagesFailed: 0,
+      anonymised: 0,
+    });
     expect(messages.deleteQuoteMessage).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,6 @@
 import {
   Client,
+  DiscordAPIError,
   TextChannel,
   EmbedBuilder,
   MessageReaction,
@@ -52,6 +53,15 @@ function normalizeUserId(input: string): string {
 
   // Return original if we can't parse it (might be a username)
   return input;
+}
+
+/** Discord's "Unknown Message": the post is already gone. */
+const DISCORD_UNKNOWN_MESSAGE = 10008;
+
+function isUnknownMessage(error: unknown): boolean {
+  return (
+    error instanceof DiscordAPIError && error.code === DISCORD_UNKNOWN_MESSAGE
+  );
 }
 
 export class QuoteChannelManager {
@@ -635,20 +645,44 @@ export class QuoteChannelManager {
     }
   }
 
-  public async deleteQuoteMessage(messageId: string): Promise<void> {
-    try {
-      const channel = await this.getQuoteChannel();
-      if (!channel) {
-        return;
-      }
+  /**
+   * Delete a post from the quote channel.
+   *
+   * Returns whether the message is now *gone*, which is not the same as "no
+   * exception escaped" (#916). A per-user purge reports this number back to
+   * the member as posts removed, so swallowing a failed delete and counting
+   * it anyway would tell someone their words are gone from Discord while
+   * they are still on screen.
+   *
+   * A message that is already missing counts as gone: `messageId` is
+   * overloaded (it starts life as the *original* message id and is
+   * overwritten by `updateQuoteMessageId` with the quote-channel post id), so
+   * a miss is the expected case for older rows, not a failure. Anything
+   * else — an unreachable channel, a permissions error, a failed delete —
+   * is a real failure, because the post may well still be visible.
+   */
+  public async deleteQuoteMessage(messageId: string): Promise<boolean> {
+    const channel = await this.getQuoteChannel();
+    if (!channel) {
+      logger.warn(
+        `Could not delete quote message ${messageId}: quote channel unavailable`,
+      );
+      return false;
+    }
 
+    try {
       const message = await channel.messages.fetch(messageId);
-      if (message) {
-        await message.delete();
-        logger.info(`Deleted quote message ${messageId}`);
-      }
+      if (!message) return true;
+      await message.delete();
+      logger.info(`Deleted quote message ${messageId}`);
+      return true;
     } catch (error) {
+      if (isUnknownMessage(error)) {
+        // Nothing to delete — see the `messageId` note above.
+        return true;
+      }
       logger.error(`Error deleting quote message ${messageId}:`, error);
+      return false;
     }
   }
 
