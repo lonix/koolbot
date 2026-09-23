@@ -3022,10 +3022,12 @@ export interface FeatureSettingsCardProps {
 
 /**
  * Notice shown in place of editable settings when the stored config could not
- * be read, so no form pre-filled with schema defaults is ever offered.
+ * be read, so no form pre-filled with schema defaults is ever offered. Carries
+ * the same `tabindex="-1"` + `data-flash` hook as `renderFlash`, so the
+ * layout's on-load script focuses it and screen readers announce it (#855).
  */
 export function renderSettingsUnavailableNotice(): string {
-  return `<div class="notice warn" role="status">Settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>`;
+  return `<div class="notice warn" role="status" tabindex="-1" data-flash>Settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>`;
 }
 
 /**

@@ -2156,6 +2156,10 @@ describe("renderFeatureSettingsCard (#971)", () => {
     });
     expect(html).toContain("<h2>Settings</h2>");
     expect(html).toContain("Settings could not be loaded");
+    // Same focus/announce hook as the flash banner (#855).
+    expect(html).toContain(
+      '<div class="notice warn" role="status" tabindex="-1" data-flash>',
+    );
   });
 
   it("posts through save-section with CSRF, category and the page redirect", () => {
