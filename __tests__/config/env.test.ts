@@ -157,6 +157,27 @@ describe("config/env", () => {
       expect(getEnvConfigValue("voicechannels.lobby.name")).toBe("Lobby");
     });
 
+    it("keeps a snowflake id for a string-typed key as the raw string", () => {
+      const id = "123456789012345678";
+      // Number(id) would round to 123456789012345680 (> MAX_SAFE_INTEGER).
+      expect(Number.isSafeInteger(Number(id))).toBe(false);
+      process.env["voicechannels.category_id"] = id;
+      expect(getEnvConfigValue("voicechannels.category_id")).toBe(id);
+    });
+
+    it("does not coerce boolean- or number-looking strings for string keys", () => {
+      process.env["voicechannels.lobby.name"] = "true";
+      expect(getEnvConfigValue("voicechannels.lobby.name")).toBe("true");
+
+      process.env["voicechannels.lobby.name"] = "42";
+      expect(getEnvConfigValue("voicechannels.lobby.name")).toBe("42");
+    });
+
+    it("still coerces numeric schema keys to numbers", () => {
+      process.env["quotes.max_length"] = "1000";
+      expect(getEnvConfigValue("quotes.max_length")).toBe(1000);
+    });
+
     it("returns null for an unset or blank variable", () => {
       delete process.env.UNSET_CONFIG_KEY;
       expect(getEnvConfigValue("UNSET_CONFIG_KEY")).toBeNull();
