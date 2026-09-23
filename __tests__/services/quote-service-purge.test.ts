@@ -219,6 +219,30 @@ describe("QuoteService.purgeForUser", () => {
       expect(result.attributionsRerendered).toBe(0);
     });
 
+    it("re-renders the posts even when the update rejects", async () => {
+      // A multi-document update can modify rows and still reject — a lost
+      // acknowledgement is enough. Those rows now hold the sentinel, so no
+      // retry selects them again, and skipping the redraw would leave the
+      // member named on every embed for good (#916).
+      model.find.mockResolvedValue([
+        { _id: "q1", messageId: "m1", content: "Hi", authorId: "999" },
+      ]);
+      model.updateMany.mockRejectedValue(new Error("connection reset"));
+
+      const result = await service.purgeForUser("123", messages);
+
+      expect(messages.updateQuoteMessage).toHaveBeenCalledWith(
+        "m1",
+        "q1",
+        "Hi",
+        "999",
+        ANONYMISED_USER_ID,
+      );
+      expect(result.attributionsRerendered).toBe(1);
+      // The write failure is still reported rather than papered over.
+      expect(result.anonymiseError).toBe("connection reset");
+    });
+
     it("uses a sentinel no real member can match", () => {
       expect(ANONYMISED_USER_ID).toBe("0");
       expect(ANONYMISED_USER_ID).not.toMatch(/^\d{17,20}$/);

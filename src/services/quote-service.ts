@@ -855,51 +855,59 @@ export class QuoteService {
     let attributionsRerendered = 0;
     let attributionsStale = 0;
     let attributionsGone = 0;
+    // Snapshot first: after the update these rows no longer match, and
+    // their posts still print "Added by @member" until they are redrawn.
+    let saved: IQuote[] = [];
     try {
-      // Snapshot first: after the update these rows no longer match, and
-      // their posts still print "Added by @member" until they are redrawn.
-      const saved = await this.model.find({ addedById: { $in: idForms } });
+      saved = await this.model.find({ addedById: { $in: idForms } });
       const anonymisation = await this.model.updateMany(
         { addedById: { $in: idForms } },
         { $set: { addedById: ANONYMISED_USER_ID } },
       );
       anonymised = anonymisation?.modifiedCount ?? 0;
-
-      for (const quote of saved) {
-        if (!quote.messageId) continue;
-        try {
-          await messages.updateQuoteMessage(
-            quote.messageId,
-            quote._id.toString(),
-            quote.content,
-            quote.authorId,
-            ANONYMISED_USER_ID,
-          );
-          attributionsRerendered++;
-        } catch (error) {
-          if (isMissingPostError(error)) {
-            // Nothing to re-render and nothing on screen: the post, or the
-            // whole quote channel, is gone. Counting it as stale would keep
-            // the purge report failing over a member's name that no longer
-            // appears anywhere (#916).
-            attributionsGone++;
-            continue;
-          }
-          // The row is anonymised regardless — an unreachable post must not
-          // hold up the erasure — but the embed still names them, so say so.
-          attributionsStale++;
-          logger.warn(
-            `Could not re-render quote post ${quote.messageId} after anonymising ${userId}; it still shows them as the saver:`,
-            error,
-          );
-        }
-      }
     } catch (error) {
       anonymiseError = getErrorMessage(error);
       logger.error(
         `Failed to clear the saver attribution of ${userId}:`,
         error,
       );
+    }
+
+    // The posts are redrawn whether or not that write reported success. A
+    // multi-document update can modify rows and still reject — a lost
+    // acknowledgement is enough — and those rows now hold the sentinel, so
+    // no retry will ever select them again while their embeds go on naming
+    // the member (#916). Redrawing a post whose row was *not* updated is the
+    // harmless direction: it shows the sentinel a little early, and the next
+    // attempt anonymises the row it belongs to.
+    for (const quote of saved) {
+      if (!quote.messageId) continue;
+      try {
+        await messages.updateQuoteMessage(
+          quote.messageId,
+          quote._id.toString(),
+          quote.content,
+          quote.authorId,
+          ANONYMISED_USER_ID,
+        );
+        attributionsRerendered++;
+      } catch (error) {
+        if (isMissingPostError(error)) {
+          // Nothing to re-render and nothing on screen: the post, or the
+          // whole quote channel, is gone. Counting it as stale would keep
+          // the purge report failing over a member's name that no longer
+          // appears anywhere (#916).
+          attributionsGone++;
+          continue;
+        }
+        // The row is anonymised regardless — an unreachable post must not
+        // hold up the erasure — but the embed still names them, so say so.
+        attributionsStale++;
+        logger.warn(
+          `Could not re-render quote post ${quote.messageId} after anonymising ${userId}; it still shows them as the saver:`,
+          error,
+        );
+      }
     }
 
     const result: QuotePurgeResult = {

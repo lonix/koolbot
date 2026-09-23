@@ -287,6 +287,18 @@ export class VoiceChannelTracker {
     newState: VoiceState,
   ): Promise<void> {
     try {
+      const member = newState.member || oldState.member; // Try to get member from either state
+      if (!member) {
+        logger.info(`No member found in voice state update`);
+        return;
+      }
+      // Before the first await, not after: a handler that yielded on the
+      // config read below and resumed after a purge would otherwise read the
+      // *new* generation and be waved through, installing a session for an
+      // event that predates the erasure. Reading it here means every handler
+      // already in flight carries a pre-purge token (#916).
+      const generation = this.purgeGeneration(member.id);
+
       // Check if voice tracking is enabled
       const isEnabled = await this.configService.getBoolean(
         "voicetracking.enabled",
@@ -295,16 +307,6 @@ export class VoiceChannelTracker {
       if (!isEnabled) {
         return; // Voice tracking is disabled
       }
-
-      const member = newState.member || oldState.member; // Try to get member from either state
-      if (!member) {
-        logger.info(`No member found in voice state update`);
-        return;
-      }
-      // Read once, up front: a purge landing part-way through this update
-      // bumps it, and the switch path below refuses to restart tracking when
-      // it has moved (#916).
-      const generation = this.purgeGeneration(member.id);
 
       const oldChannel = oldState.channel;
       const newChannel = newState.channel;

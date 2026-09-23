@@ -517,6 +517,49 @@ describe("VoiceChannelTracker", () => {
       expect(tracker.getActiveSession("user123")).toBeNull();
     });
 
+    it("does not start tracking for a join that predates the purge (#916)", async () => {
+      // The handler yields on the enablement lookup before it ever reaches
+      // `startTracking`. Reading the generation after that await would hand
+      // the resumed handler the *post*-purge value, and it would install a
+      // session for an event from before the erasure.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.get.mockResolvedValue(null);
+
+      // Park only the first lookup — the one the handler hits before it can
+      // reach `startTracking`; later ones resolve normally.
+      let allowEnablement: () => void = () => {};
+      let parked = false;
+      const enablementAsked = new Promise<void>((asked) => {
+        mockConfigService.getBoolean.mockImplementation(() => {
+          if (parked) return Promise.resolve(true);
+          parked = true;
+          return new Promise((resolve) => {
+            allowEnablement = (): void => resolve(true);
+            asked();
+          });
+        });
+      });
+
+      const member = memberIn("user123");
+      const channel = {
+        id: "channel123",
+        name: "TestChannel",
+      } as unknown as VoiceChannel;
+
+      const joining = tracker.handleVoiceStateUpdate(
+        { member, channel: null } as unknown as VoiceState,
+        { member, channel } as unknown as VoiceState,
+      );
+      await enablementAsked;
+
+      // The purge lands while the handler is parked on the config read.
+      await tracker.forgetActiveSession("user123");
+      allowEnablement();
+      await joining;
+
+      expect(tracker.getActiveSession("user123")).toBeNull();
+    });
+
     it("leaves other members' in-flight sessions alone", async () => {
       const { tracker, mockConfigService } = createTracker(mockClient);
       mockConfigService.getBoolean.mockResolvedValue(true);

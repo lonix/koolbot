@@ -548,6 +548,14 @@ export class EventService extends ScheduledService {
           `Failed to remove the RSVP of ${sanitizeForLog(userId)} from event ${match._id}:`,
           error,
         );
+        // The update may have applied and only lost its acknowledgement, in
+        // which case the row is clean, no retry will ever match this event on
+        // `rsvps.userId` again, and the announcement would keep the member
+        // listed for good. Re-read and, if the RSVP really is gone, refresh
+        // from that document — still reporting the write as failed (#916).
+        rendersFailed += (await this.refreshAfterFailedPull(match._id, userId))
+          ? 0
+          : 1;
       }
     }
 
@@ -558,6 +566,35 @@ export class EventService extends ScheduledService {
           : ""),
     );
     return { matched: matches.length, removed, rendersFailed };
+  }
+
+  /**
+   * After a `$pull` that threw: re-read the event and, if the RSVP is in fact
+   * gone, redraw the announcement (#916).
+   *
+   * Returns whether the public post is known to be consistent with the
+   * database — true when the RSVP is still there (the pull genuinely did not
+   * apply, so the announcement is not stale and the write error alone is the
+   * story) or when the refresh landed; false when the member may still be
+   * listed. Never throws: this runs inside the caller's recovery path.
+   */
+  private async refreshAfterFailedPull(
+    eventId: unknown,
+    userId: string,
+  ): Promise<boolean> {
+    try {
+      const current = await Event.findById(eventId);
+      if (!current) return true; // The event itself is gone.
+      if (current.rsvps.some((rsvp) => rsvp.userId === userId)) return true;
+      if (isTerminalState(current.state)) return true;
+      return await this.updateAnnouncement(current);
+    } catch (error) {
+      logger.error(
+        `Could not check whether the announcement for event ${eventId} still lists ${sanitizeForLog(userId)}:`,
+        error,
+      );
+      return false;
+    }
   }
 
   // ---------------------------------------------------------------
