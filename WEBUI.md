@@ -752,7 +752,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
 | **Setup Wizard**   | `/setup wizard`                                                                                     |
 | **Announcements**  | `/announce create`, `list`, `delete`                                                                |
-| **Events**         | `/event create`, `list`, `cancel`, `start`                                                          |
+| **Events**         | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
 | **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
 | **Reaction Roles** | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |

@@ -5,6 +5,7 @@ import {
   fetchChannelData,
   loadFeatureSettings,
   POLLS_SETTING_KEYS,
+  EVENTS_SETTING_KEYS,
   VOICE_CHANNELS_SETTING_KEYS,
   REACTION_ROLES_SETTING_KEYS,
   NOTICES_SETTING_KEYS,
@@ -504,6 +505,57 @@ describe("loadFeatureSettings (#971)", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+// Issue #975: the Events page edits every `events.*` key in place.
+describe("EVENTS_SETTING_KEYS (#975)", () => {
+  it("lists every events.* key in the schema, master first", () => {
+    const schemaKeys = Object.keys(defaultConfig).filter((k) =>
+      k.startsWith("events."),
+    );
+    expect([...EVENTS_SETTING_KEYS].sort()).toEqual(schemaKeys.sort());
+    expect(EVENTS_SETTING_KEYS[0]).toBe("events.enabled");
+  });
+
+  it("fetches the channel pickers but not roles", async () => {
+    const calls = { channels: 0, roles: 0 };
+    const guild = {
+      id: "guild-1",
+      channels: {
+        fetch: async (): Promise<void> => {
+          calls.channels += 1;
+        },
+        cache: createMockCollection([
+          ["t1", { id: "t1", name: "general", type: ChannelType.GuildText }],
+          ["c1", { id: "c1", name: "Events", type: ChannelType.GuildCategory }],
+        ]),
+      },
+      roles: {
+        fetch: async (): Promise<void> => {
+          calls.roles += 1;
+        },
+        cache: createMockCollection([]),
+      },
+    };
+    const client: any = { guilds: { fetch: async () => guild } };
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      EVENTS_SETTING_KEYS,
+      [{ key: "events.reminder_minutes", value: 45 }],
+    );
+    expect(calls).toEqual({ channels: 1, roles: 0 });
+    expect(data.pickers.textChannels?.map((c) => c.id)).toEqual(["t1"]);
+    expect(data.pickers.categoryChannels?.map((c) => c.id)).toEqual(["c1"]);
+    expect(data.pickers.roles).toBeUndefined();
+    expect(data.settingRows.map((r) => r.key)).toEqual([
+      ...EVENTS_SETTING_KEYS,
+    ]);
+    expect(
+      data.settingRows.find((r) => r.key === "events.reminder_minutes")
+        ?.current,
+    ).toBe(45);
   });
 });
 

@@ -342,6 +342,48 @@ export function adminPages(): A11yPage[] {
         categoryConfigured: true,
         announcementConfigured: false,
         timezone: "Europe/Stockholm",
+        settingRows: [
+          {
+            key: "events.enabled",
+            label: "Events enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable scheduled events.",
+            category: "events",
+          },
+          {
+            key: "events.category_id",
+            label: "Event channel category",
+            current: "cat1",
+            defaultValue: "",
+            type: "category",
+            description: "Category the temporary event voice channels go in.",
+            category: "events",
+          },
+          {
+            key: "events.announcement_channel_id",
+            label: "Event announcement channel",
+            current: "",
+            defaultValue: "",
+            type: "channel",
+            description: "Channel where RSVP and reminder messages post.",
+            category: "events",
+          },
+          {
+            key: "events.reminder_minutes",
+            label: "Reminder lead time (minutes)",
+            current: 30,
+            defaultValue: 30,
+            type: "number",
+            description: "How long before start the reminder is posted.",
+            category: "events",
+          },
+        ],
+        settingsPickers: {
+          textChannels: CHANNELS,
+          categoryChannels: CATEGORIES,
+        },
         rows: [
           {
             id: "e1",

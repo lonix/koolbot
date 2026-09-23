@@ -144,6 +144,23 @@ export const POLLS_SETTING_KEYS = [
 ] as const;
 
 /**
+ * Every `events.*` key, edited in place on the Events feature page (#975).
+ * Includes the `events.enabled` master, so the card cascades like a Settings
+ * section and the feature can be switched off from its own page.
+ */
+export const EVENTS_SETTING_KEYS = [
+  "events.enabled",
+  "events.category_id",
+  "events.announcement_channel_id",
+  "events.timezone",
+  "events.channel_prefix",
+  "events.default_duration_minutes",
+  "events.create_lead_minutes",
+  "events.channel_grace_minutes",
+  "events.reminder_minutes",
+] as const;
+
+/**
  * The `reactionroles.*` keys surfaced as editable controls on the Reaction
  * Roles feature page (#974). Unlike Voice Channels, the feature master
  * `reactionroles.enabled` is included so the page can turn the feature off as
@@ -844,14 +861,22 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const service = EventService.getInstance(client);
       const config = ConfigService.getInstance();
-      const [enabled, categoryId, announcementChannelId, tz, events] =
-        await Promise.all([
-          config.getBoolean("events.enabled", false),
-          config.getString("events.category_id", ""),
-          config.getString("events.announcement_channel_id", ""),
-          config.getString("events.timezone", ""),
-          service.listEvents(common.guildId),
-        ]);
+      const [
+        enabled,
+        categoryId,
+        announcementChannelId,
+        tz,
+        events,
+        eventSettings,
+      ] = await Promise.all([
+        config.getBoolean("events.enabled", false),
+        config.getString("events.category_id", ""),
+        config.getString("events.announcement_channel_id", ""),
+        config.getString("events.timezone", ""),
+        service.listEvents(common.guildId),
+        // Editable `events.*` settings card (#975).
+        loadFeatureSettings(client, common.guildId, EVENTS_SETTING_KEYS),
+      ]);
 
       const rows = events.map((e) => {
         const counts = countRsvps(e.rsvps);
@@ -877,6 +902,10 @@ export function createReadOnlyRouter(
           // value) so the UI shows exactly what event parsing will use.
           timezone: resolveTimezone(tz),
           rows,
+          settingRows: eventSettings.settingRows,
+          settingsPickers: eventSettings.pickers,
+          dependencyState: eventSettings.dependencyState,
+          settingsUnavailable: eventSettings.unavailable,
           flash: readFlash(req),
         }),
       );

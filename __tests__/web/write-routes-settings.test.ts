@@ -423,6 +423,38 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet.mock.calls[0][1]).toBe(false);
   });
 
+  it("saves the Events page card and returns to /admin/events (#975)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "events",
+      redirect: "/admin/events",
+      keys: ["events.enabled", "events.timezone", "events.reminder_minutes"],
+      "value_events.enabled": "true",
+      "value_events.timezone": "Europe/Oslo",
+      "value_events.reminder_minutes": "45",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/events");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 3 settings in events.");
+    expect(mockConfigSet).toHaveBeenCalledTimes(3);
+  });
+
+  it("disables Events from its page without blanking the other settings (#975)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "events",
+      redirect: "/admin/events",
+      keys: ["events.enabled", "events.category_id", "events.timezone"],
+      "value_events.category_id": "123456789012345678",
+      "value_events.timezone": "Europe/Oslo",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/events");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("events.enabled");
+    expect(mockConfigSet.mock.calls[0][1]).toBe(false);
+  });
+
   it("saves the Reaction Roles page card and returns to that page (#974)", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "reactionroles",
