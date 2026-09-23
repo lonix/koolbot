@@ -68,6 +68,12 @@ function normalizeUserId(input: string): string {
  */
 export type AttributionRepair = "edited" | "missing" | "failed";
 
+/** A quote-channel post: its message id and the channel it went to (#916). */
+export interface QuotePost {
+  messageId: string;
+  channelId: string;
+}
+
 export class QuoteChannelManager {
   private static instance: QuoteChannelManager;
   private client: Client;
@@ -569,15 +575,21 @@ export class QuoteChannelManager {
    * with it" apart from "we could not reach it this time": the first owes
    * nothing, the second leaves the member's words publicly readable (#916).
    */
-  private async getQuoteChannelDetailed(): Promise<{
+  private async getQuoteChannelDetailed(postedIn?: string): Promise<{
     channel: TextChannel | null;
     gone: boolean;
   }> {
     try {
-      const channelId = await this.configService.getString(
-        "quotes.channel_id",
-        "",
-      );
+      // The channel a post actually went to, when the row recorded one.
+      // `quotes.channel_id` is where posts go *now*: an admin who moves the
+      // quote channel leaves every older post behind in the old one, and
+      // looking for it in the new channel returns Unknown Message — which a
+      // purge would read as "already gone" while the post is still on screen
+      // (#916). Rows written before the field existed fall back to the
+      // configured channel, which is the best guess available for them.
+      const channelId =
+        postedIn ||
+        (await this.configService.getString("quotes.channel_id", ""));
       if (!channelId) {
         return { channel: null, gone: false };
       }
@@ -597,13 +609,20 @@ export class QuoteChannelManager {
     }
   }
 
+  /**
+   * Post a quote to the quote channel.
+   *
+   * Returns the channel it landed in as well as the message id: the caller
+   * has to record both, because `quotes.channel_id` can be changed later and
+   * this post stays where it was (#916).
+   */
   public async postQuote(
     quoteId: string,
     content: string,
     authorId: string,
     addedById: string,
     votes?: { likes: number; dislikes: number },
-  ): Promise<string | null> {
+  ): Promise<QuotePost | null> {
     try {
       const channel = await this.getQuoteChannel();
       if (!channel) {
@@ -658,7 +677,7 @@ export class QuoteChannelManager {
       logger.info(
         `Posted quote ${quoteId} to channel as message ${message.id}`,
       );
-      return message.id;
+      return { messageId: message.id, channelId: channel.id };
     } catch (error) {
       logger.error("Error posting quote to channel:", error);
       return null;
@@ -682,8 +701,11 @@ export class QuoteChannelManager {
    * else — an unreachable channel, a permissions error, a failed delete —
    * is a real failure, because the post may well still be visible.
    */
-  public async deleteQuoteMessage(messageId: string): Promise<boolean> {
-    const { channel, gone } = await this.getQuoteChannelDetailed();
+  public async deleteQuoteMessage(
+    messageId: string,
+    postedIn?: string,
+  ): Promise<boolean> {
+    const { channel, gone } = await this.getQuoteChannelDetailed(postedIn);
     if (!channel) {
       // A deleted channel took every post in it, this one included, so
       // there is nothing left to remove and nothing to report.
@@ -716,8 +738,9 @@ export class QuoteChannelManager {
     content: string,
     authorId: string,
     addedById: string,
+    postedIn?: string,
   ): Promise<void> {
-    const { channel, gone } = await this.getQuoteChannelDetailed();
+    const { channel, gone } = await this.getQuoteChannelDetailed(postedIn);
     if (!channel) {
       if (gone) {
         // The channel was deleted and took this post with it, so there is
@@ -796,6 +819,7 @@ export class QuoteChannelManager {
     quoteId: string,
     content: string,
     authorId: string,
+    postedIn?: string,
   ): Promise<AttributionRepair> {
     try {
       await this.updateQuoteMessage(
@@ -804,6 +828,7 @@ export class QuoteChannelManager {
         content,
         authorId,
         ANONYMISED_USER_ID,
+        postedIn,
       );
       return "edited";
     } catch (error) {
@@ -812,7 +837,9 @@ export class QuoteChannelManager {
         `Could not re-render quote post ${messageId} after its saver was erased; removing it instead:`,
         error,
       );
-      return (await this.deleteQuoteMessage(messageId)) ? "missing" : "failed";
+      return (await this.deleteQuoteMessage(messageId, postedIn))
+        ? "missing"
+        : "failed";
     }
   }
 
@@ -1055,7 +1082,7 @@ export class QuoteChannelManager {
       let orphaned = 0;
 
       for (const quote of quotes) {
-        const messageId = await this.postQuote(
+        const post = await this.postQuote(
           quote._id.toString(),
           quote.content,
           quote.authorId,
@@ -1063,12 +1090,14 @@ export class QuoteChannelManager {
           { likes: quote.likes ?? 0, dislikes: quote.dislikes ?? 0 },
         );
 
-        if (messageId) {
+        if (post) {
+          const { messageId, channelId } = post;
           // Update quote with message ID in database
           const { stillExists, attributionCleared } =
             await quoteService.updateQuoteMessageId(
               quote._id.toString(),
               messageId,
+              channelId,
             );
           if (!stillExists) {
             // A per-user purge removed the row after this rebuild
@@ -1078,7 +1107,7 @@ export class QuoteChannelManager {
             logger.warn(
               `Quote ${quote._id} was purged mid-sync; removing the post just created`,
             );
-            if (await this.deleteQuoteMessage(messageId)) {
+            if (await this.deleteQuoteMessage(messageId, channelId)) {
               // Cleaned up: this quote is simply not part of the rebuild.
               continue;
             }
@@ -1099,6 +1128,7 @@ export class QuoteChannelManager {
               quote._id.toString(),
               quote.content,
               quote.authorId,
+              channelId,
             );
             if (repair === "failed") {
               orphaned++;

@@ -79,8 +79,8 @@ describe("QuoteService.purgeForUser", () => {
       // `cleanupUnauthorizedMessages` only sweeps non-bot messages, so a
       // bot-posted quote orphaned by a row delete is never collected.
       expect(messages.deleteQuoteMessage).toHaveBeenCalledTimes(2);
-      expect(messages.deleteQuoteMessage).toHaveBeenCalledWith("m1");
-      expect(messages.deleteQuoteMessage).toHaveBeenCalledWith("m2");
+      expect(messages.deleteQuoteMessage).toHaveBeenCalledWith("m1", undefined);
+      expect(messages.deleteQuoteMessage).toHaveBeenCalledWith("m2", undefined);
       expect(result.deleted).toBe(2);
       expect(result.messagesAttempted).toBe(2);
       expect(result.messagesDeleted).toBe(2);
@@ -192,6 +192,7 @@ describe("QuoteService.purgeForUser", () => {
         "Hi",
         "999",
         ANONYMISED_USER_ID,
+        undefined,
       );
       expect(result.attributionsRerendered).toBe(1);
       expect(result.attributionsStale).toBe(0);
@@ -253,6 +254,7 @@ describe("QuoteService.purgeForUser", () => {
         "Hi",
         "999",
         ANONYMISED_USER_ID,
+        undefined,
       );
       expect(result.attributionsRerendered).toBe(1);
       // The write failure is still reported rather than papered over.

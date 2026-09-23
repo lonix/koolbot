@@ -51,6 +51,17 @@ interface VoiceSession {
 const MAX_DRAIN_ROUNDS = 10;
 
 /**
+ * The per-session bookkeeping an `endTracking` call takes out of the shared
+ * per-user maps before it starts awaiting (#916).
+ */
+interface ClaimedSessionState {
+  encountered: Set<string> | undefined;
+  since: Map<string, number> | undefined;
+  seconds: Map<string, number> | undefined;
+  firsts: { wasFirst: boolean; joinedExisting: string[] } | undefined;
+}
+
+/**
  * Close every still-open companion interval on one session's own maps.
  *
  * The same work as `accumulateCompanion`, but against maps a caller has
@@ -627,11 +638,18 @@ export class VoiceChannelTracker {
   }
 
   private async endTracking(userId: string): Promise<void> {
+    // Hoisted so the failure path can hand the claimed bookkeeping back:
+    // `activeSessions` is deliberately left in place when the persist throws,
+    // so the session is retried on the next disconnect, and it has to be
+    // retried with the co-presence it was claimed with (#916).
+    let session: VoiceSession | undefined;
+    let claimed: ClaimedSessionState | undefined;
+
     try {
       const debugModeEnabled = isDebugMode();
       await this.mongo.ensureConnection();
 
-      const session = this.activeSessions.get(userId);
+      session = this.activeSessions.get(userId);
       if (!session) {
         if (debugModeEnabled) {
           logger.info(
@@ -648,7 +666,7 @@ export class VoiceChannelTracker {
       // count the new session's co-presence into this document and then wipe
       // it along with this one, so the rejoin's own disconnect would find
       // nothing to record.
-      const claimed = {
+      claimed = {
         encountered: this.encounteredUsers.get(userId),
         since: this.companionSince.get(userId),
         seconds: this.companionSeconds.get(userId),
@@ -700,15 +718,19 @@ export class VoiceChannelTracker {
       if (companionsEnabled) {
         // Close any still-open companion intervals so the final session
         // reflects everyone who was co-present right up to the disconnect.
-        // On the claimed maps, not the live ones: `accumulateCompanion`
-        // reads `this.companionSince`, which by now may belong to a rejoin.
-        closeCompanionIntervals(claimed.since, claimed.seconds);
-        sessionDoc.companions = claimed.seconds
-          ? Array.from(claimed.seconds.entries()).map(([id, secs]) => ({
-              userId: id,
-              seconds: secs,
-            }))
-          : [];
+        // On copies of the claimed maps: `accumulateCompanion` reads
+        // `this.companionSince`, which by now may belong to a rejoin, and
+        // the claimed maps themselves must survive intact in case the write
+        // below fails and this session is handed back for a retry.
+        const since = new Map(claimed.since ?? []);
+        const seconds = new Map(claimed.seconds ?? []);
+        closeCompanionIntervals(since, seconds);
+        sessionDoc.companions = Array.from(seconds.entries()).map(
+          ([id, secs]) => ({
+            userId: id,
+            seconds: secs,
+          }),
+        );
         sessionDoc.wasFirst = claimed.firsts
           ? claimed.firsts.wasFirst
           : otherUsers.length === 0;
@@ -783,6 +805,40 @@ export class VoiceChannelTracker {
       }
     } catch (error: unknown) {
       logger.error("Error ending voice tracking:", error);
+      // The session stays in `activeSessions` for the next disconnect to
+      // retry, so its bookkeeping has to go back too — otherwise the retry
+      // persists a session with no companions and no encountered users.
+      this.returnClaimedState(userId, session, claimed);
+    }
+  }
+
+  /**
+   * Hand a failed persist's claimed bookkeeping back to the live maps.
+   *
+   * Only while the same session still owns the key: a rejoin that started
+   * during the failed persist has its own, newer state under these keys and
+   * must not be overwritten by a session that is already over. Each map is
+   * restored only if nothing has been put there since, for the same reason.
+   */
+  private returnClaimedState(
+    userId: string,
+    session: VoiceSession | undefined,
+    claimed: ClaimedSessionState | undefined,
+  ): void {
+    if (!session || !claimed) return;
+    if (this.activeSessions.get(userId) !== session) return;
+
+    if (claimed.encountered && !this.encounteredUsers.has(userId)) {
+      this.encounteredUsers.set(userId, claimed.encountered);
+    }
+    if (claimed.since && !this.companionSince.has(userId)) {
+      this.companionSince.set(userId, claimed.since);
+    }
+    if (claimed.seconds && !this.companionSeconds.has(userId)) {
+      this.companionSeconds.set(userId, claimed.seconds);
+    }
+    if (claimed.firsts && !this.sessionFirsts.has(userId)) {
+      this.sessionFirsts.set(userId, claimed.firsts);
     }
   }
 

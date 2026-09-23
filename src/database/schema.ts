@@ -26,6 +26,14 @@ export const quoteSchema = new Schema({
   addedById: { type: String, required: true },
   channelId: { type: String, required: true }, // Channel where quote was said
   messageId: { type: String, required: true }, // Original message ID
+  // The channel the quote-channel post actually went to, recorded when
+  // `messageId` is overwritten with that post's id. `quotes.channel_id` says
+  // where posts go *now*, so after an admin moves the quote channel it no
+  // longer locates older posts — and a purge looking for one in the wrong
+  // channel reads Unknown Message as "already gone" while it is still on
+  // screen (#916). Absent on rows published before this field existed; those
+  // fall back to the configured channel.
+  postChannelId: { type: String, required: false },
   createdAt: { type: Date, required: true, default: Date.now },
   addedAt: { type: Date, required: true, default: Date.now },
   likes: { type: Number, required: true, default: 0 },

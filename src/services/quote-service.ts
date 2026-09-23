@@ -72,6 +72,8 @@ export interface IQuote extends Document {
   addedById: string;
   channelId: string;
   messageId: string;
+  /** Channel the quote-channel post went to (see `database/schema.ts`). */
+  postChannelId?: string;
   createdAt: Date;
   addedAt: Date;
   likes: number;
@@ -151,6 +153,8 @@ export interface QuoteExportEntry {
   addedById: string;
   channelId: string;
   messageId: string;
+  /** Channel the quote-channel post went to (see `database/schema.ts`). */
+  postChannelId?: string;
   likes: number;
   dislikes: number;
   createdAt?: string;
@@ -183,7 +187,7 @@ export interface QuoteMessageDeleter {
    * refused delete does not (#916). A purge reports this back to the member
    * as posts removed, so "no exception escaped" is not good enough.
    */
-  deleteQuoteMessage(messageId: string): Promise<boolean>;
+  deleteQuoteMessage(messageId: string, postedIn?: string): Promise<boolean>;
   /**
    * Re-render a quote-channel post from the row's current values. A purge
    * needs this because the embed prints "Added by @member": anonymising the
@@ -196,6 +200,7 @@ export interface QuoteMessageDeleter {
     content: string,
     authorId: string,
     addedById: string,
+    postedIn?: string,
   ): Promise<void>;
 }
 
@@ -440,10 +445,13 @@ export class QuoteService {
   async updateQuoteMessageId(
     quoteId: string,
     messageId: string,
+    postChannelId?: string,
   ): Promise<QuotePublicationResult> {
     const updated = await this.model.findByIdAndUpdate(
       quoteId,
-      { messageId },
+      // The channel goes with the id: without it nothing can find this post
+      // again once the quote channel is moved (#916).
+      postChannelId ? { messageId, postChannelId } : { messageId },
       { new: true },
     );
     if (!updated) return { stillExists: false, attributionCleared: false };
@@ -799,7 +807,12 @@ export class QuoteService {
       // is counted as a failure, not as a deletion, so the caller can say the
       // post may still be visible instead of claiming it is gone (#916).
       try {
-        if (await messages.deleteQuoteMessage(quote.messageId)) {
+        if (
+          await messages.deleteQuoteMessage(
+            quote.messageId,
+            quote.postChannelId,
+          )
+        ) {
           messagesDeleted++;
         } else {
           messagesFailed++;
@@ -892,6 +905,7 @@ export class QuoteService {
           quote.content,
           quote.authorId,
           ANONYMISED_USER_ID,
+          quote.postChannelId,
         );
         attributionsRerendered++;
       } catch (error) {

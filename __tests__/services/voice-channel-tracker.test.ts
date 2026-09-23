@@ -557,6 +557,39 @@ describe("VoiceChannelTracker", () => {
       expect(tracker.getActiveSession("user123")?.channelName).toBe("B");
     });
 
+    it("hands the session's bookkeeping back when the persist fails (#916)", async () => {
+      // `activeSessions` is deliberately kept on a failed write so the next
+      // disconnect retries it — and the retry has to see the companions and
+      // encountered users the failed attempt had claimed, not an empty
+      // session.
+      const { tracker, mockConfigService } = createTracker(mockClient);
+      mockConfigService.getBoolean.mockResolvedValue(true);
+      mockConfigService.get.mockResolvedValue(null);
+      (mockClient.users as any).fetch = jest
+        .fn()
+        .mockResolvedValue({ username: "user123", id: "user123" });
+
+      const member = memberIn("user123");
+      const channel = { id: "channel-a", name: "A" } as unknown as VoiceChannel;
+      await joinChannel(tracker, member, channel);
+      await joinChannel(tracker, memberIn("user456"), channel);
+
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock)
+        .mockRejectedValueOnce(new Error("write conflict"))
+        .mockResolvedValue({});
+
+      await leaveChannel(tracker, member, channel);
+      // The session survived the failure, as before.
+      expect(tracker.getActiveSession("user123")).not.toBeNull();
+
+      (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+      await leaveChannel(tracker, member, channel);
+
+      const pushed = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+        .calls[0][1].$push.sessions;
+      expect(pushed.otherUsers).toEqual(["user456"]);
+    });
+
     it("does not start tracking for a join that predates the purge (#916)", async () => {
       // The handler yields on the enablement lookup before it ever reaches
       // `startTracking`. Reading the generation after that await would hand

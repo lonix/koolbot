@@ -193,23 +193,32 @@ async function handleAdd(
   const quoteChannelManager = QuoteChannelManager.getInstance(
     interaction.client,
   );
-  const messageId = await quoteChannelManager.postQuote(
+  const post = await quoteChannelManager.postQuote(
     quote._id.toString(),
     quote.content,
     quote.authorId,
     quote.addedById,
   );
 
-  if (messageId) {
-    // Update quote with message ID
+  if (post) {
+    // Update quote with the message ID *and* the channel it went to, so the
+    // post can still be found after an admin moves the quote channel (#916).
+    const { messageId, channelId } = post;
     const { stillExists, attributionCleared } =
-      await quoteService.updateQuoteMessageId(quote._id.toString(), messageId);
+      await quoteService.updateQuoteMessageId(
+        quote._id.toString(),
+        messageId,
+        channelId,
+      );
     if (!stillExists) {
       // The row was purged between `addQuote` and the post going up (#916).
       // Nothing else will ever collect this message — the sweep ignores bot
       // posts, and the row that pointed at it is gone — so take it down here
       // rather than leave the quote publicly readable after an erasure.
-      const removed = await quoteChannelManager.deleteQuoteMessage(messageId);
+      const removed = await quoteChannelManager.deleteQuoteMessage(
+        messageId,
+        channelId,
+      );
       await interaction.editReply({
         content: removed
           ? "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted."
@@ -227,6 +236,7 @@ async function handleAdd(
         quote._id.toString(),
         quote.content,
         quote.authorId,
+        channelId,
       );
       // Three different things to say: the post is up without the credit,
       // there is no post at all (the redraw failed and it was taken down),

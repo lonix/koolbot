@@ -118,6 +118,37 @@ describe("QuoteChannelManager.deleteQuoteMessage", () => {
     );
   });
 
+  it("looks in the channel the post went to, not the configured one", async () => {
+    // `quotes.channel_id` says where posts go *now*. After an admin moves
+    // the quote channel, looking for an older post there returns Unknown
+    // Message, which would be read as "already gone" while it is still on
+    // screen in the old channel (#916).
+    const configured = { messages: { fetch: jest.fn() } };
+    channel = configured;
+    const recorded = {
+      messages: {
+        fetch: jest.fn(async () => ({
+          delete: jest.fn(async () => undefined),
+        })),
+      },
+    };
+    const instance = await manager();
+    (
+      instance as unknown as {
+        getQuoteChannelDetailed: (postedIn?: string) => Promise<unknown>;
+      }
+    ).getQuoteChannelDetailed = async (postedIn?: string) => ({
+      channel: postedIn === "old-channel" ? recorded : configured,
+      gone: false,
+    });
+
+    await expect(
+      instance.deleteQuoteMessage("m1", "old-channel"),
+    ).resolves.toBe(true);
+    expect(recorded.messages.fetch).toHaveBeenCalledWith("m1");
+    expect(configured.messages.fetch).not.toHaveBeenCalled();
+  });
+
   it("reports true when the quote channel itself was deleted", async () => {
     // Deleting the channel took every post in it, this one included, so
     // there is nothing left to remove and nothing to report (#916).

@@ -28,7 +28,8 @@ const mockGetQuoteById = jest.fn<() => Promise<unknown>>();
 const mockEditQuote = jest.fn<() => Promise<unknown>>();
 const mockExportQuotes = jest.fn<() => Promise<unknown>>();
 const mockImportQuotes = jest.fn<() => Promise<unknown>>();
-const mockPostQuote = jest.fn<() => Promise<string | null>>();
+const mockPostQuote =
+  jest.fn<() => Promise<{ messageId: string; channelId: string } | null>>();
 const mockUpdateQuoteMessage = jest.fn<() => Promise<unknown>>();
 const mockResetChannel = jest.fn<() => Promise<{ reposted: number }>>();
 const mockDeleteQuoteMessage = jest.fn<() => Promise<boolean>>();
@@ -85,7 +86,10 @@ beforeEach(() => {
     authorId: "author-1",
     addedById: "user-1",
   });
-  mockPostQuote.mockResolvedValue("message-1");
+  mockPostQuote.mockResolvedValue({
+    messageId: "message-1",
+    channelId: "quote-channel",
+  });
   mockUpdateQuoteMessageId.mockResolvedValue({
     stillExists: true,
     attributionCleared: false,
@@ -126,6 +130,7 @@ describe("/quote add", () => {
     expect(mockUpdateQuoteMessageId).toHaveBeenCalledWith(
       "quote-1",
       "message-1",
+      "quote-channel",
     );
     // Deferred before the DB insert and the Discord round-trips: an
     // unacknowledged interaction is invalidated after 3 seconds (#842).
@@ -149,7 +154,10 @@ describe("/quote add", () => {
     const it_ = interaction(options);
     await execute(it_);
 
-    expect(mockDeleteQuoteMessage).toHaveBeenCalledWith("message-1");
+    expect(mockDeleteQuoteMessage).toHaveBeenCalledWith(
+      "message-1",
+      "quote-channel",
+    );
     expect(it_.editReply).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("⚠️") }),
     );
@@ -173,6 +181,7 @@ describe("/quote add", () => {
       "quote-1",
       "Hello",
       "author-1",
+      "quote-channel",
     );
     const reply = it_.editReply.mock.calls[0][0] as { content: string };
     expect(reply.content).toContain("does not credit you");
