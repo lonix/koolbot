@@ -55,6 +55,12 @@ export interface RsvpRemovalResult {
   matched: number;
   /** Of those, the ones the RSVP was actually pulled from. */
   removed: number;
+  /**
+   * Rows cleared whose announcement could not be re-rendered (#916). The
+   * database no longer has the RSVP, but the message in the channel still
+   * shows it, so the erasure is not finished.
+   */
+  rendersFailed: number;
 }
 
 const DISCORD_UNKNOWN_MESSAGE = 10008;
@@ -498,18 +504,21 @@ export class EventService extends ScheduledService {
    * ended or cancelled event's post is churn nobody reads, and
    * `updateAnnouncement` already no-ops when the message is gone.
    *
-   * Returns the events carrying the member's RSVP and how many were
-   * actually cleared — a shortfall between the two is a partial removal, and
-   * the caller reports it rather than losing it (#916).
+   * Returns the events carrying the member's RSVP, how many were actually
+   * cleared, and how many announcements could not be refreshed afterwards —
+   * a shortfall in either is an unfinished erasure the caller reports rather
+   * than loses (#916).
    */
   public async removeRsvp(
     guildId: string,
     userId: string,
   ): Promise<RsvpRemovalResult> {
     const matches = await Event.find({ guildId, "rsvps.userId": userId });
-    if (matches.length === 0) return { matched: 0, removed: 0 };
+    if (matches.length === 0)
+      return { matched: 0, removed: 0, rendersFailed: 0 };
 
     let removed = 0;
+    let rendersFailed = 0;
     for (const match of matches) {
       // Per event, so one failure neither stops the others nor discards the
       // record of the RSVPs already pulled (#916). The count that comes back
@@ -525,8 +534,14 @@ export class EventService extends ScheduledService {
         );
         if (!updated) continue;
         removed++;
-        if (!isTerminalState(updated.state)) {
-          await this.updateAnnouncement(updated);
+        // The row is gone, but the announcement may still show the member as
+        // attending — that is their data, still public, so a failed refresh
+        // is counted rather than swallowed.
+        if (
+          !isTerminalState(updated.state) &&
+          !(await this.updateAnnouncement(updated))
+        ) {
+          rendersFailed++;
         }
       } catch (error) {
         logger.error(
@@ -537,9 +552,12 @@ export class EventService extends ScheduledService {
     }
 
     logger.info(
-      `Removed RSVPs for user ${sanitizeForLog(userId)} from ${removed} of ${matches.length} event(s)`,
+      `Removed RSVPs for user ${sanitizeForLog(userId)} from ${removed} of ${matches.length} event(s)` +
+        (rendersFailed > 0
+          ? `; ${rendersFailed} announcement(s) could not be refreshed`
+          : ""),
     );
-    return { matched: matches.length, removed };
+    return { matched: matches.length, removed, rendersFailed };
   }
 
   // ---------------------------------------------------------------
@@ -628,24 +646,39 @@ export class EventService extends ScheduledService {
     await event.save();
   }
 
-  private async updateAnnouncement(event: IEvent): Promise<void> {
-    if (!event.announcementChannelId || !event.announcementMessageId) return;
+  /**
+   * Refresh an event's announcement message.
+   *
+   * Returns whether the post now reflects the event — which is not the same
+   * as "no exception escaped" (#916). A purge re-renders to take the
+   * member's RSVP off a message anyone in the guild can read, so an
+   * unreachable channel or a failed edit leaves their answer publicly
+   * visible and has to be reported, not swallowed. Nothing to refresh
+   * (no announcement configured, or the message is already gone) counts as
+   * success: there is no stale post left to fix.
+   */
+  private async updateAnnouncement(event: IEvent): Promise<boolean> {
+    if (!event.announcementChannelId || !event.announcementMessageId) {
+      return true;
+    }
     const channel = await this.fetchTextChannel(
       event.guildId,
       event.announcementChannelId,
     );
-    if (!channel) return;
+    if (!channel) return false;
     try {
       const message = await channel.messages.fetch(event.announcementMessageId);
       await message.edit(this.buildAnnouncementPayload(event));
+      return true;
     } catch (error) {
       if (this.isDiscardableError(error, DISCORD_UNKNOWN_MESSAGE)) {
         logger.warn(
           `Event announcement message ${sanitizeForLog(event.announcementMessageId)} gone; skipping edit`,
         );
-        return;
+        return true;
       }
       logger.error("Failed to update event announcement:", error);
+      return false;
     }
   }
 

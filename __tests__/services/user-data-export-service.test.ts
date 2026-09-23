@@ -50,7 +50,8 @@ function listModel(name: string): Record<string, unknown> {
   };
 }
 
-const mockGetNumber = jest.fn<(key: string, fallback: number) => Promise<number>>();
+const mockGetNumber =
+  jest.fn<(key: string, fallback: number) => Promise<number>>();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: { getInstance: jest.fn(() => ({ getNumber: mockGetNumber })) },
@@ -134,9 +135,8 @@ jest.unstable_mockModule("../../src/models/channel-invite.js", () => ({
 
 const { UserDataExportService, createExportProgress, DEFAULT_MAX_ITEMS } =
   await import("../../src/services/user-data-export-service.js");
-const { EXPORTABLE_COLLECTIONS, EXCLUDED_USER_DATA } = await import(
-  "../../src/services/user-data-registry.js"
-);
+const { EXPORTABLE_COLLECTIONS, EXCLUDED_USER_DATA } =
+  await import("../../src/services/user-data-registry.js");
 
 const USER = "member-1";
 const GUILD = "guild-1";
@@ -184,9 +184,7 @@ describe("UserDataExportService", () => {
     for (const key of Object.keys(LIMITS)) delete LIMITS[key];
     mockGetNumber.mockReset();
     mockGetNumber.mockResolvedValue(100);
-    (
-      UserDataExportService as unknown as { instance: unknown }
-    ).instance = null;
+    (UserDataExportService as unknown as { instance: unknown }).instance = null;
   });
 
   it("emits a parseable envelope with one key per exportable collection", async () => {
@@ -316,7 +314,11 @@ describe("UserDataExportService", () => {
       __v: 3,
       userId: USER,
       sessions: [
-        { _id: "session-id", channelId: "c1", companions: [{ _id: "x", userId: "friend-1" }] },
+        {
+          _id: "session-id",
+          channelId: "c1",
+          companions: [{ _id: "x", userId: "friend-1" }],
+        },
       ],
       monthlyTotals: [{ _id: "month-id", month: "2026-01", totalTime: 60 }],
     };

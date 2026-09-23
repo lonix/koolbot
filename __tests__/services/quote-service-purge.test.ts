@@ -190,6 +190,22 @@ describe("QuoteService.purgeForUser", () => {
     expect(messages.deleteQuoteMessage).not.toHaveBeenCalled();
   });
 
+  it("still anonymises when the authored lookup itself fails", async () => {
+    // The lookup only the authored half needs must not be able to skip the
+    // independent anonymisation (#916).
+    model.find.mockRejectedValue(new Error("no primary"));
+    model.updateMany.mockResolvedValue({ modifiedCount: 2 });
+
+    const result = await service.purgeForUser("123", messages);
+
+    expect(result.authored).toBe(0);
+    expect(result.deleted).toBe(0);
+    expect(result.deleteError).toBe("no primary");
+    // Not attempted, since the rows it would delete are unknown.
+    expect(model.deleteMany).not.toHaveBeenCalled();
+    expect(result.anonymised).toBe(2);
+  });
+
   it("still anonymises when the row delete fails, and records why", async () => {
     // By this point the Discord posts are already deleted. Letting the row
     // delete take the whole call down would lose that, and leave the saver

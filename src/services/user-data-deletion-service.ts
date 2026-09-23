@@ -203,13 +203,15 @@ const DELETERS: Record<string, CollectionDeleter> = {
         action: "pull-member",
         matched,
         removed: result.revoked.length,
-        // A retained role means the member is still wearing a reward role
-        // they asked to be forgotten from. The next reconcile retries it,
-        // but the purge is not complete until it does, so this is an error
-        // on the step and not just a note.
+        // A retained role means the member is still on the roster for it,
+        // whether the Discord revoke failed or the roster `$pull` that
+        // follows it did — so this says what is true of both rather than
+        // naming an operation that may well have succeeded. The next
+        // reconcile retries, but the purge is not complete until it does,
+        // so this is an error on the step and not just a note.
         error:
           result.retained.length > 0
-            ? `Discord revoke failed for role(s) ${result.retained.join(", ")}; left on the roster for the next reconcile to retry`
+            ? `Leaderboard cleanup incomplete for role(s) ${result.retained.join(", ")}; left on the roster for the next reconcile to retry`
             : undefined,
       });
     },
@@ -269,10 +271,19 @@ const DELETERS: Record<string, CollectionDeleter> = {
       // Reports what it found as well as what it cleared, so an event whose
       // pull or re-render failed shows up as a shortfall rather than as a
       // silently smaller success.
-      const { matched, removed } = await EventService.getInstance(
-        client,
-      ).removeRsvp(guildId, userId);
-      emit({ action: "pull-member", matched, removed });
+      const { matched, removed, rendersFailed } =
+        await EventService.getInstance(client).removeRsvp(guildId, userId);
+      emit({
+        action: "pull-member",
+        matched,
+        removed,
+        // The row is gone but the announcement still shows the member as
+        // attending, which is their data left publicly readable.
+        error:
+          rendersFailed > 0
+            ? `${rendersFailed} event announcement(s) could not be refreshed and may still show this member's RSVP`
+            : undefined,
+      });
     },
   },
 
@@ -444,18 +455,39 @@ const DELETERS: Record<string, CollectionDeleter> = {
   "channel-invite": {
     actions: ["hard-delete", "anonymise"],
     run: async ({ userId }, emit) => {
-      const removal = await ChannelInvite.deleteMany({ userId });
-      emit(deleted(removal?.deletedCount));
+      // Each policy gets its own catch: they are independent writes, and a
+      // failed delete must not stop the sender attribution from being
+      // cleared — nor leave the report with no row for it at all.
+      try {
+        const removal = await ChannelInvite.deleteMany({ userId });
+        emit(deleted(removal?.deletedCount));
+      } catch (error) {
+        emit({
+          action: "hard-delete",
+          matched: 0,
+          removed: 0,
+          error: getErrorMessage(error),
+        });
+      }
 
-      const anonymisation = await ChannelInvite.updateMany(
-        { invitedBy: userId },
-        { $set: { invitedBy: ANONYMISED_USER_ID } },
-      );
-      emit({
-        action: "anonymise",
-        matched: anonymisation?.matchedCount ?? 0,
-        removed: anonymisation?.modifiedCount ?? 0,
-      });
+      try {
+        const anonymisation = await ChannelInvite.updateMany(
+          { invitedBy: userId },
+          { $set: { invitedBy: ANONYMISED_USER_ID } },
+        );
+        emit({
+          action: "anonymise",
+          matched: anonymisation?.matchedCount ?? 0,
+          removed: anonymisation?.modifiedCount ?? 0,
+        });
+      } catch (error) {
+        emit({
+          action: "anonymise",
+          matched: 0,
+          removed: 0,
+          error: getErrorMessage(error),
+        });
+      }
     },
   },
 };

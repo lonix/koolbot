@@ -691,11 +691,23 @@ export class QuoteService {
   ): Promise<QuotePurgeResult> {
     const idForms = userIdMatchForms(userId);
 
-    const authored = await this.model.find({ authorId: { $in: idForms } });
-
+    // The authored half and the anonymisation are independent policies on
+    // the same collection, so the lookup that only the first one needs must
+    // not be able to skip the second (#916).
+    let authored: IQuote[] = [];
     let messagesAttempted = 0;
     let messagesDeleted = 0;
     let messagesFailed = 0;
+    let deleted = 0;
+    let deleteError: string | undefined;
+
+    try {
+      authored = await this.model.find({ authorId: { $in: idForms } });
+    } catch (error) {
+      deleteError = getErrorMessage(error);
+      logger.error(`Failed to look up quotes authored by ${userId}:`, error);
+    }
+
     for (const quote of authored) {
       if (!quote.messageId) continue;
       messagesAttempted++;
@@ -725,19 +737,19 @@ export class QuoteService {
       }
     }
 
-    // The two writes are independent, and by this point Discord posts have
-    // already been deleted — so neither may take the whole call down with it
+    // Each write stands on its own, and by this point Discord posts have
+    // already been deleted — so none of them may take the whole call down
     // and leave the caller believing nothing happened (#916).
-    let deleted = 0;
-    let deleteError: string | undefined;
-    try {
-      const removal = await this.model.deleteMany({
-        authorId: { $in: idForms },
-      });
-      deleted = removal?.deletedCount ?? 0;
-    } catch (error) {
-      deleteError = getErrorMessage(error);
-      logger.error(`Failed to delete quotes authored by ${userId}:`, error);
+    if (!deleteError) {
+      try {
+        const removal = await this.model.deleteMany({
+          authorId: { $in: idForms },
+        });
+        deleted = removal?.deletedCount ?? 0;
+      } catch (error) {
+        deleteError = getErrorMessage(error);
+        logger.error(`Failed to delete quotes authored by ${userId}:`, error);
+      }
     }
 
     let anonymised = 0;

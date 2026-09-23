@@ -325,14 +325,14 @@ describe("removeRsvp", () => {
     const svc = buildService();
     const render = jest
       .spyOn(
-        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     const removed = await svc.removeRsvp("guild-1", "user-1");
 
-    expect(removed).toEqual({ matched: 1, removed: 1 });
+    expect(removed).toEqual({ matched: 1, removed: 1, rendersFailed: 0 });
     expect(EventMock.find).toHaveBeenCalledWith({
       guildId: "guild-1",
       "rsvps.userId": "user-1",
@@ -356,14 +356,14 @@ describe("removeRsvp", () => {
     const svc = buildService();
     jest
       .spyOn(
-        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     const removed = await svc.removeRsvp("guild-1", "user-1");
 
-    expect(removed).toEqual({ matched: 3, removed: 3 });
+    expect(removed).toEqual({ matched: 3, removed: 3, rendersFailed: 0 });
     const [filter] = EventMock.find.mock.calls[0] as [Record<string, unknown>];
     expect(filter).not.toHaveProperty("state");
   });
@@ -381,7 +381,7 @@ describe("removeRsvp", () => {
         },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     await svc.removeRsvp("guild-1", "user-1");
 
@@ -400,7 +400,7 @@ describe("removeRsvp", () => {
         svc as unknown as { updateAnnouncement: (e: unknown) => Promise<void> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     await svc.removeRsvp("guild-1", "user-1");
 
@@ -414,6 +414,7 @@ describe("removeRsvp", () => {
     expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
       matched: 0,
       removed: 0,
+      rendersFailed: 0,
     });
     expect(EventMock.findByIdAndUpdate).not.toHaveBeenCalled();
   });
@@ -424,10 +425,10 @@ describe("removeRsvp", () => {
     const svc = buildService();
     const render = jest
       .spyOn(
-        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     // Matched but not removed: the scan found it, the pull did not. A
     // shortfall like this is what makes a partial removal visible in the
@@ -435,8 +436,34 @@ describe("removeRsvp", () => {
     expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
       matched: 1,
       removed: 0,
+      rendersFailed: 0,
     });
     expect(render).not.toHaveBeenCalled();
+  });
+
+  it("counts an announcement it could not refresh", async () => {
+    // The row is gone but the message still lists the member as attending —
+    // their data, still readable by the whole guild, so the caller has to be
+    // told rather than shown a clean 1/1 (#916).
+    EventMock.find = jest.fn(async () => [{ _id: "e1", state: "scheduled" }]);
+    EventMock.findByIdAndUpdate = jest.fn(async () => ({
+      _id: "e1",
+      state: "scheduled",
+      rsvps: [],
+    }));
+    const svc = buildService();
+    jest
+      .spyOn(
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
+        "updateAnnouncement",
+      )
+      .mockResolvedValue(false);
+
+    expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
+      matched: 1,
+      removed: 1,
+      rendersFailed: 1,
+    });
   });
 
   it("keeps clearing the other events when one pull throws", async () => {
@@ -454,14 +481,15 @@ describe("removeRsvp", () => {
     const svc = buildService();
     jest
       .spyOn(
-        svc as unknown as { updateAnnouncement: () => Promise<void> },
+        svc as unknown as { updateAnnouncement: () => Promise<boolean> },
         "updateAnnouncement",
       )
-      .mockResolvedValue(undefined);
+      .mockResolvedValue(true);
 
     expect(await svc.removeRsvp("guild-1", "user-1")).toEqual({
       matched: 3,
       removed: 2,
+      rendersFailed: 0,
     });
   });
 });

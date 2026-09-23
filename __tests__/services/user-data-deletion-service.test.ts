@@ -110,13 +110,16 @@ const revokeForUser =
       userId: string,
     ) => Promise<{ revoked: string[]; retained: string[] }>
   >();
-const removeRsvp =
-  jest.fn<
-    (
-      guildId: string,
-      userId: string,
-    ) => Promise<{ matched: number; removed: number }>
-  >();
+const removeRsvp = jest.fn<
+  (
+    guildId: string,
+    userId: string,
+  ) => Promise<{
+    matched: number;
+    removed: number;
+    rendersFailed: number;
+  }>
+>();
 const purgeForUser = jest.fn<
   (
     userId: string,
@@ -241,7 +244,9 @@ describe("UserDataDeletionService.purge", () => {
       .mockReset()
       .mockReturnValue({ discarded: false, drained: false });
     revokeForUser.mockReset().mockResolvedValue({ revoked: [], retained: [] });
-    removeRsvp.mockReset().mockResolvedValue({ matched: 0, removed: 0 });
+    removeRsvp
+      .mockReset()
+      .mockResolvedValue({ matched: 0, removed: 0, rendersFailed: 0 });
     purgeForUser.mockReset().mockResolvedValue({
       authored: 0,
       deleted: 0,
@@ -497,7 +502,11 @@ describe("UserDataDeletionService.purge", () => {
     });
 
     it("reports an RSVP removal that cleared only some of the events", async () => {
-      removeRsvp.mockResolvedValue({ matched: 3, removed: 2 });
+      removeRsvp.mockResolvedValue({
+        matched: 3,
+        removed: 2,
+        rendersFailed: 0,
+      });
 
       const report = await service().purge(USER, GUILD);
 
@@ -505,6 +514,47 @@ describe("UserDataDeletionService.purge", () => {
         matched: 3,
         removed: 2,
       });
+      expect(report.ok).toBe(false);
+    });
+
+    it("fails the purge when an event announcement could not be refreshed", async () => {
+      // The RSVP row is gone, but the message still shows the member as
+      // attending — their data, still readable by the whole guild.
+      removeRsvp.mockResolvedValue({
+        matched: 2,
+        removed: 2,
+        rendersFailed: 1,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      const step = stepsFor(report, "event-rsvp")[0];
+      expect(step).toMatchObject({ matched: 2, removed: 2 });
+      expect(step.error).toContain("could not be refreshed");
+      expect(report.ok).toBe(false);
+    });
+
+    it("still anonymises invites when the invite delete fails", async () => {
+      // Two independent policies on one collection: a failed delete must not
+      // stop the sender attribution from being cleared, nor leave the report
+      // with no row for it at all.
+      THROWS["channel-invite.deleteMany"] = "write conflict";
+      RESULTS["channel-invite.updateMany"] = {
+        matchedCount: 3,
+        modifiedCount: 3,
+      };
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "channel-invite")).toMatchObject([
+        {
+          action: "hard-delete",
+          matched: 0,
+          removed: 0,
+          error: "write conflict",
+        },
+        { action: "anonymise", matched: 3, removed: 3 },
+      ]);
       expect(report.ok).toBe(false);
     });
 
@@ -521,6 +571,7 @@ describe("UserDataDeletionService.purge", () => {
       const step = stepsFor(report, "leaderboard-role-assignment")[0];
       expect(step).toMatchObject({ matched: 2, removed: 1 });
       expect(step.error).toContain("role-b");
+      expect(step.error).toContain("Leaderboard cleanup incomplete");
       // The next reconcile will retry, but until it does the member is still
       // wearing a reward role they asked to be forgotten from — so the purge
       // did not succeed, whatever the retry does later.
@@ -656,7 +707,11 @@ describe("UserDataDeletionService.purge", () => {
       };
       forgetActiveSession.mockReturnValue({ discarded: true, drained: true });
       revokeForUser.mockResolvedValue({ revoked: ["role-a"], retained: [] });
-      removeRsvp.mockResolvedValue({ matched: 2, removed: 2 });
+      removeRsvp.mockResolvedValue({
+        matched: 2,
+        removed: 2,
+        rendersFailed: 0,
+      });
       purgeForUser.mockResolvedValue({
         authored: 3,
         deleted: 3,
@@ -677,7 +732,11 @@ describe("UserDataDeletionService.purge", () => {
       for (const key of Object.keys(RESULTS)) delete RESULTS[key];
       forgetActiveSession.mockReturnValue({ discarded: false, drained: false });
       revokeForUser.mockResolvedValue({ revoked: [], retained: [] });
-      removeRsvp.mockResolvedValue({ matched: 0, removed: 0 });
+      removeRsvp.mockResolvedValue({
+        matched: 0,
+        removed: 0,
+        rendersFailed: 0,
+      });
       purgeForUser.mockResolvedValue({
         authored: 0,
         deleted: 0,

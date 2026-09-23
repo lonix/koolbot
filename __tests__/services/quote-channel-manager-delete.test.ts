@@ -21,9 +21,8 @@ describe("QuoteChannelManager.deleteQuoteMessage", () => {
   async function manager(): Promise<{
     deleteQuoteMessage(messageId: string): Promise<boolean>;
   }> {
-    const { QuoteChannelManager } = await import(
-      "../../src/services/quote-channel-manager.js"
-    );
+    const { QuoteChannelManager } =
+      await import("../../src/services/quote-channel-manager.js");
     const instance = QuoteChannelManager.getInstance(mockClient);
     // `getQuoteChannel` resolves config and the gateway; stub it so these
     // cases are about the delete outcome alone.
