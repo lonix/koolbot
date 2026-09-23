@@ -130,6 +130,20 @@ export const VOICE_CHANNELS_SETTING_KEYS = [
 ] as const;
 
 /**
+ * Every `polls.*` key, edited in place on the Polls feature page (#973).
+ * Includes the `polls.enabled` master, so the card cascades like a Settings
+ * section and the feature can be switched off from its own page.
+ */
+export const POLLS_SETTING_KEYS = [
+  "polls.enabled",
+  "polls.default_duration_hours",
+  "polls.cooldown_days",
+  "polls.participation.enabled",
+  "polls.participation.weekly_retention_weeks",
+  "polls.turnout.retention_days",
+] as const;
+
+/**
  * The `reactionroles.*` keys surfaced as editable controls on the Reaction
  * Roles feature page (#974). Unlike Voice Channels, the feature master
  * `reactionroles.enabled` is included so the page can turn the feature off as
@@ -169,6 +183,14 @@ export function envSettingFallback(
     // unticked and a save would store `false`.
     const value = getEnvConfigValue(key);
     return value === null ? null : isEnabledValue(value);
+  }
+  if (typeof defaultValue === "number") {
+    // Read the way `ConfigService.getNumber` reads it: a boolean is 1 / 0 and
+    // an unparsable string falls back to the default rather than rendering
+    // text in a number input (#973).
+    const value = getEnvConfigValue(key);
+    if (typeof value === "boolean") return value ? 1 : 0;
+    return typeof value === "number" ? value : null;
   }
   if (typeof defaultValue !== "string") return getEnvConfigValue(key);
   const raw = getEnv(key);
@@ -846,6 +868,7 @@ export function createReadOnlyRouter(
         cooldownDays,
         channelData,
         roleData,
+        pollSettings,
       ] = await Promise.all([
         config.getBoolean("polls.enabled", false),
         service.listSchedules(common.guildId),
@@ -854,6 +877,8 @@ export function createReadOnlyRouter(
         config.getNumber("polls.cooldown_days", 7),
         fetchChannelData(client, common.guildId),
         fetchRoleData(client, common.guildId),
+        // Editable `polls.*` settings card (#973).
+        loadFeatureSettings(client, common.guildId, POLLS_SETTING_KEYS),
       ]);
 
       res.type("text/html").send(
@@ -862,6 +887,8 @@ export function createReadOnlyRouter(
           enabled,
           defaultDurationHours,
           cooldownDays,
+          settingRows: pollSettings.settingRows,
+          dependencyState: pollSettings.dependencyState,
           textChannels: channelData.textChannels,
           roles: roleData.roles,
           flash: readFlash(req),

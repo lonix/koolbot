@@ -4,6 +4,7 @@ import {
   buildSettingRows,
   fetchChannelData,
   loadFeatureSettings,
+  POLLS_SETTING_KEYS,
   VOICE_CHANNELS_SETTING_KEYS,
   REACTION_ROLES_SETTING_KEYS,
   NOTICES_SETTING_KEYS,
@@ -354,6 +355,77 @@ describe("loadFeatureSettings (#971)", () => {
     }
   });
 
+  it("renders an env-supplied value for a key with no stored row (#973)", async () => {
+    const { client } = countingClient();
+    const previous = process.env["polls.enabled"];
+    process.env["polls.enabled"] = "true";
+    try {
+      const data = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["polls.enabled", "polls.cooldown_days"],
+        [],
+      );
+      expect(data.settingRows[0].current).toBe(true);
+      // Keys without an env var still fall back to the schema default.
+      expect(data.settingRows[1].current).toBe(
+        defaultConfig["polls.cooldown_days"],
+      );
+      // A stored row still wins over the environment.
+      const stored = await loadFeatureSettings(
+        client,
+        "guild-1",
+        ["polls.enabled"],
+        [{ key: "polls.enabled", value: false }],
+      );
+      expect(stored.settingRows[0].current).toBe(false);
+    } finally {
+      if (previous === undefined) delete process.env["polls.enabled"];
+      else process.env["polls.enabled"] = previous;
+    }
+  });
+
+  it("coerces env values to the key's type like ConfigService does (#973)", async () => {
+    const { client } = countingClient();
+    const saved = {
+      enabled: process.env["polls.enabled"],
+      cooldown: process.env["polls.cooldown_days"],
+      duration: process.env["polls.default_duration_hours"],
+    };
+    process.env["polls.enabled"] = "1";
+    process.env["polls.cooldown_days"] = "not-a-number";
+    process.env["polls.default_duration_hours"] = "true";
+    try {
+      const data = await loadFeatureSettings(
+        client,
+        "guild-1",
+        [
+          "polls.enabled",
+          "polls.cooldown_days",
+          "polls.default_duration_hours",
+        ],
+        [],
+      );
+      const byKey = new Map(data.settingRows.map((r) => [r.key, r.current]));
+      // getBoolean treats a non-zero number as on.
+      expect(byKey.get("polls.enabled")).toBe(true);
+      // getNumber falls back to the default for an unparsable string...
+      expect(byKey.get("polls.cooldown_days")).toBe(
+        defaultConfig["polls.cooldown_days"],
+      );
+      // ...and reads a boolean as 1 / 0.
+      expect(byKey.get("polls.default_duration_hours")).toBe(1);
+    } finally {
+      const restore = (key: string, value: string | undefined) => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      };
+      restore("polls.enabled", saved.enabled);
+      restore("polls.cooldown_days", saved.cooldown);
+      restore("polls.default_duration_hours", saved.duration);
+    }
+  });
+
   it("resolves off-card dependencies from stored rows, else the schema default", async () => {
     const { client } = countingClient();
     const data = await loadFeatureSettings(
@@ -368,6 +440,40 @@ describe("loadFeatureSettings (#971)", () => {
     );
     // Keys on the card judge themselves from their own rows.
     expect(data.dependencyState.has("digest.enabled")).toBe(false);
+  });
+});
+
+// Issue #973: the Polls page edits every `polls.*` key in place.
+describe("POLLS_SETTING_KEYS (#973)", () => {
+  it("lists every polls.* key in the schema, master first", () => {
+    const schemaKeys = Object.keys(defaultConfig).filter((k) =>
+      k.startsWith("polls."),
+    );
+    expect([...POLLS_SETTING_KEYS].sort()).toEqual(schemaKeys.sort());
+    expect(POLLS_SETTING_KEYS[0]).toBe("polls.enabled");
+  });
+
+  it("builds rows without any guild picker fetch", async () => {
+    let fetched = 0;
+    const client: any = {
+      guilds: {
+        fetch: async () => {
+          fetched += 1;
+          throw new Error("unexpected guild fetch");
+        },
+      },
+    };
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      POLLS_SETTING_KEYS,
+      [{ key: "polls.cooldown_days", value: 14 }],
+    );
+    expect(fetched).toBe(0);
+    expect(data.settingRows.map((r) => r.key)).toEqual([...POLLS_SETTING_KEYS]);
+    expect(
+      data.settingRows.find((r) => r.key === "polls.cooldown_days")?.current,
+    ).toBe(14);
   });
 });
 

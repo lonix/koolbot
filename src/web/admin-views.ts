@@ -2098,6 +2098,14 @@ export interface PollsProps extends CommonProps {
   enabled: boolean;
   defaultDurationHours: number;
   cooldownDays: number;
+  /**
+   * Every `polls.*` key, edited in place on this page (#973) through
+   * {@link renderFeatureSettingsCard}. Includes `polls.enabled`, so the
+   * feature can be switched off here as well as on.
+   */
+  settingRows: SettingRow[];
+  /** On/off state of off-card dependencies of {@link settingRows}. */
+  dependencyState?: ReadonlyMap<string, boolean>;
   schedules: PollScheduleRow[];
   items: PollItemRow[];
   textChannels: ChannelOption[];
@@ -2216,6 +2224,15 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Polls", featureK
     <dt>Question library</dt><dd>${props.items.length}</dd>
   </dl>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change poll settings here without leaving the page. Saved through the shared settings route.",
+  category: "polls",
+  settingRows: props.settingRows,
+  returnTo: "/admin/polls",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+})}
 <div class="card">
   <h2>Schedules</h2>
   ${

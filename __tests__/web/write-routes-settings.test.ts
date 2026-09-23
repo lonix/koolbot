@@ -389,6 +389,40 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet).toHaveBeenCalledTimes(2);
   });
 
+  it("saves the Polls page card and returns to /admin/polls (#973)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "polls",
+      redirect: "/admin/polls",
+      keys: [
+        "polls.enabled",
+        "polls.default_duration_hours",
+        "polls.cooldown_days",
+      ],
+      "value_polls.enabled": "true",
+      "value_polls.default_duration_hours": "48",
+      "value_polls.cooldown_days": "14",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/polls");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 3 settings in polls.");
+    expect(mockConfigSet).toHaveBeenCalledTimes(3);
+  });
+
+  it("disables Polls from its page without blanking the other settings (#973)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "polls",
+      redirect: "/admin/polls",
+      keys: ["polls.enabled", "polls.default_duration_hours"],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/polls");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("polls.enabled");
+    expect(mockConfigSet.mock.calls[0][1]).toBe(false);
+  });
+
   it("saves the Reaction Roles page card and returns to that page (#974)", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "reactionroles",
