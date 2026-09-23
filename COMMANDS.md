@@ -594,13 +594,16 @@ to play right now, and let people join from the post itself. For a
    `lfg.expiry_minutes` passes — whichever comes first. A closed post keeps
    its roster on screen with its buttons greyed out
 
-**The voice channel:** with `lfg.voice_channel.enabled` on, your post gets a
-dynamic voice channel — the same kind the lobby hands out, so the usual
-cleanup deletes it once everyone leaves. If you already own one, that
-channel is linked instead of a second one being made. It needs voice
-channel management (`voicechannels.enabled`) to be on; without it, posts
-are published with no channel. Closing a post never deletes the channel —
-people may still be in there playing.
+**The voice channel:** with `lfg.voice_channel.enabled` on, and **if you are
+already in a voice channel when you run `/lfg`**, your post gets a dynamic
+voice channel — the same kind the lobby hands out — and you are moved into
+it. Being in it is the point: an empty one is deleted by the usual
+empty-channel cleanup within minutes, which would leave your post pointing
+at nothing. If you already own a dynamic channel and are sitting in it, that
+one is linked rather than a second being made. Run `/lfg` from outside voice
+and the post simply goes up without a channel. It also needs voice channel
+management (`voicechannels.enabled`) to be on. Closing a post never deletes
+the channel — people may still be in there playing.
 
 You can have `lfg.max_active_per_user` posts open at a time (one by
 default); close one to post again.

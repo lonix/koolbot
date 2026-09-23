@@ -15,12 +15,22 @@ import mongoose, { Schema, Document } from "mongoose";
  * reference for the embed, never a thing this feature deletes.
  *
  * The row is deliberately short-lived: a post lives at most
- * `lfg.expiry_minutes`, and `LfgService`'s sweep deletes it a while after it
- * closes. It is persisted rather than held in memory so the buttons keep
- * working across a restart and so a post opened before a restart still gets
- * closed afterwards — the same "the row is the source of truth" reasoning as
- * the events feature.
+ * `lfg.expiry_minutes`, and it is removed an hour after that either by
+ * `LfgService`'s sweep or, if the feature has since been switched off and the
+ * sweep with it, by the TTL index below. It is persisted rather than held in
+ * memory so the buttons keep working across a restart and so a post opened
+ * before a restart still gets closed afterwards — the same "the row is the
+ * source of truth" reasoning as the events feature.
  */
+
+/**
+ * How long a row outlives the post's expiry instant.
+ *
+ * Also the sweep's grace for a closed row, so the two agree: the slack exists
+ * so a close whose message edit failed can be retried on a later tick before
+ * the row goes away.
+ */
+export const LFG_ROW_TTL_SECONDS = 60 * 60;
 
 /** Lifecycle states. `open → closed`; `closed` is terminal. */
 export type LfgState = "open" | "closed";
@@ -48,6 +58,15 @@ export interface ILfgPost extends Document {
   voiceChannelId: string | null;
   state: LfgState;
   closeReason: LfgCloseReason | null;
+  /**
+   * Whether the closed post's message has been re-rendered as closed.
+   *
+   * Without it a swallowed edit failure would strand a post that still looks
+   * open — the sweep only ever selects open rows, so nothing would try again.
+   * The sweep retries any closed row still marked false, and only purges rows
+   * it has confirmed rendered.
+   */
+  closeRendered: boolean;
   /** When the sweep should close the post if it is still open. */
   expiresAt: Date;
   createdAt: Date;
@@ -76,6 +95,7 @@ const LfgPostSchema = new Schema<ILfgPost>(
       enum: ["expired", "full", "cancelled", null],
       default: null,
     },
+    closeRendered: { type: Boolean, default: false },
     expiresAt: { type: Date, required: true },
   },
   {
@@ -90,5 +110,22 @@ const LfgPostSchema = new Schema<ILfgPost>(
 // member's open posts on every /lfg.
 LfgPostSchema.index({ state: 1, expiresAt: 1 });
 LfgPostSchema.index({ guildId: 1, hostId: 1, state: 1 });
+
+// Backstop for the sweep, which only runs while `lfg.enabled` is on: turning
+// the feature off mid-post would otherwise leave that post's host and roster
+// ids sitting in the database indefinitely. Mongo removes the row an hour
+// after the post was due to expire whatever the feature gate says, which is
+// what lets the per-user data registry classify these ids as `expires`.
+//
+// The window is deliberately the same hour the sweep waits, which means a bot
+// that stays down for more than an hour past a post's expiry can have the row
+// removed before the sweep ever re-renders the message as closed. That costs a
+// post whose embed still reads as open — its buttons answer "no longer open"
+// either way — and the alternative, holding roster ids longer to tidy an
+// embed, is the worse trade.
+LfgPostSchema.index(
+  { expiresAt: 1 },
+  { expireAfterSeconds: LFG_ROW_TTL_SECONDS },
+);
 
 export const LfgPost = mongoose.model<ILfgPost>("LfgPost", LfgPostSchema);

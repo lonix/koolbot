@@ -12,6 +12,7 @@ import { ScheduledService } from "./scheduled-service.js";
 import { VoiceChannelManager } from "./voice-channel-manager.js";
 import {
   LfgPost,
+  LFG_ROW_TTL_SECONDS,
   type ILfgPost,
   type LfgCloseReason,
 } from "../models/lfg-post.js";
@@ -51,11 +52,12 @@ const DISCORD_UNKNOWN_MESSAGE = 10008;
  * How long a closed post's row is kept before the sweep deletes it.
  *
  * Not a retention setting: the row has no value once its message has been
- * re-rendered as closed. The hour is slack for a re-render that failed on
- * the tick that closed the post, so the next tick can retry before the row
- * goes away.
+ * re-rendered as closed. The slack is there so a re-render that failed on the
+ * tick that closed the post can be retried before the row goes away. Shared
+ * with the model's TTL index, which enforces the same window from the
+ * database side when the feature (and therefore this sweep) is switched off.
  */
-const CLOSED_ROW_RETENTION_MS = 60 * MS_PER_MINUTE;
+const CLOSED_ROW_RETENTION_MS = LFG_ROW_TTL_SECONDS * 1000;
 
 /** Smallest party worth advertising: the host plus one. */
 export const MIN_PARTY_SIZE = 2;
@@ -102,6 +104,8 @@ export type CloseLfgResult =
 export interface LfgSweepSummary {
   /** Open posts whose expiry had passed. */
   expired: number;
+  /** Closed posts whose message was re-rendered on a later attempt. */
+  retried: number;
   /** Closed rows aged out of the database. */
   purged: number;
 }
@@ -208,7 +212,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
 
   protected async runOnce(): Promise<LfgSweepSummary> {
     const now = new Date();
-    const summary: LfgSweepSummary = { expired: 0, purged: 0 };
+    const summary: LfgSweepSummary = { expired: 0, purged: 0, retried: 0 };
 
     const due = await LfgPost.find({
       state: "open",
@@ -220,7 +224,7 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
         const closed = await this.closePost(String(post._id), "expired");
         if (!closed) continue;
         summary.expired += 1;
-        await this.renderToMessage(closed);
+        await this.renderClosed(closed);
       } catch (error) {
         logger.error(
           `Error expiring LFG post ${sanitizeForLog(String(post._id))}:`,
@@ -229,9 +233,30 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       }
     }
 
-    // Closed rows have done their job once the message shows as closed.
+    // A close whose edit failed (or a restart between the two) leaves a post
+    // that still reads as open. Nothing else would ever look at it again —
+    // every other query here selects open rows — so retry it here until the
+    // message agrees with the row.
+    const unrendered = await LfgPost.find({
+      state: "closed",
+      closeRendered: false,
+    });
+    for (const post of unrendered) {
+      try {
+        if (await this.renderClosed(post)) summary.retried += 1;
+      } catch (error) {
+        logger.error(
+          `Error re-rendering closed LFG post ${sanitizeForLog(String(post._id))}:`,
+          error,
+        );
+      }
+    }
+
+    // Only rows whose message has been confirmed closed are dropped: purging
+    // an unrendered one would strand a post that still looks open forever.
     const purge = await LfgPost.deleteMany({
       state: "closed",
+      closeRendered: true,
       updatedAt: { $lte: new Date(now.getTime() - CLOSED_ROW_RETENTION_MS) },
     });
     summary.purged = purge.deletedCount ?? 0;
@@ -244,10 +269,15 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
   // ---------------------------------------------------------------
 
   /**
-   * Open a post: create the row, optionally attach a voice channel, and send
-   * the embed. The row is saved before the message so the buttons can carry
-   * its id; a send that fails takes the row with it rather than leaving a
-   * post nobody can see or close.
+   * Open a post: reserve the row, claim the host's slot, optionally attach a
+   * voice channel, and send the embed.
+   *
+   * The order matters. The row is saved first so the buttons can carry its
+   * id and so the per-host cap can be settled against rows that already
+   * exist; the voice channel is only created once the post is known to be
+   * keeping its slot, so a refused `/lfg` can't leave a channel behind; and
+   * the message goes last, because a send that fails takes the row with it
+   * rather than leaving a post nobody can see or close.
    */
   public async createPost(input: CreateLfgInput): Promise<CreateLfgResult> {
     const channelId =
@@ -256,29 +286,10 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     const channel = await this.fetchPostChannel(channelId);
     if (!channel) return { status: "no_channel" };
 
-    const limit = await this.configService.getNumber(
-      "lfg.max_active_per_user",
-      1,
-    );
-    if (limit > 0) {
-      const open = await LfgPost.countDocuments({
-        guildId: input.guildId,
-        hostId: input.hostId,
-        state: "open",
-      });
-      if (open >= limit) return { status: "at_limit", limit };
-    }
-
     const expiryMinutes = await this.configService.getNumber(
       "lfg.expiry_minutes",
       60,
     );
-    const voiceChannelId = await this.resolveVoiceChannel(
-      input.guildId,
-      input.hostId,
-      input.game,
-    );
-
     const post = new LfgPost({
       guildId: input.guildId,
       hostId: input.hostId,
@@ -287,13 +298,28 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       partySize: input.partySize,
       memberIds: [input.hostId],
       channelId: channel.id,
-      voiceChannelId,
+      voiceChannelId: null,
       state: "open",
       expiresAt: new Date(
         Date.now() + Math.max(1, expiryMinutes) * MS_PER_MINUTE,
       ),
     });
     await post.save();
+
+    if (!(await this.claimHostSlot(post))) {
+      await LfgPost.deleteOne({ _id: post._id }).catch(() => undefined);
+      return {
+        status: "at_limit",
+        limit: await this.configService.getNumber("lfg.max_active_per_user", 1),
+      };
+    }
+
+    const voiceChannelId = await this.resolveVoiceChannel(
+      input.guildId,
+      input.hostId,
+      input.game,
+    );
+    if (voiceChannelId) post.voiceChannelId = voiceChannelId;
 
     try {
       const message = await channel.send(this.buildPayload(post));
@@ -312,14 +338,19 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
   }
 
   /**
-   * Add a member to the roster.
+   * Add a member to the roster, closing the post in the same write if that
+   * fills the party.
    *
-   * The push runs server-side as a single `findOneAndUpdate` whose filter
-   * carries every precondition — still open, not already on the roster, and
-   * not yet full. A fetch/modify/save would let two clicks in the same tick
-   * both see a free slot and overflow the party (the lost-update defence
-   * `EventService.setRsvp` exists for). A miss is re-read afterwards purely
-   * to tell the member *why* they didn't get in.
+   * Everything runs server-side as a single `findOneAndUpdate`: the filter
+   * carries every precondition (still open, not already on the roster, not
+   * yet full) and the pipeline appends the member and then conditionally
+   * flips `state`/`closeReason` from the *post-append* roster. A
+   * fetch/modify/save would let two clicks in the same tick both see the last
+   * free slot (the lost-update defence `EventService.setRsvp` exists for),
+   * and appending in one write then closing in another would let a Leave
+   * land between them and close a post as `full` with an underfilled roster.
+   * A miss is re-read afterwards purely to tell the member *why* they didn't
+   * get in.
    */
   public async joinPost(
     postId: string,
@@ -334,7 +365,27 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
         memberIds: { $ne: userId },
         $expr: { $lt: [{ $size: "$memberIds" }, "$partySize"] },
       },
-      { $push: { memberIds: userId } },
+      [
+        { $set: { memberIds: { $concatArrays: ["$memberIds", [userId]] } } },
+        {
+          $set: {
+            state: {
+              $cond: [
+                { $gte: [{ $size: "$memberIds" }, "$partySize"] },
+                "closed",
+                "$state",
+              ],
+            },
+            closeReason: {
+              $cond: [
+                { $gte: [{ $size: "$memberIds" }, "$partySize"] },
+                "full",
+                "$closeReason",
+              ],
+            },
+          },
+        },
+      ],
       { new: true },
     );
 
@@ -347,14 +398,11 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       return { status: "full", post: current };
     }
 
-    if (!isPartyFull(joined)) {
-      return { status: "joined", post: joined, filled: false };
-    }
-
-    // The join that completes the party closes it: nobody should be able to
-    // click Join on a party that has everyone it asked for.
-    const closed = await this.closePost(postId, "full");
-    return { status: "joined", post: closed ?? joined, filled: true };
+    return {
+      status: "joined",
+      post: joined,
+      filled: joined.state === "closed",
+    };
   }
 
   /**
@@ -405,6 +453,33 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
   public async getPost(postId: string): Promise<ILfgPost | null> {
     if (!isValidObjectId(postId)) return null;
     return LfgPost.findById(postId).catch(() => null);
+  }
+
+  /**
+   * Decide whether a freshly saved post keeps its slot under
+   * `lfg.max_active_per_user`.
+   *
+   * Counting before inserting would let two `/lfg` runs in the same instant
+   * both see a count below the cap and both post. Counting *after* the
+   * insert, over the member's older open rows only, cannot: ObjectIds are
+   * monotonic, so of any two racing posts exactly one sees the other as
+   * older, and it is always the later one that stands down. A cap of 0 (or
+   * less) means no cap and skips the query entirely.
+   */
+  private async claimHostSlot(post: ILfgPost): Promise<boolean> {
+    const limit = await this.configService.getNumber(
+      "lfg.max_active_per_user",
+      1,
+    );
+    if (limit <= 0) return true;
+
+    const older = await LfgPost.countDocuments({
+      guildId: post.guildId,
+      hostId: post.hostId,
+      state: "open",
+      _id: { $lt: post._id },
+    });
+    return older < limit;
   }
 
   /**
@@ -503,14 +578,21 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     return { embeds: [embed], components: [row] };
   }
 
-  /** Re-render a post's message in place. Used by the sweep. */
-  public async renderToMessage(post: ILfgPost): Promise<void> {
-    if (!post.messageId) return;
+  /**
+   * Re-render a post's message in place, reporting whether the message now
+   * agrees with the row. Used by the sweep.
+   *
+   * A message that has been deleted counts as rendered: there is nothing
+   * stale left on screen, so retrying forever would be pointless.
+   */
+  public async renderToMessage(post: ILfgPost): Promise<boolean> {
+    if (!post.messageId) return true;
     const channel = await this.fetchPostChannel(post.channelId);
-    if (!channel) return;
+    if (!channel) return false;
     try {
       const message = await channel.messages.fetch(post.messageId);
       await message.edit(this.buildPayload(post));
+      return true;
     } catch (error) {
       if (
         error instanceof DiscordAPIError &&
@@ -519,10 +601,38 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
         logger.warn(
           `LFG message ${sanitizeForLog(post.messageId)} is gone; skipping edit`,
         );
-        return;
+        return true;
       }
       logger.error("Failed to update LFG post:", error);
+      return false;
     }
+  }
+
+  /**
+   * Re-render a closed post and record that its message agrees with the row,
+   * so the sweep stops retrying it and may eventually purge it.
+   */
+  private async renderClosed(post: ILfgPost): Promise<boolean> {
+    if (!(await this.renderToMessage(post))) return false;
+    await this.markCloseRendered(String(post._id));
+    return true;
+  }
+
+  /**
+   * Record that a closed post's message has been re-rendered.
+   *
+   * Public because the button handlers render by acknowledging their own
+   * interaction rather than through `renderToMessage`, and an unmarked row
+   * would have the sweep edit the same message again a minute later.
+   */
+  public async markCloseRendered(postId: string): Promise<void> {
+    if (!isValidObjectId(postId)) return;
+    await LfgPost.updateOne(
+      { _id: postId, state: "closed" },
+      { $set: { closeRendered: true } },
+    ).catch((error) =>
+      logger.error("Failed to mark an LFG post as re-rendered:", error),
+    );
   }
 
   // ---------------------------------------------------------------
@@ -532,11 +642,22 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
   /**
    * The voice channel to advertise, if any.
    *
-   * Reuses the host's existing dynamic channel when they already own one —
-   * `createDynamicChannel` tracks one channel per owner, so creating a second
-   * would drop the first out of the ownership map. Creation is gated on
-   * `voicechannels.enabled` as well as `lfg.voice_channel.enabled`: with
-   * voice management off nothing would ever sweep the channel away again.
+   * A channel is only attached when the host is **in voice right now**, and
+   * a newly created one has the host moved into it immediately. That is not a
+   * nicety: `VoiceChannelManager.cleanupEmptyChannels` deletes every empty
+   * managed channel on its five-minute sweep, so a channel created for a host
+   * who is not there to occupy it would be gone — and the post left pointing
+   * at a dead channel — within minutes. The lobby path has the same
+   * constraint and solves it the same way (`handleLobbyJoin` moves the member
+   * into the channel it just made).
+   *
+   * A host who already owns a dynamic channel gets that one, and only while
+   * they are sitting in it: `createDynamicChannel` tracks one channel per
+   * owner, so making a second would drop the first out of the ownership map.
+   *
+   * Creation is gated on `voicechannels.enabled` as well as
+   * `lfg.voice_channel.enabled` — with voice management off nothing would
+   * ever sweep the channel away again.
    */
   private async resolveVoiceChannel(
     guildId: string,
@@ -558,12 +679,23 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     }
 
     try {
-      const manager = VoiceChannelManager.getInstance(this.client);
-      const existing = manager.getUserChannel(hostId);
-      if (existing) return existing.id;
-
       const guild = await this.client.guilds.fetch(guildId).catch(() => null);
       if (!guild) return null;
+      const host = await guild.members.fetch(hostId).catch(() => null);
+      if (!host?.voice.channelId) {
+        logger.debug(
+          "LFG: host is not in a voice channel — posting without one",
+        );
+        return null;
+      }
+
+      const manager = VoiceChannelManager.getInstance(this.client);
+      const owned = manager.getUserChannel(hostId);
+      if (owned) {
+        // Their own room, but only while they are in it — an empty one is
+        // the next sweep's to delete, whoever made it.
+        return host.voice.channelId === owned.id ? owned.id : null;
+      }
 
       const prefix = await this.configService.getString(
         "voicechannels.channel.prefix",
@@ -571,7 +703,20 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       );
       const name = `${prefix} ${game}`.trim().slice(0, 100);
       const created = await manager.createDynamicChannel(guild, hostId, name);
-      return created?.id ?? null;
+      if (!created) return null;
+
+      try {
+        await host.voice.setChannel(created.id);
+      } catch (error) {
+        // Nobody is in it and nobody is going to be, so it is already the
+        // sweep's. Don't advertise a channel that is about to disappear.
+        logger.error(
+          "LFG: could not move the host into their new voice channel:",
+          error,
+        );
+        return null;
+      }
+      return created.id;
     } catch (error) {
       logger.error("LFG: failed to attach a voice channel:", error);
       return null;

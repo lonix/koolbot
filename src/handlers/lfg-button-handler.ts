@@ -1,5 +1,6 @@
 import { ButtonInteraction, MessageFlags } from "discord.js";
 import { LfgService, spotsLeft } from "../services/lfg-service.js";
+import type { ILfgPost } from "../models/lfg-post.js";
 import logger from "../utils/logger.js";
 
 /**
@@ -9,12 +10,18 @@ import logger from "../utils/logger.js";
  * (24 hex chars, no underscores), so a plain split is safe (same shape as
  * the event RSVP buttons).
  *
- * Every branch either updates the post message or replies ephemerally, so a
- * click always gets an acknowledgement inside Discord's 3-second window.
+ * The click is acknowledged with `deferUpdate()` before the first database
+ * read, for the same reason commands defer before theirs: Discord invalidates
+ * an interaction that goes unacknowledged for three seconds, and the
+ * resulting `10062 Unknown interaction` cannot be recovered — which would
+ * leave a member's join recorded but unacknowledged (#842). Everything after
+ * the defer therefore edits the post with `editReply` and answers the member
+ * with an ephemeral `followUp`.
  */
 
 const ACTIONS = new Set(["join", "leave", "close"]);
 
+/** Tell just the clicker something, whatever the interaction's state. */
 async function replyQuietly(
   interaction: ButtonInteraction,
   content: string,
@@ -42,6 +49,22 @@ export async function handleLfgButton(
   const [, action, postId] = parts;
   const service = LfgService.getInstance(interaction.client);
 
+  // Acknowledge before the first database round-trip, and without changing
+  // the message: the branches below decide whether it changes at all.
+  await interaction.deferUpdate();
+
+  /**
+   * Re-render the post. A post that has just closed also gets marked as
+   * rendered, so the sweep neither retries this edit nor purges the row
+   * while its message still reads as open.
+   */
+  const refresh = async (post: ILfgPost): Promise<void> => {
+    await interaction.editReply(service.buildPayload(post));
+    if (post.state === "closed") {
+      await service.markCloseRendered(String(post._id));
+    }
+  };
+
   try {
     if (action === "join") {
       const result = await service.joinPost(postId, interaction.user.id);
@@ -61,16 +84,16 @@ export async function handleLfgButton(
         return;
       }
 
-      await interaction.update(service.buildPayload(result.post));
+      await refresh(result.post);
       const where = result.post.voiceChannelId
         ? ` Hop into <#${result.post.voiceChannelId}>.`
         : "";
-      await interaction.followUp({
-        content: result.filled
+      await replyQuietly(
+        interaction,
+        result.filled
           ? `You're in — that fills the party!${where}`
           : `You're in — ${spotsLeft(result.post)} spot(s) left.${where}`,
-        flags: MessageFlags.Ephemeral,
-      });
+      );
       return;
     }
 
@@ -92,11 +115,8 @@ export async function handleLfgButton(
         return;
       }
 
-      await interaction.update(service.buildPayload(result.post));
-      await interaction.followUp({
-        content: "You've left the party.",
-        flags: MessageFlags.Ephemeral,
-      });
+      await refresh(result.post);
+      await replyQuietly(interaction, "You've left the party.");
       return;
     }
 
@@ -112,7 +132,7 @@ export async function handleLfgButton(
       await replyQuietly(interaction, "This LFG post is already closed.");
       return;
     }
-    await interaction.update(service.buildPayload(result.post));
+    await refresh(result.post);
   } catch (error) {
     logger.error("Error handling LFG button:", error);
     await replyQuietly(

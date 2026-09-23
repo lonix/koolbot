@@ -34,6 +34,7 @@ jest.unstable_mockModule("../../src/services/voice-channel-manager.js", () => ({
 
 jest.unstable_mockModule("../../src/models/lfg-post.js", () => ({
   LfgPost: jest.fn(),
+  LFG_ROW_TTL_SECONDS: 60 * 60,
 }));
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -53,6 +54,7 @@ const LfgPostMock = LfgPost as unknown as jest.Mock & {
   countDocuments: jest.Mock;
   deleteMany: jest.Mock;
   deleteOne: jest.Mock;
+  updateOne: jest.Mock;
 };
 
 const { VoiceChannelManager } =
@@ -85,6 +87,7 @@ interface PostLike {
   voiceChannelId: string | null;
   state: "open" | "closed";
   closeReason: "expired" | "full" | "cancelled" | null;
+  closeRendered: boolean;
   expiresAt: Date;
 }
 
@@ -102,6 +105,7 @@ function post(overrides: Partial<PostLike> = {}): PostLike {
     voiceChannelId: null,
     state: "open",
     closeReason: null,
+    closeRendered: false,
     expiresAt: new Date("2026-07-04T21:00:00Z"),
     ...overrides,
   };
@@ -125,6 +129,7 @@ beforeEach(() => {
   LfgPostMock.countDocuments = jest.fn(async () => 0);
   LfgPostMock.deleteMany = jest.fn(async () => ({ deletedCount: 0 }));
   LfgPostMock.deleteOne = jest.fn(async () => ({ deletedCount: 1 }));
+  LfgPostMock.updateOne = jest.fn(async () => ({ modifiedCount: 1 }));
   VcmMock.getInstance = jest.fn();
 });
 
@@ -192,9 +197,12 @@ describe("formatRoster", () => {
 
 // The join path is the highest-concurrency write in the feature: one post
 // draws several clicks in the same tick, and a fetch/modify/save would let
-// two of them both see the last free slot (lost update).
+// two of them both see the last free slot (lost update). Appending in one
+// write and closing in another has its own race — a Leave landing between
+// them closes a post as `full` with an underfilled roster — so both happen
+// in a single pipeline update.
 describe("joinPost", () => {
-  it("pushes the member with every precondition in the filter", async () => {
+  it("appends and conditionally closes in one atomic write", async () => {
     const updated = post({ memberIds: ["host-1", "user-2"] });
     LfgPostMock.findOneAndUpdate = jest.fn(async () => updated);
 
@@ -202,40 +210,56 @@ describe("joinPost", () => {
 
     expect(result).toEqual({ status: "joined", post: updated, filled: false });
     expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
-    expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledWith(
+
+    const [filter, pipeline, options] =
+      LfgPostMock.findOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({
+      _id: POST_ID,
+      state: "open",
+      memberIds: { $ne: "user-2" },
+      $expr: { $lt: [{ $size: "$memberIds" }, "$partySize"] },
+    });
+    expect(options).toEqual({ new: true });
+    // Stage 1 appends; stage 2 reads the *post-append* roster to decide
+    // whether the party is now full.
+    expect(pipeline).toEqual([
+      { $set: { memberIds: { $concatArrays: ["$memberIds", ["user-2"]] } } },
       {
-        _id: POST_ID,
-        state: "open",
-        memberIds: { $ne: "user-2" },
-        $expr: { $lt: [{ $size: "$memberIds" }, "$partySize"] },
+        $set: {
+          state: {
+            $cond: [
+              { $gte: [{ $size: "$memberIds" }, "$partySize"] },
+              "closed",
+              "$state",
+            ],
+          },
+          closeReason: {
+            $cond: [
+              { $gte: [{ $size: "$memberIds" }, "$partySize"] },
+              "full",
+              "$closeReason",
+            ],
+          },
+        },
       },
-      { $push: { memberIds: "user-2" } },
-      { new: true },
-    );
+    ]);
   });
 
-  it("closes the post as `full` when the join completes the party", async () => {
-    const filled = post({ memberIds: ["host-1", "user-2"], partySize: 2 });
-    const closed = {
-      ...filled,
-      state: "closed" as const,
-      closeReason: "full" as const,
-    };
-    LfgPostMock.findOneAndUpdate = jest
-      .fn<(...args: unknown[]) => Promise<unknown>>()
-      .mockResolvedValueOnce(filled)
-      .mockResolvedValueOnce(closed);
+  it("reports the post as filled when that same write closed it", async () => {
+    const closed = post({
+      memberIds: ["host-1", "user-2"],
+      partySize: 2,
+      state: "closed",
+      closeReason: "full",
+    });
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
 
     const result = await buildService().joinPost(POST_ID, "user-2");
 
     expect(result).toEqual({ status: "joined", post: closed, filled: true });
-    // Second call is the close: a compare-and-set on the open state.
-    expect(LfgPostMock.findOneAndUpdate).toHaveBeenNthCalledWith(
-      2,
-      { _id: POST_ID, state: "open" },
-      { $set: { state: "closed", closeReason: "full" } },
-      { new: true },
-    );
+    // No follow-up close: one write did both, so a concurrent Leave or host
+    // Close cannot slip between them.
+    expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("reports a closed post rather than a silent no-op", async () => {
@@ -345,9 +369,19 @@ describe("closeByHost", () => {
 });
 
 describe("sweep (runOnce)", () => {
-  it("closes due posts, re-renders them, and ages out closed rows", async () => {
+  /** `find` is called twice per sweep: due posts, then unrendered closed. */
+  function stubFinds(due: PostLike[], unrendered: PostLike[] = []): jest.Mock {
+    const find = jest
+      .fn<(...args: unknown[]) => Promise<unknown>>()
+      .mockResolvedValueOnce(due)
+      .mockResolvedValueOnce(unrendered);
+    LfgPostMock.find = find;
+    return find as jest.Mock;
+  }
+
+  it("closes due posts, re-renders them, and ages out rendered rows", async () => {
     const due = post();
-    LfgPostMock.find = jest.fn(async () => [due]);
+    const find = stubFinds([due]);
     const closed = {
       ...due,
       state: "closed" as const,
@@ -357,32 +391,92 @@ describe("sweep (runOnce)", () => {
     LfgPostMock.deleteMany = jest.fn(async () => ({ deletedCount: 3 }));
 
     const svc = buildService();
-    const render = jest
-      .spyOn(svc, "renderToMessage")
-      .mockResolvedValue(undefined);
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
     configValues.booleans["lfg.enabled"] = true;
 
     const summary = await svc.runNow();
 
-    expect(summary).toEqual({ expired: 1, purged: 3 });
+    expect(summary).toEqual({ expired: 1, retried: 0, purged: 3 });
     expect(render).toHaveBeenCalledWith(closed);
-    expect(LfgPostMock.find).toHaveBeenCalledWith({
+    expect(find).toHaveBeenNthCalledWith(1, {
       state: "open",
       expiresAt: { $lte: expect.any(Date) },
+    });
+    // Only rows whose message is confirmed closed are purged.
+    expect(LfgPostMock.deleteMany).toHaveBeenCalledWith({
+      state: "closed",
+      closeRendered: true,
+      updatedAt: { $lte: expect.any(Date) },
+    });
+  });
+
+  it("marks a post rendered so it is neither retried nor left stale", async () => {
+    const due = post();
+    stubFinds([due]);
+    const closed = { ...due, state: "closed" as const };
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+
+    const svc = buildService();
+    jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+    configValues.booleans["lfg.enabled"] = true;
+
+    await svc.runNow();
+
+    expect(LfgPostMock.updateOne).toHaveBeenCalledWith(
+      { _id: POST_ID, state: "closed" },
+      { $set: { closeRendered: true } },
+    );
+  });
+
+  it("leaves a post unmarked when the edit failed, so a later tick retries", async () => {
+    const due = post();
+    stubFinds([due]);
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => ({
+      ...due,
+      state: "closed" as const,
+    }));
+
+    const svc = buildService();
+    jest.spyOn(svc, "renderToMessage").mockResolvedValue(false);
+    configValues.booleans["lfg.enabled"] = true;
+
+    const summary = await svc.runNow();
+
+    expect(summary.expired).toBe(1);
+    expect(LfgPostMock.updateOne).not.toHaveBeenCalled();
+  });
+
+  it("retries closed posts whose message never got re-rendered", async () => {
+    const stale = post({ state: "closed", closeReason: "cancelled" });
+    stubFinds([], [stale]);
+
+    const svc = buildService();
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+    configValues.booleans["lfg.enabled"] = true;
+
+    const summary = await svc.runNow();
+
+    expect(summary).toEqual({ expired: 0, retried: 1, purged: 0 });
+    expect(render).toHaveBeenCalledWith(stale);
+    expect(LfgPostMock.find).toHaveBeenNthCalledWith(2, {
+      state: "closed",
+      closeRendered: false,
     });
   });
 
   it("does not count a post another closer already took", async () => {
-    LfgPostMock.find = jest.fn(async () => [post()]);
+    stubFinds([post()]);
     LfgPostMock.findOneAndUpdate = jest.fn(async () => null);
 
     const svc = buildService();
-    const render = jest
-      .spyOn(svc, "renderToMessage")
-      .mockResolvedValue(undefined);
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
     configValues.booleans["lfg.enabled"] = true;
 
-    expect(await svc.runNow()).toEqual({ expired: 0, purged: 0 });
+    expect(await svc.runNow()).toEqual({
+      expired: 0,
+      retried: 0,
+      purged: 0,
+    });
     expect(render).not.toHaveBeenCalled();
   });
 
@@ -417,6 +511,23 @@ describe("createPost", () => {
     fallbackChannelId: "chan-1",
   };
 
+  /** Capture what each `save()` wrote, in order. */
+  function stubSavedPosts(): Record<string, unknown>[] {
+    const saved: Record<string, unknown>[] = [];
+    LfgPostMock.mockImplementation(function (
+      this: Record<string, unknown>,
+      doc: Record<string, unknown>,
+    ) {
+      Object.assign(this, doc, {
+        _id: POST_ID,
+        save: jest.fn(async () => {
+          saved.push({ ...this });
+        }),
+      });
+    } as never);
+    return saved;
+  }
+
   it("saves the row, posts the embed, and records the message id", async () => {
     const send = jest.fn(async () => ({ id: "msg-9" }));
     const { client } = stubChannel(send as never);
@@ -444,10 +555,16 @@ describe("createPost", () => {
     expect(saved[1].messageId).toBe("msg-9");
   });
 
-  it("refuses once the member is at their open-post cap", async () => {
-    const { client } = stubChannel(jest.fn() as never);
+  // Counting before the insert would let two `/lfg` runs in the same instant
+  // both see a count below the cap. Counting the member's *older* open rows
+  // after inserting cannot: of two racing posts, exactly one sees the other
+  // as older, and that one stands down.
+  it("settles the cap against older rows, after reserving its own", async () => {
+    const send = jest.fn(async () => ({ id: "msg-9" }));
+    const { client } = stubChannel(send as never);
     configValues.numbers["lfg.max_active_per_user"] = 2;
     LfgPostMock.countDocuments = jest.fn(async () => 2);
+    stubSavedPosts();
 
     const result = await LfgService.getInstance(client as never).createPost(
       input,
@@ -458,19 +575,32 @@ describe("createPost", () => {
       guildId: "guild-1",
       hostId: "host-1",
       state: "open",
+      _id: { $lt: POST_ID },
     });
+    // The reservation is given back, and no post goes out.
+    expect(LfgPostMock.deleteOne).toHaveBeenCalledWith({ _id: POST_ID });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("does not create a voice channel for a post it then refuses", async () => {
+    const { client } = stubChannel(jest.fn() as never);
+    configValues.numbers["lfg.max_active_per_user"] = 1;
+    configValues.booleans["voicechannels.enabled"] = true;
+    LfgPostMock.countDocuments = jest.fn(async () => 1);
+    const getInstance = jest.fn();
+    VcmMock.getInstance = getInstance;
+    stubSavedPosts();
+
+    await LfgService.getInstance(client as never).createPost(input);
+
+    expect(getInstance).not.toHaveBeenCalled();
   });
 
   it("treats a cap of 0 as no cap", async () => {
     const send = jest.fn(async () => ({ id: "msg-9" }));
     const { client } = stubChannel(send as never);
     configValues.numbers["lfg.max_active_per_user"] = 0;
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, { _id: POST_ID, save: jest.fn(async () => {}) });
-    } as never);
+    stubSavedPosts();
 
     const result = await LfgService.getInstance(client as never).createPost(
       input,
@@ -515,28 +645,28 @@ describe("createPost", () => {
   it("attaches the host's existing dynamic channel rather than a second one", async () => {
     const send = jest.fn(async () => ({ id: "msg-9" }));
     const { client } = stubChannel(send as never);
+    // The host is sitting in the channel they already own.
+    (client as { guilds: unknown }).guilds = {
+      fetch: jest.fn(async () => ({
+        id: "guild-1",
+        members: {
+          fetch: jest.fn(async () => ({
+            voice: { channelId: "voice-existing", setChannel: jest.fn() },
+          })),
+        },
+      })),
+    };
     configValues.booleans["voicechannels.enabled"] = true;
     const createDynamicChannel = jest.fn();
     VcmMock.getInstance = jest.fn(() => ({
       getUserChannel: jest.fn(() => ({ id: "voice-existing" })),
       createDynamicChannel,
     }));
-    const saved: Record<string, unknown>[] = [];
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, {
-        _id: POST_ID,
-        save: jest.fn(async () => {
-          saved.push({ ...this });
-        }),
-      });
-    } as never);
+    const saved = stubSavedPosts();
 
     await LfgService.getInstance(client as never).createPost(input);
 
-    expect(saved[0].voiceChannelId).toBe("voice-existing");
+    expect(saved[saved.length - 1].voiceChannelId).toBe("voice-existing");
     expect(createDynamicChannel).not.toHaveBeenCalled();
   });
 
@@ -564,7 +694,7 @@ describe("createPost", () => {
 
     await LfgService.getInstance(client as never).createPost(input);
 
-    expect(saved[0].voiceChannelId).toBeNull();
+    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
     expect(getUserChannel).not.toHaveBeenCalled();
   });
 });
@@ -642,14 +772,15 @@ describe("renderToMessage", () => {
     return { channels: { fetch: jest.fn(async () => channel) } };
   }
 
-  it("edits the post in place", async () => {
+  it("edits the post in place and reports success", async () => {
     const edit = jest.fn(async () => undefined);
     const service = LfgService.getInstance(
       clientWithMessage(edit as never) as never,
     );
 
-    await service.renderToMessage(post({ state: "closed" }) as never);
-
+    await expect(
+      service.renderToMessage(post({ state: "closed" }) as never),
+    ).resolves.toBe(true);
     expect(edit).toHaveBeenCalledTimes(1);
   });
 
@@ -663,7 +794,9 @@ describe("renderToMessage", () => {
     expect(client.channels.fetch).not.toHaveBeenCalled();
   });
 
-  it("swallows a message that has been deleted", async () => {
+  // A deleted message counts as rendered: nothing stale is left on screen,
+  // so the sweep must stop retrying it (and may purge the row).
+  it("treats a message that has been deleted as rendered", async () => {
     const gone = Object.assign(Object.create(DiscordAPIError.prototype), {
       code: 10008,
     });
@@ -674,12 +807,10 @@ describe("renderToMessage", () => {
       clientWithMessage(jest.fn() as never, fetch as never) as never,
     );
 
-    await expect(
-      service.renderToMessage(post() as never),
-    ).resolves.toBeUndefined();
+    await expect(service.renderToMessage(post() as never)).resolves.toBe(true);
   });
 
-  it("swallows any other Discord failure rather than killing the sweep", async () => {
+  it("reports any other Discord failure so a later tick retries it", async () => {
     const fetch = jest.fn(async () => {
       throw new Error("gateway exploded");
     });
@@ -687,9 +818,7 @@ describe("renderToMessage", () => {
       clientWithMessage(jest.fn() as never, fetch as never) as never,
     );
 
-    await expect(
-      service.renderToMessage(post() as never),
-    ).resolves.toBeUndefined();
+    await expect(service.renderToMessage(post() as never)).resolves.toBe(false);
   });
 });
 
@@ -719,7 +848,14 @@ describe("voice channel attachment", () => {
     return saved;
   }
 
-  function clientWithGuild(): unknown {
+  /**
+   * A client whose guild reports the host's voice state. `voiceChannelId`
+   * null stands for a host who is not connected to voice at all.
+   */
+  function clientWithGuild(
+    voiceChannelId: string | null = "voice-somewhere",
+    setChannel: jest.Mock = jest.fn(async () => undefined),
+  ): { client: unknown; setChannel: jest.Mock } {
     const channel = {
       id: "chan-1",
       isTextBased: () => true,
@@ -727,12 +863,27 @@ describe("voice channel attachment", () => {
       send: jest.fn(async () => ({ id: "msg-9" })),
     };
     return {
-      channels: { fetch: jest.fn(async () => channel) },
-      guilds: { fetch: jest.fn(async () => ({ id: "guild-1" })) },
+      client: {
+        channels: { fetch: jest.fn(async () => channel) },
+        guilds: {
+          fetch: jest.fn(async () => ({
+            id: "guild-1",
+            members: {
+              fetch: jest.fn(async () => ({
+                voice: { channelId: voiceChannelId, setChannel },
+              })),
+            },
+          })),
+        },
+      },
+      setChannel,
     };
   }
 
-  it("names the channel with the server's managed-channel prefix", async () => {
+  // An empty managed channel is deleted by the voice-channel sweep within
+  // minutes, so a channel the host is not moved into would leave the post
+  // pointing at a dead link.
+  it("creates the channel with the server's prefix and moves the host in", async () => {
     configValues.booleans["voicechannels.enabled"] = true;
     configValues.strings["voicechannels.channel.prefix"] = "🎮";
     const createDynamicChannel = jest.fn(async () => ({ id: "voice-new" }));
@@ -741,15 +892,76 @@ describe("voice channel attachment", () => {
       createDynamicChannel,
     }));
     const saved = stubSavedPosts();
+    const { client, setChannel } = clientWithGuild();
 
-    await LfgService.getInstance(clientWithGuild() as never).createPost(input);
+    await LfgService.getInstance(client as never).createPost(input);
 
     expect(createDynamicChannel).toHaveBeenCalledWith(
-      { id: "guild-1" },
+      expect.objectContaining({ id: "guild-1" }),
       "host-1",
       "🎮 Deep Rock Galactic",
     );
-    expect(saved[0].voiceChannelId).toBe("voice-new");
+    expect(setChannel).toHaveBeenCalledWith("voice-new");
+    expect(saved[saved.length - 1].voiceChannelId).toBe("voice-new");
+  });
+
+  it("creates no channel for a host who is not in voice", async () => {
+    configValues.booleans["voicechannels.enabled"] = true;
+    const createDynamicChannel = jest.fn();
+    VcmMock.getInstance = jest.fn(() => ({
+      getUserChannel: jest.fn(() => undefined),
+      createDynamicChannel,
+    }));
+    const saved = stubSavedPosts();
+    const { client } = clientWithGuild(null);
+
+    const result = await LfgService.getInstance(client as never).createPost(
+      input,
+    );
+
+    expect(result.status).toBe("created");
+    expect(createDynamicChannel).not.toHaveBeenCalled();
+    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+  });
+
+  it("does not link the host's own channel while they are elsewhere", async () => {
+    configValues.booleans["voicechannels.enabled"] = true;
+    const createDynamicChannel = jest.fn();
+    VcmMock.getInstance = jest.fn(() => ({
+      getUserChannel: jest.fn(() => ({ id: "voice-owned" })),
+      createDynamicChannel,
+    }));
+    const saved = stubSavedPosts();
+    const { client } = clientWithGuild("voice-elsewhere");
+
+    await LfgService.getInstance(client as never).createPost(input);
+
+    // Their empty room is the next sweep's; a second channel would also drop
+    // the first out of the one-per-owner map.
+    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(createDynamicChannel).not.toHaveBeenCalled();
+  });
+
+  it("drops a channel it could not move the host into", async () => {
+    configValues.booleans["voicechannels.enabled"] = true;
+    VcmMock.getInstance = jest.fn(() => ({
+      getUserChannel: jest.fn(() => undefined),
+      createDynamicChannel: jest.fn(async () => ({ id: "voice-new" })),
+    }));
+    const saved = stubSavedPosts();
+    const { client } = clientWithGuild(
+      "voice-somewhere",
+      jest.fn(async () => {
+        throw new Error("missing Move Members");
+      }) as never,
+    );
+
+    const result = await LfgService.getInstance(client as never).createPost(
+      input,
+    );
+
+    expect(result.status).toBe("created");
+    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
   });
 
   it("posts without a channel when the operator turned the attachment off", async () => {
@@ -758,10 +970,11 @@ describe("voice channel attachment", () => {
     const getInstance = jest.fn();
     VcmMock.getInstance = getInstance;
     const saved = stubSavedPosts();
+    const { client } = clientWithGuild();
 
-    await LfgService.getInstance(clientWithGuild() as never).createPost(input);
+    await LfgService.getInstance(client as never).createPost(input);
 
-    expect(saved[0].voiceChannelId).toBeNull();
+    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
     expect(getInstance).not.toHaveBeenCalled();
   });
 
@@ -772,13 +985,14 @@ describe("voice channel attachment", () => {
       createDynamicChannel: jest.fn(async () => null),
     }));
     const saved = stubSavedPosts();
+    const { client } = clientWithGuild();
 
-    const result = await LfgService.getInstance(
-      clientWithGuild() as never,
-    ).createPost(input);
+    const result = await LfgService.getInstance(client as never).createPost(
+      input,
+    );
 
     expect(result.status).toBe("created");
-    expect(saved[0].voiceChannelId).toBeNull();
+    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
   });
 
   it("does not let a voice-manager failure sink the post", async () => {
@@ -788,11 +1002,12 @@ describe("voice channel attachment", () => {
     });
     const saved = stubSavedPosts();
 
-    const result = await LfgService.getInstance(
-      clientWithGuild() as never,
-    ).createPost(input);
+    const { client } = clientWithGuild();
+    const result = await LfgService.getInstance(client as never).createPost(
+      input,
+    );
 
     expect(result.status).toBe("created");
-    expect(saved[0].voiceChannelId).toBeNull();
+    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
   });
 });

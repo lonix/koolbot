@@ -23,6 +23,7 @@ const mockJoinPost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockLeavePost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockCloseByHost = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockBuildPayload = jest.fn(() => ({ content: "refreshed" }));
+const mockMarkCloseRendered = jest.fn<() => Promise<void>>();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -53,6 +54,7 @@ jest.unstable_mockModule("../../src/services/voice-channel-manager.js", () => ({
 
 jest.unstable_mockModule("../../src/models/lfg-post.js", () => ({
   LfgPost: jest.fn(),
+  LFG_ROW_TTL_SECONDS: 60 * 60,
 }));
 
 // Keep the real pure helpers (`resolvePartySize`, `spotsLeft`) and swap only
@@ -67,6 +69,7 @@ jest.unstable_mockModule("../../src/services/lfg-service.js", () => ({
       leavePost: mockLeavePost,
       closeByHost: mockCloseByHost,
       buildPayload: mockBuildPayload,
+      markCloseRendered: mockMarkCloseRendered,
     }),
   },
 }));
@@ -76,6 +79,25 @@ const { handleLfgButton } =
   await import("../../src/handlers/lfg-button-handler.js");
 
 const POST_ID = "0123456789abcdef01234567";
+
+/**
+ * A button interaction that acknowledges like the real thing: `deferUpdate`
+ * flips `deferred`, so the handler's refusals land on `followUp` (ephemeral)
+ * rather than `reply`, exactly as Discord would route them.
+ */
+function buttonInteraction(
+  customId: string,
+): ReturnType<typeof createMockButtonInteraction> {
+  const btn = createMockButtonInteraction(customId, {
+    editReply: jest.fn(async () => undefined),
+  });
+  (btn as unknown as { deferUpdate: unknown }).deferUpdate = jest.fn(
+    async () => {
+      (btn as unknown as { deferred: boolean }).deferred = true;
+    },
+  );
+  return btn;
+}
 
 function post(
   overrides: Record<string, unknown> = {},
@@ -106,6 +128,7 @@ beforeEach(() => {
   mockConfigGetBoolean.mockResolvedValue(true);
   mockConfigGetNumber.mockResolvedValue(4);
   mockCreatePost.mockResolvedValue({ status: "created", post: post() });
+  mockMarkCloseRendered.mockResolvedValue(undefined);
 });
 
 describe("/lfg", () => {
@@ -205,6 +228,21 @@ describe("/lfg", () => {
 });
 
 describe("LFG buttons", () => {
+  // The click is acknowledged before the first database read, so a slow query
+  // cannot blow Discord's three-second window and strand a recorded join
+  // (#842). Everything after that edits via editReply / followUp.
+  it("acknowledges the click before touching the database", async () => {
+    mockJoinPost.mockImplementation(async () => {
+      expect(btn.deferUpdate).toHaveBeenCalled();
+      return { status: "joined", post: post(), filled: false };
+    });
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
+
+    await handleLfgButton(btn);
+
+    expect(btn.deferUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it("refreshes the post and confirms the join privately", async () => {
     const joined = post({ memberIds: ["user-1", "user-2"] });
     mockJoinPost.mockResolvedValue({
@@ -212,12 +250,12 @@ describe("LFG buttons", () => {
       post: joined,
       filled: false,
     });
-    const btn = createMockButtonInteraction(`lfg_join_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
 
     await handleLfgButton(btn);
 
     expect(mockJoinPost).toHaveBeenCalledWith(POST_ID, "user-1");
-    expect(btn.update).toHaveBeenCalledWith({ content: "refreshed" });
+    expect(btn.editReply).toHaveBeenCalledWith({ content: "refreshed" });
     expect(
       (btn.followUp.mock.calls[0][0] as { content: string }).content,
     ).toContain("2 spot(s) left");
@@ -229,10 +267,11 @@ describe("LFG buttons", () => {
       post: post({
         memberIds: ["user-1", "user-2"],
         voiceChannelId: "voice-1",
+        state: "closed",
       }),
       filled: true,
     });
-    const btn = createMockButtonInteraction(`lfg_join_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
 
     await handleLfgButton(btn);
 
@@ -241,41 +280,69 @@ describe("LFG buttons", () => {
     expect(followUp.content).toContain("<#voice-1>");
   });
 
+  // The handler renders by acknowledging its own interaction, so it has to
+  // tell the service — otherwise the sweep would edit the same message again
+  // a minute later, or purge a row whose message still read as open.
+  it("marks a post it just closed as re-rendered", async () => {
+    mockCloseByHost.mockResolvedValue({
+      status: "closed",
+      post: post({ state: "closed", closeReason: "cancelled" }),
+    });
+    const btn = buttonInteraction(`lfg_close_${POST_ID}`);
+
+    await handleLfgButton(btn);
+
+    expect(btn.editReply).toHaveBeenCalledWith({ content: "refreshed" });
+    expect(mockMarkCloseRendered).toHaveBeenCalledWith(POST_ID);
+  });
+
+  it("does not mark a post that is still open", async () => {
+    mockJoinPost.mockResolvedValue({
+      status: "joined",
+      post: post({ memberIds: ["user-1", "user-2"] }),
+      filled: false,
+    });
+
+    await handleLfgButton(buttonInteraction(`lfg_join_${POST_ID}`));
+
+    expect(mockMarkCloseRendered).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["closed", "no longer open"],
     ["already_joined", "already on this roster"],
     ["full", "already full"],
   ])("answers a %s join without touching the post", async (status, text) => {
     mockJoinPost.mockResolvedValue({ status, post: post() });
-    const btn = createMockButtonInteraction(`lfg_join_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
 
     await handleLfgButton(btn);
 
-    expect(btn.update).not.toHaveBeenCalled();
+    expect(btn.editReply).not.toHaveBeenCalled();
     expect(
-      (btn.reply.mock.calls[0][0] as { content: string }).content,
+      (btn.followUp.mock.calls[0][0] as { content: string }).content,
     ).toContain(text);
   });
 
   it("sends the host to Close rather than letting them leave", async () => {
     mockLeavePost.mockResolvedValue({ status: "host", post: post() });
-    const btn = createMockButtonInteraction(`lfg_leave_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_leave_${POST_ID}`);
 
     await handleLfgButton(btn);
 
-    expect(btn.update).not.toHaveBeenCalled();
+    expect(btn.editReply).not.toHaveBeenCalled();
     expect(
-      (btn.reply.mock.calls[0][0] as { content: string }).content,
+      (btn.followUp.mock.calls[0][0] as { content: string }).content,
     ).toContain("Close");
   });
 
   it("refreshes the post when someone leaves", async () => {
     mockLeavePost.mockResolvedValue({ status: "left", post: post() });
-    const btn = createMockButtonInteraction(`lfg_leave_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_leave_${POST_ID}`);
 
     await handleLfgButton(btn);
 
-    expect(btn.update).toHaveBeenCalledWith({ content: "refreshed" });
+    expect(btn.editReply).toHaveBeenCalledWith({ content: "refreshed" });
   });
 
   it("closes the post for its host", async () => {
@@ -283,31 +350,32 @@ describe("LFG buttons", () => {
       status: "closed",
       post: post({ state: "closed" }),
     });
-    const btn = createMockButtonInteraction(`lfg_close_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_close_${POST_ID}`);
 
     await handleLfgButton(btn);
 
     expect(mockCloseByHost).toHaveBeenCalledWith(POST_ID, "user-1");
-    expect(btn.update).toHaveBeenCalledWith({ content: "refreshed" });
+    expect(btn.editReply).toHaveBeenCalledWith({ content: "refreshed" });
   });
 
   it("refuses a Close from anyone but the host", async () => {
     mockCloseByHost.mockResolvedValue({ status: "not_host" });
-    const btn = createMockButtonInteraction(`lfg_close_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_close_${POST_ID}`);
 
     await handleLfgButton(btn);
 
-    expect(btn.update).not.toHaveBeenCalled();
+    expect(btn.editReply).not.toHaveBeenCalled();
     expect(
-      (btn.reply.mock.calls[0][0] as { content: string }).content,
+      (btn.followUp.mock.calls[0][0] as { content: string }).content,
     ).toContain("Only the host");
   });
 
-  it("rejects a malformed customId without calling the service", async () => {
-    const btn = createMockButtonInteraction("lfg_bogus_1_2");
+  it("rejects a malformed customId without acknowledging or calling the service", async () => {
+    const btn = buttonInteraction("lfg_bogus_1_2");
 
     await handleLfgButton(btn);
 
+    expect(btn.deferUpdate).not.toHaveBeenCalled();
     expect(mockJoinPost).not.toHaveBeenCalled();
     expect(mockLeavePost).not.toHaveBeenCalled();
     expect(mockCloseByHost).not.toHaveBeenCalled();
@@ -318,12 +386,12 @@ describe("LFG buttons", () => {
 
   it("always answers the click, even when the service throws", async () => {
     mockJoinPost.mockRejectedValue(new Error("mongo is down"));
-    const btn = createMockButtonInteraction(`lfg_join_${POST_ID}`);
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
 
     await handleLfgButton(btn);
 
     expect(
-      (btn.reply.mock.calls[0][0] as { content: string }).content,
+      (btn.followUp.mock.calls[0][0] as { content: string }).content,
     ).toContain("error updating this LFG post");
   });
 });

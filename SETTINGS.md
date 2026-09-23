@@ -734,11 +734,18 @@ self-service, so there is no admin page — just the settings below (see
   that, `lfg.voice_channel.enabled` only takes effect while
   `voicechannels.enabled` is on; with voice management off, posts are
   published without a channel rather than leaving one nobody would sweep.
-- A host who already owns a dynamic voice channel gets **that** channel
-  linked instead of a second one.
+- **A channel is only attached when the host is already in voice**, and the
+  host is moved into a newly created one straight away. An empty managed
+  channel is deleted by the voice-channel sweep within about five minutes,
+  so a channel the host is not in would leave the post pointing at a dead
+  link. A host who already owns a dynamic channel gets **that** one linked,
+  and only while they are sitting in it.
 - Closing a post never deletes its voice channel — members may still be in
   it.
 - Party size is clamped to 2–25 so the roster fits in one embed field.
+- Post rows are removed an hour after a post's expiry instant at the latest.
+  That is enforced by a database TTL index as well as by the sweep, so
+  turning the feature off mid-post does not leave roster IDs behind.
 
 ---
 
