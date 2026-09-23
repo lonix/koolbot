@@ -157,12 +157,19 @@ export const NOTICES_SETTING_KEYS = [
  * The env-var fallback a settings row shows for `key` when no DB row exists.
  * `getEnvConfigValue` coerces every digit-only string to a number, which
  * rounds a Discord snowflake past 2^53 and leaves an id picker with no
- * selection. A key whose schema default is a string keeps the raw text.
+ * selection. A key whose schema default is a string keeps the raw text; a
+ * boolean key is read the way `ConfigService.getBoolean` reads it.
  */
 export function envSettingFallback(
   key: string,
   defaultValue: unknown,
 ): unknown {
+  if (typeof defaultValue === "boolean") {
+    // `getBoolean` reads `1` as on; a raw number would leave the checkbox
+    // unticked and a save would store `false`.
+    const value = getEnvConfigValue(key);
+    return value === null ? null : isEnabledValue(value);
+  }
   if (typeof defaultValue !== "string") return getEnvConfigValue(key);
   const raw = getEnv(key);
   return raw === undefined || raw.trim() === "" ? null : raw;

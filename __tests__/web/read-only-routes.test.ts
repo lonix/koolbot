@@ -197,6 +197,33 @@ describe("buildSettingRows (#705)", () => {
     expect(envSettingFallback("definitely.unset.key", "")).toBeNull();
   });
 
+  it("envSettingFallback reads a boolean key the way getBoolean does", () => {
+    const prev = process.env["notices.header_enabled"];
+    try {
+      for (const [raw, expected] of [
+        ["1", true],
+        ["0", false],
+        ["true", true],
+        ["false", false],
+        ["yes", false],
+      ] as const) {
+        process.env["notices.header_enabled"] = raw;
+        expect(envSettingFallback("notices.header_enabled", true)).toBe(
+          expected,
+        );
+      }
+      // Unset keeps null so the schema default still applies.
+      delete process.env["notices.header_enabled"];
+      expect(envSettingFallback("notices.header_enabled", true)).toBeNull();
+      process.env["notices.header_enabled"] = "1";
+      const [row] = buildSettingRows(["notices.header_enabled"], []);
+      expect(row.current).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env["notices.header_enabled"];
+      else process.env["notices.header_enabled"] = prev;
+    }
+  });
+
   it("excludes the feature master voicechannels.enabled from the key list", () => {
     expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
     expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");
