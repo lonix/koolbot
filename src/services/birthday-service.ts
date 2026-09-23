@@ -39,6 +39,18 @@ export interface StoredBirthday {
   year: number | null;
 }
 
+/** What a per-user birthday purge did (#916). */
+export interface BirthdayPurgeResult {
+  /** Birthday rows the member had in this guild. */
+  matched: number;
+  /** Of those, the ones deleted. */
+  removed: number;
+  /** Whether a live birthday-role grant was taken back on Discord. */
+  roleRevoked: boolean;
+  /** Why the purge is incomplete, when it is. */
+  error?: string;
+}
+
 export interface BirthdayRunSummary {
   ranAt: Date;
   candidates: number;
@@ -420,6 +432,95 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
    * aged past `durationMs`. Durable across restarts because the grant
    * time lives on the row, not in memory. Returns the count removed.
    */
+  /**
+   * Erase a member's birthday and take back any live birthday role (#916).
+   *
+   * **The role has to go first, and this cannot be a raw `deleteMany`.**
+   * `sweepExpiredRoles` finds grants to revoke by querying
+   * `UserBirthday.roleAssignedAt` — that row *is* the only record that the
+   * role was ever handed out. Delete it while a grant is live and the sweep
+   * can never find it again: the member keeps the birthday role permanently
+   * and nothing will ever take it off. Same trap as the leaderboard reward
+   * roles (#914), same order of operations.
+   *
+   * A failed revoke leaves the row in place so the sweep still expires it
+   * later, and is reported as an incomplete purge rather than swallowed.
+   */
+  public async purgeForUser(
+    guildId: string,
+    userId: string,
+  ): Promise<BirthdayPurgeResult> {
+    const rows = await UserBirthday.find({ userId, guildId });
+    if (rows.length === 0) {
+      return { matched: 0, removed: 0, roleRevoked: false };
+    }
+
+    const held = rows.some((row) => row.roleAssignedAt);
+    let roleRevoked = false;
+
+    if (held) {
+      const roleId = await this.configService.getString(
+        "birthdays.role_id",
+        "",
+      );
+      if (roleId) {
+        const revoked = await this.revokeBirthdayRole(guildId, userId, roleId);
+        if (!revoked) {
+          // Keep the row: it is the sweep's only handle on the grant, so
+          // dropping it now would strand the role for good.
+          return {
+            matched: rows.length,
+            removed: 0,
+            roleRevoked: false,
+            error: `could not take back the birthday role; the row is kept so the expiry sweep can still revoke it`,
+          };
+        }
+        roleRevoked = true;
+      }
+      // No role configured any more: nothing to revoke, so the marker is
+      // just stale bookkeeping and the row can go.
+    }
+
+    const removal = await UserBirthday.deleteMany({ userId, guildId });
+    return {
+      matched: rows.length,
+      removed: removal?.deletedCount ?? 0,
+      roleRevoked,
+    };
+  }
+
+  /**
+   * Take the birthday role off a member. True when it is safe to drop their
+   * row — the guild, member or role being gone all count, since there is no
+   * grant left for the sweep to chase.
+   */
+  private async revokeBirthdayRole(
+    guildId: string,
+    userId: string,
+    roleId: string,
+  ): Promise<boolean> {
+    try {
+      const guild = await this.client.guilds.fetch(guildId).catch(() => null);
+      if (!guild) {
+        logger.warn(
+          `Birthday role revoke for ${sanitizeForLog(userId)}: guild unreachable`,
+        );
+        return false;
+      }
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (!member) return true;
+      if (!member.roles.cache.has(roleId)) return true;
+      await member.roles.remove(roleId, "Birthday data reset");
+      return true;
+    } catch (error) {
+      logger.error(
+        `Failed to take back the birthday role from ${sanitizeForLog(userId)}:`,
+        error,
+      );
+      return false;
+    }
+  }
+
   private async sweepExpiredRoles(
     guild: Guild,
     guildId: string,

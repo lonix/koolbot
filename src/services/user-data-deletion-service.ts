@@ -60,6 +60,7 @@
  */
 
 import { Client } from "discord.js";
+import { BirthdayService } from "./birthday-service.js";
 import { EventService } from "./event-service.js";
 import { LeaderboardRoleService } from "./leaderboard-role-service.js";
 import { QuoteChannelManager } from "./quote-channel-manager.js";
@@ -77,7 +78,6 @@ import { Reminder } from "../models/reminder.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { UserAchievements } from "../models/user-achievements.js";
-import { UserBirthday } from "../models/user-birthday.js";
 import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
@@ -269,6 +269,28 @@ const DELETERS: Record<string, CollectionDeleter> = {
     },
   },
 
+  // Not an inert row: `UserBirthday.roleAssignedAt` is the *only* record
+  // that a birthday role was granted, and `sweepExpiredRoles` queries it to
+  // find grants to revoke. A raw delete while a grant is live would strand
+  // the role on the member for good — the same trap the leaderboard rosters
+  // have — so this goes through the owning service, which revokes first.
+  "user-birthday": {
+    actions: ["hard-delete"],
+    run: async ({ userId, guildId, client }, emit) => {
+      const result = await BirthdayService.getInstance(client).purgeForUser(
+        guildId,
+        userId,
+      );
+      emit({
+        action: "hard-delete",
+        matched: result.matched,
+        removed: result.removed,
+        note: result.roleRevoked ? "birthday role revoked" : undefined,
+        error: result.error,
+      });
+    },
+  },
+
   // ---------------------------------------------------------------
   // Owning-service call with a side-effect on someone else's message
   // ---------------------------------------------------------------
@@ -375,17 +397,6 @@ const DELETERS: Record<string, CollectionDeleter> = {
     run: async ({ userId }, emit) => {
       emit(
         deleted((await UserAchievements.deleteMany({ userId })).deletedCount),
-      );
-    },
-  },
-
-  "user-birthday": {
-    actions: ["hard-delete"],
-    run: async ({ userId, guildId }, emit) => {
-      emit(
-        deleted(
-          (await UserBirthday.deleteMany({ userId, guildId })).deletedCount,
-        ),
       );
     },
   },
@@ -540,6 +551,7 @@ export const PURGE_ORDER: readonly string[] = [
   // Discord side-effects first.
   "leaderboard-role-assignment",
   "quote",
+  "user-birthday",
   // Then the owning-service call that edits an event announcement.
   "event-rsvp",
   // Then everything inert.
@@ -549,7 +561,6 @@ export const PURGE_ORDER: readonly string[] = [
   "poll-participation-tracking",
   "poll-turnout",
   "user-achievements",
-  "user-birthday",
   "user-notification-prefs",
   "user-voice-preferences",
   "rewind-snapshot",

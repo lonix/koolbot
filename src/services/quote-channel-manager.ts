@@ -966,6 +966,11 @@ export class QuoteChannelManager {
       // not just the first page.
       const quotes = await quoteService.getAllQuotes();
 
+      // Counted separately: a quote purged mid-rebuild whose post could not
+      // be taken down is not "reposted", it is an orphan (#916).
+      let reposted = 0;
+      let orphaned = 0;
+
       for (const quote of quotes) {
         const messageId = await this.postQuote(
           quote._id.toString(),
@@ -989,13 +994,28 @@ export class QuoteChannelManager {
             logger.warn(
               `Quote ${quote._id} was purged mid-sync; removing the post just created`,
             );
-            await this.deleteQuoteMessage(messageId);
+            if (await this.deleteQuoteMessage(messageId)) {
+              // Cleaned up: this quote is simply not part of the rebuild.
+              continue;
+            }
+            // Still public, with no row pointing at it. Counting it as
+            // reposted would report a clean rebuild over an orphan, so the
+            // sync says how many it could not account for instead.
+            orphaned++;
+            continue;
           }
+          reposted++;
         }
       }
 
-      logger.info(`Synced ${quotes.length} quotes to channel`);
-      return quotes.length;
+      if (orphaned > 0) {
+        logger.error(
+          `Synced ${reposted} quote(s) to channel, but ${orphaned} purged quote(s) could not be removed and remain publicly visible with no database row`,
+        );
+      } else {
+        logger.info(`Synced ${reposted} quotes to channel`);
+      }
+      return reposted;
     } catch (error) {
       logger.error("Error syncing quotes:", error);
       return 0;

@@ -22,6 +22,7 @@ const mockBirthdayFindOne = jest.fn();
 const mockBirthdayFindOneAndUpdate = jest.fn();
 const mockBirthdayDeleteOne = jest.fn();
 const mockBirthdayFind = jest.fn();
+const mockBirthdayDeleteMany = jest.fn();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -50,6 +51,7 @@ jest.unstable_mockModule("../../src/models/user-birthday.js", () => ({
     findOne: mockBirthdayFindOne,
     findOneAndUpdate: mockBirthdayFindOneAndUpdate,
     deleteOne: mockBirthdayDeleteOne,
+    deleteMany: mockBirthdayDeleteMany,
     find: mockBirthdayFind,
   },
 }));
@@ -561,6 +563,103 @@ describe("BirthdayService", () => {
       expect(removed).toBe(0);
       expect(row.roleAssignedAt).toBeDefined();
       expect(row.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("purgeForUser (#916)", () => {
+    /** A guild whose member holds (or does not hold) the birthday role. */
+    function guildWithMember(hasRole: boolean): {
+      guild: unknown;
+      remove: jest.Mock;
+    } {
+      const remove = jest.fn(async () => undefined);
+      return {
+        guild: {
+          members: {
+            fetch: jest.fn(async () => ({
+              roles: { cache: { has: () => hasRole }, remove },
+            })),
+          },
+        },
+        remove,
+      };
+    }
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      resetSingleton();
+      mockConfigGetString.mockResolvedValue("role-1");
+      mockBirthdayDeleteMany.mockResolvedValue({ deletedCount: 1 });
+    });
+
+    it("takes the role back before deleting the row that records it", async () => {
+      // `roleAssignedAt` is the expiry sweep's only handle on the grant, so
+      // deleting the row first would leave the role on the member forever.
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      const { guild, remove } = guildWithMember(true);
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(guild);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({ matched: 1, removed: 1, roleRevoked: true });
+      expect(remove.mock.invocationCallOrder[0]).toBeLessThan(
+        mockBirthdayDeleteMany.mock.invocationCallOrder[0],
+      );
+    });
+
+    it("keeps the row when the role could not be taken back", async () => {
+      // Dropping it would strand the grant: the sweep would never see it.
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue(null);
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result.removed).toBe(0);
+      expect(result.error).toBeDefined();
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("just deletes the row when no role was ever granted", async () => {
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: undefined }]);
+      const client = makeClient();
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({ matched: 1, removed: 1, roleRevoked: false });
+      expect(client.guilds.fetch).not.toHaveBeenCalled();
+    });
+
+    it("reports zeros for a member with no birthday", async () => {
+      mockBirthdayFind.mockResolvedValue([]);
+      const client = makeClient();
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+
+      expect(await svc.purgeForUser("guild-1", "user-1")).toEqual({
+        matched: 0,
+        removed: 0,
+        roleRevoked: false,
+      });
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
+    it("drops the row when the member has already left", async () => {
+      // No member, no grant left for the sweep to chase.
+      mockBirthdayFind.mockResolvedValue([{ roleAssignedAt: new Date() }]);
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        members: { fetch: jest.fn(async () => null) },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toEqual({ matched: 1, removed: 1, roleRevoked: true });
     });
   });
 });

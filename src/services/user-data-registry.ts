@@ -233,7 +233,7 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
     onDelete: "hard-delete",
     subject: "self",
     deleteNote:
-      "Self-declared personal data the member entered themselves; the clearest possible hard delete.",
+      "Self-declared personal data the member entered themselves. Not quite the simple delete it looks: `roleAssignedAt` on this row is the only record that the temporary birthday role was granted, so a live grant has to be revoked before the row goes or the expiry sweep can never find it (#916).",
   },
   {
     source: "src/models/user-notification-prefs.ts",

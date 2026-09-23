@@ -83,7 +83,6 @@ for (const [path, exportName, label] of [
   ],
   ["poll-turnout", "PollTurnout", "poll-turnout"],
   ["user-achievements", "UserAchievements", "user-achievements"],
-  ["user-birthday", "UserBirthday", "user-birthday"],
   [
     "user-notification-prefs",
     "UserNotificationPrefs",
@@ -137,6 +136,17 @@ const purgeForUser = jest.fn<
     anonymised: number;
   }>
 >();
+const birthdayPurgeForUser = jest.fn<
+  (
+    guildId: string,
+    userId: string,
+  ) => Promise<{
+    matched: number;
+    removed: number;
+    roleRevoked: boolean;
+    error?: string;
+  }>
+>();
 const revokeSessionsForUser = jest.fn<(userId: string) => Promise<number>>();
 
 jest.unstable_mockModule("../../src/services/voice-channel-tracker.js", () => ({
@@ -163,6 +173,17 @@ jest.unstable_mockModule(
     },
   }),
 );
+
+jest.unstable_mockModule("../../src/services/birthday-service.js", () => ({
+  BirthdayService: {
+    getInstance: () => ({
+      purgeForUser: async (guildId: string, userId: string) => {
+        CALLS.push("birthday.purgeForUser");
+        return birthdayPurgeForUser(guildId, userId);
+      },
+    }),
+  },
+}));
 
 jest.unstable_mockModule("../../src/services/event-service.js", () => ({
   EventService: {
@@ -260,6 +281,9 @@ describe("UserDataDeletionService.purge", () => {
       messagesFailed: 0,
       anonymised: 0,
     });
+    birthdayPurgeForUser
+      .mockReset()
+      .mockResolvedValue({ matched: 0, removed: 0, roleRevoked: false });
     revokeSessionsForUser.mockReset().mockResolvedValue(0);
   });
 
@@ -350,7 +374,6 @@ describe("UserDataDeletionService.purge", () => {
         "message-activity-tracking",
         "reaction-activity-tracking",
         "poll-participation-tracking",
-        "user-birthday",
         "user-notification-prefs",
         "rewind-snapshot",
         "rewind-nudge-state",
@@ -563,6 +586,44 @@ describe("UserDataDeletionService.purge", () => {
       expect(report.ok).toBe(false);
     });
 
+    it("revokes the birthday role before the row that records it", async () => {
+      // `roleAssignedAt` on that row is the expiry sweep's only handle on the
+      // grant, so deleting it first would strand the role permanently.
+      birthdayPurgeForUser.mockResolvedValue({
+        matched: 1,
+        removed: 1,
+        roleRevoked: true,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "user-birthday")[0]).toMatchObject({
+        matched: 1,
+        removed: 1,
+        note: "birthday role revoked",
+      });
+      expect(CALLS.indexOf("birthday.purgeForUser")).toBeLessThan(
+        CALLS.indexOf("reminder.deleteMany"),
+      );
+    });
+
+    it("fails the purge when the birthday role could not be taken back", async () => {
+      birthdayPurgeForUser.mockResolvedValue({
+        matched: 1,
+        removed: 0,
+        roleRevoked: false,
+        error: "could not take back the birthday role",
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, "user-birthday")[0]).toMatchObject({
+        matched: 1,
+        removed: 0,
+      });
+      expect(report.ok).toBe(false);
+    });
+
     it("reports a leaderboard role whose Discord revoke failed as a partial step", async () => {
       // The id stays on the roster so the next reconcile retries — but the
       // member is still wearing the role, which the report has to say.
@@ -758,6 +819,11 @@ describe("UserDataDeletionService.purge", () => {
         messagesFailed: 0,
         anonymised: 1,
       });
+      birthdayPurgeForUser.mockResolvedValue({
+        matched: 1,
+        removed: 1,
+        roleRevoked: true,
+      });
       revokeSessionsForUser.mockResolvedValue(1);
 
       const instance = service();
@@ -786,6 +852,11 @@ describe("UserDataDeletionService.purge", () => {
         messagesDeleted: 0,
         messagesFailed: 0,
         anonymised: 0,
+      });
+      birthdayPurgeForUser.mockResolvedValue({
+        matched: 0,
+        removed: 0,
+        roleRevoked: false,
       });
       revokeSessionsForUser.mockResolvedValue(0);
 
