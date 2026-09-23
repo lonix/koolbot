@@ -49,6 +49,7 @@ import { DigestService } from "./services/digest-service.js";
 import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { BirthdayService } from "./services/birthday-service.js";
 import { EventService } from "./services/event-service.js";
+import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
 import { WizardService } from "./services/wizard-service.js";
@@ -511,6 +512,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         rewindNudgeService.destroy();
         birthdayService.destroy();
         eventService.destroy();
+        lfgService.destroy();
         reminderService.destroy();
         WizardService.getInstance().shutdown();
         // Persist any metrics still buffered in memory before the DB
@@ -579,6 +581,7 @@ let digestService: DigestService;
 let rewindNudgeService: RewindNudgeService;
 let birthdayService: BirthdayService;
 let eventService: EventService;
+let lfgService: LfgService;
 let reminderService: ReminderService;
 let moderationService: ModerationService;
 
@@ -609,6 +612,7 @@ try {
   rewindNudgeService = RewindNudgeService.getInstance(client);
   birthdayService = BirthdayService.getInstance(client);
   eventService = EventService.getInstance(client);
+  lfgService = LfgService.getInstance(client);
   reminderService = ReminderService.getInstance(client);
   moderationService = ModerationService.getInstance(client);
 } catch (error) {
@@ -729,6 +733,10 @@ async function initializeServices(): Promise<void> {
     await birthdayService.start();
     await eventService.start();
 
+    // Start the ad-hoc LFG sweep (#957). Members open posts with /lfg; this
+    // closes the ones that filled nobody's party before their timer ran out.
+    await lfgService.start();
+
     // Start the personal reminder scan (#866). Members schedule their own
     // reminders with /remind; this delivers the due ones once a minute.
     await reminderService.start();
@@ -838,6 +846,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleEventRsvpButton } =
           await import("./handlers/event-rsvp-handler.js");
         await handleEventRsvpButton(interaction);
+      } else if (interaction.customId.startsWith("lfg_")) {
+        const { handleLfgButton } =
+          await import("./handlers/lfg-button-handler.js");
+        await handleLfgButton(interaction);
       } else if (interaction.customId.startsWith("reactrole:btn:")) {
         await reactionRoleService.handleButtonInteraction(interaction);
       } else {

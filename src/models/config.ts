@@ -24,6 +24,7 @@ export const CONFIG_CATEGORIES = [
   "gamification", // Kept for backward compatibility during migration
   "help", // No settings use it today; kept so legacy `help.*` rows survive the cleanup sweep
   "leaderboard_roles",
+  "lfg",
   "messagetracking",
   "moderation",
   "notices",

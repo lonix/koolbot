@@ -446,6 +446,30 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Session infrastructure. `WebSessionService.revokeForUser` soft-revokes ($set revokedAt) rather than destroying rows, which is the right behaviour and matches the export's classification.",
   },
   {
+    source: "src/models/lfg-post.ts",
+    collection: "lfg-post",
+    field: "memberIds",
+    exportable: false,
+    guildScoped: true,
+    note: "Ephemeral runtime state: an LFG roster the member joined. The row is removed an hour after the post's expiry instant (`lfg.expiry_minutes` from when it was opened) at the latest — by the sweep once the post closes, or by the model's TTL index regardless.",
+    onDelete: "expires",
+    subject: "self",
+    deleteNote:
+      "Ephemeral runtime state: the whole post row goes away on its own, and the TTL index on `expiresAt` enforces that from the database side even if the feature (and with it the sweep) is switched off mid-post. Pulling a member mid-post would silently shrink a live party instead.",
+  },
+  {
+    source: "src/models/lfg-post.ts",
+    collection: "lfg-post",
+    field: "hostId",
+    exportable: false,
+    guildScoped: true,
+    note: "Ephemeral runtime state: who opened a short-lived LFG post. Gone with the row, which the TTL index on `expiresAt` removes an hour past the post's expiry instant whether or not the feature is still enabled.",
+    onDelete: "expires",
+    subject: "self",
+    deleteNote:
+      "Ephemeral runtime state: the row is removed by the LFG sweep once the post closes, and by the TTL index regardless. Clearing the host mid-post would leave a live post nobody could close.",
+  },
+  {
     source: "src/models/voice-channel-ownership.ts",
     collection: "voice-channel-ownership",
     field: "ownerId",

@@ -36,6 +36,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/achievements](#achievements)
   - [/quote](#quote)
   - [/event](#event)
+  - [/lfg](#lfg)
   - [/remind](#remind)
 - [Moderation commands](#-moderation-commands)
   - [/warn](#warn)
@@ -556,6 +557,59 @@ restart-safe — progress is tracked on the stored event, not in memory.
 
 ---
 
+### `/lfg`
+
+**Description:** Post a **"looking for group"** call for something you want
+to play right now, and let people join from the post itself. For a
+*scheduled* session with RSVPs, use [`/event`](#event) instead.
+
+**Enable:** Web UI → Settings → `lfg.enabled = true` → Reload commands.
+
+**Usage:**
+
+```text
+/lfg game:"Helldivers 2"
+/lfg game:"Valorant" size:5 note:"ranked, mic required"
+```
+
+**Parameters:**
+
+- `game` (required) — what you want to play (max 100 characters)
+- `size` (optional) — how many people you want in total, **you included**
+  (2–25). Defaults to `lfg.default_size`
+- `note` (optional) — anything else worth saying (max 500 characters)
+
+**How it works:**
+
+1. KoolBot posts an embed to the LFG channel (`lfg.channel_id`, or the
+   channel you ran the command in if none is configured). Your reply is
+   ephemeral — the post is the public part
+2. The post shows the host, a live roster, how many spots are left, and
+   when it closes
+3. Anyone can press **Join** to be added to the roster, or **Leave** to
+   drop off again. Only you, the host, can press **Close**
+4. When a voice channel is attached, the post links it and joiners are
+   pointed at it
+5. The post closes as soon as the party fills, you close it, or
+   `lfg.expiry_minutes` passes — whichever comes first. A closed post keeps
+   its roster on screen with its buttons greyed out
+
+**The voice channel:** with `lfg.voice_channel.enabled` on, and **if you are
+already in a voice channel when you run `/lfg`**, your post gets a dynamic
+voice channel — the same kind the lobby hands out — and you are moved into
+it. Being in it is the point: an empty one is deleted by the usual
+empty-channel cleanup within minutes, which would leave your post pointing
+at nothing. If you already own a dynamic channel and are sitting in it, that
+one is linked rather than a second being made. Run `/lfg` from outside voice
+and the post simply goes up without a channel. It also needs voice channel
+management (`voicechannels.enabled`) to be on. Closing a post never deletes
+the channel — people may still be in there playing.
+
+You can have `lfg.max_active_per_user` posts open at a time (one by
+default); close one to post again.
+
+---
+
 ### `/remind`
 
 **Description:** Set a personal, one-off reminder for yourself. KoolBot DMs
@@ -1016,6 +1070,7 @@ surfaces share the same validation.
 | `/quote`                       | Everyone\*       | Quotes enabled                |
 | `/event list`                  | Everyone\*       | Events enabled                |
 | `/event` create/cancel/start   | Administrator    | Events enabled                |
+| `/lfg`                         | Everyone\*       | LFG enabled                   |
 | `/remind`                      | Everyone\*       | Reminders enabled             |
 | `/warn`                        | Moderate Members | Moderation log enabled        |
 | `/timeout`                     | Moderate Members | Moderation log enabled        |
@@ -1122,6 +1177,7 @@ when its message, role, category, or channel is deleted.
 /quote edit id:"..." [text:"..."] [author:@User]
 /event list                         # List upcoming events
 /event create title:"..." date:YYYY-MM-DD time:HH:MM  # (admin) schedule an event
+/lfg game:"..." [size:N] [note:"..."]  # Ad-hoc looking-for-group post
 /remind set message:"..." in:2h     # Set a personal reminder
 /remind list                        # Your pending reminders
 /remind cancel id:"..."             # Cancel one of your reminders

@@ -319,6 +319,17 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "polls.default_duration_hours",
     "polls.cooldown_days",
   ],
+  lfg: [
+    // `lfg.enabled` stays first: the apply step derives a feature's master
+    // gate as the first `.enabled` key in its list, and `lfg.voice_channel
+    // .enabled` would otherwise be mistaken for it.
+    "lfg.enabled",
+    "lfg.channel_id",
+    "lfg.expiry_minutes",
+    "lfg.default_size",
+    "lfg.max_active_per_user",
+    "lfg.voice_channel.enabled",
+  ],
 };
 
 export const WIZARD_FEATURE_ORDER = [
@@ -330,6 +341,7 @@ export const WIZARD_FEATURE_ORDER = [
   "announcements",
   "notices",
   "polls",
+  "lfg",
 ];
 
 /**
