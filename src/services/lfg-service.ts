@@ -269,12 +269,31 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
    * live posts at the instant it is switched off gets the rest on the next
    * reload; nothing is lost either way, since the rows still expire.
    */
+  /**
+   * Arm the sweep, then tidy up if the feature is off.
+   *
+   * The drain cannot be a reload-only concern: a bot that *starts* with LFG
+   * already disabled would otherwise inherit every post left open by the
+   * previous run, with nothing scheduled to ever close them. `start()` runs
+   * once the Discord client is ready, so the drain's edits can go out.
+   */
+  public async start(): Promise<void> {
+    await super.start();
+    await this.drainIfDisabled();
+  }
+
   private async drainIfDisabled(): Promise<void> {
     try {
       if (await this.isEnabled()) return;
 
-      // Phase 1: close what is still open. A `creating` row is skipped — its
-      // message does not exist yet, and `createPost` promotes it in a moment.
+      // Phase 0: drop reservations. A `creating` row has no message to edit,
+      // and its `createPost` is still in flight — deleting it makes that
+      // caller's conditional promotion fail, which is how it learns to take
+      // its message back down instead of opening a post the stopped cron
+      // would never close.
+      await LfgPost.deleteMany({ state: "creating" });
+
+      // Phase 1: close what is still open.
       let closed = 0;
       for (let pass = 0; pass < DRAIN_MAX_PASSES; pass++) {
         const open = await LfgPost.find({ state: "open" })
@@ -483,19 +502,34 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
       return { status: "post_failed" };
     }
 
-    post.messageId = message.id;
-    post.state = "open";
+    // Promote the reservation, conditional on it still being one. The filter
+    // is what makes this safe against an operator disabling LFG mid-send: the
+    // drain deletes reservations, so a promotion that matches nothing means
+    // the feature went away underneath us and this post must not open.
+    let opened: ILfgPost | null = null;
     try {
-      await post.save();
-    } catch (error) {
-      // The message is already out. Dropping the row on its own would leave
-      // a post that looks live but can never be joined, closed or expired —
-      // nothing would reference it again — so take the message down first and
-      // only then release the row.
-      logger.error(
-        "Failed to record the LFG message id; removing the post again:",
-        error,
+      opened = await LfgPost.findOneAndUpdate(
+        { _id: post._id, state: "creating" },
+        {
+          $set: {
+            state: "open",
+            messageId: message.id,
+            // Resolved after the reservation was saved, so it rides along
+            // here rather than in a save of its own.
+            voiceChannelId: post.voiceChannelId,
+          },
+        },
+        { new: true },
       );
+    } catch (error) {
+      logger.error("Failed to record the LFG message id:", error);
+    }
+
+    if (!opened) {
+      // Either the write failed or the reservation is gone. The message is
+      // already out, and nothing will ever reference it again, so take it
+      // back down rather than leave a post that can never be joined, closed
+      // or expired.
       await message.delete().catch((deleteError) => {
         logger.error(
           "Failed to remove the orphaned LFG message; it will have to be deleted by hand:",
@@ -507,9 +541,9 @@ export class LfgService extends ScheduledService<LfgSweepSummary> {
     }
 
     logger.info(
-      `Opened LFG post ${sanitizeForLog(String(post._id))} for ${sanitizeForLog(input.game)}`,
+      `Opened LFG post ${sanitizeForLog(String(opened._id))} for ${sanitizeForLog(input.game)}`,
     );
-    return { status: "created", post };
+    return { status: "created", post: opened };
   }
 
   /**

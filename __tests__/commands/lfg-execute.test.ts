@@ -410,6 +410,21 @@ describe("LFG buttons", () => {
     ).toContain("Only the host");
   });
 
+  // A post outlives the feature switch: closing them all is best-effort, and
+  // an edit that could not go through leaves live-looking buttons behind.
+  it("refuses every button once LFG has been switched off", async () => {
+    mockConfigGetBoolean.mockResolvedValue(false);
+    const btn = buttonInteraction(`lfg_join_${POST_ID}`);
+
+    await handleLfgButton(btn);
+
+    expect(mockJoinPost).not.toHaveBeenCalled();
+    expect(btn.deferUpdate).not.toHaveBeenCalled();
+    expect(
+      (btn.reply.mock.calls[0][0] as { content: string }).content,
+    ).toContain("switched off");
+  });
+
   it("rejects a malformed customId without acknowledging or calling the service", async () => {
     const btn = buttonInteraction("lfg_bogus_1_2");
 

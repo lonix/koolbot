@@ -1,4 +1,5 @@
 import { ButtonInteraction, MessageFlags } from "discord.js";
+import { ConfigService } from "../services/config-service.js";
 import { LfgService, spotsLeft } from "../services/lfg-service.js";
 import type { ILfgPost } from "../models/lfg-post.js";
 import logger from "../utils/logger.js";
@@ -47,6 +48,18 @@ export async function handleLfgButton(
   }
 
   const [, action, postId] = parts;
+
+  // A post outlives the feature switch: the row is closed and re-rendered
+  // when LFG is turned off, but an edit that could not go through leaves a
+  // message still carrying live-looking buttons. They must not still work.
+  if (!(await ConfigService.getInstance().getBoolean("lfg.enabled", false))) {
+    await replyQuietly(
+      interaction,
+      "❌ LFG is switched off on this server, so this post is no longer active.",
+    );
+    return;
+  }
+
   const service = LfgService.getInstance(interaction.client);
 
   // Acknowledge before the first database round-trip, and without changing

@@ -138,6 +138,40 @@ function buildService(): InstanceType<typeof LfgService> {
   return LfgService.getInstance(CLIENT);
 }
 
+/**
+ * Stub the reservation `save()` and the conditional promotion that follows it.
+ *
+ * `saved` is what each `save()` wrote; `promoted` collects the `$set` of each
+ * promotion — which is where `messageId` and the resolved voice channel land,
+ * since the reservation is saved before either is known.
+ */
+function stubSavedPosts(): {
+  saved: Record<string, unknown>[];
+  promoted: Record<string, unknown>[];
+} {
+  const saved: Record<string, unknown>[] = [];
+  const promoted: Record<string, unknown>[] = [];
+  LfgPostMock.mockImplementation(function (
+    this: Record<string, unknown>,
+    doc: Record<string, unknown>,
+  ) {
+    Object.assign(this, doc, {
+      _id: POST_ID,
+      save: jest.fn(async () => {
+        saved.push({ ...this });
+      }),
+    });
+  } as never);
+  LfgPostMock.findOneAndUpdate = jest.fn(
+    async (_filter: unknown, update: unknown) => {
+      const set = (update as { $set: Record<string, unknown> }).$set;
+      promoted.push(set);
+      return { ...post(), ...set, _id: POST_ID };
+    },
+  );
+  return { saved, promoted };
+}
+
 beforeEach(() => {
   LfgService.reset();
   reloadCallbacks.length = 0;
@@ -563,38 +597,10 @@ describe("createPost", () => {
     fallbackChannelId: "chan-1",
   };
 
-  /** Capture what each `save()` wrote, in order. */
-  function stubSavedPosts(): Record<string, unknown>[] {
-    const saved: Record<string, unknown>[] = [];
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, {
-        _id: POST_ID,
-        save: jest.fn(async () => {
-          saved.push({ ...this });
-        }),
-      });
-    } as never);
-    return saved;
-  }
-
   it("saves the row, posts the embed, and records the message id", async () => {
-    const send = jest.fn(async () => ({ id: "msg-9" }));
+    const send = jest.fn(async () => ({ id: "msg-9", delete: jest.fn() }));
     const { client } = stubChannel(send as never);
-    const saved: Record<string, unknown>[] = [];
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, {
-        _id: POST_ID,
-        save: jest.fn(async () => {
-          saved.push({ ...this });
-        }),
-      });
-    } as never);
+    const { saved, promoted } = stubSavedPosts();
 
     const service = LfgService.getInstance(client as never);
     const result = await service.createPost(input);
@@ -604,7 +610,12 @@ describe("createPost", () => {
     // Host is seeded onto their own roster, and the message id is persisted
     // so the sweep can re-render the post later.
     expect(saved[0].memberIds).toEqual(["host-1"]);
-    expect(saved[1].messageId).toBe("msg-9");
+    expect(saved[0].state).toBe("creating");
+    expect(promoted[0]).toEqual({
+      state: "open",
+      messageId: "msg-9",
+      voiceChannelId: null,
+    });
   });
 
   // Counting before the insert would let two `/lfg` runs in the same instant
@@ -612,7 +623,7 @@ describe("createPost", () => {
   // after inserting cannot: of two racing posts, exactly one sees the other
   // as older, and that one stands down.
   it("settles the cap against older rows, after reserving its own", async () => {
-    const send = jest.fn(async () => ({ id: "msg-9" }));
+    const send = jest.fn(async () => ({ id: "msg-9", delete: jest.fn() }));
     const { client } = stubChannel(send as never);
     configValues.numbers["lfg.max_active_per_user"] = 2;
     LfgPostMock.countDocuments = jest.fn(async () => 2);
@@ -653,7 +664,7 @@ describe("createPost", () => {
   });
 
   it("treats a cap of 0 as no cap", async () => {
-    const send = jest.fn(async () => ({ id: "msg-9" }));
+    const send = jest.fn(async () => ({ id: "msg-9", delete: jest.fn() }));
     const { client } = stubChannel(send as never);
     configValues.numbers["lfg.max_active_per_user"] = 0;
     stubSavedPosts();
@@ -666,25 +677,36 @@ describe("createPost", () => {
     expect(LfgPostMock.countDocuments).not.toHaveBeenCalled();
   });
 
-  // The message is already out by then, so dropping the row alone would leave
-  // a post that looks live but can never be joined, closed or expired.
-  it("takes the message down when its id cannot be recorded", async () => {
+  // The message is already out by the time the promotion runs, so dropping
+  // the row alone would leave a post that looks live but can never be joined,
+  // closed or expired.
+  it("takes the message down when the promotion fails", async () => {
     const del = jest.fn(async () => undefined);
     const send = jest.fn(async () => ({ id: "msg-9", delete: del }));
     const { client } = stubChannel(send as never);
-    let saves = 0;
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, {
-        _id: POST_ID,
-        save: jest.fn(async () => {
-          // The reservation save succeeds; recording the message id does not.
-          if (++saves > 1) throw new Error("connection reset");
-        }),
-      });
-    } as never);
+    stubSavedPosts();
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => {
+      throw new Error("connection reset");
+    });
+
+    const result = await LfgService.getInstance(client as never).createPost(
+      input,
+    );
+
+    expect(result).toEqual({ status: "post_failed" });
+    expect(del).toHaveBeenCalledTimes(1);
+    expect(LfgPostMock.deleteOne).toHaveBeenCalledWith({ _id: POST_ID });
+  });
+
+  // An operator disabling LFG mid-send makes the drain delete the
+  // reservation, so the promotion matches nothing. The post must not open:
+  // the cron is stopped, so nothing would ever close it.
+  it("takes the message down when the reservation was drained away", async () => {
+    const del = jest.fn(async () => undefined);
+    const send = jest.fn(async () => ({ id: "msg-9", delete: del }));
+    const { client } = stubChannel(send as never);
+    stubSavedPosts();
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => null);
 
     const result = await LfgService.getInstance(client as never).createPost(
       input,
@@ -700,12 +722,7 @@ describe("createPost", () => {
       throw new Error("missing permissions");
     });
     const { client } = stubChannel(send as never);
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, { _id: POST_ID, save: jest.fn(async () => {}) });
-    } as never);
+    stubSavedPosts();
 
     const result = await LfgService.getInstance(client as never).createPost(
       input,
@@ -728,7 +745,7 @@ describe("createPost", () => {
   });
 
   it("attaches the host's existing dynamic channel rather than a second one", async () => {
-    const send = jest.fn(async () => ({ id: "msg-9" }));
+    const send = jest.fn(async () => ({ id: "msg-9", delete: jest.fn() }));
     const { client } = stubChannel(send as never);
     // The host is sitting in the channel they already own.
     (client as { guilds: unknown }).guilds = {
@@ -747,16 +764,16 @@ describe("createPost", () => {
       getUserChannel: jest.fn(() => ({ id: "voice-existing" })),
       createDynamicChannel,
     }));
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
 
     await LfgService.getInstance(client as never).createPost(input);
 
-    expect(saved[saved.length - 1].voiceChannelId).toBe("voice-existing");
+    expect(promoted[0].voiceChannelId).toBe("voice-existing");
     expect(createDynamicChannel).not.toHaveBeenCalled();
   });
 
   it("posts without a channel while voice channel management is off", async () => {
-    const send = jest.fn(async () => ({ id: "msg-9" }));
+    const send = jest.fn(async () => ({ id: "msg-9", delete: jest.fn() }));
     const { client } = stubChannel(send as never);
     configValues.booleans["voicechannels.enabled"] = false;
     const getUserChannel = jest.fn();
@@ -764,22 +781,11 @@ describe("createPost", () => {
       getUserChannel,
       createDynamicChannel: jest.fn(),
     }));
-    const saved: Record<string, unknown>[] = [];
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, {
-        _id: POST_ID,
-        save: jest.fn(async () => {
-          saved.push({ ...this });
-        }),
-      });
-    } as never);
+    const { promoted } = stubSavedPosts();
 
     await LfgService.getInstance(client as never).createPost(input);
 
-    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(promoted[0].voiceChannelId).toBeNull();
     expect(getUserChannel).not.toHaveBeenCalled();
   });
 });
@@ -917,22 +923,6 @@ describe("voice channel attachment", () => {
     fallbackChannelId: "chan-1",
   };
 
-  function stubSavedPosts(): Record<string, unknown>[] {
-    const saved: Record<string, unknown>[] = [];
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, {
-        _id: POST_ID,
-        save: jest.fn(async () => {
-          saved.push({ ...this });
-        }),
-      });
-    } as never);
-    return saved;
-  }
-
   /**
    * A client whose guild reports the host's voice state. `voiceChannelId`
    * null stands for a host who is not connected to voice at all.
@@ -945,7 +935,7 @@ describe("voice channel attachment", () => {
       id: "chan-1",
       isTextBased: () => true,
       isDMBased: () => false,
-      send: jest.fn(async () => ({ id: "msg-9" })),
+      send: jest.fn(async () => ({ id: "msg-9", delete: jest.fn() })),
     };
     return {
       client: {
@@ -976,7 +966,7 @@ describe("voice channel attachment", () => {
       getUserChannel: jest.fn(() => undefined),
       createDynamicChannel,
     }));
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
     const { client, setChannel } = clientWithGuild();
 
     await LfgService.getInstance(client as never).createPost(input);
@@ -987,7 +977,7 @@ describe("voice channel attachment", () => {
       "🎮 Deep Rock Galactic",
     );
     expect(setChannel).toHaveBeenCalledWith("voice-new");
-    expect(saved[saved.length - 1].voiceChannelId).toBe("voice-new");
+    expect(promoted[0].voiceChannelId).toBe("voice-new");
   });
 
   it("creates no channel for a host who is not in voice", async () => {
@@ -997,7 +987,7 @@ describe("voice channel attachment", () => {
       getUserChannel: jest.fn(() => undefined),
       createDynamicChannel,
     }));
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
     const { client } = clientWithGuild(null);
 
     const result = await LfgService.getInstance(client as never).createPost(
@@ -1006,7 +996,7 @@ describe("voice channel attachment", () => {
 
     expect(result.status).toBe("created");
     expect(createDynamicChannel).not.toHaveBeenCalled();
-    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(promoted[0].voiceChannelId).toBeNull();
   });
 
   it("does not link the host's own channel while they are elsewhere", async () => {
@@ -1016,14 +1006,14 @@ describe("voice channel attachment", () => {
       getUserChannel: jest.fn(() => ({ id: "voice-owned" })),
       createDynamicChannel,
     }));
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
     const { client } = clientWithGuild("voice-elsewhere");
 
     await LfgService.getInstance(client as never).createPost(input);
 
     // Their empty room is the next sweep's; a second channel would also drop
     // the first out of the one-per-owner map.
-    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(promoted[0].voiceChannelId).toBeNull();
     expect(createDynamicChannel).not.toHaveBeenCalled();
   });
 
@@ -1033,7 +1023,7 @@ describe("voice channel attachment", () => {
       getUserChannel: jest.fn(() => undefined),
       createDynamicChannel: jest.fn(async () => ({ id: "voice-new" })),
     }));
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
     const { client } = clientWithGuild(
       "voice-somewhere",
       jest.fn(async () => {
@@ -1046,7 +1036,7 @@ describe("voice channel attachment", () => {
     );
 
     expect(result.status).toBe("created");
-    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(promoted[0].voiceChannelId).toBeNull();
   });
 
   it("posts without a channel when the operator turned the attachment off", async () => {
@@ -1054,12 +1044,12 @@ describe("voice channel attachment", () => {
     configValues.booleans["voicechannels.enabled"] = true;
     const getInstance = jest.fn();
     VcmMock.getInstance = getInstance;
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
     const { client } = clientWithGuild();
 
     await LfgService.getInstance(client as never).createPost(input);
 
-    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(promoted[0].voiceChannelId).toBeNull();
     expect(getInstance).not.toHaveBeenCalled();
   });
 
@@ -1069,7 +1059,7 @@ describe("voice channel attachment", () => {
       getUserChannel: jest.fn(() => undefined),
       createDynamicChannel: jest.fn(async () => null),
     }));
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
     const { client } = clientWithGuild();
 
     const result = await LfgService.getInstance(client as never).createPost(
@@ -1077,7 +1067,7 @@ describe("voice channel attachment", () => {
     );
 
     expect(result.status).toBe("created");
-    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(promoted[0].voiceChannelId).toBeNull();
   });
 
   it("does not let a voice-manager failure sink the post", async () => {
@@ -1085,7 +1075,7 @@ describe("voice channel attachment", () => {
     VcmMock.getInstance = jest.fn(() => {
       throw new Error("voice manager is not initialised");
     });
-    const saved = stubSavedPosts();
+    const { promoted } = stubSavedPosts();
 
     const { client } = clientWithGuild();
     const result = await LfgService.getInstance(client as never).createPost(
@@ -1093,7 +1083,7 @@ describe("voice channel attachment", () => {
     );
 
     expect(result.status).toBe("created");
-    expect(saved[saved.length - 1].voiceChannelId).toBeNull();
+    expect(promoted[0].voiceChannelId).toBeNull();
   });
 });
 
@@ -1162,19 +1152,14 @@ describe("the cap and the buttons agree on what 'open' means", () => {
       id: "chan-1",
       isTextBased: () => true,
       isDMBased: () => false,
-      send: jest.fn(async () => ({ id: "msg-9" })),
+      send: jest.fn(async () => ({ id: "msg-9", delete: jest.fn() })),
     };
     const client = { channels: { fetch: jest.fn(async () => channel) } };
     configValues.numbers["lfg.max_active_per_user"] = 1;
     // Nothing *unexpired* is open, so the count comes back empty and the post
     // is allowed even though a dead row is still sitting there.
     LfgPostMock.countDocuments = jest.fn(async () => 0);
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, { _id: POST_ID, save: jest.fn(async () => {}) });
-    } as never);
+    stubSavedPosts();
 
     const result = await LfgService.getInstance(client as never).createPost({
       guildId: "guild-1",
@@ -1238,7 +1223,7 @@ describe("one member's concurrent posts resolve voice one at a time", () => {
       id: "chan-1",
       isTextBased: () => true,
       isDMBased: () => false,
-      send: jest.fn(async () => ({ id: "msg-9" })),
+      send: jest.fn(async () => ({ id: "msg-9", delete: jest.fn() })),
     };
     const client = {
       channels: { fetch: jest.fn(async () => channel) },
@@ -1256,12 +1241,7 @@ describe("one member's concurrent posts resolve voice one at a time", () => {
         })),
       },
     };
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, { _id: POST_ID, save: jest.fn(async () => {}) });
-    } as never);
+    stubSavedPosts();
 
     const service = LfgService.getInstance(client as never);
     const input = {
@@ -1434,26 +1414,28 @@ describe("a post is not live until its message exists", () => {
   };
 
   it("reserves the row as `creating`, then promotes it once sent", async () => {
-    const saved: Record<string, unknown>[] = [];
-    LfgPostMock.mockImplementation(function (
-      this: Record<string, unknown>,
-      doc: Record<string, unknown>,
-    ) {
-      Object.assign(this, doc, {
-        _id: POST_ID,
-        save: jest.fn(async () => {
-          saved.push({ ...this });
-        }),
-      });
-    } as never);
-    const client = stubChannelClient(jest.fn(async () => ({ id: "msg-9" })));
+    const { saved } = stubSavedPosts();
+    const client = stubChannelClient(
+      jest.fn(async () => ({ id: "msg-9", delete: jest.fn() })),
+    );
 
     await LfgService.getInstance(client as never).createPost(input);
 
     expect(saved[0].state).toBe("creating");
     expect(saved[0].messageId).toBeUndefined();
-    expect(saved[saved.length - 1].state).toBe("open");
-    expect(saved[saved.length - 1].messageId).toBe("msg-9");
+    // Promotion is conditional on the row still being a reservation, so a
+    // drain that removed it makes this match nothing.
+    expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: POST_ID, state: "creating" },
+      {
+        $set: {
+          state: "open",
+          messageId: "msg-9",
+          voiceChannelId: null,
+        },
+      },
+      { new: true },
+    );
   });
 
   it("keeps the expiry sweep off rows that have no message yet", async () => {
@@ -1520,5 +1502,51 @@ describe("the disable drain keeps going until it is done", () => {
     // One pass, not ten: nothing is getting through, so retrying the same
     // batch nine more times inside a config reload helps nobody.
     expect(render).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A bot that *starts* with LFG already off inherits whatever the previous run
+// left open. Nothing is scheduled to close those, so the drain cannot be a
+// reload-only concern.
+describe("startup drains when the feature is already off", () => {
+  it("closes posts left open by a previous run", async () => {
+    const svc = buildService();
+    configValues.booleans["lfg.enabled"] = false;
+    const stale = post();
+    const closed = { ...stale, state: "closed" as const };
+    let call = 0;
+    LfgPostMock.find = jest.fn(() =>
+      queryReturning(call++ === 0 ? [stale] : []),
+    );
+    LfgPostMock.findOneAndUpdate = jest.fn(async () => closed);
+    LfgPostMock.findById = jest.fn(async () => closed);
+    LfgPostMock.countDocuments = jest.fn(async () => 0);
+    const render = jest.spyOn(svc, "renderToMessage").mockResolvedValue(true);
+
+    await svc.start();
+
+    expect(LfgPostMock.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: POST_ID, state: "open" },
+      {
+        $set: {
+          state: "closed",
+          closeReason: "disabled",
+          renderPending: true,
+        },
+      },
+      { new: true },
+    );
+    expect(render).toHaveBeenCalled();
+  });
+
+  it("drops reservations, so a half-made post cannot open behind the drain", async () => {
+    const svc = buildService();
+    configValues.booleans["lfg.enabled"] = false;
+    LfgPostMock.find = jest.fn(() => queryReturning([]));
+    LfgPostMock.countDocuments = jest.fn(async () => 0);
+
+    await svc.start();
+
+    expect(LfgPostMock.deleteMany).toHaveBeenCalledWith({ state: "creating" });
   });
 });

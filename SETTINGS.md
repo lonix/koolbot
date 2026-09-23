@@ -748,7 +748,10 @@ self-service, so there is no admin page — just the settings below (see
   turning the feature off mid-post does not leave roster IDs behind.
 - Turning `lfg.enabled` off closes any posts still open (they show as
   "LFG was switched off on this server") rather than abandoning them with
-  buttons that no longer do anything.
+  buttons that no longer do anything. The same tidy-up runs at startup, so a
+  bot that boots with the feature already off does not inherit live posts
+  from a previous run. While the feature is off, the buttons on any post
+  whose message could not be edited refuse politely instead of working.
 
 ---
 
