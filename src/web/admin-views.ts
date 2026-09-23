@@ -313,6 +313,12 @@ export interface SettingsProps extends CommonProps {
    * not just that something was.
    */
   invalidKeys?: string[];
+  /**
+   * The stored config could not be read. The per-section forms are replaced
+   * by a notice: rendering them from schema defaults would let a save
+   * overwrite the real stored values.
+   */
+  settingsUnavailable?: boolean;
 }
 
 /**
@@ -929,8 +935,13 @@ export function renderSettingsPage(props: SettingsProps): string {
     <button type="submit" class="btn">Reload commands</button>
   </form>
   <a href="/admin/settings/export" class="btn">Export YAML</a>
-  <a href="#import-section" class="btn">Import YAML</a>
-  <a href="/admin/wizard" class="btn">Setup wizard</a>
+  <a href="#import-section" class="btn">Import YAML</a>${
+    // The wizard pre-fills from the same store; don't point at it while the
+    // store can't be read.
+    props.settingsUnavailable
+      ? ""
+      : `\n  <a href="/admin/wizard" class="btn">Setup wizard</a>`
+  }
 </div>`;
 
   const pickers = {
@@ -1097,7 +1108,11 @@ export function renderSettingsPage(props: SettingsProps): string {
 <p class="subtitle">All DB-backed configuration, grouped by feature. Mirrors <code>SETTINGS.md</code> and <code>config-service.ts</code>.</p>
 ${renderFlash(props.flash, SETTINGS_FLASH_ID)}
 ${actionBar}
-${sections}
+${
+  props.settingsUnavailable
+    ? `<div class="card">${renderSettingsUnavailableNotice()}</div>`
+    : sections
+}
 ${importSection}
 ${dangerSection}
 `;
@@ -1440,6 +1455,12 @@ export interface WizardStepPageProps extends CommonProps {
    */
   enabledByKey: Record<string, boolean>;
   flash?: FlashMessage | null;
+  /**
+   * The stored config could not be read, so `currentValues` can't be trusted
+   * (`ConfigService.get` returns `null` on a read error). The step form is
+   * replaced by a notice so blank values can't be carried into an apply.
+   */
+  settingsUnavailable?: boolean;
 }
 
 export function renderWizardStepPage(props: WizardStepPageProps): string {
@@ -1572,7 +1593,14 @@ export function renderWizardStepPage(props: WizardStepPageProps): string {
 <h1>${escapeHtml(info.name)} <span class="muted" style="font-size:1rem">${escapeHtml(stepLabel)}</span></h1>
 <p class="subtitle">${escapeHtml(info.desc)}</p>
 ${renderFlash(props.flash)}
-<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
+${
+  props.settingsUnavailable
+    ? `<div class="card">${renderSettingsUnavailableNotice()}</div>
+<div class="actions">
+  ${previousButton}
+  <a href="/admin/wizard" class="btn">← Back to features</a>
+</div>`
+    : `<form method="POST" action="/admin/wizard/step/${props.stepIndex}" data-cascade-scope>
   <input type="hidden" name="_csrf" value="${csrf}">
   <div class="card">${fields}</div>
   <div class="actions">
@@ -1580,7 +1608,8 @@ ${renderFlash(props.flash)}
     ${previousButton}
     <a href="/admin/wizard" class="btn">← Back to features</a>
   </div>
-</form>
+</form>`
+}
 `;
   return renderAdminPage({
     title: `Wizard — ${info.name}`,
@@ -3004,6 +3033,11 @@ export interface VoiceChannelsProps extends CommonProps {
    * picker, text fields, toggles, etc.
    */
   settingRows: SettingRow[];
+  /**
+   * The stored config could not be read, so the settings card is replaced by
+   * a notice rather than rendering schema defaults a save would write back.
+   */
+  settingsUnavailable?: boolean;
   /** Category options backing the `voicechannels.category_id` picker. */
   categoryChannels: ChannelOption[];
   flash?: FlashMessage | null;
@@ -3046,6 +3080,23 @@ export interface FeatureSettingsCardProps {
    * Without it an off-card dependency counts as unmet and locks the control.
    */
   dependencyState?: ReadonlyMap<string, boolean>;
+  /**
+   * The stored config snapshot could not be read. The card then renders a
+   * notice instead of controls: rows built from an empty snapshot would show
+   * schema defaults as if they were stored, and saving them would overwrite
+   * the real values.
+   */
+  unavailable?: boolean;
+}
+
+/**
+ * Notice shown in place of editable settings when the stored config could not
+ * be read, so no form pre-filled with schema defaults is ever offered. Carries
+ * the same `tabindex="-1"` + `data-flash` hook as `renderFlash`, so the
+ * layout's on-load script focuses it and screen readers announce it (#855).
+ */
+export function renderSettingsUnavailableNotice(): string {
+  return `<div class="notice warn" role="status" tabindex="-1" data-flash>Settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>`;
 }
 
 /**
@@ -3080,6 +3131,13 @@ export function findFeatureMasterKey(rows: SettingRow[]): string | null {
 export function renderFeatureSettingsCard(
   props: FeatureSettingsCardProps,
 ): string {
+  if (props.unavailable) {
+    return `
+<div class="card">
+  <h2>${escapeHtml(props.title ?? "Settings")}</h2>
+  ${renderSettingsUnavailableNotice()}
+</div>`;
+  }
   if (props.settingRows.length === 0) return "";
   const pickers = {
     textChannels: props.pickers?.textChannels ?? [],
@@ -3182,6 +3240,7 @@ function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
     pickers: { categoryChannels: props.categoryChannels },
     returnTo: "/admin/voice-channels",
     csrfToken: props.csrfToken,
+    unavailable: props.settingsUnavailable,
   });
 }
 

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "@jest/globals";
+import { describe, it, expect, jest } from "@jest/globals";
 import { ChannelType } from "discord.js";
 import {
   buildSettingRows,
@@ -12,6 +12,7 @@ import {
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
 import { createMockCollection } from "../test-utils.js";
+import { ConfigService } from "../../src/services/config-service.js";
 import {
   defaultConfig,
   getDependencies,
@@ -440,6 +441,69 @@ describe("loadFeatureSettings (#971)", () => {
     );
     // Keys on the card judge themselves from their own rows.
     expect(data.dependencyState.has("digest.enabled")).toBe(false);
+  });
+
+  it("reports a readable snapshot as available", async () => {
+    const { client } = countingClient();
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      ["quotes.enabled"],
+      [],
+    );
+    expect(data.unavailable).toBe(false);
+  });
+
+  it("fails closed when the caller's snapshot read failed (null)", async () => {
+    const { client, calls } = countingClient();
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      ["voicechannels.category_id", "voicechannels.lobby.name"],
+      null,
+    );
+    // No rows built from schema defaults, and no picker round-trips for a
+    // card that won't render.
+    expect(data.unavailable).toBe(true);
+    expect(data.settingRows).toEqual([]);
+    expect(data.pickers).toEqual({});
+    expect(data.dependencyState.size).toBe(0);
+    expect(calls).toEqual({ channels: 0, roles: 0 });
+  });
+
+  it("fails closed when its own config.getAll() read rejects", async () => {
+    const { client, calls } = countingClient();
+    const spy = jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getAll: async () => {
+        throw new Error("mongo down");
+      },
+    } as unknown as ConfigService);
+    try {
+      const data = await loadFeatureSettings(client, "guild-1", [
+        "voicechannels.category_id",
+      ]);
+      expect(data.unavailable).toBe(true);
+      expect(data.settingRows).toEqual([]);
+      expect(calls).toEqual({ channels: 0, roles: 0 });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("builds rows from its own config.getAll() read when it succeeds", async () => {
+    const { client } = countingClient();
+    const spy = jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getAll: async () => [{ key: "quotes.max_length", value: 42 }],
+    } as unknown as ConfigService);
+    try {
+      const data = await loadFeatureSettings(client, "guild-1", [
+        "quotes.max_length",
+      ]);
+      expect(data.unavailable).toBe(false);
+      expect(data.settingRows[0].current).toBe(42);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
