@@ -16,7 +16,13 @@ import { ChannelType, Client } from "discord.js";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
-import { defaultConfig, settingsMetadata } from "../services/config-schema.js";
+import {
+  defaultConfig,
+  getDependencies,
+  isEnabledValue,
+  settingsMetadata,
+  type ConfigSchema,
+} from "../services/config-schema.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import { ScheduledAnnouncement } from "../models/scheduled-announcement.js";
@@ -53,7 +59,7 @@ import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
 import { BOOTSTRAP_VARS } from "./bootstrap-vars.js";
-import { getEnv } from "../config/env.js";
+import { getEnv, getEnvConfigValue } from "../config/env.js";
 import {
   createSessionPingHandler,
   requireAdminRoleMiddleware,
@@ -90,6 +96,7 @@ import {
   type FlashMessage,
   type NoticeCategoryOption,
   type ReactionRoleRow,
+  type FeatureSettingsPickers,
   type RoleOption,
   type SettingRow,
 } from "./admin-views.js";
@@ -156,6 +163,83 @@ export function buildSettingRows(
       channelKind: meta?.channelKind,
     };
   });
+}
+
+/** Everything a {@link renderFeatureSettingsCard} needs besides page props. */
+export interface FeatureSettingsData {
+  settingRows: SettingRow[];
+  pickers: FeatureSettingsPickers;
+  dependencyState: Map<string, boolean>;
+}
+
+type StoredConfigRow = {
+  key: string;
+  value: unknown;
+  description?: string;
+  category?: string;
+};
+
+/**
+ * One-liner for a feature page's in-place settings card (#971): builds the
+ * rows for `keys` via {@link buildSettingRows}, fetches only the guild picker
+ * lists those rows render (channels for `channel` / `channel_list` /
+ * `category`, roles for `role` / `role_list`), and resolves the on/off state
+ * of any off-card dependency so the card's dependency locks (#666) agree with
+ * the Settings page. Pass `stored` when the handler already loaded
+ * `config.getAll()`; otherwise it is fetched here. Picker fetches are
+ * best-effort (see `fetchChannelData` / `fetchRoleData`), so a Discord outage
+ * degrades to empty dropdowns rather than a failed page.
+ */
+export async function loadFeatureSettings(
+  client: Client,
+  guildId: string,
+  keys: readonly string[],
+  stored?: ReadonlyArray<StoredConfigRow>,
+): Promise<FeatureSettingsData> {
+  const storedRows =
+    stored ??
+    (await ConfigService.getInstance()
+      .getAll()
+      .catch((): StoredConfigRow[] => []));
+  const settingRows = buildSettingRows(keys, storedRows);
+
+  const needsChannels = settingRows.some(
+    (r) =>
+      r.type === "channel" ||
+      r.type === "channel_list" ||
+      r.type === "category",
+  );
+  const needsRoles = settingRows.some(
+    (r) => r.type === "role" || r.type === "role_list",
+  );
+  const [channelData, roleData] = await Promise.all([
+    needsChannels ? fetchChannelData(client, guildId) : null,
+    needsRoles ? fetchRoleData(client, guildId) : null,
+  ]);
+  const pickers: FeatureSettingsPickers = {};
+  if (channelData) {
+    pickers.textChannels = channelData.textChannels;
+    pickers.voiceChannels = channelData.voiceChannels;
+    pickers.categoryChannels = channelData.categoryChannels;
+  }
+  if (roleData) pickers.roles = roleData.roles;
+
+  // Dependencies that live outside the card, resolved in the same order
+  // `ConfigService.get` uses at runtime: stored row, then an env var named
+  // after the key, then the schema default. Skipping the env step would lock
+  // a control whose dependency is switched on through the environment.
+  const storedByKey = new Map(storedRows.map((s) => [s.key, s.value]));
+  const dependencyState = new Map<string, boolean>();
+  for (const key of keys) {
+    for (const dep of getDependencies(key as keyof ConfigSchema)) {
+      if (keys.includes(dep) || dependencyState.has(dep)) continue;
+      const value = storedByKey.has(dep)
+        ? storedByKey.get(dep)
+        : (getEnvConfigValue(dep) ?? defaultConfig[dep]);
+      dependencyState.set(dep, isEnabledValue(value));
+    }
+  }
+  return { settingRows, pickers, dependencyState };
 }
 
 function getCsrfToken(req: Request): string {

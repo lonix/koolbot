@@ -1,6 +1,7 @@
 import { describe, it, expect } from "@jest/globals";
 import {
   findCascadeMasterKey,
+  findFeatureMasterKey,
   parseCronToPickerState,
   renderAnalyticsPage,
   renderAnnouncementsPage,
@@ -10,6 +11,7 @@ import {
   renderDatabasePage,
   renderDigestPage,
   renderEventsPage,
+  renderFeatureSettingsCard,
   renderImportDiffPage,
   renderNoticesPage,
   renderPermissionsPage,
@@ -20,6 +22,7 @@ import {
   renderWizardConfirmPage,
   renderWizardPage,
   renderWizardStepPage,
+  type SettingRow,
 } from "../../src/web/admin-views.js";
 
 const COMMON = { csrfToken: "csrf", remainingMs: 60_000 };
@@ -2046,6 +2049,231 @@ describe("renderVoiceChannelsPage", () => {
       '<form method="POST" action="/admin/settings/save-section">',
     );
     expect(html).not.toContain(">Save settings</button>");
+  });
+});
+
+// Issue #971: the generic in-place settings card every feature page builds on.
+describe("renderFeatureSettingsCard (#971)", () => {
+  const row = (over: Partial<SettingRow> & Pick<SettingRow, "key" | "type">) =>
+    ({
+      label: over.key,
+      current: "",
+      defaultValue: "",
+      description: "",
+      category: over.key.split(".")[0],
+      ...over,
+    }) as SettingRow;
+
+  const BASE = {
+    category: "digest",
+    returnTo: "/admin/digest",
+    csrfToken: "tok<&>",
+  };
+
+  it("renders nothing when there are no rows", () => {
+    expect(renderFeatureSettingsCard({ ...BASE, settingRows: [] })).toBe("");
+  });
+
+  it("posts through save-section with CSRF, category and the page redirect", () => {
+    const html = renderFeatureSettingsCard({
+      ...BASE,
+      title: "Digest settings",
+      intro: "Tune <the> digest.",
+      submitLabel: "Save digest",
+      settingRows: [
+        row({ key: "digest.cron", type: "cron", current: "0 9 * * 1" }),
+      ],
+    });
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain(
+      '<input type="hidden" name="_csrf" value="tok&lt;&amp;&gt;">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="digest">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/digest">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="keys" value="digest.cron">',
+    );
+    expect(html).toContain("<h2>Digest settings</h2>");
+    expect(html).toContain("Tune &lt;the&gt; digest.");
+    expect(html).toContain(">Save digest</button>");
+  });
+
+  it("renders every key type through the shared control renderer", () => {
+    const html = renderFeatureSettingsCard({
+      ...BASE,
+      settingRows: [
+        row({ key: "x.flag", type: "boolean", current: true }),
+        row({ key: "x.count", type: "number", current: 5, min: 1 }),
+        row({ key: "x.name", type: "string", current: "hi" }),
+        row({ key: "x.channel", type: "channel", current: "t1" }),
+        row({
+          key: "x.voice_list",
+          type: "channel_list",
+          current: "v1",
+          channelKind: "voice",
+        }),
+        row({ key: "x.category", type: "category", current: "c1" }),
+        row({ key: "x.role", type: "role", current: "r1" }),
+        row({ key: "x.roles", type: "role_list", current: "r1,r2" }),
+        row({ key: "x.cron", type: "cron", current: "0 9 * * *" }),
+        row({
+          key: "x.mode",
+          type: "string",
+          current: "b",
+          options: [
+            { value: "a", label: "Alpha" },
+            { value: "b", label: "Bravo" },
+          ],
+        }),
+      ],
+      pickers: {
+        textChannels: [{ id: "t1", name: "general" }],
+        voiceChannels: [{ id: "v1", name: "Lounge" }],
+        categoryChannels: [{ id: "c1", name: "Voice" }],
+        roles: [
+          { id: "r1", name: "Mods" },
+          { id: "r2", name: "VIP" },
+        ],
+      },
+    });
+    expect(html).toMatch(
+      /<input type="checkbox" id="set-x\.flag"[^>]*name="value_x\.flag" value="true" checked>/,
+    );
+    expect(html).toMatch(/<input type="number" id="set-x\.count"[^>]*min="1"/);
+    expect(html).toMatch(/<input type="text" id="set-x\.name"[^>]*value="hi"/);
+    expect(html).toContain('<option value="t1" selected>#general</option>');
+    // Voice-kind list draws from the voice picker, not the text one.
+    expect(html).toMatch(/name="value_x\.voice_list" multiple/);
+    expect(html).toContain('<option value="v1" selected>#Lounge</option>');
+    expect(html).toContain('<option value="c1" selected>#Voice</option>');
+    expect(html).toContain('<option value="r1" selected>@Mods</option>');
+    expect(html).toContain('<option value="r2" selected>@VIP</option>');
+    expect(html).toContain("cron-picker");
+    expect(html).toContain('<option value="b" selected>Bravo</option>');
+    // Each caption is a real label for its control (#854); cron is a group.
+    expect(html).toContain('<label id="set-x.name-label" for="set-x.name">');
+    expect(html).toContain('<div id="set-x.cron-label">');
+    // Every row gets its own Reset button.
+    expect(html.match(/formaction="\/admin\/settings\/reset"/g)).toHaveLength(
+      10,
+    );
+  });
+
+  it("links help and warnBelow text into aria-describedby", () => {
+    const html = renderFeatureSettingsCard({
+      ...BASE,
+      settingRows: [
+        row({
+          key: "x.days",
+          type: "number",
+          current: 5,
+          description: "Retention.",
+          warnBelow: { value: 30, message: "Too low" },
+        }),
+      ],
+    });
+    expect(html).toContain(
+      'aria-describedby="set-x.days-help set-x.days-warn"',
+    );
+    expect(html).toContain('id="set-x.days-warn"');
+    expect(html).toContain(
+      '<td class="muted" id="set-x.days-help">Retention.</td>',
+    );
+  });
+
+  it("with the feature master: renders it as the cascade master and keeps the cascade", () => {
+    const html = renderFeatureSettingsCard({
+      ...BASE,
+      settingRows: [
+        row({ key: "quotes.enabled", type: "boolean", current: true }),
+        row({ key: "quotes.max_length", type: "number", current: 250 }),
+      ],
+    });
+    expect(html).toContain(
+      '<form method="POST" action="/admin/settings/save-section" data-cascade-scope>',
+    );
+    expect(html).toMatch(
+      /name="value_quotes\.enabled" value="true" checked data-cascade-master>/,
+    );
+    // Cascade on: switching the master off writes only the master flag, so
+    // the form must NOT opt out with no_cascade.
+    expect(html).not.toContain('name="no_cascade"');
+  });
+
+  it("renders a disabled feature's master unchecked so it can be turned back on", () => {
+    const html = renderFeatureSettingsCard({
+      ...BASE,
+      settingRows: [
+        row({ key: "quotes.enabled", type: "boolean", current: false }),
+      ],
+    });
+    expect(html).toMatch(
+      /name="value_quotes\.enabled" value="true" data-cascade-master>/,
+    );
+  });
+
+  it("without the feature master: sub-toggles are not masters and the form opts out of the cascade", () => {
+    const rows = [
+      row({
+        key: "voicechannels.controlpanel.enabled",
+        type: "boolean",
+        current: true,
+      }),
+      row({
+        key: "voicechannels.lobby.name",
+        type: "string",
+        current: "Lobby",
+      }),
+    ];
+    expect(findFeatureMasterKey(rows)).toBeNull();
+    const html = renderFeatureSettingsCard({ ...BASE, settingRows: rows });
+    expect(html).toContain('<input type="hidden" name="no_cascade" value="1">');
+    expect(html).not.toContain("data-cascade-scope");
+    expect(html).not.toContain("data-cascade-master");
+  });
+
+  it("locks a control whose off-card dependency is off, round-tripping its value", () => {
+    const rows = [
+      row({ key: "digest.enabled", type: "boolean", current: false }),
+      row({
+        key: "digest.include_achievements",
+        type: "boolean",
+        current: true,
+      }),
+    ];
+    const locked = renderFeatureSettingsCard({
+      ...BASE,
+      settingRows: rows,
+      dependencyState: new Map([
+        ["voicetracking.enabled", true],
+        ["achievements.enabled", false],
+      ]),
+    });
+    expect(locked).toContain('<tr class="dep-off">');
+    expect(locked).toContain(
+      '<input type="hidden" name="value_digest.include_achievements" value="true">',
+    );
+    expect(locked).toMatch(
+      /name="value_digest\.include_achievements" value="true" checked disabled data-dep-locked>/,
+    );
+    expect(locked).toContain('id="set-digest.include_achievements-dep"');
+    // No in-page sections to link to on a feature page.
+    expect(locked).not.toContain('href="#section-');
+
+    const unlocked = renderFeatureSettingsCard({
+      ...BASE,
+      settingRows: rows,
+      dependencyState: new Map([
+        ["voicetracking.enabled", true],
+        ["achievements.enabled", true],
+      ]),
+    });
+    expect(unlocked).not.toContain("dep-off");
+    expect(unlocked).not.toContain("data-dep-locked");
   });
 });
 

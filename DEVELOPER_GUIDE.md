@@ -181,6 +181,23 @@ The always-visible **session expires in X · [Finish]** banner is part of
 the shared layout and reads `WebSessionContext.expiresAt` to render the
 remaining time.
 
+#### Feature-page settings cards
+
+A feature page edits its own config keys in place with
+`renderFeatureSettingsCard` (`admin-views.ts`), fed by
+`loadFeatureSettings(client, guildId, KEYS, stored)` (`read-only-routes.ts`).
+The loader builds the rows, fetches only the channel / role picker lists
+those keys render, and resolves off-card dependencies. The card uses the
+Settings page's control renderer, labels, warnings and dependency locks,
+and posts to `/admin/settings/save-section` with `redirect` back to the page
+(the page must be in the nav, or the redirect falls back to Settings).
+
+Put the feature's `<feature>.enabled` key in `KEYS` to let operators turn the
+feature off from the page. It then acts as the section's cascade master:
+unchecking it greys the other controls, and the save writes only the master,
+so the other keys keep their stored values. A card without the master posts
+`no_cascade` and every submitted key is written.
+
 ---
 
 ## The "thin HTTP layer over services" goal
