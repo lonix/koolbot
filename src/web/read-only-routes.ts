@@ -179,6 +179,27 @@ export function buildSettingRows(
   });
 }
 
+/**
+ * Coerce an env-supplied value to the type of the key's schema default, the
+ * way `ConfigService.getBoolean` / `getNumber` / `getString` read it at
+ * runtime. The controls compare strictly (a toggle is checked only for
+ * `true`), so an uncoerced `polls.enabled=1` would render the master
+ * unchecked while the bot treats the feature as on (#973).
+ */
+function coerceEnvValue(
+  value: string | number | boolean,
+  defaultValue: unknown,
+): unknown {
+  if (typeof defaultValue === "boolean") return isEnabledValue(value);
+  if (typeof defaultValue === "number") {
+    if (typeof value === "number") return value;
+    if (typeof value === "boolean") return value ? 1 : 0;
+    return defaultValue;
+  }
+  if (typeof defaultValue === "string") return String(value);
+  return value;
+}
+
 /** Everything a {@link renderFeatureSettingsCard} needs besides page props. */
 export interface FeatureSettingsData {
   settingRows: SettingRow[];
@@ -223,7 +244,9 @@ export async function loadFeatureSettings(
   const settingRows = buildSettingRows(keys, storedRows).map((row) => {
     if (storedByKey.has(row.key)) return row;
     const envValue = getEnvConfigValue(row.key);
-    return envValue === null ? row : { ...row, current: envValue };
+    return envValue === null
+      ? row
+      : { ...row, current: coerceEnvValue(envValue, row.defaultValue) };
   });
 
   const needsChannels = settingRows.some(

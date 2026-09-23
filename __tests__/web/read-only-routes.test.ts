@@ -265,6 +265,47 @@ describe("loadFeatureSettings (#971)", () => {
     }
   });
 
+  it("coerces env values to the key's type like ConfigService does (#973)", async () => {
+    const { client } = countingClient();
+    const saved = {
+      enabled: process.env["polls.enabled"],
+      cooldown: process.env["polls.cooldown_days"],
+      duration: process.env["polls.default_duration_hours"],
+    };
+    process.env["polls.enabled"] = "1";
+    process.env["polls.cooldown_days"] = "not-a-number";
+    process.env["polls.default_duration_hours"] = "true";
+    try {
+      const data = await loadFeatureSettings(
+        client,
+        "guild-1",
+        [
+          "polls.enabled",
+          "polls.cooldown_days",
+          "polls.default_duration_hours",
+        ],
+        [],
+      );
+      const byKey = new Map(data.settingRows.map((r) => [r.key, r.current]));
+      // getBoolean treats a non-zero number as on.
+      expect(byKey.get("polls.enabled")).toBe(true);
+      // getNumber falls back to the default for an unparsable string...
+      expect(byKey.get("polls.cooldown_days")).toBe(
+        defaultConfig["polls.cooldown_days"],
+      );
+      // ...and reads a boolean as 1 / 0.
+      expect(byKey.get("polls.default_duration_hours")).toBe(1);
+    } finally {
+      const restore = (key: string, value: string | undefined) => {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      };
+      restore("polls.enabled", saved.enabled);
+      restore("polls.cooldown_days", saved.cooldown);
+      restore("polls.default_duration_hours", saved.duration);
+    }
+  });
+
   it("resolves off-card dependencies from stored rows, else the schema default", async () => {
     const { client } = countingClient();
     const data = await loadFeatureSettings(
