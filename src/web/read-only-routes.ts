@@ -142,10 +142,49 @@ export const REACTION_ROLES_SETTING_KEYS = [
 ] as const;
 
 /**
+ * The `notices.*` keys editable in place on the Notices page (#972). Includes
+ * the feature master so the page can switch notices off as well as on; the
+ * auto-managed `notices.header_message_id` is bookkeeping and stays out.
+ */
+export const NOTICES_SETTING_KEYS = [
+  "notices.enabled",
+  "notices.channel_id",
+  "notices.header_enabled",
+  "notices.header_pin_enabled",
+] as const;
+
+/**
+ * The env-var fallback a settings row shows for `key` when no DB row exists.
+ * `getEnvConfigValue` coerces every digit-only string to a number, which
+ * rounds a Discord snowflake past 2^53 and leaves an id picker with no
+ * selection. A key whose schema default is a string keeps the raw text; a
+ * boolean key is read the way `ConfigService.getBoolean` reads it.
+ */
+export function envSettingFallback(
+  key: string,
+  defaultValue: unknown,
+): unknown {
+  if (typeof defaultValue === "boolean") {
+    // `getBoolean` reads `1` as on; a raw number would leave the checkbox
+    // unticked and a save would store `false`.
+    const value = getEnvConfigValue(key);
+    return value === null ? null : isEnabledValue(value);
+  }
+  if (typeof defaultValue !== "string") return getEnvConfigValue(key);
+  const raw = getEnv(key);
+  return raw === undefined || raw.trim() === "" ? null : raw;
+}
+
+/**
  * Build the {@link SettingRow}s for a fixed list of config keys, mirroring how
  * the Settings page derives label/type/description from `settingsMetadata` with
  * a stored DB row taking precedence. Lets a feature page render its own keys
  * with the shared control renderer (#705).
+ *
+ * `current` resolves in the order `ConfigService.get` (and the Settings page)
+ * use: stored row, then an env var named after the key, then the schema
+ * default. Skipping the env step would show (and let a save persist) the
+ * default over an env-supplied value (#972).
  */
 export function buildSettingRows(
   keys: readonly string[],
@@ -164,7 +203,9 @@ export function buildSettingRows(
     return {
       key,
       label: meta?.label ?? key,
-      current: dbEntry ? dbEntry.value : defaultValue,
+      current: dbEntry
+        ? dbEntry.value
+        : (envSettingFallback(key, defaultValue) ?? defaultValue),
       defaultValue,
       type: meta?.type ?? describeType(defaultValue),
       description: dbEntry?.description ?? meta?.description ?? "",
@@ -581,7 +622,9 @@ export function createReadOnlyRouter(
           return {
             key,
             label: meta?.label ?? key,
-            current: dbEntry ? dbEntry.value : defaultValue,
+            current: dbEntry
+              ? dbEntry.value
+              : (envSettingFallback(key, defaultValue) ?? defaultValue),
             defaultValue,
             type: meta?.type ?? describeType(defaultValue),
             description: dbEntry?.description ?? meta?.description ?? "",
@@ -949,15 +992,23 @@ export function createReadOnlyRouter(
     asyncHandler(async (req, res) => {
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
-      const [enabled, channelId, headerEnabled, notices, channelData] =
+      const [enabled, channelId, stored, notices, channelData] =
         await Promise.all([
           config.getBoolean("notices.enabled", false),
           config.getString("notices.channel_id", ""),
-          config.getBoolean("notices.header_enabled", true),
+          // `null` (not `[]`) on failure: rendering schema defaults here would
+          // let a save overwrite the real values, so the card is withheld.
+          config.getAll().catch(() => null),
           Notice.find({}).sort({ category: 1, order: 1 }).lean(),
           fetchChannelData(client, common.guildId),
         ]);
       const channelNames = channelData.names;
+      // Editable `notices.*` settings rendered in place on this page (#972).
+      // The picker reuses the channel fetch above, and none of these keys has
+      // a `dependsOn`, so `loadFeatureSettings` would only add a second fetch.
+      const settingRows = stored
+        ? buildSettingRows(NOTICES_SETTING_KEYS, stored)
+        : [];
 
       const grouped = new Map<string, typeof notices>();
       for (const n of notices) {
@@ -994,8 +1045,10 @@ export function createReadOnlyRouter(
           channel: channelId
             ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
             : null,
-          headerEnabled,
           total: notices.length,
+          settingRows,
+          settingsUnavailable: stored === null,
+          textChannels: channelData.textChannels,
           groups,
           categoryOptions,
           flash: readFlash(req),

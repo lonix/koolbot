@@ -2554,8 +2554,20 @@ export interface NoticeCategoryOption {
 export interface NoticesProps extends CommonProps {
   enabled: boolean;
   channel: { name: string; id: string } | null;
-  headerEnabled: boolean;
   total: number;
+  /**
+   * The editable `notices.*` settings rendered in place on the page (#972),
+   * built from the config schema the same way the Settings page builds its
+   * rows. Excludes the auto-managed `notices.header_message_id`.
+   */
+  settingRows: SettingRow[];
+  /** Text-channel options backing the `notices.channel_id` picker. */
+  textChannels: ChannelOption[];
+  /**
+   * True when the stored config could not be read. The settings card is then
+   * withheld rather than rendered with schema defaults a save would persist.
+   */
+  settingsUnavailable?: boolean;
   groups: Array<{ category: string; rows: NoticeRow[] }>;
   categoryOptions: NoticeCategoryOption[];
   flash?: FlashMessage | null;
@@ -2615,12 +2627,21 @@ export function renderNoticesPage(props: NoticesProps): string {
 <p class="subtitle">Notice posts grouped by category. Edit the inline <em>Order</em> field to reorder within a category (lower numbers post first).</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Notices", featureKey: "notices.enabled", returnTo: "/admin/notices", csrfToken: props.csrfToken })}
+${props.settingsUnavailable ? `<div class="notice warn">Notices settings could not be loaded, so they can't be edited here right now. Reload the page to try again.</div>` : ""}
+${renderFeatureSettingsCard({
+  intro:
+    "Change notices settings here without leaving the page. Changing the channel does not move notices already posted: after saving, use Resync notices to channel below to repost them in the new channel.",
+  category: "notices",
+  settingRows: props.settingRows,
+  pickers: { textChannels: props.textChannels },
+  returnTo: "/admin/notices",
+  csrfToken: props.csrfToken,
+})}
 <div class="card">
   <h2>Status</h2>
   <dl class="kv">
     <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
     <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
-    <dt>Header post</dt><dd>${tagOnOff(props.headerEnabled, "enabled", "disabled")}</dd>
     <dt>Total notices</dt><dd>${props.total}</dd>
   </dl>
   <form method="POST" action="/admin/notices/sync" class="inline-form" onsubmit="return confirm('Resync all notices? This deletes and reposts every notice message.');">

@@ -432,6 +432,58 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet.mock.calls[0][1]).toBe(false);
   });
 
+  it("saves the Notices page card and returns there (#972)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "notices",
+      redirect: "/admin/notices",
+      keys: [
+        "notices.enabled",
+        "notices.channel_id",
+        "notices.header_enabled",
+        "notices.header_pin_enabled",
+      ],
+      "value_notices.enabled": "true",
+      "value_notices.channel_id": "123456789012345678",
+      "value_notices.header_enabled": "true",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/notices");
+    expect(flash.type).toBe("ok");
+    const writes = Object.fromEntries(
+      mockConfigSet.mock.calls.map((c) => {
+        const [k, v] = c as unknown as [string, unknown];
+        return [k, v];
+      }),
+    );
+    expect(writes).toEqual({
+      "notices.enabled": true,
+      "notices.channel_id": "123456789012345678",
+      "notices.header_enabled": true,
+      "notices.header_pin_enabled": false,
+    });
+  });
+
+  it("switching notices off from its page writes only the master (#972)", async () => {
+    // The greyed-out dependents are not submitted; the cascade keeps their
+    // stored values instead of blanking the channel.
+    const res = await harness.post("/settings/save-section", {
+      category: "notices",
+      redirect: "/admin/notices",
+      keys: [
+        "notices.enabled",
+        "notices.channel_id",
+        "notices.header_enabled",
+        "notices.header_pin_enabled",
+      ],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/notices");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("notices.enabled");
+    expect(mockConfigSet.mock.calls[0][1]).toBe(false);
+  });
+
   it("de-duplicates repeated keys so a doubled input can't double-write", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "quotes",
