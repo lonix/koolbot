@@ -424,6 +424,49 @@ describe("VoiceChannelTracker", () => {
       await expect(forgetting).resolves.toMatchObject({ drained: true });
     });
 
+    it("gives up on a persist that never settles, rather than hanging (#916)", async () => {
+      // `endTracking` keeps going past its Mongo write — Discord fetches,
+      // accolade checks — so one stalled call must not take the rest of the
+      // purge with it. The wait is bounded and the step is reported as
+      // incomplete instead.
+      jest.useFakeTimers();
+      try {
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        mockConfigService.getBoolean.mockResolvedValue(true);
+        mockConfigService.get.mockResolvedValue(null);
+        (mockClient.users as any).fetch = jest
+          .fn()
+          .mockResolvedValue({ username: "user123", id: "user123" });
+
+        const member = memberIn("user123");
+        const channel = {
+          id: "channel123",
+          name: "TestChannel",
+        } as unknown as VoiceChannel;
+
+        // This persist never resolves.
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockImplementation(
+          () => new Promise(() => {}),
+        );
+
+        await joinChannel(tracker, member, channel);
+        void leaveChannel(tracker, member, channel);
+        // Let the disconnect reach its (hanging) write.
+        await jest.advanceTimersByTimeAsync(0);
+
+        const forgetting = tracker.forgetActiveSession("user123");
+        // Nothing settles on its own; only the timeout releases the wait.
+        await jest.advanceTimersByTimeAsync(20_000);
+
+        await expect(forgetting).resolves.toMatchObject({
+          drained: true,
+          timedOut: true,
+        });
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it("leaves other members' in-flight sessions alone", async () => {
       const { tracker, mockConfigService } = createTracker(mockClient);
       mockConfigService.getBoolean.mockResolvedValue(true);

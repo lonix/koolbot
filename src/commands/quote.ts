@@ -206,10 +206,11 @@ async function handleAdd(
       // Nothing else will ever collect this message — the sweep ignores bot
       // posts, and the row that pointed at it is gone — so take it down here
       // rather than leave the quote publicly readable after an erasure.
-      await quoteChannelManager.deleteQuoteMessage(messageId);
+      const removed = await quoteChannelManager.deleteQuoteMessage(messageId);
       await interaction.reply({
-        content:
-          "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted.",
+        content: removed
+          ? "⚠️ The quote could not be saved — the author's data was reset while it was being added. Nothing was posted."
+          : "⚠️ The quote could not be saved — the author's data was reset while it was being added — and the post could not be removed from the quote channel. Please delete it manually.",
         flags: MessageFlags.Ephemeral,
       });
       return;

@@ -977,10 +977,20 @@ export class QuoteChannelManager {
 
         if (messageId) {
           // Update quote with message ID in database
-          await quoteService.updateQuoteMessageId(
+          const stillExists = await quoteService.updateQuoteMessageId(
             quote._id.toString(),
             messageId,
           );
+          if (!stillExists) {
+            // A per-user purge removed the row after this rebuild
+            // snapshotted it, so the post just made has nothing pointing at
+            // it and nothing would ever collect it (#916). Same compensation
+            // as `/quote add`.
+            logger.warn(
+              `Quote ${quote._id} was purged mid-sync; removing the post just created`,
+            );
+            await this.deleteQuoteMessage(messageId);
+          }
         }
       }
 

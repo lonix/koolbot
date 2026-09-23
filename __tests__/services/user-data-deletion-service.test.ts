@@ -101,8 +101,13 @@ for (const [path, exportName, label] of [
   }));
 }
 
-const forgetActiveSession =
-  jest.fn<(userId: string) => { discarded: boolean; drained: boolean }>();
+const forgetActiveSession = jest.fn<
+  (userId: string) => {
+    discarded: boolean;
+    drained: boolean;
+    timedOut: boolean;
+  }
+>();
 const revokeForUser =
   jest.fn<
     (
@@ -242,7 +247,7 @@ describe("UserDataDeletionService.purge", () => {
     }
     forgetActiveSession
       .mockReset()
-      .mockReturnValue({ discarded: false, drained: false });
+      .mockReturnValue({ discarded: false, drained: false, timedOut: false });
     revokeForUser.mockReset().mockResolvedValue({ revoked: [], retained: [] });
     removeRsvp
       .mockReset()
@@ -579,7 +584,11 @@ describe("UserDataDeletionService.purge", () => {
     });
 
     it("records the in-flight voice session it discarded", async () => {
-      forgetActiveSession.mockReturnValue({ discarded: true, drained: false });
+      forgetActiveSession.mockReturnValue({
+        discarded: true,
+        drained: false,
+        timedOut: false,
+      });
 
       const report = await service().purge(USER, GUILD);
 
@@ -590,11 +599,36 @@ describe("UserDataDeletionService.purge", () => {
       });
     });
 
+    it("fails the purge but finishes it when the voice drain times out", async () => {
+      // A persist still running can land after the deletes and resurrect the
+      // row, so the purge cannot claim to have closed the window — but it
+      // must not hang on it either.
+      forgetActiveSession.mockReturnValue({
+        discarded: true,
+        drained: true,
+        timedOut: true,
+      });
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(stepsFor(report, VOICE_SESSION_CACHE)[0].error).toContain(
+        "may be recreated",
+      );
+      expect(report.ok).toBe(false);
+      // Everything after it still ran, including the last step of all.
+      expect(CALLS).toContain("reminder.deleteMany");
+      expect(CALLS[CALLS.length - 1]).toBe("session.revokeForUser");
+    });
+
     it("records that it waited out a persist already in flight", async () => {
       // Evicting the maps cannot call back a persist that already read its
       // session; the tracker waits for it so the delete below lands after
       // that write instead of racing it.
-      forgetActiveSession.mockReturnValue({ discarded: false, drained: true });
+      forgetActiveSession.mockReturnValue({
+        discarded: false,
+        drained: true,
+        timedOut: false,
+      });
 
       const report = await service().purge(USER, GUILD);
 
@@ -705,7 +739,11 @@ describe("UserDataDeletionService.purge", () => {
         matchedCount: 1,
         modifiedCount: 1,
       };
-      forgetActiveSession.mockReturnValue({ discarded: true, drained: true });
+      forgetActiveSession.mockReturnValue({
+        discarded: true,
+        drained: true,
+        timedOut: false,
+      });
       revokeForUser.mockResolvedValue({ revoked: ["role-a"], retained: [] });
       removeRsvp.mockResolvedValue({
         matched: 2,
@@ -730,7 +768,11 @@ describe("UserDataDeletionService.purge", () => {
       // Second run: the rows are gone, so every step matches nothing. The
       // mocks stand in for the database having been emptied by the first.
       for (const key of Object.keys(RESULTS)) delete RESULTS[key];
-      forgetActiveSession.mockReturnValue({ discarded: false, drained: false });
+      forgetActiveSession.mockReturnValue({
+        discarded: false,
+        drained: false,
+        timedOut: false,
+      });
       revokeForUser.mockResolvedValue({ revoked: [], retained: [] });
       removeRsvp.mockResolvedValue({
         matched: 0,
