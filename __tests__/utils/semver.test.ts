@@ -48,6 +48,27 @@ describe("semver helpers (#1029)", () => {
       expect(compareVersions("2.0.0-rc.1", "2.0.0-rc.1")).toBe(0);
     });
 
+    it("orders pre-release identifiers by SemVer precedence", () => {
+      // Numeric identifiers compare numerically, not lexically.
+      expect(compareVersions("2.0.0-rc.2", "2.0.0-rc.10")).toBe(-1);
+      expect(compareVersions("2.0.0-rc.10", "2.0.0-rc.2")).toBe(1);
+      // The SemVer §11 example chain.
+      const chain = [
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha.beta",
+        "1.0.0-beta",
+        "1.0.0-beta.2",
+        "1.0.0-beta.11",
+        "1.0.0-rc.1",
+        "1.0.0",
+      ];
+      for (let i = 0; i < chain.length - 1; i++) {
+        expect(compareVersions(chain[i], chain[i + 1])).toBe(-1);
+        expect(compareVersions(chain[i + 1], chain[i])).toBe(1);
+      }
+    });
+
     it("returns null when either side does not parse", () => {
       expect(compareVersions("unknown", "2.0.0")).toBeNull();
       expect(compareVersions("2.0.0", "latest")).toBeNull();

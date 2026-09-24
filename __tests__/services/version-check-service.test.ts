@@ -24,7 +24,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
 
 const mockIsCategoryEnabled = jest.fn<(type: string) => Promise<boolean>>();
 const mockLogToChannel =
-  jest.fn<(type: string, msg: Record<string, unknown>) => Promise<void>>();
+  jest.fn<(type: string, msg: Record<string, unknown>) => Promise<boolean>>();
 
 jest.unstable_mockModule("../../src/services/discord-logger.js", () => ({
   DiscordLogger: {
@@ -117,7 +117,7 @@ beforeEach(() => {
   mockFindOneLean.mockResolvedValue(null);
   mockUpdateOne.mockResolvedValue({});
   mockIsCategoryEnabled.mockResolvedValue(false);
-  mockLogToChannel.mockResolvedValue(undefined);
+  mockLogToChannel.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -197,6 +197,25 @@ describe("VersionCheckService (#1029)", () => {
       expect(snap.latest?.url).toBe(
         "https://github.com/lonix/koolbot/releases/tag/v2.1.0",
       );
+    });
+
+    it("rejects a release URL that only looks like it is under /releases/", async () => {
+      for (const html_url of [
+        "https://github.com/lonix/koolbot/releases/../issues",
+        "https://github.com/lonix/koolbot/releases/%2e%2e/issues",
+        "https://user@github.com/lonix/koolbot/releases/tag/v2.1.0",
+        "http://github.com/lonix/koolbot/releases/tag/v2.1.0",
+        "not a url",
+      ]) {
+        VersionCheckService.reset();
+        fetchMock.mockResolvedValue(
+          response(200, release("v2.1.0", { html_url })),
+        );
+        const snap = await service().checkNow();
+        expect(snap.latest?.url).toBe(
+          "https://github.com/lonix/koolbot/releases/tag/v2.1.0",
+        );
+      }
     });
 
     it("records a network error without throwing", async () => {
@@ -364,6 +383,30 @@ describe("VersionCheckService (#1029)", () => {
       );
     });
 
+    it("retries the note on the next check when it was not delivered", async () => {
+      mockIsCategoryEnabled.mockResolvedValue(true);
+      mockLogToChannel.mockResolvedValueOnce(false);
+      jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
+      fetchMock.mockResolvedValue(response(200, release("v2.1.0")));
+      const svc = service();
+      await svc.checkNow();
+      expect(mockLogToChannel).toHaveBeenCalledTimes(1);
+      expect(mockUpdateOne).toHaveBeenLastCalledWith(
+        { key: "latest-release" },
+        { $set: expect.objectContaining({ notifiedVersion: null }) },
+        { upsert: true },
+      );
+
+      jest.setSystemTime(Date.now() + MIN_CHECK_GAP_MS + 1);
+      await svc.checkNow();
+      expect(mockLogToChannel).toHaveBeenCalledTimes(2);
+      expect(mockUpdateOne).toHaveBeenLastCalledWith(
+        { key: "latest-release" },
+        { $set: expect.objectContaining({ notifiedVersion: "v2.1.0" }) },
+        { upsert: true },
+      );
+    });
+
     it("does not post when already up to date", async () => {
       mockIsCategoryEnabled.mockResolvedValue(true);
       fetchMock.mockResolvedValue(response(200, release("v2.0.0")));
@@ -426,6 +469,32 @@ describe("VersionCheckService (#1029)", () => {
       await onReload();
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(svc.getSnapshot().status).toBe("up-to-date");
+    });
+
+    it("the reload callback re-checks when switched back on with a cached result", async () => {
+      mockFindOneLean.mockResolvedValue({
+        latestVersion: "v2.0.0",
+        releaseUrl: "https://github.com/lonix/koolbot/releases/tag/v2.0.0",
+        publishedAt: null,
+        fetchedAt: new Date("2026-01-01T00:00:00Z"),
+        notifiedVersion: null,
+      });
+      mockGetBoolean.mockResolvedValue(false);
+      fetchMock.mockResolvedValue(response(200, release("v2.1.0")));
+      const svc = service();
+      await svc.start();
+      expect(svc.getSnapshot().latest?.version).toBe("v2.0.0");
+      const onReload = mockRegisterReload.mock
+        .calls[0][0] as () => Promise<void>;
+
+      mockGetBoolean.mockResolvedValue(true);
+      await onReload();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(svc.getSnapshot().latest?.version).toBe("v2.1.0");
+
+      // A reload while it was already on does not force another request.
+      await onReload();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
     it("reports unchecked before the first result arrives", () => {

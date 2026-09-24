@@ -86,13 +86,26 @@ type FetchLike = (
  * tag, so the dashboard never renders an arbitrary link.
  */
 function releaseUrlFor(tag: string, htmlUrl: unknown): string {
-  if (
-    typeof htmlUrl === "string" &&
-    htmlUrl.startsWith(`${RELEASES_PAGE_URL}/`)
-  ) {
-    return htmlUrl;
+  const fallback = `${RELEASES_PAGE_URL}/tag/${encodeURIComponent(tag)}`;
+  if (typeof htmlUrl !== "string") return fallback;
+  // Parse rather than prefix-match: `new URL` resolves `..` segments, so a
+  // value like `…/releases/../issues` is judged by where it really points.
+  let parsed: URL;
+  try {
+    parsed = new URL(htmlUrl);
+  } catch {
+    return fallback;
   }
-  return `${RELEASES_PAGE_URL}/tag/${encodeURIComponent(tag)}`;
+  const allowed = new URL(RELEASES_PAGE_URL);
+  if (
+    parsed.origin !== allowed.origin ||
+    !parsed.pathname.startsWith(`${allowed.pathname}/`) ||
+    parsed.username ||
+    parsed.password
+  ) {
+    return fallback;
+  }
+  return parsed.toString();
 }
 
 function describeRateLimit(headers: {
@@ -122,8 +135,11 @@ export class VersionCheckService {
   private notifiedVersion: string | null = null;
 
   private readonly onReload = async (): Promise<void> => {
+    const wasEnabled = this.enabled;
     await this.refreshEnabled();
-    if (this.enabled && !this.latest) {
+    // Check straight away when the check was just switched back on (the
+    // persisted result may be stale) or has never produced a result.
+    if (this.enabled && (!wasEnabled || !this.latest)) {
       await this.checkNow();
     }
   };
@@ -328,7 +344,7 @@ export class VersionCheckService {
     try {
       const discordLogger = DiscordLogger.getInstance(this.client);
       if (!(await discordLogger.isCategoryEnabled("updates"))) return;
-      await discordLogger.logToChannel("updates", {
+      const delivered = await discordLogger.logToChannel("updates", {
         title: "⬆️ KoolBot update available",
         description:
           `Running ${formatVersion(getBotVersion())} · latest ${latest.version} (${kind} update).` +
@@ -338,6 +354,9 @@ export class VersionCheckService {
         color: "#2563eb",
         fields: [{ name: "Release notes", value: latest.url }],
       });
+      // Only a posted note counts: a missing channel or failed send leaves
+      // the version unannounced so the next check retries it.
+      if (!delivered) return;
       this.notifiedVersion = latest.version;
       await this.saveState();
     } catch (err) {

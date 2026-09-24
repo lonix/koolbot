@@ -41,11 +41,38 @@ export function parseVersion(
 }
 
 /**
+ * SemVer §11 pre-release precedence: compare dot-separated identifiers left
+ * to right; numeric identifiers compare numerically and sort below
+ * alphanumeric ones; a shorter list of otherwise-equal identifiers sorts
+ * first (`rc.2` < `rc.10`, `alpha` < `alpha.1` < `beta`).
+ */
+function comparePrerelease(a: string, b: string): number {
+  const pa = a.split(".");
+  const pb = b.split(".");
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i];
+    const y = pb[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const xNum = /^\d+$/.test(x);
+    const yNum = /^\d+$/.test(y);
+    if (xNum && yNum) {
+      const diff = Number(x) - Number(y);
+      if (diff !== 0) return Math.sign(diff);
+    } else if (xNum !== yNum) {
+      return xNum ? -1 : 1;
+    } else if (x !== y) {
+      return x < y ? -1 : 1;
+    }
+  }
+  return 0;
+}
+
+/**
  * Compare two versions: negative when `a < b`, `0` when equal, positive
  * when `a > b`. Returns `null` when either side does not parse. A
  * pre-release sorts below the release of the same `X.Y.Z` (`2.0.0-rc.1`
- * < `2.0.0`); two pre-releases of the same `X.Y.Z` compare lexically, which
- * is enough to spot a difference without claiming a precise ordering.
+ * < `2.0.0`), and two pre-releases follow SemVer precedence.
  */
 export function compareVersions(a: string, b: string): number | null {
   const pa = parseVersion(a);
@@ -57,7 +84,7 @@ export function compareVersions(a: string, b: string): number | null {
   if (pa.prerelease === pb.prerelease) return 0;
   if (pa.prerelease === null) return 1;
   if (pb.prerelease === null) return -1;
-  return pa.prerelease < pb.prerelease ? -1 : 1;
+  return comparePrerelease(pa.prerelease, pb.prerelease);
 }
 
 /**
