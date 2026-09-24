@@ -872,13 +872,17 @@ Web UI only — there is no slash command for either.
   again. The cooldown bounds how often that can happen.
 - **Tracking opt-out (`privacy.tracking_opt_out.enabled`)** lets a member stop
   the message, reaction, poll-participation and voice trackers recording
-  anything about them. They are also left out of other members' voice
-  co-presence (`otherUsers`, companions). The opt-out is one row in the
+  anything about them. They are also no longer added to other members' voice
+  co-presence (`otherUsers`, companions); mentions already stored in other
+  members' rows are kept, as with a reset. The opt-out is one row in the
   `tracking-opt-out` collection, loaded into memory at startup, so the check
   on each tracker's write path is a single in-memory lookup, not a query.
 - Opting out waits for any tracker write already in flight for the member
   and evicts a live voice session, so nothing more is written about them
   once the opt-out completes — a reset straight afterwards stays a deletion.
+  If that wait times out, the member is told to wait before resetting, and the
+  reset itself drains in-flight writes again first; if one is still pending,
+  the purge is reported incomplete and the member is told to retry.
 - The opt-out **stops accumulation only**. Existing data still shows on
   leaderboards, digests, `/voicestats` and Rewind until the member resets it.
   Opt-out plus reset is the deletion. Opting back in deletes the row, starts

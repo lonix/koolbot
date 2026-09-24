@@ -1635,7 +1635,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "privacy.tracking_opt_out.enabled": {
     label: "Member tracking opt-out enabled",
     description:
-      "Let members opt out of activity tracking from /me/privacy (also needs the data export enabled). An opted-out member's messages, reactions, poll votes and voice sessions are not recorded, and they are left out of other members' voice co-presence. Existing data is not hidden — combined with a data reset, the opt-out is what makes the reset a real deletion. The opt-out itself is a small stored flag the reset keeps; the member removes it by opting back in. Turning this off stops new opt-outs but existing ones stay honoured, and members can always opt back in.",
+      "Let members opt out of activity tracking from /me/privacy (also needs the data export enabled). An opted-out member's messages, reactions, poll votes and voice sessions are not recorded, and they are no longer added to other members' voice co-presence (older mentions in other members' rows are kept). Existing data is not hidden — combined with a data reset, the opt-out is what makes the reset a real deletion. The opt-out itself is a small stored flag the reset keeps; the member removes it by opting back in. Turning this off stops new opt-outs but existing ones stay honoured, and members can always opt back in.",
     category: "privacy",
     type: "boolean",
   },

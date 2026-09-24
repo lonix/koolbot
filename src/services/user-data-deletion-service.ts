@@ -67,6 +67,7 @@ import { QuoteChannelManager } from "./quote-channel-manager.js";
 import { quoteService } from "./quote-service.js";
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { WebSessionService } from "./web-session-service.js";
 import { ChannelInvite } from "../models/channel-invite.js";
 import { DigestState } from "../models/digest-state.js";
@@ -599,6 +600,9 @@ export const VOICE_SESSION_CACHE = "voice-session-cache";
 /** Note marking the quote step that covers the Discord posts, not the rows. */
 export const QUOTE_CHANNEL_POSTS = "quote-channel posts";
 
+/** Step label for the in-flight tracker-write drain (#918). */
+export const TRACKING_WRITES = "tracking writes";
+
 export class UserDataDeletionService {
   private static instance: UserDataDeletionService | null = null;
 
@@ -690,6 +694,32 @@ export class UserDataDeletionService {
         error: timedOut
           ? "timed out waiting for an in-flight voice session persist; a tracking row may be recreated after this purge"
           : undefined,
+      });
+    });
+
+    // 1b. Wait out any message, reaction or poll write already in flight
+    //     for the member (#918). The trackers register those writes, and a
+    //     tracked member's could otherwise land after the deletes below and
+    //     recreate a row. Matters most straight after an opt-out whose own
+    //     drain timed out: without this the reset would be called a deletion
+    //     while a write was still due.
+    await this.runStep(steps, TRACKING_WRITES, "evict", async (emit) => {
+      const { pending, settled } =
+        await TrackingOptOutService.getInstance().waitForWrites(
+          userId,
+          ctx.guildId,
+        );
+      emit({
+        action: "evict",
+        matched: pending,
+        removed: settled ? pending : 0,
+        note:
+          pending > 0
+            ? `waited for ${pending} in-flight tracking write(s)`
+            : "no in-flight tracking writes",
+        error: settled
+          ? undefined
+          : "timed out waiting for an in-flight tracking write; a row may be recreated after this purge",
       });
     });
 

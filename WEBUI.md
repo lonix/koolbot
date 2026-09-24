@@ -1135,8 +1135,9 @@ When `privacy.tracking_opt_out.enabled` is also on, an **Activity tracking**
 card sits between the export tables and the reset card. `action=opt-out`
 writes a row to `tracking-opt-out`; `action=opt-in` deletes it. While the row
 exists, the message, reaction, poll-participation and voice trackers record
-nothing about the member, and the member is left out of other members' voice
-co-presence. The check is an in-memory lookup loaded at startup, not a query.
+nothing about the member, and the member is no longer added to other members'
+voice co-presence. Mentions already stored in other members' rows are kept, as
+with a reset. The check is an in-memory lookup loaded at startup, not a query.
 
 The card says plainly that existing data stays visible on leaderboards,
 digests and Rewind until the member resets it, and that the opt-out is itself

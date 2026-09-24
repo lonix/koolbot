@@ -1454,7 +1454,8 @@ function renderTrackingOptOutCard(
       "<h2>Activity tracking</h2>",
       `<p><strong>You are opted out</strong> (since ${escapeHtml(optOut.optedOutAt.toISOString().slice(0, 10))}). ` +
         "Koolbot does not record your messages, reactions, poll votes or voice sessions, " +
-        "and leaves you out of other members' voice history.</p>",
+        "and no longer adds you to other members' voice history. Older entries in other " +
+        "members' records can still mention you.</p>",
       '<p class="muted">What was stored before you opted out is still there, and still shows on ' +
         `leaderboards, digests and your Rewind — ${removeIt}. Opting back ` +
         "in starts tracking again from that moment; nothing from the time you were opted out " +
@@ -1473,8 +1474,9 @@ function renderTrackingOptOutCard(
     "<p>Koolbot records your messages, reactions, poll votes and time in voice channels " +
       "to power stats, leaderboards, achievements, digests and Rewind. You can opt out.</p>",
     "<ul>",
-    "<li>Nothing new is recorded about you from the moment you opt out, and you are left " +
-      "out of other members' voice history.</li>",
+    "<li>Nothing new is recorded about you from the moment you opt out, and you are no " +
+      "longer added to other members' voice history. Older entries in their records can " +
+      "still mention you.</li>",
     "<li>What is already stored stays, and keeps showing on leaderboards, digests and Rewind" +
       (resetAvailable
         ? " until you reset it. Opting out and then resetting is a real deletion.</li>"

@@ -1581,9 +1581,12 @@ export function createUserRouter(
       }
 
       const service = TrackingOptOutService.getInstance();
+      // False when the opt-out is stored but a write already under way could
+      // not be confirmed finished; said out loud, never flashed as clean.
+      let settled = true;
       try {
         if (action === "opt-out") {
-          await service.optOut(userId, guildId);
+          ({ settled } = await service.optOut(userId, guildId));
         } else {
           await service.optIn(userId, guildId);
         }
@@ -1612,18 +1615,28 @@ export function createUserRouter(
       await recordAudit(session, {
         action: TRACKING_OPT_OUT_ACTION,
         targetId: userId,
-        details: { action },
+        details: settled ? { action } : { action, settled: false },
         result: "success",
       });
       res.redirect(
         303,
-        flashUrl("/me/privacy", {
-          type: "ok",
-          text:
-            action === "opt-out"
-              ? "You are opted out of tracking. Nothing new is recorded about you from now on."
-              : "You are opted back in. Tracking starts again from now.",
-        }),
+        flashUrl(
+          "/me/privacy",
+          action === "opt-in"
+            ? {
+                type: "ok",
+                text: "You are opted back in. Tracking starts again from now.",
+              }
+            : settled
+              ? {
+                  type: "ok",
+                  text: "You are opted out of tracking. Nothing new is recorded about you from now on.",
+                }
+              : {
+                  type: "err",
+                  text: "You are opted out of tracking, but a recording that was already under way could not be confirmed finished. Wait a minute before resetting your data.",
+                },
+        ),
       );
     }),
   );

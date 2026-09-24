@@ -246,7 +246,10 @@ const {
   DELETER_COLLECTIONS,
   PURGE_ORDER,
   VOICE_SESSION_CACHE,
+  TRACKING_WRITES,
 } = await import("../../src/services/user-data-deletion-service.js");
+const { TrackingOptOutService } =
+  await import("../../src/services/tracking-opt-out-service.js");
 const { ANONYMISED_USER_ID } =
   await import("../../src/services/user-data-registry.js");
 
@@ -329,6 +332,43 @@ describe("UserDataDeletionService.purge", () => {
         collection: VOICE_SESSION_CACHE,
         action: "evict",
       });
+    });
+
+    it("waits for in-flight tracking writes before any collection is touched (#918)", async () => {
+      const waitForWrites = jest
+        .spyOn(TrackingOptOutService.getInstance(), "waitForWrites")
+        .mockResolvedValue({ pending: 1, settled: true });
+      try {
+        const report = await service().purge(USER, GUILD);
+
+        expect(waitForWrites).toHaveBeenCalledWith(USER, GUILD);
+        expect(report.steps[1]).toMatchObject({
+          collection: TRACKING_WRITES,
+          action: "evict",
+          matched: 1,
+          removed: 1,
+        });
+        expect(report.steps[1].error).toBeUndefined();
+      } finally {
+        waitForWrites.mockRestore();
+      }
+    });
+
+    it("reports the purge incomplete when an in-flight tracking write never settles (#918)", async () => {
+      const waitForWrites = jest
+        .spyOn(TrackingOptOutService.getInstance(), "waitForWrites")
+        .mockResolvedValue({ pending: 1, settled: false });
+      try {
+        const report = await service().purge(USER, GUILD);
+
+        expect(report.ok).toBe(false);
+        const step = report.steps.find(
+          (s: PurgeStep) => s.collection === TRACKING_WRITES,
+        );
+        expect(step?.error).toContain("timed out");
+      } finally {
+        waitForWrites.mockRestore();
+      }
     });
 
     it("revokes the leaderboard role on Discord before any collection is touched", async () => {

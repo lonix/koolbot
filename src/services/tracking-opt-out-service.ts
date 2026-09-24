@@ -166,12 +166,19 @@ export class TrackingOptOutService {
   }
 
   /**
-   * Opt a member out. Idempotent; keeps the original timestamp. Returns once
-   * no tracker write about the member is still in flight (or the drain timed
-   * out, which is logged).
+   * Opt a member out. Idempotent; keeps the original timestamp. Resolves once
+   * no tracker write about the member is still in flight, with `settled:
+   * false` when that could not be confirmed — the drain or a hook timed out
+   * or failed. The opt-out itself is stored either way; `settled: false`
+   * only means a write already under way might still land, which the caller
+   * must not paper over (a reset straight after drains again and reports it).
    */
-  public async optOut(userId: string, guildId: string): Promise<void> {
+  public async optOut(
+    userId: string,
+    guildId: string,
+  ): Promise<{ settled: boolean }> {
     const key = TrackingOptOutService.key(userId, guildId);
+    let settled = true;
     // The whole opt-out — write, cache, drain and hooks — holds the member's
     // mutation barrier, so an opt-in cannot overtake work that is still
     // finishing the opt-out (and a hook's eviction cannot hit a session that
@@ -190,14 +197,17 @@ export class TrackingOptOutService {
 
       // From here no new write can start; wait out the ones that already had.
       if (!(await this.drainWrites(key))) {
+        settled = false;
         logger.warn(
           `Timed out waiting for in-flight tracking writes for ${sanitizeForLog(userId)} after opt-out`,
         );
       }
       for (const hook of this.optOutHooks) {
         try {
-          await hook(userId, guildId);
+          // A hook reports an unsettled drain of its own by resolving false.
+          if ((await hook(userId, guildId)) === false) settled = false;
         } catch (error) {
+          settled = false;
           logger.warn(
             `Tracking opt-out hook failed for ${sanitizeForLog(userId)}`,
             error,
@@ -205,6 +215,22 @@ export class TrackingOptOutService {
         }
       }
     });
+    return { settled };
+  }
+
+  /**
+   * Wait (bounded) for the member's in-flight tracker writes to settle. The
+   * purge calls this before deleting anything, so a write that an opt-out
+   * could not confirm finished cannot land after the reset unreported.
+   * Returns how many were pending and whether they all settled.
+   */
+  public async waitForWrites(
+    userId: string,
+    guildId: string,
+  ): Promise<{ pending: number; settled: boolean }> {
+    const key = TrackingOptOutService.key(userId, guildId);
+    const pending = this.inFlight.get(key)?.size ?? 0;
+    return { pending, settled: await this.drainWrites(key) };
   }
 
   /**

@@ -205,6 +205,10 @@ export class VoiceChannelTracker {
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+    // At construction, not in `initialize()`: the voice-state listener and
+    // the Web UI are live before startup finishes, and an opt-out in that
+    // window must still evict the session (#918).
+    this.registerOptOutHook();
   }
 
   public static getInstance(client: Client): VoiceChannelTracker {
@@ -218,15 +222,14 @@ export class VoiceChannelTracker {
    * On a tracking opt-out (#918), evict the member's live session and wait
    * out any persist already in flight — the same eviction a purge uses, so
    * opting out (and even opting straight back in) mid-session never lets the
-   * session be written. Registered once per tracker instance.
+   * session be written. Registered once, from the constructor. Resolves
+   * false when a drain timed out, so `optOut` can report it as unsettled.
    */
-  private optOutHookRegistered = false;
   private registerOptOutHook(): void {
-    if (this.optOutHookRegistered) return;
-    this.optOutHookRegistered = true;
     TrackingOptOutService.getInstance().onOptOut(async (userId, guildId) => {
-      await this.forgetActiveSession(userId);
-      await this.forgetCompanion(userId, guildId);
+      const { timedOut } = await this.forgetActiveSession(userId);
+      const companionSettled = await this.forgetCompanion(userId, guildId);
+      return !timedOut && companionSettled;
     });
   }
 
@@ -241,7 +244,7 @@ export class VoiceChannelTracker {
   private async forgetCompanion(
     userId: string,
     guildId: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     for (const [sessionUserId, session] of this.activeSessions) {
       if (sessionUserId === userId) continue;
       if (session.guildId && session.guildId !== guildId) continue;
@@ -266,7 +269,9 @@ export class VoiceChannelTracker {
       logger.warn(
         `Timed out waiting for in-flight voice persists after ${userId} opted out; one may still name them as co-present`,
       );
+      return false;
     }
+    return true;
   }
 
   public getActiveSession(userId: string): { channelName: string } | null {
@@ -1249,9 +1254,6 @@ export class VoiceChannelTracker {
 
   async initialize(): Promise<void> {
     try {
-      // Before the connection check, so a slow Mongo at boot cannot leave
-      // opt-outs without their session eviction.
-      this.registerOptOutHook();
       await this.mongo.ensureConnection();
       logger.info("VoiceChannelTracker initialized");
     } catch (error) {

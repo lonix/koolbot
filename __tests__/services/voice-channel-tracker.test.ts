@@ -932,6 +932,17 @@ describe("VoiceChannelTracker", () => {
         expect(tracker.getActiveSession("u1")).toBeNull();
       });
 
+      it("registers its opt-out hook at construction, before initialize()", () => {
+        stubTrackingOptOuts();
+        createTracker(mockClient);
+        const hooks = (
+          TrackingOptOutService.getInstance() as unknown as {
+            optOutHooks: unknown[];
+          }
+        ).optOutHooks;
+        expect(hooks).toHaveLength(1);
+      });
+
       it("evicts a live session through the opt-out hook, so opting straight back in cannot persist it", async () => {
         stubTrackingOptOuts();
         const { tracker, mockConfigService } = createTracker(mockClient);

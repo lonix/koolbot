@@ -39,6 +39,8 @@ interface MockOptions {
   privacyEnabled?: boolean;
   optOutEnabled?: boolean;
   writeThrows?: boolean;
+  /** What `optOut` reports about draining in-flight writes. */
+  settled?: boolean;
 }
 
 let auditRows: Array<Record<string, unknown>> = [];
@@ -99,6 +101,7 @@ async function installMocks(opts: MockOptions = {}): Promise<void> {
     optOut: async (userId: string, guildId: string) => {
       if (opts.writeThrows) throw new Error("mongo went away");
       optOutCalls.push([userId, guildId]);
+      return { settled: opts.settled ?? true };
     },
     optIn: async (userId: string, guildId: string) => {
       if (opts.writeThrows) throw new Error("mongo went away");
@@ -236,6 +239,19 @@ describe("POST /me/privacy/tracking", () => {
       action: "user.privacy.tracking",
       result: "success",
       details: { action: "opt-out" },
+    });
+  });
+
+  it("says so when the opt-out is stored but an in-flight write is unconfirmed", async () => {
+    await installMocks({ settled: false });
+    const { captured } = await post();
+
+    expect(optOutCalls).toEqual([[USER, GUILD]]);
+    expect(flashOf(captured).type).toBe("err");
+    expect(flashOf(captured).text).toContain("could not be confirmed finished");
+    expect(auditRows[0]).toMatchObject({
+      result: "success",
+      details: { action: "opt-out", settled: false },
     });
   });
 

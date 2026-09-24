@@ -282,8 +282,12 @@ describe("TrackingOptOutService", () => {
         seen.push(service.isOptedOut(userId, guildId));
       });
 
-      await expect(service.optOut("u1", "g1")).resolves.toBeUndefined();
+      // Stored and applied, but a failed hook means it is not settled.
+      await expect(service.optOut("u1", "g1")).resolves.toEqual({
+        settled: false,
+      });
       expect(seen).toEqual([true]);
+      expect(service.isOptedOut("u1", "g1")).toBe(true);
     });
 
     it("serialises overlapping opt-out and opt-in so the cache matches the last write", async () => {
@@ -330,6 +334,49 @@ describe("TrackingOptOutService", () => {
       await optingIn;
       expect(deleteOne).toHaveBeenCalledTimes(1);
       expect(service.isOptedOut("u1", "g1")).toBe(false);
+    });
+
+    it("reports a clean opt-out as settled", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      service.onOptOut(async () => true);
+      await expect(service.optOut("u1", "g1")).resolves.toEqual({
+        settled: true,
+      });
+    });
+
+    it("reports an opt-out whose hook could not drain as unsettled", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      service.onOptOut(async () => false);
+      await expect(service.optOut("u1", "g1")).resolves.toEqual({
+        settled: false,
+      });
+    });
+
+    it("lets the purge wait for a member's in-flight writes", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      await expect(service.waitForWrites("u1", "g1")).resolves.toEqual({
+        pending: 0,
+        settled: true,
+      });
+
+      const gate = deferred();
+      const writing = service.trackWrite("u1", "g1", () => gate.promise);
+      let waited: unknown = null;
+      const waiting = service.waitForWrites("u1", "g1").then((r) => {
+        waited = r;
+      });
+      await flush();
+      expect(waited).toBeNull();
+      gate.resolve();
+      await writing;
+      await waiting;
+      expect(waited).toEqual({ pending: 1, settled: true });
     });
 
     it("keeps serving later mutations after one fails", async () => {
