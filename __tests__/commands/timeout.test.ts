@@ -52,11 +52,9 @@ function makeMember(
     moderatable: options.moderatable ?? true,
     timeout:
       options.timeout ??
-      jest
-        .fn<() => Promise<unknown>>()
-        .mockResolvedValue({
-          communicationDisabledUntilTimestamp: TIMEOUT_EXPIRY,
-        }),
+      jest.fn<() => Promise<unknown>>().mockResolvedValue({
+        communicationDisabledUntilTimestamp: TIMEOUT_EXPIRY,
+      }),
   };
 }
 

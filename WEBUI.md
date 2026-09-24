@@ -759,6 +759,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Permissions**       | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
 | **Setup Wizard**      | `/setup wizard`                                                                                     |
 | **Announcements**     | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
+| **Birthdays**         | (new — upcoming list, edit/remove, message preview, **Run now**) + editable `birthdays.*` settings  |
 | **Events**            | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
 | **Polls**             | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
 | **Reaction Roles**    | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
@@ -799,8 +800,8 @@ minute). The result is cached, so no page waits on GitHub. A failed check
   post a one-time note to a log channel when a newer release is first seen. It
   is off by default.
 
-Feature pages (Announcements, Events, Polls, Reaction Roles, Notices, Quotes,
-Voice Channels, Weekly Digest, Leaderboard Roles) are gated by their
+Feature pages (Announcements, Birthdays, Events, Polls, Reaction Roles,
+Notices, Quotes, Voice Channels, Weekly Digest, Leaderboard Roles) are gated by their
 `<feature>.enabled` config key. When a feature is **off**, its sidebar link is
 still shown — greyed with an "off" badge — rather than hidden, so the page stays
 discoverable (#610);
@@ -863,6 +864,37 @@ channel, the header and pin toggles, `quotes.clear_on_sync`, the cooldown,
 maximum length and vote-history retention, and the roles allowed to delete
 quotes. The auto-managed `quotes.header_message_id` is shown read-only in the
 status card.
+
+The **Birthdays** page (#986) is for the admin side of birthdays; members still
+set their own date on `/me/birthday`. It lists every stored birthday, soonest
+first by each member's own timezone, 25 per page, with the next celebration
+date, whether a birth year is on file, whether a birthday-role grant is on
+record (not yet swept) and the year the check last handled them (it posted,
+or skipped them because they had left). The birth year itself is never shown: members share it only to have
+their age in the post. Per row:
+
+- **Edit** corrects the month and day, and can remove a stored birth year (an
+  admin can never add one). Only an existing entry can be edited. Moving the
+  date lets it be announced again this year; removing only the year does not.
+- **Remove** runs the same erasure as the member's own data reset (#916): it
+  takes back a live birthday role and deletes the bot's birthday posts about
+  the member before the entry goes. If either cannot be undone, the entry is
+  kept and the page says so, so you can try again. That includes an old grant
+  that names no role while `birthdays.role_id` is unset: the entry stays until
+  a role is configured again, so the grant can still be taken back.
+
+The **Message preview** card renders the saved `birthdays.message` with you as
+the member (a sample age of 30, plus the no-year variant when the template uses
+`{age}`), and says whether the member is pinged and which role they get.
+**Run now** runs the scheduled check through `ScheduledService.runNow()`; it
+never announces anyone twice, because the once-a-year guard still applies.
+Every action is CSRF-protected and written to the Web UI audit log
+(`birthday.edit`, `birthday.remove`, `birthday.run-now`), recording whether a
+birth year is on file but never the year.
+
+Its **Settings** card edits every `birthdays.*` key in place, with
+`birthdays.enabled` as the cascade master. Saving a new `birthdays.cron` or
+flipping the feature re-arms the birthday job straight away.
 
 On the **Settings** page, a toggle whose feature declares a hard dependency
 (`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an

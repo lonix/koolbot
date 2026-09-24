@@ -160,6 +160,115 @@ export function shouldAnnounceBirthday(
   return birthday.lastAnnouncedYear !== local.year;
 }
 
+/**
+ * The UTC-midnight date `birthday` is celebrated on in `year` — Mar 1 for a
+ * Feb 29 birthday in a non-leap year, matching {@link isBirthdayToday}.
+ */
+function celebrationDateInYear(
+  birthday: { month: number; day: number },
+  year: number,
+): Date {
+  if (birthday.month === 2 && birthday.day === 29 && !isLeapYear(year)) {
+    return new Date(Date.UTC(year, 2, 1));
+  }
+  return new Date(Date.UTC(year, birthday.month - 1, birthday.day));
+}
+
+/**
+ * The next date `birthday` is celebrated on, counting `today` itself, and
+ * how many days away that is (0 = today). Used to sort the admin birthday
+ * list by who is up next (#986).
+ */
+export function nextBirthday(
+  birthday: { month: number; day: number },
+  today: { year: number; month: number; day: number },
+): { date: string; daysUntil: number } {
+  const start = Date.UTC(today.year, today.month - 1, today.day);
+  let when = celebrationDateInYear(birthday, today.year);
+  if (when.getTime() < start) {
+    when = celebrationDateInYear(birthday, today.year + 1);
+  }
+  return {
+    date: when.toISOString().slice(0, 10),
+    daysUntil: Math.round((when.getTime() - start) / (24 * MS_PER_HOUR)),
+  };
+}
+
+/**
+ * One stored birthday as the admin Birthdays page lists it (#986). The
+ * birth year is deliberately left out: a member shares it only to have their
+ * age in the post, so the page says whether one is on file, not what it is.
+ */
+export interface BirthdayListEntry {
+  userId: string;
+  month: number;
+  day: number;
+  hasYear: boolean;
+  /**
+   * Next celebration date, `YYYY-MM-DD`, in the member's own timezone
+   * (the host's when they have none set).
+   */
+  nextDate: string;
+  daysUntil: number;
+  /**
+   * A birthday-role grant is on record and not yet swept. This is the
+   * bookkeeping marker, not a live check of the member's roles: the role may
+   * already have been removed by hand, or be past its duration and waiting
+   * for the next run's sweep.
+   */
+  roleGranted: boolean;
+  /**
+   * The year the check last handled this member: posted for them, or marked
+   * them done because they had left the guild. Not proof a post was made.
+   */
+  lastAnnouncedYear: number | null;
+  updatedAt: Date | null;
+}
+
+/** How many read/write passes an admin edit makes before giving up (#986). */
+const MAX_EDIT_ATTEMPTS = 3;
+
+/** What an admin edit changed (#986). */
+export interface BirthdayEditResult {
+  before: StoredBirthday;
+  after: StoredBirthday;
+}
+
+/** An admin correction to a stored birthday (#986). */
+export interface BirthdayEdit {
+  month: number;
+  day: number;
+  /** Drop the stored birth year. An admin can remove one, never set one. */
+  clearYear?: boolean;
+}
+
+/**
+ * The filter for a scheduled-run write to a row it read: its id plus the
+ * date, year and `lastAnnouncedYear` the run read. `readMarker` is that last
+ * one as read, before the run stamps this year onto the in-memory row; it
+ * catches an admin who moved the date away and back again mid-run, which
+ * leaves the date matching but the marker reset. An admin who corrected the entry mid-run
+ * (#986) either moved the date — they reset `lastAnnouncedYear`, and writing
+ * this year back would stop the corrected date firing — or removed the birth
+ * year, and a post rendered from the stale year shows an age the member no
+ * longer shares. Either way the write matches nothing, and the not-persisted
+ * path withdraws what the run just posted. (The role-marker cleanup uses a
+ * plain `save()`: it only writes the marker fields, which an edit never
+ * touches.)
+ */
+function runRowFilter(
+  row: IUserBirthday,
+  readMarker: number | null,
+): Record<string, unknown> {
+  return {
+    _id: row._id,
+    month: row.month,
+    day: row.day,
+    year: typeof row.year === "number" ? row.year : null,
+    lastAnnouncedYear: readMarker,
+  };
+}
+
 function rowToStored(row: IUserBirthday): StoredBirthday {
   return {
     month: row.month,
@@ -314,6 +423,134 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     return row ? rowToStored(row) : { month, day, year: year ?? null };
   }
 
+  /**
+   * Every stored birthday in the guild, soonest celebration first (#986).
+   * "Today" is each member's own calendar day (`/me/timezone`, falling back
+   * to the host's), so the next date matches when the announcer will post.
+   * The list is sorted in memory: one guild's birthdays are small, and the
+   * order depends on per-member timezones a query cannot see. Throws on a read error so the admin page can say so rather than show an
+   * empty list.
+   */
+  public async listBirthdays(
+    guildId: string,
+    now: Date = new Date(),
+  ): Promise<BirthdayListEntry[]> {
+    const rows = await UserBirthday.find(
+      { guildId },
+      // Only what the list shows: `announcements` grows by one entry a year
+      // and is never needed here.
+      {
+        userId: 1,
+        month: 1,
+        day: 1,
+        year: 1,
+        lastAnnouncedYear: 1,
+        roleAssignedAt: 1,
+        updatedAt: 1,
+      },
+    );
+    // Each member's own zone, like the announcer: near midnight the host's
+    // "today" can be a day off theirs.
+    const zones = await UserNotificationPrefsService.getInstance().getTimezones(
+      rows.map((row) => row.userId),
+      guildId,
+    );
+    return rows
+      .map((row) => {
+        const today = localYmdInZone(
+          now,
+          resolveTimezone(zones.get(row.userId)),
+        );
+        const next = nextBirthday(row, today);
+        return {
+          userId: row.userId,
+          month: row.month,
+          day: row.day,
+          hasYear: typeof row.year === "number",
+          nextDate: next.date,
+          daysUntil: next.daysUntil,
+          roleGranted: Boolean(row.roleAssignedAt),
+          lastAnnouncedYear:
+            typeof row.lastAnnouncedYear === "number"
+              ? row.lastAnnouncedYear
+              : null,
+          updatedAt: row.updatedAt ?? null,
+        };
+      })
+      .sort(
+        (a, b) => a.daysUntil - b.daysUntil || a.userId.localeCompare(b.userId),
+      );
+  }
+
+  /**
+   * Correct a member's stored birthday on their behalf (#986). Only an
+   * existing entry can be edited — an admin must not create birthday data a
+   * member never shared — so this returns `null` when there is none. A read
+   * or write error throws, so the caller can tell an outage from "not found".
+   *
+   * The birth year is kept unless `clearYear` is set. `lastAnnouncedYear` is
+   * reset only when the date actually moves, so a corrected date can still
+   * fire this year while a year-only change on the day of the post does not
+   * announce the member a second time.
+   *
+   * The write is conditional on the row still being what was read. The
+   * scheduled run writes `lastAnnouncedYear` back to the rows it announced;
+   * waiting for a run in flight first, and refusing a row that changed under
+   * us, keeps that write from undoing the reset. (The run's own write is in
+   * turn conditional on the date it announced, see `writeRunRow`.)
+   */
+  public async editBirthday(
+    userId: string,
+    guildId: string,
+    edit: BirthdayEdit,
+  ): Promise<BirthdayEditResult | null> {
+    if (!userId) throw new Error("userId required");
+    if (!guildId) throw new Error("guildId required");
+    const { month, day } = edit;
+    if (!isValidMonthDay(month, day)) {
+      throw new Error(`"${month}/${day}" is not a valid month/day`);
+    }
+
+    await this.waitForIdle();
+
+    for (let attempt = 0; attempt < MAX_EDIT_ATTEMPTS; attempt++) {
+      const row = await UserBirthday.findOne({ userId, guildId });
+      if (!row) return null;
+
+      const $unset: Record<string, ""> = {};
+      if (row.month !== month || row.day !== day) {
+        $unset.lastAnnouncedYear = "";
+      }
+      if (edit.clearYear) $unset.year = "";
+
+      const updated = await UserBirthday.findOneAndUpdate(
+        {
+          _id: row._id,
+          month: row.month,
+          day: row.day,
+          year: row.year ?? null,
+          lastAnnouncedYear: row.lastAnnouncedYear ?? null,
+        },
+        {
+          $set: { month, day, updatedAt: new Date() },
+          ...(Object.keys($unset).length > 0 ? { $unset } : {}),
+        },
+        // No upsert: a row purged since the read above stays gone.
+        { new: true },
+      );
+      if (updated) {
+        return { before: rowToStored(row), after: rowToStored(updated) };
+      }
+      // Changed (or deleted) since the read: go round against the new state.
+      logger.warn(
+        `Birthday edit for ${sanitizeForLog(userId)}: the row changed mid-edit; retrying`,
+      );
+    }
+    throw new Error(
+      "the birthday kept changing while it was being saved; try again",
+    );
+  }
+
   // ---------------------------------------------------------------
   // Cron lifecycle
   // ---------------------------------------------------------------
@@ -395,6 +632,11 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     summary.candidates = rows.length;
 
     for (const row of rows) {
+      // As read — the loop stamps this year onto `row` before writing it.
+      const readMarker =
+        typeof row.lastAnnouncedYear === "number"
+          ? row.lastAnnouncedYear
+          : null;
       try {
         const tz = resolveTimezone(
           await prefsService.getTimezone(row.userId, guildId),
@@ -405,9 +647,13 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         const member = await guild.members.fetch(row.userId).catch(() => null);
         if (!member) {
           // Member left the guild — mark as announced so we don't
-          // retry every tick, and skip.
-          row.lastAnnouncedYear = local.year;
-          await row.save();
+          // retry every tick, and skip. Conditional like `writeRunRow`: if
+          // an admin corrected the entry mid-run (#986), stamping this year
+          // would undo their reset, so the write matches nothing and the
+          // next run looks again.
+          await UserBirthday.updateOne(runRowFilter(row, readMarker), {
+            $set: { lastAnnouncedYear: local.year },
+          });
           continue;
         }
 
@@ -452,7 +698,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         // iteration just did: the grant above would have no marker, so the
         // expiry sweep could never find it and the role would sit on the
         // member for good.
-        const persisted = await this.saveRunRow(row);
+        const persisted = await this.saveRunRow(row, readMarker);
         if (!persisted) {
           // Everything this iteration produced is now the member's data with
           // no row behind it: the announcement names them (and often their
@@ -659,9 +905,21 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           };
         }
         roleRevoked = true;
+      } else {
+        // A grant written before `roleAssignedId` existed, with
+        // `birthdays.role_id` now unset: nothing names the role to revoke,
+        // but it may still be on the member. Keep the row, as the expiry
+        // sweep does, so the grant can still be taken back once a role is
+        // configured again — deleting it would strand the role for good.
+        return {
+          matched: rows.length,
+          removed: 0,
+          roleRevoked: false,
+          retry: false,
+          ...posts,
+          error: `a birthday-role grant is on record but names no role and birthdays.role_id is unset; the row is kept so the role can still be revoked once birthdays.role_id is set again`,
+        };
       }
-      // No role configured any more: nothing to revoke, so the marker is
-      // just stale bookkeeping and the row can go.
     }
 
     if (posts.announcementsFailed > 0) {
@@ -902,9 +1160,12 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
    * save failing for some other reason, which propagates to the per-row
    * catch as before.
    */
-  private async saveRunRow(row: IUserBirthday): Promise<boolean> {
+  private async saveRunRow(
+    row: IUserBirthday,
+    readMarker: number | null,
+  ): Promise<boolean> {
     try {
-      return await this.writeRunRow(row);
+      return await this.writeRunRow(row, readMarker);
     } catch (error) {
       // A rejected write is the same problem as a row that vanished: the
       // announcement is up and the role may be granted, with nothing
@@ -925,9 +1186,13 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     }
   }
 
-  private async writeRunRow(row: IUserBirthday): Promise<boolean> {
+  private async writeRunRow(
+    row: IUserBirthday,
+    readMarker: number | null,
+  ): Promise<boolean> {
     const result = await UserBirthday.updateOne(
-      { _id: row._id },
+      // And on the entry this run announced from (see `runRowFilter`).
+      runRowFilter(row, readMarker),
       {
         $set: {
           lastAnnouncedYear: row.lastAnnouncedYear,

@@ -717,6 +717,22 @@ describe("POST /settings/save-section", () => {
     expect(mockDigestReload).toHaveBeenCalledTimes(1);
   });
 
+  it("saves the Birthdays page card and re-arms only the birthday job (#986)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "birthdays",
+      redirect: "/admin/birthdays",
+      keys: ["birthdays.enabled", "birthdays.cron", "birthdays.message"],
+      "value_birthdays.enabled": "true",
+      "value_birthdays.cron": "0 */2 * * *",
+      "value_birthdays.message": "Happy birthday {user}",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/birthdays");
+    expect(flash.type).toBe("ok");
+    expect(mockBirthdayReload).toHaveBeenCalledTimes(1);
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
   it("saves the Leaderboard Roles card and re-arms its job (#985)", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "leaderboard_roles",

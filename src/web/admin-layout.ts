@@ -92,6 +92,12 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "announcements.enabled",
   },
   {
+    href: "/admin/birthdays",
+    label: "Birthdays",
+    group: "Features",
+    featureKey: "birthdays.enabled",
+  },
+  {
     href: "/admin/events",
     label: "Events",
     group: "Features",

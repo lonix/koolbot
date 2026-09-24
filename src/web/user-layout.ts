@@ -996,7 +996,7 @@ export function renderUserRewindBody(opts: RewindBodyOptions): string {
 // Birthday page (#657)
 // --------------------------------------------------------------------
 
-const MONTH_NAMES = [
+export const MONTH_NAMES = [
   "January",
   "February",
   "March",

@@ -15,6 +15,7 @@ import {
   METRICS_SETTING_KEYS,
   COMMAND_AUDIT_SETTING_KEYS,
   QUOTES_SETTING_KEYS,
+  BIRTHDAYS_SETTING_KEYS,
   envSettingFallback,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
@@ -276,6 +277,21 @@ describe("buildSettingRows (#705)", () => {
     expect(typeOf("quotes.channel_id")).toBe("channel");
     expect(typeOf("quotes.delete_roles")).toBe("role_list");
     expect(typeOf("quotes.cooldown")).toBe("number");
+  });
+
+  it("lists every birthdays key, master included (#986)", () => {
+    const birthdayKeys = Object.keys(defaultConfig).filter((k) =>
+      k.startsWith("birthdays."),
+    );
+    expect([...BIRTHDAYS_SETTING_KEYS].sort()).toEqual(birthdayKeys.sort());
+    const rows = buildSettingRows(BIRTHDAYS_SETTING_KEYS, []);
+    const typeOf = (key: string): string | undefined =>
+      rows.find((r) => r.key === key)?.type;
+    expect(typeOf("birthdays.enabled")).toBe("boolean");
+    expect(typeOf("birthdays.channel_id")).toBe("channel");
+    expect(typeOf("birthdays.cron")).toBe("cron");
+    expect(typeOf("birthdays.role_id")).toBe("role");
+    expect(typeOf("birthdays.role_duration_hours")).toBe("number");
   });
 });
 
