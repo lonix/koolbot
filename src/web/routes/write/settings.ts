@@ -270,7 +270,7 @@ export function createSettingsRouter(client: Client): Router {
 
       const config = ConfigService.getInstance();
       try {
-        const { updated, deleted, failed, changed } =
+        const { updated, deleted, failed } =
           await resetConfigToDefaults(config);
         const landed = updated + deleted;
         // Mirror the YAML-import audit: `result: "failure"` only when nothing
@@ -301,10 +301,18 @@ export function createSettingsRouter(client: Client): Router {
             ? `, ${deleted} orphan key${deleted === 1 ? "" : "s"} removed`
             : "";
         const reloadNote = " You may need to Reload commands.";
-        // Scheduled jobs whose schedule or enable flag moved are re-armed
-        // here (#1013); only the command list still needs a manual reload.
+        // Re-arm every scheduled job from the defaults just written (#1013);
+        // only the command list still needs a manual reload. Not diffed: a
+        // key with no stored row may have been running on an env fallback,
+        // and `get()` reads a failed lookup as null, so neither says whether
+        // the effective value moved. A bulk reset is rare, and re-arming an
+        // unchanged schedule just restarts it.
+        const failedKeys = new Set(failed.map((f) => f.key));
         const rearmNote = rearmFailureNote(
-          await rearmScheduledServices(client, changed),
+          await rearmScheduledServices(
+            client,
+            Object.keys(defaultConfig).filter((k) => !failedKeys.has(k)),
+          ),
         );
         if (failed.length === 0) {
           flashRedirect(res, "/admin/settings", {
@@ -822,17 +830,9 @@ export function createSettingsRouter(client: Client): Router {
       // Phase 2: apply the validated set. Skip the per-key check — the batch
       // was already validated, and per-key ordering would falsely reject an
       // intra-snapshot dependency pair.
-      const changedKeys: string[] = [];
+      const writtenKeys: string[] = [];
       for (const { key, value } of toWrite) {
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
-        // Read before writing so an unchanged value leaves its job alone.
-        // A failed read counts as changed, like the per-key Reset.
-        let before: unknown;
-        try {
-          before = await config.get(key);
-        } catch {
-          before = undefined;
-        }
         try {
           await config.set(
             key,
@@ -842,12 +842,7 @@ export function createSettingsRouter(client: Client): Router {
             { skipDependencyCheck: true },
           );
           applied++;
-          if (
-            before === undefined ||
-            effectiveValueChanged(key, before, value)
-          ) {
-            changedKeys.push(key);
-          }
+          writtenKeys.push(key);
         } catch (err) {
           const text = err instanceof Error ? err.message : "set failed";
           // Static message: `key` comes from the uploaded YAML, and the
@@ -883,7 +878,11 @@ export function createSettingsRouter(client: Client): Router {
       });
 
       // An imported schedule or enable flag re-arms its job now (#1013).
-      const rearmFailed = await rearmScheduledServices(client, changedKeys);
+      // Every written key counts, not only changed ones: `get()` reads a
+      // failed lookup as null and falls back to env for a missing row, so a
+      // before/after diff can't be trusted here. Re-arming an unchanged
+      // schedule just restarts it.
+      const rearmFailed = await rearmScheduledServices(client, writtenKeys);
       const summary =
         failed.length === 0
           ? `Imported ${applied} setting${applied === 1 ? "" : "s"}.`

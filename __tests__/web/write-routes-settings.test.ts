@@ -479,20 +479,24 @@ describe("POST /settings/reset-defaults", () => {
     });
   });
 
-  it("re-arms the jobs whose stored schedule the reset moved (#1013)", async () => {
-    mockConfigGetAll.mockResolvedValue([
-      { key: "birthdays.enabled", value: true },
-      { key: "events.enabled", value: false },
-      { key: "quotes.max_length", value: 5 },
-    ]);
+  it("re-arms every scheduled job after the reset (#1013)", async () => {
     const res = await harness.post("/settings/reset-defaults", {
       confirm: "Kool Guild",
     });
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
-    // birthdays.enabled moved true -> false; events.enabled was already off.
-    expect(mockBirthdayReload).toHaveBeenCalledTimes(1);
-    expect(mockEventReload).not.toHaveBeenCalled();
-    expect(mockDigestReload).not.toHaveBeenCalled();
+    // Not diffed against stored rows: a missing row may have been running on
+    // an env fallback, so every job is re-armed from the new defaults.
+    for (const reload of [
+      mockDigestReload,
+      mockLeaderboardReload,
+      mockBirthdayReload,
+      mockRewindNudgeReload,
+      mockEventReload,
+      mockReminderReload,
+      mockLfgReload,
+    ]) {
+      expect(reload).toHaveBeenCalledTimes(1);
+    }
   });
 });
 
@@ -1443,7 +1447,9 @@ describe("POST /settings/import/apply", () => {
     });
   });
 
-  it("re-arms the jobs whose imported schedule changed (#1013)", async () => {
+  it("re-arms the jobs whose schedule keys were imported (#1013)", async () => {
+    // A stored value can't prove the key is unchanged (a failed read comes
+    // back null), so an imported key re-arms even when it looks the same.
     mockConfigGet.mockImplementation(async (key) =>
       key === "reminders.enabled" ? true : null,
     );
@@ -1452,8 +1458,8 @@ describe("POST /settings/import/apply", () => {
     });
     expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
     expect(mockRewindNudgeReload).toHaveBeenCalledTimes(1);
-    // Re-imported unchanged, so the live reminder tick is left alone.
-    expect(mockReminderReload).not.toHaveBeenCalled();
+    expect(mockReminderReload).toHaveBeenCalledTimes(1);
+    expect(mockDigestReload).not.toHaveBeenCalled();
   });
 
   it("warns when an imported schedule can't be re-armed (#1013)", async () => {

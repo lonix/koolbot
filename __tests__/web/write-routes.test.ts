@@ -84,10 +84,7 @@ function makeFakeStore(initial: Record<string, unknown>): ResetConfigStore & {
     setCalls,
     deleted,
     async getAll() {
-      return Array.from(rows.entries()).map(([key, value]) => ({
-        key,
-        value,
-      }));
+      return Array.from(rows.keys()).map((key) => ({ key }));
     },
     async set(key, value) {
       setCalls.push({ key, value });
@@ -747,18 +744,6 @@ describe("resetConfigToDefaults (#487)", () => {
     expect(store.deleted).toEqual(["orphan.key"]);
     expect(store.deleted).not.toContain("DISCORD_TOKEN");
     expect(store.rows.get("DISCORD_TOKEN")).toBe("should-not-be-touched");
-  });
-
-  it("reports only the stored keys that moved off their default (#1013)", async () => {
-    const store = makeFakeStore({
-      "voicechannels.enabled": !defaultConfig["voicechannels.enabled"],
-      "quotes.max_length": defaultConfig["quotes.max_length"],
-      "orphan.key": "x",
-    });
-
-    const { changed } = await resetConfigToDefaults(store);
-
-    expect(changed).toEqual(["voicechannels.enabled"]);
   });
 
   it("collects per-key failures and keeps going (partial application)", async () => {
