@@ -517,6 +517,45 @@ describe("TrackingOptOutService", () => {
       );
     });
 
+    it("refuses a write whose ticket was taken while the reset was still running", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      const resetGate = deferred();
+      let ticket = -1;
+      const resetting = service.withTrackingPaused("u1", "g1", async () => {
+        // An event arrives mid-reset and its handler takes a ticket.
+        ticket = service.admission();
+        await resetGate.promise;
+      });
+      await flush();
+      resetGate.resolve();
+      await resetting;
+      expect(service.isOptedOut("u1", "g1")).toBe(false);
+
+      const stale = jest.fn(async () => undefined);
+      await expect(service.trackWrite("u1", "g1", stale, ticket)).resolves.toBe(
+        false,
+      );
+      expect(stale).not.toHaveBeenCalled();
+    });
+
+    it("refuses a write whose ticket was taken while the member was opted out", async () => {
+      findReturns([{ userId: "u1", guildId: "g1" }]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      const ticket = service.admission();
+      await service.optIn("u1", "g1");
+
+      const stale = jest.fn(async () => undefined);
+      await expect(service.trackWrite("u1", "g1", stale, ticket)).resolves.toBe(
+        false,
+      );
+      expect(stale).not.toHaveBeenCalled();
+    });
+
     it("keeps serving later mutations after one fails", async () => {
       findReturns([]);
       const service = TrackingOptOutService.getInstance();

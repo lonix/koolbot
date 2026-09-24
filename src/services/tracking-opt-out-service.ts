@@ -150,7 +150,12 @@ export class TrackingOptOutService {
     return this.epoch;
   }
 
-  /** Mark a member's barrier as engaged now (see `admission`). */
+  /**
+   * Mark a member's barrier as engaged — or released — now (see
+   * `admission`). Called on both edges: a ticket taken while a barrier is
+   * active would otherwise equal its epoch and be admitted once it lifts,
+   * recording an event from the opted-out or reset period.
+   */
   private engageBarrier(key: string): void {
     this.epoch += 1;
     this.barrierAt.set(key, this.epoch);
@@ -281,6 +286,8 @@ export class TrackingOptOutService {
       const deleted = await TrackingOptOut.deleteOne({ userId, guildId });
       await this.settleLoad();
       this.optedOut?.delete(key);
+      // Release edge: tickets taken while opted out stay invalid.
+      this.engageBarrier(key);
       const removed = (deleted?.deletedCount ?? 0) > 0;
       if (removed) {
         logger.info(
@@ -312,6 +319,8 @@ export class TrackingOptOutService {
         return await fn(await this.quiesce(userId, guildId, key));
       } finally {
         this.paused.delete(key);
+        // Release edge: tickets taken during the reset stay invalid.
+        this.engageBarrier(key);
       }
     });
   }

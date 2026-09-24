@@ -245,19 +245,7 @@ export class VoiceChannelTracker {
     userId: string,
     guildId: string,
   ): Promise<boolean> {
-    for (const [sessionUserId, session] of this.activeSessions) {
-      if (sessionUserId === userId) continue;
-      if (session.guildId && session.guildId !== guildId) continue;
-      this.encounteredUsers.get(sessionUserId)?.delete(userId);
-      this.companionSince.get(sessionUserId)?.delete(userId);
-      this.companionSeconds.get(sessionUserId)?.delete(userId);
-      const firsts = this.sessionFirsts.get(sessionUserId);
-      if (firsts) {
-        firsts.joinedExisting = firsts.joinedExisting.filter(
-          (id) => id !== userId,
-        );
-      }
-    }
+    this.dropCompanion(userId, guildId);
 
     const inFlight = [...this.endingSessions.values()].flatMap((set) => [
       ...set,
@@ -271,7 +259,28 @@ export class VoiceChannelTracker {
       );
       return false;
     }
+    // Again after the drain: a persist that failed while we waited hands its
+    // claimed co-presence back to the live maps (`returnClaimedState`),
+    // which can put the member straight back into another session.
+    this.dropCompanion(userId, guildId);
     return true;
+  }
+
+  /** Remove a member from every other live session's co-presence state. */
+  private dropCompanion(userId: string, guildId: string): void {
+    for (const [sessionUserId, session] of this.activeSessions) {
+      if (sessionUserId === userId) continue;
+      if (session.guildId && session.guildId !== guildId) continue;
+      this.encounteredUsers.get(sessionUserId)?.delete(userId);
+      this.companionSince.get(sessionUserId)?.delete(userId);
+      this.companionSeconds.get(sessionUserId)?.delete(userId);
+      const firsts = this.sessionFirsts.get(sessionUserId);
+      if (firsts) {
+        firsts.joinedExisting = firsts.joinedExisting.filter(
+          (id) => id !== userId,
+        );
+      }
+    }
   }
 
   public getActiveSession(userId: string): { channelName: string } | null {

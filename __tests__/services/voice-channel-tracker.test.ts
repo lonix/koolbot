@@ -1045,6 +1045,58 @@ describe("VoiceChannelTracker", () => {
         ).toEqual(["other1"]);
       });
 
+      it("drops a companion again after a failed persist hands its state back", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const member = inGuild(
+          memberInChannel("u1", "c1", "C1", ["other1", "later"]),
+        );
+        const channel = { id: "c1", name: "C1" };
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          { member, channel } as unknown as VoiceState,
+        );
+
+        // u1's persist is slow and then fails, so its claimed co-presence
+        // (still naming "later") is handed back to the live maps.
+        let failPersist: () => void = () => undefined;
+        (
+          VoiceChannelTracking.findOneAndUpdate as jest.Mock
+        ).mockImplementationOnce(
+          () =>
+            new Promise((_, reject) => {
+              failPersist = () => reject(new Error("mongo blip"));
+            }),
+        );
+        const leaving = tracker.handleVoiceStateUpdate(
+          { member, channel } as unknown as VoiceState,
+          { member, channel: null } as unknown as VoiceState,
+        );
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+
+        const service = TrackingOptOutService.getInstance() as unknown as {
+          optedOut: Set<string>;
+          optOutHooks: Array<(u: string, g: string) => Promise<unknown>>;
+        };
+        service.optedOut.add("g1:later");
+        const hookDone = service.optOutHooks[0]("later", "g1");
+        await new Promise((r) => setTimeout(r, 0));
+        failPersist();
+        await leaving;
+        await expect(hookDone).resolves.toBe(true);
+
+        const maps = tracker as unknown as {
+          encounteredUsers: Map<string, Set<string>>;
+          companionSince: Map<string, Map<string, number>>;
+        };
+        expect(maps.encounteredUsers.get("u1")?.has("later")).toBe(false);
+        expect(maps.companionSince.get("u1")?.has("later")).toBe(false);
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockResolvedValue(
+          {},
+        );
+      });
+
       it("records no co-presence for a member who joins while opted out", async () => {
         stubTrackingOptOuts([["hidden", "g1"]]);
         const { tracker, mockConfigService } = createTracker(mockClient);
