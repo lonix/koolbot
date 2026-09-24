@@ -18,6 +18,7 @@ import {
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
+  renderQuotesPage,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
@@ -2450,6 +2451,145 @@ describe("renderNoticesPage", () => {
     });
     expect(html).toContain("Notices settings could not be loaded");
     expect(html).not.toContain('name="value_notices.enabled"');
+  });
+});
+
+describe("renderQuotesPage (#984)", () => {
+  const QUOTE_BASE = {
+    ...COMMON,
+    enabled: true,
+    channel: { name: "quotes", id: "c1" },
+    headerMessageId: "900000000000000001",
+    settingRows: [] as SettingRow[],
+    maxLength: 1000,
+    rows: [],
+    total: 0,
+    page: 1,
+    pageSize: 25,
+    search: "",
+  };
+  const QUOTE = {
+    id: "0123456789abcdef01234567",
+    content: "<b>I'm</b> quoted",
+    authorId: "111111111111111111",
+    authorLabel: "Alice",
+    addedByLabel: "Bob",
+    addedAt: "2026-09-01T00:00:00.000Z",
+    likes: 3,
+    dislikes: 1,
+    messageId: "333333333333333333",
+  };
+
+  it("renders the empty state and the channel actions", () => {
+    const html = renderQuotesPage(QUOTE_BASE);
+    expect(html).toContain("No quotes stored.");
+    expect(html).toContain('action="/admin/quotes/sync"');
+    expect(html).toContain('href="/admin/quotes/export"');
+    // The auto-managed header id is shown read-only, never as a control.
+    expect(html).toContain("900000000000000001");
+    expect(html).not.toContain('name="value_quotes.header_message_id"');
+    expect(html).toContain('href="/admin/quotes" class="active"');
+  });
+
+  it("says a search matched nothing rather than that no quotes exist", () => {
+    const html = renderQuotesPage({ ...QUOTE_BASE, search: "<zz>" });
+    expect(html).toContain("No quotes match this search.");
+    expect(html).toContain('value="&lt;zz&gt;"');
+    expect(html).toContain("Matching quotes");
+  });
+
+  it("lists quotes with edit and delete forms and escapes their text", () => {
+    const html = renderQuotesPage({
+      ...QUOTE_BASE,
+      rows: [QUOTE],
+      total: 1,
+    });
+    expect(html).toContain("&lt;b&gt;I&#39;m&lt;/b&gt; quoted");
+    expect(html).not.toContain("<b>I'm</b>");
+    expect(html).toContain("Alice");
+    expect(html).toContain("Bob");
+    expect(html).toContain("👍 3 · 👎 1");
+    expect(html).toContain(QUOTE.messageId);
+    expect(html).toContain(`action="/admin/quotes/${QUOTE.id}/edit"`);
+    expect(html).toContain(`action="/admin/quotes/${QUOTE.id}/delete"`);
+    expect(html).toContain(`name="author_id" inputmode="numeric"`);
+    expect(html).toContain(`value="${QUOTE.authorId}"`);
+    expect(html).toContain('maxlength="1000"');
+  });
+
+  it("pages through results and keeps the search in the links", () => {
+    const html = renderQuotesPage({
+      ...QUOTE_BASE,
+      rows: [QUOTE],
+      total: 60,
+      page: 2,
+      search: "a&b",
+    });
+    expect(html).toContain("Page 2 of 3");
+    expect(html).toContain('href="/admin/quotes?q=a%26b">← Prev');
+    expect(html).toContain('href="/admin/quotes?q=a%26b&page=3"');
+  });
+
+  it("disables resync while the feature is off and offers to enable it", () => {
+    const html = renderQuotesPage({ ...QUOTE_BASE, enabled: false });
+    expect(html).toMatch(/btn btn-primary" disabled>Resync quote channel/);
+    expect(html).toContain("quotes.enabled");
+  });
+
+  it("renders every quotes key on the settings card, master included", () => {
+    const row = (key: string, type: string, current: unknown): SettingRow => ({
+      key,
+      label: key,
+      current,
+      defaultValue: current,
+      type,
+      description: `${key} help`,
+      category: "quotes",
+    });
+    const html = renderQuotesPage({
+      ...QUOTE_BASE,
+      settingsPickers: {
+        textChannels: [{ id: "c1", name: "quotes" }],
+        roles: [{ id: "r1", name: "Mods" }],
+      },
+      settingRows: [
+        row("quotes.enabled", "boolean", true),
+        row("quotes.channel_id", "channel", "c1"),
+        row("quotes.header_enabled", "boolean", true),
+        row("quotes.header_pin_enabled", "boolean", true),
+        row("quotes.clear_on_sync", "boolean", false),
+        row("quotes.cooldown", "number", 60),
+        row("quotes.max_length", "number", 1000),
+        row("quotes.vote_history_days", "number", 30),
+        row("quotes.delete_roles", "role_list", "r1"),
+      ],
+    });
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/quotes">',
+    );
+    expect(html).not.toContain('name="no_cascade"');
+    for (const key of [
+      "quotes.enabled",
+      "quotes.channel_id",
+      "quotes.header_enabled",
+      "quotes.header_pin_enabled",
+      "quotes.clear_on_sync",
+      "quotes.cooldown",
+      "quotes.max_length",
+      "quotes.vote_history_days",
+      "quotes.delete_roles",
+    ]) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+    }
+    expect(html).toContain('<option value="c1" selected>#quotes</option>');
+    expect(html).toContain("Mods");
+  });
+
+  it("shows a notice instead of the card when settings can't be read", () => {
+    const html = renderQuotesPage({ ...QUOTE_BASE, settingsUnavailable: true });
+    expect(html).toContain("Settings could not be loaded");
   });
 });
 

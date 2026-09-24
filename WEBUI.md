@@ -756,6 +756,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
 | **Reaction Roles** | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
+| **Quotes**         | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
 | **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels** | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**  | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
@@ -765,10 +766,10 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Moderation**     | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
-Feature pages (Announcements, Events, Polls, Reaction Roles, Notices, Voice
-Channels, Weekly Digest) are gated by their `<feature>.enabled` config key. When a
-feature is **off**, its sidebar link is still shown — greyed with an
-"off" badge — rather than hidden, so the page stays discoverable (#610);
+Feature pages (Announcements, Events, Polls, Reaction Roles, Notices, Quotes,
+Voice Channels, Weekly Digest) are gated by their `<feature>.enabled` config
+key. When a feature is **off**, its sidebar link is still shown — greyed
+with an "off" badge — rather than hidden, so the page stays discoverable (#610);
 hiding it created a chicken-and-egg where the natural place to enable a
 feature was the very page you couldn't reach. Opening a disabled feature's
 page renders a banner explaining the state with an inline **Enable** button
@@ -796,6 +797,38 @@ style (`reactionroles.style`) in place, saving through the shared
 toggle is the form's cascade master: unticking it greys out the other two, and
 saving then writes only `reactionroles.enabled = false`, so turning the feature
 off from here leaves its channel and style untouched.
+
+The **Quotes** page (#984) is where moderators manage stored quotes without
+going through `/quote` in Discord. The list is newest first, 25 per page, and
+shows each quote's author, who added it, when, its 👍/👎 tally and the message
+ID of its channel post. The search box matches the quote text literally (case
+insensitive) and also an exact quote, message or member ID. Per row:
+
+- **Edit** changes the text and/or the author (a Discord user ID). The channel
+  post is redrawn first, so if the post can't be reached the quote is left
+  unchanged; if the post no longer exists the quote is saved and the flash
+  points you at Resync. If saving the quote then fails, the post is put back
+  to the stored text. Text longer than `quotes.max_length` is refused.
+  While `quotes.enabled` is off only the stored quote changes.
+- **Delete** removes the channel post and the quote. If the post can't be
+  removed the quote is still deleted and the flash says the post is left
+  over, so you can remove it in Discord or with Resync.
+
+**Resync quote channel** is the same rebuild as `/quote reset`: it clears the
+channel, posts a fresh header and reposts every quote with its saved votes. If
+fewer quotes are reposted than are stored, the result is a warning, not a
+success.
+**Export quotes (JSON)** downloads the `/quote export` backup; restoring one is
+still done with `/quote import` in Discord. Every action is CSRF-protected and
+written to the Web UI audit log (`quote.edit`, `quote.delete`, `quote.sync`,
+`quote.export`).
+
+Its **Settings** card edits every `quotes.*` key in place: the enable toggle
+(the cascade master, so switching quotes off keeps the rest), the quote
+channel, the header and pin toggles, `quotes.clear_on_sync`, the cooldown,
+maximum length and vote-history retention, and the roles allowed to delete
+quotes. The auto-managed `quotes.header_message_id` is shown read-only in the
+status card.
 
 On the **Settings** page, a toggle whose feature declares a hard dependency
 (`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an
