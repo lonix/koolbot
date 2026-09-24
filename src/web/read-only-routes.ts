@@ -207,6 +207,28 @@ export const MODERATION_SETTING_KEYS = [
 ] as const;
 
 /**
+ * The metrics-persistence keys edited in place on the Command Metrics page
+ * (#978). `monitoring.metrics_persistence.enabled` is a sub-toggle, not a
+ * `<feature>.enabled` master, so the card saves every submitted key.
+ */
+export const METRICS_SETTING_KEYS = [
+  "monitoring.metrics_persistence.enabled",
+  "monitoring.metrics_retention_days",
+] as const;
+
+/**
+ * The audit keys edited in place on the Command Audit page (#978). The
+ * WebUI audit retention rides along: the page is the only audit view, so it
+ * is the natural home for it. Like {@link METRICS_SETTING_KEYS} there is no
+ * feature master, so every submitted key is saved.
+ */
+export const COMMAND_AUDIT_SETTING_KEYS = [
+  "core.command_audit.enabled",
+  "core.command_audit.retention_days",
+  "core.web_audit.retention_days",
+] as const;
+
+/**
  * The env-var fallback a settings row shows for `key` when no DB row exists.
  * `getEnvConfigValue` coerces every digit-only string to a number, which
  * rounds a Discord snowflake past 2^53 and leaves an id picker with no
@@ -1528,27 +1550,33 @@ export function createReadOnlyRouter(
       const windowRaw = Number.parseInt(String(req.query.window ?? "30"), 10);
       const windowDays = windowRaw === 7 ? 7 : 30;
 
-      const [enabled, retentionDays, summary] = await Promise.all([
-        config.getBoolean("monitoring.metrics_persistence.enabled", true),
-        config.getNumber("monitoring.metrics_retention_days", 30),
-        getCommandMetricsSummary(common.guildId, windowDays).catch((err) => {
-          logger.debug("command metrics aggregation failed", err);
-          return {
-            windowDays,
-            fromDate: "",
-            rows: [],
-            dailyTotals: [],
-            totalUsage: 0,
-            totalErrors: 0,
-          };
-        }),
-      ]);
+      const [enabled, retentionDays, metricsSettings, summary] =
+        await Promise.all([
+          config.getBoolean("monitoring.metrics_persistence.enabled", true),
+          config.getNumber("monitoring.metrics_retention_days", 30),
+          // Editable metrics-persistence settings card (#978).
+          loadFeatureSettings(client, common.guildId, METRICS_SETTING_KEYS),
+          getCommandMetricsSummary(common.guildId, windowDays).catch((err) => {
+            logger.debug("command metrics aggregation failed", err);
+            return {
+              windowDays,
+              fromDate: "",
+              rows: [],
+              dailyTotals: [],
+              totalUsage: 0,
+              totalErrors: 0,
+            };
+          }),
+        ]);
 
       res.type("text/html").send(
         renderCommandMetricsPage({
           ...common,
           enabled,
           retentionDays,
+          settingRows: metricsSettings.settingRows,
+          settingsUnavailable: metricsSettings.unavailable,
+          flash: readFlash(req),
           windowDays,
           totalUsage: summary.totalUsage,
           totalErrors: summary.totalErrors,
@@ -1647,17 +1675,24 @@ export function createReadOnlyRouter(
         query.createdAt = dateRange;
       }
 
-      const [enabled, retentionDays, total, docs] = await Promise.all([
-        config.getBoolean("core.command_audit.enabled", true),
-        config.getNumber("core.command_audit.retention_days", 90),
-        DiscordCommandAuditLog.countDocuments(query).catch(() => 0),
-        DiscordCommandAuditLog.find(query)
-          .sort({ createdAt: -1 })
-          .skip((page - 1) * pageSize)
-          .limit(pageSize)
-          .lean()
-          .catch(() => [] as Array<Record<string, unknown>>),
-      ]);
+      const [enabled, retentionDays, auditSettings, total, docs] =
+        await Promise.all([
+          config.getBoolean("core.command_audit.enabled", true),
+          config.getNumber("core.command_audit.retention_days", 90),
+          // Editable audit settings card (#978).
+          loadFeatureSettings(
+            client,
+            common.guildId,
+            COMMAND_AUDIT_SETTING_KEYS,
+          ),
+          DiscordCommandAuditLog.countDocuments(query).catch(() => 0),
+          DiscordCommandAuditLog.find(query)
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * pageSize)
+            .limit(pageSize)
+            .lean()
+            .catch(() => [] as Array<Record<string, unknown>>),
+        ]);
 
       // Resolve user labels from the guild member cache so the table
       // shows names rather than raw snowflakes. One fetch per request.
@@ -1717,6 +1752,9 @@ export function createReadOnlyRouter(
           ...common,
           enabled,
           retentionDays,
+          settingRows: auditSettings.settingRows,
+          settingsUnavailable: auditSettings.unavailable,
+          flash: readFlash(req),
           commandOptions,
           userOptions,
           filters: {

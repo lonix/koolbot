@@ -471,6 +471,52 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet.mock.calls[0][1]).toBe(false);
   });
 
+  it("saves the Command Metrics page card and returns to /admin/metrics (#978)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "core",
+      redirect: "/admin/metrics",
+      no_cascade: "1",
+      keys: [
+        "monitoring.metrics_persistence.enabled",
+        "monitoring.metrics_retention_days",
+      ],
+      "value_monitoring.metrics_persistence.enabled": "true",
+      "value_monitoring.metrics_retention_days": "60",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/metrics");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 2 settings in core.");
+    expect(mockConfigSet).toHaveBeenCalledTimes(2);
+  });
+
+  it("switches command auditing off from its page and still saves retention (#978)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "core",
+      redirect: "/admin/audit/commands",
+      no_cascade: "1",
+      keys: [
+        "core.command_audit.enabled",
+        "core.command_audit.retention_days",
+        "core.web_audit.retention_days",
+      ],
+      "value_core.command_audit.retention_days": "30",
+      "value_core.web_audit.retention_days": "0",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/audit/commands");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 3 settings in core.");
+    const writes = Object.fromEntries(
+      mockConfigSet.mock.calls.map((c: unknown[]) => [c[0], c[1]]),
+    );
+    expect(writes).toEqual({
+      "core.command_audit.enabled": false,
+      "core.command_audit.retention_days": 30,
+      "core.web_audit.retention_days": 0,
+    });
+  });
+
   it("saves the Events page card and returns to /admin/events (#975)", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "events",

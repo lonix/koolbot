@@ -11,6 +11,8 @@ import {
   VOICE_CHANNELS_SETTING_KEYS,
   REACTION_ROLES_SETTING_KEYS,
   NOTICES_SETTING_KEYS,
+  METRICS_SETTING_KEYS,
+  COMMAND_AUDIT_SETTING_KEYS,
   envSettingFallback,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
@@ -604,6 +606,42 @@ describe("EVENTS_SETTING_KEYS (#975)", () => {
       data.settingRows.find((r) => r.key === "events.reminder_minutes")
         ?.current,
     ).toBe(45);
+  });
+});
+
+// Issue #978: the Command Metrics and Command Audit pages edit their keys in
+// place.
+describe("METRICS_SETTING_KEYS / COMMAND_AUDIT_SETTING_KEYS (#978)", () => {
+  it("cover every metrics and audit key in the schema", () => {
+    const schemaKeys = Object.keys(defaultConfig);
+    expect([...METRICS_SETTING_KEYS].sort()).toEqual(
+      schemaKeys.filter((k) => k.startsWith("monitoring.metrics")).sort(),
+    );
+    expect([...COMMAND_AUDIT_SETTING_KEYS].sort()).toEqual(
+      schemaKeys.filter((k) => /^core\.(command|web)_audit\./.test(k)).sort(),
+    );
+  });
+
+  it("builds rows without fetching any guild picker", async () => {
+    const fetchGuild = jest.fn(async () => ({}));
+    const client: any = { guilds: { fetch: fetchGuild } };
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      COMMAND_AUDIT_SETTING_KEYS,
+      [{ key: "core.command_audit.retention_days", value: 14 }],
+    );
+    expect(fetchGuild).not.toHaveBeenCalled();
+    expect(data.unavailable).toBe(false);
+    expect(data.settingRows.map((r) => r.key)).toEqual([
+      ...COMMAND_AUDIT_SETTING_KEYS,
+    ]);
+    expect(
+      data.settingRows.find(
+        (r) => r.key === "core.command_audit.retention_days",
+      )?.current,
+    ).toBe(14);
+    expect(data.settingRows.every((r) => r.category === "core")).toBe(true);
   });
 });
 

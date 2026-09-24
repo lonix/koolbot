@@ -3530,6 +3530,14 @@ export interface CommandAuditRow {
 export interface CommandAuditProps extends CommonProps {
   enabled: boolean;
   retentionDays: number;
+  /**
+   * The command / WebUI audit settings edited in place on this page (#978)
+   * through {@link renderFeatureSettingsCard}.
+   */
+  settingRows: SettingRow[];
+  /** The stored config could not be read; the card shows a notice instead. */
+  settingsUnavailable?: boolean;
+  flash?: FlashMessage | null;
   /** All command names registered on the bot — populates the filter dropdown. */
   commandOptions: string[];
   /** All distinct user IDs in the current result page — populates the user filter. */
@@ -3628,6 +3636,7 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
   const body = `
 <h1>Slash-command audit log</h1>
 <p class="subtitle">One row per Discord slash-command invocation. Raw command arguments are deliberately omitted.</p>
+${renderFlash(props.flash)}
 
 <div class="card">
   <h2>Status</h2>
@@ -3636,8 +3645,17 @@ export function renderCommandAuditPage(props: CommandAuditProps): string {
     <dt>Retention</dt><dd>${props.retentionDays} days</dd>
     <dt>Rows matched</dt><dd>${props.total}</dd>
   </dl>
-  ${props.enabled ? "" : '<p class="muted">Enable <code>core.command_audit.enabled</code> in Settings to start recording.</p>'}
+  ${props.enabled ? "" : `<p class="muted">Enable <code>core.command_audit.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording.</p>`}
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change audit logging and retention here without leaving the page. Saved through the shared settings route.",
+  category: "core",
+  settingRows: props.settingRows,
+  returnTo: "/admin/audit/commands",
+  csrfToken: props.csrfToken,
+  unavailable: props.settingsUnavailable,
+})}
 
 <div class="card">
   <h2>Filters</h2>
@@ -3910,6 +3928,14 @@ export interface CommandMetricsDailyView {
 export interface CommandMetricsProps extends CommonProps {
   enabled: boolean;
   retentionDays: number;
+  /**
+   * The metrics-persistence settings edited in place on this page (#978)
+   * through {@link renderFeatureSettingsCard}.
+   */
+  settingRows: SettingRow[];
+  /** The stored config could not be read; the card shows a notice instead. */
+  settingsUnavailable?: boolean;
+  flash?: FlashMessage | null;
   /** Selected trailing window in days (7 or 30). */
   windowDays: number;
   totalUsage: number;
@@ -4030,6 +4056,7 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
   const body = `
 <h1>Command metrics</h1>
 <p class="subtitle">Historical per-command usage, error rate, and latency persisted to MongoDB. Complements the live in-memory view and the Prometheus <code>/metrics</code> endpoint.</p>
+${renderFlash(props.flash)}
 
 <div class="card">
   <h2>Overview</h2>
@@ -4040,8 +4067,17 @@ export function renderCommandMetricsPage(props: CommandMetricsProps): string {
     <dt>Total invocations</dt><dd>${props.totalUsage}</dd>
     <dt>Total errors</dt><dd>${props.totalErrors}</dd>
   </dl>
-  ${props.enabled ? "" : '<p class="muted">Enable <code>monitoring.metrics_persistence.enabled</code> in Settings to start recording. Counts already shown were captured before it was disabled.</p>'}
+  ${props.enabled ? "" : `<p class="muted">Enable <code>monitoring.metrics_persistence.enabled</code> ${props.settingsUnavailable ? "once settings can be loaded again" : "in the settings below"} to start recording. Counts already shown were captured before it was disabled.</p>`}
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change metrics persistence and retention here without leaving the page. Saved through the shared settings route.",
+  category: "core",
+  settingRows: props.settingRows,
+  returnTo: "/admin/metrics",
+  csrfToken: props.csrfToken,
+  unavailable: props.settingsUnavailable,
+})}
 
 <div class="card">
   <h2>Commands by usage</h2>

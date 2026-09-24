@@ -7,6 +7,7 @@ import {
   renderAnnouncementsPage,
   renderBootstrapPage,
   renderCommandAuditPage,
+  renderCommandMetricsPage,
   renderDashboardPage,
   renderDatabasePage,
   renderDigestPage,
@@ -3997,6 +3998,7 @@ describe("renderCommandAuditPage", () => {
       ...COMMON,
       enabled: true,
       retentionDays: 90,
+      settingRows: [],
       commandOptions: ["ping", "quote"],
       userOptions: [],
       filters: BASE_FILTERS,
@@ -4019,6 +4021,7 @@ describe("renderCommandAuditPage", () => {
       ...COMMON,
       enabled: true,
       retentionDays: 30,
+      settingRows: [],
       commandOptions: ["quote"],
       userOptions: [{ id: "u1", label: "Alice" }],
       filters: BASE_FILTERS,
@@ -4052,6 +4055,7 @@ describe("renderCommandAuditPage", () => {
       ...COMMON,
       enabled: true,
       retentionDays: 90,
+      settingRows: [],
       commandOptions: ["quote", "ping"],
       userOptions: [{ id: "u1", label: "Alice" }],
       filters: {
@@ -4093,6 +4097,7 @@ describe("renderCommandAuditPage", () => {
       ...COMMON,
       enabled: false,
       retentionDays: 90,
+      settingRows: [],
       commandOptions: [],
       userOptions: [],
       filters: BASE_FILTERS,
@@ -4103,6 +4108,138 @@ describe("renderCommandAuditPage", () => {
     });
     expect(html).toContain('class="tag tag-off">disabled');
     expect(html).toContain("core.command_audit.enabled");
+  });
+});
+
+describe("Command Audit and Metrics settings cards (#978)", () => {
+  type Key = keyof typeof defaultConfig & keyof typeof settingsMetadata;
+  // Rows shaped the way `buildSettingRows` shapes them, from the schema.
+  const rowsFor = (
+    keys: readonly Key[],
+    overrides: Partial<Record<Key, unknown>> = {},
+  ): SettingRow[] =>
+    keys.map((key) => ({
+      key,
+      label: settingsMetadata[key].label,
+      current: key in overrides ? overrides[key] : defaultConfig[key],
+      defaultValue: defaultConfig[key],
+      type: settingsMetadata[key].type,
+      description: settingsMetadata[key].description,
+      category: settingsMetadata[key].category,
+      min: settingsMetadata[key].min,
+    }));
+  const AUDIT_KEYS: readonly Key[] = [
+    "core.command_audit.enabled",
+    "core.command_audit.retention_days",
+    "core.web_audit.retention_days",
+  ];
+  const METRICS_KEYS: readonly Key[] = [
+    "monitoring.metrics_persistence.enabled",
+    "monitoring.metrics_retention_days",
+  ];
+  const renderAudit = (
+    extra: Partial<Parameters<typeof renderCommandAuditPage>[0]> = {},
+  ) =>
+    renderCommandAuditPage({
+      ...COMMON,
+      enabled: true,
+      retentionDays: 90,
+      settingRows: rowsFor(AUDIT_KEYS),
+      commandOptions: [],
+      userOptions: [],
+      filters: { commandName: "", userId: "", result: "", from: "", to: "" },
+      rows: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+      ...extra,
+    });
+  const renderMetrics = (
+    extra: Partial<Parameters<typeof renderCommandMetricsPage>[0]> = {},
+  ) =>
+    renderCommandMetricsPage({
+      ...COMMON,
+      enabled: true,
+      retentionDays: 30,
+      settingRows: rowsFor(METRICS_KEYS),
+      windowDays: 30,
+      totalUsage: 0,
+      totalErrors: 0,
+      rows: [],
+      dailyTotals: [],
+      ...extra,
+    });
+
+  it.each([
+    ["Command Audit", renderAudit, AUDIT_KEYS, "/admin/audit/commands"],
+    ["Command Metrics", renderMetrics, METRICS_KEYS, "/admin/metrics"],
+  ] as const)(
+    "%s renders every key and saves back to its page",
+    (_name, render, keys, path) => {
+      const html = render();
+      for (const key of keys) {
+        expect(html).toContain(
+          `<input type="hidden" name="keys" value="${key}">`,
+        );
+        expect(html).toContain(`name="value_${key}"`);
+      }
+      expect(html).toContain('action="/admin/settings/save-section"');
+      expect(html).toContain(
+        '<input type="hidden" name="category" value="core">',
+      );
+      expect(html).toContain(
+        `<input type="hidden" name="redirect" value="${path}">`,
+      );
+      // The `.enabled` keys are sub-toggles, not a feature master, so every
+      // submitted key is written — unchecking one must not drop the others.
+      expect(html).toContain('name="no_cascade"');
+      expect(html).toContain(
+        '<form method="POST" action="/admin/settings/save-section">',
+      );
+    },
+  );
+
+  it("shows the saved flash on both pages", () => {
+    const flash = { type: "ok" as const, text: "Saved 2 settings in core." };
+    expect(renderAudit({ flash })).toContain("Saved 2 settings in core.");
+    expect(renderMetrics({ flash })).toContain("Saved 2 settings in core.");
+  });
+
+  it("points the disabled hint at the card, not Settings", () => {
+    const audit = renderAudit({
+      enabled: false,
+      settingRows: rowsFor(AUDIT_KEYS, { "core.command_audit.enabled": false }),
+    });
+    expect(audit).toContain("in the settings below to start recording");
+    const metrics = renderMetrics({
+      enabled: false,
+      settingRows: rowsFor(METRICS_KEYS, {
+        "monitoring.metrics_persistence.enabled": false,
+      }),
+    });
+    expect(metrics).toContain("in the settings below to start recording");
+  });
+
+  it("shows a notice instead of controls when settings can't be read", () => {
+    for (const html of [
+      renderAudit({
+        enabled: false,
+        settingRows: [],
+        settingsUnavailable: true,
+      }),
+      renderMetrics({
+        enabled: false,
+        settingRows: [],
+        settingsUnavailable: true,
+      }),
+    ]) {
+      expect(html).toContain("Settings could not be loaded");
+      expect(html).not.toContain(
+        '<form method="POST" action="/admin/settings/save-section"',
+      );
+      expect(html).not.toContain("in the settings below");
+      expect(html).toContain("once settings can be loaded again");
+    }
   });
 });
 

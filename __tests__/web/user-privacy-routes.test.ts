@@ -122,16 +122,14 @@ async function installCommonMocks(privacyEnabled: boolean): Promise<void> {
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   } as never);
 
-  const { PermissionsService } = await import(
-    "../../src/services/permissions-service.js"
-  );
+  const { PermissionsService } =
+    await import("../../src/services/permissions-service.js");
   jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
     checkCommandPermission: async () => true,
   } as never);
 
-  const { ConfigService } = await import(
-    "../../src/services/config-service.js"
-  );
+  const { ConfigService } =
+    await import("../../src/services/config-service.js");
   jest.spyOn(ConfigService, "getInstance").mockReturnValue({
     getBoolean: async (key: string) =>
       key === "privacy.enabled" ? privacyEnabled : false,
@@ -139,12 +137,10 @@ async function installCommonMocks(privacyEnabled: boolean): Promise<void> {
   } as never);
 
   const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
-  jest
-    .spyOn(WebAuditLog, "create")
-    .mockImplementation(async (row: unknown) => {
-      auditRows.push(row as Record<string, unknown>);
-      return {} as never;
-    });
+  jest.spyOn(WebAuditLog, "create").mockImplementation(async (row: unknown) => {
+    auditRows.push(row as Record<string, unknown>);
+    return {} as never;
+  });
 }
 
 /** Mock the export service so no model/Mongo work happens in route tests. */
@@ -152,9 +148,8 @@ async function stubExportService(
   chunks: string[],
   progress: { collections: string[]; truncated: string[] },
 ): Promise<void> {
-  const { UserDataExportService } = await import(
-    "../../src/services/user-data-export-service.js"
-  );
+  const { UserDataExportService } =
+    await import("../../src/services/user-data-export-service.js");
   jest.spyOn(UserDataExportService, "getInstance").mockReturnValue({
     getMaxItems: async () => 5000,
     streamJson: async function* (
@@ -177,11 +172,15 @@ async function dispatch(
     backpressure?: boolean;
     onWait?: (captured: Captured) => void;
   } = {},
-): Promise<{ captured: Captured; router: ReturnType<typeof createUserRouter> }> {
+): Promise<{
+  captured: Captured;
+  router: ReturnType<typeof createUserRouter>;
+}> {
   const mockClient = {} as never;
   const { createSessionMiddleware } = await import("../../src/web/session.js");
   const router =
-    opts.router ?? createUserRouter(mockClient, createSessionMiddleware(mockClient));
+    opts.router ??
+    createUserRouter(mockClient, createSessionMiddleware(mockClient));
 
   const captured: Captured = {
     statusCode: 200,
@@ -337,9 +336,8 @@ describe("/me/privacy/export", () => {
 
   it("audits a failure when the stream breaks mid-file", async () => {
     await installCommonMocks(true);
-    const { UserDataExportService } = await import(
-      "../../src/services/user-data-export-service.js"
-    );
+    const { UserDataExportService } =
+      await import("../../src/services/user-data-export-service.js");
     jest.spyOn(UserDataExportService, "getInstance").mockReturnValue({
       getMaxItems: async () => 5000,
       streamJson: async function* () {
@@ -360,7 +358,6 @@ describe("/me/privacy/export", () => {
       errorMessage: "mongo went away",
     });
   });
-
 
   it("stops and audits when the client hangs up mid-stream", async () => {
     await installCommonMocks(true);
