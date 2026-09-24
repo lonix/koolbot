@@ -327,6 +327,9 @@ const STYLE = [
   "form.stack fieldset legend{color:#94a3b8;padding:0 .35rem}",
   ".inline-form{margin:.75rem 0 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
   ".btn{background:#374151;color:#e4e6eb;border:0;padding:.35rem .7rem;border-radius:4px;cursor:pointer;font-size:.8rem;font-weight:600;display:inline-block;text-decoration:none}",
+  // `.btn` sets display, which overrides the UA rule for `hidden`; keep a
+  // hidden button (a JS-only control before its script runs) out of view.
+  ".btn[hidden]{display:none}",
   ".btn:hover{background:#4b5563;text-decoration:none}",
   ".btn-primary{background:#2563eb;color:#fff}",
   ".btn-primary:hover{background:#1d4ed8}",

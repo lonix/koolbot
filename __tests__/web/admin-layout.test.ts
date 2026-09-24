@@ -141,6 +141,19 @@ describe("renderAdminPage", () => {
     );
   });
 
+  it("keeps a hidden .btn hidden despite the .btn display rule", () => {
+    const html = renderAdminPage({
+      title: "Leaderboard Roles",
+      active: "/admin/leaderboard-roles",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // `.btn{display:inline-block}` beats the UA `[hidden]` rule, so JS-only
+    // controls such as the tier editor's Add/Remove need this override.
+    expect(html).toContain(".btn[hidden]{display:none}");
+  });
+
   it("marks and focuses the fields a save rejected (issue #854)", () => {
     const html = renderAdminPage({
       title: "Settings",
