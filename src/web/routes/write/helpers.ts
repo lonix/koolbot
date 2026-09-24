@@ -501,7 +501,7 @@ export function getCsrfFromReq(req: AuthenticatedRequest): string {
  * unit-testable against a fake store without Express or Mongo.
  */
 export interface ResetConfigStore {
-  getAll(): Promise<Array<{ key: string }>>;
+  getAll(): Promise<Array<{ key: string; value?: unknown }>>;
   set(
     key: string,
     value: unknown,
@@ -521,14 +521,22 @@ export interface ResetConfigStore {
  * skipped on the delete pass defensively so a stray row can't be dropped
  * here. Mirrors the partial-application semantics of the YAML import: a
  * write/delete that throws is collected in `failed` and the rest continue.
+ *
+ * `changed` lists the schema keys whose stored value differed from the
+ * default and were rewritten, so the caller can re-arm just the scheduled
+ * services the reset actually moved (#1013). A key with no stored row was
+ * already on its default and is not changed.
  */
 export async function resetConfigToDefaults(config: ResetConfigStore): Promise<{
   updated: number;
   deleted: number;
   failed: Array<{ key: string; reason: string }>;
+  changed: string[];
 }> {
   const all = await config.getAll();
+  const stored = new Map(all.map((entry) => [entry.key, entry.value]));
   const failed: Array<{ key: string; reason: string }> = [];
+  const changed: string[] = [];
 
   let updated = 0;
   for (const [key, value] of Object.entries(defaultConfig)) {
@@ -546,6 +554,11 @@ export async function resetConfigToDefaults(config: ResetConfigStore): Promise<{
         { skipDependencyCheck: true },
       );
       updated++;
+      // Compared as strings, like `effectiveValueChanged`: a stored value
+      // may predate type coercion.
+      if (stored.has(key) && String(stored.get(key)) !== String(value)) {
+        changed.push(key);
+      }
     } catch (err) {
       const reason = err instanceof Error ? err.message : "set failed";
       logger.error("reset-defaults: failed to write setting", err);
@@ -567,7 +580,7 @@ export async function resetConfigToDefaults(config: ResetConfigStore): Promise<{
     }
   }
 
-  return { updated, deleted, failed };
+  return { updated, deleted, failed, changed };
 }
 
 /**

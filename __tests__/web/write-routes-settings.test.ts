@@ -42,6 +42,11 @@ const mockSetConfigReloadStatus = jest.fn();
 const mockGuildsFetch = jest.fn<() => Promise<{ name: string }>>();
 const mockDigestReload = jest.fn<() => Promise<void>>();
 const mockLeaderboardReload = jest.fn<() => Promise<void>>();
+const mockBirthdayReload = jest.fn<() => Promise<void>>();
+const mockRewindNudgeReload = jest.fn<() => Promise<void>>();
+const mockEventReload = jest.fn<() => Promise<void>>();
+const mockReminderReload = jest.fn<() => Promise<void>>();
+const mockLfgReload = jest.fn<() => Promise<void>>();
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -106,6 +111,33 @@ jest.unstable_mockModule(
   }),
 );
 
+// And every other ScheduledService in SCHEDULE_REARMS (#1013).
+jest.unstable_mockModule("../../src/services/birthday-service.js", () => ({
+  BirthdayService: {
+    getInstance: (): unknown => ({ reload: mockBirthdayReload }),
+  },
+}));
+jest.unstable_mockModule("../../src/services/rewind-nudge-service.js", () => ({
+  RewindNudgeService: {
+    getInstance: (): unknown => ({ reload: mockRewindNudgeReload }),
+  },
+}));
+jest.unstable_mockModule("../../src/services/event-service.js", () => ({
+  EventService: {
+    getInstance: (): unknown => ({ reload: mockEventReload }),
+  },
+}));
+jest.unstable_mockModule("../../src/services/reminder-service.js", () => ({
+  ReminderService: {
+    getInstance: (): unknown => ({ reload: mockReminderReload }),
+  },
+}));
+jest.unstable_mockModule("../../src/services/lfg-service.js", () => ({
+  LfgService: {
+    getInstance: (): unknown => ({ reload: mockLfgReload }),
+  },
+}));
+
 const { createSettingsRouter } =
   await import("../../src/web/routes/write/settings.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -129,6 +161,11 @@ beforeEach(async () => {
   mockGuildsFetch.mockResolvedValue({ name: "Kool Guild" });
   mockDigestReload.mockResolvedValue(undefined);
   mockLeaderboardReload.mockResolvedValue(undefined);
+  mockBirthdayReload.mockResolvedValue(undefined);
+  mockRewindNudgeReload.mockResolvedValue(undefined);
+  mockEventReload.mockResolvedValue(undefined);
+  mockReminderReload.mockResolvedValue(undefined);
+  mockLfgReload.mockResolvedValue(undefined);
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -275,6 +312,50 @@ describe("POST /settings/set", () => {
     });
     expect(mockDigestReload).not.toHaveBeenCalled();
   });
+
+  // One key per scheduled service (#1013): each re-arms only its own job.
+  const allReloads = (): Array<jest.Mock<() => Promise<void>>> => [
+    mockDigestReload,
+    mockLeaderboardReload,
+    mockBirthdayReload,
+    mockRewindNudgeReload,
+    mockEventReload,
+    mockReminderReload,
+    mockLfgReload,
+  ];
+  it.each([
+    ["birthdays.cron", "0 8 * * *", () => mockBirthdayReload],
+    ["birthdays.enabled", "true", () => mockBirthdayReload],
+    ["rewind.nudge.enabled", "true", () => mockRewindNudgeReload],
+    ["rewind.cron", "0 10 1 12 *", () => mockRewindNudgeReload],
+    ["leaderboard_roles.update_cron", "0 6 * * 1", () => mockLeaderboardReload],
+    ["events.enabled", "true", () => mockEventReload],
+    ["reminders.enabled", "true", () => mockReminderReload],
+    ["lfg.enabled", "true", () => mockLfgReload],
+  ])(
+    "re-arms only its own job when %s changes (#1013)",
+    async (key, value, reload) => {
+      const res = await harness.post("/settings/set", { key, value });
+      expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+      const expected = reload();
+      expect(expected).toHaveBeenCalledTimes(1);
+      for (const other of allReloads()) {
+        if (other !== expected) expect(other).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it("warns when the LFG sweep can't be re-armed but keeps the save (#1013)", async () => {
+    mockLfgReload.mockRejectedValueOnce(new Error("boom"));
+    const res = await harness.post("/settings/set", {
+      key: "lfg.enabled",
+      value: "true",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("The LFG schedule could not be re-armed");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("POST /settings/reset", () => {
@@ -396,6 +477,22 @@ describe("POST /settings/reset-defaults", () => {
       result: "success",
       details: { outcome: "ok" },
     });
+  });
+
+  it("re-arms the jobs whose stored schedule the reset moved (#1013)", async () => {
+    mockConfigGetAll.mockResolvedValue([
+      { key: "birthdays.enabled", value: true },
+      { key: "events.enabled", value: false },
+      { key: "quotes.max_length", value: 5 },
+    ]);
+    const res = await harness.post("/settings/reset-defaults", {
+      confirm: "Kool Guild",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    // birthdays.enabled moved true -> false; events.enabled was already off.
+    expect(mockBirthdayReload).toHaveBeenCalledTimes(1);
+    expect(mockEventReload).not.toHaveBeenCalled();
+    expect(mockDigestReload).not.toHaveBeenCalled();
   });
 });
 
@@ -1344,6 +1441,30 @@ describe("POST /settings/import/apply", () => {
       result: "failure",
       details: { applied: 0, outcome: "failed" },
     });
+  });
+
+  it("re-arms the jobs whose imported schedule changed (#1013)", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "reminders.enabled" ? true : null,
+    );
+    const res = await harness.post("/settings/import/apply", {
+      yaml: "rewind.cron: 0 10 1 12 *\nreminders.enabled: true\nquotes.max_length: 500",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockRewindNudgeReload).toHaveBeenCalledTimes(1);
+    // Re-imported unchanged, so the live reminder tick is left alone.
+    expect(mockReminderReload).not.toHaveBeenCalled();
+  });
+
+  it("warns when an imported schedule can't be re-armed (#1013)", async () => {
+    mockBirthdayReload.mockRejectedValueOnce(new Error("boom"));
+    const res = await harness.post("/settings/import/apply", {
+      yaml: "birthdays.cron: 0 8 * * *",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("Imported 1 setting.");
+    expect(flash.msg).toContain("birthdays schedule could not be re-armed");
   });
 
   it("reports a key whose write threw", async () => {

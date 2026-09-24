@@ -270,7 +270,7 @@ export function createSettingsRouter(client: Client): Router {
 
       const config = ConfigService.getInstance();
       try {
-        const { updated, deleted, failed } =
+        const { updated, deleted, failed, changed } =
           await resetConfigToDefaults(config);
         const landed = updated + deleted;
         // Mirror the YAML-import audit: `result: "failure"` only when nothing
@@ -301,16 +301,21 @@ export function createSettingsRouter(client: Client): Router {
             ? `, ${deleted} orphan key${deleted === 1 ? "" : "s"} removed`
             : "";
         const reloadNote = " You may need to Reload commands.";
+        // Scheduled jobs whose schedule or enable flag moved are re-armed
+        // here (#1013); only the command list still needs a manual reload.
+        const rearmNote = rearmFailureNote(
+          await rearmScheduledServices(client, changed),
+        );
         if (failed.length === 0) {
           flashRedirect(res, "/admin/settings", {
-            type: "ok",
-            text: `Settings reset to defaults — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}.${reloadNote}`,
+            type: rearmNote ? "warn" : "ok",
+            text: `Settings reset to defaults — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}.${reloadNote}${rearmNote}`,
           });
           return;
         }
         flashRedirect(res, "/admin/settings", {
           type: landed > 0 ? "warn" : "err",
-          text: `Reset ${landed > 0 ? "partially " : ""}failed — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}, ${failed.length} failed (first: ${failed[0].key} — ${failed[0].reason}).${landed > 0 ? reloadNote : ""}`,
+          text: `Reset ${landed > 0 ? "partially " : ""}failed — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}, ${failed.length} failed (first: ${failed[0].key} — ${failed[0].reason}).${landed > 0 ? reloadNote : ""}${rearmNote}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
@@ -817,8 +822,17 @@ export function createSettingsRouter(client: Client): Router {
       // Phase 2: apply the validated set. Skip the per-key check — the batch
       // was already validated, and per-key ordering would falsely reject an
       // intra-snapshot dependency pair.
+      const changedKeys: string[] = [];
       for (const { key, value } of toWrite) {
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
+        // Read before writing so an unchanged value leaves its job alone.
+        // A failed read counts as changed, like the per-key Reset.
+        let before: unknown;
+        try {
+          before = await config.get(key);
+        } catch {
+          before = undefined;
+        }
         try {
           await config.set(
             key,
@@ -828,6 +842,12 @@ export function createSettingsRouter(client: Client): Router {
             { skipDependencyCheck: true },
           );
           applied++;
+          if (
+            before === undefined ||
+            effectiveValueChanged(key, before, value)
+          ) {
+            changedKeys.push(key);
+          }
         } catch (err) {
           const text = err instanceof Error ? err.message : "set failed";
           // Static message: `key` comes from the uploaded YAML, and the
@@ -862,13 +882,20 @@ export function createSettingsRouter(client: Client): Router {
             : null,
       });
 
+      // An imported schedule or enable flag re-arms its job now (#1013).
+      const rearmFailed = await rearmScheduledServices(client, changedKeys);
       const summary =
         failed.length === 0
           ? `Imported ${applied} setting${applied === 1 ? "" : "s"}.`
           : `Imported ${applied}, skipped ${failed.length} (first: ${failed[0].key} — ${failed[0].reason}).`;
       flashRedirect(res, "/admin/settings", {
-        type: failed.length === 0 ? "ok" : applied > 0 ? "warn" : "err",
-        text: summary,
+        type:
+          failed.length === 0 && rearmFailed.length === 0
+            ? "ok"
+            : applied > 0
+              ? "warn"
+              : "err",
+        text: `${summary}${rearmFailureNote(rearmFailed)}`,
       });
     }),
   );
