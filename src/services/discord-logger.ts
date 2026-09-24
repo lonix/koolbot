@@ -148,19 +148,22 @@ export class DiscordLogger {
   }
 
   /**
-   * Send a log message to a specific core channel
+   * Send a log message to a specific core channel. Never throws; resolves
+   * `true` only when the message was actually posted, so a caller that must
+   * not lose a one-off message (the update note, #1029) can tell a skipped or
+   * failed send from a delivered one.
    */
   public async logToChannel(
     logType: string,
     message: ILogMessage,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       // Check if logger is ready
       if (!this.isReady()) {
         logger.debug(
           `Discord logger: Logger not ready, skipping message to ${logType}`,
         );
-        return;
+        return false;
       }
 
       logger.debug(`Discord logger: Attempting to log to channel: ${logType}`);
@@ -181,7 +184,7 @@ export class DiscordLogger {
         logger.debug(
           `Discord logger: Log channel ${logType} not configured or disabled`,
         );
-        return;
+        return false;
       }
 
       logger.debug(
@@ -200,7 +203,7 @@ export class DiscordLogger {
           `Discord logger: Available channels:`,
           Array.from(this.client.channels.cache.keys()),
         );
-        return;
+        return false;
       }
 
       logger.debug(
@@ -233,11 +236,13 @@ export class DiscordLogger {
       logger.info(
         `Discord logger: Log message sent to ${logType}: ${message.title}`,
       );
+      return true;
     } catch (error) {
       logger.error(
         `Discord logger: Error sending log message to ${logType}:`,
         error,
       );
+      return false;
     }
   }
 

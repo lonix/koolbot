@@ -208,6 +208,13 @@ still apply. The result page shows per-key outcomes plus a top-level
 `ok` / `partial` / `failed` status — a mixed YAML produces a partial
 import, not an atomic failure.
 
+Any Web UI write that changes a scheduled feature's enable flag or cron — a
+Settings or feature-card save, the Enable banner, a per-key Reset, a YAML
+import or Reset to defaults — re-arms that feature's job immediately (digest,
+leaderboard roles, birthdays, rewind nudge, events, reminders, LFG). A single
+save that re-posts the same value leaves the running job alone; a YAML import
+re-arms every job whose keys it wrote, and Reset to defaults re-arms them all.
+
 ---
 
 ## Bootstrap environment variables
@@ -767,6 +774,31 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Command Metrics**   | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
 | **Moderation**        | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
 | **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
+
+The **Dashboard** has a **Version** card (#1029) that shows the running version
+next to the latest KoolBot release, with its state: *up to date*, *update
+available* (with the kind: major, minor or patch), or *couldn't check*. It also
+links to the release notes and has a **Check now** button. When an update is
+available, the card shows how to update for Docker Compose, plain Docker and
+source installs, and warns that a major update may include breaking changes.
+Every admin page shows the running version in the top banner, plus an *Update
+available* badge when the instance is behind.
+
+The check runs at startup, every 12 hours and on **Check now** (at most once a
+minute). The result is cached, so no page waits on GitHub. A failed check
+(offline, air-gapped, rate-limited) never breaks the page. The card shows
+*couldn't check* with the reason and the last successful result.
+
+- **What is sent:** one anonymous `GET` of
+  `https://api.github.com/repos/lonix/koolbot/releases/latest`, public release
+  metadata. Nothing about the instance is sent: no version, guild or
+  identifiers, and no headers beyond a generic `User-Agent` and `Accept`.
+- **Turning it off:** set `core.updatecheck.enabled` to `false` in Settings.
+  The card and banner then show only the running version, and no request is
+  made.
+- **Discord note (optional):** `core.updates.enabled` + `core.updates.channel_id`
+  post a one-time note to a log channel when a newer release is first seen. It
+  is off by default.
 
 Feature pages (Announcements, Birthdays, Events, Polls, Reaction Roles,
 Notices, Quotes, Voice Channels, Weekly Digest, Leaderboard Roles) are gated by their

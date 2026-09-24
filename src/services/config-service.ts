@@ -16,12 +16,26 @@ import {
 } from "./config-schema.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
+function toBoolean(value: unknown, defaultValue: boolean): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value === "string") {
+    return value === "true";
+  }
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  return defaultValue;
+}
+
 export class ConfigService {
   private static instance: ConfigService;
   private cache: Map<string, unknown> = new Map();
   private initialized = false;
   private client: Client | null = null;
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
+  private changeListeners: Set<(key: string) => void> = new Set();
 
   private constructor() {}
 
@@ -42,6 +56,34 @@ export class ConfigService {
 
   public removeReloadCallback(callback: () => Promise<void>): void {
     this.reloadCallbacks.delete(callback);
+  }
+
+  /**
+   * Be told, synchronously and after the write, whenever `set()` or
+   * `delete()` changes a key. Unlike reload callbacks this is not a reload:
+   * it is for a service that caches one flag and must not keep acting on
+   * the old value until the next `/config reload` (the update check's
+   * enable flag, #1029). A throwing listener is logged and ignored.
+   */
+  public addChangeListener(listener: (key: string) => void): void {
+    this.changeListeners.add(listener);
+  }
+
+  public removeChangeListener(listener: (key: string) => void): void {
+    this.changeListeners.delete(listener);
+  }
+
+  private notifyChange(key: string): void {
+    for (const listener of this.changeListeners) {
+      try {
+        listener(key);
+      } catch (error) {
+        logger.error(
+          `Config change listener failed for ${sanitizeForLog(key)}:`,
+          error,
+        );
+      }
+    }
   }
 
   public async triggerReload(): Promise<void> {
@@ -312,54 +354,7 @@ export class ConfigService {
 
   public async get(key: string): Promise<unknown> {
     try {
-      // Check cache first
-      if (this.cache.has(key)) {
-        return this.cache.get(key);
-      }
-
-      // Try to get from database
-      const config = await Config.findOne({ key });
-      if (config) {
-        this.cache.set(key, config.value);
-        return config.value;
-      }
-
-      // Handle backward compatibility for gamification -> achievements migration
-      if (key.startsWith("achievements.")) {
-        const oldKey = key.replace("achievements.", "gamification.");
-        const oldConfig = await Config.findOne({ key: oldKey });
-        if (oldConfig) {
-          logger.info(
-            `⚠️  Found old gamification config key: ${sanitizeForLog(oldKey)}, migrating to ${sanitizeForLog(key)}`,
-          );
-          // Migrate the old key to new key. This is a rename carrying the
-          // previously-stored value verbatim, not an operator enabling a
-          // feature, so it must never be blocked by dependency validation.
-          await this.set(
-            key,
-            oldConfig.value,
-            oldConfig.description.replace(/gamification/gi, "achievements"),
-            "achievements",
-            { skipDependencyCheck: true },
-          );
-          // Delete the old key
-          await Config.deleteOne({ key: oldKey });
-          return oldConfig.value;
-        }
-      }
-
-      // If not found, try to get from environment variables (for backward
-      // compatibility). The string -> boolean/number coercion lives in
-      // `getEnvConfigValue` so the validate-config script reads an
-      // env-supplied setting exactly the way the runtime does.
-      const envValue = getEnvConfigValue(key);
-      if (envValue !== null) {
-        this.cache.set(key, envValue);
-        return envValue;
-      }
-
-      // Return null if not found anywhere
-      return null;
+      return await this.readValue(key);
     } catch (error) {
       logger.error(
         `Error getting configuration for key ${sanitizeForLog(key)}:`,
@@ -367,6 +362,62 @@ export class ConfigService {
       );
       return null;
     }
+  }
+
+  /**
+   * The lookup behind `get()`, without its catch: a failed database read
+   * throws instead of looking like "not set". `get()` keeps its forgiving
+   * null; `getBooleanStrict()` needs to tell the two apart.
+   */
+  private async readValue(key: string): Promise<unknown> {
+    // Check cache first
+    if (this.cache.has(key)) {
+      return this.cache.get(key);
+    }
+
+    // Try to get from database
+    const config = await Config.findOne({ key });
+    if (config) {
+      this.cache.set(key, config.value);
+      return config.value;
+    }
+
+    // Handle backward compatibility for gamification -> achievements migration
+    if (key.startsWith("achievements.")) {
+      const oldKey = key.replace("achievements.", "gamification.");
+      const oldConfig = await Config.findOne({ key: oldKey });
+      if (oldConfig) {
+        logger.info(
+          `⚠️  Found old gamification config key: ${sanitizeForLog(oldKey)}, migrating to ${sanitizeForLog(key)}`,
+        );
+        // Migrate the old key to new key. This is a rename carrying the
+        // previously-stored value verbatim, not an operator enabling a
+        // feature, so it must never be blocked by dependency validation.
+        await this.set(
+          key,
+          oldConfig.value,
+          oldConfig.description.replace(/gamification/gi, "achievements"),
+          "achievements",
+          { skipDependencyCheck: true },
+        );
+        // Delete the old key
+        await Config.deleteOne({ key: oldKey });
+        return oldConfig.value;
+      }
+    }
+
+    // If not found, try to get from environment variables (for backward
+    // compatibility). The string -> boolean/number coercion lives in
+    // `getEnvConfigValue` so the validate-config script reads an
+    // env-supplied setting exactly the way the runtime does.
+    const envValue = getEnvConfigValue(key);
+    if (envValue !== null) {
+      this.cache.set(key, envValue);
+      return envValue;
+    }
+
+    // Return null if not found anywhere
+    return null;
   }
 
   public async getString(
@@ -387,17 +438,20 @@ export class ConfigService {
     key: string,
     defaultValue: boolean = false,
   ): Promise<boolean> {
-    const value = await this.get(key);
-    if (typeof value === "boolean") {
-      return value;
-    }
-    if (typeof value === "string") {
-      return value === "true";
-    }
-    if (typeof value === "number") {
-      return value !== 0;
-    }
-    return defaultValue;
+    return toBoolean(await this.get(key), defaultValue);
+  }
+
+  /**
+   * Like `getBoolean`, but a failed read rejects instead of silently
+   * returning `defaultValue`. For an opt-out whose default is "on" (the
+   * update check, #1029), where a database hiccup must not flip a stored
+   * `false` back to the default.
+   */
+  public async getBooleanStrict(
+    key: string,
+    defaultValue: boolean = false,
+  ): Promise<boolean> {
+    return toBoolean(await this.readValue(key), defaultValue);
   }
 
   public async getNumber(
@@ -522,6 +576,7 @@ export class ConfigService {
       logger.info(
         `Configuration updated: ${sanitizeForLog(key)} = ${sanitizeForLog(value)}`,
       );
+      this.notifyChange(key);
 
       // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {
@@ -538,6 +593,7 @@ export class ConfigService {
       await Config.deleteOne({ key });
       this.cache.delete(key);
       logger.info(`Configuration deleted: ${key}`);
+      this.notifyChange(key);
 
       // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {

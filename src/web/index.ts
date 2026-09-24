@@ -20,6 +20,8 @@ import {
 } from "./views.js";
 import { createReadOnlyRouter } from "./read-only-routes.js";
 import { createWriteRouter } from "./write-routes.js";
+import { setAdminUpdateBadgeProvider } from "./admin-layout.js";
+import { VersionCheckService } from "../services/version-check-service.js";
 import { createUserRouter, SelfScopeError } from "./user-routes.js";
 
 /**
@@ -30,6 +32,14 @@ import { createUserRouter, SelfScopeError } from "./user-routes.js";
 export function createWebRouter(client: Client): Router {
   const router = Router();
   const sessionService = WebSessionService.getInstance();
+
+  // Banner "update available" badge on every admin page (#1029), read from
+  // the update check's in-memory snapshot — no I/O per render.
+  setAdminUpdateBadgeProvider(() => {
+    const snapshot = VersionCheckService.peek()?.getSnapshot();
+    if (!snapshot?.latest || !snapshot.updateKind) return null;
+    return { latest: snapshot.latest.version, kind: snapshot.updateKind };
+  });
 
   // 256kb covers a 2000-char message + 6000-char embed + CSRF/cron/etc.
   // with comfortable headroom, plus YAML import payloads from the settings

@@ -202,6 +202,22 @@ export function adminPages(): A11yPage[] {
           { key: "voicechannels.enabled", label: "Voice Channels", on: true },
           { key: "polls.enabled", label: "Polls", on: false },
         ],
+        // Update-available state (#1029): the fullest card — kind tag, major
+        // warning, release links, update instructions and "Check now".
+        version: {
+          enabled: true,
+          running: "1.2.2",
+          latest: {
+            version: "v2.0.0",
+            url: "https://github.com/lonix/koolbot/releases/tag/v2.0.0",
+            publishedAt: new Date("2026-09-01T12:00:00Z"),
+            fetchedAt: new Date("2026-09-24T08:00:00Z"),
+          },
+          status: "update-available",
+          updateKind: "major",
+          lastAttemptAt: new Date("2026-09-24T08:00:00Z"),
+          lastError: null,
+        },
       }),
     },
     {
