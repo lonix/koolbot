@@ -866,6 +866,8 @@ describe("createWriteRouter (#850)", () => {
         "POST /events/:id/cancel",
         "POST /events/:id/start-now",
         "POST /events/create",
+        "POST /leaderboard-roles/run-now",
+        "POST /leaderboard-roles/tiers",
         "POST /notices/:id/delete",
         "POST /notices/:id/order",
         "POST /notices/:id/update",

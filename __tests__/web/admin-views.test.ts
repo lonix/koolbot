@@ -14,6 +14,7 @@ import {
   renderEventsPage,
   renderFeatureSettingsCard,
   renderImportDiffPage,
+  renderLeaderboardRolesPage,
   renderModerationPage,
   renderNoticesPage,
   renderPermissionsPage,
@@ -4784,5 +4785,134 @@ describe("Wizard step accessibility (#854)", () => {
     expect(html).toMatch(
       /id="wiz-voicetracking\.seen_retention_days" aria-describedby="wiz-voicetracking\.seen_retention_days-warn wiz-voicetracking\.seen_retention_days-help"/,
     );
+  });
+});
+
+describe("renderLeaderboardRolesPage (#985)", () => {
+  const ENABLED_ROW: SettingRow = {
+    key: "leaderboard_roles.enabled",
+    label: "Leaderboard role rewards enabled",
+    current: true,
+    defaultValue: false,
+    type: "boolean",
+    description: "Auto-assign roles.",
+    category: "leaderboard_roles",
+  };
+
+  function render(
+    extra: Partial<Parameters<typeof renderLeaderboardRolesPage>[0]> = {},
+  ): string {
+    return renderLeaderboardRolesPage({
+      ...COMMON,
+      enabled: true,
+      voiceTrackingEnabled: true,
+      period: "week",
+      cron: "0 0 * * 1",
+      tiers: [
+        {
+          topN: 1,
+          roleId: "111",
+          roleName: "Champion",
+          assignable: true,
+          holders: [{ id: "u1", label: "alice <b>" }],
+          lastUpdated: "2026-01-05T00:00:00.000Z",
+        },
+        {
+          topN: 3,
+          roleId: "222",
+          roleName: null,
+          assignable: null,
+          holders: [],
+          lastUpdated: null,
+        },
+      ],
+      ignoredEntries: [],
+      roles: [
+        { id: "111", name: "Champion" },
+        { id: "333", name: "Podium" },
+      ],
+      settingRows: [ENABLED_ROW],
+      ...extra,
+    });
+  }
+
+  it("renders one editor row per tier plus a spare blank row", () => {
+    const html = render();
+    const editor = html.slice(html.indexOf('id="lb-tier-rows"'));
+    const tbody = editor.slice(0, editor.indexOf("</tbody>"));
+    expect(tbody.match(/name="topN"/g)).toHaveLength(3);
+    expect(tbody).toContain('value="1"');
+    expect(tbody).toContain('value="3"');
+    // The stored role stays selected, including one that no longer exists.
+    expect(tbody).toContain('<option value="111" selected>@Champion</option>');
+    expect(tbody).toContain('value="222" selected>@222 (unavailable)');
+    expect(html).toContain('action="/admin/leaderboard-roles/tiers"');
+    expect(html).toContain('<template id="lb-tier-template">');
+  });
+
+  it("lists current holders, escaped, and flags a missing role", () => {
+    const html = render();
+    expect(html).toContain("alice &lt;b&gt;");
+    expect(html).not.toContain("alice <b>");
+    expect(html).toContain("role not found");
+    expect(html).toContain("nobody yet");
+    expect(html).toContain("2026-01-05T00:00:00.000Z");
+  });
+
+  it("flags a role the bot cannot assign", () => {
+    const html = render({
+      tiers: [
+        {
+          topN: 1,
+          roleId: "111",
+          roleName: "Champion",
+          assignable: false,
+          holders: [],
+          lastUpdated: null,
+        },
+      ],
+    });
+    expect(html).toContain("above the bot’s role");
+  });
+
+  it("renders the settings card posting back to this page", () => {
+    const html = render();
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain('name="redirect" value="/admin/leaderboard-roles"');
+    expect(html).toContain('name="category" value="leaderboard_roles"');
+    expect(html).toContain('value="leaderboard_roles.enabled"');
+  });
+
+  it("shows a notice instead of the settings card when config is unreadable", () => {
+    const html = render({ settingRows: [], settingsUnavailable: true });
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain('name="category" value="leaderboard_roles"');
+  });
+
+  it("enables Run now only while the feature is on", () => {
+    const on = render();
+    expect(on).toContain('action="/admin/leaderboard-roles/run-now"');
+    expect(on).not.toMatch(/disabled>Run now/);
+    const off = render({ enabled: false });
+    expect(off).toMatch(/disabled>Run now/);
+    expect(off).toContain("Leaderboard roles are disabled.");
+  });
+
+  it("warns when voice tracking is off", () => {
+    expect(render()).not.toContain("Voice tracking is off");
+    expect(render({ voiceTrackingEnabled: false })).toContain(
+      "Voice tracking is off",
+    );
+  });
+
+  it("warns about stored entries the editor cannot show", () => {
+    const html = render({ ignoredEntries: ["oops", "0:<x>"] });
+    expect(html).toContain("<code>oops</code>");
+    expect(html).toContain("<code>0:&lt;x&gt;</code>");
+    expect(html).toContain("saving a change removes them");
+  });
+
+  it("says so when no tiers are configured", () => {
+    expect(render({ tiers: [] })).toContain("No tiers configured yet");
   });
 });

@@ -132,6 +132,12 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "digest.enabled",
   },
   {
+    href: "/admin/leaderboard-roles",
+    label: "Leaderboard Roles",
+    group: "Features",
+    featureKey: "leaderboard_roles.enabled",
+  },
+  {
     href: "/admin/analytics",
     label: "Voice Analytics",
     group: "Features",

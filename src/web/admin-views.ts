@@ -3677,6 +3677,217 @@ ${previewHtml}
   });
 }
 
+// ---------- Leaderboard Roles (#985) ----------
+
+export interface LeaderboardTierHolder {
+  id: string;
+  /** Display name, or the raw id when the member could not be resolved. */
+  label: string;
+}
+
+export interface LeaderboardTierView {
+  topN: number;
+  roleId: string;
+  /** Role name, or null when the role no longer exists in the guild. */
+  roleName: string | null;
+  /**
+   * Whether the bot can assign the role (it sits below the bot's highest
+   * role and is not integration-managed). Null when that could not be
+   * checked, e.g. the guild fetch failed.
+   */
+  assignable: boolean | null;
+  /** Members the bot last recorded as holding the role. */
+  holders: LeaderboardTierHolder[];
+  /** When the bot last reconciled this tier (ISO), or null if never. */
+  lastUpdated: string | null;
+}
+
+export interface LeaderboardRolesProps extends CommonProps {
+  enabled: boolean;
+  /** `voicetracking.enabled` — the ranking data the tiers are computed from. */
+  voiceTrackingEnabled: boolean;
+  period: string;
+  cron: string;
+  /** Configured tiers, ascending by Top N, with their current holders. */
+  tiers: LeaderboardTierView[];
+  /**
+   * Stored tier entries the service skips (malformed or shadowed); the editor
+   * can't show them, so saving a change drops them.
+   */
+  ignoredEntries: string[];
+  /** Assignable roles backing the tier editor's role pickers. */
+  roles: RoleOption[];
+  /**
+   * The `leaderboard_roles.*` keys other than `tiers`, edited in place through
+   * {@link renderFeatureSettingsCard}. Includes the feature master, so the
+   * feature can be switched off here as well as on.
+   */
+  settingRows: SettingRow[];
+  /** Channel list backing the announcement-channel picker. */
+  pickers?: FeatureSettingsPickers;
+  /** On/off state of off-card dependencies (`voicetracking.enabled`). */
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /** The stored config could not be read; the card renders a notice. */
+  settingsUnavailable?: boolean;
+  flash?: FlashMessage | null;
+}
+
+// Progressive enhancement for the tier editor: "Add tier" clones the blank
+// row template and each row's "Remove" drops it. Without JS the page renders
+// one spare blank row, and clearing a row's fields removes it on save.
+const LEADERBOARD_TIER_EDITOR_SCRIPT =
+  "(function(){" +
+  "var body=document.getElementById('lb-tier-rows');" +
+  "var tpl=document.getElementById('lb-tier-template');" +
+  "var add=document.getElementById('lb-tier-add');" +
+  "if(!body||!tpl||!add||!('content' in tpl))return;" +
+  "add.hidden=false;" +
+  "add.addEventListener('click',function(){" +
+  "var row=tpl.content.firstElementChild.cloneNode(true);" +
+  "body.appendChild(row);" +
+  "var f=row.querySelector('input');if(f)f.focus()});" +
+  "body.addEventListener('click',function(e){" +
+  "var t=e.target;if(!t||!t.closest)return;" +
+  "var b=t.closest('.lb-tier-remove');if(!b)return;" +
+  "var row=b.closest('tr');if(row)row.remove();" +
+  "add.focus()})})();";
+
+function renderTierEditorRow(
+  roles: RoleOption[],
+  tier: { topN: number; roleId: string } | null,
+): string {
+  return `<tr>
+<td><input type="number" name="topN" min="1" max="1000" step="1" inputmode="numeric" aria-label="Top N" value="${tier ? tier.topN : ""}" style="width:6rem"></td>
+<td><select name="roleId" aria-label="Role">${roleOptionsHtml(roles, tier?.roleId)}</select></td>
+<td><button type="button" class="btn lb-tier-remove">Remove</button></td>
+</tr>`;
+}
+
+function renderTierHolders(tier: LeaderboardTierView): string {
+  if (tier.holders.length === 0) {
+    return `<span class="muted">nobody yet</span>`;
+  }
+  return tier.holders
+    .map(
+      (h) =>
+        `<span class="tag tag-info" title="${escapeHtml(h.id)}">${escapeHtml(h.label)}</span>`,
+    )
+    .join(" ");
+}
+
+export function renderLeaderboardRolesPage(
+  props: LeaderboardRolesProps,
+): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+
+  const trackingNotice = props.voiceTrackingEnabled
+    ? ""
+    : `<div class="notice warn" role="status">Voice tracking is off (<code>voicetracking.enabled</code>), so there is no ranking to compute tiers from and recalculation is skipped. Enable it under <a href="/admin/settings">Settings</a>.</div>`;
+
+  const holderRows = props.tiers
+    .map((t) => {
+      const roleCell =
+        t.roleName === null
+          ? `<span class="mono">${escapeHtml(t.roleId)}</span> <span class="tag tag-warn">role not found</span>`
+          : `@${escapeHtml(t.roleName)}${t.assignable === false ? ' <span class="tag tag-warn">above the bot’s role</span>' : ""}`;
+      return `<tr>
+<td>Top ${t.topN}</td>
+<td>${roleCell}</td>
+<td>${renderTierHolders(t)}</td>
+<td class="muted">${escapeHtml(t.lastUpdated ?? "never")}</td>
+</tr>`;
+    })
+    .join("");
+  const holdersHtml =
+    props.tiers.length === 0
+      ? `<div class="empty">No tiers configured yet. Add one below.</div>`
+      : `<table><thead><tr><th scope="col">Tier</th><th scope="col">Role</th><th scope="col">Current holders</th><th scope="col">Last recalculated</th></tr></thead><tbody>${holderRows}</tbody></table>
+  <p class="muted">Holders are the members the bot recorded on its last recalculation, not a live read of the role.</p>`;
+
+  const ignoredHtml =
+    props.ignoredEntries.length === 0
+      ? ""
+      : `<div class="notice warn" role="status">The stored tiers contain entries the bot ignores: ${props.ignoredEntries
+          .map((e) => `<code>${escapeHtml(e)}</code>`)
+          .join(
+            ", ",
+          )}. They are not shown below, and saving a change removes them.</div>`;
+
+  const editorRows = [
+    ...props.tiers.map((t) => renderTierEditorRow(props.roles, t)),
+    // One spare row, so a tier can be added without JavaScript.
+    renderTierEditorRow(props.roles, null),
+  ].join("");
+
+  const runDisabled = !props.enabled;
+  const runHint = !props.enabled
+    ? "Enable <code>leaderboard_roles.enabled</code> first."
+    : "Recalculates every tier now — the same run the schedule triggers, including the announcement. Concurrent runs coalesce, so this is safe during a scheduled run.";
+
+  const body = `
+<h1>Leaderboard Roles</h1>
+<p class="subtitle">Reward the top voice-leaderboard members with Discord roles. Each tier gives its role to everyone ranked within its Top N.</p>
+${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Leaderboard roles", featureKey: "leaderboard_roles.enabled", returnTo: "/admin/leaderboard-roles", csrfToken: props.csrfToken })}
+${trackingNotice}
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
+    <dt>Period</dt><dd>${escapeHtml(props.period)}</dd>
+    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron || "(unset)")}</dd>
+    <dt>Tiers</dt><dd>${props.tiers.length}</dd>
+  </dl>
+</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change leaderboard role settings here without leaving the page. Saved through the shared settings route.",
+  category: "leaderboard_roles",
+  settingRows: props.settingRows,
+  pickers: props.pickers,
+  returnTo: "/admin/leaderboard-roles",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
+<div class="card">
+  <h2>Current holders</h2>
+  ${holdersHtml}
+  <form method="POST" action="/admin/leaderboard-roles/run-now" class="inline-form" style="margin-top:.75rem" onsubmit="return confirm('Recalculate leaderboard roles now? Roles are granted and revoked immediately.');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
+    <span class="muted">${runHint}</span>
+  </form>
+</div>
+<div class="card">
+  <h2>Tiers</h2>
+  <p class="muted">One row per tier. Top N must be unique, and each role must sit below the bot’s highest role so the bot can assign it. Clear a row to remove it.</p>
+  ${ignoredHtml}
+  <form method="POST" action="/admin/leaderboard-roles/tiers">
+    ${csrfInput}
+    <table>
+      <thead><tr><th scope="col">Top N</th><th scope="col">Role</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr></thead>
+      <tbody id="lb-tier-rows">${editorRows}</tbody>
+    </table>
+    <template id="lb-tier-template">${renderTierEditorRow(props.roles, null)}</template>
+    <div class="actions" style="margin-top:.75rem">
+      <button type="button" class="btn" id="lb-tier-add" hidden>Add tier</button>
+      <button type="submit" class="btn btn-primary">Save tiers</button>
+    </div>
+  </form>
+</div>
+<script>${LEADERBOARD_TIER_EDITOR_SCRIPT}</script>
+`;
+  return renderAdminPage({
+    title: "Leaderboard Roles",
+    active: "/admin/leaderboard-roles",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
 // ---------- Command Audit Log ----------
 
 export interface CommandAuditRow {
