@@ -449,6 +449,27 @@ export class VoiceChannelTracker {
         `Active session exists: ${this.activeSessions.has(member.id)}`,
       );
 
+      // A stale event for this member (#918): an opt-out or reset engaged or
+      // released since it arrived. Its barrier already evicted any session
+      // the event could belong to, so whatever session exists now started
+      // later — ending it here would persist a fresh session on the say-so
+      // of an obsolete event. Nothing below may act for this member: no
+      // session start or end, no co-presence either way.
+      const eventGuildId = member.guild?.id;
+      if (
+        eventGuildId &&
+        !TrackingOptOutService.getInstance().admitted(
+          member.id,
+          eventGuildId,
+          ticket,
+        )
+      ) {
+        logger.info(
+          `Ignoring stale voice state update for ${member.id}: their tracking changed while it was in flight`,
+        );
+        return;
+      }
+
       // User joined a channel (including initial join)
       if (!oldChannel && newChannel) {
         logger.info(
@@ -739,8 +760,13 @@ export class VoiceChannelTracker {
           if (channel.members) {
             channel.members.forEach((m) => {
               // An opted-out member is not recorded as co-present in
-              // anyone else's session either (#918).
-              if (m.id !== member.id && !optOuts.isOptedOut(m.id, guild.id)) {
+              // anyone else's session either, nor one whose barrier moved
+              // while this event was in flight (#918).
+              if (
+                m.id !== member.id &&
+                !optOuts.isOptedOut(m.id, guild.id) &&
+                optOuts.admitted(m.id, guild.id, ticket)
+              ) {
                 encounteredSet.add(m.id);
                 since.set(m.id, now);
                 presentAtJoin.push(m.id);

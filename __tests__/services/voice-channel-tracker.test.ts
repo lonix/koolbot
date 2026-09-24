@@ -1155,6 +1155,69 @@ describe("VoiceChannelTracker", () => {
         expect(tracker.getActiveSession("u1")).toBeNull();
       });
 
+      it("does not let a stale switch end a session started after the opt-in", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const member = inGuild(memberInChannel("u1", "c1", "C1", []));
+        const c1 = { id: "c1", name: "C1" };
+        const c2 = { id: "c2", name: "C2" };
+
+        // A switch event arrives, then its handler stalls while the member
+        // opts out, opts back in and joins afresh.
+        const staleTicket = TrackingOptOutService.getInstance().admission();
+        optOutAndBackIn("u1");
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          { member, channel: c1 } as unknown as VoiceState,
+        );
+        expect(tracker.getActiveSession("u1")).not.toBeNull();
+
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: c1 } as unknown as VoiceState,
+          { member, channel: c2 } as unknown as VoiceState,
+          staleTicket,
+        );
+
+        // The fresh session is untouched: not ended, not persisted.
+        expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(tracker.getActiveSession("u1")).toEqual({ channelName: "C1" });
+      });
+
+      it("seeds no co-presence for a channel member whose barrier moved in flight", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const member = inGuild(
+          memberInChannel("u1", "c1", "C1", ["other1", "flipped"]),
+        );
+
+        const ticket = TrackingOptOutService.getInstance().admission();
+        optOutAndBackIn("flipped");
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          {
+            member,
+            channel: { id: "c1", name: "C1" },
+          } as unknown as VoiceState,
+          ticket,
+        );
+
+        const maps = tracker as unknown as {
+          encounteredUsers: Map<string, Set<string>>;
+          companionSince: Map<string, Map<string, number>>;
+          sessionFirsts: Map<string, { joinedExisting: string[] }>;
+        };
+        expect([...(maps.encounteredUsers.get("u1") ?? [])]).toEqual([
+          "other1",
+        ]);
+        expect(maps.companionSince.get("u1")?.has("flipped")).toBe(false);
+        expect(maps.sessionFirsts.get("u1")?.joinedExisting).toEqual([
+          "other1",
+        ]);
+      });
+
       it("adds no co-presence for a join suspended across the joiner's opt-out and back in", async () => {
         stubTrackingOptOuts();
         const { tracker, mockConfigService } = createTracker(mockClient);
