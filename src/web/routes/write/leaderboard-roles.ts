@@ -30,6 +30,26 @@ const PAGE = "/admin/leaderboard-roles";
 const TIERS_KEY = "leaderboard_roles.tiers";
 
 /**
+ * The stored `leaderboard_roles.tiers` value, or null when it can't be read.
+ * `ConfigService.getString` swallows read failures and returns the default,
+ * which here would make an outage look like "no tiers" and let a save
+ * overwrite the real ones. `getAll` rejects instead, so it is the strict
+ * read; only when no row is stored does the env / default fallback apply.
+ */
+async function readStoredTiers(config: ConfigService): Promise<string | null> {
+  let rows: Awaited<ReturnType<ConfigService["getAll"]>>;
+  try {
+    rows = await config.getAll();
+  } catch (err) {
+    logger.warn("leaderboard tiers: config read failed", err);
+    return null;
+  }
+  const row = rows.find((r) => r.key === TIERS_KEY);
+  if (row) return typeof row.value === "string" ? row.value : "";
+  return config.getString(TIERS_KEY, "");
+}
+
+/**
  * Whether the submitted rows are exactly the stored tiers — the same
  * `topN:roleId` pairs the service would act on, ignoring blank rows, order
  * and spacing. A submission the service itself would parse differently (a
@@ -104,11 +124,18 @@ export function createLeaderboardRolesRouter(client: Client): Router {
       const topNs = toArray(body["topN"]);
       const roleIds = toArray(body["roleId"]);
       const config = ConfigService.getInstance();
-      let before: string;
-      try {
-        before = await config.getString(TIERS_KEY, "");
-      } catch {
-        before = "";
+      const before = await readStoredTiers(config);
+      if (before === null) {
+        const text =
+          "Could not read the stored tiers, so nothing was saved (saving could overwrite them). Try again.";
+        await recordAudit(session, {
+          action: "leaderboard-roles.tiers",
+          targetId: TIERS_KEY,
+          result: "failure",
+          errorMessage: "stored tiers unreadable",
+        });
+        flashRedirect(res, PAGE, { type: "err", text });
+        return;
       }
       // Saving the editor unchanged must leave the stored string exactly as
       // it was — including its order and spacing — so compare the tiers the

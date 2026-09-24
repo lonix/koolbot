@@ -1,5 +1,6 @@
 import {
   Client,
+  DiscordAPIError,
   Guild,
   GuildMember,
   Role,
@@ -12,6 +13,28 @@ import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
+
+/** Discord's Unknown Role error: the role was deleted. */
+const UNKNOWN_ROLE = 10011;
+
+/**
+ * Fetch a role, resolving a confirmed deletion to null. Discord reports a
+ * deleted role either as null or as an Unknown Role (10011) rejection; any
+ * other error is rethrown, so a transient failure never reads as "deleted".
+ */
+async function fetchRoleOrNull(
+  guild: Guild,
+  roleId: string,
+): Promise<Role | null> {
+  try {
+    return await guild.roles.fetch(roleId);
+  } catch (error) {
+    if (error instanceof DiscordAPIError && error.code === UNKNOWN_ROLE) {
+      return null;
+    }
+    throw error;
+  }
+}
 
 /** Weekly, Monday 00:00 — the schedule leaderboard roles ship with. */
 const DEFAULT_CRON = "0 0 * * 1";
@@ -214,7 +237,9 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         logger.info(
           "No leaderboard role tiers configured, skipping reconciliation.",
         );
-        return { ranAt: new Date(), period, tiers: [], retired };
+        const summary = { ranAt: new Date(), period, tiers: [], retired };
+        await this.maybeAnnounce(guild, summary);
+        return summary;
       }
 
       // Fetch the full ranking with the documented "all ranked users"
@@ -261,7 +286,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     tier: ParsedTier,
     rankedUserIds: string[],
   ): Promise<LeaderboardRoleRunSummary["tiers"][number]> {
-    const role: Role | null = await guild.roles.fetch(tier.roleId);
+    const role = await fetchRoleOrNull(guild, tier.roleId);
     if (!role) {
       logger.warn(
         `Leaderboard tier top${tier.topN}: role ${tier.roleId} not found in guild`,
@@ -375,8 +400,9 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
    * Same ordering rule as `revokeForUser`: revoke on Discord first, and drop
    * an id only once that landed (or the member / role is gone). A failed
    * revoke keeps the id so the next run retries; the row is deleted once it
-   * is empty. A role lookup that errors (rather than resolving to null) skips
-   * the row this run, so a transient failure never reads as "role deleted".
+   * is empty. A deleted role (null, or an Unknown Role rejection) drops the
+   * row; any other lookup error skips it this run, so a transient failure
+   * never reads as "role deleted".
    */
   private async retireRemovedTiers(
     guild: Guild,
@@ -388,7 +414,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       if (activeRoleIds.has(row.roleId)) continue;
       let role: Role | null;
       try {
-        role = await guild.roles.fetch(row.roleId);
+        role = await fetchRoleOrNull(guild, row.roleId);
       } catch (error) {
         logger.warn(
           `Leaderboard role ${row.roleId} is no longer a tier but could not be fetched; retrying next run:`,
@@ -638,9 +664,9 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     );
     if (!channelId) return;
 
-    const hasChanges = summary.tiers.some(
-      (t) => t.added.length > 0 || t.removed.length > 0,
-    );
+    const hasChanges =
+      summary.tiers.some((t) => t.added.length > 0 || t.removed.length > 0) ||
+      summary.retired.some((r) => r.removed.length > 0);
     if (!hasChanges) return;
 
     try {
@@ -675,6 +701,16 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         embed.addFields({
           name: `Top ${tier.topN} — ${tier.roleName}`,
           value: lines.join("\n"),
+          inline: false,
+        });
+      }
+
+      // Roles taken back because their tier was removed (#985).
+      for (const r of summary.retired) {
+        if (r.removed.length === 0) continue;
+        embed.addFields({
+          name: `Removed tier — ${r.roleName}`,
+          value: `Removed: ${r.removed.map((id) => `<@${id}>`).join(", ")}`,
           inline: false,
         });
       }

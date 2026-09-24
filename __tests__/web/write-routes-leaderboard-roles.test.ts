@@ -25,6 +25,7 @@ import {
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockGetString = jest.fn<() => Promise<string>>();
+const mockGetAll = jest.fn<() => Promise<unknown[]>>();
 const mockSet = jest.fn<() => Promise<void>>();
 const mockRunNow = jest.fn<() => Promise<unknown>>();
 
@@ -45,6 +46,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
       getString: mockGetString,
+      getAll: mockGetAll,
       set: mockSet,
     }),
   },
@@ -125,6 +127,7 @@ function soleAudit(): Record<string, unknown> {
 beforeEach(() => {
   jest.clearAllMocks();
   mockGetString.mockResolvedValue("");
+  mockGetAll.mockResolvedValue([]);
   mockSet.mockResolvedValue(undefined);
 });
 
@@ -192,6 +195,42 @@ describe("POST /leaderboard-roles/tiers", () => {
     expect(flash.type).toBe("ok");
     expect(flash.msg).toContain("unchanged");
     expect(mockSet).not.toHaveBeenCalled();
+  });
+
+  it("compares against the stored row, not the env/default fallback", async () => {
+    mockGetAll.mockResolvedValue([
+      { key: "leaderboard_roles.tiers", value: "1:111" },
+    ]);
+    mockGetString.mockResolvedValue("should-not-be-used");
+    harness = await mount(makeClient({}));
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: "1",
+      roleId: "111",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).msg).toContain(
+      "unchanged",
+    );
+    expect(mockGetString).not.toHaveBeenCalled();
+    expect(mockSet).not.toHaveBeenCalled();
+  });
+
+  it("refuses to save when the stored tiers can't be read", async () => {
+    // getString would swallow this and return "", making an outage look like
+    // "no tiers" and letting the save overwrite the real ones.
+    mockGetAll.mockRejectedValue(new Error("mongo down"));
+    harness = await mount(makeClient({ roles: { "111": { position: 1 } } }));
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: "1",
+      roleId: "111",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Could not read the stored tiers");
+    expect(mockSet).not.toHaveBeenCalled();
+    expect(soleAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "stored tiers unreadable",
+    });
   });
 
   it("clears the tiers when every row is blank", async () => {

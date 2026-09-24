@@ -67,6 +67,18 @@ const { LeaderboardRoleService } =
 
 type ServiceInstance = InstanceType<typeof LeaderboardRoleService>;
 
+/** Discord's Unknown Role rejection, as `guild.roles.fetch` throws it. */
+function unknownRoleError(): DiscordAPIError {
+  return new DiscordAPIError(
+    { code: 10011, message: "Unknown Role" },
+    10011,
+    404,
+    "GET",
+    "",
+    {},
+  );
+}
+
 function resetSingleton(): void {
   (LeaderboardRoleService as unknown as { instance: unknown }).instance =
     undefined;
@@ -476,6 +488,33 @@ describe("LeaderboardRoleService", () => {
     });
   });
 
+  it("skips a tier whose role fetch rejects with Unknown Role (#985)", async () => {
+    // Discord usually reports a deleted role as a 10011 rejection, not null;
+    // that must skip the tier, not fail the whole run.
+    mockConfigGetString.mockImplementation(async (key: unknown) => {
+      const k = key as string;
+      if (k === "GUILD_ID") return "guild-1";
+      if (k === "leaderboard_roles.tiers") return "1:99999998";
+      return k === "leaderboard_roles.period" ? "alltime" : "";
+    });
+    mockGetTopUsers.mockResolvedValue([
+      { userId: "u1", username: "u1", totalTime: 100 },
+    ]);
+    mockClientGuildsFetch.mockResolvedValue({
+      id: "guild-1",
+      members: { fetch: mockGuildMembersFetch },
+      roles: { fetch: jest.fn().mockRejectedValue(unknownRoleError()) },
+      channels: { fetch: mockGuildChannelsFetch },
+    });
+
+    const svc: ServiceInstance =
+      LeaderboardRoleService.getInstance(makeClient());
+    const result = await svc.runNow();
+
+    expect(result).not.toBeNull();
+    expect(result!.tiers[0].skippedReason).toBe("role-not-found");
+  });
+
   // #985. A tier that is removed, or given a different role, leaves a roster
   // row no tier reconciles any more; without this its holders would keep the
   // old role forever.
@@ -596,6 +635,63 @@ describe("LeaderboardRoleService", () => {
       });
       expect(mockRolesRemove).not.toHaveBeenCalled();
       expect(mockAssignmentDeleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops the row when the old role fetch rejects with Unknown Role", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockRejectedValue(unknownRoleError()) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired[0]).toMatchObject({ removed: ["u1"] });
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("announces roles taken back from removed tiers", async () => {
+      const mockSend = jest.fn(async () => undefined);
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.announcement_channel_id") return "chan-1";
+        return k === "leaderboard_roles.period" ? "alltime" : "";
+      });
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+      mockGuildChannelsFetch.mockResolvedValue({
+        isTextBased: () => true,
+        send: mockSend,
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      await svc.runNow();
+
+      // Every tier was removed, and the announcement still goes out.
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const [payload] = mockSend.mock.calls[0] as unknown as [
+        { embeds: Array<{ toJSON(): { fields?: unknown[] } }> },
+      ];
+      expect(payload.embeds[0].toJSON().fields).toEqual([
+        {
+          name: "Removed tier — Old tier",
+          value: "Removed: <@u1>",
+          inline: false,
+        },
+      ]);
     });
 
     it("leaves the row alone when the role lookup errors", async () => {
