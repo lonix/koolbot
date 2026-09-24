@@ -22,6 +22,7 @@ import {
 } from "../services/config-schema.js";
 import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
 import { THEME } from "./theme.js";
+import { MONTH_NAMES } from "./user-layout.js";
 import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import type { ModerationAction } from "../models/moderation-log.js";
@@ -2913,6 +2914,220 @@ ${renderFeatureSettingsCard({
   return renderAdminPage({
     title: "Quotes",
     active: "/admin/quotes",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
+// ---------- Birthdays ----------
+
+export interface BirthdayRow {
+  userId: string;
+  /** Display name when the member resolved, else the raw ID. */
+  userLabel: string;
+  month: number;
+  day: number;
+  /** A birth year is on file. The year itself is never shown (#986). */
+  hasYear: boolean;
+  /** Next celebration, `YYYY-MM-DD`. */
+  nextDate: string;
+  daysUntil: number;
+  roleActive: boolean;
+  lastAnnouncedYear: number | null;
+}
+
+export interface BirthdayPreviewView {
+  /** The signed-in admin, used as the sample member. */
+  mentionUserId: string;
+  mentionLabel: string;
+  /** `birthdays.mention` — whether `{user}` pings. */
+  mention: boolean;
+  /** The template rendered with {@link sampleAge}. */
+  withAge: string;
+  /** The template rendered with no year on file; null when it has no `{age}`. */
+  withoutAge: string | null;
+  sampleAge: number;
+}
+
+export interface BirthdaysProps extends CommonProps {
+  enabled: boolean;
+  channel: { name: string; id: string } | null;
+  role: { name: string; id: string } | null;
+  cron: string;
+  /** Every `birthdays.*` key, rendered in place on the page (#986). */
+  settingRows: SettingRow[];
+  settingsPickers?: FeatureSettingsPickers;
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /** The stored config could not be read; the card shows a notice instead. */
+  settingsUnavailable?: boolean;
+  preview: BirthdayPreviewView;
+  rows: BirthdayRow[];
+  /** The stored birthdays could not be read. */
+  listUnavailable?: boolean;
+  total: number;
+  page: number;
+  pageSize: number;
+  flash?: FlashMessage | null;
+}
+
+/**
+ * A rendered birthday message as HTML: escaped, with the sample member's
+ * `<@id>` mention drawn as a Discord-style chip instead of raw markup.
+ */
+function renderBirthdayPreviewText(
+  text: string,
+  preview: BirthdayPreviewView,
+): string {
+  const mentionHtml = `<span class="tag tag-info">@${escapeHtml(preview.mentionLabel)}</span>`;
+  return escapeHtml(text)
+    .split(escapeHtml(`<@${preview.mentionUserId}>`))
+    .join(mentionHtml);
+}
+
+function formatMonthDay(month: number, day: number): string {
+  return `${MONTH_NAMES[month - 1] ?? month} ${day}`;
+}
+
+function nextBirthdayLabel(row: BirthdayRow): string {
+  if (row.daysUntil === 0) return "today";
+  if (row.daysUntil === 1) return "tomorrow";
+  return `in ${row.daysUntil} days`;
+}
+
+export function renderBirthdaysPage(props: BirthdaysProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
+  const page = Math.min(Math.max(1, props.page), totalPages);
+
+  const monthOptions = (selected: number): string =>
+    MONTH_NAMES.map(
+      (name, i) =>
+        `<option value="${i + 1}"${i + 1 === selected ? " selected" : ""}>${escapeHtml(name)}</option>`,
+    ).join("");
+  const dayOptions = (selected: number): string =>
+    Array.from(
+      { length: 31 },
+      (_, i) =>
+        `<option value="${i + 1}"${i + 1 === selected ? " selected" : ""}>${i + 1}</option>`,
+    ).join("");
+
+  const rowsHtml = props.rows
+    .map((b) => {
+      const id = escapeHtml(b.userId);
+      const clearYear = b.hasYear
+        ? `<label class="checkbox"><input type="checkbox" name="clear_year" value="1"> Remove the birth year (the post stops showing an age)</label>`
+        : "";
+      return `<tr>
+<td title="${id}">${escapeHtml(b.userLabel)}<div class="muted mono">${id}</div></td>
+<td>${escapeHtml(formatMonthDay(b.month, b.day))}</td>
+<td>${escapeHtml(b.nextDate)} <span class="muted">(${nextBirthdayLabel(b)})</span></td>
+<td>${b.hasYear ? "on file" : '<span class="muted">none</span>'}</td>
+<td>${b.roleActive ? '<span class="tag tag-on">held</span>' : '<span class="muted">—</span>'}</td>
+<td class="muted">${b.lastAnnouncedYear ?? "—"}</td>
+<td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/birthdays/${id}/edit" class="stack">${csrfInput}
+      <label>Month<select name="month" required>${monthOptions(b.month)}</select></label>
+      <label>Day<select name="day" required>${dayOptions(b.day)}</select></label>
+      ${clearYear}
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
+  <form method="POST" action="/admin/birthdays/${id}/remove" onsubmit="return confirm('Remove the birthday for ${escapeJsInAttr(b.userLabel)}? Any birthday role they hold is taken back and the bot\\'s birthday posts about them are deleted.');">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Remove birthday for ${escapeHtml(b.userLabel)}">Remove</button></form>
+</td>
+</tr>`;
+    })
+    .join("");
+
+  const tableHtml = props.listUnavailable
+    ? `<div class="notice">Stored birthdays could not be read. Check the bot's logs and reload the page.</div>`
+    : props.rows.length === 0
+      ? `<div class="empty">No member has set a birthday yet. Members add theirs on <code>/me/birthday</code>.</div>`
+      : `<table><thead><tr><th scope="col">Member</th><th scope="col">Birthday</th><th scope="col">Next</th><th scope="col">Birth year</th><th scope="col">Role</th><th scope="col">Last post</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+
+  const pageLink = (n: number): string =>
+    n > 1 ? `/admin/birthdays?page=${n}` : "/admin/birthdays";
+  const prevLink =
+    page > 1
+      ? `<a class="btn btn-sm" href="${pageLink(page - 1)}">← Prev</a>`
+      : `<button class="btn btn-sm" disabled>← Prev</button>`;
+  const nextLink =
+    page < totalPages
+      ? `<a class="btn btn-sm" href="${pageLink(page + 1)}">Next →</a>`
+      : `<button class="btn btn-sm" disabled>Next →</button>`;
+
+  const p = props.preview;
+  const withoutAgeHtml = p.withoutAge
+    ? `<dt>No birth year on file</dt><dd>${renderBirthdayPreviewText(p.withoutAge, p)}</dd>`
+    : "";
+  const previewNotes = [
+    p.mention
+      ? "The member is pinged (<code>birthdays.mention</code> is on)."
+      : "The member's name shows, but they are not pinged (<code>birthdays.mention</code> is off).",
+    props.role
+      ? `They get <strong>@${escapeHtml(props.role.name)}</strong> for the configured duration.`
+      : "No birthday role is granted (<code>birthdays.role_id</code> is empty).",
+  ];
+
+  const runDisabled = !props.enabled || !props.channel;
+  const runHint = !props.enabled
+    ? "Enable <code>birthdays.enabled</code> first."
+    : !props.channel
+      ? "Set <code>birthdays.channel_id</code> first."
+      : "Runs the scheduled check now: posts for anyone whose birthday it is in their own timezone and has not been announced this year, and removes expired birthday roles. Nobody is announced twice.";
+
+  const body = `
+<h1>Birthdays</h1>
+<p class="subtitle">Members set their own birthday on <code>/me/birthday</code>. Here you can see who is coming up, correct or remove an entry, and check the message before it goes live.</p>
+${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Birthdays", featureKey: "birthdays.enabled", returnTo: "/admin/birthdays", csrfToken: props.csrfToken })}
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
+    <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
+    <dt>Birthday role</dt><dd>${props.role ? `@${escapeHtml(props.role.name)} <span class="muted mono">${escapeHtml(props.role.id)}</span>` : '<span class="muted">none</span>'}</dd>
+    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron)}</dd>
+    <dt>Stored birthdays</dt><dd>${props.listUnavailable ? '<span class="muted">unavailable</span>' : props.total}</dd>
+  </dl>
+  <form method="POST" action="/admin/birthdays/run-now" class="inline-form" onsubmit="return confirm('Run the birthday check now?');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary"${runDisabled ? " disabled" : ""}>Run now</button>
+    <span class="muted">${runHint}</span>
+  </form>
+</div>
+<div class="card">
+  <h2>Message preview</h2>
+  <p class="muted">The saved <code>birthdays.message</code>, filled in with you as the member. Save the settings below to update it.</p>
+  <dl class="kv">
+    <dt>Birth year on file (age ${p.sampleAge})</dt><dd>${renderBirthdayPreviewText(p.withAge, p)}</dd>
+    ${withoutAgeHtml}
+  </dl>
+  <p class="muted">${previewNotes.join(" ")}</p>
+</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change birthday settings here without leaving the page. A schedule change re-arms the birthday check on save — no restart needed.",
+  category: "birthdays",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/birthdays",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
+<div class="card">
+  <h2>Stored birthdays</h2>
+  <p class="muted">Soonest first. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
+  ${tableHtml}
+  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
+</div>
+`;
+  return renderAdminPage({
+    title: "Birthdays",
+    active: "/admin/birthdays",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

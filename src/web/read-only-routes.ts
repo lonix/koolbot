@@ -38,6 +38,10 @@ import { ReactionRoleService } from "../services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import Notice from "../models/notice.js";
 import { quoteService } from "../services/quote-service.js";
+import {
+  BirthdayService,
+  renderBirthdayMessage,
+} from "../services/birthday-service.js";
 import { normalizeUserId } from "../utils/user-id.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { BotStatusMessage } from "../models/bot-status-message.js";
@@ -88,6 +92,7 @@ import {
   renderPollsPage,
   renderModerationPage,
   renderQuotesPage,
+  renderBirthdaysPage,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
@@ -99,6 +104,7 @@ import {
   type FlashMessage,
   type NoticeCategoryOption,
   type QuoteRow,
+  type BirthdayRow,
   type ReactionRoleRow,
   type FeatureSettingsPickers,
   type RoleOption,
@@ -262,6 +268,24 @@ export const QUOTES_SETTING_KEYS = [
   "quotes.vote_history_days",
   "quotes.delete_roles",
 ] as const;
+
+/**
+ * Every `birthdays.*` key, edited in place on the Birthdays page (#986).
+ * `birthdays.enabled` is the card's cascade master, so the page can switch
+ * birthdays off as well as on.
+ */
+export const BIRTHDAYS_SETTING_KEYS = [
+  "birthdays.enabled",
+  "birthdays.channel_id",
+  "birthdays.cron",
+  "birthdays.message",
+  "birthdays.mention",
+  "birthdays.role_id",
+  "birthdays.role_duration_hours",
+] as const;
+
+/** Sample age the Birthdays page previews `{age}` with (#986). */
+const BIRTHDAY_PREVIEW_AGE = 30;
 
 /**
  * The env-var fallback a settings row shows for `key` when no DB row exists.
@@ -1331,6 +1355,135 @@ export function createReadOnlyRouter(
           page,
           pageSize,
           search,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Birthdays (#986) ----------
+  router.get(
+    "/birthdays",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const session = req.webSession;
+      if (!session) throw new Error("requireSession middleware must run first");
+      const config = ConfigService.getInstance();
+      const pageSize = 25;
+      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const requestedPage =
+        Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+
+      const [
+        enabled,
+        channelId,
+        roleId,
+        cron,
+        template,
+        mention,
+        birthdaySettings,
+        entries,
+      ] = await Promise.all([
+        config.getBoolean("birthdays.enabled", false),
+        config.getString("birthdays.channel_id", ""),
+        config.getString("birthdays.role_id", ""),
+        config.getString("birthdays.cron", "0 * * * *"),
+        config.getString("birthdays.message", "🎂 Happy birthday, {user}! 🎉"),
+        config.getBoolean("birthdays.mention", true),
+        loadFeatureSettings(client, common.guildId, BIRTHDAYS_SETTING_KEYS),
+        BirthdayService.getInstance(client)
+          .listBirthdays(common.guildId)
+          .catch((err: unknown) => {
+            logger.error("birthdays page: list read failed", err);
+            return null;
+          }),
+      ]);
+
+      const total = entries?.length ?? 0;
+      const lastPage = Math.max(1, Math.ceil(total / pageSize));
+      const page = Math.min(requestedPage, lastPage);
+      const pageEntries = (entries ?? []).slice(
+        (page - 1) * pageSize,
+        page * pageSize,
+      );
+
+      const channelNames = new Map<string, string>();
+      for (const c of birthdaySettings.pickers.textChannels ?? []) {
+        channelNames.set(c.id, c.name);
+      }
+      const roleNames = new Map<string, string>();
+      for (const r of birthdaySettings.pickers.roles ?? []) {
+        roleNames.set(r.id, r.name);
+      }
+
+      // Names rather than raw snowflakes, plus the signed-in admin for the
+      // preview: one batched member fetch, best-effort — a miss falls back
+      // to the ID.
+      const viewerId = session.discordUserId;
+      const ids = [
+        ...new Set([...pageEntries.map((e) => e.userId), viewerId]),
+      ].filter((id) => /^\d{17,20}$/.test(id));
+      const userLabels = new Map<string, string>();
+      if (ids.length > 0) {
+        try {
+          const guild = await client.guilds.fetch(common.guildId);
+          const members = await guild.members.fetch({ user: ids });
+          for (const [id, member] of members) {
+            userLabels.set(id, member.displayName ?? member.user.username);
+          }
+        } catch (err) {
+          logger.debug("birthdays page member-label fetch failed", err);
+        }
+      }
+
+      const rows: BirthdayRow[] = pageEntries.map((e) => ({
+        userId: e.userId,
+        userLabel: userLabels.get(e.userId) ?? e.userId,
+        month: e.month,
+        day: e.day,
+        hasYear: e.hasYear,
+        nextDate: e.nextDate,
+        daysUntil: e.daysUntil,
+        roleActive: e.roleActive,
+        lastAnnouncedYear: e.lastAnnouncedYear,
+      }));
+
+      const viewerName = userLabels.get(viewerId) ?? "Member";
+      const previewArgs = { userId: viewerId, displayName: viewerName };
+
+      res.type("text/html").send(
+        renderBirthdaysPage({
+          ...common,
+          enabled,
+          channel: channelId
+            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            : null,
+          role: roleId
+            ? { name: roleNames.get(roleId) ?? roleId, id: roleId }
+            : null,
+          cron,
+          settingRows: birthdaySettings.settingRows,
+          settingsPickers: birthdaySettings.pickers,
+          dependencyState: birthdaySettings.dependencyState,
+          settingsUnavailable: birthdaySettings.unavailable,
+          preview: {
+            mentionUserId: viewerId,
+            mentionLabel: viewerName,
+            mention,
+            withAge: renderBirthdayMessage(template, {
+              ...previewArgs,
+              age: BIRTHDAY_PREVIEW_AGE,
+            }),
+            withoutAge: template.includes("{age}")
+              ? renderBirthdayMessage(template, { ...previewArgs, age: null })
+              : null,
+            sampleAge: BIRTHDAY_PREVIEW_AGE,
+          },
+          rows,
+          listUnavailable: entries === null,
+          total,
+          page,
+          pageSize,
           flash: readFlash(req),
         }),
       );

@@ -160,6 +160,67 @@ export function shouldAnnounceBirthday(
   return birthday.lastAnnouncedYear !== local.year;
 }
 
+/**
+ * The UTC-midnight date `birthday` is celebrated on in `year` — Mar 1 for a
+ * Feb 29 birthday in a non-leap year, matching {@link isBirthdayToday}.
+ */
+function celebrationDateInYear(
+  birthday: { month: number; day: number },
+  year: number,
+): Date {
+  if (birthday.month === 2 && birthday.day === 29 && !isLeapYear(year)) {
+    return new Date(Date.UTC(year, 2, 1));
+  }
+  return new Date(Date.UTC(year, birthday.month - 1, birthday.day));
+}
+
+/**
+ * The next date `birthday` is celebrated on, counting `today` itself, and
+ * how many days away that is (0 = today). Used to sort the admin birthday
+ * list by who is up next (#986).
+ */
+export function nextBirthday(
+  birthday: { month: number; day: number },
+  today: { year: number; month: number; day: number },
+): { date: string; daysUntil: number } {
+  const start = Date.UTC(today.year, today.month - 1, today.day);
+  let when = celebrationDateInYear(birthday, today.year);
+  if (when.getTime() < start) {
+    when = celebrationDateInYear(birthday, today.year + 1);
+  }
+  return {
+    date: when.toISOString().slice(0, 10),
+    daysUntil: Math.round((when.getTime() - start) / (24 * MS_PER_HOUR)),
+  };
+}
+
+/**
+ * One stored birthday as the admin Birthdays page lists it (#986). The
+ * birth year is deliberately left out: a member shares it only to have their
+ * age in the post, so the page says whether one is on file, not what it is.
+ */
+export interface BirthdayListEntry {
+  userId: string;
+  month: number;
+  day: number;
+  hasYear: boolean;
+  /** Next celebration date, `YYYY-MM-DD` (host timezone). */
+  nextDate: string;
+  daysUntil: number;
+  /** A temporary birthday role is currently recorded as granted. */
+  roleActive: boolean;
+  lastAnnouncedYear: number | null;
+  updatedAt: Date | null;
+}
+
+/** An admin correction to a stored birthday (#986). */
+export interface BirthdayEdit {
+  month: number;
+  day: number;
+  /** Drop the stored birth year. An admin can remove one, never set one. */
+  clearYear?: boolean;
+}
+
 function rowToStored(row: IUserBirthday): StoredBirthday {
   return {
     month: row.month,
@@ -314,6 +375,83 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
       },
     );
     return row ? rowToStored(row) : { month, day, year: year ?? null };
+  }
+
+  /**
+   * Every stored birthday in the guild, soonest celebration first (#986).
+   * "Today" is the host's calendar day: members' own zones only shift an
+   * entry by a day either way, which does not matter for a sorted list.
+   * Throws on a read error so the admin page can say so rather than show an
+   * empty list.
+   */
+  public async listBirthdays(
+    guildId: string,
+    now: Date = new Date(),
+  ): Promise<BirthdayListEntry[]> {
+    const today = localYmdInZone(now, resolveTimezone(null));
+    const rows = await UserBirthday.find({ guildId });
+    return rows
+      .map((row) => {
+        const next = nextBirthday(row, today);
+        return {
+          userId: row.userId,
+          month: row.month,
+          day: row.day,
+          hasYear: typeof row.year === "number",
+          nextDate: next.date,
+          daysUntil: next.daysUntil,
+          roleActive: Boolean(row.roleAssignedAt),
+          lastAnnouncedYear:
+            typeof row.lastAnnouncedYear === "number"
+              ? row.lastAnnouncedYear
+              : null,
+          updatedAt: row.updatedAt ?? null,
+        };
+      })
+      .sort(
+        (a, b) => a.daysUntil - b.daysUntil || a.userId.localeCompare(b.userId),
+      );
+  }
+
+  /**
+   * Correct a member's stored birthday on their behalf (#986). Only an
+   * existing entry can be edited — an admin must not create birthday data a
+   * member never shared — so this returns `null` when there is none.
+   *
+   * The birth year is kept unless `clearYear` is set. `lastAnnouncedYear` is
+   * reset only when the date actually moves, so a corrected date can still
+   * fire this year while a year-only change on the day of the post does not
+   * announce the member a second time.
+   */
+  public async editBirthday(
+    userId: string,
+    guildId: string,
+    edit: BirthdayEdit,
+  ): Promise<StoredBirthday | null> {
+    if (!userId) throw new Error("userId required");
+    if (!guildId) throw new Error("guildId required");
+    const { month, day } = edit;
+    if (!isValidMonthDay(month, day)) {
+      throw new Error(`"${month}/${day}" is not a valid month/day`);
+    }
+
+    const row = await UserBirthday.findOne({ userId, guildId });
+    if (!row) return null;
+
+    const $unset: Record<string, ""> = {};
+    if (row.month !== month || row.day !== day) $unset.lastAnnouncedYear = "";
+    if (edit.clearYear) $unset.year = "";
+
+    const updated = await UserBirthday.findOneAndUpdate(
+      { _id: row._id },
+      {
+        $set: { month, day, updatedAt: new Date() },
+        ...(Object.keys($unset).length > 0 ? { $unset } : {}),
+      },
+      // No upsert: a row purged since the read above stays gone.
+      { new: true },
+    );
+    return updated ? rowToStored(updated) : null;
   }
 
   // ---------------------------------------------------------------

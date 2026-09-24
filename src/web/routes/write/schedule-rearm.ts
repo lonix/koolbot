@@ -12,6 +12,7 @@
 import type { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { DigestService } from "../../../services/digest-service.js";
+import { BirthdayService } from "../../../services/birthday-service.js";
 import { defaultConfig } from "../../../services/config-schema.js";
 
 interface ScheduleRearm {
@@ -27,6 +28,11 @@ const SCHEDULE_REARMS: readonly ScheduleRearm[] = [
     label: "weekly digest",
     keys: ["digest.enabled", "digest.cron"],
     reload: (client) => DigestService.getInstance(client).reload(),
+  },
+  {
+    label: "birthday check",
+    keys: ["birthdays.enabled", "birthdays.cron"],
+    reload: (client) => BirthdayService.getInstance(client).reload(),
   },
 ];
 

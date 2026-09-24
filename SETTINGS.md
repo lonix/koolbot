@@ -635,7 +635,9 @@ Celebrate members' birthdays with a message in a configured channel on
 the day — evaluated in **each member's own timezone** — optionally
 granting a temporary "birthday" role that is removed automatically.
 Members set their birthday on the **`/me/birthday`** page (the year is
-optional for privacy); there is no slash command.
+optional for privacy); there is no slash command. Admins manage the stored
+birthdays, preview the message and run the check on the Web UI **Birthdays**
+page (`/admin/birthdays`), which also edits these settings.
 
 | Setting | Default | Description |
 | --- | --- | --- |

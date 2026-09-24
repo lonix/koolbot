@@ -19,6 +19,7 @@ import {
   renderPermissionsPage,
   renderPollsPage,
   renderQuotesPage,
+  renderBirthdaysPage,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
@@ -2451,6 +2452,127 @@ describe("renderNoticesPage", () => {
     });
     expect(html).toContain("Notices settings could not be loaded");
     expect(html).not.toContain('name="value_notices.enabled"');
+  });
+});
+
+describe("renderBirthdaysPage (#986)", () => {
+  const PREVIEW = {
+    mentionUserId: "999999999999999999",
+    mentionLabel: "<Admin>",
+    mention: true,
+    withAge: "Happy birthday, <@999999999999999999>! You turn 30 <3",
+    withoutAge: null as string | null,
+    sampleAge: 30,
+  };
+  const BASE = {
+    ...COMMON,
+    enabled: true,
+    channel: { name: "general", id: "c1" },
+    role: null as { name: string; id: string } | null,
+    cron: "0 * * * *",
+    settingRows: [] as SettingRow[],
+    preview: PREVIEW,
+    rows: [],
+    total: 0,
+    page: 1,
+    pageSize: 25,
+  };
+  const ROW = {
+    userId: "111111111111111111",
+    userLabel: "Al'ice",
+    month: 2,
+    day: 29,
+    hasYear: true,
+    nextDate: "2027-03-01",
+    daysUntil: 158,
+    roleActive: true,
+    lastAnnouncedYear: 2026,
+  };
+
+  it("renders the empty state, status, run-now and the nav entry", () => {
+    const html = renderBirthdaysPage(BASE);
+    expect(html).toContain("No member has set a birthday yet.");
+    expect(html).toContain('action="/admin/birthdays/run-now"');
+    expect(html).not.toMatch(/disabled>Run now/);
+    expect(html).toContain("#general");
+    expect(html).toContain('href="/admin/birthdays" class="active"');
+  });
+
+  it("previews the message with an escaped mention chip, not raw markup", () => {
+    const html = renderBirthdaysPage(BASE);
+    expect(html).toContain('<span class="tag tag-info">@&lt;Admin&gt;</span>');
+    expect(html).not.toContain("&lt;@999999999999999999&gt;");
+    expect(html).toContain("You turn 30 &lt;3");
+    expect(html).toContain("The member is pinged");
+    expect(html).toContain("No birthday role is granted");
+  });
+
+  it("adds the no-year variant and the role when configured", () => {
+    const html = renderBirthdaysPage({
+      ...BASE,
+      role: { name: "Birthday", id: "r1" },
+      preview: {
+        ...PREVIEW,
+        mention: false,
+        withoutAge: "Happy birthday, <@999999999999999999>!",
+      },
+    });
+    expect(html).toContain("No birth year on file");
+    expect(html).toContain("<strong>@Birthday</strong>");
+    expect(html).toContain("they are not pinged");
+  });
+
+  it("lists entries with edit/remove forms and never a birth year", () => {
+    const html = renderBirthdaysPage({ ...BASE, rows: [ROW], total: 1 });
+    expect(html).toContain("Al&#39;ice");
+    expect(html).toContain("February 29");
+    expect(html).toContain("2027-03-01");
+    expect(html).toContain("in 158 days");
+    expect(html).toContain(`action="/admin/birthdays/${ROW.userId}/edit"`);
+    expect(html).toContain(`action="/admin/birthdays/${ROW.userId}/remove"`);
+    expect(html).toContain('<option value="2" selected>February</option>');
+    expect(html).toContain('<option value="29" selected>29</option>');
+    // A year is on file, so the admin may drop it — but never set one.
+    expect(html).toContain('name="clear_year"');
+    expect(html).not.toContain('name="year"');
+    expect(html).toContain("on file");
+  });
+
+  it("offers no clear-year box when no year is stored", () => {
+    const html = renderBirthdaysPage({
+      ...BASE,
+      rows: [{ ...ROW, hasYear: false, daysUntil: 0 }],
+      total: 1,
+    });
+    expect(html).not.toContain('name="clear_year"');
+    expect(html).toContain("(today)");
+  });
+
+  it("says the list could not be read instead of showing it empty", () => {
+    const html = renderBirthdaysPage({ ...BASE, listUnavailable: true });
+    expect(html).toContain("Stored birthdays could not be read");
+    expect(html).not.toContain("No member has set a birthday yet.");
+  });
+
+  it("pages through entries", () => {
+    const html = renderBirthdaysPage({
+      ...BASE,
+      rows: [ROW],
+      total: 60,
+      page: 2,
+    });
+    expect(html).toContain("Page 2 of 3");
+    expect(html).toContain('href="/admin/birthdays">← Prev');
+    expect(html).toContain('href="/admin/birthdays?page=3"');
+  });
+
+  it("disables run-now while the feature is off or the channel is unset", () => {
+    expect(renderBirthdaysPage({ ...BASE, enabled: false })).toMatch(
+      /btn btn-primary" disabled>Run now/,
+    );
+    const noChannel = renderBirthdaysPage({ ...BASE, channel: null });
+    expect(noChannel).toMatch(/btn btn-primary" disabled>Run now/);
+    expect(noChannel).toContain("Set <code>birthdays.channel_id</code> first.");
   });
 });
 

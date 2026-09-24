@@ -25,6 +25,7 @@ import { createPollsRouter } from "./routes/write/polls.js";
 import { createReactionRolesRouter } from "./routes/write/reaction-roles.js";
 import { createNoticesRouter } from "./routes/write/notices.js";
 import { createQuotesRouter } from "./routes/write/quotes.js";
+import { createBirthdaysRouter } from "./routes/write/birthdays.js";
 import { createDatabaseRouter } from "./routes/write/database.js";
 import { createVoiceChannelsRouter } from "./routes/write/voice-channels.js";
 import { createDigestRouter } from "./routes/write/digest.js";
@@ -53,6 +54,7 @@ export function createWriteRouter(
   router.use(createReactionRolesRouter(client));
   router.use(createNoticesRouter(client));
   router.use(createQuotesRouter(client));
+  router.use(createBirthdaysRouter(client));
   router.use(createDatabaseRouter(client));
   router.use(createVoiceChannelsRouter(client));
   router.use(createDigestRouter(client));

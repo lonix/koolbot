@@ -77,6 +77,7 @@ const {
   shouldAnnounceBirthday,
   localYmdInZone,
   renderBirthdayMessage,
+  nextBirthday,
 } = await import("../../src/services/birthday-service.js");
 
 type ServiceInstance = InstanceType<typeof BirthdayService>;
@@ -243,6 +244,41 @@ describe("birthday pure helpers", () => {
           local,
         ),
       ).toBe(false);
+    });
+  });
+
+  describe("nextBirthday (#986)", () => {
+    const today = { year: 2026, month: 9, day: 24 };
+
+    it("counts today as zero days away", () => {
+      expect(nextBirthday({ month: 9, day: 24 }, today)).toEqual({
+        date: "2026-09-24",
+        daysUntil: 0,
+      });
+    });
+
+    it("rolls a date already past this year over to next year", () => {
+      expect(nextBirthday({ month: 9, day: 23 }, today)).toEqual({
+        date: "2027-09-23",
+        daysUntil: 364,
+      });
+      expect(nextBirthday({ month: 1, day: 1 }, today)).toEqual({
+        date: "2027-01-01",
+        daysUntil: 99,
+      });
+    });
+
+    it("celebrates Feb 29 on Mar 1 in a non-leap year, like the announcer", () => {
+      expect(
+        nextBirthday({ month: 2, day: 29 }, { year: 2027, month: 2, day: 1 }),
+      ).toEqual({ date: "2027-03-01", daysUntil: 28 });
+      expect(
+        nextBirthday({ month: 2, day: 29 }, { year: 2028, month: 2, day: 1 }),
+      ).toEqual({ date: "2028-02-29", daysUntil: 28 });
+      // Mar 1 of a non-leap year *is* the celebration day.
+      expect(
+        nextBirthday({ month: 2, day: 29 }, { year: 2027, month: 3, day: 1 }),
+      ).toEqual({ date: "2027-03-01", daysUntil: 0 });
     });
   });
 
@@ -574,6 +610,138 @@ describe("BirthdayService", () => {
         svc.setBirthday("u1", "g1", { month: 6, day: 16, year: 1800 }),
       ).rejects.toThrow(/valid birth year/);
       expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("listBirthdays / editBirthday (#986)", () => {
+    it("lists entries soonest first and withholds the birth year", async () => {
+      mockBirthdayFind.mockResolvedValue([
+        { userId: "u-late", month: 12, day: 25, year: 1990 },
+        {
+          userId: "u-soon",
+          month: 9,
+          day: 25,
+          roleAssignedAt: new Date(),
+          lastAnnouncedYear: 2025,
+        },
+        { userId: "u-past", month: 9, day: 1 },
+      ]);
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      // Midday UTC, so the host timezone cannot move "today".
+      const list = await svc.listBirthdays(
+        "g1",
+        new Date("2026-09-24T12:00:00Z"),
+      );
+      expect(mockBirthdayFind).toHaveBeenCalledWith({ guildId: "g1" });
+      expect(list.map((e) => e.userId)).toEqual(["u-soon", "u-late", "u-past"]);
+      expect(list[0]).toMatchObject({
+        nextDate: "2026-09-25",
+        daysUntil: 1,
+        roleActive: true,
+        hasYear: false,
+        lastAnnouncedYear: 2025,
+      });
+      expect(list[1].hasYear).toBe(true);
+      expect(list[2].nextDate).toBe("2027-09-01");
+      for (const entry of list) expect(entry).not.toHaveProperty("year");
+    });
+
+    it("propagates a read error so the page can say so", async () => {
+      mockBirthdayFind.mockRejectedValue(new Error("db down"));
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      await expect(svc.listBirthdays("g1")).rejects.toThrow("db down");
+    });
+
+    it("returns null and writes nothing when no entry exists", async () => {
+      mockBirthdayFindOne.mockResolvedValue(null);
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      expect(
+        await svc.editBirthday("u1", "g1", { month: 6, day: 16 }),
+      ).toBeNull();
+      expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("moves the date, keeps the year and re-arms this year's post", async () => {
+      mockBirthdayFindOne.mockResolvedValue({
+        _id: "row1",
+        month: 6,
+        day: 15,
+        year: 1990,
+        lastAnnouncedYear: 2026,
+      });
+      mockBirthdayFindOneAndUpdate.mockResolvedValue({
+        month: 6,
+        day: 16,
+        year: 1990,
+      });
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      const result = await svc.editBirthday("u1", "g1", { month: 6, day: 16 });
+      expect(result).toEqual({ month: 6, day: 16, year: 1990 });
+      const [filter, update, options] = mockBirthdayFindOneAndUpdate.mock
+        .calls[0] as [
+        unknown,
+        { $set: Record<string, unknown>; $unset?: Record<string, unknown> },
+        Record<string, unknown>,
+      ];
+      expect(filter).toEqual({ _id: "row1" });
+      expect(update.$set).toMatchObject({ month: 6, day: 16 });
+      expect(update.$set).not.toHaveProperty("year");
+      expect(update.$unset).toEqual({ lastAnnouncedYear: "" });
+      // Never an upsert: a row purged since the read must stay gone.
+      expect(options).not.toHaveProperty("upsert");
+    });
+
+    it("clears only the year when the date is unchanged, so no second post", async () => {
+      mockBirthdayFindOne.mockResolvedValue({
+        _id: "row1",
+        month: 6,
+        day: 16,
+        year: 1990,
+        lastAnnouncedYear: 2026,
+      });
+      mockBirthdayFindOneAndUpdate.mockResolvedValue({ month: 6, day: 16 });
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      const result = await svc.editBirthday("u1", "g1", {
+        month: 6,
+        day: 16,
+        clearYear: true,
+      });
+      expect(result).toEqual({ month: 6, day: 16, year: null });
+      const [, update] = mockBirthdayFindOneAndUpdate.mock.calls[0] as [
+        unknown,
+        { $unset?: Record<string, unknown> },
+      ];
+      expect(update.$unset).toEqual({ year: "" });
+    });
+
+    it("sends no $unset for an unchanged date with the year kept", async () => {
+      mockBirthdayFindOne.mockResolvedValue({ _id: "row1", month: 6, day: 16 });
+      mockBirthdayFindOneAndUpdate.mockResolvedValue({ month: 6, day: 16 });
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      await svc.editBirthday("u1", "g1", { month: 6, day: 16 });
+      const [, update] = mockBirthdayFindOneAndUpdate.mock.calls[0] as [
+        unknown,
+        Record<string, unknown>,
+      ];
+      expect(update).not.toHaveProperty("$unset");
+    });
+
+    it("rejects an invalid date before reading or writing", async () => {
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      await expect(
+        svc.editBirthday("u1", "g1", { month: 4, day: 31 }),
+      ).rejects.toThrow(/valid month\/day/);
+      expect(mockBirthdayFindOne).not.toHaveBeenCalled();
+      expect(mockBirthdayFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("returns null when the row vanished between the read and the write", async () => {
+      mockBirthdayFindOne.mockResolvedValue({ _id: "row1", month: 6, day: 15 });
+      mockBirthdayFindOneAndUpdate.mockResolvedValue(null);
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      expect(
+        await svc.editBirthday("u1", "g1", { month: 6, day: 16 }),
+      ).toBeNull();
     });
   });
 

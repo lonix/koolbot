@@ -41,6 +41,7 @@ const mockPopulateClientCommands = jest.fn<() => Promise<void>>();
 const mockSetConfigReloadStatus = jest.fn();
 const mockGuildsFetch = jest.fn<() => Promise<{ name: string }>>();
 const mockDigestReload = jest.fn<() => Promise<void>>();
+const mockBirthdayReload = jest.fn<() => Promise<void>>();
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -95,6 +96,13 @@ jest.unstable_mockModule("../../src/services/digest-service.js", () => ({
   },
 }));
 
+// …and one that touches the birthday schedule re-arms the birthday job (#986).
+jest.unstable_mockModule("../../src/services/birthday-service.js", () => ({
+  BirthdayService: {
+    getInstance: (): unknown => ({ reload: mockBirthdayReload }),
+  },
+}));
+
 const { createSettingsRouter } =
   await import("../../src/web/routes/write/settings.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -117,6 +125,7 @@ beforeEach(async () => {
   mockFindDependencyIssues.mockResolvedValue([]);
   mockGuildsFetch.mockResolvedValue({ name: "Kool Guild" });
   mockDigestReload.mockResolvedValue(undefined);
+  mockBirthdayReload.mockResolvedValue(undefined);
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -602,6 +611,22 @@ describe("POST /settings/save-section", () => {
     );
     // The new schedule is armed now, not on the next restart.
     expect(mockDigestReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves the Birthdays page card and re-arms only the birthday job (#986)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "birthdays",
+      redirect: "/admin/birthdays",
+      keys: ["birthdays.enabled", "birthdays.cron", "birthdays.message"],
+      "value_birthdays.enabled": "true",
+      "value_birthdays.cron": "0 */2 * * *",
+      "value_birthdays.message": "Happy birthday {user}",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/birthdays");
+    expect(flash.type).toBe("ok");
+    expect(mockBirthdayReload).toHaveBeenCalledTimes(1);
+    expect(mockDigestReload).not.toHaveBeenCalled();
   });
 
   it("re-arms the digest job when disabled from its page (#976)", async () => {
