@@ -758,7 +758,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
 | **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
 | **Voice Channels** | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
-| **Weekly Digest**  | (new — **Preview** the weekly digest dry-run, plus a **Send now** button)                           |
+| **Weekly Digest**  | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
 | **Command Metrics**| (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
@@ -766,7 +766,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
 Feature pages (Announcements, Events, Polls, Reaction Roles, Notices, Voice
-Channels) are gated by their `<feature>.enabled` config key. When a
+Channels, Weekly Digest) are gated by their `<feature>.enabled` config key. When a
 feature is **off**, its sidebar link is still shown — greyed with an
 "off" badge — rather than hidden, so the page stays discoverable (#610);
 hiding it created a chicken-and-egg where the natural place to enable a
@@ -860,12 +860,24 @@ opted out, and whether a digest has already gone out this week) — **without
 sending any DMs or writing anything**. It's GET-driven, so it's safe to refresh.
 Users who have DMs closed can't be detected without actually sending, so those
 skips only surface on a real run. The page is gated by `digest.enabled`
-(the #610 disabled-feature pattern), and the digest thresholds/schedule
-themselves live under **Settings** (`digest.*`). A **Send now** button force-fires the
+(the #610 disabled-feature pattern). A **Send now** button force-fires the
 digest immediately — the same path the cron runs, including DM delivery and
 streak/state updates; concurrent runs coalesce, so clicking it during a
 scheduled tick can't double-deliver. There is intentionally **no `/digest`
 slash command** — the Web UI is the admin surface.
+
+Its **Settings** card (#976) edits every `digest.*` key in place: the enable
+toggle, the schedule (`digest.cron`, the same cron builder as Settings), the
+qualifying and streak thresholds, and whether achievements are included. It
+saves through the shared `/admin/settings/save-section` route and returns to
+the page. The enable toggle is the form's cascade master, so turning the digest
+off from here writes only `digest.enabled = false` and keeps the other values.
+A save that changes `digest.enabled` or `digest.cron` — from this card, the
+Settings page, the Enable banner or a per-key Reset — re-arms the digest job
+immediately, so a new schedule takes effect without a restart. A cron value the
+scheduler can't parse is refused at save time, so a typo can't stop the job.
+If the stored config can't be read, the card shows a notice instead of
+controls pre-filled with defaults.
 
 The **Voice Analytics** page (`/admin/analytics`) is a read-only, guild-wide
 voice-activity heatmap (#675, Part B). It aggregates the already-stored

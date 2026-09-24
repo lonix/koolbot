@@ -211,6 +211,38 @@ describe("ScheduledService", () => {
       expect(mockCronJob.mock.calls[1][0]).toBe("*/5 * * * *");
     });
 
+    it("serializes overlapping reloads so no job is left running unreferenced", async () => {
+      const service = new TestService();
+      await service.start();
+      const onReload = mockRegisterReloadCallback.mock.calls[0][0];
+
+      // A Web UI save racing another save and `/config reload`.
+      await Promise.all([service.reload(), service.reload(), onReload()]);
+
+      // Four jobs armed in total, and every one but the live job stopped.
+      // Interleaved, all three would stop the first job and then each arm a
+      // new one, leaving two orphans that still tick.
+      expect(mockCronJob).toHaveBeenCalledTimes(4);
+      expect(mockJobStop).toHaveBeenCalledTimes(3);
+    });
+
+    it("keeps reloading after a reload in the queue failed", async () => {
+      const service = new TestService();
+      await service.start();
+      const isEnabled = jest
+        .spyOn(
+          service as unknown as { isEnabled: () => Promise<boolean> },
+          "isEnabled",
+        )
+        .mockRejectedValueOnce(new Error("mongo is down"));
+
+      await expect(service.reload()).rejects.toThrow("mongo is down");
+      isEnabled.mockRestore();
+      await service.reload();
+
+      expect(mockCronJob).toHaveBeenCalledTimes(2);
+    });
+
     it("stops the job on destroy", async () => {
       const service = new TestService();
 

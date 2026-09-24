@@ -445,6 +445,15 @@ export function coerceConfigValue(
       reason: `too long (max ${TEXT_LIMITS.configValue} characters)`,
     };
   }
+  // Cron keys are re-armed on save (#976), so a value the scheduler can't
+  // parse would stop a running job. Refuse it at the write boundary instead,
+  // and store the sanitized form (wrapping quotes trimmed) the job will arm.
+  if (settingsMetadata[key as keyof typeof settingsMetadata]?.type === "cron") {
+    value = sanitizeCronExpression(value);
+    if (!isValidCronExpression(value)) {
+      return { ok: false, reason: "invalid cron expression" };
+    }
+  }
   // Fixed-options keys carry an `options` whitelist in their metadata. Any
   // value outside it (mistyped form field, crafted POST, stale YAML import)
   // is refused with a clear, enumerated error rather than silently stored.

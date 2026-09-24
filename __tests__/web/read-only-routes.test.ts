@@ -8,6 +8,7 @@ import {
   MODERATION_SETTING_KEYS,
   POLLS_SETTING_KEYS,
   EVENTS_SETTING_KEYS,
+  DIGEST_SETTING_KEYS,
   VOICE_CHANNELS_SETTING_KEYS,
   REACTION_ROLES_SETTING_KEYS,
   NOTICES_SETTING_KEYS,
@@ -555,6 +556,41 @@ describe("loadFeatureSettings (#971)", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+// Issue #976: the Weekly Digest page edits every `digest.*` key in place.
+describe("DIGEST_SETTING_KEYS (#976)", () => {
+  it("lists every digest.* key in the schema, master first", () => {
+    const schemaKeys = Object.keys(defaultConfig).filter((k) =>
+      k.startsWith("digest."),
+    );
+    expect([...DIGEST_SETTING_KEYS].sort()).toEqual(schemaKeys.sort());
+    expect(DIGEST_SETTING_KEYS[0]).toBe("digest.enabled");
+  });
+
+  it("resolves the off-card voice tracking and achievements dependencies", async () => {
+    const data = await loadFeatureSettings(
+      {} as any,
+      "guild-1",
+      DIGEST_SETTING_KEYS,
+      [
+        { key: "digest.cron", value: "0 16 * * 5" },
+        { key: "voicetracking.enabled", value: true },
+        { key: "achievements.enabled", value: false },
+      ],
+    );
+    expect(data.unavailable).toBe(false);
+    expect(data.settingRows.map((r) => r.key)).toEqual([
+      ...DIGEST_SETTING_KEYS,
+    ]);
+    expect(data.settingRows.find((r) => r.key === "digest.cron")?.current).toBe(
+      "0 16 * * 5",
+    );
+    expect(data.dependencyState.get("voicetracking.enabled")).toBe(true);
+    expect(data.dependencyState.get("achievements.enabled")).toBe(false);
+    // No channel or role keys, so no guild fetches were needed.
+    expect(data.pickers).toEqual({});
   });
 });
 

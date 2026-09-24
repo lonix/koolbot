@@ -82,6 +82,14 @@ export abstract class ScheduledService<TSummary = void> {
   private job: CronJob | null = null;
   private initialized = false;
   private inFlight: Promise<TSummary | null> | null = null;
+  /**
+   * Tail of the reload queue. `reload()` stops the job and then awaits
+   * `start()`, which awaits config reads before arming, so two overlapping
+   * reloads (a Web UI save racing `/config reload`, or two saves) would both
+   * pass the `initialized` guard and each arm a job — the first left running
+   * unreferenced and delivering twice. Reloads chain onto this instead.
+   */
+  private lifecycle: Promise<void> = Promise.resolve();
 
   protected constructor(client: Client, options: ScheduledServiceOptions) {
     this.client = client;
@@ -140,6 +148,9 @@ export abstract class ScheduledService<TSummary = void> {
         return;
       }
 
+      // Belt and braces for the reload queue: never drop a live job's
+      // reference, so a start that races one can't orphan it.
+      if (this.job) this.job.stop();
       const job = new CronJob(cronExpression, () => {
         void this.tick();
       });
@@ -160,11 +171,25 @@ export abstract class ScheduledService<TSummary = void> {
     }
   }
 
-  /** Stop the job and arm it again from current config. */
-  public async reload(): Promise<void> {
+  /**
+   * Stop the job and arm it again from current config. Concurrent calls run
+   * one after another, never interleaved, so they cannot stack jobs.
+   */
+  public reload(): Promise<void> {
+    return this.serialize(() => this.reloadNow());
+  }
+
+  private async reloadNow(): Promise<void> {
     logger.info(`Reloading ${this.options.label.toLowerCase()}...`);
     this.stopJob();
     await this.start();
+  }
+
+  /** Run `op` after every lifecycle change queued before it has settled. */
+  private serialize(op: () => Promise<void>): Promise<void> {
+    const next = this.lifecycle.then(op);
+    this.lifecycle = next.catch(() => undefined);
+    return next;
   }
 
   /**
@@ -249,7 +274,11 @@ export abstract class ScheduledService<TSummary = void> {
    * invoked for every registered service in turn, and one broken service must
    * not stop the rest from reloading.
    */
-  private async onConfigReload(): Promise<void> {
+  private onConfigReload(): Promise<void> {
+    return this.serialize(() => this.reconcileWithConfig());
+  }
+
+  private async reconcileWithConfig(): Promise<void> {
     try {
       logger.info(`${this.options.label}: configuration changed, reloading...`);
       const enabled = await this.isEnabled();
@@ -259,7 +288,7 @@ export abstract class ScheduledService<TSummary = void> {
         );
         this.destroy();
       } else if (enabled) {
-        await this.reload();
+        await this.reloadNow();
       }
     } catch (error) {
       logger.error(

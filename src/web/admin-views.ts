@@ -3381,10 +3381,24 @@ export interface DigestPreviewView {
 
 export interface DigestProps extends CommonProps {
   enabled: boolean;
-  cron: string;
-  minActiveMinutes: number;
-  streakMinMinutes: number;
-  includeAchievements: boolean;
+  /**
+   * Every `digest.*` key, edited in place on this page (#976) through
+   * {@link renderFeatureSettingsCard}. Includes `digest.enabled`, so the
+   * digest can be switched off here as well as on.
+   */
+  settingRows: SettingRow[];
+  /** Picker lists the card's rows render (none today; kept for parity). */
+  settingsPickers?: FeatureSettingsPickers;
+  /**
+   * On/off state of off-card dependencies of {@link settingRows}
+   * (`voicetracking.enabled`, `achievements.enabled`).
+   */
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /**
+   * True when the stored config could not be read. The card then renders a
+   * notice instead of controls pre-filled with schema defaults.
+   */
+  settingsUnavailable?: boolean;
   /** Populated only when a preview was requested (`?preview=1`). */
   preview: DigestPreviewView | null;
   flash?: FlashMessage | null;
@@ -3475,19 +3489,20 @@ export function renderDigestPage(props: DigestProps): string {
 .digest-embed-footer{margin-top:.75rem;padding-top:.5rem;border-top:1px solid #2d3748;font-size:.78rem;color:#94a3b8}
 </style>
 <h1>Weekly Digest</h1>
-<p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent. Configure the thresholds and schedule under <a href="/admin/settings">Settings</a>.</p>
+<p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Weekly Digest", featureKey: "digest.enabled", returnTo: "/admin/digest", csrfToken: props.csrfToken })}
-<div class="card">
-  <h2>Configuration</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron || "(unset)")}</dd>
-    <dt>Minimum active time to qualify</dt><dd>${props.minActiveMinutes} min/week</dd>
-    <dt>Minimum time counting toward a streak</dt><dd>${props.streakMinMinutes} min/week</dd>
-    <dt>Include achievements</dt><dd>${tagOnOff(props.includeAchievements, "yes", "no")}</dd>
-  </dl>
-</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change the digest schedule and thresholds here without leaving the page. A schedule change re-arms the digest job on save — no restart needed.",
+  category: "digest",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/digest",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
 <div class="card">
   <h2>Actions</h2>
   <form method="GET" action="/admin/digest" class="inline-form">
