@@ -394,6 +394,62 @@ describe("ConfigService - Methods", () => {
     });
   });
 
+  describe("getBooleanStrict() (#1029)", () => {
+    it("coerces like getBoolean and falls back to the default when unset", async () => {
+      mockFindOneAndUpdate.mockResolvedValue({});
+      await service.set("strict.key", false, "d", "core");
+      expect(await service.getBooleanStrict("strict.key", true)).toBe(false);
+
+      mockFindOne.mockResolvedValue(null);
+      expect(await service.getBooleanStrict("strict.unset", true)).toBe(true);
+    });
+
+    it("rejects on a failed read where getBoolean returns the default", async () => {
+      mockFindOne.mockRejectedValue(new Error("mongo down"));
+      expect(await service.getBoolean("strict.cold", true)).toBe(true);
+      await expect(
+        service.getBooleanStrict("strict.cold", true),
+      ).rejects.toThrow("mongo down");
+    });
+  });
+
+  describe("change listeners (#1029)", () => {
+    it("notifies after a successful set() and delete(), not a failed one", async () => {
+      const seen: string[] = [];
+      const listener = (key: string): void => {
+        seen.push(key);
+      };
+      service.addChangeListener(listener);
+
+      mockFindOneAndUpdate.mockResolvedValue({});
+      await service.set("watched.key", true, "d", "core");
+      mockDeleteOne.mockResolvedValue({ deletedCount: 1 });
+      await service.delete("watched.key");
+      mockFindOneAndUpdate.mockRejectedValue(new Error("DB write error"));
+      await expect(
+        service.set("failed.key", true, "d", "core"),
+      ).rejects.toThrow();
+      expect(seen).toEqual(["watched.key", "watched.key"]);
+
+      service.removeChangeListener(listener);
+      mockFindOneAndUpdate.mockResolvedValue({});
+      await service.set("watched.key", false, "d", "core");
+      expect(seen).toHaveLength(2);
+    });
+
+    it("keeps writing when a listener throws", async () => {
+      const throwing = (): void => {
+        throw new Error("listener boom");
+      };
+      service.addChangeListener(throwing);
+      mockFindOneAndUpdate.mockResolvedValue({});
+      await expect(
+        service.set("any.key", 1, "d", "core"),
+      ).resolves.toBeUndefined();
+      service.removeChangeListener(throwing);
+    });
+  });
+
   describe("delete()", () => {
     it("should delete key from database and cache", async () => {
       // First set a value in cache

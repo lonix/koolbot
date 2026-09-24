@@ -171,6 +171,12 @@ export interface ConfigSchema {
   "core.cron.channel_id": string;
   "core.moderation.enabled": boolean;
   "core.moderation.channel_id": string;
+  // Update-available note (#1029): a DiscordLogger category like the above.
+  "core.updates.enabled": boolean;
+  "core.updates.channel_id": string;
+
+  // Web UI update check (#1029)
+  "core.updatecheck.enabled": boolean;
 
   // Discord slash-command audit log (issue #459)
   "core.command_audit.enabled": boolean;
@@ -441,6 +447,16 @@ export const defaultConfig: ConfigSchema = {
   // until an operator names a mod-log channel to post them to.
   "core.moderation.enabled": false,
   "core.moderation.channel_id": "",
+  // One-time "update available" note (#1029). Off like every other log
+  // category: posting into a guild channel is an operator opt-in.
+  "core.updates.enabled": false,
+  "core.updates.channel_id": "",
+
+  // Web UI update check (#1029). On by default so operators notice a stale
+  // instance; it is an anonymous GET of public release metadata that sends
+  // nothing about the instance. Air-gapped or privacy-strict operators turn
+  // it off and the Web UI then shows only the running version.
+  "core.updatecheck.enabled": true,
 
   // WebUI audit log retention default (#756). WebAuditLog rows are written
   // unconditionally on every state-changing WebUI request, so there's no
@@ -1862,6 +1878,30 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Text channel that receives moderation action embeds. Nothing is posted while this is empty.",
     category: "core",
     type: "channel",
+  },
+  "core.updates.enabled": {
+    label: "Update notes to Discord",
+    description:
+      "Post a one-time note to the updates log channel the first time the update check sees a newer KoolBot release. Needs the update check to be on.",
+    category: "core",
+    type: "boolean",
+    dependsOn: ["core.updatecheck.enabled"],
+  },
+  "core.updates.channel_id": {
+    label: "Updates log channel",
+    description:
+      "Text channel that receives the update-available note. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
+  },
+
+  // Web UI update check (#1029)
+  "core.updatecheck.enabled": {
+    label: "Check for updates",
+    description:
+      "Compare the running version with the latest KoolBot release on GitHub (at startup, every 12 hours and on demand) and show the result in the Web UI. The check is an anonymous request for public release data and sends nothing about this instance. Turn off for air-gapped or privacy-strict installs.",
+    category: "core",
+    type: "boolean",
   },
 
   // Discord slash-command audit log (#459)

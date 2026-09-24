@@ -119,6 +119,10 @@ Review bot permissions carefully:
 - **Data retention**: Configure cleanup policies to minimize data storage
 - **Data access**: Only bot administrators can access stored data
 - **GDPR compliance**: Users can request data deletion via bot administrators
+- **Outbound requests**: the only request KoolBot makes on its own, beyond Discord and your
+  MongoDB, is the update check (`core.updatecheck.enabled`, on by default). It is an anonymous
+  `GET` of public release metadata from the GitHub API that sends nothing about your instance,
+  and you can turn it off. See `SETTINGS.md`.
 
 ## Security Updates
 

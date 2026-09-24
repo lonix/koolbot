@@ -24,6 +24,7 @@ import {
   type ConfigSchema,
 } from "../services/config-schema.js";
 import { PermissionsService } from "../services/permissions-service.js";
+import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
 import { ScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import {
@@ -802,6 +803,13 @@ export function createReadOnlyRouter(
           mongoose.connection.readyState
         ] ?? "unknown";
 
+      // Update check (#1029): re-read the enable flag so a Settings save shows
+      // up at once, then use the cached result — the dashboard never waits on
+      // GitHub.
+      const versionService = VersionCheckService.getInstance(client);
+      await versionService.refreshEnabled();
+      const version = versionService.getSnapshot();
+
       res.type("text/html").send(
         renderDashboardPage({
           ...common,
@@ -821,6 +829,8 @@ export function createReadOnlyRouter(
             notices,
           },
           features,
+          version,
+          flash: readFlash(req),
         }),
       );
     }),

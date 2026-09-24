@@ -34,6 +34,7 @@ import { ReactionActivityTracker } from "./services/reaction-activity-tracker.js
 import { PollParticipationTracker } from "./services/poll-participation-tracker.js";
 import { CommandAuditCleanupService } from "./services/command-audit-cleanup.js";
 import { WebAuditLogCleanupService } from "./services/web-audit-cleanup.js";
+import { VersionCheckService } from "./services/version-check-service.js";
 import { ModerationLogCleanupService } from "./services/moderation-log-cleanup.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
@@ -503,6 +504,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         messageActivityCleanup.destroy();
         CommandAuditCleanupService.getInstance().destroy();
         WebAuditLogCleanupService.getInstance().destroy();
+        VersionCheckService.getInstance().destroy();
         ModerationLogCleanupService.getInstance().destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
@@ -756,6 +758,11 @@ async function initializeServices(): Promise<void> {
     // Start the moderation-log retention cleanup cron (#742). Gates on
     // `moderation.enabled` and `moderation.retention_days` at run time.
     ModerationLogCleanupService.getInstance().start();
+
+    // Start the update check (#1029). An anonymous GET of the latest public
+    // release, at startup and every 12h; gates on `core.updatecheck.enabled`
+    // at run time and never blocks startup on the network round-trip.
+    await VersionCheckService.getInstance(client).start();
 
     // Switch lobby to online mode on startup and handle any users in offline lobby
     try {

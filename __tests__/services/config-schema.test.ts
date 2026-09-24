@@ -244,6 +244,9 @@ describe("Config Schema", () => {
       "achievements.enabled": ["voicetracking.enabled"],
       "celebrations.enabled": ["achievements.enabled"],
       "voicetracking.announcements.enabled": ["voicetracking.enabled"],
+      // The update-available note (#1029) has nothing to announce without
+      // the update check that finds the newer release.
+      "core.updates.enabled": ["core.updatecheck.enabled"],
     } satisfies Partial<Record<keyof ConfigSchema, (keyof ConfigSchema)[]>>;
 
     it("declares exactly the #659 hard-dependency table", () => {
@@ -534,6 +537,13 @@ describe("Config Schema", () => {
       // Moderation context notices (#907) — same opt-in posture, and they
       // additionally require the `moderation.enabled` master gate.
       "core.moderation.enabled": false,
+      // Update-available note (#1029) — same opt-in posture as the other
+      // log categories.
+      "core.updates.enabled": false,
+      // Web UI update check (#1029) — cross-cutting operator visibility, on
+      // by default so a stale self-hosted instance gets noticed. It sends
+      // nothing about the instance and can be turned off.
+      "core.updatecheck.enabled": true,
       // Persisted command metrics (#648) — same rationale as audit logging:
       // a cross-cutting operator-visibility feature, on by default so fresh
       // installs get historical command analytics out of the box.
