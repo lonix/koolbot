@@ -204,7 +204,10 @@ export interface BirthdayListEntry {
   month: number;
   day: number;
   hasYear: boolean;
-  /** Next celebration date, `YYYY-MM-DD` (host timezone). */
+  /**
+   * Next celebration date, `YYYY-MM-DD`, in the member's own timezone
+   * (the host's when they have none set).
+   */
   nextDate: string;
   daysUntil: number;
   /**
@@ -214,6 +217,10 @@ export interface BirthdayListEntry {
    * for the next run's sweep.
    */
   roleGranted: boolean;
+  /**
+   * The year the check last handled this member: posted for them, or marked
+   * them done because they had left the guild. Not proof a post was made.
+   */
   lastAnnouncedYear: number | null;
   updatedAt: Date | null;
 }
@@ -864,9 +871,21 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           };
         }
         roleRevoked = true;
+      } else {
+        // A grant written before `roleAssignedId` existed, with
+        // `birthdays.role_id` now unset: nothing names the role to revoke,
+        // but it may still be on the member. Keep the row, as the expiry
+        // sweep does, so the grant can still be taken back once a role is
+        // configured again — deleting it would strand the role for good.
+        return {
+          matched: rows.length,
+          removed: 0,
+          roleRevoked: false,
+          retry: false,
+          ...posts,
+          error: `a birthday-role grant is on record but names no role and birthdays.role_id is unset; the row is kept so the role can still be revoked once birthdays.role_id is set again`,
+        };
       }
-      // No role configured any more: nothing to revoke, so the marker is
-      // just stale bookkeeping and the row can go.
     }
 
     if (posts.announcementsFailed > 0) {

@@ -2537,6 +2537,7 @@ describe("renderBirthdaysPage (#986)", () => {
     expect(html).toContain('name="clear_year"');
     expect(html).not.toContain('name="year"');
     expect(html).toContain("on file");
+    expect(html).toContain("Last handled");
   });
 
   it("offers no clear-year box when no year is stored", () => {

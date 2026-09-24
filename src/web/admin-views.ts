@@ -2937,6 +2937,7 @@ export interface BirthdayRow {
   daysUntil: number;
   /** A grant is on record and not yet swept — not a live role check. */
   roleGranted: boolean;
+  /** Year the check last handled the member — not proof of a post. */
   lastAnnouncedYear: number | null;
 }
 
@@ -3047,7 +3048,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
     ? `<div class="notice">Stored birthdays could not be read. Check the bot's logs and reload the page.</div>`
     : props.rows.length === 0
       ? `<div class="empty">No member has set a birthday yet. Members add theirs on <code>/me/birthday</code>.</div>`
-      : `<table><thead><tr><th scope="col">Member</th><th scope="col">Birthday</th><th scope="col">Next</th><th scope="col">Birth year</th><th scope="col">Role grant</th><th scope="col">Last post</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+      : `<table><thead><tr><th scope="col">Member</th><th scope="col">Birthday</th><th scope="col">Next</th><th scope="col">Birth year</th><th scope="col">Role grant</th><th scope="col">Last handled</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
 
   const pageLink = (n: number): string =>
     n > 1 ? `/admin/birthdays?page=${n}` : "/admin/birthdays";
@@ -3122,7 +3123,7 @@ ${renderFeatureSettingsCard({
 })}
 <div class="card">
   <h2>Stored birthdays</h2>
-  <p class="muted">Soonest first, by each member's own timezone. <em>Role grant</em> means the bot recorded giving the birthday role and has not swept it yet; the next run removes it once <code>birthdays.role_duration_hours</code> has passed. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
+  <p class="muted">Soonest first, by each member's own timezone. <em>Role grant</em> means the bot recorded giving the birthday role and has not swept it yet; the next run removes it once <code>birthdays.role_duration_hours</code> has passed. <em>Last handled</em> is the year the check last dealt with the member: it posted for them, or skipped them because they had left the server. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
   ${tableHtml}
   <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
 </div>

@@ -837,7 +837,8 @@ The **Birthdays** page (#986) is for the admin side of birthdays; members still
 set their own date on `/me/birthday`. It lists every stored birthday, soonest
 first by each member's own timezone, 25 per page, with the next celebration
 date, whether a birth year is on file, whether a birthday-role grant is on
-record (not yet swept) and the year of the last post. The birth year itself is never shown: members share it only to have
+record (not yet swept) and the year the check last handled them (it posted,
+or skipped them because they had left). The birth year itself is never shown: members share it only to have
 their age in the post. Per row:
 
 - **Edit** corrects the month and day, and can remove a stored birth year (an
@@ -846,7 +847,9 @@ their age in the post. Per row:
 - **Remove** runs the same erasure as the member's own data reset (#916): it
   takes back a live birthday role and deletes the bot's birthday posts about
   the member before the entry goes. If either cannot be undone, the entry is
-  kept and the page says so, so you can try again.
+  kept and the page says so, so you can try again. That includes an old grant
+  that names no role while `birthdays.role_id` is unset: the entry stays until
+  a role is configured again, so the grant can still be taken back.
 
 The **Message preview** card renders the saved `birthdays.message` with you as
 the member (a sample age of 30, plus the no-year variant when the template uses

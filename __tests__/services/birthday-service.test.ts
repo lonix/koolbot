@@ -1268,6 +1268,26 @@ describe("BirthdayService", () => {
       expect(result.roleRevoked).toBe(true);
     });
 
+    it("keeps a legacy grant that names no role while none is configured (#986)", async () => {
+      // Written before `roleAssignedId` existed, and `birthdays.role_id` is
+      // now empty: the old role may still be on the member, so the row is
+      // their only handle on it — the same call the expiry sweep makes.
+      mockBirthdayFind.mockResolvedValue([
+        { _id: "b1", roleAssignedAt: new Date() },
+      ]);
+      mockConfigGetString.mockResolvedValue("");
+      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
+      const result = await svc.purgeForUser("guild-1", "user-1");
+
+      expect(result).toMatchObject({
+        matched: 1,
+        removed: 0,
+        roleRevoked: false,
+      });
+      expect(result.error).toMatch(/names no role/);
+      expect(mockBirthdayDeleteMany).not.toHaveBeenCalled();
+    });
+
     it("reports zeros for a member with no birthday", async () => {
       mockBirthdayFind.mockResolvedValue([]);
       const client = makeClient();
