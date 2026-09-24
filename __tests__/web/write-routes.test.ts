@@ -191,6 +191,28 @@ describe("coerceConfigValue", () => {
     if (!r.ok) expect(r.reason).toBe("unknown key");
   });
 
+  it("accepts a valid cron expression for cron keys (#976)", () => {
+    expect(coerceConfigValue("digest.cron", "0 16 * * 5")).toEqual({
+      ok: true,
+      value: "0 16 * * 5",
+    });
+  });
+
+  it("stores the sanitized cron form, trimming wrapping quotes (#976)", () => {
+    expect(coerceConfigValue("digest.cron", '"0 16 * * 5"')).toEqual({
+      ok: true,
+      value: "0 16 * * 5",
+    });
+  });
+
+  it("refuses a cron key value the scheduler can't parse (#976)", () => {
+    for (const bad of ["every monday", ""]) {
+      const r = coerceConfigValue("digest.cron", bad);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.reason).toBe("invalid cron expression");
+    }
+  });
+
   it("coerces HTML checkbox 'true' to a real boolean for boolean keys", () => {
     const r = coerceConfigValue("voicechannels.enabled", "true");
     expect(r).toEqual({ ok: true, value: true });

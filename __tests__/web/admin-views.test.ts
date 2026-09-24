@@ -3028,10 +3028,7 @@ describe("renderFeatureSettingsCard (#971)", () => {
 describe("renderDigestPage", () => {
   const DIGEST_CONFIG = {
     enabled: true,
-    cron: "0 9 * * 1",
-    minActiveMinutes: 30,
-    streakMinMinutes: 30,
-    includeAchievements: true,
+    settingRows: [],
   };
 
   it("renders the feature-disabled banner and disables actions when off", () => {
@@ -3125,6 +3122,111 @@ describe("renderDigestPage", () => {
     expect(html).toContain("digest.include_achievements");
     expect(html).toContain(
       "No opted-in members qualify for the digest this week",
+    );
+  });
+});
+
+describe("renderDigestPage settings card (#976)", () => {
+  const DIGEST_KEYS = [
+    "digest.enabled",
+    "digest.cron",
+    "digest.min_active_minutes",
+    "digest.streak_min_minutes",
+    "digest.include_achievements",
+  ] as const;
+  // Rows shaped the way `buildSettingRows` shapes them, from the schema.
+  const digestRows = (
+    overrides: Partial<Record<(typeof DIGEST_KEYS)[number], unknown>> = {},
+  ): SettingRow[] =>
+    DIGEST_KEYS.map((key) => ({
+      key,
+      label: settingsMetadata[key].label,
+      current: key in overrides ? overrides[key] : defaultConfig[key],
+      defaultValue: defaultConfig[key],
+      type: settingsMetadata[key].type,
+      description: settingsMetadata[key].description,
+      category: "digest",
+      min: settingsMetadata[key].min,
+    }));
+  const deps = new Map([
+    ["voicetracking.enabled", true],
+    ["achievements.enabled", true],
+  ]);
+  const render = (
+    settingRows: SettingRow[],
+    extra: Partial<Parameters<typeof renderDigestPage>[0]> = {},
+  ) =>
+    renderDigestPage({
+      ...COMMON,
+      enabled: true,
+      preview: null,
+      settingRows,
+      dependencyState: deps,
+      ...extra,
+    });
+
+  it("renders an editable control for every digest.* key", () => {
+    const html = render(digestRows());
+    for (const key of DIGEST_KEYS) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+      expect(html).toContain(`name="value_${key}"`);
+    }
+  });
+
+  it("renders digest.cron with the Settings cron control", () => {
+    const html = render(digestRows({ "digest.cron": "0 16 * * 5" }));
+    expect(html).toContain('<div class="cron-picker" data-mode="weekly"');
+    expect(html).toContain(
+      '<input type="hidden" class="cron-hidden" name="value_digest.cron" value="0 16 * * 5">',
+    );
+  });
+
+  it("posts to save-section and returns to /admin/digest", () => {
+    const html = render(digestRows());
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="digest">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/digest">',
+    );
+  });
+
+  it("carries digest.enabled as the cascade master so the digest can be disabled here", () => {
+    const html = render(digestRows({ "digest.enabled": true }));
+    expect(html).toMatch(
+      /name="value_digest\.enabled"[^>]*checked[^>]*data-cascade-master/,
+    );
+    expect(html).not.toContain('name="no_cascade"');
+  });
+
+  it("keeps Send now and Preview next to the card", () => {
+    const html = render(digestRows());
+    expect(html).toContain('action="/admin/digest/send-now"');
+    expect(html).toContain(">Preview digest</button>");
+    // The read-only Configuration list is gone — the card replaces it.
+    expect(html).not.toContain("<h2>Configuration</h2>");
+  });
+
+  it("locks the achievements toggle while achievements are off", () => {
+    const html = render(digestRows(), {
+      dependencyState: new Map([
+        ["voicetracking.enabled", true],
+        ["achievements.enabled", false],
+      ]),
+    });
+    expect(html).toMatch(
+      /name="value_digest\.include_achievements"[^>]*data-dep-locked/,
+    );
+  });
+
+  it("shows a notice instead of controls when settings can't be read", () => {
+    const html = render([], { settingsUnavailable: true });
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain(
+      '<form method="POST" action="/admin/settings/save-section"',
     );
   });
 });

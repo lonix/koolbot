@@ -163,6 +163,19 @@ export const EVENTS_SETTING_KEYS = [
 ] as const;
 
 /**
+ * Every `digest.*` key, edited in place on the Weekly Digest page (#976).
+ * Includes the `digest.enabled` master, so the card cascades like a Settings
+ * section and the digest can be switched off from its own page.
+ */
+export const DIGEST_SETTING_KEYS = [
+  "digest.enabled",
+  "digest.cron",
+  "digest.min_active_minutes",
+  "digest.streak_min_minutes",
+  "digest.include_achievements",
+] as const;
+
+/**
  * The `reactionroles.*` keys surfaced as editable controls on the Reaction
  * Roles feature page (#974). Unlike Voice Channels, the feature master
  * `reactionroles.enabled` is included so the page can turn the feature off as
@@ -1475,18 +1488,10 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
 
-      const [
-        enabled,
-        cron,
-        minActiveMinutes,
-        streakMinMinutes,
-        includeAchievements,
-      ] = await Promise.all([
+      const [enabled, digestSettings] = await Promise.all([
         config.getBoolean("digest.enabled", false),
-        config.getString("digest.cron", "0 9 * * 1"),
-        config.getNumber("digest.min_active_minutes", 30),
-        config.getNumber("digest.streak_min_minutes", 30),
-        config.getBoolean("digest.include_achievements", true),
+        // Editable `digest.*` settings card (#976).
+        loadFeatureSettings(client, common.guildId, DIGEST_SETTING_KEYS),
       ]);
 
       // Preview is a read-only dry run, so it's GET-driven: the "Preview"
@@ -1526,10 +1531,10 @@ export function createReadOnlyRouter(
         renderDigestPage({
           ...common,
           enabled,
-          cron,
-          minActiveMinutes,
-          streakMinMinutes,
-          includeAchievements,
+          settingRows: digestSettings.settingRows,
+          settingsPickers: digestSettings.pickers,
+          dependencyState: digestSettings.dependencyState,
+          settingsUnavailable: digestSettings.unavailable,
           preview,
           flash: readFlash(req),
         }),

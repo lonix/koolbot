@@ -41,6 +41,7 @@ import {
   findSectionMasterKey,
   resetConfigToDefaults,
 } from "./helpers.js";
+import { rearmScheduledServices, rearmFailureNote } from "./schedule-rearm.js";
 
 export function createSettingsRouter(client: Client): Router {
   const router = Router();
@@ -113,9 +114,10 @@ export function createSettingsRouter(client: Client): Router {
           unknown.length > 0
             ? ` Note: ${unknown.join(", ")} ${unknown.length === 1 ? "is not a" : "are not"} recognised emoji shortcode${unknown.length === 1 ? "" : "s"} (kept as typed; custom server emoji can't appear in channel names).`
             : "";
+        const rearmFailed = await rearmScheduledServices(client, [key]);
         flashRedirect(res, redirectTo, {
-          type: unknown.length > 0 ? "warn" : "ok",
-          text: `Set ${key} = ${String(coerced.value)}.${hint}`,
+          type: unknown.length > 0 || rearmFailed.length > 0 ? "warn" : "ok",
+          text: `Set ${key} = ${String(coerced.value)}.${hint}${rearmFailureNote(rearmFailed)}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
@@ -178,9 +180,10 @@ export function createSettingsRouter(client: Client): Router {
           },
           result: "success",
         });
+        const rearmFailed = await rearmScheduledServices(client, [key]);
         flashRedirect(res, redirectTo, {
-          type: "ok",
-          text: `Reset ${key} to default.`,
+          type: rearmFailed.length > 0 ? "warn" : "ok",
+          text: `Reset ${key} to default.${rearmFailureNote(rearmFailed)}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
@@ -510,14 +513,21 @@ export function createSettingsRouter(client: Client): Router {
             : null,
       });
 
+      // A changed schedule or enable flag re-arms its cron job now rather
+      // than on the next restart (#976).
+      const rearmFailed = await rearmScheduledServices(
+        client,
+        applied.map((a) => a.key),
+      );
+      const rearmNote = rearmFailureNote(rearmFailed);
       const label = category || "section";
       if (failed.length === 0) {
         respondSectionFlash(
           req,
           res,
           {
-            type: "ok",
-            text: `Saved ${applied.length} setting${applied.length === 1 ? "" : "s"} in ${label}.`,
+            type: rearmFailed.length > 0 ? "warn" : "ok",
+            text: `Saved ${applied.length} setting${applied.length === 1 ? "" : "s"} in ${label}.${rearmNote}`,
           },
           redirectTo,
         );
@@ -529,7 +539,7 @@ export function createSettingsRouter(client: Client): Router {
         res,
         {
           type: applied.length > 0 ? "warn" : "err",
-          text: `Saved ${applied.length}/${applied.length + failed.length} in ${label}. Failed: ${firstError.key} (${firstError.reason})${failed.length > 1 ? ` and ${failed.length - 1} more` : ""}.`,
+          text: `Saved ${applied.length}/${applied.length + failed.length} in ${label}. Failed: ${firstError.key} (${firstError.reason})${failed.length > 1 ? ` and ${failed.length - 1} more` : ""}.${rearmNote}`,
         },
         redirectTo,
         failed.map((f) => f.key),
