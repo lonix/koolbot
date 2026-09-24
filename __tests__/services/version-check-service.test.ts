@@ -11,6 +11,8 @@ const mockGetBoolean =
   jest.fn<(key: string, def: boolean) => Promise<boolean>>();
 const mockRegisterReload = jest.fn();
 const mockRemoveReload = jest.fn();
+const mockAddChangeListener = jest.fn();
+const mockRemoveChangeListener = jest.fn();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -18,6 +20,8 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
       getBoolean: mockGetBoolean,
       registerReloadCallback: mockRegisterReload,
       removeReloadCallback: mockRemoveReload,
+      addChangeListener: mockAddChangeListener,
+      removeChangeListener: mockRemoveChangeListener,
     })),
   },
 }));
@@ -348,6 +352,32 @@ describe("VersionCheckService (#1029)", () => {
     });
   });
 
+  it("retries loading the persisted state after a failed read", async () => {
+    jest.useFakeTimers({ doNotFake: ["nextTick", "setImmediate"] });
+    mockFindOneLean.mockRejectedValueOnce(new Error("mongo down"));
+    fetchMock.mockRejectedValue(new Error("offline"));
+    const svc = service();
+    await svc.checkNow();
+    expect(svc.getSnapshot().latest).toBeNull();
+
+    mockFindOneLean.mockResolvedValueOnce({
+      latestVersion: "v2.1.0",
+      releaseUrl: "https://github.com/lonix/koolbot/releases/tag/v2.1.0",
+      publishedAt: null,
+      fetchedAt: new Date("2026-09-20T00:00:00Z"),
+      notifiedVersion: null,
+    });
+    jest.setSystemTime(Date.now() + MIN_CHECK_GAP_MS + 1);
+    await svc.checkNow();
+    expect(mockFindOneLean).toHaveBeenCalledTimes(2);
+    expect(svc.getSnapshot().latest?.version).toBe("v2.1.0");
+
+    // Once loaded it is not read again.
+    jest.setSystemTime(Date.now() + MIN_CHECK_GAP_MS + 1);
+    await svc.checkNow();
+    expect(mockFindOneLean).toHaveBeenCalledTimes(2);
+  });
+
   describe("update-available note", () => {
     it("posts once per new release when core.updates is on", async () => {
       mockIsCategoryEnabled.mockResolvedValue(true);
@@ -495,6 +525,35 @@ describe("VersionCheckService (#1029)", () => {
       // A reload while it was already on does not force another request.
       await onReload();
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("a settings write to the enable flag applies without a reload", async () => {
+      fetchMock.mockResolvedValue(response(200, release("v2.1.0")));
+      const svc = service();
+      await svc.start();
+      await new Promise((r) => globalThis.setImmediate(r));
+      expect(svc.getSnapshot().updateKind).toBe("minor");
+      expect(mockAddChangeListener).toHaveBeenCalledTimes(1);
+      const onChange = mockAddChangeListener.mock.calls[0][0] as (
+        key: string,
+      ) => void;
+
+      // Unrelated keys are ignored.
+      mockGetBoolean.mockClear();
+      onChange("quotes.enabled");
+      await new Promise((r) => globalThis.setImmediate(r));
+      expect(mockGetBoolean).not.toHaveBeenCalled();
+
+      // Opting out drops the badge right away.
+      mockGetBoolean.mockResolvedValue(false);
+      onChange("core.updatecheck.enabled");
+      await new Promise((r) => globalThis.setImmediate(r));
+      const snap = svc.getSnapshot();
+      expect(snap.status).toBe("disabled");
+      expect(snap.updateKind).toBeNull();
+
+      svc.destroy();
+      expect(mockRemoveChangeListener).toHaveBeenCalledWith(onChange);
     });
 
     it("reports unchecked before the first result arrives", () => {

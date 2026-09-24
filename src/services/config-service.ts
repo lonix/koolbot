@@ -22,6 +22,7 @@ export class ConfigService {
   private initialized = false;
   private client: Client | null = null;
   private reloadCallbacks: Set<() => Promise<void>> = new Set();
+  private changeListeners: Set<(key: string) => void> = new Set();
 
   private constructor() {}
 
@@ -42,6 +43,34 @@ export class ConfigService {
 
   public removeReloadCallback(callback: () => Promise<void>): void {
     this.reloadCallbacks.delete(callback);
+  }
+
+  /**
+   * Be told, synchronously and after the write, whenever `set()` or
+   * `delete()` changes a key. Unlike reload callbacks this is not a reload:
+   * it is for a service that caches one flag and must not keep acting on
+   * the old value until the next `/config reload` (the update check's
+   * enable flag, #1029). A throwing listener is logged and ignored.
+   */
+  public addChangeListener(listener: (key: string) => void): void {
+    this.changeListeners.add(listener);
+  }
+
+  public removeChangeListener(listener: (key: string) => void): void {
+    this.changeListeners.delete(listener);
+  }
+
+  private notifyChange(key: string): void {
+    for (const listener of this.changeListeners) {
+      try {
+        listener(key);
+      } catch (error) {
+        logger.error(
+          `Config change listener failed for ${sanitizeForLog(key)}:`,
+          error,
+        );
+      }
+    }
   }
 
   public async triggerReload(): Promise<void> {
@@ -522,6 +551,7 @@ export class ConfigService {
       logger.info(
         `Configuration updated: ${sanitizeForLog(key)} = ${sanitizeForLog(value)}`,
       );
+      this.notifyChange(key);
 
       // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {
@@ -538,6 +568,7 @@ export class ConfigService {
       await Config.deleteOne({ key });
       this.cache.delete(key);
       logger.info(`Configuration deleted: ${key}`);
+      this.notifyChange(key);
 
       // No automatic reloads - users must manually trigger via /config reload
     } catch (error) {

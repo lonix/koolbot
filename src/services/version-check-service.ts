@@ -134,6 +134,18 @@ export class VersionCheckService {
   private lastError: string | null = null;
   private notifiedVersion: string | null = null;
 
+  /**
+   * A Settings write to `core.updatecheck.enabled` takes effect at once:
+   * turning it off drops the banner badge on the very next page, and
+   * turning it on runs a check, without waiting for `/config reload`.
+   */
+  private readonly onConfigChange = (key: string): void => {
+    if (key !== "core.updatecheck.enabled") return;
+    this.onReload().catch((err) => {
+      logger.error("Update check after a settings change failed:", err);
+    });
+  };
+
   private readonly onReload = async (): Promise<void> => {
     const wasEnabled = this.enabled;
     await this.refreshEnabled();
@@ -189,6 +201,7 @@ export class VersionCheckService {
     await this.loadState();
     await this.refreshEnabled();
     this.configService.registerReloadCallback(this.onReload);
+    this.configService.addChangeListener(this.onConfigChange);
     this.interval = setInterval(() => {
       this.checkNow().catch((err) => {
         logger.error("Update check failed:", err);
@@ -210,7 +223,8 @@ export class VersionCheckService {
       clearInterval(this.interval);
       this.interval = null;
     }
-    this.configService.removeReloadCallback?.(this.onReload);
+    this.configService.removeReloadCallback(this.onReload);
+    this.configService.removeChangeListener(this.onConfigChange);
   }
 
   /** Re-read `core.updatecheck.enabled`; returns the fresh value. */
@@ -366,9 +380,11 @@ export class VersionCheckService {
 
   private async loadState(): Promise<void> {
     if (this.stateLoaded) return;
-    this.stateLoaded = true;
     try {
       const row = await VersionCheckState.findOne({ key: STATE_KEY }).lean();
+      // Only a completed read (a row or none) counts as loaded; a failed
+      // one is retried by the next check instead of being given up on.
+      this.stateLoaded = true;
       if (!row) return;
       this.notifiedVersion = row.notifiedVersion ?? null;
       if (row.latestVersion && row.releaseUrl && row.fetchedAt) {
