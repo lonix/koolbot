@@ -1506,6 +1506,17 @@ describe("renderEventsPage settings card (#975)", () => {
     expect(html).toContain("pick a channel in the settings below");
   });
 
+  it("does not point the warnings at controls that aren't rendered", () => {
+    const html = render([], {
+      categoryConfigured: false,
+      announcementConfigured: false,
+      settingsUnavailable: true,
+    });
+    expect(html).not.toContain("in the settings below");
+    expect(html).toContain("pick a category once settings can be loaded again");
+    expect(html).toContain("pick a channel once settings can be loaded again");
+  });
+
   it("shows a notice instead of controls when settings can't be read", () => {
     const html = render([], { settingsUnavailable: true });
     expect(html).toContain("Settings could not be loaded");

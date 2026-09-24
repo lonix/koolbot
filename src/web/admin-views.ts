@@ -2042,12 +2042,17 @@ export function renderEventsPage(props: EventsProps): string {
 </table>`
       : '<p class="muted">No events scheduled yet.</p>';
 
+  // Point at the settings card only when it actually renders controls: while
+  // the config snapshot is unreadable the card is just a notice (#975).
+  const where = props.settingsUnavailable
+    ? "once settings can be loaded again"
+    : "in the settings below";
   const categoryWarn = props.categoryConfigured
     ? ""
-    : `<div class="notice warn">No <code>events.category_id</code> is set — event channels won't be created until you pick a category in the settings below.</div>`;
+    : `<div class="notice warn">No <code>events.category_id</code> is set — event channels won't be created until you pick a category ${where}.</div>`;
   const announcementWarn = props.announcementConfigured
     ? ""
-    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — RSVP messages and reminders won't be posted until you pick a channel in the settings below.</div>`;
+    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — RSVP messages and reminders won't be posted until you pick a channel ${where}.</div>`;
 
   const body = `
 <h1>Events</h1>
