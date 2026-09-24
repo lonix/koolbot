@@ -224,10 +224,10 @@ export interface QuotePurgeResult {
   /** Of those, the ones confirmed gone. */
   messagesDeleted: number;
   /**
-   * Of those, the ones that may still be visible in Discord (#916). The row
-   * is deleted regardless — see `purgeForUser` — so this is the member's
-   * erasure being *incomplete*, and the caller has to report it rather than
-   * count a failed delete as a success.
+   * Of those, the ones that may still be visible in Discord (#916). Their
+   * rows are kept — see `purgeForUser` — so a retry can still find the post;
+   * this is the member's erasure being *incomplete*, and the caller has to
+   * report it rather than count a failed delete as a success.
    */
   messagesFailed: number;
   /** Quotes the member saved for someone else that the purge found. */
@@ -813,9 +813,10 @@ export class QuoteService {
    * `deleteMany`:
    *
    * - `authorId === userId` — the quote is a record of what *they* said, so
-   *   the row goes, **and so does the bot's post in the quote channel** —
-   *   and when the post cannot be deleted the row still goes, but the
-   *   failure is counted as a failure so the caller can say so (#916).
+   *   the row goes, **and so does the bot's post in the quote channel**.
+   *   When the post cannot be deleted the row is *kept*, because it holds
+   *   the only `messageId`/`postChannelId` a retry could find the post by,
+   *   and the failure is counted so the caller can say so (#916).
    *   Deleting only the row would leave the member's words visible in Discord
    *   forever: `quote-channel-manager.cleanupUnauthorizedMessages()` sweeps
    *   only messages whose author is *not* the bot, so a bot-posted quote

@@ -108,3 +108,54 @@ describe("QuoteChannelManager.postQuote - reaction failure handling", () => {
     expect(result).toBeNull();
   });
 });
+
+/**
+ * No recorded channel and none configured (#919).
+ *
+ * `postQuote` needs a channel, so a quote added while `quotes.channel_id`
+ * was empty was never posted. Reporting its post as "unreachable" kept a
+ * purge of its author failing on every retry, since no retry could ever find
+ * a channel to look in.
+ */
+describe("QuoteChannelManager with no quote channel anywhere", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockGetString.mockResolvedValue("");
+  });
+
+  it("reports a post with no channel to live in as gone", async () => {
+    const manager = await loadManager();
+
+    await expect(manager.deleteQuoteMessage("interaction-id")).resolves.toBe(
+      true,
+    );
+    expect(mockClient.channels.fetch).not.toHaveBeenCalled();
+  });
+
+  it("tells a re-render there is no post rather than failing", async () => {
+    const { MissingPostError } = await import("../../src/utils/discord.js");
+    const manager = await loadManager();
+
+    await expect(
+      manager.updateQuoteMessage("interaction-id", "q1", "Hi", "999", "0"),
+    ).rejects.toBeInstanceOf(MissingPostError);
+  });
+
+  it("still looks in a recorded channel when none is configured", async () => {
+    // A post that recorded where it went can still be on screen there, so
+    // an empty `quotes.channel_id` must not short-circuit it.
+    const message = { delete: jest.fn().mockResolvedValue(undefined) };
+    mockClient.channels.fetch.mockResolvedValue({
+      isTextBased: () => true,
+      isDMBased: () => false,
+      messages: { fetch: jest.fn().mockResolvedValue(message) },
+    });
+    const manager = await loadManager();
+
+    await expect(manager.deleteQuoteMessage("m1", "old-channel")).resolves.toBe(
+      true,
+    );
+    expect(mockClient.channels.fetch).toHaveBeenCalledWith("old-channel");
+    expect(message.delete).toHaveBeenCalled();
+  });
+});

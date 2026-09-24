@@ -603,6 +603,9 @@ export const QUOTE_CHANNEL_POSTS = "quote-channel posts";
 /** Step label for the in-flight tracker-write drain (#918). */
 export const TRACKING_WRITES = "tracking writes";
 
+/** Step label for holding the member out of leaderboard reconciliation. */
+export const LEADERBOARD_HOLD = "leaderboard hold";
+
 export class UserDataDeletionService {
   private static instance: UserDataDeletionService | null = null;
 
@@ -647,18 +650,20 @@ export class UserDataDeletionService {
         // no run can re-grant a reward role after step 2 revokes it (#917).
         // Best effort: failing to take the hold must not stop an erasure.
         let releaseLeaderboard: () => void = () => undefined;
+        let holdError: string | undefined;
         try {
           releaseLeaderboard = await LeaderboardRoleService.getInstance(
             this.client,
           ).holdOutForPurge(userId);
         } catch (err) {
+          holdError = getErrorMessage(err);
           logger.warn(
             `Purge for ${sanitizeForLog(userId)}: could not hold the member out of leaderboard reconciliation`,
             err,
           );
         }
         try {
-          return await this.runPurge(ctx, userId, quiesced);
+          return await this.runPurge(ctx, userId, quiesced, holdError);
         } finally {
           releaseLeaderboard();
         }
@@ -668,12 +673,14 @@ export class UserDataDeletionService {
 
   /**
    * The purge steps proper; `purge` wraps them in the tracking pause and the
-   * leaderboard hold. `quiesced` is what the pause found when it started.
+   * leaderboard hold. `quiesced` is what the pause found when it started, and
+   * `holdError` why the leaderboard hold could not be taken, if it could not.
    */
   private async runPurge(
     ctx: PurgeContext,
     userId: string,
     quiesced: { pending: number; settled: boolean },
+    holdError?: string,
   ): Promise<PurgeReport> {
     const steps: PurgeStep[] = [];
 
@@ -729,6 +736,25 @@ export class UserDataDeletionService {
         error: settled
           ? undefined
           : "timed out waiting for an in-flight tracking write; a row may be recreated after this purge",
+      });
+    });
+
+    // 1c. Report the leaderboard hold (#917). The purge goes ahead without
+    //     it — failing to take a hold must not stop an erasure — but then a
+    //     reconcile running mid-purge can re-grant the reward role step 2
+    //     revokes, so the report says so rather than the audit calling the
+    //     purge clean over a window it did not close (#919).
+    await this.runStep(steps, LEADERBOARD_HOLD, "evict", async (emit) => {
+      emit({
+        action: "evict",
+        matched: 0,
+        removed: 0,
+        note: holdError
+          ? undefined
+          : "held out of leaderboard reconciliation for the purge",
+        error: holdError
+          ? `could not hold the member out of leaderboard reconciliation (${holdError}); a reward role may be re-granted by a reconcile that ran during this purge`
+          : undefined,
       });
     });
 
