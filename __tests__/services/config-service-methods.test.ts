@@ -394,6 +394,25 @@ describe("ConfigService - Methods", () => {
     });
   });
 
+  describe("getBooleanStrict() (#1029)", () => {
+    it("coerces like getBoolean and falls back to the default when unset", async () => {
+      mockFindOneAndUpdate.mockResolvedValue({});
+      await service.set("strict.key", false, "d", "core");
+      expect(await service.getBooleanStrict("strict.key", true)).toBe(false);
+
+      mockFindOne.mockResolvedValue(null);
+      expect(await service.getBooleanStrict("strict.unset", true)).toBe(true);
+    });
+
+    it("rejects on a failed read where getBoolean returns the default", async () => {
+      mockFindOne.mockRejectedValue(new Error("mongo down"));
+      expect(await service.getBoolean("strict.cold", true)).toBe(true);
+      await expect(
+        service.getBooleanStrict("strict.cold", true),
+      ).rejects.toThrow("mongo down");
+    });
+  });
+
   describe("change listeners (#1029)", () => {
     it("notifies after a successful set() and delete(), not a failed one", async () => {
       const seen: string[] = [];

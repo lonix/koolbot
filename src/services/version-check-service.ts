@@ -129,6 +129,8 @@ export class VersionCheckService {
   private stateLoaded = false;
 
   private enabled = true;
+  /** Whether `enabled` came from a successful config read yet. */
+  private enabledKnown = false;
   private latest: LatestRelease | null = null;
   private lastAttemptAt: Date | null = null;
   private lastError: string | null = null;
@@ -227,15 +229,27 @@ export class VersionCheckService {
     this.configService.removeChangeListener(this.onConfigChange);
   }
 
-  /** Re-read `core.updatecheck.enabled`; returns the fresh value. */
+  /**
+   * Re-read `core.updatecheck.enabled`; returns the fresh value. Fails
+   * closed: when the read itself fails (Mongo down with a cold cache), the
+   * last successfully read value is kept, and before any successful read
+   * the check counts as off — a stored opt-out must never be mistaken for
+   * the default "on".
+   */
   public async refreshEnabled(): Promise<boolean> {
     try {
-      this.enabled = await this.configService.getBoolean(
+      this.enabled = await this.configService.getBooleanStrict(
         "core.updatecheck.enabled",
         true,
       );
+      this.enabledKnown = true;
     } catch (err) {
-      logger.debug("Could not read core.updatecheck.enabled:", err);
+      if (!this.enabledKnown) this.enabled = false;
+      logger.warn(
+        "Could not read core.updatecheck.enabled; keeping the update check " +
+          (this.enabled ? "on (last known value)." : "off."),
+      );
+      logger.debug("core.updatecheck.enabled read error:", err);
     }
     return this.enabled;
   }

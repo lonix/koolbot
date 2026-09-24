@@ -17,8 +17,16 @@ export interface ParsedVersion {
 
 export type UpdateKind = "major" | "minor" | "patch";
 
-const VERSION_RE =
-  /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+// The SemVer 2.0.0 grammar: no leading zeros in numeric parts or numeric
+// pre-release identifiers, and no empty dot-separated identifiers.
+const NUM = "(0|[1-9]\\d*)";
+const PRE_ID = "(?:0|[1-9]\\d*|\\d*[A-Za-z-][0-9A-Za-z-]*)";
+const BUILD_ID = "[0-9A-Za-z-]+";
+const VERSION_RE = new RegExp(
+  `^v?${NUM}\\.${NUM}\\.${NUM}` +
+    `(?:-(${PRE_ID}(?:\\.${PRE_ID})*))?` +
+    `(?:\\+${BUILD_ID}(?:\\.${BUILD_ID})*)?$`,
+);
 
 /**
  * Parse a version string. Returns `null` for anything that is not a

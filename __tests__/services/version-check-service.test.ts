@@ -17,7 +17,7 @@ const mockRemoveChangeListener = jest.fn();
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
-      getBoolean: mockGetBoolean,
+      getBooleanStrict: mockGetBoolean,
       registerReloadCallback: mockRegisterReload,
       removeReloadCallback: mockRemoveReload,
       addChangeListener: mockAddChangeListener,
@@ -376,6 +376,29 @@ describe("VersionCheckService (#1029)", () => {
     jest.setSystemTime(Date.now() + MIN_CHECK_GAP_MS + 1);
     await svc.checkNow();
     expect(mockFindOneLean).toHaveBeenCalledTimes(2);
+  });
+
+  describe("fail-closed enable flag", () => {
+    it("treats the check as off when the very first read fails", async () => {
+      mockGetBoolean.mockRejectedValue(new Error("mongo down"));
+      fetchMock.mockResolvedValue(response(200, release("v2.1.0")));
+      const snap = await service().checkNow();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(snap.status).toBe("disabled");
+    });
+
+    it("keeps the last known value when a later read fails", async () => {
+      const svc = service();
+      mockGetBoolean.mockResolvedValueOnce(false);
+      expect(await svc.refreshEnabled()).toBe(false);
+      mockGetBoolean.mockRejectedValueOnce(new Error("mongo down"));
+      expect(await svc.refreshEnabled()).toBe(false);
+
+      mockGetBoolean.mockResolvedValueOnce(true);
+      expect(await svc.refreshEnabled()).toBe(true);
+      mockGetBoolean.mockRejectedValueOnce(new Error("mongo down"));
+      expect(await svc.refreshEnabled()).toBe(true);
+    });
   });
 
   describe("update-available note", () => {

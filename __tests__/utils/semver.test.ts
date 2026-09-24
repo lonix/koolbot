@@ -24,6 +24,30 @@ describe("semver helpers (#1029)", () => {
       expect(parseVersion("2.0.0+build.5")?.prerelease).toBeNull();
     });
 
+    it("rejects tags that break the SemVer grammar", () => {
+      for (const raw of [
+        "01.2.3", // leading zero
+        "1.02.3",
+        "1.2.03",
+        "1.2.3-rc.01", // leading zero in a numeric pre-release id
+        "1.2.3-", // empty pre-release
+        "1.2.3-rc..1", // empty identifier
+        "1.2.3-.rc",
+        "1.2.3-rc.",
+        "1.2.3+", // empty build
+        "1.2.3+build..1",
+        "1.2.3-rc_1", // invalid character
+      ]) {
+        expect(parseVersion(raw)).toBeNull();
+      }
+      // Still valid: zero parts, alphanumeric ids with leading digits.
+      expect(parseVersion("0.0.0")).not.toBeNull();
+      expect(parseVersion("1.2.3-0.3.7")?.prerelease).toBe("0.3.7");
+      expect(parseVersion("1.2.3-x-y-z.--")?.prerelease).toBe("x-y-z.--");
+      expect(parseVersion("1.2.3-01a")?.prerelease).toBe("01a");
+      expect(parseVersion("1.2.3+exp.sha.5114f85")).not.toBeNull();
+    });
+
     it("rejects anything that is not a semantic version", () => {
       for (const raw of ["unknown", "", "2.1", "v", "2.1.0.4", "x2.1.0"]) {
         expect(parseVersion(raw)).toBeNull();
