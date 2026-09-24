@@ -12,6 +12,7 @@
 import type { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { DigestService } from "../../../services/digest-service.js";
+import { LeaderboardRoleService } from "../../../services/leaderboard-role-service.js";
 import { defaultConfig } from "../../../services/config-schema.js";
 
 interface ScheduleRearm {
@@ -27,6 +28,11 @@ const SCHEDULE_REARMS: readonly ScheduleRearm[] = [
     label: "weekly digest",
     keys: ["digest.enabled", "digest.cron"],
     reload: (client) => DigestService.getInstance(client).reload(),
+  },
+  {
+    label: "leaderboard roles",
+    keys: ["leaderboard_roles.enabled", "leaderboard_roles.update_cron"],
+    reload: (client) => LeaderboardRoleService.getInstance(client).reload(),
   },
 ];
 

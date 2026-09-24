@@ -48,7 +48,10 @@ import {
   type UserFlashMessage,
   type VoicePresetView,
 } from "./user-layout.js";
-import { BirthdayService } from "../services/birthday-service.js";
+import {
+  BirthdayService,
+  type BirthdayPurgeResult,
+} from "../services/birthday-service.js";
 import {
   UserVoicePrefsService,
   VoicePrefsValidationError,
@@ -889,9 +892,20 @@ export function createUserRouter(
       let result: "success" | "failure" = "success";
       let errorMessage: string | null = null;
       let after = before;
+      let purge: BirthdayPurgeResult | null = null;
       try {
         if (clearing) {
-          after = await service.setBirthday(userId, guildId, null);
+          // Never a raw delete: the row is the only record of a live
+          // birthday role and of the bot's posts about the member, so the
+          // purge takes those back first and keeps the row if it cannot
+          // (#916, #1033).
+          purge = await service.purgeForUser(guildId, userId);
+          if (purge.error || (purge.matched > 0 && purge.removed === 0)) {
+            throw new Error(
+              purge.error ?? "the birthday could not be fully removed",
+            );
+          }
+          after = null;
         } else if (month === null || day === null) {
           throw new Error("Please choose a month and a day.");
         } else {
@@ -905,7 +919,7 @@ export function createUserRouter(
         result = "failure";
         errorMessage = err instanceof Error ? err.message : String(err);
         logger.error(
-          `Failed to save birthday: ${sanitizeForLog(errorMessage)}`,
+          `Failed to ${clearing ? "remove" : "save"} birthday: ${sanitizeForLog(errorMessage)}`,
         );
       }
 
@@ -914,8 +928,10 @@ export function createUserRouter(
         targetId: userId,
         details:
           result === "success"
-            ? { before, after }
-            : { attempted: { month, day, year } },
+            ? { before, after, ...(purge ? { purge } : {}) }
+            : clearing
+              ? { attempted: { clear: true }, before, purge }
+              : { attempted: { month, day, year } },
         result,
         errorMessage,
       });
@@ -924,7 +940,7 @@ export function createUserRouter(
       if (result === "failure") {
         flash = {
           type: "err",
-          text: `Could not save your birthday: ${errorMessage ?? "unknown error"}.`,
+          text: `Could not ${clearing ? "remove" : "save"} your birthday: ${errorMessage ?? "unknown error"}.`,
         };
       } else if (after === null) {
         flash = { type: "ok", text: "Removed your birthday." };

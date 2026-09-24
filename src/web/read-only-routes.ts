@@ -12,7 +12,7 @@ import {
   type RequestHandler,
   type Response,
 } from "express";
-import { ChannelType, Client } from "discord.js";
+import { ChannelType, Client, type Guild } from "discord.js";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
@@ -49,6 +49,14 @@ import {
 } from "../content/statuses.js";
 import { VoiceChannelTruncationService } from "../services/voice-channel-truncation.js";
 import { DigestService } from "../services/digest-service.js";
+import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
+import {
+  parseTierConfig,
+  storedTiersFromSnapshot,
+  tierRoleIssue,
+  TIERS_KEY,
+  type LeaderboardTier,
+} from "./leaderboard-tiers.js";
 import {
   VoiceChannelManager,
   resolveManagedCategory,
@@ -83,6 +91,7 @@ import {
   renderDatabasePage,
   renderDigestPage,
   renderEventsPage,
+  renderLeaderboardRolesPage,
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
@@ -101,6 +110,7 @@ import {
   type QuoteRow,
   type ReactionRoleRow,
   type FeatureSettingsPickers,
+  type LeaderboardTierView,
   type RoleOption,
   type SettingRow,
 } from "./admin-views.js";
@@ -261,6 +271,19 @@ export const QUOTES_SETTING_KEYS = [
   "quotes.max_length",
   "quotes.vote_history_days",
   "quotes.delete_roles",
+] as const;
+
+/**
+ * The `leaderboard_roles.*` keys edited in place on the Leaderboard Roles page
+ * (#985). `leaderboard_roles.enabled` is the card's cascade master.
+ * `leaderboard_roles.tiers` is left out: the page edits it through its own
+ * tier editor, and Settings keeps the raw text field for it.
+ */
+export const LEADERBOARD_ROLES_SETTING_KEYS = [
+  "leaderboard_roles.enabled",
+  "leaderboard_roles.period",
+  "leaderboard_roles.update_cron",
+  "leaderboard_roles.announcement_channel_id",
 ] as const;
 
 /**
@@ -545,6 +568,113 @@ export async function fetchRoleData(
     logger.debug("fetchRoleData failed", err);
   }
   return { names, roles };
+}
+
+/** Discord's cap on user ids per batched guild-member fetch. */
+const MEMBER_FETCH_BATCH = 100;
+
+/**
+ * Guild-side state for the Leaderboard Roles page (#985): each configured
+ * tier's role, whether the bot can assign it, and the members the service
+ * last recorded as holding it, plus the roles the tier editor can offer.
+ *
+ * Holders come from the service's own `LeaderboardRoleAssignment` roster, not
+ * `role.members` — the bot does not request the privileged GuildMembers
+ * intent, so that roster is the only record of who holds a reward role.
+ * Everything here is best-effort: a failed guild or roster read degrades to
+ * unresolved names and empty lists rather than failing the page.
+ */
+export async function loadLeaderboardRoleState(
+  client: Client,
+  guildId: string,
+  tiers: readonly LeaderboardTier[],
+): Promise<{ tiers: LeaderboardTierView[]; roles: RoleOption[] }> {
+  const assignments = await LeaderboardRoleAssignment.find({ guildId })
+    .lean()
+    .catch((err: unknown) => {
+      logger.debug("leaderboard roles: roster read failed", err);
+      return [];
+    });
+  const rosterByRole = new Map(assignments.map((a) => [a.roleId, a]));
+
+  let guild: Guild | null = null;
+  let botHighest: number | null = null;
+  const roles: RoleOption[] = [];
+  try {
+    guild = await client.guilds.fetch(guildId);
+    await guild.roles.fetch();
+    const me =
+      guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+    botHighest = me ? me.roles.highest.position : null;
+    for (const role of guild.roles.cache.values()) {
+      // @everyone and integration-managed roles can never be assigned.
+      if (role.id === guild.id || role.managed) continue;
+      roles.push({ id: role.id, name: role.name });
+    }
+    roles.sort((a, b) => a.name.localeCompare(b.name));
+  } catch (err) {
+    logger.debug("leaderboard roles: guild fetch failed", err);
+    guild = null;
+  }
+
+  // Resolve holder names: member cache first, then batched fetches for the
+  // misses — Discord accepts at most 100 ids per request, and a wide tier can
+  // hold far more. Unresolved ids (left the guild) fall back to the raw id.
+  const labels = new Map<string, string>();
+  const holderIds = new Set<string>();
+  for (const tier of tiers) {
+    for (const id of rosterByRole.get(tier.roleId)?.userIds ?? []) {
+      holderIds.add(id);
+    }
+  }
+  if (guild && holderIds.size > 0) {
+    const missing: string[] = [];
+    for (const id of holderIds) {
+      const cached = guild.members.cache.get(id);
+      if (cached) labels.set(id, cached.displayName ?? cached.user.username);
+      else missing.push(id);
+    }
+    for (let i = 0; i < missing.length; i += MEMBER_FETCH_BATCH) {
+      const fetched = await guild.members
+        .fetch({ user: missing.slice(i, i + MEMBER_FETCH_BATCH) })
+        .catch(() => null);
+      if (fetched) {
+        for (const [id, member] of fetched) {
+          labels.set(id, member.displayName ?? member.user.username);
+        }
+      }
+    }
+  }
+
+  const views = tiers.map((tier): LeaderboardTierView => {
+    const role = guild?.roles.cache.get(tier.roleId) ?? null;
+    const roster = rosterByRole.get(tier.roleId);
+    const issue =
+      guild && role ? tierRoleIssue(role, guild.id, botHighest) : null;
+    return {
+      topN: tier.topN,
+      roleId: tier.roleId,
+      // Unknown when the guild couldn't be read, so show the id rather than
+      // claiming the role is gone.
+      roleName: role ? role.name : guild ? null : tier.roleId,
+      roleIssue: issue === "missing" ? null : issue,
+      // Unknown, not assignable, when the hierarchy was never checked (the
+      // guild or the bot's own member couldn't be read).
+      assignable: issue
+        ? false
+        : guild && role && botHighest !== null
+          ? true
+          : null,
+      holders: (roster?.userIds ?? []).map((id) => ({
+        id,
+        label: labels.get(id) ?? id,
+      })),
+      lastUpdated: roster?.updatedAt
+        ? new Date(roster.updatedAt).toISOString()
+        : null,
+    };
+  });
+  return { tiers: views, roles };
 }
 
 function readFlash(req: Request): FlashMessage | null {
@@ -1663,6 +1793,67 @@ export function createReadOnlyRouter(
           dependencyState: digestSettings.dependencyState,
           settingsUnavailable: digestSettings.unavailable,
           preview,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Leaderboard Roles (#985) ----------
+  router.get(
+    "/leaderboard-roles",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+
+      // One strict config snapshot backs both the settings card and the tier
+      // editor, so a failed read shows the "can't be loaded" notice for both
+      // rather than an empty editor (getString would turn the failure into
+      // "no tiers").
+      const stored = await config.getAll().catch((err: unknown) => {
+        logger.warn("leaderboard roles: config snapshot read failed", err);
+        return null;
+      });
+      const [enabled, voiceTrackingEnabled, period, cron, tiersRaw, settings] =
+        await Promise.all([
+          config.getBoolean("leaderboard_roles.enabled", false),
+          config.getBoolean("voicetracking.enabled", false),
+          config.getString("leaderboard_roles.period", "alltime"),
+          config.getString("leaderboard_roles.update_cron", "0 0 * * 1"),
+          stored === null
+            ? ""
+            : (storedTiersFromSnapshot(stored) ??
+              config.getString(TIERS_KEY, "")),
+          // Loaded whether or not the feature is on, so it can be switched
+          // on from this card as well.
+          loadFeatureSettings(
+            client,
+            common.guildId,
+            LEADERBOARD_ROLES_SETTING_KEYS,
+            stored,
+          ),
+        ]);
+      const parsed = parseTierConfig(tiersRaw);
+      const state = await loadLeaderboardRoleState(
+        client,
+        common.guildId,
+        parsed.tiers,
+      );
+
+      res.type("text/html").send(
+        renderLeaderboardRolesPage({
+          ...common,
+          enabled,
+          voiceTrackingEnabled,
+          period,
+          cron,
+          tiers: state.tiers,
+          ignoredEntries: parsed.ignored,
+          roles: state.roles,
+          settingRows: settings.settingRows,
+          pickers: settings.pickers,
+          dependencyState: settings.dependencyState,
+          settingsUnavailable: settings.unavailable,
           flash: readFlash(req),
         }),
       );

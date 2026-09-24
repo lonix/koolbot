@@ -22,6 +22,7 @@ const mockAssignmentFindOne = jest.fn();
 const mockAssignmentFindOneAndUpdate = jest.fn();
 const mockAssignmentFind = jest.fn();
 const mockAssignmentUpdateOne = jest.fn();
+const mockAssignmentDeleteOne = jest.fn();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -47,6 +48,7 @@ jest.unstable_mockModule(
       findOneAndUpdate: mockAssignmentFindOneAndUpdate,
       find: mockAssignmentFind,
       updateOne: mockAssignmentUpdateOne,
+      deleteOne: mockAssignmentDeleteOne,
     },
   }),
 );
@@ -60,10 +62,22 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { LeaderboardRoleService } =
+const { LeaderboardRoleService, formatMentionLine } =
   await import("../../src/services/leaderboard-role-service.js");
 
 type ServiceInstance = InstanceType<typeof LeaderboardRoleService>;
+
+/** Discord's Unknown Role rejection, as `guild.roles.fetch` throws it. */
+function unknownRoleError(): DiscordAPIError {
+  return new DiscordAPIError(
+    { code: 10011, message: "Unknown Role" },
+    10011,
+    404,
+    "GET",
+    "",
+    {},
+  );
+}
 
 function resetSingleton(): void {
   (LeaderboardRoleService as unknown as { instance: unknown }).instance =
@@ -142,6 +156,7 @@ describe("LeaderboardRoleService", () => {
     mockAssignmentFindOneAndUpdate.mockResolvedValue({});
     mockAssignmentFind.mockResolvedValue([]);
     mockAssignmentUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    mockAssignmentDeleteOne.mockResolvedValue({ deletedCount: 1 });
   });
 
   describe("singleton", () => {
@@ -473,6 +488,290 @@ describe("LeaderboardRoleService", () => {
     });
   });
 
+  it("skips a tier whose role fetch rejects with Unknown Role (#985)", async () => {
+    // Discord usually reports a deleted role as a 10011 rejection, not null;
+    // that must skip the tier, not fail the whole run.
+    mockConfigGetString.mockImplementation(async (key: unknown) => {
+      const k = key as string;
+      if (k === "GUILD_ID") return "guild-1";
+      if (k === "leaderboard_roles.tiers") return "1:99999998";
+      return k === "leaderboard_roles.period" ? "alltime" : "";
+    });
+    mockGetTopUsers.mockResolvedValue([
+      { userId: "u1", username: "u1", totalTime: 100 },
+    ]);
+    mockClientGuildsFetch.mockResolvedValue({
+      id: "guild-1",
+      members: { fetch: mockGuildMembersFetch },
+      roles: { fetch: jest.fn().mockRejectedValue(unknownRoleError()) },
+      channels: { fetch: mockGuildChannelsFetch },
+    });
+
+    const svc: ServiceInstance =
+      LeaderboardRoleService.getInstance(makeClient());
+    const result = await svc.runNow();
+
+    expect(result).not.toBeNull();
+    expect(result!.tiers[0].skippedReason).toBe("role-not-found");
+  });
+
+  // #985. A tier that is removed, or given a different role, leaves a roster
+  // row no tier reconciles any more; without this its holders would keep the
+  // old role forever.
+  describe("removed tiers (#985)", () => {
+    function tiersConfig(tiers: string): void {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.tiers") return tiers;
+        if (k === "leaderboard_roles.period") return "alltime";
+        return "";
+      });
+    }
+
+    beforeEach(() => {
+      mockRolesRemove.mockResolvedValue(undefined);
+      mockGetTopUsers.mockResolvedValue([]);
+    });
+
+    it("takes the old role back and deletes the roster row", async () => {
+      tiersConfig("1:99999001");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999001", userIds: [] },
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1", "u2"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired).toEqual([
+        {
+          roleId: "99999777",
+          roleName: "Old tier",
+          removed: ["u1", "u2"],
+          retained: [],
+        },
+      ]);
+      expect(mockRolesRemove).toHaveBeenCalledTimes(2);
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledWith({
+        guildId: "guild-1",
+        roleId: "99999777",
+      });
+      // The configured tier's row is left to reconcileTier.
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("still takes the roles back when every tier was removed", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result).toMatchObject({
+        tiers: [],
+        retired: [{ removed: ["u1"] }],
+      });
+      expect(mockRolesRemove).toHaveBeenCalledTimes(1);
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+    });
+
+    it("keeps a member whose revoke failed on the roster to retry", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1", "u2"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+      mockRolesRemove
+        .mockRejectedValueOnce(new Error("missing permissions"))
+        .mockResolvedValueOnce(undefined);
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired[0]).toMatchObject({
+        removed: ["u2"],
+        retained: ["u1"],
+      });
+      expect(mockAssignmentDeleteOne).not.toHaveBeenCalled();
+      expect(mockAssignmentUpdateOne).toHaveBeenCalledWith(
+        { guildId: "guild-1", roleId: "99999777" },
+        { $pull: { userIds: { $in: ["u2"] } } },
+      );
+    });
+
+    it("drops the row when the old role no longer exists", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockResolvedValue(null) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired[0]).toMatchObject({
+        roleName: "99999777",
+        removed: ["u1"],
+      });
+      expect(mockRolesRemove).not.toHaveBeenCalled();
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("drops the row when the old role fetch rejects with Unknown Role", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockRejectedValue(unknownRoleError()) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired[0]).toMatchObject({ removed: ["u1"] });
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("announces roles taken back from removed tiers", async () => {
+      const mockSend = jest.fn(async () => undefined);
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.announcement_channel_id") return "chan-1";
+        return k === "leaderboard_roles.period" ? "alltime" : "";
+      });
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+      mockGuildChannelsFetch.mockResolvedValue({
+        isTextBased: () => true,
+        send: mockSend,
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      await svc.runNow();
+
+      // Every tier was removed, and the announcement still goes out.
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const [payload] = mockSend.mock.calls[0] as unknown as [
+        { embeds: Array<{ toJSON(): { fields?: unknown[] } }> },
+      ];
+      expect(payload.embeds[0].toJSON().fields).toEqual([
+        {
+          name: "Removed tier — Old tier",
+          value: "Removed: <@u1>",
+          inline: false,
+        },
+      ]);
+    });
+
+    it("keeps a huge removed tier's announcement within Discord's limits", async () => {
+      const mockSend = jest.fn(async () => undefined);
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.announcement_channel_id") return "chan-1";
+        return k === "leaderboard_roles.period" ? "alltime" : "";
+      });
+      const holders = Array.from(
+        { length: 1000 },
+        (_, i) => `${100000000000000000 + i}`,
+      );
+      mockAssignmentFind.mockResolvedValue(
+        Array.from({ length: 30 }, (_, t) => ({
+          guildId: "guild-1",
+          roleId: `9999${t}`,
+          userIds: holders,
+        })),
+      );
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "any", roleName: "Old tier" }),
+      );
+      mockGuildChannelsFetch.mockResolvedValue({
+        isTextBased: () => true,
+        send: mockSend,
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      await svc.runNow();
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const [payload] = mockSend.mock.calls[0] as unknown as [
+        {
+          embeds: Array<{
+            toJSON(): {
+              title?: string;
+              description?: string;
+              fields?: Array<{ name: string; value: string }>;
+            };
+          }>;
+        },
+      ];
+      const embed = payload.embeds[0].toJSON();
+      const fields = embed.fields ?? [];
+      expect(fields.length).toBeLessThanOrEqual(25);
+      for (const f of fields) expect(f.value.length).toBeLessThanOrEqual(1024);
+      const total =
+        (embed.title?.length ?? 0) +
+        (embed.description?.length ?? 0) +
+        fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
+      expect(total).toBeLessThanOrEqual(6000);
+      expect(fields[fields.length - 1].name).toBe("More changes");
+    });
+
+    it("leaves the row alone when the role lookup errors", async () => {
+      // A transient failure must not read as "role deleted".
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockRejectedValue(new Error("503")) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired).toEqual([]);
+      expect(mockAssignmentDeleteOne).not.toHaveBeenCalled();
+      expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
+    });
+  });
+
   // #914. `reconcileTier` only ever walks the persisted `userIds[]` when
   // deciding what to revoke (the bot has no GuildMembers intent), so pulling
   // an id before the Discord role is actually gone strands the role on the
@@ -786,5 +1085,28 @@ describe("LeaderboardRoleService", () => {
       expect(mockClientGuildsFetch).not.toHaveBeenCalled();
       expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("formatMentionLine (#985)", () => {
+  it("lists every mention when they fit", () => {
+    expect(formatMentionLine("Added", ["1", "2"])).toBe("Added: <@1>, <@2>");
+  });
+
+  it("cuts a long list with an accurate remainder, within the cap", () => {
+    const ids = Array.from({ length: 500 }, (_, i) => `${1000 + i}`);
+    const line = formatMentionLine("Removed", ids, 100);
+    expect(line.length).toBeLessThanOrEqual(100);
+    const shown = (line.match(/<@/g) ?? []).length;
+    expect(line).toMatch(new RegExp(` … and ${500 - shown} more$`));
+  });
+
+  it("does not cut a list that exactly fits", () => {
+    const line = formatMentionLine(
+      "Added",
+      ["1", "2"],
+      "Added: <@1>, <@2>".length,
+    );
+    expect(line).toBe("Added: <@1>, <@2>");
   });
 });

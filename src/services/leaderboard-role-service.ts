@@ -1,5 +1,6 @@
 import {
   Client,
+  DiscordAPIError,
   Guild,
   GuildMember,
   Role,
@@ -12,6 +13,61 @@ import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment
 import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import { fetchMemberOrNull } from "../utils/moderation-guards.js";
+
+/** Discord's Unknown Role error: the role was deleted. */
+const UNKNOWN_ROLE = 10011;
+
+/**
+ * Fetch a role, resolving a confirmed deletion to null. Discord reports a
+ * deleted role either as null or as an Unknown Role (10011) rejection; any
+ * other error is rethrown, so a transient failure never reads as "deleted".
+ */
+async function fetchRoleOrNull(
+  guild: Guild,
+  roleId: string,
+): Promise<Role | null> {
+  try {
+    return await guild.roles.fetch(roleId);
+  } catch (error) {
+    if (error instanceof DiscordAPIError && error.code === UNKNOWN_ROLE) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** Discord's limit on one embed field value. */
+const EMBED_FIELD_MAX = 1024;
+/** Discord's limit on an embed's total text (title, description, fields). */
+const EMBED_TOTAL_MAX = 6000;
+/** Discord's limit on fields per embed. */
+const EMBED_FIELDS_MAX = 25;
+
+/**
+ * `<label>: <@a>, <@b>, …` capped at `max` characters. A wide tier can hold
+ * hundreds of members, and a field over Discord's limit makes the whole
+ * announcement fail to send, so the list ends in "and N more" instead.
+ */
+export function formatMentionLine(
+  label: string,
+  userIds: readonly string[],
+  max = EMBED_FIELD_MAX,
+): string {
+  const mentions = userIds.map((id) => `<@${id}>`);
+  const full = `${label}: ${mentions.join(", ")}`;
+  if (full.length <= max) return full;
+  // Too long: keep as many mentions as leave room for "… and N more".
+  let line = `${label}: `;
+  for (let i = 0; i < mentions.length; i++) {
+    const mention = `${i === 0 ? "" : ", "}${mentions[i]}`;
+    const after = ` … and ${mentions.length - i - 1} more`;
+    if (line.length + mention.length + after.length > max) {
+      return `${line} … and ${mentions.length - i} more`;
+    }
+    line += mention;
+  }
+  return line;
+}
 
 /** Weekly, Monday 00:00 — the schedule leaderboard roles ship with. */
 const DEFAULT_CRON = "0 0 * * 1";
@@ -31,6 +87,16 @@ export interface LeaderboardRoleRunSummary {
     added: string[]; // user IDs that gained the role
     removed: string[]; // user IDs that lost the role
     skippedReason?: string;
+  }>;
+  /**
+   * Rosters for roles that are no longer a configured tier (#985): the tier
+   * was removed or given a different role, so its old role is taken back.
+   */
+  retired: Array<{
+    roleId: string;
+    roleName: string;
+    removed: string[]; // user IDs the old role was taken back from
+    retained: string[]; // user IDs whose revoke failed; retried next run
   }>;
 }
 
@@ -179,12 +245,6 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         "",
       );
       const tiers = this.parseTiers(tiersRaw);
-      if (tiers.length === 0) {
-        logger.info(
-          "No leaderboard role tiers configured, skipping reconciliation.",
-        );
-        return null;
-      }
 
       const periodRaw = await this.configService.getString(
         "leaderboard_roles.period",
@@ -200,6 +260,21 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         return null;
       }
 
+      // Before the tiers: a removed tier's old role is taken back even when
+      // no tiers are left at all.
+      const retired = await this.retireRemovedTiers(
+        guild,
+        new Set(tiers.map((t) => t.roleId)),
+      );
+      if (tiers.length === 0) {
+        logger.info(
+          "No leaderboard role tiers configured, skipping reconciliation.",
+        );
+        const summary = { ranAt: new Date(), period, tiers: [], retired };
+        await this.maybeAnnounce(guild, summary);
+        return summary;
+      }
+
       // Fetch the full ranking with the documented "all ranked users"
       // sentinel (0). A positive limit would be clamped to
       // voicetracking.stats.leaderboard_max_results, silently truncating
@@ -213,6 +288,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         ranAt: new Date(),
         period,
         tiers: [],
+        retired,
       };
 
       for (const tier of tiers) {
@@ -243,7 +319,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     tier: ParsedTier,
     rankedUserIds: string[],
   ): Promise<LeaderboardRoleRunSummary["tiers"][number]> {
-    const role: Role | null = await guild.roles.fetch(tier.roleId);
+    const role = await fetchRoleOrNull(guild, tier.roleId);
     if (!role) {
       logger.warn(
         `Leaderboard tier top${tier.topN}: role ${tier.roleId} not found in guild`,
@@ -343,6 +419,96 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       added,
       removed,
     };
+  }
+
+  /**
+   * Take reward roles back from every roster whose role is no longer a
+   * configured tier (#985).
+   *
+   * `reconcileTier` only visits the roles in the current config, and the
+   * roster is the only record of who holds a reward role (no GuildMembers
+   * intent). So when a tier is removed, or its role replaced, nothing else
+   * would ever revoke the old role: its holders would keep it permanently.
+   *
+   * Same ordering rule as `revokeForUser`: revoke on Discord first, and drop
+   * an id only once that landed (or the member / role is gone). A failed
+   * revoke keeps the id so the next run retries; the row is deleted once it
+   * is empty. A deleted role (null, or an Unknown Role rejection) drops the
+   * row; any other lookup error skips it this run, so a transient failure
+   * never reads as "role deleted".
+   */
+  private async retireRemovedTiers(
+    guild: Guild,
+    activeRoleIds: ReadonlySet<string>,
+  ): Promise<LeaderboardRoleRunSummary["retired"]> {
+    const rows = await LeaderboardRoleAssignment.find({ guildId: guild.id });
+    const retired: LeaderboardRoleRunSummary["retired"] = [];
+    for (const row of rows) {
+      if (activeRoleIds.has(row.roleId)) continue;
+      let role: Role | null;
+      try {
+        role = await fetchRoleOrNull(guild, row.roleId);
+      } catch (error) {
+        logger.warn(
+          `Leaderboard role ${row.roleId} is no longer a tier but could not be fetched; retrying next run:`,
+          error,
+        );
+        continue;
+      }
+
+      const removed: string[] = [];
+      const retained: string[] = [];
+      for (const userId of row.userIds) {
+        if (!role) {
+          // The role itself is gone, so there is nothing left to take back.
+          removed.push(userId);
+          continue;
+        }
+        try {
+          const member = await fetchMemberOrNull(guild, userId);
+          if (member) {
+            await member.roles.remove(
+              role,
+              "Leaderboard role reward (tier removed)",
+            );
+          }
+          removed.push(userId);
+        } catch (error) {
+          logger.warn(
+            `Failed to take back removed-tier role ${role.name} from ${userId}; keeping them on the roster to retry:`,
+            error,
+          );
+          retained.push(userId);
+        }
+      }
+
+      if (retained.length === 0) {
+        await LeaderboardRoleAssignment.deleteOne({
+          guildId: guild.id,
+          roleId: row.roleId,
+        });
+      } else if (removed.length > 0) {
+        // Server-side pull, so a concurrent per-user purge is not clobbered.
+        await LeaderboardRoleAssignment.updateOne(
+          { guildId: guild.id, roleId: row.roleId },
+          { $pull: { userIds: { $in: removed } } },
+        );
+      }
+      retired.push({
+        roleId: row.roleId,
+        roleName: role?.name ?? row.roleId,
+        removed,
+        retained,
+      });
+    }
+    if (retired.length > 0) {
+      logger.info(
+        `Leaderboard roles: retired ${retired.length} removed tier role(s): ${retired
+          .map((r) => `${r.roleName} -${r.removed.length}`)
+          .join(", ")}`,
+      );
+    }
+    return retired;
   }
 
   /**
@@ -531,9 +697,9 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     );
     if (!channelId) return;
 
-    const hasChanges = summary.tiers.some(
-      (t) => t.added.length > 0 || t.removed.length > 0,
-    );
+    const hasChanges =
+      summary.tiers.some((t) => t.added.length > 0 || t.removed.length > 0) ||
+      summary.retired.some((r) => r.removed.length > 0);
     if (!hasChanges) return;
 
     try {
@@ -554,22 +720,57 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         )
         .setColor(0xf1c40f);
 
+      const fields: Array<{ name: string; value: string }> = [];
       for (const tier of summary.tiers) {
+        if (tier.added.length === 0 && tier.removed.length === 0) continue;
+        // Each line gets half the field when both are present, so the
+        // joined value stays within the field limit.
+        const both = tier.added.length > 0 && tier.removed.length > 0;
+        const lineMax = both
+          ? Math.floor((EMBED_FIELD_MAX - 1) / 2)
+          : EMBED_FIELD_MAX;
         const lines: string[] = [];
         if (tier.added.length > 0) {
-          lines.push(`Added: ${tier.added.map((id) => `<@${id}>`).join(", ")}`);
+          lines.push(formatMentionLine("Added", tier.added, lineMax));
         }
         if (tier.removed.length > 0) {
-          lines.push(
-            `Removed: ${tier.removed.map((id) => `<@${id}>`).join(", ")}`,
-          );
+          lines.push(formatMentionLine("Removed", tier.removed, lineMax));
         }
-        if (lines.length === 0) continue;
-        embed.addFields({
+        fields.push({
           name: `Top ${tier.topN} — ${tier.roleName}`,
           value: lines.join("\n"),
-          inline: false,
         });
+      }
+      // Roles taken back because their tier was removed (#985).
+      for (const r of summary.retired) {
+        if (r.removed.length === 0) continue;
+        fields.push({
+          name: `Removed tier — ${r.roleName}`,
+          value: formatMentionLine("Removed", r.removed),
+        });
+      }
+
+      // Stay inside the embed's field-count and total-text limits; fields
+      // that don't fit are summarised rather than failing the whole send.
+      let total =
+        (embed.data.title?.length ?? 0) + (embed.data.description?.length ?? 0);
+      let added = 0;
+      for (const field of fields) {
+        const size = field.name.length + field.value.length;
+        const remaining = fields.length - added;
+        // Keep the last slot and ~100 characters for the summary field.
+        const outOfSlots = remaining > 1 && added >= EMBED_FIELDS_MAX - 1;
+        if (outOfSlots || total + size > EMBED_TOTAL_MAX - 100) {
+          embed.addFields({
+            name: "More changes",
+            value: `${remaining} more tier${remaining === 1 ? "" : "s"} changed; see the Web UI for details.`,
+            inline: false,
+          });
+          break;
+        }
+        embed.addFields({ ...field, inline: false });
+        total += size;
+        added += 1;
       }
 
       await (channel as GuildTextBasedChannel).send({ embeds: [embed] });

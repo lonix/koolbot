@@ -839,7 +839,7 @@ describe("createWriteRouter (#850)", () => {
       true,
     );
     // Every domain module mounted exactly once.
-    expect(stack.length - 3).toBe(13);
+    expect(stack.length - 3).toBe(14);
   });
 
   it("exposes the same route surface as before the split", () => {
@@ -866,6 +866,8 @@ describe("createWriteRouter (#850)", () => {
         "POST /events/:id/cancel",
         "POST /events/:id/start-now",
         "POST /events/create",
+        "POST /leaderboard-roles/run-now",
+        "POST /leaderboard-roles/tiers",
         "POST /notices/:id/delete",
         "POST /notices/:id/order",
         "POST /notices/:id/update",
