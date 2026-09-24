@@ -477,6 +477,123 @@ describe("LeaderboardRoleService", () => {
   // deciding what to revoke (the bot has no GuildMembers intent), so pulling
   // an id before the Discord role is actually gone strands the role on the
   // member forever. These tests pin the ordering.
+  describe("holdOutForPurge (#917)", () => {
+    function configureTopTwo(): void {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.tiers") return "2:99999002";
+        if (k === "leaderboard_roles.period") return "alltime";
+        return "";
+      });
+      mockGetTopUsers.mockResolvedValue([
+        { userId: "u1", username: "u1", totalTime: 100 },
+        { userId: "u2", username: "u2", totalTime: 90 },
+        { userId: "u3", username: "u3", totalTime: 80 },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999002", roleName: "Top 2" }),
+      );
+    }
+
+    it("never grants the role to a held member, and lets the next one move up", async () => {
+      configureTopTwo();
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+
+      const release = await svc.holdOutForPurge("u1");
+      const result = await svc.runNow();
+
+      expect(result!.tiers[0].added.sort()).toEqual(["u2", "u3"]);
+      expect(mockAssignmentFindOneAndUpdate).toHaveBeenCalledWith(
+        { guildId: "guild-1", roleId: "99999002" },
+        expect.objectContaining({ userIds: ["u2", "u3"] }),
+        { upsert: true },
+      );
+
+      // Released: u1 qualifies again (their data would be gone in a real
+      // purge, so in practice they simply no longer rank).
+      release();
+      jest.clearAllMocks();
+      configureTopTwo();
+      mockAssignmentFindOne.mockResolvedValue(null);
+      const after = await svc.runNow();
+      expect(after!.tiers[0].added.sort()).toEqual(["u1", "u2"]);
+    });
+
+    it("revokes the role from a held member already on the roster", async () => {
+      configureTopTwo();
+      mockAssignmentFindOne.mockResolvedValue({
+        guildId: "guild-1",
+        roleId: "99999002",
+        topN: 2,
+        userIds: ["u1", "u2"],
+      });
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+
+      await svc.holdOutForPurge("u1");
+      const result = await svc.runNow();
+
+      expect(result!.tiers[0].removed).toEqual(["u1"]);
+      expect(mockRolesRemove).toHaveBeenCalledTimes(1);
+    });
+
+    it("waits out a reconcile already in flight before returning", async () => {
+      configureTopTwo();
+      let finishRanking: () => void = () => undefined;
+      mockGetTopUsers.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finishRanking = () =>
+              resolve([
+                { userId: "u1", username: "u1", totalTime: 100 },
+                { userId: "u2", username: "u2", totalTime: 90 },
+              ]);
+          }) as never,
+      );
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+
+      const run = svc.runNow();
+      await new Promise((r) => setTimeout(r, 0));
+      let held = false;
+      const hold = svc.holdOutForPurge("u1").then((release) => {
+        held = true;
+        return release;
+      });
+      await new Promise((r) => setTimeout(r, 0));
+      // The run is still ranking, so the hold has not returned yet — the
+      // purge's revoke would otherwise race the run's roster write.
+      expect(held).toBe(false);
+
+      finishRanking();
+      await run;
+      await hold;
+      expect(held).toBe(true);
+    });
+
+    it("keeps the hold until every overlapping holder has released", async () => {
+      configureTopTwo();
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+
+      const releaseA = await svc.holdOutForPurge("u1");
+      const releaseB = await svc.holdOutForPurge("u1");
+      releaseA();
+      releaseA(); // idempotent
+      const result = await svc.runNow();
+      expect(result!.tiers[0].added).not.toContain("u1");
+
+      releaseB();
+      jest.clearAllMocks();
+      configureTopTwo();
+      mockAssignmentFindOne.mockResolvedValue(null);
+      const after = await svc.runNow();
+      expect(after!.tiers[0].added).toContain("u1");
+    });
+  });
+
   describe("revokeForUser", () => {
     beforeEach(() => {
       // `jest.clearAllMocks()` clears calls but keeps implementations, so a

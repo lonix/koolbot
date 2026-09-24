@@ -35,6 +35,8 @@ const NON_CONFIG_DOTTED_NAMES = new Set<string>([
   // WebUI audit-log action name written by the /me/privacy export (#719),
   // not a setting.
   "user.privacy.export",
+  // ...and by the /me/privacy self-service reset (#917).
+  "user.privacy.delete",
 ]);
 
 /**

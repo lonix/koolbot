@@ -126,6 +126,8 @@ export interface ConfigSchema {
   // Self-service data export (#719)
   "privacy.enabled": boolean; // Gates the /me/privacy page and its export route
   "privacy.export.max_items": number; // Per-collection ceiling on exported rows
+  "privacy.delete.enabled": boolean; // Gates the self-service "Reset my data" action
+  "privacy.delete.cooldown_hours": number; // Per-member wait between two completed resets
 
   // Reaction Roles
   "reactionroles.enabled": boolean;
@@ -374,6 +376,12 @@ export const defaultConfig: ConfigSchema = {
   // payload names anything it clipped.
   "privacy.enabled": false,
   "privacy.export.max_items": 5000,
+  // Self-service data reset (#917). Its own gate, off by default — it is
+  // destructive, so an operator who turned the export on has not thereby
+  // agreed to the reset. The cooldown is persisted (read back from the Web
+  // UI audit log), unlike the in-memory, per-IP rate limiter in front of it.
+  "privacy.delete.enabled": false,
+  "privacy.delete.cooldown_hours": 168,
 
   // Reaction Roles defaults
   "reactionroles.enabled": false,
@@ -908,7 +916,7 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
   privacy: {
     title: "Privacy",
     description:
-      "Self-service data export. When enabled, members can see what KoolBot stores about them on /me/privacy and download all of it as one JSON file. Moderation records, admin audit logs and session rows are never included.",
+      "Self-service data export and reset. When enabled, members can see what KoolBot stores about them on /me/privacy and download all of it as one JSON file — and, if the reset is also enabled, wipe it. Moderation records, admin audit logs and session rows are never included in either.",
   },
   reactionroles: {
     title: "Reaction Roles",
@@ -1604,6 +1612,21 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "privacy",
     type: "number",
     min: 1,
+  },
+  "privacy.delete.enabled": {
+    label: "Self-service data reset enabled",
+    description:
+      'Add a "Reset my data" action to /me/privacy (also needs the data export enabled). It wipes the member\'s tracking history, achievements, preferences and other per-member rows, then signs them out. Moderation records and audit logs are kept. Tracking starts again on their next message, reaction or voice join, so this is a reset, not a deletion. Note: achievements become re-earnable, and re-earning a marquee accolade @-mentions the member in the celebrations channel again — the cooldown bounds how often that can happen.',
+    category: "privacy",
+    type: "boolean",
+  },
+  "privacy.delete.cooldown_hours": {
+    label: "Reset cooldown (hours)",
+    description:
+      "How long a member must wait after a completed reset before they can run another. Persisted per member, so it survives restarts. 0 turns the cooldown off. Keep it below the Web UI audit retention (core.web_audit.retention_days), which is where the last reset is read back from.",
+    category: "privacy",
+    type: "number",
+    min: 0,
   },
   "reactionroles.enabled": {
     label: "Reaction roles enabled",

@@ -811,12 +811,15 @@ beyond the on/off switch and the per-member cap.
 
 A member self-service **"my data" download**. When enabled, `/me/privacy`
 shows what KoolBot stores about the signed-in member and offers it as a
-single JSON file. Web UI only — there is no slash command for it.
+single JSON file — and, behind its own gate, a **"Reset my data"** action.
+Web UI only — there is no slash command for either.
 
 | Setting | Default | Description |
 | --- | --- | --- |
 | `privacy.enabled` | `false` | Master switch — enables the `/me/privacy` page and its download |
 | `privacy.export.max_items` | `5000` | Ceiling on rows (and append-only array entries) per collection in one export |
+| `privacy.delete.enabled` | `false` | Enables the self-service "Reset my data" action (also needs `privacy.enabled`) |
+| `privacy.delete.cooldown_hours` | `168` | Per-member wait after a completed reset before another is allowed (`0` = off) |
 
 **Notes:**
 
@@ -841,7 +844,30 @@ single JSON file. Web UI only — there is no slash command for it.
 - The download is rate-limited (3 per minute per client) and records a
   `user.privacy.export` row in the Web UI audit log naming which collections
   were served.
-- Deletion is **not** part of this — see issue #906.
+- **Reset (`privacy.delete.enabled`)** runs the per-user purge coordinator
+  (`UserDataDeletionService`) and signs the member out. It is a **reset, not
+  a deletion**: the activity trackers start writing again on the member's
+  next message, reaction or voice join. Moderation records and audit logs
+  are kept, other members' voice rows may still name the member as
+  co-present, and timezone/notification preferences return to defaults
+  (DMs fail closed to off).
+- The reset needs the member to type `RESET`, has its own rate-limit bucket
+  (5 per 15 minutes per client), and a **persisted** per-member cooldown read
+  back from the Web UI audit log — so it survives restarts and is not shared
+  across a NAT. The cooldown starts when a reset begins (its intent row), so a
+  crash or a lost completion row cannot dodge it; only a _recorded_ failure
+  lifts it, so a partial reset can be retried straight away (every purge step
+  is idempotent). A second request from the same member while a reset is
+  running is refused. Keep
+  `privacy.delete.cooldown_hours` below `core.web_audit.retention_days`, or
+  the cleanup job will prune the row the cooldown reads.
+- Every reset writes a `user.privacy.delete` **intent** row before any data
+  is touched (if that row cannot be written, the reset is refused) and a
+  **completed** row afterwards carrying the coordinator's per-step report.
+  Refusals (feature off, wrong confirmation, cooldown) are audited too.
+- ⚠️ Resetting clears achievements, so marquee accolades become re-earnable —
+  and re-earning one `@`-mentions the member in `celebrations.channel_id`
+  again. The cooldown bounds how often that can happen.
 
 ---
 
