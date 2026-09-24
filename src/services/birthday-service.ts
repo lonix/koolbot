@@ -358,24 +358,22 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
   }
 
   /**
-   * Set or clear a member's birthday. Passing `null` removes the row.
-   * The month/day are validated against the calendar (Feb 29 allowed);
-   * the year, when present, must be a plausible four-digit value not in
-   * the future. Resets `lastAnnouncedYear` so a corrected date can still
-   * fire this year. Returns the stored value (or `null` when cleared).
+   * Set a member's birthday. The month/day are validated against the
+   * calendar (Feb 29 allowed); the year, when present, must be a plausible
+   * four-digit value not in the future. Resets `lastAnnouncedYear` so a
+   * corrected date can still fire this year. Returns the stored value.
+   *
+   * There is deliberately no "clear" mode: removing a birthday must go
+   * through `purgeForUser`, which takes back a live birthday role and the
+   * bot's posts before deleting the row that records them (#916, #1033).
    */
   public async setBirthday(
     userId: string,
     guildId: string,
-    input: BirthdayInput | null,
-  ): Promise<StoredBirthday | null> {
+    input: BirthdayInput,
+  ): Promise<StoredBirthday> {
     if (!userId) throw new Error("userId required");
     if (!guildId) throw new Error("guildId required");
-
-    if (input === null) {
-      await UserBirthday.deleteOne({ userId, guildId });
-      return null;
-    }
 
     const { month, day } = input;
     if (!isValidMonthDay(month, day)) {
