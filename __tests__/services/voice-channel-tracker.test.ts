@@ -1185,6 +1185,49 @@ describe("VoiceChannelTracker", () => {
         expect(tracker.getActiveSession("u1")).toEqual({ channelName: "C1" });
       });
 
+      it("does not let a switch end a fresh session when the barrier lands inside endTracking", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const member = inGuild(memberInChannel("u1", "c1", "C1", []));
+        const c1 = { id: "c1", name: "C1" };
+        const c2 = { id: "c2", name: "C2" };
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          { member, channel: c1 } as unknown as VoiceState,
+        );
+
+        // The switch passes the early check, then endTracking awaits the
+        // Mongo guard: meanwhile the member opts out (evicting the old
+        // session), opts back in, and a fresh session starts.
+        const internals = tracker as unknown as {
+          mongo: { ensureConnection: jest.Mock };
+          activeSessions: Map<string, unknown>;
+        };
+        const fresh = {
+          startTime: new Date(),
+          channelId: "c9",
+          channelName: "Fresh",
+          guildId: "g1",
+        };
+        let fired = false;
+        internals.mongo.ensureConnection.mockImplementation(async () => {
+          if (fired) return;
+          fired = true;
+          optOutAndBackIn("u1");
+          internals.activeSessions.set("u1", fresh);
+        });
+
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: c1 } as unknown as VoiceState,
+          { member, channel: c2 } as unknown as VoiceState,
+        );
+
+        expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(internals.activeSessions.get("u1")).toBe(fresh);
+      });
+
       it("seeds no co-presence for a channel member whose barrier moved in flight", async () => {
         stubTrackingOptOuts();
         const { tracker, mockConfigService } = createTracker(mockClient);

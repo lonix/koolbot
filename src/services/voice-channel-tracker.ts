@@ -488,7 +488,7 @@ export class VoiceChannelTracker {
         logger.info(
           `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
         );
-        await this.endTrackingTracked(member.id);
+        await this.endTrackingTracked(member.id, ticket);
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
         );
@@ -519,7 +519,7 @@ export class VoiceChannelTracker {
             `Found active session in channel ${activeSession.channelName} (${activeSession.channelId})`,
           );
         }
-        await this.endTrackingTracked(member.id);
+        await this.endTrackingTracked(member.id, ticket);
       }
 
       // Track users joining/leaving channels where we have active sessions
@@ -798,19 +798,31 @@ export class VoiceChannelTracker {
    * `forgetActiveSession` can wait for it (#916). Every call site goes
    * through here; calling `endTracking` directly reopens the race.
    */
-  private async endTrackingTracked(userId: string): Promise<void> {
+  private async endTrackingTracked(
+    userId: string,
+    ticket?: number,
+  ): Promise<void> {
     const pending = this.endingSessions.get(userId) ?? new Set();
     this.endingSessions.set(userId, pending);
 
-    const running: Promise<void> = this.endTracking(userId).finally(() => {
-      pending.delete(running);
-      if (pending.size === 0) this.endingSessions.delete(userId);
-    });
+    const running: Promise<void> = this.endTracking(userId, ticket).finally(
+      () => {
+        pending.delete(running);
+        if (pending.size === 0) this.endingSessions.delete(userId);
+      },
+    );
     pending.add(running);
     await running;
   }
 
-  private async endTracking(userId: string): Promise<void> {
+  /**
+   * `ticket` is the originating event's admission ticket (#918). It is
+   * re-checked the moment the session is read, after this method's own
+   * await: an opt-out or reset landing in between evicts the session the
+   * event belonged to, so whatever is there now is a later session that a
+   * stale event must not end.
+   */
+  private async endTracking(userId: string, ticket?: number): Promise<void> {
     // Hoisted so the failure path can hand the claimed bookkeeping back:
     // `activeSessions` is deliberately left in place when the persist throws,
     // so the session is retried on the next disconnect, and it has to be
@@ -823,6 +835,20 @@ export class VoiceChannelTracker {
       await this.mongo.ensureConnection();
 
       session = this.activeSessions.get(userId);
+      if (
+        ticket !== undefined &&
+        session?.guildId &&
+        !TrackingOptOutService.getInstance().admitted(
+          userId,
+          session.guildId,
+          ticket,
+        )
+      ) {
+        logger.info(
+          `Not ending the voice session for ${userId}: the event is stale and the session is newer`,
+        );
+        return;
+      }
       if (session?.persisting) {
         // Another handler is already writing this very session. Persisting
         // it again would double-count it (#916).
