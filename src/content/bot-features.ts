@@ -24,7 +24,7 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   voicetracking: {
     emoji: "📊",
     label: "Voice Tracking",
-    description: "Track your voice activity with `/voicestats` and `/seen`",
+    description: "Track your voice activity with `/voicestats`",
   },
   messagetracking: {
     emoji: "💬",
@@ -95,7 +95,7 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
   reactionroles: {
     emoji: "⭐",
     label: "Reaction Roles",
-    description: "Self-assign roles by reacting to messages",
+    description: "Pick your own roles from the server's role messages",
   },
   announcements: {
     emoji: "📢",

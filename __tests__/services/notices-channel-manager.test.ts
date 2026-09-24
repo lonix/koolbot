@@ -190,4 +190,59 @@ describe("NoticesChannelManager", () => {
       expect(ensure).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("reload callback lifecycle (#1007)", () => {
+    it("initialize() registers the reload callback and stop() removes it", async () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const registerReloadCallback = jest.fn();
+      const removeReloadCallback = jest.fn();
+      manager.configService = {
+        getBoolean: jest.fn(async () => true),
+        getString: jest.fn(async () => "channel123"),
+        registerReloadCallback,
+        removeReloadCallback,
+      };
+      for (const method of [
+        "getNoticesChannel",
+        "setupChannelPermissions",
+        "ensureHeaderPost",
+        "ensureBotInfoNotice",
+        "syncNotices",
+        "startCleanupJob",
+      ]) {
+        jest
+          .spyOn(manager, method)
+          .mockResolvedValue(
+            (method === "getNoticesChannel"
+              ? { name: "notices" }
+              : undefined) as never,
+          );
+      }
+
+      await manager.initialize();
+      expect(registerReloadCallback).toHaveBeenCalledTimes(1);
+      expect(registerReloadCallback).toHaveBeenCalledWith(
+        manager.onConfigReload,
+      );
+
+      await manager.stop();
+      expect(removeReloadCallback).toHaveBeenCalledWith(manager.onConfigReload);
+
+      // A second stop() must not try to unregister again.
+      await manager.stop();
+      expect(removeReloadCallback).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not register the reload callback when notices are disabled", async () => {
+      const manager = NoticesChannelManager.getInstance(mockClient) as any;
+      const registerReloadCallback = jest.fn();
+      manager.configService = {
+        getBoolean: jest.fn(async () => false),
+        registerReloadCallback,
+      };
+
+      await manager.initialize();
+      expect(registerReloadCallback).not.toHaveBeenCalled();
+    });
+  });
 });
