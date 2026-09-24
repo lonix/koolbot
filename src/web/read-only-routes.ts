@@ -52,7 +52,7 @@ import { DigestService } from "../services/digest-service.js";
 import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import {
   parseTierConfig,
-  tierRoleProblem,
+  tierRoleIssue,
   type LeaderboardTier,
 } from "./leaderboard-tiers.js";
 import {
@@ -568,6 +568,9 @@ export async function fetchRoleData(
   return { names, roles };
 }
 
+/** Discord's cap on user ids per batched guild-member fetch. */
+const MEMBER_FETCH_BATCH = 100;
+
 /**
  * Guild-side state for the Leaderboard Roles page (#985): each configured
  * tier's role, whether the bot can assign it, and the members the service
@@ -612,8 +615,9 @@ export async function loadLeaderboardRoleState(
     guild = null;
   }
 
-  // Resolve holder names: member cache first, then one batched fetch for
-  // the misses. Unresolved ids (left the guild) fall back to the raw id.
+  // Resolve holder names: member cache first, then batched fetches for the
+  // misses — Discord accepts at most 100 ids per request, and a wide tier can
+  // hold far more. Unresolved ids (left the guild) fall back to the raw id.
   const labels = new Map<string, string>();
   const holderIds = new Set<string>();
   for (const tier of tiers) {
@@ -628,9 +632,9 @@ export async function loadLeaderboardRoleState(
       if (cached) labels.set(id, cached.displayName ?? cached.user.username);
       else missing.push(id);
     }
-    if (missing.length > 0) {
+    for (let i = 0; i < missing.length; i += MEMBER_FETCH_BATCH) {
       const fetched = await guild.members
-        .fetch({ user: missing })
+        .fetch({ user: missing.slice(i, i + MEMBER_FETCH_BATCH) })
         .catch(() => null);
       if (fetched) {
         for (const [id, member] of fetched) {
@@ -643,15 +647,21 @@ export async function loadLeaderboardRoleState(
   const views = tiers.map((tier): LeaderboardTierView => {
     const role = guild?.roles.cache.get(tier.roleId) ?? null;
     const roster = rosterByRole.get(tier.roleId);
+    const issue =
+      guild && role ? tierRoleIssue(role, guild.id, botHighest) : null;
     return {
       topN: tier.topN,
       roleId: tier.roleId,
       // Unknown when the guild couldn't be read, so show the id rather than
       // claiming the role is gone.
       roleName: role ? role.name : guild ? null : tier.roleId,
-      assignable:
-        guild && role
-          ? tierRoleProblem(role, guild.id, botHighest) === null
+      roleIssue: issue === "missing" ? null : issue,
+      // Unknown, not assignable, when the hierarchy was never checked (the
+      // guild or the bot's own member couldn't be read).
+      assignable: issue
+        ? false
+        : guild && role && botHighest !== null
+          ? true
           : null,
       holders: (roster?.userIds ?? []).map((id) => ({
         id,

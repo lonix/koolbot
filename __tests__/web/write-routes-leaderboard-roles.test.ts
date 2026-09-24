@@ -179,6 +179,21 @@ describe("POST /leaderboard-roles/tiers", () => {
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 
+  it("round-trips a stored tier the editor's own rules would reject", async () => {
+    // Top N 5000 is above the editor's cap, but it is what is stored, so an
+    // unchanged save must not be refused.
+    mockGetString.mockResolvedValue("1:111,5000:222");
+    harness = await mount(makeClient({}));
+    const res = await harness.post("/leaderboard-roles/tiers", {
+      topN: ["1", "5000", ""],
+      roleId: ["111", "222", ""],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toContain("unchanged");
+    expect(mockSet).not.toHaveBeenCalled();
+  });
+
   it("clears the tiers when every row is blank", async () => {
     mockGetString.mockResolvedValue("1:111");
     harness = await mount(makeClient({}));
@@ -347,6 +362,28 @@ describe("POST /leaderboard-roles/run-now", () => {
     expect(soleAudit()).toMatchObject({
       action: "leaderboard-roles.run-now",
       result: "success",
+    });
+  });
+
+  it("reports roles taken back from removed tiers", async () => {
+    mockRunNow.mockResolvedValue({
+      ranAt: new Date(),
+      period: "week",
+      tiers: [],
+      retired: [
+        { roleId: "777", roleName: "Old", removed: ["u1"], retained: ["u2"] },
+      ],
+    });
+    const res = await harness.post("/leaderboard-roles/run-now");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("0 granted, 1 revoked");
+    expect(flash.msg).toContain(
+      "Removed tier @Old: −1 (1 failed, retried next run)",
+    );
+    expect(soleAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "1 removed-tier revoke(s) failed; retried next run",
     });
   });
 

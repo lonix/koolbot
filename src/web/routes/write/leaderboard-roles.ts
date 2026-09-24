@@ -29,6 +29,31 @@ import {
 const PAGE = "/admin/leaderboard-roles";
 const TIERS_KEY = "leaderboard_roles.tiers";
 
+/**
+ * Whether the submitted rows are exactly the stored tiers — the same
+ * `topN:roleId` pairs the service would act on, ignoring blank rows, order
+ * and spacing. A submission the service itself would parse differently (a
+ * malformed or repeated row) never counts as unchanged.
+ */
+function sameTiers(
+  topNs: readonly string[],
+  roleIds: readonly string[],
+  stored: string,
+): boolean {
+  const entries: string[] = [];
+  for (let i = 0; i < Math.max(topNs.length, roleIds.length); i++) {
+    const topN = (topNs[i] ?? "").trim();
+    const roleId = (roleIds[i] ?? "").trim();
+    if (topN || roleId) entries.push(`${topN}:${roleId}`);
+  }
+  const submitted = parseTierConfig(entries.join(","));
+  return (
+    submitted.ignored.length === 0 &&
+    serializeTiers(submitted.tiers) ===
+      serializeTiers(parseTierConfig(stored).tiers)
+  );
+}
+
 function toArray(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw.map(String);
   return typeof raw === "string" ? [raw] : [];
@@ -76,10 +101,29 @@ export function createLeaderboardRolesRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const body = (req.body as Record<string, unknown> | undefined) ?? {};
-      const rows = validateTierRows(
-        toArray(body["topN"]),
-        toArray(body["roleId"]),
-      );
+      const topNs = toArray(body["topN"]);
+      const roleIds = toArray(body["roleId"]);
+      const config = ConfigService.getInstance();
+      let before: string;
+      try {
+        before = await config.getString(TIERS_KEY, "");
+      } catch {
+        before = "";
+      }
+      // Saving the editor unchanged must leave the stored string exactly as
+      // it was — including its order and spacing — so compare the tiers the
+      // service would act on rather than the raw text. Checked before the
+      // editor's stricter rules, so an existing config those rules would
+      // reject (e.g. a Top N above the editor's cap) still round-trips.
+      if (sameTiers(topNs, roleIds, before)) {
+        flashRedirect(res, PAGE, {
+          type: "ok",
+          text: "Tiers unchanged — nothing to save.",
+        });
+        return;
+      }
+
+      const rows = validateTierRows(topNs, roleIds);
       if (!rows.ok) {
         await recordAudit(session, {
           action: "leaderboard-roles.tiers",
@@ -91,24 +135,7 @@ export function createLeaderboardRolesRouter(client: Client): Router {
         return;
       }
 
-      const config = ConfigService.getInstance();
-      let before: string;
-      try {
-        before = await config.getString(TIERS_KEY, "");
-      } catch {
-        before = "";
-      }
       const after = serializeTiers(rows.tiers);
-      // Saving the editor unchanged must leave the stored string exactly as
-      // it was — including its order and spacing — so compare the tiers the
-      // service would act on rather than the raw text.
-      if (after === serializeTiers(parseTierConfig(before).tiers)) {
-        flashRedirect(res, PAGE, {
-          type: "ok",
-          text: "Tiers unchanged — nothing to save.",
-        });
-        return;
-      }
 
       const problem = await findTierRoleProblem(
         client,
@@ -141,8 +168,8 @@ export function createLeaderboardRolesRouter(client: Client): Router {
           type: "ok",
           text:
             n === 0
-              ? "Tiers cleared. No leaderboard roles will be assigned."
-              : `Saved ${n} tier${n === 1 ? "" : "s"}. They apply on the next recalculation — use Run now to apply them immediately.`,
+              ? "Tiers cleared. Current holders lose their reward roles on the next recalculation — use Run now to do it immediately."
+              : `Saved ${n} tier${n === 1 ? "" : "s"}. They apply on the next recalculation, which also takes back the roles of removed tiers — use Run now to apply them immediately.`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
@@ -171,8 +198,8 @@ export function createLeaderboardRolesRouter(client: Client): Router {
         const summary = await service.runNow();
         if (!summary) {
           // null covers every "nothing ran" path: the feature is off, voice
-          // tracking is off, GUILD_ID is unset, no tiers are configured, or
-          // the run failed (the service logs which).
+          // tracking is off, GUILD_ID is unset or the guild is unreachable,
+          // or the run failed (the service logs which).
           await recordAudit(session, {
             action: "leaderboard-roles.run-now",
             result: "failure",
@@ -180,13 +207,28 @@ export function createLeaderboardRolesRouter(client: Client): Router {
           });
           flashRedirect(res, PAGE, {
             type: "warn",
-            text: "Recalculation did not run. Check that leaderboard roles and voice tracking are enabled and at least one tier is configured; the bot log has the details.",
+            text: "Recalculation did not run. Check that leaderboard roles and voice tracking are enabled and GUILD_ID is set; the bot log has the details.",
           });
           return;
         }
+        const retired = summary.retired ?? [];
         const skipped = summary.tiers.filter((t) => t.skippedReason);
+        const retainedCount = retired.reduce(
+          (n, r) => n + r.retained.length,
+          0,
+        );
         const added = summary.tiers.reduce((n, t) => n + t.added.length, 0);
-        const removed = summary.tiers.reduce((n, t) => n + t.removed.length, 0);
+        const removed =
+          summary.tiers.reduce((n, t) => n + t.removed.length, 0) +
+          retired.reduce((n, r) => n + r.removed.length, 0);
+        const problems = [
+          skipped.length > 0
+            ? `${skipped.length} tier(s) skipped: role not found`
+            : "",
+          retainedCount > 0
+            ? `${retainedCount} removed-tier revoke(s) failed; retried next run`
+            : "",
+        ].filter(Boolean);
         await recordAudit(session, {
           action: "leaderboard-roles.run-now",
           details: {
@@ -198,12 +240,14 @@ export function createLeaderboardRolesRouter(client: Client): Router {
               removed: t.removed.length,
               skippedReason: t.skippedReason ?? null,
             })),
+            retired: retired.map((r) => ({
+              roleId: r.roleId,
+              removed: r.removed.length,
+              retained: r.retained.length,
+            })),
           },
-          result: skipped.length > 0 ? "failure" : "success",
-          errorMessage:
-            skipped.length > 0
-              ? `${skipped.length} tier(s) skipped: role not found`
-              : null,
+          result: problems.length > 0 ? "failure" : "success",
+          errorMessage: problems.length > 0 ? problems.join("; ") : null,
         });
         const perTier = summary.tiers
           .map((t) =>
@@ -211,9 +255,15 @@ export function createLeaderboardRolesRouter(client: Client): Router {
               ? `Top ${t.topN}: skipped (role not found)`
               : `Top ${t.topN} @${t.roleName}: +${t.added.length} / −${t.removed.length}`,
           )
+          .concat(
+            retired.map(
+              (r) =>
+                `Removed tier @${r.roleName}: −${r.removed.length}${r.retained.length > 0 ? ` (${r.retained.length} failed, retried next run)` : ""}`,
+            ),
+          )
           .join(" · ");
         flashRedirect(res, PAGE, {
-          type: skipped.length > 0 ? "warn" : "ok",
+          type: problems.length > 0 ? "warn" : "ok",
           text: `Recalculated (${summary.period}): ${added} granted, ${removed} revoked. ${perTier}`,
         });
       } catch (err) {

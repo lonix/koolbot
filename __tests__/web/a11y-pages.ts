@@ -848,6 +848,7 @@ export function adminPages(): A11yPage[] {
             roleId: "r1",
             roleName: "Admin",
             assignable: false,
+            roleIssue: "managed",
             holders: [{ id: "u1", label: "alice" }],
             lastUpdated: "2026-01-05T00:00:00.000Z",
           },

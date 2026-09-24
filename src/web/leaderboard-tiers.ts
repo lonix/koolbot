@@ -148,24 +148,53 @@ export interface TierRoleInfo {
   position: number;
 }
 
+/** Why the bot cannot hand out a role as a tier reward. */
+export type TierRoleIssue = "missing" | "everyone" | "managed" | "hierarchy";
+
 /**
- * Why the bot cannot hand out `role` as a tier reward, or null when it can.
- * `role` is null when the id no longer resolves in the guild;
+ * Why the bot cannot hand out `role` as a tier reward, or null when nothing
+ * rules it out. `role` is null when the id no longer resolves in the guild;
  * `botHighestPosition` is null when the bot's own member could not be read,
- * in which case the hierarchy check is skipped rather than guessed.
+ * in which case the hierarchy check is skipped rather than guessed — callers
+ * that report assignability must treat that as unknown, not as fine.
  */
+export function tierRoleIssue(
+  role: TierRoleInfo | null,
+  guildId: string,
+  botHighestPosition: number | null,
+): TierRoleIssue | null {
+  if (!role) return "missing";
+  if (role.id === guildId) return "everyone";
+  if (role.managed) return "managed";
+  if (botHighestPosition !== null && role.position >= botHighestPosition) {
+    return "hierarchy";
+  }
+  return null;
+}
+
+/** Operator-facing sentence for a {@link TierRoleIssue}. */
+export function describeTierRoleIssue(
+  issue: TierRoleIssue,
+  roleName: string,
+): string {
+  switch (issue) {
+    case "missing":
+      return "that role no longer exists";
+    case "everyone":
+      return "@everyone cannot be a tier role";
+    case "managed":
+      return `@${roleName} is managed by an integration and cannot be assigned`;
+    case "hierarchy":
+      return `@${roleName} sits at or above the bot's highest role, so the bot cannot assign it`;
+  }
+}
+
+/** {@link tierRoleIssue} as a sentence, or null when nothing rules it out. */
 export function tierRoleProblem(
   role: TierRoleInfo | null,
   guildId: string,
   botHighestPosition: number | null,
 ): string | null {
-  if (!role) return "that role no longer exists";
-  if (role.id === guildId) return "@everyone cannot be a tier role";
-  if (role.managed) {
-    return `@${role.name} is managed by an integration and cannot be assigned`;
-  }
-  if (botHighestPosition !== null && role.position >= botHighestPosition) {
-    return `@${role.name} sits at or above the bot's highest role, so the bot cannot assign it`;
-  }
-  return null;
+  const issue = tierRoleIssue(role, guildId, botHighestPosition);
+  return issue ? describeTierRoleIssue(issue, role?.name ?? "") : null;
 }

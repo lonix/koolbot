@@ -3693,9 +3693,11 @@ export interface LeaderboardTierView {
   /**
    * Whether the bot can assign the role (it sits below the bot's highest
    * role and is not integration-managed). Null when that could not be
-   * checked, e.g. the guild fetch failed.
+   * checked — the guild or the bot's own member could not be read.
    */
   assignable: boolean | null;
+  /** Why the role can't be assigned, when {@link assignable} is false. */
+  roleIssue?: "everyone" | "managed" | "hierarchy" | null;
   /** Members the bot last recorded as holding the role. */
   holders: LeaderboardTierHolder[];
   /** When the bot last reconciled this tier (ISO), or null if never. */
@@ -3763,6 +3765,25 @@ function renderTierEditorRow(
 </tr>`;
 }
 
+const TIER_ROLE_ISSUE_LABELS = {
+  everyone: "@everyone can’t be a tier role",
+  managed: "managed by an integration",
+  hierarchy: "above the bot’s role",
+} as const;
+
+function renderTierRoleIssue(tier: LeaderboardTierView): string {
+  if (tier.assignable === false) {
+    const label = tier.roleIssue
+      ? TIER_ROLE_ISSUE_LABELS[tier.roleIssue]
+      : "can’t be assigned";
+    return ` <span class="tag tag-warn">${label}</span>`;
+  }
+  if (tier.assignable === null) {
+    return ` <span class="muted">(couldn’t check whether the bot can assign it)</span>`;
+  }
+  return "";
+}
+
 function renderTierHolders(tier: LeaderboardTierView): string {
   if (tier.holders.length === 0) {
     return `<span class="muted">nobody yet</span>`;
@@ -3789,7 +3810,7 @@ export function renderLeaderboardRolesPage(
       const roleCell =
         t.roleName === null
           ? `<span class="mono">${escapeHtml(t.roleId)}</span> <span class="tag tag-warn">role not found</span>`
-          : `@${escapeHtml(t.roleName)}${t.assignable === false ? ' <span class="tag tag-warn">above the bot’s role</span>' : ""}`;
+          : `@${escapeHtml(t.roleName)}${renderTierRoleIssue(t)}`;
       return `<tr>
 <td>Top ${t.topN}</td>
 <td>${roleCell}</td>
@@ -3862,7 +3883,12 @@ ${renderFeatureSettingsCard({
 <div class="card">
   <h2>Tiers</h2>
   <p class="muted">One row per tier. Top N must be unique, and each role must sit below the bot’s highest role so the bot can assign it. Clear a row to remove it.</p>
-  ${ignoredHtml}
+  ${
+    props.settingsUnavailable
+      ? // The stored tiers may not be what was read, so offering the editor
+        // could overwrite them with an empty or default list.
+        renderSettingsUnavailableNotice()
+      : `${ignoredHtml}
   <form method="POST" action="/admin/leaderboard-roles/tiers">
     ${csrfInput}
     <table>
@@ -3874,7 +3900,8 @@ ${renderFeatureSettingsCard({
       <button type="button" class="btn" id="lb-tier-add" hidden>Add tier</button>
       <button type="submit" class="btn btn-primary">Save tiers</button>
     </div>
-  </form>
+  </form>`
+  }
 </div>
 <script>${LEADERBOARD_TIER_EDITOR_SCRIPT}</script>
 `;

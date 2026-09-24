@@ -22,6 +22,7 @@ const mockAssignmentFindOne = jest.fn();
 const mockAssignmentFindOneAndUpdate = jest.fn();
 const mockAssignmentFind = jest.fn();
 const mockAssignmentUpdateOne = jest.fn();
+const mockAssignmentDeleteOne = jest.fn();
 
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
@@ -47,6 +48,7 @@ jest.unstable_mockModule(
       findOneAndUpdate: mockAssignmentFindOneAndUpdate,
       find: mockAssignmentFind,
       updateOne: mockAssignmentUpdateOne,
+      deleteOne: mockAssignmentDeleteOne,
     },
   }),
 );
@@ -142,6 +144,7 @@ describe("LeaderboardRoleService", () => {
     mockAssignmentFindOneAndUpdate.mockResolvedValue({});
     mockAssignmentFind.mockResolvedValue([]);
     mockAssignmentUpdateOne.mockResolvedValue({ modifiedCount: 1 });
+    mockAssignmentDeleteOne.mockResolvedValue({ deletedCount: 1 });
   });
 
   describe("singleton", () => {
@@ -470,6 +473,151 @@ describe("LeaderboardRoleService", () => {
       expect(result!.tiers[0].skippedReason).toBe("role-not-found");
       expect(mockRolesAdd).not.toHaveBeenCalled();
       expect(mockAssignmentFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  // #985. A tier that is removed, or given a different role, leaves a roster
+  // row no tier reconciles any more; without this its holders would keep the
+  // old role forever.
+  describe("removed tiers (#985)", () => {
+    function tiersConfig(tiers: string): void {
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.tiers") return tiers;
+        if (k === "leaderboard_roles.period") return "alltime";
+        return "";
+      });
+    }
+
+    beforeEach(() => {
+      mockRolesRemove.mockResolvedValue(undefined);
+      mockGetTopUsers.mockResolvedValue([]);
+    });
+
+    it("takes the old role back and deletes the roster row", async () => {
+      tiersConfig("1:99999001");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999001", userIds: [] },
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1", "u2"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired).toEqual([
+        {
+          roleId: "99999777",
+          roleName: "Old tier",
+          removed: ["u1", "u2"],
+          retained: [],
+        },
+      ]);
+      expect(mockRolesRemove).toHaveBeenCalledTimes(2);
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledWith({
+        guildId: "guild-1",
+        roleId: "99999777",
+      });
+      // The configured tier's row is left to reconcileTier.
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("still takes the roles back when every tier was removed", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result).toMatchObject({
+        tiers: [],
+        retired: [{ removed: ["u1"] }],
+      });
+      expect(mockRolesRemove).toHaveBeenCalledTimes(1);
+      expect(mockGetTopUsers).not.toHaveBeenCalled();
+    });
+
+    it("keeps a member whose revoke failed on the roster to retry", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1", "u2"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "99999777", roleName: "Old tier" }),
+      );
+      mockRolesRemove
+        .mockRejectedValueOnce(new Error("missing permissions"))
+        .mockResolvedValueOnce(undefined);
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired[0]).toMatchObject({
+        removed: ["u2"],
+        retained: ["u1"],
+      });
+      expect(mockAssignmentDeleteOne).not.toHaveBeenCalled();
+      expect(mockAssignmentUpdateOne).toHaveBeenCalledWith(
+        { guildId: "guild-1", roleId: "99999777" },
+        { $pull: { userIds: { $in: ["u2"] } } },
+      );
+    });
+
+    it("drops the row when the old role no longer exists", async () => {
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockResolvedValue(null) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired[0]).toMatchObject({
+        roleName: "99999777",
+        removed: ["u1"],
+      });
+      expect(mockRolesRemove).not.toHaveBeenCalled();
+      expect(mockAssignmentDeleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the row alone when the role lookup errors", async () => {
+      // A transient failure must not read as "role deleted".
+      tiersConfig("");
+      mockAssignmentFind.mockResolvedValue([
+        { guildId: "guild-1", roleId: "99999777", userIds: ["u1"] },
+      ]);
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockRejectedValue(new Error("503")) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.runNow();
+
+      expect(result!.retired).toEqual([]);
+      expect(mockAssignmentDeleteOne).not.toHaveBeenCalled();
+      expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
     });
   });
 

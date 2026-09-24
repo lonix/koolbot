@@ -3,6 +3,7 @@ import {
   MAX_TIER_TOP_N,
   parseTierConfig,
   serializeTiers,
+  tierRoleIssue,
   tierRoleProblem,
   validateTierRows,
 } from "../../src/web/leaderboard-tiers.js";
@@ -136,5 +137,24 @@ describe("tierRoleProblem (#985)", () => {
     expect(tierRoleProblem({ ...role, position: 99 }, "guild-1", null)).toBe(
       null,
     );
+  });
+});
+
+describe("tierRoleIssue (#985)", () => {
+  const role = { id: "r1", name: "Champion", managed: false, position: 3 };
+
+  it("classifies each reason separately", () => {
+    expect(tierRoleIssue(null, "guild-1", 5)).toBe("missing");
+    expect(tierRoleIssue({ ...role, id: "guild-1" }, "guild-1", 5)).toBe(
+      "everyone",
+    );
+    // Managed wins over hierarchy: raising the bot's role would not help.
+    expect(
+      tierRoleIssue({ ...role, managed: true, position: 9 }, "guild-1", 5),
+    ).toBe("managed");
+    expect(tierRoleIssue({ ...role, position: 9 }, "guild-1", 5)).toBe(
+      "hierarchy",
+    );
+    expect(tierRoleIssue(role, "guild-1", 5)).toBeNull();
   });
 });

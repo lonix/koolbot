@@ -927,7 +927,11 @@ the rows are then serialised back to the same `topN:roleId` string the service r
 so the stored format does not change. Saving the tiers unchanged writes nothing, so
 an existing config's string round-trips untouched. Stored entries the service ignores
 (malformed, or shadowed by a later entry with the same Top N) are listed in a warning
-and dropped by the next change. **Current holders** lists, per tier, the members the
+and dropped by the next change. When a tier is removed or given a different role, the
+next recalculation takes the old role back from the members the bot recorded and drops
+that roster (a failed revoke is kept and retried), including when every tier is removed.
+If the stored config can't be read, the editor is replaced by a notice so a save can't
+overwrite the real tiers. **Current holders** lists, per tier, the members the
 bot recorded on its last recalculation (the bot has no GuildMembers intent, so this
 roster — not a live read of the role — is the source of truth), and flags roles that
 are missing or above the bot's role. **Run now** recalculates immediately through

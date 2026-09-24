@@ -32,6 +32,16 @@ export interface LeaderboardRoleRunSummary {
     removed: string[]; // user IDs that lost the role
     skippedReason?: string;
   }>;
+  /**
+   * Rosters for roles that are no longer a configured tier (#985): the tier
+   * was removed or given a different role, so its old role is taken back.
+   */
+  retired: Array<{
+    roleId: string;
+    roleName: string;
+    removed: string[]; // user IDs the old role was taken back from
+    retained: string[]; // user IDs whose revoke failed; retried next run
+  }>;
 }
 
 /**
@@ -179,12 +189,6 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         "",
       );
       const tiers = this.parseTiers(tiersRaw);
-      if (tiers.length === 0) {
-        logger.info(
-          "No leaderboard role tiers configured, skipping reconciliation.",
-        );
-        return null;
-      }
 
       const periodRaw = await this.configService.getString(
         "leaderboard_roles.period",
@@ -200,6 +204,19 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         return null;
       }
 
+      // Before the tiers: a removed tier's old role is taken back even when
+      // no tiers are left at all.
+      const retired = await this.retireRemovedTiers(
+        guild,
+        new Set(tiers.map((t) => t.roleId)),
+      );
+      if (tiers.length === 0) {
+        logger.info(
+          "No leaderboard role tiers configured, skipping reconciliation.",
+        );
+        return { ranAt: new Date(), period, tiers: [], retired };
+      }
+
       // Fetch the full ranking with the documented "all ranked users"
       // sentinel (0). A positive limit would be clamped to
       // voicetracking.stats.leaderboard_max_results, silently truncating
@@ -213,6 +230,7 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         ranAt: new Date(),
         period,
         tiers: [],
+        retired,
       };
 
       for (const tier of tiers) {
@@ -343,6 +361,95 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       added,
       removed,
     };
+  }
+
+  /**
+   * Take reward roles back from every roster whose role is no longer a
+   * configured tier (#985).
+   *
+   * `reconcileTier` only visits the roles in the current config, and the
+   * roster is the only record of who holds a reward role (no GuildMembers
+   * intent). So when a tier is removed, or its role replaced, nothing else
+   * would ever revoke the old role: its holders would keep it permanently.
+   *
+   * Same ordering rule as `revokeForUser`: revoke on Discord first, and drop
+   * an id only once that landed (or the member / role is gone). A failed
+   * revoke keeps the id so the next run retries; the row is deleted once it
+   * is empty. A role lookup that errors (rather than resolving to null) skips
+   * the row this run, so a transient failure never reads as "role deleted".
+   */
+  private async retireRemovedTiers(
+    guild: Guild,
+    activeRoleIds: ReadonlySet<string>,
+  ): Promise<LeaderboardRoleRunSummary["retired"]> {
+    const rows = await LeaderboardRoleAssignment.find({ guildId: guild.id });
+    const retired: LeaderboardRoleRunSummary["retired"] = [];
+    for (const row of rows) {
+      if (activeRoleIds.has(row.roleId)) continue;
+      let role: Role | null;
+      try {
+        role = await guild.roles.fetch(row.roleId);
+      } catch (error) {
+        logger.warn(
+          `Leaderboard role ${row.roleId} is no longer a tier but could not be fetched; retrying next run:`,
+          error,
+        );
+        continue;
+      }
+
+      const removed: string[] = [];
+      const retained: string[] = [];
+      for (const userId of row.userIds) {
+        if (!role) {
+          // The role itself is gone, so there is nothing left to take back.
+          removed.push(userId);
+          continue;
+        }
+        try {
+          const member = await fetchMemberOrNull(guild, userId);
+          if (member) {
+            await member.roles.remove(
+              role,
+              "Leaderboard role reward (tier removed)",
+            );
+          }
+          removed.push(userId);
+        } catch (error) {
+          logger.warn(
+            `Failed to take back removed-tier role ${role.name} from ${userId}; keeping them on the roster to retry:`,
+            error,
+          );
+          retained.push(userId);
+        }
+      }
+
+      if (retained.length === 0) {
+        await LeaderboardRoleAssignment.deleteOne({
+          guildId: guild.id,
+          roleId: row.roleId,
+        });
+      } else if (removed.length > 0) {
+        // Server-side pull, so a concurrent per-user purge is not clobbered.
+        await LeaderboardRoleAssignment.updateOne(
+          { guildId: guild.id, roleId: row.roleId },
+          { $pull: { userIds: { $in: removed } } },
+        );
+      }
+      retired.push({
+        roleId: row.roleId,
+        roleName: role?.name ?? row.roleId,
+        removed,
+        retained,
+      });
+    }
+    if (retired.length > 0) {
+      logger.info(
+        `Leaderboard roles: retired ${retired.length} removed tier role(s): ${retired
+          .map((r) => `${r.roleName} -${r.removed.length}`)
+          .join(", ")}`,
+      );
+    }
+    return retired;
   }
 
   /**

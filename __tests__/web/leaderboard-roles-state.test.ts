@@ -27,7 +27,9 @@ function roster(rows: unknown[] | Error): void {
   });
 }
 
-function makeClient(opts: { fetchFails?: boolean } = {}): {
+function makeClient(
+  opts: { fetchFails?: boolean; noBotMember?: boolean } = {},
+): {
   client: Client;
   membersFetch: jest.Mock;
 } {
@@ -48,7 +50,10 @@ function makeClient(opts: { fetchFails?: boolean } = {}): {
     id: "guild-1",
     roles: { fetch: async () => undefined, cache: roles },
     members: {
-      me: { roles: { highest: { position: 5 } } },
+      me: opts.noBotMember ? null : { roles: { highest: { position: 5 } } },
+      fetchMe: async () => {
+        throw new Error("unknown member");
+      },
       cache: memberCache,
       fetch: membersFetch,
     },
@@ -96,6 +101,7 @@ describe("loadLeaderboardRoleState (#985)", () => {
       { topN: 1, roleId: "111" },
       { topN: 3, roleId: "222" },
       { topN: 10, roleId: "404" },
+      { topN: 20, roleId: "999" },
     ]);
 
     expect(mockFind).toHaveBeenCalledWith({ guildId: "guild-1" });
@@ -109,6 +115,7 @@ describe("loadLeaderboardRoleState (#985)", () => {
         roleId: "111",
         roleName: "Champion",
         assignable: true,
+        roleIssue: null,
         holders: [
           { id: "u1", label: "alice" },
           { id: "u2", label: "bob" },
@@ -123,6 +130,7 @@ describe("loadLeaderboardRoleState (#985)", () => {
         roleName: "Podium",
         // Position 8 is above the bot's highest role (5).
         assignable: false,
+        roleIssue: "hierarchy",
         holders: [],
         lastUpdated: "2026-01-05T00:00:00.000Z",
       },
@@ -131,6 +139,17 @@ describe("loadLeaderboardRoleState (#985)", () => {
         roleId: "404",
         roleName: null,
         assignable: null,
+        roleIssue: null,
+        holders: [],
+        lastUpdated: null,
+      },
+      {
+        topN: 20,
+        roleId: "999",
+        roleName: "BotRole",
+        // Managed, not "above the bot's role" (it sits below it).
+        assignable: false,
+        roleIssue: "managed",
         holders: [],
         lastUpdated: null,
       },
@@ -156,9 +175,45 @@ describe("loadLeaderboardRoleState (#985)", () => {
         // Unknown, not "not found": the guild was never read.
         roleName: "111",
         assignable: null,
+        roleIssue: null,
         holders: [],
         lastUpdated: null,
       },
     ]);
+  });
+
+  it("reports assignability as unknown when the bot's member can't be read", async () => {
+    roster([]);
+    const { client } = makeClient({ noBotMember: true });
+    const state = await loadLeaderboardRoleState(client, "guild-1", [
+      { topN: 1, roleId: "222" },
+      { topN: 3, roleId: "999" },
+    ]);
+    // Position 8 would be above the bot, but the hierarchy was never checked,
+    // so it is unknown rather than assignable.
+    expect(state.tiers[0]).toMatchObject({
+      roleName: "Podium",
+      assignable: null,
+      roleIssue: null,
+    });
+    // A managed role is unassignable whatever the hierarchy.
+    expect(state.tiers[1]).toMatchObject({
+      assignable: false,
+      roleIssue: "managed",
+    });
+  });
+
+  it("fetches uncached holders in batches of at most 100", async () => {
+    const ids = Array.from({ length: 250 }, (_, i) => `m${i}`);
+    roster([{ roleId: "111", userIds: ids, updatedAt: new Date() }]);
+    const { client, membersFetch } = makeClient();
+    membersFetch.mockImplementation(async () => new Map());
+    await loadLeaderboardRoleState(client, "guild-1", [
+      { topN: 250, roleId: "111" },
+    ]);
+    const sizes = membersFetch.mock.calls.map(
+      (c) => (c[0] as unknown as { user: string[] }).user.length,
+    );
+    expect(sizes).toEqual([100, 100, 50]);
   });
 });

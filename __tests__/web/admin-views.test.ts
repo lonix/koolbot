@@ -4859,7 +4859,11 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     expect(html).toContain("2026-01-05T00:00:00.000Z");
   });
 
-  it("flags a role the bot cannot assign", () => {
+  it.each([
+    ["hierarchy", "above the bot’s role"],
+    ["managed", "managed by an integration"],
+    ["everyone", "@everyone can’t be a tier role"],
+  ] as const)("labels a %s role issue specifically", (roleIssue, label) => {
     const html = render({
       tiers: [
         {
@@ -4867,12 +4871,37 @@ describe("renderLeaderboardRolesPage (#985)", () => {
           roleId: "111",
           roleName: "Champion",
           assignable: false,
+          roleIssue,
           holders: [],
           lastUpdated: null,
         },
       ],
     });
-    expect(html).toContain("above the bot’s role");
+    expect(html).toContain(label);
+    for (const other of [
+      "above the bot’s role",
+      "managed by an integration",
+      "@everyone can’t be a tier role",
+    ]) {
+      if (other !== label) expect(html).not.toContain(other);
+    }
+  });
+
+  it("says the role could not be checked when assignability is unknown", () => {
+    const html = render({
+      tiers: [
+        {
+          topN: 1,
+          roleId: "111",
+          roleName: "Champion",
+          assignable: null,
+          holders: [],
+          lastUpdated: null,
+        },
+      ],
+    });
+    expect(html).toContain("couldn’t check whether the bot can assign it");
+    expect(html).not.toContain("above the bot’s role");
   });
 
   it("renders the settings card posting back to this page", () => {
@@ -4887,6 +4916,9 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     const html = render({ settingRows: [], settingsUnavailable: true });
     expect(html).toContain("Settings could not be loaded");
     expect(html).not.toContain('name="category" value="leaderboard_roles"');
+    // The tier editor is withheld too: saving it could overwrite the real
+    // tiers with whatever (possibly empty) list was read.
+    expect(html).not.toContain('action="/admin/leaderboard-roles/tiers"');
   });
 
   it("enables Run now only while the feature is on", () => {
