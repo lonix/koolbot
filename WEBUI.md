@@ -1141,7 +1141,9 @@ with a reset. The check is an in-memory lookup loaded at startup, not a query.
 
 The card says plainly that existing data stays visible on leaderboards,
 digests and Rewind until the member resets it, and that the opt-out is itself
-stored — it is the one row a reset keeps. Opting back in restores nothing.
+stored — it is the one row a reset keeps. Opting back in restores nothing, and
+voice time resumes from the next channel the member joins, not one they are
+already in.
 The reset card reads the opt-out state: an opted-out member's reset is
 described as a **deletion**, anyone else's as a reset with a link to opt out
 first.

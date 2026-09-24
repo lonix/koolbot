@@ -1458,8 +1458,9 @@ function renderTrackingOptOutCard(
         "members' records can still mention you.</p>",
       '<p class="muted">What was stored before you opted out is still there, and still shows on ' +
         `leaderboards, digests and your Rewind — ${removeIt}. Opting back ` +
-        "in starts tracking again from that moment; nothing from the time you were opted out " +
-        "can be restored, because it was never recorded.</p>",
+        "in starts tracking again from that moment (time in voice counts from the next channel " +
+        "you join); nothing from the time you were opted out can be restored, because it was " +
+        "never recorded.</p>",
       '<form method="POST" action="/me/privacy/tracking" class="stack">',
       csrf,
       '<input type="hidden" name="action" value="opt-in">',

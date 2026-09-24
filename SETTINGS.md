@@ -886,7 +886,9 @@ Web UI only — there is no slash command for either.
 - The opt-out **stops accumulation only**. Existing data still shows on
   leaderboards, digests, `/voicestats` and Rewind until the member resets it.
   Opt-out plus reset is the deletion. Opting back in deletes the row, starts
-  tracking from that moment and restores nothing.
+  tracking from that moment and restores nothing. A voice channel the member
+  is already in when they opt back in is not counted; voice time resumes from
+  the next channel they join.
 - The opt-out row is the one thing a reset **keeps** — it is what stops the
   trackers starting again — so it is itself a small piece of personal data
   the reset cannot remove. The page says so; opting back in removes it. It is

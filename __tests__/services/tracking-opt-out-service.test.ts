@@ -200,6 +200,29 @@ describe("TrackingOptOutService", () => {
     }
   });
 
+  it("retries a failed load on a timer, with no tracker traffic at all", async () => {
+    jest.useFakeTimers({
+      doNotFake: ["nextTick", "setImmediate", "queueMicrotask"],
+    });
+    try {
+      findRejects(new Error("mongo down"));
+      const service = TrackingOptOutService.getInstance();
+      await expect(service.initialize()).rejects.toThrow();
+      expect(service.isLoaded()).toBe(false);
+
+      // Mongo recovers; nobody calls isOptedOut.
+      findReturns([{ userId: "u1", guildId: "g1" }]);
+      jest.advanceTimersByTime(TrackingOptOutService.RETRY_INTERVAL_MS);
+      await flush();
+
+      expect(find).toHaveBeenCalledTimes(2);
+      expect(service.isLoaded()).toBe(true);
+      expect(service.isOptedOut("u1", "g1")).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it("reads the page's opt-out state straight from Mongo", async () => {
     const at = new Date("2026-09-01T00:00:00Z");
     findOne.mockReturnValue({

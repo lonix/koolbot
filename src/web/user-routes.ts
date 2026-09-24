@@ -1625,7 +1625,7 @@ export function createUserRouter(
           action === "opt-in"
             ? {
                 type: "ok",
-                text: "You are opted back in. Tracking starts again from now.",
+                text: "You are opted back in. Tracking starts again from now; time in voice counts from the next channel you join.",
               }
             : settled
               ? {

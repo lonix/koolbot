@@ -64,6 +64,8 @@ export class TrackingOptOutService {
   private optedOut: Set<string> | null = null;
   private loading: Promise<void> | null = null;
   private lastFailedLoadAt = 0;
+  /** Timer for the next background reload after a failed one. */
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   /** In-flight tracker writes per `guildId:userId` (see `trackWrite`). */
   private inFlight = new Map<string, Set<Promise<unknown>>>();
   /** Tail of the per-member mutation chain (see `serialise`). */
@@ -83,6 +85,7 @@ export class TrackingOptOutService {
 
   /** Drop the singleton. Tests only. */
   public static reset(): void {
+    TrackingOptOutService.instance?.cancelRetry();
     TrackingOptOutService.instance = null;
   }
 
@@ -316,8 +319,13 @@ export class TrackingOptOutService {
               TrackingOptOutService.key(row.userId, row.guildId),
             ),
           );
+          this.cancelRetry();
         } catch (error) {
           this.lastFailedLoadAt = Date.now();
+          // Retry on a timer, not only from the next tracker event: an idle
+          // guild (or one with tracking switched off) would otherwise stay
+          // unloaded, and the first event after recovery would be dropped.
+          this.scheduleRetry();
           throw error;
         } finally {
           this.loading = null;
@@ -325,6 +333,28 @@ export class TrackingOptOutService {
       })();
     }
     return this.loading;
+  }
+
+  private scheduleRetry(): void {
+    if (this.retryTimer) return;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      if (this.optedOut !== null) return;
+      // A failure here schedules the next attempt from `load` itself.
+      this.load().catch((error: unknown) => {
+        logger.warn(
+          "Could not load tracking opt-outs; tracking stays paused until it succeeds",
+          error,
+        );
+      });
+    }, TrackingOptOutService.RETRY_INTERVAL_MS);
+    // Never hold the process open just to retry.
+    this.retryTimer.unref?.();
+  }
+
+  private cancelRetry(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
   }
 
   private retryLoadInBackground(): void {
