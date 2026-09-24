@@ -96,10 +96,11 @@ export function createQuotesRouter(client: Client): Router {
         // text while the row says otherwise. A post that no longer exists is
         // different — there is nothing to disagree with, so the row is saved
         // and Resync reposts it.
+        const manager = QuoteChannelManager.getInstance(client);
         let postMissing = false;
         if (enabled) {
           try {
-            await QuoteChannelManager.getInstance(client).updateQuoteMessage(
+            await manager.updateQuoteMessage(
               quote.messageId,
               id,
               content,
@@ -112,15 +113,59 @@ export function createQuotesRouter(client: Client): Router {
             postMissing = true;
           }
         }
+        const postUpdated = enabled && !postMissing;
 
-        await quoteService.editQuote(id, content, authorId);
+        try {
+          await quoteService.editQuote(id, content, authorId);
+        } catch (saveErr) {
+          // The post already shows the new text, so a failed save would
+          // leave Discord and the stored quote disagreeing. Put the post back
+          // the way the row still has it, and say whether that worked.
+          let postReverted = false;
+          if (postUpdated) {
+            try {
+              await manager.updateQuoteMessage(
+                quote.messageId,
+                id,
+                quote.content,
+                quote.authorId,
+                quote.addedById,
+                quote.postChannelId,
+              );
+              postReverted = true;
+            } catch (revertErr) {
+              logger.error(
+                `Could not restore quote ${id}'s post after a failed save`,
+                revertErr,
+              );
+            }
+          }
+          const text =
+            saveErr instanceof Error ? saveErr.message : "Unknown error";
+          logger.error("Edit quote save failed", saveErr);
+          await recordAudit(session, {
+            action: "quote.edit",
+            targetId: id,
+            details: { postUpdated, postReverted },
+            result: "failure",
+            errorMessage: text,
+          });
+          flashRedirect(res, QUOTES_PAGE, {
+            type: "err",
+            text:
+              postUpdated && !postReverted
+                ? `Failed to save quote ${id}: ${text}. Its channel post already shows the new text and could not be restored; use Resync quote channel to redraw it from the stored quote.`
+                : `Failed to update quote ${id}: ${text}`,
+          });
+          return;
+        }
         await recordAudit(session, {
           action: "quote.edit",
           targetId: id,
           details: {
             authorChanged: normalizeUserId(quote.authorId) !== authorId,
             contentChanged: quote.content !== content,
-            postUpdated: enabled && !postMissing,
+            postUpdated,
             featureEnabled: enabled,
           },
           result: "success",
@@ -235,13 +280,28 @@ export function createQuotesRouter(client: Client): Router {
           });
           return;
         }
+        const { total } = await quoteService.listQuotes(1, 1);
         const { reposted } =
           await QuoteChannelManager.getInstance(client).resetChannel();
+        // `resetChannel` skips a quote whose post fails (and returns 0 if
+        // the rebuild throws part-way), so a count short of the stored total
+        // is a partial rebuild, not a clean one.
+        const missing = Math.max(0, total - reposted);
         await recordAudit(session, {
           action: "quote.sync",
-          details: { reposted },
-          result: "success",
+          details: { reposted, total },
+          result: missing === 0 ? "success" : "failure",
+          ...(missing === 0
+            ? {}
+            : { errorMessage: `${missing} of ${total} quotes not reposted` }),
         });
+        if (missing > 0) {
+          flashRedirect(res, QUOTES_PAGE, {
+            type: "warn",
+            text: `Rebuilt the quote channel, but only ${reposted} of ${total} quotes were reposted. Check the bot's logs and resync again.`,
+          });
+          return;
+        }
         flashRedirect(res, QUOTES_PAGE, {
           type: "ok",
           text: `Rebuilt the quote channel: ${reposted} quote${reposted === 1 ? "" : "s"} reposted.`,

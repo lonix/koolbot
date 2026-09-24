@@ -28,6 +28,7 @@ const mockGetQuoteById = jest.fn<(id: string) => Promise<unknown>>();
 const mockEditQuote = jest.fn<() => Promise<void>>();
 const mockRemoveQuote = jest.fn<() => Promise<unknown>>();
 const mockExportQuotes = jest.fn<() => Promise<unknown>>();
+const mockListQuotes = jest.fn<() => Promise<{ total: number }>>();
 const mockUpdateQuoteMessage = jest.fn<() => Promise<void>>();
 const mockDeleteQuoteMessage = jest.fn<() => Promise<boolean>>();
 const mockResetChannel = jest.fn<() => Promise<{ reposted: number }>>();
@@ -64,6 +65,7 @@ jest.unstable_mockModule("../../src/services/quote-service.js", () => ({
     editQuote: mockEditQuote,
     removeQuote: mockRemoveQuote,
     exportQuotes: mockExportQuotes,
+    listQuotes: mockListQuotes,
   },
 }));
 
@@ -113,6 +115,7 @@ beforeEach(async () => {
   mockUpdateQuoteMessage.mockResolvedValue(undefined);
   mockDeleteQuoteMessage.mockResolvedValue(true);
   mockResetChannel.mockResolvedValue({ reposted: 4 });
+  mockListQuotes.mockResolvedValue({ total: 4 });
   mockExportQuotes.mockResolvedValue({
     version: 1,
     exportedAt: "2026-09-24T00:00:00.000Z",
@@ -272,6 +275,49 @@ describe("POST /quotes/:id/edit", () => {
     });
   });
 
+  it("puts the post back when saving the row fails", async () => {
+    mockEditQuote.mockRejectedValue(new Error("db down"));
+    const flash = parseFlashRedirect(
+      (await edit({ content: "new", author_id: AUTHOR })).headers.get(
+        "location",
+      ),
+    );
+    expect(mockUpdateQuoteMessage).toHaveBeenCalledTimes(2);
+    expect(mockUpdateQuoteMessage).toHaveBeenLastCalledWith(
+      STORED.messageId,
+      QUOTE_ID,
+      STORED.content,
+      STORED.authorId,
+      SAVER,
+      STORED.postChannelId,
+    );
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toBe(`Failed to update quote ${QUOTE_ID}: db down`);
+    expect(lastAudit()).toMatchObject({
+      action: "quote.edit",
+      result: "failure",
+      details: { postUpdated: true, postReverted: true },
+    });
+  });
+
+  it("says the post is out of step when it can't be put back", async () => {
+    mockEditQuote.mockRejectedValue(new Error("db down"));
+    mockUpdateQuoteMessage
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Missing Access"));
+    const flash = parseFlashRedirect(
+      (await edit({ content: "new", author_id: AUTHOR })).headers.get(
+        "location",
+      ),
+    );
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("already shows the new text");
+    expect(flash.msg).toContain("Resync quote channel");
+    expect(lastAudit()).toMatchObject({
+      details: { postUpdated: true, postReverted: false },
+    });
+  });
+
   it("saves without touching the channel while quotes are disabled", async () => {
     mockConfigGetBoolean.mockResolvedValue(false);
     const flash = parseFlashRedirect(
@@ -353,6 +399,19 @@ describe("POST /quotes/sync", () => {
       action: "quote.sync",
       result: "success",
       details: { reposted: 4 },
+    });
+  });
+
+  it("warns — and audits a failure — when some quotes weren't reposted", async () => {
+    mockListQuotes.mockResolvedValue({ total: 6 });
+    const res = await harness.post("/quotes/sync");
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("only 4 of 6 quotes were reposted");
+    expect(lastAudit()).toMatchObject({
+      action: "quote.sync",
+      result: "failure",
+      details: { reposted: 4, total: 6 },
     });
   });
 

@@ -807,14 +807,17 @@ insensitive) and also an exact quote, message or member ID. Per row:
 - **Edit** changes the text and/or the author (a Discord user ID). The channel
   post is redrawn first, so if the post can't be reached the quote is left
   unchanged; if the post no longer exists the quote is saved and the flash
-  points you at Resync. Text longer than `quotes.max_length` is refused.
+  points you at Resync. If saving the quote then fails, the post is put back
+  to the stored text. Text longer than `quotes.max_length` is refused.
   While `quotes.enabled` is off only the stored quote changes.
 - **Delete** removes the channel post and the quote. If the post can't be
   removed the quote is still deleted and the flash says the post is left
   over, so you can remove it in Discord or with Resync.
 
 **Resync quote channel** is the same rebuild as `/quote reset`: it clears the
-channel, posts a fresh header and reposts every quote with its saved votes.
+channel, posts a fresh header and reposts every quote with its saved votes. If
+fewer quotes are reposted than are stored, the result is a warning, not a
+success.
 **Export quotes (JSON)** downloads the `/quote export` backup; restoring one is
 still done with `/quote import` in Discord. Every action is CSRF-protected and
 written to the Web UI audit log (`quote.edit`, `quote.delete`, `quote.sync`,
