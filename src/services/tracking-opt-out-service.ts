@@ -31,8 +31,13 @@ import { TrackingOptOut } from "../models/tracking-opt-out.js";
  * opt-out hook (`onOptOut`) that evicts the member's session and drains its
  * persists. Once `optOut` returns, nothing more is written about the member.
  *
- * Opt-outs and opt-ins for the same member are serialised, so two
- * overlapping requests cannot leave the cache disagreeing with Mongo.
+ * Opt-outs, opt-ins and data resets for the same member all run under one
+ * per-member barrier (`serialise`), so none can interleave with another.
+ * A reset runs inside `withTrackingPaused`, which blocks every tracker write
+ * about the member for its whole duration — a handler that passed an early
+ * check cannot slip a write in after the reset's deletes — and an opt-in
+ * refuses to resume tracking until work left over from the opt-out has
+ * settled.
  *
  * ## Fail closed
  *
@@ -73,6 +78,8 @@ export class TrackingOptOutService {
   private optOutHooks: Array<
     (userId: string, guildId: string) => Promise<unknown>
   > = [];
+  /** Members whose tracking is paused while their data is reset. */
+  private paused = new Set<string>();
 
   private constructor() {}
 
@@ -107,15 +114,18 @@ export class TrackingOptOutService {
   }
 
   /**
-   * Whether the trackers must skip this member. Synchronous and O(1): safe
-   * on every message, reaction and voice state change.
+   * Whether the trackers must skip this member: they opted out, or their
+   * data is being reset right now (`withTrackingPaused`). Synchronous and
+   * O(1): safe on every message, reaction and voice state change.
    */
   public isOptedOut(userId: string, guildId: string): boolean {
+    const key = TrackingOptOutService.key(userId, guildId);
+    if (this.paused.has(key)) return true;
     if (this.optedOut === null) {
       this.retryLoadInBackground();
       return true;
     }
-    return this.optedOut.has(TrackingOptOutService.key(userId, guildId));
+    return this.optedOut.has(key);
   }
 
   /**
@@ -145,9 +155,12 @@ export class TrackingOptOutService {
   }
 
   /**
-   * Register work to run whenever a member opts out, after the cache knows —
-   * the voice tracker uses it to evict a live session. `optOut` awaits it; a
-   * hook that throws is logged and does not fail the opt-out.
+   * Register work that brings a member's tracking to rest: evict what is
+   * live and wait out what is in flight. The voice tracker uses it for its
+   * in-memory session and persists. It runs after the cache already blocks
+   * the member — on opt-out, before an opt-in resumes tracking, and at the
+   * start of a reset. Resolve `false` to report a drain that timed out; a
+   * hook that throws is logged and counts as unsettled.
    */
   public onOptOut(
     hook: (userId: string, guildId: string) => Promise<unknown>,
@@ -174,19 +187,17 @@ export class TrackingOptOutService {
    * false` when that could not be confirmed — the drain or a hook timed out
    * or failed. The opt-out itself is stored either way; `settled: false`
    * only means a write already under way might still land, which the caller
-   * must not paper over (a reset straight after drains again and reports it).
+   * must not paper over (a reset straight after quiesces again and reports
+   * it; an opt-in refuses until it has settled).
    */
   public async optOut(
     userId: string,
     guildId: string,
   ): Promise<{ settled: boolean }> {
     const key = TrackingOptOutService.key(userId, guildId);
-    let settled = true;
     // The whole opt-out — write, cache, drain and hooks — holds the member's
-    // mutation barrier, so an opt-in cannot overtake work that is still
-    // finishing the opt-out (and a hook's eviction cannot hit a session that
-    // started after the member opted back in).
-    await this.serialise(key, async () => {
+    // barrier, so neither an opt-in nor a reset can overtake it.
+    return this.serialise(key, async () => {
       await TrackingOptOut.updateOne(
         { userId, guildId },
         { $setOnInsert: { userId, guildId, optedOutAt: new Date() } },
@@ -197,64 +208,100 @@ export class TrackingOptOutService {
       logger.info(
         `Member ${sanitizeForLog(userId)} opted out of tracking in guild ${sanitizeForLog(guildId)}`,
       );
-
       // From here no new write can start; wait out the ones that already had.
-      if (!(await this.drainWrites(key))) {
-        settled = false;
-        logger.warn(
-          `Timed out waiting for in-flight tracking writes for ${sanitizeForLog(userId)} after opt-out`,
-        );
-      }
-      for (const hook of this.optOutHooks) {
-        try {
-          // A hook reports an unsettled drain of its own by resolving false.
-          if ((await hook(userId, guildId)) === false) settled = false;
-        } catch (error) {
-          settled = false;
-          logger.warn(
-            `Tracking opt-out hook failed for ${sanitizeForLog(userId)}`,
-            error,
-          );
-        }
-      }
+      const { settled } = await this.quiesce(userId, guildId, key);
+      return { settled };
     });
-    return { settled };
   }
 
   /**
-   * Wait (bounded) for the member's in-flight tracker writes to settle. The
-   * purge calls this before deleting anything, so a write that an opt-out
-   * could not confirm finished cannot land after the reset unreported.
-   * Returns how many were pending and whether they all settled.
+   * Opt a member back in by deleting their row. Before tracking resumes, the
+   * work an opt-out could not confirm finished is waited out again; if it
+   * still has not settled, nothing changes and `settled: false` is returned,
+   * so a late write from the opted-out period cannot land as fresh tracking.
+   * Idempotent. `removed` says whether a row was deleted.
    */
-  public async waitForWrites(
+  public async optIn(
     userId: string,
     guildId: string,
-  ): Promise<{ pending: number; settled: boolean }> {
+  ): Promise<{ removed: boolean; settled: boolean }> {
     const key = TrackingOptOutService.key(userId, guildId);
-    const pending = this.inFlight.get(key)?.size ?? 0;
-    return { pending, settled: await this.drainWrites(key) };
-  }
-
-  /**
-   * Opt a member back in by deleting their row. Idempotent. Returns whether
-   * a row was removed.
-   */
-  public async optIn(userId: string, guildId: string): Promise<boolean> {
-    const key = TrackingOptOutService.key(userId, guildId);
-    const result = await this.serialise(key, async () => {
+    return this.serialise(key, async () => {
+      // Still opted out here, so nothing new can start while this waits.
+      const { settled } = await this.quiesce(userId, guildId, key);
+      if (!settled) {
+        logger.warn(
+          `Not opting ${sanitizeForLog(userId)} back in yet: work from their opt-out has not settled`,
+        );
+        return { removed: false, settled: false };
+      }
       const deleted = await TrackingOptOut.deleteOne({ userId, guildId });
       await this.settleLoad();
       this.optedOut?.delete(key);
-      return deleted;
+      const removed = (deleted?.deletedCount ?? 0) > 0;
+      if (removed) {
+        logger.info(
+          `Member ${sanitizeForLog(userId)} opted back in to tracking in guild ${sanitizeForLog(guildId)}`,
+        );
+      }
+      return { removed, settled: true };
     });
-    const removed = (result?.deletedCount ?? 0) > 0;
-    if (removed) {
-      logger.info(
-        `Member ${sanitizeForLog(userId)} opted back in to tracking in guild ${sanitizeForLog(guildId)}`,
+  }
+
+  /**
+   * Run `fn` — a data reset — with every tracker write about the member
+   * blocked for its whole duration, under the member's barrier so no opt-in
+   * or opt-out can interleave. Before `fn` starts, in-flight writes and the
+   * hooks are waited out; `fn` receives how many writes were pending and
+   * whether everything settled, so the reset can report it rather than claim
+   * a clean deletion.
+   */
+  public async withTrackingPaused<T>(
+    userId: string,
+    guildId: string,
+    fn: (quiesced: { pending: number; settled: boolean }) => Promise<T>,
+  ): Promise<T> {
+    const key = TrackingOptOutService.key(userId, guildId);
+    return this.serialise(key, async () => {
+      this.paused.add(key);
+      try {
+        return await fn(await this.quiesce(userId, guildId, key));
+      } finally {
+        this.paused.delete(key);
+      }
+    });
+  }
+
+  /**
+   * Wait out the member's in-flight tracker writes and run every hook. Only
+   * called once the member is already blocked (opted out or paused), so
+   * nothing new can start meanwhile.
+   */
+  private async quiesce(
+    userId: string,
+    guildId: string,
+    key: string,
+  ): Promise<{ pending: number; settled: boolean }> {
+    const pending = this.inFlight.get(key)?.size ?? 0;
+    let settled = true;
+    if (!(await this.drainWrites(key))) {
+      settled = false;
+      logger.warn(
+        `Timed out waiting for in-flight tracking writes for ${sanitizeForLog(userId)}`,
       );
     }
-    return removed;
+    for (const hook of this.optOutHooks) {
+      try {
+        if ((await hook(userId, guildId)) === false) settled = false;
+      } catch (error) {
+        settled = false;
+        logger.warn(
+          `Tracking quiesce hook failed for ${sanitizeForLog(userId)}`,
+          error,
+        );
+      }
+    }
+    return { pending, settled };
   }
 
   /**

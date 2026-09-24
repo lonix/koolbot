@@ -1581,15 +1581,15 @@ export function createUserRouter(
       }
 
       const service = TrackingOptOutService.getInstance();
-      // False when the opt-out is stored but a write already under way could
-      // not be confirmed finished; said out loud, never flashed as clean.
-      let settled = true;
+      // False when work from an opt-out could not be confirmed finished:
+      // for an opt-out it is stored anyway, for an opt-in nothing changed.
+      // Said out loud either way, never flashed as clean.
+      let settled: boolean;
       try {
-        if (action === "opt-out") {
-          ({ settled } = await service.optOut(userId, guildId));
-        } else {
-          await service.optIn(userId, guildId);
-        }
+        ({ settled } =
+          action === "opt-out"
+            ? await service.optOut(userId, guildId)
+            : await service.optIn(userId, guildId));
       } catch (error) {
         logger.error(
           `Tracking ${action} failed for ${sanitizeForLog(userId)}`,
@@ -1616,17 +1616,29 @@ export function createUserRouter(
         action: TRACKING_OPT_OUT_ACTION,
         targetId: userId,
         details: settled ? { action } : { action, settled: false },
-        result: "success",
+        // An unsettled opt-in changed nothing; an unsettled opt-out is still
+        // stored, so only the former is a failure.
+        ...(action === "opt-in" && !settled
+          ? {
+              result: "failure" as const,
+              errorMessage: "opt-out work had not settled; still opted out",
+            }
+          : { result: "success" as const }),
       });
       res.redirect(
         303,
         flashUrl(
           "/me/privacy",
           action === "opt-in"
-            ? {
-                type: "ok",
-                text: "You are opted back in. Tracking starts again from now; time in voice counts from the next channel you join.",
-              }
+            ? settled
+              ? {
+                  type: "ok",
+                  text: "You are opted back in. Tracking starts again from now; time in voice counts from the next channel you join.",
+                }
+              : {
+                  type: "err",
+                  text: "You are still opted out: a recording from before could not be confirmed finished. Try opting back in again in a minute.",
+                }
             : settled
               ? {
                   type: "ok",

@@ -334,14 +334,23 @@ describe("UserDataDeletionService.purge", () => {
       });
     });
 
-    it("waits for in-flight tracking writes before any collection is touched (#918)", async () => {
-      const waitForWrites = jest
-        .spyOn(TrackingOptOutService.getInstance(), "waitForWrites")
-        .mockResolvedValue({ pending: 1, settled: true });
+    /** Run the purge through a pause that reports `quiesced`. */
+    function pauseReporting(quiesced: { pending: number; settled: boolean }) {
+      return jest
+        .spyOn(TrackingOptOutService.getInstance(), "withTrackingPaused")
+        .mockImplementation((async (
+          _userId: string,
+          _guildId: string,
+          fn: (q: typeof quiesced) => Promise<unknown>,
+        ) => fn(quiesced)) as never);
+    }
+
+    it("runs the whole purge inside a tracking pause and reports it (#918)", async () => {
+      const paused = pauseReporting({ pending: 1, settled: true });
       try {
         const report = await service().purge(USER, GUILD);
 
-        expect(waitForWrites).toHaveBeenCalledWith(USER, GUILD);
+        expect(paused).toHaveBeenCalledWith(USER, GUILD, expect.any(Function));
         expect(report.steps[1]).toMatchObject({
           collection: TRACKING_WRITES,
           action: "evict",
@@ -350,14 +359,12 @@ describe("UserDataDeletionService.purge", () => {
         });
         expect(report.steps[1].error).toBeUndefined();
       } finally {
-        waitForWrites.mockRestore();
+        paused.mockRestore();
       }
     });
 
-    it("reports the purge incomplete when an in-flight tracking write never settles (#918)", async () => {
-      const waitForWrites = jest
-        .spyOn(TrackingOptOutService.getInstance(), "waitForWrites")
-        .mockResolvedValue({ pending: 1, settled: false });
+    it("reports the purge incomplete when an in-flight tracking write never settled (#918)", async () => {
+      const paused = pauseReporting({ pending: 1, settled: false });
       try {
         const report = await service().purge(USER, GUILD);
 
@@ -367,8 +374,23 @@ describe("UserDataDeletionService.purge", () => {
         );
         expect(step?.error).toContain("timed out");
       } finally {
-        waitForWrites.mockRestore();
+        paused.mockRestore();
       }
+    });
+
+    it("blocks tracking for the member while the purge runs, and only then (#918)", async () => {
+      const optOuts = TrackingOptOutService.getInstance();
+      const seen: boolean[] = [];
+      revokeSessionsForUser.mockImplementationOnce(async () => {
+        seen.push(optOuts.isOptedOut(USER, GUILD));
+        return 0;
+      });
+      (optOuts as unknown as { optedOut: Set<string> }).optedOut = new Set();
+
+      await service().purge(USER, GUILD);
+
+      expect(seen).toEqual([true]);
+      expect(optOuts.isOptedOut(USER, GUILD)).toBe(false);
     });
 
     it("revokes the leaderboard role on Discord before any collection is touched", async () => {

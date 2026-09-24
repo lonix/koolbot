@@ -106,7 +106,7 @@ async function installMocks(opts: MockOptions = {}): Promise<void> {
     optIn: async (userId: string, guildId: string) => {
       if (opts.writeThrows) throw new Error("mongo went away");
       optInCalls.push([userId, guildId]);
-      return true;
+      return { removed: true, settled: opts.settled ?? true };
     },
   } as never);
 }
@@ -280,6 +280,20 @@ describe("POST /me/privacy/tracking", () => {
       action: "user.privacy.tracking",
       result: "success",
       details: { action: "opt-in" },
+    });
+  });
+
+  it("keeps the member opted out, and says so, when an opt-in cannot settle", async () => {
+    await installMocks({ settled: false });
+    const { captured } = await post({
+      body: { _csrf: "csrf-1", action: "opt-in" },
+    });
+
+    expect(flashOf(captured).type).toBe("err");
+    expect(flashOf(captured).text).toContain("still opted out");
+    expect(auditRows[0]).toMatchObject({
+      result: "failure",
+      details: { action: "opt-in", settled: false },
     });
   });
 

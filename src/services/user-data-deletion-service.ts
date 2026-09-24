@@ -634,32 +634,46 @@ export class UserDataDeletionService {
       `Starting per-user purge for ${sanitizeForLog(userId)} in guild ${sanitizeForLog(guildId)}`,
     );
 
-    // Hold the member out of leaderboard reconciliation until their voice
-    // data is gone, and wait out any reconcile already running, so no run
-    // can re-grant a reward role after step 2 revokes it (#917). Best
-    // effort: failing to take the hold must not stop an erasure.
-    let releaseLeaderboard: () => void = () => undefined;
-    try {
-      releaseLeaderboard = await LeaderboardRoleService.getInstance(
-        this.client,
-      ).holdOutForPurge(userId);
-    } catch (err) {
-      logger.warn(
-        `Purge for ${sanitizeForLog(userId)}: could not hold the member out of leaderboard reconciliation`,
-        err,
-      );
-    }
-    try {
-      return await this.runPurge(ctx, userId);
-    } finally {
-      releaseLeaderboard();
-    }
+    // Pause every tracker write about the member for the whole purge, under
+    // the same per-member barrier as opt-out and opt-in (#918): a handler
+    // that passed an early check cannot write after the deletes, and an
+    // opt-in cannot resume tracking halfway through.
+    return TrackingOptOutService.getInstance().withTrackingPaused(
+      userId,
+      guildId,
+      async (quiesced) => {
+        // Hold the member out of leaderboard reconciliation until their
+        // voice data is gone, and wait out any reconcile already running, so
+        // no run can re-grant a reward role after step 2 revokes it (#917).
+        // Best effort: failing to take the hold must not stop an erasure.
+        let releaseLeaderboard: () => void = () => undefined;
+        try {
+          releaseLeaderboard = await LeaderboardRoleService.getInstance(
+            this.client,
+          ).holdOutForPurge(userId);
+        } catch (err) {
+          logger.warn(
+            `Purge for ${sanitizeForLog(userId)}: could not hold the member out of leaderboard reconciliation`,
+            err,
+          );
+        }
+        try {
+          return await this.runPurge(ctx, userId, quiesced);
+        } finally {
+          releaseLeaderboard();
+        }
+      },
+    );
   }
 
-  /** The purge steps proper; `purge` wraps them in the leaderboard hold. */
+  /**
+   * The purge steps proper; `purge` wraps them in the tracking pause and the
+   * leaderboard hold. `quiesced` is what the pause found when it started.
+   */
   private async runPurge(
     ctx: PurgeContext,
     userId: string,
+    quiesced: { pending: number; settled: boolean },
   ): Promise<PurgeReport> {
     const steps: PurgeStep[] = [];
 
@@ -697,18 +711,13 @@ export class UserDataDeletionService {
       });
     });
 
-    // 1b. Wait out any message, reaction or poll write already in flight
-    //     for the member (#918). The trackers register those writes, and a
-    //     tracked member's could otherwise land after the deletes below and
-    //     recreate a row. Matters most straight after an opt-out whose own
-    //     drain timed out: without this the reset would be called a deletion
-    //     while a write was still due.
+    // 1b. Report the tracking pause (#918). Before this purge started, the
+    //     pause blocked new tracker writes and waited out the ones already
+    //     in flight, which could otherwise land after the deletes below and
+    //     recreate a row. A write that never settled is reported rather than
+    //     let the reset be called a clean deletion.
     await this.runStep(steps, TRACKING_WRITES, "evict", async (emit) => {
-      const { pending, settled } =
-        await TrackingOptOutService.getInstance().waitForWrites(
-          userId,
-          ctx.guildId,
-        );
+      const { pending, settled } = quiesced;
       emit({
         action: "evict",
         matched: pending,

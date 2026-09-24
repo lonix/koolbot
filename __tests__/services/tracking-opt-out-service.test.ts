@@ -118,7 +118,10 @@ describe("TrackingOptOutService", () => {
     const service = TrackingOptOutService.getInstance();
     await service.initialize();
 
-    await expect(service.optIn("u1", "g1")).resolves.toBe(true);
+    await expect(service.optIn("u1", "g1")).resolves.toEqual({
+      removed: true,
+      settled: true,
+    });
 
     expect(deleteOne).toHaveBeenCalledWith({ userId: "u1", guildId: "g1" });
     expect(service.isOptedOut("u1", "g1")).toBe(false);
@@ -129,7 +132,10 @@ describe("TrackingOptOutService", () => {
     deleteOne.mockResolvedValue({ deletedCount: 0 } as never);
     const service = TrackingOptOutService.getInstance();
     await service.initialize();
-    await expect(service.optIn("u1", "g1")).resolves.toBe(false);
+    await expect(service.optIn("u1", "g1")).resolves.toEqual({
+      removed: false,
+      settled: true,
+    });
   });
 
   it("leaves the cache alone when the write fails", async () => {
@@ -379,27 +385,76 @@ describe("TrackingOptOutService", () => {
       });
     });
 
-    it("lets the purge wait for a member's in-flight writes", async () => {
+    it("pauses tracking for a reset: waits out writes in flight and admits no new ones", async () => {
       findReturns([]);
       const service = TrackingOptOutService.getInstance();
       await service.initialize();
-      await expect(service.waitForWrites("u1", "g1")).resolves.toEqual({
-        pending: 0,
-        settled: true,
-      });
 
       const gate = deferred();
       const writing = service.trackWrite("u1", "g1", () => gate.promise);
-      let waited: unknown = null;
-      const waiting = service.waitForWrites("u1", "g1").then((r) => {
-        waited = r;
+
+      const resetGate = deferred();
+      let quiesced: unknown = null;
+      const resetting = service.withTrackingPaused("u1", "g1", async (q) => {
+        quiesced = q;
+        await resetGate.promise;
+        return "done";
       });
       await flush();
-      expect(waited).toBeNull();
+      // Paused already, though the old write is still open.
+      expect(service.isOptedOut("u1", "g1")).toBe(true);
+      expect(quiesced).toBeNull();
+
       gate.resolve();
       await writing;
-      await waiting;
-      expect(waited).toEqual({ pending: 1, settled: true });
+      await flush();
+      expect(quiesced).toEqual({ pending: 1, settled: true });
+
+      // A handler that passed an early check cannot write mid-reset.
+      const late = jest.fn(async () => undefined);
+      await expect(service.trackWrite("u1", "g1", late)).resolves.toBe(false);
+      expect(late).not.toHaveBeenCalled();
+
+      resetGate.resolve();
+      await expect(resetting).resolves.toBe("done");
+      // Tracked again once the reset is over.
+      expect(service.isOptedOut("u1", "g1")).toBe(false);
+    });
+
+    it("holds an opt-in back until a running reset has finished", async () => {
+      findReturns([{ userId: "u1", guildId: "g1" }]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      const resetGate = deferred();
+      const resetting = service.withTrackingPaused(
+        "u1",
+        "g1",
+        () => resetGate.promise,
+      );
+      await flush();
+      const optingIn = service.optIn("u1", "g1");
+      await flush();
+      expect(deleteOne).not.toHaveBeenCalled();
+
+      resetGate.resolve();
+      await resetting;
+      await optingIn;
+      expect(deleteOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("refuses to opt back in while work from the opt-out has not settled", async () => {
+      findReturns([{ userId: "u1", guildId: "g1" }]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      service.onOptOut(async () => false);
+
+      await expect(service.optIn("u1", "g1")).resolves.toEqual({
+        removed: false,
+        settled: false,
+      });
+      expect(deleteOne).not.toHaveBeenCalled();
+      expect(service.isOptedOut("u1", "g1")).toBe(true);
     });
 
     it("keeps serving later mutations after one fails", async () => {

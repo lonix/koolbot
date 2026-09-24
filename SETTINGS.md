@@ -880,9 +880,12 @@ Web UI only — there is no slash command for either.
 - Opting out waits for any tracker write already in flight for the member
   and evicts a live voice session, so nothing more is written about them
   once the opt-out completes — a reset straight afterwards stays a deletion.
-  If that wait times out, the member is told to wait before resetting, and the
-  reset itself drains in-flight writes again first; if one is still pending,
-  the purge is reported incomplete and the member is told to retry.
+  If that wait times out, the member is told to wait before resetting.
+- Opt-out, opt-in and a reset for the same member never overlap. A reset
+  pauses tracking for the member for its whole run and first waits out
+  in-flight writes; if one is still pending, the purge is reported incomplete
+  and the member is told to retry. Opting back in likewise refuses (and says
+  so) until work left over from the opt-out has settled.
 - The opt-out **stops accumulation only**. Existing data still shows on
   leaderboards, digests, `/voicestats` and Rewind until the member resets it.
   Opt-out plus reset is the deletion. Opting back in deletes the row, starts
