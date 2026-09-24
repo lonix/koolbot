@@ -13,6 +13,7 @@ import {
   renderEventsPage,
   renderFeatureSettingsCard,
   renderImportDiffPage,
+  renderModerationPage,
   renderNoticesPage,
   renderPermissionsPage,
   renderPollsPage,
@@ -1888,6 +1889,168 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
     expect(html).not.toMatch(
       /name="value_voicechannels\.enabled"[^>]*checked[^>]*data-cascade-master/,
     );
+  });
+});
+
+describe("renderAnnouncementsPage settings card (#977)", () => {
+  const row = (current: unknown): SettingRow => ({
+    key: "announcements.enabled",
+    label: settingsMetadata["announcements.enabled"].label,
+    current,
+    defaultValue: defaultConfig["announcements.enabled"],
+    type: "boolean",
+    description: settingsMetadata["announcements.enabled"].description,
+    category: "announcements",
+  });
+  const render = (
+    props: Partial<Parameters<typeof renderAnnouncementsPage>[0]> = {},
+  ) =>
+    renderAnnouncementsPage({
+      ...COMMON,
+      enabled: true,
+      rows: [],
+      textChannels: [],
+      ...props,
+    });
+
+  it("renders announcements.enabled as the cascade master, posting back to the page", () => {
+    const html = render({ settingRows: [row(true)] });
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain(
+      '<input type="hidden" name="keys" value="announcements.enabled">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="announcements">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/announcements">',
+    );
+    expect(html).toMatch(
+      /name="value_announcements\.enabled"[^>]*checked[^>]*data-cascade-master/,
+    );
+    expect(html).not.toContain('name="no_cascade"');
+  });
+
+  it("renders the toggle unchecked when the feature is off", () => {
+    const html = render({ enabled: false, settingRows: [row(false)] });
+    expect(html).toMatch(/name="value_announcements\.enabled"/);
+    expect(html).not.toMatch(/name="value_announcements\.enabled"[^>]*checked/);
+  });
+
+  it("omits the card when no rows are supplied", () => {
+    expect(render()).not.toContain(
+      '<form method="POST" action="/admin/settings/save-section"',
+    );
+  });
+
+  it("renders a notice instead of controls when settings are unavailable", () => {
+    const html = render({ settingRows: [], settingsUnavailable: true });
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain('<input type="hidden" name="keys"');
+  });
+});
+
+describe("renderModerationPage settings card (#977)", () => {
+  const MODERATION_KEYS = [
+    "moderation.enabled",
+    "moderation.retention_days",
+    "core.moderation.enabled",
+    "core.moderation.channel_id",
+  ] as const;
+  const moderationRows = (
+    overrides: Partial<Record<(typeof MODERATION_KEYS)[number], unknown>> = {},
+  ): SettingRow[] =>
+    MODERATION_KEYS.map((key) => ({
+      key,
+      label: settingsMetadata[key].label,
+      current: key in overrides ? overrides[key] : defaultConfig[key],
+      defaultValue: defaultConfig[key],
+      type: settingsMetadata[key].type,
+      description: settingsMetadata[key].description,
+      category: settingsMetadata[key].category,
+      min: settingsMetadata[key].min,
+    }));
+  const render = (
+    props: Partial<Parameters<typeof renderModerationPage>[0]> = {},
+  ) =>
+    renderModerationPage({
+      ...COMMON,
+      enabled: true,
+      actionOptions: ["warn"],
+      userOptions: [],
+      filters: { action: "", userId: "" },
+      rows: [],
+      total: 0,
+      page: 1,
+      pageSize: 50,
+      ...props,
+    });
+
+  it("renders an editable control for every moderation key", () => {
+    const html = render({ settingRows: moderationRows() });
+    for (const key of MODERATION_KEYS) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+      expect(html).toContain(`name="value_${key}"`);
+    }
+  });
+
+  it("posts to save-section and returns to /admin/moderation", () => {
+    const html = render({ settingRows: moderationRows() });
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="moderation">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/moderation">',
+    );
+    expect(html).toContain('<input type="hidden" name="_csrf" value="csrf">');
+  });
+
+  it("carries moderation.enabled (not core.moderation.enabled) as the cascade master", () => {
+    const html = render({
+      settingRows: moderationRows({
+        "moderation.enabled": true,
+        "core.moderation.enabled": true,
+      }),
+    });
+    expect(html).toMatch(
+      /name="value_moderation\.enabled"[^>]*checked[^>]*data-cascade-master/,
+    );
+    expect(html).not.toMatch(
+      /name="value_core\.moderation\.enabled"[^>]*data-cascade-master/,
+    );
+    expect(html).not.toContain('name="no_cascade"');
+  });
+
+  it("offers the guild's text channels for the log channel, selecting the stored one", () => {
+    const html = render({
+      settingRows: moderationRows({ "core.moderation.channel_id": "c2" }),
+      pickers: {
+        textChannels: [
+          { id: "c1", name: "general" },
+          { id: "c2", name: "mod-log" },
+        ],
+      },
+    });
+    expect(html).toMatch(/<option value="c2" selected>#mod-log<\/option>/);
+    expect(html).toContain('<option value="c1">#general</option>');
+  });
+
+  it("renders the flash the save redirects back with", () => {
+    const html = render({
+      settingRows: moderationRows(),
+      flash: { type: "ok", text: "Saved 4 settings in moderation." },
+    });
+    expect(html).toContain("Saved 4 settings in moderation.");
+    expect(html).toContain('class="notice ok"');
+  });
+
+  it("renders a notice instead of controls when settings are unavailable", () => {
+    const html = render({ settingRows: [], settingsUnavailable: true });
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain('<input type="hidden" name="keys"');
   });
 });
 

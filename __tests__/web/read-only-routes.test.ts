@@ -4,6 +4,8 @@ import {
   buildSettingRows,
   fetchChannelData,
   loadFeatureSettings,
+  ANNOUNCEMENTS_SETTING_KEYS,
+  MODERATION_SETTING_KEYS,
   POLLS_SETTING_KEYS,
   EVENTS_SETTING_KEYS,
   VOICE_CHANNELS_SETTING_KEYS,
@@ -293,6 +295,43 @@ describe("loadFeatureSettings (#971)", () => {
       calls,
     };
   }
+
+  it("loads the Moderation card with a text-channel picker for its log channel (#977)", async () => {
+    const { client, calls } = countingClient();
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      MODERATION_SETTING_KEYS,
+      [
+        { key: "moderation.retention_days", value: 30 },
+        { key: "core.moderation.channel_id", value: "t1" },
+      ],
+    );
+    expect(data.settingRows.map((r) => r.key)).toEqual([
+      ...MODERATION_SETTING_KEYS,
+    ]);
+    const byKey = new Map(data.settingRows.map((r) => [r.key, r]));
+    expect(byKey.get("moderation.retention_days")?.current).toBe(30);
+    expect(byKey.get("core.moderation.channel_id")?.type).toBe("channel");
+    expect(byKey.get("core.moderation.channel_id")?.current).toBe("t1");
+    expect(byKey.get("core.moderation.enabled")?.category).toBe("core");
+    expect(calls).toEqual({ channels: 1, roles: 0 });
+    expect(data.pickers.textChannels).toEqual([{ id: "t1", name: "general" }]);
+  });
+
+  it("loads the Announcements card as the lone master toggle, no guild fetch (#977)", async () => {
+    const { client, calls } = countingClient();
+    const data = await loadFeatureSettings(
+      client,
+      "guild-1",
+      ANNOUNCEMENTS_SETTING_KEYS,
+      [{ key: "announcements.enabled", value: true }],
+    );
+    expect(data.settingRows.map((r) => [r.key, r.current])).toEqual([
+      ["announcements.enabled", true],
+    ]);
+    expect(calls).toEqual({ channels: 0, roles: 0 });
+  });
 
   it("skips every guild fetch when no key needs a picker", async () => {
     const { client, calls } = countingClient();

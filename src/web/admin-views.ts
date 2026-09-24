@@ -1704,6 +1704,16 @@ export interface AnnouncementsProps extends CommonProps {
   enabled: boolean;
   rows: AnnouncementRow[];
   textChannels: ChannelOption[];
+  /**
+   * The `announcements.*` keys, edited in place on this page (#977) through
+   * {@link renderFeatureSettingsCard}. Includes `announcements.enabled`, so
+   * the feature can be switched off here as well as on.
+   */
+  settingRows?: SettingRow[];
+  /** On/off state of off-card dependencies of {@link settingRows}. */
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /** The stored config could not be read; the card renders a notice. */
+  settingsUnavailable?: boolean;
   flash?: FlashMessage | null;
 }
 
@@ -1916,6 +1926,16 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Announcements", 
     <span class="muted">Posts the weekly voice-stats announcement immediately, off schedule.</span>
   </form>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Switch scheduled announcements on or off here without leaving the page. Saved through the shared settings route.",
+  category: "announcements",
+  settingRows: props.settingRows ?? [],
+  returnTo: "/admin/announcements",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
 <div class="card">
   <h2>Schedules</h2>${tableHtml}
 </div>
@@ -3700,6 +3720,19 @@ export interface ModerationProps extends CommonProps {
   total: number;
   page: number;
   pageSize: number;
+  /**
+   * The moderation keys, edited in place on this page (#977) through
+   * {@link renderFeatureSettingsCard}: the `moderation.*` master and
+   * retention, plus the `core.moderation.*` Discord log channel.
+   */
+  settingRows?: SettingRow[];
+  /** Channel list backing the `core.moderation.channel_id` picker. */
+  pickers?: FeatureSettingsPickers;
+  /** On/off state of off-card dependencies of {@link settingRows}. */
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /** The stored config could not be read; the card renders a notice. */
+  settingsUnavailable?: boolean;
+  flash?: FlashMessage | null;
 }
 
 const MODERATION_ACTION_LABELS: Record<ModerationAction, string> = {
@@ -3793,7 +3826,7 @@ export function renderModerationPage(props: ModerationProps): string {
   const body = `
 <h1>Moderation log</h1>
 <p class="subtitle">Actions recorded via <code>/warn</code>, <code>/timeout</code> and <code>/ban</code> plus native kick/ban/timeout actions mirrored from the guild audit log. Query per-member history in Discord with <code>/modlog</code>.</p>
-
+${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", featureKey: "moderation.enabled", returnTo: "/admin/moderation", csrfToken: props.csrfToken })}
 
 <div class="card">
@@ -3804,6 +3837,17 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Moderation", fea
   </dl>
   <p class="muted">Native actions require the bot to have the <strong>View Audit Log</strong> permission.</p>
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change moderation-log settings here without leaving the page, including the Discord channel moderation actions are logged to. Saved through the shared settings route.",
+  category: "moderation",
+  settingRows: props.settingRows ?? [],
+  pickers: props.pickers,
+  returnTo: "/admin/moderation",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
 
 <div class="card">
   <h2>Filters</h2>

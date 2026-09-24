@@ -209,7 +209,12 @@ export function adminPages(): A11yPage[] {
           {
             category: "Discord",
             rows: [
-              { key: "DISCORD_TOKEN", present: true, isSecret: true, display: "…ab12" },
+              {
+                key: "DISCORD_TOKEN",
+                present: true,
+                isSecret: true,
+                display: "…ab12",
+              },
               { key: "GUILD_ID", present: false, isSecret: false },
             ],
           },
@@ -244,7 +249,12 @@ export function adminPages(): A11yPage[] {
       html: renderImportDiffPage({
         ...COMMON,
         rows: [
-          { key: "polls.enabled", status: "pending", before: false, after: true },
+          {
+            key: "polls.enabled",
+            status: "pending",
+            before: false,
+            after: true,
+          },
           {
             key: "polls.bogus",
             status: "rejected",
@@ -319,6 +329,17 @@ export function adminPages(): A11yPage[] {
         ...COMMON,
         enabled: true,
         textChannels: CHANNELS,
+        settingRows: [
+          {
+            key: "announcements.enabled",
+            label: "Scheduled announcements enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable scheduled announcements.",
+            category: "announcements",
+          },
+        ],
         rows: [
           {
             id: "a1",
@@ -595,7 +616,11 @@ export function adminPages(): A11yPage[] {
       name: "Database",
       html: renderDatabasePage({
         ...COMMON,
-        connection: { state: "connected", name: "koolbot", host: "mongo:27017" },
+        connection: {
+          state: "connected",
+          name: "koolbot",
+          host: "mongo:27017",
+        },
         trunk: {
           enabled: true,
           schedule: "0 3 * * 0",
@@ -755,6 +780,47 @@ export function adminPages(): A11yPage[] {
         enabled: true,
         actionOptions: ["warn", "kick", "ban"],
         userOptions: [{ id: "u1", label: "alice" }],
+        settingRows: [
+          {
+            key: "moderation.enabled",
+            label: "Moderation log enabled",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Enable the moderation log.",
+            category: "moderation",
+          },
+          {
+            key: "moderation.retention_days",
+            label: "Moderation log retention (days)",
+            current: 365,
+            defaultValue: 365,
+            type: "number",
+            description: "Days to keep moderation-log rows.",
+            category: "moderation",
+            min: 0,
+          },
+          {
+            key: "core.moderation.enabled",
+            label: "Moderation log to Discord",
+            current: true,
+            defaultValue: false,
+            type: "boolean",
+            description: "Post moderation actions to a channel.",
+            category: "core",
+          },
+          {
+            key: "core.moderation.channel_id",
+            label: "Moderation log channel",
+            current: "c1",
+            defaultValue: "",
+            type: "channel",
+            description: "Channel that receives moderation embeds.",
+            category: "core",
+          },
+        ],
+        pickers: { textChannels: CHANNELS },
+        flash: FLASH,
         filters: { action: "", userId: "" },
         rows: [
           {

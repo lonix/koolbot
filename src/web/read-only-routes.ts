@@ -187,6 +187,26 @@ export const NOTICES_SETTING_KEYS = [
 ] as const;
 
 /**
+ * The `announcements.*` keys editable in place on the Announcements page
+ * (#977). Only the feature master exists, so the card is a single toggle that
+ * switches scheduled announcements off as well as on.
+ */
+export const ANNOUNCEMENTS_SETTING_KEYS = ["announcements.enabled"] as const;
+
+/**
+ * The moderation-log keys editable in place on the Moderation page (#977).
+ * `moderation.enabled` is the card's cascade master. The `core.moderation.*`
+ * pair is the feature's Discord log channel; it stays in the Core section of
+ * Settings too, and is surfaced here because it only matters to this feature.
+ */
+export const MODERATION_SETTING_KEYS = [
+  "moderation.enabled",
+  "moderation.retention_days",
+  "core.moderation.enabled",
+  "core.moderation.channel_id",
+] as const;
+
+/**
  * The env-var fallback a settings row shows for `key` when no DB row exists.
  * `getEnvConfigValue` coerces every digit-only string to a number, which
  * rounds a Discord snowflake past 2^53 and leaves an id picker with no
@@ -826,11 +846,18 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const service = ScheduledAnnouncementService.getInstance(client);
       const config = ConfigService.getInstance();
-      const [enabled, announcements, channelData] = await Promise.all([
-        config.getBoolean("announcements.enabled", false),
-        service.listAnnouncements(common.guildId),
-        fetchChannelData(client, common.guildId),
-      ]);
+      const [enabled, announcements, channelData, announcementSettings] =
+        await Promise.all([
+          config.getBoolean("announcements.enabled", false),
+          service.listAnnouncements(common.guildId),
+          fetchChannelData(client, common.guildId),
+          // Editable `announcements.*` settings card (#977).
+          loadFeatureSettings(
+            client,
+            common.guildId,
+            ANNOUNCEMENTS_SETTING_KEYS,
+          ),
+        ]);
 
       const rows = announcements.map((a) => ({
         id: String(a._id),
@@ -850,6 +877,9 @@ export function createReadOnlyRouter(
           enabled,
           rows,
           textChannels: channelData.textChannels,
+          settingRows: announcementSettings.settingRows,
+          dependencyState: announcementSettings.dependencyState,
+          settingsUnavailable: announcementSettings.unavailable,
           flash: readFlash(req),
         }),
       );
@@ -1733,9 +1763,14 @@ export function createReadOnlyRouter(
       const userFilter = String(req.query.user ?? "").trim() || undefined;
 
       // moderation.enabled is the master gate: when off, the page renders the
-      // disabled banner and an empty table without touching the DB, matching
+      // disabled banner and an empty table without querying the log, matching
       // the "inert until opted in" contract in defaultConfig.
-      const enabled = await config.getBoolean("moderation.enabled", false);
+      const [enabled, moderationSettings] = await Promise.all([
+        config.getBoolean("moderation.enabled", false),
+        // Editable moderation settings card (#977). Loaded whether or not the
+        // feature is on, so it can be switched on from this card as well.
+        loadFeatureSettings(client, common.guildId, MODERATION_SETTING_KEYS),
+      ]);
       const [total, docs] = enabled
         ? await Promise.all([
             moderationService
@@ -1829,6 +1864,11 @@ export function createReadOnlyRouter(
           total,
           page,
           pageSize,
+          settingRows: moderationSettings.settingRows,
+          pickers: moderationSettings.pickers,
+          dependencyState: moderationSettings.dependencyState,
+          settingsUnavailable: moderationSettings.unavailable,
+          flash: readFlash(req),
         }),
       );
     }),

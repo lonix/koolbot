@@ -546,6 +546,82 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet.mock.calls[0][1]).toBe(false);
   });
 
+  it("saves the Moderation page card, core.moderation.* included, and returns there (#977)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "moderation",
+      redirect: "/admin/moderation",
+      keys: [
+        "moderation.enabled",
+        "moderation.retention_days",
+        "core.moderation.enabled",
+        "core.moderation.channel_id",
+      ],
+      "value_moderation.enabled": "true",
+      "value_moderation.retention_days": "30",
+      "value_core.moderation.enabled": "true",
+      "value_core.moderation.channel_id": "chan-mod",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/moderation");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 4 settings in moderation.");
+    expect(mockConfigSet.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      ["moderation.enabled", true],
+      ["moderation.retention_days", 30],
+      ["core.moderation.enabled", true],
+      ["core.moderation.channel_id", "chan-mod"],
+    ]);
+    // core.moderation.* keeps its own Settings category, so Settings is
+    // unchanged by editing it here.
+    expect(mockConfigSet.mock.calls[2][3]).toBe("core");
+    expect(mockConfigSet.mock.calls[3][3]).toBe("core");
+  });
+
+  it("disables Moderation from its page without clobbering its settings (#977)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "moderation",
+      redirect: "/admin/moderation",
+      keys: [
+        "moderation.enabled",
+        "moderation.retention_days",
+        "core.moderation.enabled",
+        "core.moderation.channel_id",
+      ],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/moderation");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("moderation.enabled");
+    expect(mockConfigSet.mock.calls[0][1]).toBe(false);
+  });
+
+  it("toggles Announcements from its page and returns there (#977)", async () => {
+    const on = await harness.post("/settings/save-section", {
+      category: "announcements",
+      redirect: "/admin/announcements",
+      keys: ["announcements.enabled"],
+      "value_announcements.enabled": "true",
+    });
+    const onFlash = parseFlashRedirect(on.headers.get("location"));
+    expect(onFlash.path).toBe("/admin/announcements");
+    expect(onFlash.type).toBe("ok");
+    expect(onFlash.msg).toBe("Saved 1 setting in announcements.");
+
+    const off = await harness.post("/settings/save-section", {
+      category: "announcements",
+      redirect: "/admin/announcements",
+      keys: ["announcements.enabled"],
+    });
+    expect(parseFlashRedirect(off.headers.get("location")).path).toBe(
+      "/admin/announcements",
+    );
+    expect(mockConfigSet.mock.calls.map((c) => [c[0], c[1]])).toEqual([
+      ["announcements.enabled", true],
+      ["announcements.enabled", false],
+    ]);
+  });
+
   it("saves the Notices page card and returns there (#972)", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "notices",
