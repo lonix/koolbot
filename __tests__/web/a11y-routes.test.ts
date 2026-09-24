@@ -84,7 +84,11 @@ interface HttpResult {
  */
 function httpRequest(
   path: string,
-  opts: { method?: string; headers?: Record<string, string>; body?: string } = {},
+  opts: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+  } = {},
 ): Promise<HttpResult> {
   const url = new URL(`${baseUrl}${path}`);
   return new Promise((resolve, reject) => {

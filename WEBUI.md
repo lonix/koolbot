@@ -760,8 +760,8 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Voice Channels** | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**  | (new — **Preview** the weekly digest dry-run, plus a **Send now** button)                           |
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
-| **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
-| **Command Metrics**| (new — historical per-command usage / error-rate / latency dashboard)                               |
+| **Command Audit**  | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
+| **Command Metrics**| (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
 | **Moderation**     | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
@@ -842,7 +842,11 @@ commands by average response time, and a per-day usage trend. The 7d/30d
 toggle only selects the view window over already-persisted data; it is not a
 config key. Persistence is governed by `monitoring.metrics_persistence.enabled`
 (default on), while `monitoring.metrics_retention_days` (default 30) controls
-how long buckets are kept before the TTL index prunes them. This is
+how long buckets are kept before the TTL index prunes them; both are edited in
+place on the page's **Settings** card, which saves back to `/admin/metrics`.
+The **Command Audit** page (`/admin/audit/commands`) carries the same kind of
+card for `core.command_audit.enabled`, `core.command_audit.retention_days` and
+the WebUI audit's `core.web_audit.retention_days`. This is
 complementary to the Prometheus `/metrics` endpoint, which exposes
 process-level gauges (uptime, memory) rather than historical per-command
 counters.
