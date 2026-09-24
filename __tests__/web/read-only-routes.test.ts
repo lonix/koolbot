@@ -14,6 +14,7 @@ import {
   NOTICES_SETTING_KEYS,
   METRICS_SETTING_KEYS,
   COMMAND_AUDIT_SETTING_KEYS,
+  QUOTES_SETTING_KEYS,
   envSettingFallback,
   readInvalidKeys,
 } from "../../src/web/read-only-routes.js";
@@ -260,6 +261,21 @@ describe("buildSettingRows (#705)", () => {
       "boolean",
       "boolean",
     ]);
+  });
+
+  it("lists every quotes key, master included, bookkeeping excluded (#984)", () => {
+    const quoteKeys = Object.keys(defaultConfig).filter((k) =>
+      k.startsWith("quotes."),
+    );
+    expect([...QUOTES_SETTING_KEYS].sort()).toEqual(
+      quoteKeys.filter((k) => k !== "quotes.header_message_id").sort(),
+    );
+    const rows = buildSettingRows(QUOTES_SETTING_KEYS, []);
+    const typeOf = (key: string): string | undefined =>
+      rows.find((r) => r.key === key)?.type;
+    expect(typeOf("quotes.channel_id")).toBe("channel");
+    expect(typeOf("quotes.delete_roles")).toBe("role_list");
+    expect(typeOf("quotes.cooldown")).toBe("number");
   });
 });
 

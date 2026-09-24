@@ -2770,6 +2770,156 @@ ${groupSections}
   });
 }
 
+// ---------- Quotes ----------
+
+export interface QuoteRow {
+  id: string;
+  content: string;
+  /** Normalised author snowflake — what the edit form submits back. */
+  authorId: string;
+  /** Display name when the member resolved, else the raw ID. */
+  authorLabel: string;
+  addedByLabel: string;
+  addedAt: string;
+  likes: number;
+  dislikes: number;
+  messageId: string;
+}
+
+export interface QuotesProps extends CommonProps {
+  enabled: boolean;
+  channel: { name: string; id: string } | null;
+  /** The auto-managed `quotes.header_message_id`, shown read-only. */
+  headerMessageId: string;
+  /**
+   * The editable `quotes.*` settings rendered in place on the page (#984).
+   * Excludes the auto-managed `quotes.header_message_id`.
+   */
+  settingRows: SettingRow[];
+  settingsPickers?: FeatureSettingsPickers;
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /** The stored config could not be read; the card shows a notice instead. */
+  settingsUnavailable?: boolean;
+  /** `quotes.max_length`, applied to the edit form's textarea. */
+  maxLength: number;
+  rows: QuoteRow[];
+  /** Quotes matching {@link search} (every quote when it is empty). */
+  total: number;
+  page: number;
+  pageSize: number;
+  search: string;
+  flash?: FlashMessage | null;
+}
+
+function quotesQueryString(search: string, page: number): string {
+  const parts: string[] = [];
+  if (search) parts.push(`q=${encodeURIComponent(search)}`);
+  if (page > 1) parts.push(`page=${page}`);
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
+export function renderQuotesPage(props: QuotesProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
+  const page = Math.min(Math.max(1, props.page), totalPages);
+
+  const rowsHtml = props.rows
+    .map((q) => {
+      const preview =
+        q.content.length > 160 ? `${q.content.slice(0, 160)}…` : q.content;
+      return `<tr>
+<td>${escapeHtml(preview)}<div class="muted mono">id: ${escapeHtml(q.id)}</div></td>
+<td title="${escapeHtml(q.authorId)}">${escapeHtml(q.authorLabel)}</td>
+<td>${escapeHtml(q.addedByLabel)}</td>
+<td class="muted">${escapeHtml(q.addedAt)}</td>
+<td>👍 ${q.likes} · 👎 ${q.dislikes}</td>
+<td class="mono muted">${escapeHtml(q.messageId)}</td>
+<td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit" class="stack">${csrfInput}
+      <label>Quote<textarea name="content" rows="4" maxlength="${props.maxLength}" required>${escapeHtml(q.content)}</textarea></label>
+      <label>Author (Discord user ID)<input type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(q.authorId)}" required></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
+  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" onsubmit="return confirm('Delete quote ${escapeJsInAttr(q.id)}? Its channel post is removed too.');">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
+</td>
+</tr>`;
+    })
+    .join("");
+
+  const emptyText = props.search
+    ? "No quotes match this search."
+    : "No quotes stored.";
+  const tableHtml =
+    props.rows.length === 0
+      ? `<div class="empty">${emptyText}</div>`
+      : `<table><thead><tr><th scope="col">Quote</th><th scope="col">Author</th><th scope="col">Added by</th><th scope="col">Added</th><th scope="col">Votes</th><th scope="col">Message ID</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+
+  const prevLink =
+    page > 1
+      ? `<a class="btn btn-sm" href="/admin/quotes${quotesQueryString(props.search, page - 1)}">← Prev</a>`
+      : `<button class="btn btn-sm" disabled>← Prev</button>`;
+  const nextLink =
+    page < totalPages
+      ? `<a class="btn btn-sm" href="/admin/quotes${quotesQueryString(props.search, page + 1)}">Next →</a>`
+      : `<button class="btn btn-sm" disabled>Next →</button>`;
+  const clearLink = props.search
+    ? ` <a class="btn" href="/admin/quotes">Clear</a>`
+    : "";
+
+  const body = `
+<h1>Quotes</h1>
+<p class="subtitle">Every stored quote, newest first. Edits and deletes update the quote channel as well.</p>
+${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Quotes", featureKey: "quotes.enabled", returnTo: "/admin/quotes", csrfToken: props.csrfToken })}
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
+    <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
+    <dt>Header post</dt><dd>${props.headerMessageId ? `<span class="mono">${escapeHtml(props.headerMessageId)}</span> <span class="muted">(auto-managed)</span>` : '<span class="muted">none</span>'}</dd>
+    <dt>${props.search ? "Matching quotes" : "Total quotes"}</dt><dd>${props.total}</dd>
+  </dl>
+  <form method="POST" action="/admin/quotes/sync" class="inline-form" onsubmit="return confirm('Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes.');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
+    <span class="muted">Clears the channel, posts a fresh header and reposts every quote with its saved vote tally.</span>
+  </form>
+  <p class="inline-form"><a class="btn" href="/admin/quotes/export">Export quotes (JSON)</a> <span class="muted">The same backup <code>/quote export</code> produces; restore it with <code>/quote import</code>.</span></p>
+</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change quote settings here without leaving the page. Changing the channel does not move quotes already posted: after saving, use Resync quote channel above to repost them in the new channel.",
+  category: "quotes",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/quotes",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
+<div class="card">
+  <h2>Quotes</h2>
+  <form method="GET" action="/admin/quotes" class="inline-form" role="search">
+    <label for="quote-search">Search</label>
+    <input type="search" id="quote-search" name="q" value="${escapeHtml(props.search)}" maxlength="200" placeholder="Text, quote ID, message ID or user ID">
+    <button type="submit" class="btn">Search</button>${clearLink}
+  </form>
+  ${tableHtml}
+  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
+</div>
+`;
+  return renderAdminPage({
+    title: "Quotes",
+    active: "/admin/quotes",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
 // ---------- Database ----------
 
 export interface DbTrunkHistoryRow {
