@@ -201,6 +201,18 @@ export abstract class ScheduledService<TSummary = void> {
     }
   }
 
+  /**
+   * Resolve once any run already in flight has finished, however it ended;
+   * resolves straight away when idle. Lets a caller order its own work after
+   * a run that may already have read state the caller is about to change —
+   * the per-user purge uses it so a leaderboard reconcile that snapshotted
+   * the rankings first cannot write them back after the purge (#917).
+   */
+  protected async waitForIdle(): Promise<void> {
+    const running = this.inFlight;
+    if (running) await running.catch(() => undefined);
+  }
+
   private async guardedRun(): Promise<TSummary | null> {
     if (!(await this.isEnabled())) {
       logger.info(`${this.options.runLabel} aborted: feature disabled`);

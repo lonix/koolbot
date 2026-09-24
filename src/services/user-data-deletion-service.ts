@@ -193,15 +193,10 @@ const DELETERS: Record<string, CollectionDeleter> = {
   // reconcile to retry — and reported here as a partial step, because a
   // member who asked to be forgotten is still wearing the role.
   //
-  // **Known race, not closed here.** A scheduled reconcile that snapshotted
-  // the rankings *before* this revoke can write them back afterwards and
-  // re-grant the role. It is self-limiting — the member's voice data is gone
-  // by then, so the following reconcile finds they no longer qualify and
-  // revokes — but it means the role can survive one cron cycle past a purge
-  // the report called complete. Closing it needs the reconcile to exclude
-  // in-purge members at write time, which is a `LeaderboardRoleService`
-  // change belonging with the route that will call this (see the web-surface
-  // issue), not a coordinator one.
+  // A reconcile that ranked the member *before* this revoke could otherwise
+  // re-grant the role and write them back afterwards; `purge` closes that by
+  // holding the member out of reconciliation for the whole purge (#917,
+  // `LeaderboardRoleService.holdOutForPurge`).
   "leaderboard-role-assignment": {
     actions: ["pull-member"],
     run: async ({ userId, guildId, client }, emit) => {
@@ -630,11 +625,39 @@ export class UserDataDeletionService {
    */
   public async purge(userId: string, guildId: string): Promise<PurgeReport> {
     const ctx: PurgeContext = { userId, guildId, client: this.client };
-    const steps: PurgeStep[] = [];
 
     logger.info(
       `Starting per-user purge for ${sanitizeForLog(userId)} in guild ${sanitizeForLog(guildId)}`,
     );
+
+    // Hold the member out of leaderboard reconciliation until their voice
+    // data is gone, and wait out any reconcile already running, so no run
+    // can re-grant a reward role after step 2 revokes it (#917). Best
+    // effort: failing to take the hold must not stop an erasure.
+    let releaseLeaderboard: () => void = () => undefined;
+    try {
+      releaseLeaderboard = await LeaderboardRoleService.getInstance(
+        this.client,
+      ).holdOutForPurge(userId);
+    } catch (err) {
+      logger.warn(
+        `Purge for ${sanitizeForLog(userId)}: could not hold the member out of leaderboard reconciliation`,
+        err,
+      );
+    }
+    try {
+      return await this.runPurge(ctx, userId);
+    } finally {
+      releaseLeaderboard();
+    }
+  }
+
+  /** The purge steps proper; `purge` wraps them in the leaderboard hold. */
+  private async runPurge(
+    ctx: PurgeContext,
+    userId: string,
+  ): Promise<PurgeReport> {
+    const steps: PurgeStep[] = [];
 
     // 1. Evict the in-memory voice session first. `endTracking` persists
     //    with `upsert: true`, so a member sitting in a voice channel when

@@ -107,6 +107,7 @@ const forgetActiveSession = jest.fn<
     timedOut: boolean;
   }
 >();
+const holdOutForPurge = jest.fn<(userId: string) => Promise<void>>();
 const revokeForUser =
   jest.fn<
     (
@@ -176,6 +177,13 @@ jest.unstable_mockModule(
   () => ({
     LeaderboardRoleService: {
       getInstance: () => ({
+        holdOutForPurge: async (userId: string) => {
+          CALLS.push("leaderboard.holdOutForPurge");
+          await holdOutForPurge(userId);
+          return () => {
+            CALLS.push("leaderboard.release");
+          };
+        },
         revokeForUser: async (guildId: string, userId: string) => {
           CALLS.push("leaderboard.revokeForUser");
           return revokeForUser(guildId, userId);
@@ -281,6 +289,7 @@ describe("UserDataDeletionService.purge", () => {
       .mockReset()
       .mockReturnValue({ discarded: false, drained: false, timedOut: false });
     revokeForUser.mockReset().mockResolvedValue({ revoked: [], retained: [] });
+    holdOutForPurge.mockReset().mockResolvedValue(undefined);
     removeRsvp
       .mockReset()
       .mockResolvedValue({ matched: 0, removed: 0, rendersFailed: 0 });
@@ -311,7 +320,11 @@ describe("UserDataDeletionService.purge", () => {
       // carrying the whole session's total, purge included.
       const report = await service().purge(USER, GUILD);
 
-      expect(CALLS[0]).toBe("voice.forgetActiveSession");
+      // Only the leaderboard hold (which writes nothing) comes before it.
+      expect(CALLS.slice(0, 2)).toEqual([
+        "leaderboard.holdOutForPurge",
+        "voice.forgetActiveSession",
+      ]);
       expect(report.steps[0]).toMatchObject({
         collection: VOICE_SESSION_CACHE,
         action: "evict",
@@ -371,11 +384,42 @@ describe("UserDataDeletionService.purge", () => {
       // render its own result.
       const report = await service().purge(USER, GUILD);
 
-      expect(CALLS[CALLS.length - 1]).toBe("session.revokeForUser");
+      // Followed only by releasing the leaderboard hold, which writes nothing.
+      expect(CALLS.slice(-2)).toEqual([
+        "session.revokeForUser",
+        "leaderboard.release",
+      ]);
       expect(report.steps[report.steps.length - 1]).toMatchObject({
         collection: "web-session",
         action: "revoke",
       });
+    });
+
+    it("holds the member out of leaderboard reconciliation until their voice data is gone (#917)", async () => {
+      // A reconcile that ranked the member first could otherwise re-grant the
+      // role after the revoke; the hold spans the revoke and the voice delete
+      // that stops them ranking at all.
+      await service().purge(USER, GUILD);
+
+      const hold = CALLS.indexOf("leaderboard.holdOutForPurge");
+      const release = CALLS.indexOf("leaderboard.release");
+      expect(hold).toBe(0);
+      expect(holdOutForPurge).toHaveBeenCalledWith(USER);
+      expect(hold).toBeLessThan(CALLS.indexOf("leaderboard.revokeForUser"));
+      expect(release).toBeGreaterThan(
+        CALLS.lastIndexOf("voice-channel-tracking.deleteMany"),
+      );
+    });
+
+    it("still purges when the leaderboard hold cannot be taken", async () => {
+      holdOutForPurge.mockRejectedValue(new Error("hold failed"));
+
+      const report = await service().purge(USER, GUILD);
+
+      expect(CALLS).toContain("leaderboard.revokeForUser");
+      expect(CALLS).toContain("session.revokeForUser");
+      expect(CALLS).not.toContain("leaderboard.release");
+      expect(report.steps.length).toBeGreaterThan(0);
     });
 
     it("runs every declared deleter once, in the declared order", () => {
@@ -794,7 +838,10 @@ describe("UserDataDeletionService.purge", () => {
       expect(report.ok).toBe(false);
       // Everything after it still ran, including the last step of all.
       expect(CALLS).toContain("reminder.deleteMany");
-      expect(CALLS[CALLS.length - 1]).toBe("session.revokeForUser");
+      expect(CALLS.slice(-2)).toEqual([
+        "session.revokeForUser",
+        "leaderboard.release",
+      ]);
     });
 
     it("records that it waited out a persist already in flight", async () => {
@@ -846,7 +893,10 @@ describe("UserDataDeletionService.purge", () => {
       expect(report.ok).toBe(false);
       // Everything after it still ran, including the last step of all.
       expect(CALLS).toContain("reminder.deleteMany");
-      expect(CALLS[CALLS.length - 1]).toBe("session.revokeForUser");
+      expect(CALLS.slice(-2)).toEqual([
+        "session.revokeForUser",
+        "leaderboard.release",
+      ]);
     });
 
     it("keeps the completed half of a two-policy deleter that fails mid-way", async () => {

@@ -50,6 +50,11 @@ export interface LeaderboardRoleRevokeResult {
 
 export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunSummary | null> {
   private static instance: LeaderboardRoleService;
+  /**
+   * Members a per-user purge is holding out of reconciliation, with a count
+   * so overlapping holds release cleanly (#917). See `holdOutForPurge`.
+   */
+  private readonly heldOut = new Map<string, number>();
 
   private constructor(client: Client) {
     super(client, {
@@ -253,7 +258,14 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       };
     }
 
-    const qualifyingIds = new Set(rankedUserIds.slice(0, tier.topN));
+    // A member being purged never qualifies, so this run cannot grant them
+    // the role while their data is being erased (#917). Filtered before the
+    // cut so the next-ranked member moves up rather than leaving a gap.
+    const qualifyingIds = new Set(
+      rankedUserIds
+        .filter((userId) => !this.heldOut.has(userId))
+        .slice(0, tier.topN),
+    );
 
     // Source of truth for "who already has this role per our last run" is
     // our own persisted state — we cannot rely on `role.members` because
@@ -330,6 +342,41 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
       roleName: role.name,
       added,
       removed,
+    };
+  }
+
+  /**
+   * Hold a member out of reconciliation for the length of a per-user purge
+   * (#917), and return the function that releases the hold.
+   *
+   * Closes the race `revokeForUser` alone cannot: a reconcile that had
+   * already ranked the member could re-grant the role and write them back
+   * onto the roster *after* the purge revoked it, leaving the role on a
+   * member who asked to be forgotten until the next cron cycle. Two parts:
+   *
+   * - While held, `reconcileTier` treats the member as not qualifying, so no
+   *   run can grant them the role (and a run that finds them on the roster
+   *   revokes it, which is what the purge wants anyway).
+   * - Before returning, the hold waits out any run already in flight. That
+   *   run may have granted the role before the hold existed; waiting lets it
+   *   finish writing the roster, so the purge's `revokeForUser` then sees
+   *   the member there and takes the role back. Filtering the roster write
+   *   instead would drop them from the roster while leaving the Discord
+   *   role in place — the permanent-role failure `revokeForUser` documents.
+   *
+   * The caller releases once the member's voice data is gone, after which
+   * they no longer rank and need no hold.
+   */
+  public async holdOutForPurge(userId: string): Promise<() => void> {
+    this.heldOut.set(userId, (this.heldOut.get(userId) ?? 0) + 1);
+    await this.waitForIdle();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.heldOut.get(userId) ?? 1) - 1;
+      if (remaining > 0) this.heldOut.set(userId, remaining);
+      else this.heldOut.delete(userId);
     };
   }
 
