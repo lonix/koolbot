@@ -301,16 +301,29 @@ export function createSettingsRouter(client: Client): Router {
             ? `, ${deleted} orphan key${deleted === 1 ? "" : "s"} removed`
             : "";
         const reloadNote = " You may need to Reload commands.";
+        // Re-arm every scheduled job from the defaults just written (#1013);
+        // only the command list still needs a manual reload. Not diffed: a
+        // key with no stored row may have been running on an env fallback,
+        // and `get()` reads a failed lookup as null, so neither says whether
+        // the effective value moved. A bulk reset is rare, and re-arming an
+        // unchanged schedule just restarts it.
+        const failedKeys = new Set(failed.map((f) => f.key));
+        const rearmNote = rearmFailureNote(
+          await rearmScheduledServices(
+            client,
+            Object.keys(defaultConfig).filter((k) => !failedKeys.has(k)),
+          ),
+        );
         if (failed.length === 0) {
           flashRedirect(res, "/admin/settings", {
-            type: "ok",
-            text: `Settings reset to defaults — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}.${reloadNote}`,
+            type: rearmNote ? "warn" : "ok",
+            text: `Settings reset to defaults — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}.${reloadNote}${rearmNote}`,
           });
           return;
         }
         flashRedirect(res, "/admin/settings", {
           type: landed > 0 ? "warn" : "err",
-          text: `Reset ${landed > 0 ? "partially " : ""}failed — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}, ${failed.length} failed (first: ${failed[0].key} — ${failed[0].reason}).${landed > 0 ? reloadNote : ""}`,
+          text: `Reset ${landed > 0 ? "partially " : ""}failed — ${updated} key${updated === 1 ? "" : "s"} updated${orphanNote}, ${failed.length} failed (first: ${failed[0].key} — ${failed[0].reason}).${landed > 0 ? reloadNote : ""}${rearmNote}`,
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
@@ -817,6 +830,7 @@ export function createSettingsRouter(client: Client): Router {
       // Phase 2: apply the validated set. Skip the per-key check — the batch
       // was already validated, and per-key ordering would falsely reject an
       // intra-snapshot dependency pair.
+      const writtenKeys: string[] = [];
       for (const { key, value } of toWrite) {
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
         try {
@@ -828,6 +842,7 @@ export function createSettingsRouter(client: Client): Router {
             { skipDependencyCheck: true },
           );
           applied++;
+          writtenKeys.push(key);
         } catch (err) {
           const text = err instanceof Error ? err.message : "set failed";
           // Static message: `key` comes from the uploaded YAML, and the
@@ -862,13 +877,24 @@ export function createSettingsRouter(client: Client): Router {
             : null,
       });
 
+      // An imported schedule or enable flag re-arms its job now (#1013).
+      // Every written key counts, not only changed ones: `get()` reads a
+      // failed lookup as null and falls back to env for a missing row, so a
+      // before/after diff can't be trusted here. Re-arming an unchanged
+      // schedule just restarts it.
+      const rearmFailed = await rearmScheduledServices(client, writtenKeys);
       const summary =
         failed.length === 0
           ? `Imported ${applied} setting${applied === 1 ? "" : "s"}.`
           : `Imported ${applied}, skipped ${failed.length} (first: ${failed[0].key} — ${failed[0].reason}).`;
       flashRedirect(res, "/admin/settings", {
-        type: failed.length === 0 ? "ok" : applied > 0 ? "warn" : "err",
-        text: summary,
+        type:
+          failed.length === 0 && rearmFailed.length === 0
+            ? "ok"
+            : applied > 0
+              ? "warn"
+              : "err",
+        text: `${summary}${rearmFailureNote(rearmFailed)}`,
       });
     }),
   );

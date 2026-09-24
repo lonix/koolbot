@@ -11,14 +11,24 @@
 
 import type { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
+import { BirthdayService } from "../../../services/birthday-service.js";
 import { DigestService } from "../../../services/digest-service.js";
+import { EventService } from "../../../services/event-service.js";
 import { LeaderboardRoleService } from "../../../services/leaderboard-role-service.js";
+import { LfgService } from "../../../services/lfg-service.js";
+import { ReminderService } from "../../../services/reminder-service.js";
+import { RewindNudgeService } from "../../../services/rewind-nudge-service.js";
 import { defaultConfig } from "../../../services/config-schema.js";
 
 interface ScheduleRearm {
   /** Name used in the flash note when the re-arm fails. */
   label: string;
-  /** Keys that decide whether and when the job runs. */
+  /**
+   * Keys that decide whether and when the job runs — whatever the service's
+   * `isEnabled()` / `resolveSchedule()` read. Services on a fixed tick list
+   * only their enable flag: a service that started disabled has no job until
+   * a reload arms it (#1013).
+   */
   keys: readonly string[];
   reload: (client: Client) => Promise<void>;
 }
@@ -33,6 +43,32 @@ const SCHEDULE_REARMS: readonly ScheduleRearm[] = [
     label: "leaderboard roles",
     keys: ["leaderboard_roles.enabled", "leaderboard_roles.update_cron"],
     reload: (client) => LeaderboardRoleService.getInstance(client).reload(),
+  },
+  {
+    label: "birthdays",
+    keys: ["birthdays.enabled", "birthdays.cron"],
+    reload: (client) => BirthdayService.getInstance(client).reload(),
+  },
+  {
+    label: "rewind nudge",
+    // `rewind.enabled` is the legacy fallback for `rewind.nudge.enabled`.
+    keys: ["rewind.enabled", "rewind.nudge.enabled", "rewind.cron"],
+    reload: (client) => RewindNudgeService.getInstance(client).reload(),
+  },
+  {
+    label: "events",
+    keys: ["events.enabled"],
+    reload: (client) => EventService.getInstance(client).reload(),
+  },
+  {
+    label: "reminders",
+    keys: ["reminders.enabled"],
+    reload: (client) => ReminderService.getInstance(client).reload(),
+  },
+  {
+    label: "LFG",
+    keys: ["lfg.enabled"],
+    reload: (client) => LfgService.getInstance(client).reload(),
   },
 ];
 
