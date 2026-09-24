@@ -248,6 +248,18 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "The member's own preference row; removing it returns them to the configured defaults.",
   },
   {
+    source: "src/models/tracking-opt-out.ts",
+    collection: "tracking-opt-out",
+    field: "userId",
+    exportable: true,
+    guildScoped: true,
+    note: "Whether the member has opted out of activity tracking, and since when (#918). Present only while they are opted out.",
+    onDelete: "retain",
+    subject: "self",
+    deleteNote:
+      "Deliberately kept: it is the flag that stops the trackers writing again after the reset, and so the only thing that turns a reset into a deletion. It is itself a small piece of the member's data — the reset cannot remove it, but opting back in on /me/privacy deletes it.",
+  },
+  {
     source: "src/models/user-voice-preferences.ts",
     collection: "user-voice-preferences",
     field: "userId",

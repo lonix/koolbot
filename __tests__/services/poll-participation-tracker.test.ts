@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { stubMongoGuard } from "../test-utils.js";
+import { stubMongoGuard, stubTrackingOptOuts } from "../test-utils.js";
 import type { Client, PollAnswer, User } from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
@@ -107,6 +107,8 @@ describe("PollParticipationTracker", () => {
     turnoutUpdateOne.mockResolvedValue({ matchedCount: 1 });
     (PollParticipationTracker as unknown as { instance: unknown }).instance =
       undefined;
+    // Loaded and empty: the trackers fail closed on an unloaded cache.
+    stubTrackingOptOuts();
   });
 
   describe("singleton pattern", () => {
@@ -641,6 +643,22 @@ describe("PollParticipationTracker", () => {
         weekBucketsPruned: 0,
         turnoutRowsDeleted: 0,
       });
+    });
+  });
+
+  describe("tracking opt-out (#918)", () => {
+    it("records neither the vote nor the turnout for an opted-out voter", async () => {
+      stubTrackingOptOuts([["voter1", "guild1"]]);
+      const { tracker, usersFetch } = createTracker({
+        username: "Voter",
+        bot: false,
+      });
+      await tracker.handlePollVoteAdd(makePollAnswer(), "voter1");
+
+      expect(PollParticipationTracking.updateOne).not.toHaveBeenCalled();
+      expect(PollTurnout.updateOne).not.toHaveBeenCalled();
+      // Checked before resolving the voter, so it costs no API call.
+      expect(usersFetch).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { stubMongoGuard } from "../test-utils.js";
+import { stubMongoGuard, stubTrackingOptOuts } from "../test-utils.js";
 import type { Client, Message } from "discord.js";
 
 // Rely on the global mongoose mock from setup.ts for a stable shared model
@@ -16,6 +16,7 @@ jest.mock("../../src/utils/logger.js", () => ({
 
 import { MessageActivityTracker } from "../../src/services/message-activity-tracker.js";
 import { MessageActivityTracking } from "../../src/models/message-activity-tracking.js";
+import { TrackingOptOutService } from "../../src/services/tracking-opt-out-service.js";
 
 // The global mongoose mock does not provide updateOne; attach it to the
 // shared model object so the tracker can call it.
@@ -71,6 +72,8 @@ describe("MessageActivityTracker", () => {
       .updateOne;
     (MessageActivityTracker as unknown as { instance: unknown }).instance =
       undefined;
+    // Loaded and empty: the trackers fail closed on an unloaded cache.
+    stubTrackingOptOuts();
   });
 
   describe("singleton pattern", () => {
@@ -206,6 +209,30 @@ describe("MessageActivityTracker", () => {
       await expect(
         tracker.handleMessageCreate(makeMessage()),
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe("tracking opt-out (#918)", () => {
+    it("records nothing for a member who opted out", async () => {
+      stubTrackingOptOuts([["user1", "guild1"]]);
+      const { tracker } = createTracker();
+      await tracker.handleMessageCreate(makeMessage());
+      expect(updateOne).not.toHaveBeenCalled();
+    });
+
+    it("still records a member opted out only in another guild", async () => {
+      stubTrackingOptOuts([["user1", "other-guild"]]);
+      const { tracker } = createTracker();
+      updateOne.mockResolvedValue({ matchedCount: 1 });
+      await tracker.handleMessageCreate(makeMessage());
+      expect(updateOne).toHaveBeenCalled();
+    });
+
+    it("fails closed while the opt-outs have not loaded", async () => {
+      TrackingOptOutService.reset();
+      const { tracker } = createTracker();
+      await tracker.handleMessageCreate(makeMessage());
+      expect(updateOne).not.toHaveBeenCalled();
     });
   });
 });

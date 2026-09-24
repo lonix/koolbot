@@ -13,6 +13,7 @@ import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { AchievementsService } from "./achievements-service.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
@@ -41,6 +42,11 @@ interface VoiceSession {
   startTime: Date;
   channelId: string;
   channelName: string;
+  /**
+   * The guild the session is in, for the tracking opt-out checks at persist
+   * time (#918). The tracking row itself is not guild-scoped.
+   */
+  guildId?: string;
   /**
    * Set while an `endTracking` call is persisting this session (#916).
    *
@@ -581,10 +587,25 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // Member tracking opt-out (#918): no session, so nothing to persist.
+      // Checked here, with the purge generation, for the same reason — the
+      // awaits above leave time for an opt-out to land.
+      const optOuts = TrackingOptOutService.getInstance();
+      const guildId = member.guild?.id;
+      if (guildId && optOuts.isOptedOut(member.id, guildId)) {
+        if (debugModeEnabled) {
+          logger.info(
+            `[DEBUG] Not tracking user ${member.id}: they opted out of tracking`,
+          );
+        }
+        return;
+      }
+
       this.activeSessions.set(member.id, {
         startTime: new Date(),
         channelId,
         channelName,
+        guildId,
       });
 
       // Initialize encountered users Set with current channel members
@@ -603,7 +624,9 @@ export class VoiceChannelTracker {
           // Add all current members except the joining user
           if (channel.members) {
             channel.members.forEach((m) => {
-              if (m.id !== member.id) {
+              // An opted-out member is not recorded as co-present in
+              // anyone else's session either (#918).
+              if (m.id !== member.id && !optOuts.isOptedOut(m.id, guild.id)) {
                 encounteredSet.add(m.id);
                 since.set(m.id, now);
                 presentAtJoin.push(m.id);
@@ -677,6 +700,27 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // The member opted out of tracking mid-session (#918): drop the
+      // session instead of persisting it. Synchronous, so no other handler
+      // can claim it between the check and the discard.
+      const optOuts = TrackingOptOutService.getInstance();
+      if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+        this.activeSessions.delete(userId);
+        this.userChannels.delete(userId);
+        this.encounteredUsers.delete(userId);
+        this.companionSince.delete(userId);
+        this.companionSeconds.delete(userId);
+        this.sessionFirsts.delete(userId);
+        logger.info(
+          `Discarded voice session for user ${userId}: they opted out of tracking`,
+        );
+        return;
+      }
+      // Other members who opted out while co-present stay out of this row.
+      const guildId = session.guildId;
+      const tracked = (id: string): boolean =>
+        !guildId || !optOuts.isOptedOut(id, guildId);
+
       // Take this session's bookkeeping out of the shared per-user maps in
       // one synchronous step (#916). Everything below awaits — a user fetch,
       // a config read, the write itself — and a rejoin in that window
@@ -718,7 +762,7 @@ export class VoiceChannelTracker {
 
       // Get accumulated users from the encountered users Set
       const otherUsers: string[] = claimed.encountered
-        ? Array.from(claimed.encountered)
+        ? Array.from(claimed.encountered).filter(tracked)
         : [];
 
       // Build the optional companion/firsts payload only when the feature is
@@ -746,17 +790,17 @@ export class VoiceChannelTracker {
         const since = new Map(claimed.since ?? []);
         const seconds = new Map(claimed.seconds ?? []);
         closeCompanionIntervals(since, seconds);
-        sessionDoc.companions = Array.from(seconds.entries()).map(
-          ([id, secs]) => ({
+        sessionDoc.companions = Array.from(seconds.entries())
+          .filter(([id]) => tracked(id))
+          .map(([id, secs]) => ({
             userId: id,
             seconds: secs,
-          }),
-        );
+          }));
         sessionDoc.wasFirst = claimed.firsts
           ? claimed.firsts.wasFirst
           : otherUsers.length === 0;
         sessionDoc.joinedExisting = claimed.firsts
-          ? claimed.firsts.joinedExisting
+          ? claimed.firsts.joinedExisting.filter(tracked)
           : [];
       }
 

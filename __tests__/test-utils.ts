@@ -75,6 +75,7 @@ import type {
   Client,
 } from "discord.js";
 import { jest } from "@jest/globals";
+import { TrackingOptOutService } from "../src/services/tracking-opt-out-service.js";
 
 /** Option values a command handler can read off `interaction.options`. */
 export interface MockCommandOptions {
@@ -210,4 +211,21 @@ export function stubMongoGuard(service: unknown): void {
     isConnected: true,
     ensureConnection: jest.fn(async () => undefined),
   };
+}
+
+/**
+ * Put the tracking opt-out cache (#918) into a loaded state holding exactly
+ * these `[userId, guildId]` pairs, without touching Mongo.
+ *
+ * The trackers fail closed while the cache is unloaded — they record nothing
+ * for anyone — so any tracker test that expects a write needs this, even
+ * with no opt-outs at all.
+ */
+export function stubTrackingOptOuts(
+  optedOut: Array<[userId: string, guildId: string]> = [],
+): void {
+  TrackingOptOutService.reset();
+  (TrackingOptOutService.getInstance() as never as Record<string, unknown>)[
+    "optedOut"
+  ] = new Set(optedOut.map(([userId, guildId]) => `${guildId}:${userId}`));
 }

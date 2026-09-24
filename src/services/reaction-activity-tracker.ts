@@ -9,6 +9,7 @@ import logger, { isDebugMode } from "../utils/logger.js";
 import { MongoConnectionGuard } from "../utils/mongo.js";
 import { ReactionActivityTracking } from "../models/reaction-activity-tracking.js";
 import { ConfigService } from "./config-service.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 
 /**
  * Tracks reaction activity the same way `MessageActivityTracker` tracks
@@ -123,20 +124,30 @@ export class ReactionActivityTracker {
 
       const guildId = message.guild.id;
       const year = String(new Date().getFullYear());
+      // Member tracking opt-out (#918), checked per side: an opted-out
+      // reactor records nothing given, an opted-out author nothing received.
+      const optOuts = TrackingOptOutService.getInstance();
 
       // The reactor "gives" a reaction.
-      await this.recordReaction(
-        user.id,
-        guildId,
-        user.username ?? "unknown",
-        "given",
-        year,
-      );
+      if (!optOuts.isOptedOut(user.id, guildId)) {
+        await this.recordReaction(
+          user.id,
+          guildId,
+          user.username ?? "unknown",
+          "given",
+          year,
+        );
+      }
 
       // The message author "receives" a reaction. Skip when the author is a
       // bot, missing, or the reactor themselves (don't inflate own totals).
       const author = message.author;
-      if (author && !author.bot && author.id !== user.id) {
+      if (
+        author &&
+        !author.bot &&
+        author.id !== user.id &&
+        !optOuts.isOptedOut(author.id, guildId)
+      ) {
         await this.recordReaction(
           author.id,
           guildId,

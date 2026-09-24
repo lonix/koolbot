@@ -3,6 +3,7 @@ import logger, { isDebugMode } from "../utils/logger.js";
 import { MongoConnectionGuard } from "../utils/mongo.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
 import { ConfigService } from "./config-service.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 
 /**
  * Tracks text-message activity the same way `VoiceChannelTracker` tracks
@@ -65,7 +66,8 @@ export class MessageActivityTracker {
   /**
    * Handle a `messageCreate` event. Writes are gated on
    * `messagetracking.enabled = true`; bot messages, DMs (non-guild
-   * messages), and excluded channels are skipped.
+   * messages), members who opted out of tracking, and excluded channels are
+   * skipped.
    */
   public async handleMessageCreate(message: Message): Promise<void> {
     try {
@@ -85,6 +87,16 @@ export class MessageActivityTracker {
 
       // Guild-scoped only — ignore DMs.
       if (!message.guild) {
+        return;
+      }
+
+      // Member tracking opt-out (#918). An in-memory lookup, not a query.
+      if (
+        TrackingOptOutService.getInstance().isOptedOut(
+          message.author.id,
+          message.guild.id,
+        )
+      ) {
         return;
       }
 

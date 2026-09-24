@@ -80,6 +80,7 @@ import {
   type PurgeReport,
 } from "../services/user-data-deletion-service.js";
 import { renderSignedOut } from "./views.js";
+import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
 function asyncHandler(
@@ -299,6 +300,26 @@ async function getPrivacyResetCooldownHours(): Promise<number> {
   );
   return Number.isFinite(hours) && hours > 0 ? hours : 0;
 }
+
+/**
+ * Keys that stop a member *starting* a tracking opt-out (#918); empty when
+ * it is offered. Only the offer is gated: an opt-out on file is always
+ * honoured by the trackers, and opting back in is never refused.
+ */
+async function getTrackingOptOutDisabledKeys(): Promise<string[]> {
+  const config = ConfigService.getInstance();
+  const [exportOn, optOutOn] = await Promise.all([
+    config.getBoolean("privacy.enabled", false),
+    config.getBoolean("privacy.tracking_opt_out.enabled", false),
+  ]);
+  const off: string[] = [];
+  if (!exportOn) off.push("privacy.enabled");
+  if (!optOutOn) off.push("privacy.tracking_opt_out.enabled");
+  return off;
+}
+
+/** Audit action for every tracking opt-out / opt-in row (#918). */
+const TRACKING_OPT_OUT_ACTION = "user.privacy.tracking";
 
 /** Audit action for every row the data reset writes (#917). */
 const PRIVACY_RESET_ACTION = "user.privacy.delete";
@@ -1462,10 +1483,24 @@ export function createUserRouter(
       });
       const flags = await readUserFeatureFlags();
       const maxItems = await UserDataExportService.getInstance().getMaxItems();
-      const [resetEnabled, cooldownHours] = await Promise.all([
-        isPrivacyResetEnabled(),
-        getPrivacyResetCooldownHours(),
-      ]);
+      const [resetEnabled, cooldownHours, optOutDisabledKeys] =
+        await Promise.all([
+          isPrivacyResetEnabled(),
+          getPrivacyResetCooldownHours(),
+          getTrackingOptOutDisabledKeys(),
+        ]);
+      // Read from Mongo, not the trackers' cache, so the page shows the real
+      // state. A failed read shows the member as tracked: the conservative
+      // answer, since it keeps the reset described as "not a deletion".
+      let optedOutAt: Date | null = null;
+      try {
+        optedOutAt = await TrackingOptOutService.getInstance().getOptedOutAt(
+          session.discordUserId,
+          session.guildId,
+        );
+      } catch (error) {
+        logger.warn("Could not read tracking opt-out for /me/privacy", error);
+      }
 
       res.type("text/html").send(
         renderUserPage({
@@ -1481,12 +1516,113 @@ export function createUserRouter(
               cooldownHours,
               csrfToken: getCsrfToken(req),
             },
+            trackingOptOut: {
+              offered: optOutDisabledKeys.length === 0,
+              optedOutAt,
+              csrfToken: getCsrfToken(req),
+            },
           }),
           flash: readFlashFromQuery(req),
           csrfToken: getCsrfToken(req),
           remainingMs: getDisplayedRemainingMs(session),
           isAdmin: session.role === "admin",
           ...flags,
+        }),
+      );
+    }),
+  );
+
+  // ---------- Privacy / tracking opt-out (#918) ----------
+  // `action=opt-out` is refused while the offer is switched off;
+  // `action=opt-in` never is — a member can always remove their own flag.
+  router.post(
+    "/privacy/tracking",
+    requireCsrf,
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) {
+        res.status(500).type("text/plain").send("session missing");
+        return;
+      }
+      const { userId, guildId } = assertSelfScope(session, {
+        userId: session.discordUserId,
+        guildId: session.guildId,
+      });
+
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const action = body.action;
+      if (action !== "opt-out" && action !== "opt-in") {
+        res.redirect(
+          303,
+          flashUrl("/me/privacy", {
+            type: "err",
+            text: "Unknown tracking action.",
+          }),
+        );
+        return;
+      }
+
+      if (action === "opt-out") {
+        const disabledKeys = await getTrackingOptOutDisabledKeys();
+        if (disabledKeys.length > 0) {
+          await recordAudit(session, {
+            action: TRACKING_OPT_OUT_ACTION,
+            targetId: userId,
+            details: { action, reason: "feature-disabled", disabledKeys },
+            result: "failure",
+            errorMessage: `${disabledKeys.join(" and ")} ${disabledKeys.length === 1 ? "is" : "are"} off`,
+          });
+          res
+            .status(403)
+            .type("text/plain")
+            .send("The tracking opt-out is not enabled on this server.");
+          return;
+        }
+      }
+
+      const service = TrackingOptOutService.getInstance();
+      try {
+        if (action === "opt-out") {
+          await service.optOut(userId, guildId);
+        } else {
+          await service.optIn(userId, guildId);
+        }
+      } catch (error) {
+        logger.error(
+          `Tracking ${action} failed for ${sanitizeForLog(userId)}`,
+          error,
+        );
+        await recordAudit(session, {
+          action: TRACKING_OPT_OUT_ACTION,
+          targetId: userId,
+          details: { action },
+          result: "failure",
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+        res.redirect(
+          303,
+          flashUrl("/me/privacy", {
+            type: "err",
+            text: "Could not save your tracking choice — nothing changed. Please try again.",
+          }),
+        );
+        return;
+      }
+
+      await recordAudit(session, {
+        action: TRACKING_OPT_OUT_ACTION,
+        targetId: userId,
+        details: { action },
+        result: "success",
+      });
+      res.redirect(
+        303,
+        flashUrl("/me/privacy", {
+          type: "ok",
+          text:
+            action === "opt-out"
+              ? "You are opted out of tracking. Reset your data below to remove what is already stored."
+              : "You are opted back in. Tracking starts again from now.",
         }),
       );
     }),

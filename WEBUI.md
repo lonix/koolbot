@@ -1107,7 +1107,8 @@ data** danger-zone card. The export button is repeated above the reset
 button — download first, then reset. The card is explicit that:
 
 1. tracking starts again on the next message, reaction or voice join, so
-   this is a **reset, not a deletion**;
+   this is a **reset, not a deletion** — unless the member has opted out of
+   tracking (below), in which case the card calls it a deletion instead;
 2. moderation records and audit logs are **kept**;
 3. other members' voice records may still mention the member as co-present;
 4. timezone and notification preferences go back to defaults.
@@ -1127,6 +1128,28 @@ its own in-memory rate-limit bucket (5 per 15 minutes per client), separate
 from the export's; that is only an outer layer, the cooldown is the real
 once-per-member limit. `web-audit-log` stays out of the member's export, so
 the reset trail is admin-only.
+
+#### Opting out of tracking (`POST /me/privacy/tracking`, #918)
+
+When `privacy.tracking_opt_out.enabled` is also on, an **Activity tracking**
+card sits between the export tables and the reset card. `action=opt-out`
+writes a row to `tracking-opt-out`; `action=opt-in` deletes it. While the row
+exists, the message, reaction, poll-participation and voice trackers record
+nothing about the member, and the member is left out of other members' voice
+co-presence. The check is an in-memory lookup loaded at startup, not a query.
+
+The card says plainly that existing data stays visible on leaderboards,
+digests and Rewind until the member resets it, and that the opt-out is itself
+stored — it is the one row a reset keeps. Opting back in restores nothing.
+The reset card reads the opt-out state: an opted-out member's reset is
+described as a **deletion**, anyone else's as a reset with a link to opt out
+first.
+
+The setting gates only the offer. An opt-out already on file is always
+honoured, and the card (with its opt-in button) always renders for an
+opted-out member, even with the setting or `privacy.enabled` off. Opt-out
+refusals return `403` with a `feature-disabled` audit row, and every change
+writes a `user.privacy.tracking` row to the Web UI audit log.
 
 User-facing commands (`/ping`, `/voicestats`, `/seen`, `/quote`,
 `/achievements`, `/help`) are **not** affected and stay in

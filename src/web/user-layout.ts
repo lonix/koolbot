@@ -1420,6 +1420,68 @@ export interface PrivacyPageBodyOptions {
     cooldownHours: number;
     csrfToken: string;
   };
+  /**
+   * The member tracking opt-out (#918). The card renders when the opt-out is
+   * offered (`privacy.tracking_opt_out.enabled` and the export on), and
+   * always when the member is already opted out — opting back in must stay
+   * reachable whatever an operator later switches off.
+   */
+  trackingOptOut?: {
+    /** Whether a member who is tracked may opt out. */
+    offered: boolean;
+    /** When the member opted out, or null while they are tracked. */
+    optedOutAt: Date | null;
+    csrfToken: string;
+  };
+}
+
+/**
+ * The tracking opt-out card (#918). Honest about the one awkward part: the
+ * opt-out is itself stored, and it is the single row a reset keeps.
+ */
+function renderTrackingOptOutCard(
+  optOut: NonNullable<PrivacyPageBodyOptions["trackingOptOut"]>,
+): string {
+  const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(optOut.csrfToken)}">`;
+  if (optOut.optedOutAt) {
+    return [
+      '<div id="tracking" class="card">',
+      "<h2>Activity tracking</h2>",
+      `<p><strong>You are opted out</strong> (since ${escapeHtml(optOut.optedOutAt.toISOString().slice(0, 10))}). ` +
+        "Koolbot does not record your messages, reactions, poll votes or voice sessions, " +
+        "and leaves you out of other members' voice history.</p>",
+      '<p class="muted">What was stored before you opted out is still there, and still shows on ' +
+        "leaderboards, digests and your Rewind — reset your data below to remove it. Opting back " +
+        "in starts tracking again from that moment; nothing from the time you were opted out " +
+        "can be restored, because it was never recorded.</p>",
+      '<form method="POST" action="/me/privacy/tracking" class="stack">',
+      csrf,
+      '<input type="hidden" name="action" value="opt-in">',
+      '<div class="form-actions"><button class="btn" type="submit">Opt back in to tracking</button></div>',
+      "</form>",
+      "</div>",
+    ].join("");
+  }
+  return [
+    '<div id="tracking" class="card">',
+    "<h2>Activity tracking</h2>",
+    "<p>Koolbot records your messages, reactions, poll votes and time in voice channels " +
+      "to power stats, leaderboards, achievements, digests and Rewind. You can opt out.</p>",
+    "<ul>",
+    "<li>Nothing new is recorded about you from the moment you opt out, and you are left " +
+      "out of other members' voice history.</li>",
+    "<li>What is already stored stays, and keeps showing on leaderboards, digests and Rewind " +
+      "until you reset it. Opting out and then resetting is a real deletion.</li>",
+    "<li>Koolbot has to remember that you opted out, so the opt-out itself is stored — it is " +
+      "the one thing a reset does not remove. Opting back in deletes it.</li>",
+    "</ul>",
+    '<form method="POST" action="/me/privacy/tracking" class="stack">',
+    csrf,
+    '<input type="hidden" name="action" value="opt-out">',
+    '<div class="form-actions"><button class="btn" type="submit">Opt out of tracking</button></div>',
+    "</form>",
+    "</div>",
+  ].join("");
 }
 
 /** The word a member types to confirm the reset (#917). */
@@ -1434,7 +1496,20 @@ export const PRIVACY_RESET_CONFIRM_WORD = "RESET";
  */
 function renderPrivacyResetCard(
   reset: NonNullable<PrivacyPageBodyOptions["reset"]>,
+  optOut: PrivacyPageBodyOptions["trackingOptOut"],
 ): string {
+  // #918: only an opted-out member's reset is a deletion — for everyone
+  // else the trackers start writing again, and the copy has to say so.
+  const tracking = optOut?.optedOutAt
+    ? "<li><strong>This is a deletion.</strong> You have opted out of tracking, so Koolbot " +
+      "will not start recording again. The opt-out itself is kept — it is the one thing a " +
+      "reset does not remove — until you opt back in.</li>"
+    : "<li><strong>This is a reset, not a deletion.</strong> Koolbot starts recording again the " +
+      "next time you send a message, react or join a voice channel." +
+      (optOut?.offered
+        ? ' <a href="#tracking">Opt out of tracking</a> first to make it a deletion.'
+        : "") +
+      "</li>";
   const word = PRIVACY_RESET_CONFIRM_WORD;
   const cooldown =
     reset.cooldownHours > 0
@@ -1448,8 +1523,7 @@ function renderPrivacyResetCard(
       "the collections listed above — then signs you out. It cannot be undone.</p>",
     "<p>Before you go ahead, know that:</p>",
     "<ul>",
-    "<li><strong>This is a reset, not a deletion.</strong> Koolbot starts recording again the " +
-      "next time you send a message, react or join a voice channel.</li>",
+    tracking,
     "<li><strong>Moderation records and audit logs are kept.</strong> Warnings, timeouts and " +
       "the server's audit trail are not yours to erase — the reset itself is recorded there too.</li>",
     "<li><strong>Other members' records may still mention you.</strong> Voice history rows " +
@@ -1551,8 +1625,13 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     '<p class="muted" style="margin-top:.75rem">Moderation records in particular are not ' +
       "self-service: ask a server moderator if you need to know where you stand.</p>",
     "</div>",
+    opts.trackingOptOut &&
+    ((opts.featureEnabled && opts.trackingOptOut.offered) ||
+      opts.trackingOptOut.optedOutAt)
+      ? renderTrackingOptOutCard(opts.trackingOptOut)
+      : "",
     opts.featureEnabled && opts.reset?.enabled
-      ? renderPrivacyResetCard(opts.reset)
+      ? renderPrivacyResetCard(opts.reset, opts.trackingOptOut)
       : "",
   ].join("");
 }

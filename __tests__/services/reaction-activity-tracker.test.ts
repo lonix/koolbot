@@ -1,5 +1,5 @@
 import { describe, it, expect, jest, beforeEach } from "@jest/globals";
-import { stubMongoGuard } from "../test-utils.js";
+import { stubMongoGuard, stubTrackingOptOuts } from "../test-utils.js";
 import type { Client, MessageReaction, User } from "discord.js";
 
 jest.mock("../../src/utils/logger.js", () => ({
@@ -82,6 +82,8 @@ describe("ReactionActivityTracker", () => {
     updateOne.mockResolvedValue({ matchedCount: 1 });
     (ReactionActivityTracker as unknown as { instance: unknown }).instance =
       undefined;
+    // Loaded and empty: the trackers fail closed on an unloaded cache.
+    stubTrackingOptOuts();
   });
 
   describe("singleton pattern", () => {
@@ -206,6 +208,35 @@ describe("ReactionActivityTracker", () => {
       await expect(
         tracker.handleReactionAdd(makeReaction(), makeUser()),
       ).resolves.not.toThrow();
+    });
+  });
+
+  describe("tracking opt-out (#918)", () => {
+    it("records nothing given by an opted-out reactor", async () => {
+      stubTrackingOptOuts([["reactor1", "guild1"]]);
+      const { tracker } = createTracker();
+      await tracker.handleReactionAdd(makeReaction(), makeUser());
+
+      // Only the author's "received" write happens.
+      expect(updateOne).toHaveBeenCalledTimes(1);
+      expect(updateOne.mock.calls[0][0]).toEqual({
+        userId: "author1",
+        guildId: "guild1",
+      });
+      expect(updateOne.mock.calls[0][1].$inc.totalReceived).toBe(1);
+    });
+
+    it("records nothing received by an opted-out author", async () => {
+      stubTrackingOptOuts([["author1", "guild1"]]);
+      const { tracker } = createTracker();
+      await tracker.handleReactionAdd(makeReaction(), makeUser());
+
+      expect(updateOne).toHaveBeenCalledTimes(1);
+      expect(updateOne.mock.calls[0][0]).toEqual({
+        userId: "reactor1",
+        guildId: "guild1",
+      });
+      expect(updateOne.mock.calls[0][1].$inc.totalGiven).toBe(1);
     });
   });
 });

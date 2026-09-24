@@ -105,6 +105,9 @@ jest.unstable_mockModule("../../src/models/user-birthday.js", () => ({
 jest.unstable_mockModule("../../src/models/user-notification-prefs.js", () => ({
   UserNotificationPrefs: docModel("user-notification-prefs"),
 }));
+jest.unstable_mockModule("../../src/models/tracking-opt-out.js", () => ({
+  TrackingOptOut: docModel("tracking-opt-out"),
+}));
 jest.unstable_mockModule("../../src/models/user-voice-preferences.js", () => ({
   UserVoicePreferences: docModel("user-voice-preferences"),
 }));
