@@ -1724,6 +1724,21 @@ export interface EventsProps extends CommonProps {
   announcementConfigured: boolean;
   timezone: string;
   rows: EventRow[];
+  /**
+   * Every `events.*` key, edited in place on this page (#975) through
+   * {@link renderFeatureSettingsCard}. Includes `events.enabled`, so the
+   * feature can be switched off here as well as on.
+   */
+  settingRows: SettingRow[];
+  /** Picker lists the card's category / channel keys render. */
+  settingsPickers?: FeatureSettingsPickers;
+  /** On/off state of off-card dependencies of {@link settingRows}. */
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /**
+   * True when the stored config could not be read. The card then renders a
+   * notice instead of controls pre-filled with schema defaults.
+   */
+  settingsUnavailable?: boolean;
   flash?: FlashMessage | null;
 }
 
@@ -2027,12 +2042,17 @@ export function renderEventsPage(props: EventsProps): string {
 </table>`
       : '<p class="muted">No events scheduled yet.</p>';
 
+  // Point at the settings card only when it actually renders controls: while
+  // the config snapshot is unreadable the card is just a notice (#975).
+  const where = props.settingsUnavailable
+    ? "once settings can be loaded again"
+    : "in the settings below";
   const categoryWarn = props.categoryConfigured
     ? ""
-    : `<div class="notice warn">No <code>events.category_id</code> is set — event channels won't be created until you pick a category in Settings.</div>`;
+    : `<div class="notice warn">No <code>events.category_id</code> is set — event channels won't be created until you pick a category ${where}.</div>`;
   const announcementWarn = props.announcementConfigured
     ? ""
-    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — RSVP messages and reminders won't be posted until you pick a channel in Settings.</div>`;
+    : `<div class="notice warn">No <code>events.announcement_channel_id</code> is set — RSVP messages and reminders won't be posted until you pick a channel ${where}.</div>`;
 
   const body = `
 <h1>Events</h1>
@@ -2057,6 +2077,17 @@ ${renderFeatureDisabledNotice({
   ${categoryWarn}
   ${announcementWarn}
 </div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change event settings here without leaving the page. Saved through the shared settings route.",
+  category: "events",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/events",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
 <div class="card">
   <h2>Events</h2>${tableHtml}
 </div>

@@ -1322,6 +1322,7 @@ describe("renderEventsPage", () => {
     categoryConfigured: true,
     announcementConfigured: true,
     timezone: "UTC",
+    settingRows: [],
   };
 
   it("shows the empty state and disabled notice", () => {
@@ -1389,6 +1390,7 @@ describe("renderEventsPage", () => {
       categoryConfigured: false,
       announcementConfigured: false,
       timezone: "UTC",
+      settingRows: [],
       rows: [],
     });
     expect(html).toContain("events.category_id");
@@ -1405,6 +1407,122 @@ describe("renderEventsPage", () => {
     expect(html).toContain('name="title"');
     expect(html).toContain('name="date"');
     expect(html).toContain('name="time"');
+  });
+});
+
+describe("renderEventsPage settings card (#975)", () => {
+  const EVENT_KEYS = [
+    "events.enabled",
+    "events.category_id",
+    "events.announcement_channel_id",
+    "events.timezone",
+    "events.channel_prefix",
+    "events.default_duration_minutes",
+    "events.create_lead_minutes",
+    "events.channel_grace_minutes",
+    "events.reminder_minutes",
+  ] as const;
+  // Rows shaped the way `buildSettingRows` shapes them, from the schema.
+  const eventRows = (
+    overrides: Partial<Record<(typeof EVENT_KEYS)[number], unknown>> = {},
+  ): SettingRow[] =>
+    EVENT_KEYS.map((key) => ({
+      key,
+      label: settingsMetadata[key].label,
+      current: key in overrides ? overrides[key] : defaultConfig[key],
+      defaultValue: defaultConfig[key],
+      type: settingsMetadata[key].type,
+      description: settingsMetadata[key].description,
+      category: "events",
+      min: settingsMetadata[key].min,
+    }));
+  const render = (
+    settingRows: SettingRow[],
+    extra: Partial<Parameters<typeof renderEventsPage>[0]> = {},
+  ) =>
+    renderEventsPage({
+      ...COMMON,
+      enabled: true,
+      categoryConfigured: true,
+      announcementConfigured: true,
+      timezone: "UTC",
+      rows: [],
+      settingRows,
+      settingsPickers: {
+        textChannels: [{ id: "t1", name: "announcements" }],
+        categoryChannels: [{ id: "cat1", name: "Events" }],
+      },
+      ...extra,
+    });
+
+  it("renders an editable control for every events.* key", () => {
+    const html = render(eventRows());
+    for (const key of EVENT_KEYS) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+      expect(html).toContain(`name="value_${key}"`);
+    }
+  });
+
+  it("draws the category and announcement pickers from the guild lists", () => {
+    const html = render(
+      eventRows({
+        "events.category_id": "cat1",
+        "events.announcement_channel_id": "t1",
+      }),
+    );
+    expect(html).toMatch(/<option value="cat1" selected>[^<]*Events/);
+    expect(html).toMatch(/<option value="t1" selected>[^<]*announcements/);
+  });
+
+  it("posts to save-section and returns to /admin/events", () => {
+    const html = render(eventRows());
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain(
+      '<input type="hidden" name="category" value="events">',
+    );
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/events">',
+    );
+    expect(html).toContain('<input type="hidden" name="_csrf" value="csrf">');
+  });
+
+  it("carries events.enabled as the cascade master so the feature can be disabled here", () => {
+    const html = render(eventRows({ "events.enabled": true }));
+    expect(html).toContain("data-cascade-scope");
+    expect(html).toMatch(
+      /name="value_events\.enabled"[^>]*checked[^>]*data-cascade-master/,
+    );
+    expect(html).not.toContain('name="no_cascade"');
+  });
+
+  it("points the unset-channel warnings at the card, not Settings", () => {
+    const html = render(eventRows(), {
+      categoryConfigured: false,
+      announcementConfigured: false,
+    });
+    expect(html).toContain("pick a category in the settings below");
+    expect(html).toContain("pick a channel in the settings below");
+  });
+
+  it("does not point the warnings at controls that aren't rendered", () => {
+    const html = render([], {
+      categoryConfigured: false,
+      announcementConfigured: false,
+      settingsUnavailable: true,
+    });
+    expect(html).not.toContain("in the settings below");
+    expect(html).toContain("pick a category once settings can be loaded again");
+    expect(html).toContain("pick a channel once settings can be loaded again");
+  });
+
+  it("shows a notice instead of controls when settings can't be read", () => {
+    const html = render([], { settingsUnavailable: true });
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain(
+      '<form method="POST" action="/admin/settings/save-section"',
+    );
   });
 });
 

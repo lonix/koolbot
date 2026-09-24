@@ -752,7 +752,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
 | **Setup Wizard**   | `/setup wizard`                                                                                     |
 | **Announcements**  | `/announce create`, `list`, `delete`                                                                |
-| **Events**         | `/event create`, `list`, `cancel`, `start`                                                          |
+| **Events**         | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
 | **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
 | **Reaction Roles** | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
 | **Notices**        | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
@@ -765,7 +765,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Moderation**     | `/modlog` (read-only, server-wide; also surfaces `/warn` entries)                                   |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
-Feature pages (Announcements, Polls, Reaction Roles, Notices, Voice
+Feature pages (Announcements, Events, Polls, Reaction Roles, Notices, Voice
 Channels) are gated by their `<feature>.enabled` config key. When a
 feature is **off**, its sidebar link is still shown — greyed with an
 "off" badge — rather than hidden, so the page stays discoverable (#610);
@@ -895,9 +895,17 @@ events table lists each event's title, start time, lifecycle state
 lifecycle controls — **Start now** (spin the event up immediately) and
 **Cancel** (a confirm-guarded stop) — while finished events show no actions. A
 **Schedule a new event** form creates events without leaving the page. The page
-is gated by `events.enabled` (the #610 disabled-feature pattern), and the
-category / announcement channel / timezone themselves live under **Settings**
-(`events.*`).
+is gated by `events.enabled` (the #610 disabled-feature pattern).
+
+Its **Settings** card (#975) edits every `events.*` key in place: the enable
+toggle, the channel category (`events.category_id`, a category picker), the
+announcement channel (`events.announcement_channel_id`, a text-channel picker),
+the timezone, the channel prefix, and the default duration, channel lead time,
+grace period and reminder timings. It saves through the shared
+`/admin/settings/save-section` route and returns to the page. The enable toggle
+is the form's cascade master, so turning events off from here writes only
+`events.enabled = false` and keeps the other values. If the stored config can't
+be read, the card shows a notice instead of controls pre-filled with defaults.
 
 The **Moderation** page (`/admin/moderation`) is a read-only, server-wide
 history of moderation actions — the Web UI counterpart to per-user `/modlog`.
