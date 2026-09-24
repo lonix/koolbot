@@ -16,6 +16,8 @@ import { recordAudit } from "../../audit.js";
 import {
   parseTierConfig,
   serializeTiers,
+  storedTiersFromSnapshot,
+  TIERS_KEY,
   tierRoleProblem,
   validateTierRows,
   type LeaderboardTier,
@@ -27,7 +29,6 @@ import {
 } from "./helpers.js";
 
 const PAGE = "/admin/leaderboard-roles";
-const TIERS_KEY = "leaderboard_roles.tiers";
 
 /**
  * The stored `leaderboard_roles.tiers` value, or null when it can't be read.
@@ -44,9 +45,7 @@ async function readStoredTiers(config: ConfigService): Promise<string | null> {
     logger.warn("leaderboard tiers: config read failed", err);
     return null;
   }
-  const row = rows.find((r) => r.key === TIERS_KEY);
-  if (row) return typeof row.value === "string" ? row.value : "";
-  return config.getString(TIERS_KEY, "");
+  return storedTiersFromSnapshot(rows) ?? config.getString(TIERS_KEY, "");
 }
 
 /**

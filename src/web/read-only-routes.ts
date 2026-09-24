@@ -52,7 +52,9 @@ import { DigestService } from "../services/digest-service.js";
 import { LeaderboardRoleAssignment } from "../models/leaderboard-role-assignment.js";
 import {
   parseTierConfig,
+  storedTiersFromSnapshot,
   tierRoleIssue,
+  TIERS_KEY,
   type LeaderboardTier,
 } from "./leaderboard-tiers.js";
 import {
@@ -1804,19 +1806,31 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
 
+      // One strict config snapshot backs both the settings card and the tier
+      // editor, so a failed read shows the "can't be loaded" notice for both
+      // rather than an empty editor (getString would turn the failure into
+      // "no tiers").
+      const stored = await config.getAll().catch((err: unknown) => {
+        logger.warn("leaderboard roles: config snapshot read failed", err);
+        return null;
+      });
       const [enabled, voiceTrackingEnabled, period, cron, tiersRaw, settings] =
         await Promise.all([
           config.getBoolean("leaderboard_roles.enabled", false),
           config.getBoolean("voicetracking.enabled", false),
           config.getString("leaderboard_roles.period", "alltime"),
           config.getString("leaderboard_roles.update_cron", "0 0 * * 1"),
-          config.getString("leaderboard_roles.tiers", ""),
+          stored === null
+            ? ""
+            : (storedTiersFromSnapshot(stored) ??
+              config.getString(TIERS_KEY, "")),
           // Loaded whether or not the feature is on, so it can be switched
           // on from this card as well.
           loadFeatureSettings(
             client,
             common.guildId,
             LEADERBOARD_ROLES_SETTING_KEYS,
+            stored,
           ),
         ]);
       const parsed = parseTierConfig(tiersRaw);

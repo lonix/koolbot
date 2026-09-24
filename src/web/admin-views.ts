@@ -11,6 +11,7 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import { sanitizeCronExpression } from "../utils/cron.js";
+import { MAX_TIER_TOP_N } from "./leaderboard-tiers.js";
 import {
   categoryMetadata,
   getDependencies,
@@ -3754,12 +3755,15 @@ const LEADERBOARD_TIER_EDITOR_SCRIPT =
   "var row=b.closest('tr');if(row)row.remove();" +
   "add.focus()})})();";
 
+// A stored tier above the editor's cap keeps a max that still admits it, so
+// an unchanged save isn't blocked by the browser's own validation; the server
+// accepts an unchanged resubmission and applies the cap only to edits.
 function renderTierEditorRow(
   roles: RoleOption[],
   tier: { topN: number; roleId: string } | null,
 ): string {
   return `<tr>
-<td><input type="number" name="topN" min="1" max="1000" step="1" inputmode="numeric" aria-label="Top N" value="${tier ? tier.topN : ""}" style="width:6rem"></td>
+<td><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${tier ? tier.topN : ""}" style="width:6rem"></td>
 <td><select name="roleId" aria-label="Role">${roleOptionsHtml(roles, tier?.roleId)}</select></td>
 <td><button type="button" class="btn lb-tier-remove">Remove</button></td>
 </tr>`;

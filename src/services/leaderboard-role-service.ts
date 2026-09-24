@@ -36,6 +36,39 @@ async function fetchRoleOrNull(
   }
 }
 
+/** Discord's limit on one embed field value. */
+const EMBED_FIELD_MAX = 1024;
+/** Discord's limit on an embed's total text (title, description, fields). */
+const EMBED_TOTAL_MAX = 6000;
+/** Discord's limit on fields per embed. */
+const EMBED_FIELDS_MAX = 25;
+
+/**
+ * `<label>: <@a>, <@b>, …` capped at `max` characters. A wide tier can hold
+ * hundreds of members, and a field over Discord's limit makes the whole
+ * announcement fail to send, so the list ends in "and N more" instead.
+ */
+export function formatMentionLine(
+  label: string,
+  userIds: readonly string[],
+  max = EMBED_FIELD_MAX,
+): string {
+  const mentions = userIds.map((id) => `<@${id}>`);
+  const full = `${label}: ${mentions.join(", ")}`;
+  if (full.length <= max) return full;
+  // Too long: keep as many mentions as leave room for "… and N more".
+  let line = `${label}: `;
+  for (let i = 0; i < mentions.length; i++) {
+    const mention = `${i === 0 ? "" : ", "}${mentions[i]}`;
+    const after = ` … and ${mentions.length - i - 1} more`;
+    if (line.length + mention.length + after.length > max) {
+      return `${line} … and ${mentions.length - i} more`;
+    }
+    line += mention;
+  }
+  return line;
+}
+
 /** Weekly, Monday 00:00 — the schedule leaderboard roles ship with. */
 const DEFAULT_CRON = "0 0 * * 1";
 
@@ -687,32 +720,57 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
         )
         .setColor(0xf1c40f);
 
+      const fields: Array<{ name: string; value: string }> = [];
       for (const tier of summary.tiers) {
+        if (tier.added.length === 0 && tier.removed.length === 0) continue;
+        // Each line gets half the field when both are present, so the
+        // joined value stays within the field limit.
+        const both = tier.added.length > 0 && tier.removed.length > 0;
+        const lineMax = both
+          ? Math.floor((EMBED_FIELD_MAX - 1) / 2)
+          : EMBED_FIELD_MAX;
         const lines: string[] = [];
         if (tier.added.length > 0) {
-          lines.push(`Added: ${tier.added.map((id) => `<@${id}>`).join(", ")}`);
+          lines.push(formatMentionLine("Added", tier.added, lineMax));
         }
         if (tier.removed.length > 0) {
-          lines.push(
-            `Removed: ${tier.removed.map((id) => `<@${id}>`).join(", ")}`,
-          );
+          lines.push(formatMentionLine("Removed", tier.removed, lineMax));
         }
-        if (lines.length === 0) continue;
-        embed.addFields({
+        fields.push({
           name: `Top ${tier.topN} — ${tier.roleName}`,
           value: lines.join("\n"),
-          inline: false,
         });
       }
-
       // Roles taken back because their tier was removed (#985).
       for (const r of summary.retired) {
         if (r.removed.length === 0) continue;
-        embed.addFields({
+        fields.push({
           name: `Removed tier — ${r.roleName}`,
-          value: `Removed: ${r.removed.map((id) => `<@${id}>`).join(", ")}`,
-          inline: false,
+          value: formatMentionLine("Removed", r.removed),
         });
+      }
+
+      // Stay inside the embed's field-count and total-text limits; fields
+      // that don't fit are summarised rather than failing the whole send.
+      let total =
+        (embed.data.title?.length ?? 0) + (embed.data.description?.length ?? 0);
+      let added = 0;
+      for (const field of fields) {
+        const size = field.name.length + field.value.length;
+        const remaining = fields.length - added;
+        // Keep the last slot and ~100 characters for the summary field.
+        const outOfSlots = remaining > 1 && added >= EMBED_FIELDS_MAX - 1;
+        if (outOfSlots || total + size > EMBED_TOTAL_MAX - 100) {
+          embed.addFields({
+            name: "More changes",
+            value: `${remaining} more tier${remaining === 1 ? "" : "s"} changed; see the Web UI for details.`,
+            inline: false,
+          });
+          break;
+        }
+        embed.addFields({ ...field, inline: false });
+        total += size;
+        added += 1;
       }
 
       await (channel as GuildTextBasedChannel).send({ embeds: [embed] });

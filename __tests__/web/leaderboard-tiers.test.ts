@@ -3,6 +3,7 @@ import {
   MAX_TIER_TOP_N,
   parseTierConfig,
   serializeTiers,
+  storedTiersFromSnapshot,
   tierRoleIssue,
   tierRoleProblem,
   validateTierRows,
@@ -156,5 +157,19 @@ describe("tierRoleIssue (#985)", () => {
       "hierarchy",
     );
     expect(tierRoleIssue(role, "guild-1", 5)).toBeNull();
+  });
+});
+
+describe("storedTiersFromSnapshot (#985)", () => {
+  it("returns the stored row, or undefined when none is stored", () => {
+    expect(
+      storedTiersFromSnapshot([
+        { key: "other", value: "x" },
+        { key: "leaderboard_roles.tiers", value: "1:111" },
+      ]),
+    ).toBe("1:111");
+    expect(storedTiersFromSnapshot([{ key: "other", value: "x" }])).toBe(
+      undefined,
+    );
   });
 });

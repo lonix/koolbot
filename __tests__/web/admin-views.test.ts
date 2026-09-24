@@ -4944,6 +4944,28 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     expect(html).toContain("saving a change removes them");
   });
 
+  it("lets a stored tier above the editor's cap submit unchanged", () => {
+    const html = render({
+      tiers: [
+        {
+          topN: 5000,
+          roleId: "111",
+          roleName: "Champion",
+          assignable: true,
+          holders: [],
+          lastUpdated: null,
+        },
+      ],
+    });
+    expect(html).toContain(
+      'max="5000" step="1" inputmode="numeric" aria-label="Top N" value="5000"',
+    );
+    // New and blank rows keep the normal cap.
+    expect(html).toContain(
+      'max="1000" step="1" inputmode="numeric" aria-label="Top N" value=""',
+    );
+  });
+
   it("says so when no tiers are configured", () => {
     expect(render({ tiers: [] })).toContain("No tiers configured yet");
   });

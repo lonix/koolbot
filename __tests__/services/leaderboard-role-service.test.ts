@@ -62,7 +62,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { LeaderboardRoleService } =
+const { LeaderboardRoleService, formatMentionLine } =
   await import("../../src/services/leaderboard-role-service.js");
 
 type ServiceInstance = InstanceType<typeof LeaderboardRoleService>;
@@ -694,6 +694,61 @@ describe("LeaderboardRoleService", () => {
       ]);
     });
 
+    it("keeps a huge removed tier's announcement within Discord's limits", async () => {
+      const mockSend = jest.fn(async () => undefined);
+      mockConfigGetString.mockImplementation(async (key: unknown) => {
+        const k = key as string;
+        if (k === "GUILD_ID") return "guild-1";
+        if (k === "leaderboard_roles.announcement_channel_id") return "chan-1";
+        return k === "leaderboard_roles.period" ? "alltime" : "";
+      });
+      const holders = Array.from(
+        { length: 1000 },
+        (_, i) => `${100000000000000000 + i}`,
+      );
+      mockAssignmentFind.mockResolvedValue(
+        Array.from({ length: 30 }, (_, t) => ({
+          guildId: "guild-1",
+          roleId: `9999${t}`,
+          userIds: holders,
+        })),
+      );
+      mockClientGuildsFetch.mockResolvedValue(
+        makeGuildWithRole({ roleId: "any", roleName: "Old tier" }),
+      );
+      mockGuildChannelsFetch.mockResolvedValue({
+        isTextBased: () => true,
+        send: mockSend,
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      await svc.runNow();
+
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const [payload] = mockSend.mock.calls[0] as unknown as [
+        {
+          embeds: Array<{
+            toJSON(): {
+              title?: string;
+              description?: string;
+              fields?: Array<{ name: string; value: string }>;
+            };
+          }>;
+        },
+      ];
+      const embed = payload.embeds[0].toJSON();
+      const fields = embed.fields ?? [];
+      expect(fields.length).toBeLessThanOrEqual(25);
+      for (const f of fields) expect(f.value.length).toBeLessThanOrEqual(1024);
+      const total =
+        (embed.title?.length ?? 0) +
+        (embed.description?.length ?? 0) +
+        fields.reduce((n, f) => n + f.name.length + f.value.length, 0);
+      expect(total).toBeLessThanOrEqual(6000);
+      expect(fields[fields.length - 1].name).toBe("More changes");
+    });
+
     it("leaves the row alone when the role lookup errors", async () => {
       // A transient failure must not read as "role deleted".
       tiersConfig("");
@@ -1030,5 +1085,28 @@ describe("LeaderboardRoleService", () => {
       expect(mockClientGuildsFetch).not.toHaveBeenCalled();
       expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe("formatMentionLine (#985)", () => {
+  it("lists every mention when they fit", () => {
+    expect(formatMentionLine("Added", ["1", "2"])).toBe("Added: <@1>, <@2>");
+  });
+
+  it("cuts a long list with an accurate remainder, within the cap", () => {
+    const ids = Array.from({ length: 500 }, (_, i) => `${1000 + i}`);
+    const line = formatMentionLine("Removed", ids, 100);
+    expect(line.length).toBeLessThanOrEqual(100);
+    const shown = (line.match(/<@/g) ?? []).length;
+    expect(line).toMatch(new RegExp(` … and ${500 - shown} more$`));
+  });
+
+  it("does not cut a list that exactly fits", () => {
+    const line = formatMentionLine(
+      "Added",
+      ["1", "2"],
+      "Added: <@1>, <@2>".length,
+    );
+    expect(line).toBe("Added: <@1>, <@2>");
   });
 });

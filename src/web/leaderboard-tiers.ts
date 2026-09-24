@@ -31,6 +31,23 @@ export interface ParsedTierConfig {
  */
 export const MAX_TIER_TOP_N = 1000;
 
+/** The config key the tier editor edits. */
+export const TIERS_KEY = "leaderboard_roles.tiers";
+
+/**
+ * The stored tier string from a strict `ConfigService.getAll()` snapshot, or
+ * undefined when no row is stored (the env / schema default then applies).
+ * Used instead of `getString`, which turns a failed read into the default and
+ * so would make an outage look like "no tiers".
+ */
+export function storedTiersFromSnapshot(
+  rows: ReadonlyArray<{ key: string; value: unknown }>,
+): string | undefined {
+  const row = rows.find((r) => r.key === TIERS_KEY);
+  if (!row) return undefined;
+  return typeof row.value === "string" ? row.value : "";
+}
+
 /** Upper bound on the number of tiers the editor accepts. */
 export const MAX_TIERS = 25;
 
