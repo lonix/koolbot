@@ -476,7 +476,13 @@ describe("BirthdayService", () => {
       expect(mockBirthdayUpdateOne).toHaveBeenCalledWith(
         // Conditional on the announced date, so an admin edit mid-run (#986)
         // is not overwritten.
-        { _id: "row-1", month: row.month, day: row.day, year: null },
+        {
+          _id: "row-1",
+          month: row.month,
+          day: row.day,
+          year: null,
+          lastAnnouncedYear: null,
+        },
         expect.objectContaining({
           $set: expect.objectContaining({
             announcements: [
@@ -488,6 +494,50 @@ describe("BirthdayService", () => {
           }),
         }),
       );
+    });
+
+    it("matches the lastAnnouncedYear it read, not the one it stamps (#986)", async () => {
+      // An admin who moves the date away and back mid-run leaves the date
+      // matching but the marker reset; only the read marker catches that.
+      const today = new Date();
+      const row = {
+        _id: "row-1",
+        userId: "user-1",
+        guildId: "guild-1",
+        month: today.getUTCMonth() + 1,
+        day: today.getUTCDate(),
+        lastAnnouncedYear: 2000,
+      };
+      mockBirthdayFind
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([row as never]);
+
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        id: string;
+        send: jest.Mock;
+      };
+      channel.id = "chan-1";
+      channel.send = jest.fn(async () => ({
+        id: "msg-9",
+        delete: jest.fn(async () => undefined),
+      }));
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        channels: { fetch: jest.fn(async () => channel) },
+        members: {
+          fetch: jest.fn(async () => ({ displayName: "Ada", id: "user-1" })),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      await svc.runNow();
+
+      const [filter, update] = mockBirthdayUpdateOne.mock.calls[0] as [
+        Record<string, unknown>,
+        { $set: Record<string, unknown> },
+      ];
+      expect(filter.lastAnnouncedYear).toBe(2000);
+      expect(update.$set.lastAnnouncedYear).toBe(today.getUTCFullYear());
     });
 
     it("withdraws an age-bearing post when the year was removed mid-run (#986)", async () => {
@@ -527,7 +577,13 @@ describe("BirthdayService", () => {
       const summary = await svc.runNow();
 
       expect(mockBirthdayUpdateOne).toHaveBeenCalledWith(
-        { _id: "row-1", month: row.month, day: row.day, year: 1990 },
+        {
+          _id: "row-1",
+          month: row.month,
+          day: row.day,
+          year: 1990,
+          lastAnnouncedYear: null,
+        },
         expect.anything(),
       );
       expect(deletePost).toHaveBeenCalledTimes(1);
@@ -565,7 +621,13 @@ describe("BirthdayService", () => {
       expect(channel.send).not.toHaveBeenCalled();
       expect(save).not.toHaveBeenCalled();
       expect(mockBirthdayUpdateOne).toHaveBeenCalledWith(
-        { _id: "row-1", month: row.month, day: row.day, year: null },
+        {
+          _id: "row-1",
+          month: row.month,
+          day: row.day,
+          year: null,
+          lastAnnouncedYear: null,
+        },
         { $set: { lastAnnouncedYear: today.getUTCFullYear() } },
       );
     });

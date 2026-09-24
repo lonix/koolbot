@@ -244,7 +244,10 @@ export interface BirthdayEdit {
 
 /**
  * The filter for a scheduled-run write to a row it read: its id plus the
- * date and year the run acted on. An admin who corrected the entry mid-run
+ * date, year and `lastAnnouncedYear` the run read. `readMarker` is that last
+ * one as read, before the run stamps this year onto the in-memory row; it
+ * catches an admin who moved the date away and back again mid-run, which
+ * leaves the date matching but the marker reset. An admin who corrected the entry mid-run
  * (#986) either moved the date — they reset `lastAnnouncedYear`, and writing
  * this year back would stop the corrected date firing — or removed the birth
  * year, and a post rendered from the stale year shows an age the member no
@@ -253,12 +256,16 @@ export interface BirthdayEdit {
  * plain `save()`: it only writes the marker fields, which an edit never
  * touches.)
  */
-function runRowFilter(row: IUserBirthday): Record<string, unknown> {
+function runRowFilter(
+  row: IUserBirthday,
+  readMarker: number | null,
+): Record<string, unknown> {
   return {
     _id: row._id,
     month: row.month,
     day: row.day,
     year: typeof row.year === "number" ? row.year : null,
+    lastAnnouncedYear: readMarker,
   };
 }
 
@@ -625,6 +632,11 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     summary.candidates = rows.length;
 
     for (const row of rows) {
+      // As read — the loop stamps this year onto `row` before writing it.
+      const readMarker =
+        typeof row.lastAnnouncedYear === "number"
+          ? row.lastAnnouncedYear
+          : null;
       try {
         const tz = resolveTimezone(
           await prefsService.getTimezone(row.userId, guildId),
@@ -639,7 +651,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
           // an admin corrected the entry mid-run (#986), stamping this year
           // would undo their reset, so the write matches nothing and the
           // next run looks again.
-          await UserBirthday.updateOne(runRowFilter(row), {
+          await UserBirthday.updateOne(runRowFilter(row, readMarker), {
             $set: { lastAnnouncedYear: local.year },
           });
           continue;
@@ -686,7 +698,7 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         // iteration just did: the grant above would have no marker, so the
         // expiry sweep could never find it and the role would sit on the
         // member for good.
-        const persisted = await this.saveRunRow(row);
+        const persisted = await this.saveRunRow(row, readMarker);
         if (!persisted) {
           // Everything this iteration produced is now the member's data with
           // no row behind it: the announcement names them (and often their
@@ -1148,9 +1160,12 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
    * save failing for some other reason, which propagates to the per-row
    * catch as before.
    */
-  private async saveRunRow(row: IUserBirthday): Promise<boolean> {
+  private async saveRunRow(
+    row: IUserBirthday,
+    readMarker: number | null,
+  ): Promise<boolean> {
     try {
-      return await this.writeRunRow(row);
+      return await this.writeRunRow(row, readMarker);
     } catch (error) {
       // A rejected write is the same problem as a row that vanished: the
       // announcement is up and the role may be granted, with nothing
@@ -1171,10 +1186,13 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
     }
   }
 
-  private async writeRunRow(row: IUserBirthday): Promise<boolean> {
+  private async writeRunRow(
+    row: IUserBirthday,
+    readMarker: number | null,
+  ): Promise<boolean> {
     const result = await UserBirthday.updateOne(
       // And on the entry this run announced from (see `runRowFilter`).
-      runRowFilter(row),
+      runRowFilter(row, readMarker),
       {
         $set: {
           lastAnnouncedYear: row.lastAnnouncedYear,
