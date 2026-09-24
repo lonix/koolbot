@@ -1804,6 +1804,93 @@ describe("renderPollsPage settings card (#973)", () => {
   });
 });
 
+describe("renderVoiceChannelsPage settings card (#979)", () => {
+  const VC_KEYS = [
+    "voicechannels.enabled",
+    "voicechannels.category_id",
+    "voicechannels.lobby.name",
+    "voicechannels.lobby.offlinename",
+    "voicechannels.channel.prefix",
+    "voicechannels.channel.suffix",
+    "voicechannels.controlpanel.enabled",
+    "voicechannels.presets.enabled",
+    "voicechannels.presets.max_per_user",
+  ] as const;
+  // Rows shaped the way `buildSettingRows` shapes them, from the schema.
+  const vcRows = (
+    overrides: Partial<Record<(typeof VC_KEYS)[number], unknown>> = {},
+  ): SettingRow[] =>
+    VC_KEYS.map((key) => ({
+      key,
+      label: settingsMetadata[key].label,
+      current: key in overrides ? overrides[key] : defaultConfig[key],
+      defaultValue: defaultConfig[key],
+      type: settingsMetadata[key].type,
+      description: settingsMetadata[key].description,
+      category: "voicechannels",
+      min: settingsMetadata[key].min,
+    }));
+  const render = (settingRows: SettingRow[], enabled = true) =>
+    renderVoiceChannelsPage({
+      ...COMMON,
+      enabled,
+      controlPanelEnabled: true,
+      categoryName: "Voice",
+      lobbyName: "Lobby",
+      offlineLobbyName: "Offline Lobby",
+      prefix: "🎮",
+      totalManaged: 0,
+      totalEmpty: 0,
+      channels: [],
+      categoryFound: true,
+      categoryChannels: [{ id: "cat-1", name: "Voice Channels" }],
+      settingRows,
+    });
+
+  it("renders an editable control for every voicechannels.* key", () => {
+    const html = render(vcRows({ "voicechannels.category_id": "cat-1" }));
+    for (const key of VC_KEYS) {
+      expect(html).toContain(
+        `<input type="hidden" name="keys" value="${key}">`,
+      );
+      expect(html).toContain(`name="value_${key}"`);
+    }
+    expect(html).toContain(
+      '<option value="cat-1" selected>#Voice Channels</option>',
+    );
+  });
+
+  it("renders presets.max_per_user as a number input with its current value", () => {
+    const html = render(vcRows({ "voicechannels.presets.max_per_user": 7 }));
+    expect(html).toMatch(
+      /<input type="number"[^>]*name="value_voicechannels\.presets\.max_per_user" value="7"/,
+    );
+  });
+
+  it("carries voicechannels.enabled as the cascade master so the feature can be disabled here", () => {
+    const html = render(vcRows({ "voicechannels.enabled": true }));
+    expect(html).toContain('action="/admin/settings/save-section"');
+    expect(html).toContain(
+      '<input type="hidden" name="redirect" value="/admin/voice-channels">',
+    );
+    expect(html).toContain("data-cascade-scope");
+    expect(html).toMatch(
+      /name="value_voicechannels\.enabled"[^>]*checked[^>]*data-cascade-master/,
+    );
+    expect(html).not.toContain('name="no_cascade"');
+  });
+
+  it("renders the master unchecked while the feature is off, next to the enable notice", () => {
+    const html = render(vcRows({ "voicechannels.enabled": false }), false);
+    expect(html).toMatch(
+      /name="value_voicechannels\.enabled"[^>]*data-cascade-master/,
+    );
+    expect(html).not.toMatch(
+      /name="value_voicechannels\.enabled"[^>]*checked[^>]*data-cascade-master/,
+    );
+  });
+});
+
 describe("renderReactionRolesPage", () => {
   it("shows the empty state for active and archived", () => {
     const html = renderReactionRolesPage({

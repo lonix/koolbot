@@ -114,11 +114,13 @@ function describeType(value: unknown): string {
 }
 
 /**
- * The `voicechannels.*` keys surfaced as editable controls on the Voice
- * Channels feature page (#705). The feature master `voicechannels.enabled`
- * is intentionally excluded — it is owned by the enable/disable notice.
+ * Every `voicechannels.*` key, edited in place on the Voice Channels feature
+ * page (#705). Includes the `voicechannels.enabled` master (#979), so the card
+ * cascades like a Settings section and the feature can be switched off from
+ * its own page, not only on through the disabled notice (#610).
  */
 export const VOICE_CHANNELS_SETTING_KEYS = [
+  "voicechannels.enabled",
   "voicechannels.category_id",
   "voicechannels.lobby.name",
   "voicechannels.lobby.offlinename",
