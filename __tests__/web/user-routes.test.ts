@@ -1666,7 +1666,9 @@ describe("/me/birthday clear (#1033)", () => {
     const getBirthday = jest
       .fn<() => Promise<unknown>>()
       .mockResolvedValue({ month: 6, day: 16, year: 1990 });
-    const setBirthday = jest.fn<() => Promise<unknown>>();
+    const setBirthday = jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValue({ month: 3, day: 4, year: null });
     const purgeForUser =
       opts.purgeImpl ??
       jest.fn<() => Promise<PurgeResult>>().mockResolvedValue(CLEAN_PURGE);
@@ -1791,7 +1793,10 @@ describe("/me/birthday clear (#1033)", () => {
       action: "user.birthday.set",
       result: "failure",
       errorMessage: "could not revoke the birthday role",
-      details: { attempted: { clear: true } },
+      details: {
+        attempted: { clear: true },
+        purge: { matched: 1, removed: 0, roleRevoked: false },
+      },
     });
   });
 
@@ -1818,5 +1823,13 @@ describe("/me/birthday clear (#1033)", () => {
       year: null,
     });
     expect(out.purgeForUser).not.toHaveBeenCalled();
+    expect(out.statusCode).toBe(303);
+    const flash = flashOf(out.redirectedTo);
+    expect(flash.get("flash")).toBe("ok");
+    expect(flash.toString()).toContain("3%2F4");
+    expect(out.audit).toMatchObject({
+      result: "success",
+      details: { after: { month: 3, day: 4, year: null } },
+    });
   });
 });
