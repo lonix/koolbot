@@ -389,6 +389,54 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet).toHaveBeenCalledTimes(2);
   });
 
+  it("saves the Voice Channels page card and returns to that page (#979)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      redirect: "/admin/voice-channels",
+      keys: [
+        "voicechannels.enabled",
+        "voicechannels.lobby.name",
+        "voicechannels.presets.max_per_user",
+      ],
+      "value_voicechannels.enabled": "true",
+      "value_voicechannels.lobby.name": "Lobby",
+      "value_voicechannels.presets.max_per_user": "5",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/voice-channels");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 3 settings in voicechannels.");
+    expect(mockConfigSet).toHaveBeenCalledTimes(3);
+    expect(mockConfigSet).toHaveBeenCalledWith(
+      "voicechannels.presets.max_per_user",
+      5,
+      expect.any(String),
+      "voicechannels",
+      expect.anything(),
+    );
+  });
+
+  it("disables Voice Channels from its page without blanking the other settings (#979)", async () => {
+    // Unchecked master: the checkbox posts nothing, as a browser would.
+    const res = await harness.post("/settings/save-section", {
+      category: "voicechannels",
+      redirect: "/admin/voice-channels",
+      keys: [
+        "voicechannels.enabled",
+        "voicechannels.lobby.name",
+        "voicechannels.presets.max_per_user",
+      ],
+      "value_voicechannels.lobby.name": "Lobby",
+      "value_voicechannels.presets.max_per_user": "5",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/voice-channels");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("voicechannels.enabled");
+    expect(mockConfigSet.mock.calls[0][1]).toBe(false);
+  });
+
   it("saves the Polls page card and returns to /admin/polls (#973)", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "polls",

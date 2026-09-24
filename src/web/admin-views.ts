@@ -3027,10 +3027,10 @@ export interface VoiceChannelsProps extends CommonProps {
   channels: VoiceChannelRow[];
   categoryFound: boolean;
   /**
-   * The editable `voicechannels.*` settings rendered in-place on the feature
-   * page (#705). Built from the config schema the same way the Settings page
-   * builds its rows, so the shared control renderer produces a category
-   * picker, text fields, toggles, etc.
+   * Every `voicechannels.*` key, edited in place on the feature page (#705)
+   * through {@link renderFeatureSettingsCard}. Includes
+   * `voicechannels.enabled` (#979), so the feature can be switched off here
+   * as well as on.
    */
   settingRows: SettingRow[];
   /**
@@ -3102,8 +3102,8 @@ export function renderSettingsUnavailableNotice(): string {
 /**
  * The feature's top-level master toggle among a card's rows, or null. Only a
  * two-segment `<feature>.enabled` key counts: a card that carries just
- * sub-toggles (Voice Channels' `voicechannels.controlpanel.enabled`) has no
- * master, even though `findCascadeMasterKey` would pick that sub-toggle.
+ * sub-toggles (e.g. `voicechannels.controlpanel.enabled` without
+ * `voicechannels.enabled`) has no master, even though `findCascadeMasterKey` would pick that sub-toggle.
  * `findSectionMasterKey` on the server picks the same key from the submitted
  * set, so the cascade the page renders is the one the save applies.
  */
@@ -3225,25 +3225,6 @@ export function renderFeatureSettingsCard(
 </div>`;
 }
 
-/**
- * The editable settings card on the Voice Channels feature page (#705), built
- * on {@link renderFeatureSettingsCard}. Its keys exclude
- * `voicechannels.enabled` (owned by the enable notice), so the card has no
- * master and posts with `no_cascade`.
- */
-function renderVoiceChannelsSettings(props: VoiceChannelsProps): string {
-  return renderFeatureSettingsCard({
-    intro:
-      "Change voice-channel settings here without leaving the page. Saved through the shared settings route.",
-    category: "voicechannels",
-    settingRows: props.settingRows,
-    pickers: { categoryChannels: props.categoryChannels },
-    returnTo: "/admin/voice-channels",
-    csrfToken: props.csrfToken,
-    unavailable: props.settingsUnavailable,
-  });
-}
-
 export function renderVoiceChannelsPage(props: VoiceChannelsProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const rows = props.channels
@@ -3293,7 +3274,16 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels",
     <dt>Empty channels</dt><dd>${props.totalEmpty}</dd>
   </dl>
 </div>
-${renderVoiceChannelsSettings(props)}
+${renderFeatureSettingsCard({
+  intro:
+    "Change voice-channel settings here without leaving the page. Saved through the shared settings route.",
+  category: "voicechannels",
+  settingRows: props.settingRows,
+  pickers: { categoryChannels: props.categoryChannels },
+  returnTo: "/admin/voice-channels",
+  csrfToken: props.csrfToken,
+  unavailable: props.settingsUnavailable,
+})}
 <div class="card">
   <h2>Cleanup actions</h2>
   <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty. An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it.');">

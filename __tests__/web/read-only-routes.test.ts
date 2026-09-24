@@ -226,9 +226,18 @@ describe("buildSettingRows (#705)", () => {
     }
   });
 
-  it("excludes the feature master voicechannels.enabled from the key list", () => {
-    expect(VOICE_CHANNELS_SETTING_KEYS).not.toContain("voicechannels.enabled");
-    expect(VOICE_CHANNELS_SETTING_KEYS).toContain("voicechannels.category_id");
+  it("lists every voicechannels key, master included (#979)", () => {
+    expect([...VOICE_CHANNELS_SETTING_KEYS]).toEqual([
+      "voicechannels.enabled",
+      "voicechannels.category_id",
+      "voicechannels.lobby.name",
+      "voicechannels.lobby.offlinename",
+      "voicechannels.channel.prefix",
+      "voicechannels.channel.suffix",
+      "voicechannels.controlpanel.enabled",
+      "voicechannels.presets.enabled",
+      "voicechannels.presets.max_per_user",
+    ]);
   });
 
   it("lists every editable notices key, master included, bookkeeping excluded (#972)", () => {
