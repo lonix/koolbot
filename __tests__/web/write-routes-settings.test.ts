@@ -41,6 +41,7 @@ const mockPopulateClientCommands = jest.fn<() => Promise<void>>();
 const mockSetConfigReloadStatus = jest.fn();
 const mockGuildsFetch = jest.fn<() => Promise<{ name: string }>>();
 const mockDigestReload = jest.fn<() => Promise<void>>();
+const mockLeaderboardReload = jest.fn<() => Promise<void>>();
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -95,6 +96,16 @@ jest.unstable_mockModule("../../src/services/digest-service.js", () => ({
   },
 }));
 
+// Likewise for the leaderboard-role recalculation job (#985).
+jest.unstable_mockModule(
+  "../../src/services/leaderboard-role-service.js",
+  () => ({
+    LeaderboardRoleService: {
+      getInstance: (): unknown => ({ reload: mockLeaderboardReload }),
+    },
+  }),
+);
+
 const { createSettingsRouter } =
   await import("../../src/web/routes/write/settings.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -117,6 +128,7 @@ beforeEach(async () => {
   mockFindDependencyIssues.mockResolvedValue([]);
   mockGuildsFetch.mockResolvedValue({ name: "Kool Guild" });
   mockDigestReload.mockResolvedValue(undefined);
+  mockLeaderboardReload.mockResolvedValue(undefined);
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -602,6 +614,35 @@ describe("POST /settings/save-section", () => {
     );
     // The new schedule is armed now, not on the next restart.
     expect(mockDigestReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves the Leaderboard Roles card and re-arms its job (#985)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "leaderboard_roles",
+      redirect: "/admin/leaderboard-roles",
+      keys: [
+        "leaderboard_roles.enabled",
+        "leaderboard_roles.period",
+        "leaderboard_roles.update_cron",
+        "leaderboard_roles.announcement_channel_id",
+      ],
+      "value_leaderboard_roles.enabled": "true",
+      "value_leaderboard_roles.period": "week",
+      "value_leaderboard_roles.update_cron": "0 6 * * 1",
+      "value_leaderboard_roles.announcement_channel_id": "",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/leaderboard-roles");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledWith(
+      "leaderboard_roles.update_cron",
+      "0 6 * * 1",
+      expect.any(String),
+      "leaderboard_roles",
+      expect.anything(),
+    );
+    expect(mockLeaderboardReload).toHaveBeenCalledTimes(1);
+    expect(mockDigestReload).not.toHaveBeenCalled();
   });
 
   it("re-arms the digest job when disabled from its page (#976)", async () => {
