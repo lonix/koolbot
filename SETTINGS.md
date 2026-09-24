@@ -854,8 +854,11 @@ Web UI only — there is no slash command for either.
 - The reset needs the member to type `RESET`, has its own rate-limit bucket
   (5 per 15 minutes per client), and a **persisted** per-member cooldown read
   back from the Web UI audit log — so it survives restarts and is not shared
-  across a NAT. Only a fully completed reset starts the cooldown; a partial
-  one can be retried straight away (every purge step is idempotent). Keep
+  across a NAT. The cooldown starts when a reset begins (its intent row), so a
+  crash or a lost completion row cannot dodge it; only a _recorded_ failure
+  lifts it, so a partial reset can be retried straight away (every purge step
+  is idempotent). A second request from the same member while a reset is
+  running is refused. Keep
   `privacy.delete.cooldown_hours` below `core.web_audit.retention_days`, or
   the cleanup job will prune the row the cooldown reads.
 - Every reset writes a `user.privacy.delete` **intent** row before any data

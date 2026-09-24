@@ -39,8 +39,13 @@ interface MockOptions {
   privacyEnabled?: boolean;
   resetEnabled?: boolean;
   cooldownHours?: number;
-  /** A completed reset returned by the cooldown lookup, if any. */
+  /** The latest intent row the cooldown lookup finds, if any. */
   lastReset?: Record<string, unknown> | null;
+  /** A recorded failure after that intent, which lifts the cooldown. */
+  failedAfter?: Record<string, unknown> | null;
+  revokeThrows?: boolean;
+  /** Keep the purge running this long, to overlap two requests. */
+  purgeDelayMs?: number;
   cooldownLookupThrows?: boolean;
   /** Make the audit write for this phase throw. */
   failAuditPhase?: string;
@@ -50,7 +55,7 @@ interface MockOptions {
 
 let auditRows: Array<Record<string, unknown>> = [];
 let purgeCalls: Array<[string, string]> = [];
-let revokedSessions: string[] = [];
+let revokedUsers: string[] = [];
 let cooldownQueries: Array<Record<string, unknown>> = [];
 
 function buildCookie(): string {
@@ -79,9 +84,11 @@ async function installMocks(opts: MockOptions = {}): Promise<void> {
     expiresAt: new Date(Date.now() + 60 * 60 * 1000),
   } as never);
   jest
-    .spyOn(svc, "revokeSession")
-    .mockImplementation(async (sessionId: string) => {
-      revokedSessions.push(sessionId);
+    .spyOn(svc, "revokeForUser")
+    .mockImplementation(async (userId: string) => {
+      if (opts.revokeThrows) throw new Error("mongo went away");
+      revokedUsers.push(userId);
+      return 1;
     });
 
   const { PermissionsService } =
@@ -117,19 +124,24 @@ async function installMocks(opts: MockOptions = {}): Promise<void> {
     query: Record<string, unknown>,
   ) => {
     cooldownQueries.push(query);
-    return {
-      sort: () => ({
-        lean: async () => {
-          if (opts.cooldownLookupThrows) throw new Error("mongo went away");
-          return opts.lastReset ?? null;
-        },
-      }),
+    // The intent lookup sorts; the "failure after it" lookup does not.
+    const result =
+      query["details.phase"] === "intent"
+        ? (opts.lastReset ?? null)
+        : (opts.failedAfter ?? null);
+    const lean = async () => {
+      if (opts.cooldownLookupThrows) throw new Error("mongo went away");
+      return result;
     };
+    return { sort: () => ({ lean }), lean };
   }) as never);
 
   jest.spyOn(UserDataDeletionService, "getInstance").mockReturnValue({
     purge: async (userId: string, guildId: string) => {
       purgeCalls.push([userId, guildId]);
+      if (opts.purgeDelayMs) {
+        await new Promise((r) => setTimeout(r, opts.purgeDelayMs));
+      }
       if (opts.purgeThrows) throw new Error("no deleter");
       const ok = opts.purgeOk ?? true;
       return {
@@ -231,6 +243,12 @@ async function post(
   return { captured, router };
 }
 
+async function createRouter(): Promise<ReturnType<typeof createUserRouter>> {
+  const mockClient = {} as never;
+  const { createSessionMiddleware } = await import("../../src/web/session.js");
+  return createUserRouter(mockClient, createSessionMiddleware(mockClient));
+}
+
 function flashText(captured: Captured): string {
   const url = new globalThis.URL(`http://x${captured.redirect ?? ""}`);
   return url.searchParams.get("msg") ?? "";
@@ -243,7 +261,7 @@ describe("POST /me/privacy/delete", () => {
     (WebSessionService as unknown as { instance: unknown }).instance = null;
     auditRows = [];
     purgeCalls = [];
-    revokedSessions = [];
+    revokedUsers = [];
     cooldownQueries = [];
   });
 
@@ -292,15 +310,20 @@ describe("POST /me/privacy/delete", () => {
       action: "user.privacy.delete",
       result: "failure",
       details: { reason: "feature-disabled" },
+      errorMessage: "privacy.delete.enabled is off",
     });
   });
 
-  it("refuses when the export itself is off, even with the reset on", async () => {
+  it("refuses when the export itself is off, naming that key rather than the reset's", async () => {
     await installMocks({ privacyEnabled: false, resetEnabled: true });
     const { captured } = await post();
 
     expect(captured.statusCode).toBe(403);
     expect(purgeCalls).toEqual([]);
+    expect(auditRows[0]).toMatchObject({
+      details: { disabledKeys: ["privacy.enabled"] },
+      errorMessage: "privacy.enabled is off",
+    });
   });
 
   it.each([
@@ -351,13 +374,66 @@ describe("POST /me/privacy/delete", () => {
     ).toHaveLength(2);
 
     // Terminal treatment, same as /me/finish.
-    expect(revokedSessions).toEqual(["session-id"]);
+    expect(revokedUsers).toEqual([USER]);
     expect(String(captured.headers["set-cookie"])).toContain(
       "koolbot_session=;",
     );
     expect(captured.statusCode).toBe(200);
     expect(captured.body).toContain("Signed out");
     expect(captured.body).toContain("has been reset");
+    expect(captured.body).toContain("Your session has been revoked");
+  });
+
+  it("does not claim the session was revoked when the revoke fails", async () => {
+    await installMocks({ revokeThrows: true });
+    const { captured } = await post();
+
+    expect(purgeCalls).toEqual([[USER, GUILD]]);
+    expect(String(captured.headers["set-cookie"])).toContain(
+      "koolbot_session=;",
+    );
+    expect(captured.body).toContain("has been reset");
+    expect(captured.body).not.toContain("Your session has been revoked");
+    expect(captured.body).toContain(
+      "could not confirm your session was revoked",
+    );
+  });
+
+  it("still signs out when the completed row cannot be written", async () => {
+    await installMocks({ failAuditPhase: "completed" });
+    const { captured } = await post();
+
+    // The intent row (which holds the cooldown) landed; the completed one
+    // failed but did not turn a finished purge into an error page.
+    expect(
+      auditRows.map((r) => (r.details as { phase: string }).phase),
+    ).toEqual(["intent"]);
+    expect(revokedUsers).toEqual([USER]);
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toContain("has been reset");
+  });
+
+  it("lets only one of two concurrent requests from the same member through", async () => {
+    await installMocks({ purgeDelayMs: 50 });
+    const first = await createRouter();
+    const [a, b] = await Promise.all([
+      post({ router: first }),
+      post({ router: first }),
+    ]);
+    // Let the purge that won finish before asserting (and before the next
+    // test), so it cannot leak rows into a later test.
+    await new Promise((r) => setTimeout(r, 80));
+
+    expect(purgeCalls).toEqual([[USER, GUILD]]);
+    const refused = [a, b].find((r) => r.captured.statusCode === 303);
+    expect(refused).toBeDefined();
+    expect(flashText(refused!.captured)).toContain("already in progress");
+    expect(auditRows).toContainEqual(
+      expect.objectContaining({
+        result: "failure",
+        details: { reason: "in-progress" },
+      }),
+    );
   });
 
   it("records a partial purge as a failed completed row and says so", async () => {
@@ -370,10 +446,10 @@ describe("POST /me/privacy/delete", () => {
       details: { phase: "completed", report: { ok: false } },
     });
     expect(captured.body).toContain("did not fully complete");
-    expect(revokedSessions).toEqual(["session-id"]);
+    expect(revokedUsers).toEqual([USER]);
   });
 
-  it("closes the intent row with a failure if the coordinator throws", async () => {
+  it("closes the intent row with a failure and still signs out if the coordinator throws", async () => {
     await installMocks({ purgeThrows: true });
     const { captured } = await post();
 
@@ -384,8 +460,11 @@ describe("POST /me/privacy/delete", () => {
       result: "failure",
       errorMessage: "no deleter",
     });
-    expect(captured.statusCode).toBe(303);
-    expect(flashText(captured)).toContain("could not finish");
+    // Part of the data may already be gone: same terminal treatment.
+    expect(revokedUsers).toEqual([USER]);
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toContain("Signed out");
+    expect(captured.body).toContain("could not finish");
   });
 
   it("refuses the purge when the intent row cannot be written", async () => {
@@ -393,7 +472,7 @@ describe("POST /me/privacy/delete", () => {
     const { captured } = await post();
 
     expect(purgeCalls).toEqual([]);
-    expect(revokedSessions).toEqual([]);
+    expect(revokedUsers).toEqual([]);
     expect(captured.statusCode).toBe(303);
     expect(flashText(captured)).toContain("could not be recorded");
   });
@@ -413,7 +492,7 @@ describe("POST /me/privacy/delete", () => {
     expect(auditRows[0]).toMatchObject({ targetId: USER });
   });
 
-  it("refuses inside the persisted cooldown, keyed on this member's completed resets", async () => {
+  it("refuses inside the persisted cooldown, keyed on this member's intent rows", async () => {
     const lastResetAt = new Date(Date.now() - 2 * 60 * 60 * 1000);
     await installMocks({
       cooldownHours: 24,
@@ -430,14 +509,22 @@ describe("POST /me/privacy/delete", () => {
       details: { reason: "cooldown", lastResetAt: lastResetAt.toISOString() },
     });
 
-    // Persisted, per member, and only a fully completed reset counts.
-    expect(cooldownQueries).toHaveLength(1);
+    // Persisted, per member, keyed on the fail-closed intent row, then a
+    // check for a recorded failure after it.
+    expect(cooldownQueries).toHaveLength(2);
     expect(cooldownQueries[0]).toMatchObject({
       guildId: GUILD,
       discordUserId: USER,
       action: "user.privacy.delete",
-      result: "success",
+      "details.phase": "intent",
+    });
+    expect(cooldownQueries[1]).toMatchObject({
+      guildId: GUILD,
+      discordUserId: USER,
+      action: "user.privacy.delete",
       "details.phase": "completed",
+      result: "failure",
+      createdAt: { $gte: lastResetAt },
     });
     const since = (cooldownQueries[0].createdAt as { $gte: Date }).$gte;
     expect(Date.now() - since.getTime()).toBeGreaterThanOrEqual(
@@ -445,7 +532,18 @@ describe("POST /me/privacy/delete", () => {
     );
   });
 
-  it("allows a reset once no completed reset falls inside the window", async () => {
+  it("lets a member retry straight away after a recorded failed reset", async () => {
+    await installMocks({
+      cooldownHours: 24,
+      lastReset: { createdAt: new Date(Date.now() - 60_000) },
+      failedAfter: { createdAt: new Date(Date.now() - 30_000) },
+    });
+    await post();
+
+    expect(purgeCalls).toEqual([[USER, GUILD]]);
+  });
+
+  it("allows a reset once no prior reset falls inside the window", async () => {
     await installMocks({ cooldownHours: 24, lastReset: null });
     await post();
 

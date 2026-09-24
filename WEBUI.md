@@ -1100,7 +1100,9 @@ The handler is CSRF-checked and self-scoped like every other `/me/*` write,
 and runs its steps in a fixed order: feature gate (refused with a `403` and a
 `feature-disabled` audit row when off) → typed confirmation (the member must
 type `RESET`; a JS `confirm()` guards the click too) → persisted per-member
-cooldown (`privacy.delete.cooldown_hours`, read back from the audit log) →
+cooldown (`privacy.delete.cooldown_hours`, read back from the audit log and
+keyed on the intent row, so only a recorded failure lifts it; a per-member
+in-process lock refuses a second concurrent request) →
 an **intent** audit row, written with `recordAuditOrThrow` so the purge is
 refused if the row cannot be stored → the purge coordinator
 (`UserDataDeletionService`) → a **completed** audit row carrying its per-step

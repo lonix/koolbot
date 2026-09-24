@@ -72,15 +72,23 @@ export function renderErrorPage(opts: {
 /**
  * Terminal "signed out" page. `message` is an optional plain-text paragraph
  * shown above the standard copy — the data reset (#917) uses it to say what
- * just happened before the member loses the page.
+ * just happened before the member loses the page. Pass `revoked: false`
+ * when the server-side revoke could not be confirmed, so the page does not
+ * claim a revocation that did not happen.
  */
-export function renderSignedOut(message?: string): string {
+export function renderSignedOut(
+  message?: string,
+  opts: { revoked?: boolean } = {},
+): string {
+  const revoked = opts.revoked ?? true;
   return pageShell(
     "Signed out",
     [
       "<h1>Signed out</h1>",
       message ? `<p>${escapeHtml(message)}</p>` : "",
-      "<p>Your session has been revoked. Run <code>/config</code> in Discord to start a new one.</p>",
+      revoked
+        ? "<p>Your session has been revoked. Run <code>/config</code> in Discord to start a new one.</p>"
+        : "<p>This browser has been signed out, but the server could not confirm your session was revoked; it will expire on its own. Run <code>/config</code> in Discord to start a new one.</p>",
     ].join(""),
   );
 }
