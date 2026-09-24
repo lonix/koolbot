@@ -54,16 +54,14 @@ export function createBirthdaysRouter(client: Client): Router {
       }
 
       try {
-        const service = BirthdayService.getInstance(client);
-        const before = await service.getBirthday(userId, session.guildId);
-        const after = before
-          ? await service.editBirthday(userId, session.guildId, {
-              month,
-              day,
-              clearYear,
-            })
-          : null;
-        if (!before || !after) {
+        // A strict read: `getBirthday` turns a read error into "not set",
+        // which would report an outage as a missing entry.
+        const result = await BirthdayService.getInstance(client).editBirthday(
+          userId,
+          session.guildId,
+          { month, day, clearYear },
+        );
+        if (!result) {
           await recordAudit(session, {
             action: "birthday.edit",
             targetId: userId,
@@ -76,6 +74,7 @@ export function createBirthdaysRouter(client: Client): Router {
           });
           return;
         }
+        const { before, after } = result;
         // The audit log is admin-readable, so it records whether a year is on
         // file rather than the year itself — the same line the page draws.
         await recordAudit(session, {

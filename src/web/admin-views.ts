@@ -2544,7 +2544,7 @@ ${settingsCard}
   ${
     props.active.length === 0
       ? `<div class="empty">No active reaction-role mappings.</div>`
-      : `<table><thead><tr><th scope="col">Emoji</th><th scope="col">Role</th><th scope="col">Type</th><th scope="col">Category</th><th scope="col">Channel</th><th scope="col">Message ID</th><th scope="col">Mode</th><th scope="col">Status</th><th scope="col">Archived</th><th scope="col">Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
+      : `<table><thead><tr><th scope="col">Emoji</th><th scope="col">Role grant</th><th scope="col">Type</th><th scope="col">Category</th><th scope="col">Channel</th><th scope="col">Message ID</th><th scope="col">Mode</th><th scope="col">Status</th><th scope="col">Archived</th><th scope="col">Actions</th></tr></thead><tbody>${activeRows}</tbody></table>`
   }
 </div>
 <div class="card">
@@ -2617,7 +2617,7 @@ ${settingsCard}
   ${
     props.archived.length === 0
       ? `<div class="empty">No archived mappings.</div>`
-      : `<table><thead><tr><th scope="col">Emoji</th><th scope="col">Role</th><th scope="col">Type</th><th scope="col">Category</th><th scope="col">Channel</th><th scope="col">Message ID</th><th scope="col">Mode</th><th scope="col">Status</th><th scope="col">Archived</th><th scope="col">Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
+      : `<table><thead><tr><th scope="col">Emoji</th><th scope="col">Role grant</th><th scope="col">Type</th><th scope="col">Category</th><th scope="col">Channel</th><th scope="col">Message ID</th><th scope="col">Mode</th><th scope="col">Status</th><th scope="col">Archived</th><th scope="col">Actions</th></tr></thead><tbody>${archivedRows}</tbody></table>`
   }
 </div>
 `;
@@ -2934,7 +2934,8 @@ export interface BirthdayRow {
   /** Next celebration, `YYYY-MM-DD`. */
   nextDate: string;
   daysUntil: number;
-  roleActive: boolean;
+  /** A grant is on record and not yet swept — not a live role check. */
+  roleGranted: boolean;
   lastAnnouncedYear: number | null;
 }
 
@@ -3024,7 +3025,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
 <td>${escapeHtml(formatMonthDay(b.month, b.day))}</td>
 <td>${escapeHtml(b.nextDate)} <span class="muted">(${nextBirthdayLabel(b)})</span></td>
 <td>${b.hasYear ? "on file" : '<span class="muted">none</span>'}</td>
-<td>${b.roleActive ? '<span class="tag tag-on">held</span>' : '<span class="muted">—</span>'}</td>
+<td>${b.roleGranted ? '<span class="tag tag-on">granted</span>' : '<span class="muted">—</span>'}</td>
 <td class="muted">${b.lastAnnouncedYear ?? "—"}</td>
 <td class="actions">
   <details class="helper edit-details"><summary>Edit</summary>
@@ -3045,7 +3046,7 @@ export function renderBirthdaysPage(props: BirthdaysProps): string {
     ? `<div class="notice">Stored birthdays could not be read. Check the bot's logs and reload the page.</div>`
     : props.rows.length === 0
       ? `<div class="empty">No member has set a birthday yet. Members add theirs on <code>/me/birthday</code>.</div>`
-      : `<table><thead><tr><th scope="col">Member</th><th scope="col">Birthday</th><th scope="col">Next</th><th scope="col">Birth year</th><th scope="col">Role</th><th scope="col">Last post</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+      : `<table><thead><tr><th scope="col">Member</th><th scope="col">Birthday</th><th scope="col">Next</th><th scope="col">Birth year</th><th scope="col">Role grant</th><th scope="col">Last post</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
 
   const pageLink = (n: number): string =>
     n > 1 ? `/admin/birthdays?page=${n}` : "/admin/birthdays";
@@ -3120,7 +3121,7 @@ ${renderFeatureSettingsCard({
 })}
 <div class="card">
   <h2>Stored birthdays</h2>
-  <p class="muted">Soonest first. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
+  <p class="muted">Soonest first, by each member's own timezone. <em>Role grant</em> means the bot recorded giving the birthday role and has not swept it yet; the next run removes it once <code>birthdays.role_duration_hours</code> has passed. Birth years stay private: the page shows only whether one is on file. Removing an entry takes back a live birthday role and deletes the bot's birthday posts about the member, the same as their own data reset.</p>
   ${tableHtml}
   <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
 </div>

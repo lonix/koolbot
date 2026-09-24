@@ -28,9 +28,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { data, execute, PAGE_SIZE, MAX_REASON_DISPLAY_LENGTH } = await import(
-  "../../src/commands/modlog.js"
-);
+const { data, execute, PAGE_SIZE, MAX_REASON_DISPLAY_LENGTH } =
+  await import("../../src/commands/modlog.js");
 
 function makeInteraction(
   page: number | null = null,

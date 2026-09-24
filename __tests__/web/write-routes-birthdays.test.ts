@@ -23,7 +23,6 @@ import {
 } from "./admin-harness.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
-const mockGetBirthday = jest.fn<() => Promise<unknown>>();
 const mockEditBirthday = jest.fn<() => Promise<unknown>>();
 const mockPurgeForUser = jest.fn<() => Promise<Record<string, unknown>>>();
 const mockRunNow = jest.fn<() => Promise<unknown>>();
@@ -44,7 +43,6 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 jest.unstable_mockModule("../../src/services/birthday-service.js", () => ({
   BirthdayService: {
     getInstance: (): unknown => ({
-      getBirthday: mockGetBirthday,
       editBirthday: mockEditBirthday,
       purgeForUser: mockPurgeForUser,
       runNow: mockRunNow,
@@ -74,8 +72,10 @@ const CLEAN_PURGE = {
 
 beforeEach(async () => {
   jest.clearAllMocks();
-  mockGetBirthday.mockResolvedValue({ month: 6, day: 15, year: 1990 });
-  mockEditBirthday.mockResolvedValue({ month: 6, day: 16, year: 1990 });
+  mockEditBirthday.mockResolvedValue({
+    before: { month: 6, day: 15, year: 1990 },
+    after: { month: 6, day: 16, year: 1990 },
+  });
   mockPurgeForUser.mockResolvedValue(CLEAN_PURGE);
   mockRunNow.mockResolvedValue({
     ranAt: new Date(),
@@ -143,17 +143,31 @@ describe("POST /birthdays/:userId/edit", () => {
   });
 
   it("refuses to create an entry the member never set", async () => {
-    mockGetBirthday.mockResolvedValue(null);
+    mockEditBirthday.mockResolvedValue(null);
     const flash = parseFlashRedirect(
       (await edit({ month: "6", day: "16" })).headers.get("location"),
     );
     expect(flash.type).toBe("err");
     expect(flash.msg).toContain("No birthday is stored");
-    expect(mockEditBirthday).not.toHaveBeenCalled();
     expect(lastAudit()).toMatchObject({
       action: "birthday.edit",
       result: "failure",
       errorMessage: "not found",
+    });
+  });
+
+  it("reports a database outage as a failure, not a missing entry", async () => {
+    mockEditBirthday.mockRejectedValue(new Error("db down"));
+    const flash = parseFlashRedirect(
+      (await edit({ month: "6", day: "16" })).headers.get("location"),
+    );
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Failed to update");
+    expect(flash.msg).toContain("db down");
+    expect(flash.msg).not.toContain("No birthday is stored");
+    expect(lastAudit()).toMatchObject({
+      result: "failure",
+      errorMessage: "db down",
     });
   });
 
@@ -181,7 +195,10 @@ describe("POST /birthdays/:userId/edit", () => {
   });
 
   it("passes clear_year through and says the year was removed", async () => {
-    mockEditBirthday.mockResolvedValue({ month: 6, day: 16, year: null });
+    mockEditBirthday.mockResolvedValue({
+      before: { month: 6, day: 15, year: 1990 },
+      after: { month: 6, day: 16, year: null },
+    });
     const flash = parseFlashRedirect(
       (await edit({ month: "6", day: "16", clear_year: "1" })).headers.get(
         "location",

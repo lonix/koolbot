@@ -7,13 +7,13 @@ contributors edit copy without touching unrelated code.
 
 ## What lives here
 
-| File | Used by | What it is |
-| --- | --- | --- |
-| `statuses.ts` | `services/bot-status-service.ts` | Random-rotation Discord presence pools (lonely / single-user / multi-user) |
-| `notice-categories.ts` | `services/notices-channel-manager.ts` | Per-category emoji + embed color + label |
-| `accolades.ts` | `services/achievements-service.ts` | Display metadata (emoji / name / description) for every accolade |
-| `achievements.ts` | `services/achievements-service.ts` | Display metadata for time-based achievements |
-| `bot-features.ts` | `services/notices-channel-manager.ts` | Emoji / label / blurb per feature in the auto-maintained features notice |
+| File                   | Used by                               | What it is                                                                 |
+| ---------------------- | ------------------------------------- | -------------------------------------------------------------------------- |
+| `statuses.ts`          | `services/bot-status-service.ts`      | Random-rotation Discord presence pools (lonely / single-user / multi-user) |
+| `notice-categories.ts` | `services/notices-channel-manager.ts` | Per-category emoji + embed color + label                                   |
+| `accolades.ts`         | `services/achievements-service.ts`    | Display metadata (emoji / name / description) for every accolade           |
+| `achievements.ts`      | `services/achievements-service.ts`    | Display metadata for time-based achievements                               |
+| `bot-features.ts`      | `services/notices-channel-manager.ts` | Emoji / label / blurb per feature in the auto-maintained features notice   |
 
 ## What does **not** belong here
 

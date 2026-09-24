@@ -29,6 +29,7 @@ jest.mock("../../src/models/user-notification-prefs.js", () => ({
   UserNotificationPrefs: {
     findOne: jest.fn(),
     findOneAndUpdate: jest.fn(),
+    find: jest.fn(),
   },
 }));
 
@@ -41,11 +42,13 @@ import {
 
 const findOne = UserNotificationPrefs.findOne as jest.Mock;
 const findOneAndUpdate = UserNotificationPrefs.findOneAndUpdate as jest.Mock;
+const find = UserNotificationPrefs.find as jest.Mock;
 
 describe("UserNotificationPrefsService", () => {
   beforeEach(() => {
     findOne.mockReset();
     findOneAndUpdate.mockReset();
+    find.mockReset();
     (
       UserNotificationPrefsService as unknown as { instance: unknown }
     ).instance = null;
@@ -213,6 +216,34 @@ describe("UserNotificationPrefsService", () => {
           "g1",
         );
       expect(out).toEqual({ prefs: DEFAULT_PREFS, timezone: null });
+    });
+  });
+
+  describe("getTimezones (#986)", () => {
+    it("maps each member with a stored zone in one query", async () => {
+      find.mockResolvedValueOnce([
+        { userId: "u1", timezone: "Europe/Berlin" },
+        { userId: "u2", timezone: "" },
+      ]);
+      const zones =
+        await UserNotificationPrefsService.getInstance().getTimezones(
+          ["u1", "u2", "u3"],
+          "g1",
+        );
+      expect(find).toHaveBeenCalledTimes(1);
+      expect(find.mock.calls[0][0]).toEqual({
+        guildId: "g1",
+        userId: { $in: ["u1", "u2", "u3"] },
+      });
+      expect([...zones]).toEqual([["u1", "Europe/Berlin"]]);
+    });
+
+    it("skips the query for no members and degrades to empty on error", async () => {
+      const svc = UserNotificationPrefsService.getInstance();
+      expect((await svc.getTimezones([], "g1")).size).toBe(0);
+      expect(find).not.toHaveBeenCalled();
+      find.mockRejectedValueOnce(new Error("db down"));
+      expect((await svc.getTimezones(["u1"], "g1")).size).toBe(0);
     });
   });
 

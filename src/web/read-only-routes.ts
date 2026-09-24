@@ -1444,7 +1444,7 @@ export function createReadOnlyRouter(
         hasYear: e.hasYear,
         nextDate: e.nextDate,
         daysUntil: e.daysUntil,
-        roleActive: e.roleActive,
+        roleGranted: e.roleGranted,
         lastAnnouncedYear: e.lastAnnouncedYear,
       }));
 

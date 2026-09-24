@@ -2485,7 +2485,7 @@ describe("renderBirthdaysPage (#986)", () => {
     hasYear: true,
     nextDate: "2027-03-01",
     daysUntil: 158,
-    roleActive: true,
+    roleGranted: true,
     lastAnnouncedYear: 2026,
   };
 

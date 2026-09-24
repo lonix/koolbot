@@ -153,6 +153,33 @@ export class UserNotificationPrefsService {
   }
 
   /**
+   * The stored timezones for several members at once, keyed by user ID
+   * (#986). Members with no timezone are simply absent, and a read error
+   * yields an empty map, so callers fall back to the server timezone just
+   * as with {@link getTimezone}.
+   */
+  public async getTimezones(
+    userIds: readonly string[],
+    guildId: string,
+  ): Promise<Map<string, string>> {
+    const zones = new Map<string, string>();
+    if (userIds.length === 0 || !guildId) return zones;
+    try {
+      const rows = await UserNotificationPrefs.find(
+        { guildId, userId: { $in: [...userIds] } },
+        { userId: 1, timezone: 1 },
+      );
+      for (const row of rows) {
+        const tz = row.timezone;
+        if (typeof tz === "string" && tz.length > 0) zones.set(row.userId, tz);
+      }
+    } catch (err) {
+      logger.error("Failed to load user timezones", err);
+    }
+    return zones;
+  }
+
+  /**
    * Set or clear the user's preferred display timezone (#524).
    *
    * Passing `null`/empty clears the preference ($unset) so the user falls

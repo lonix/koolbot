@@ -833,9 +833,9 @@ status card.
 
 The **Birthdays** page (#986) is for the admin side of birthdays; members still
 set their own date on `/me/birthday`. It lists every stored birthday, soonest
-first, 25 per page, with the next celebration date, whether a birth year is on
-file, whether the temporary role is currently held and the year of the last
-post. The birth year itself is never shown: members share it only to have
+first by each member's own timezone, 25 per page, with the next celebration
+date, whether a birth year is on file, whether a birthday-role grant is on
+record (not yet swept) and the year of the last post. The birth year itself is never shown: members share it only to have
 their age in the post. Per row:
 
 - **Edit** corrects the month and day, and can remove a stored birth year (an

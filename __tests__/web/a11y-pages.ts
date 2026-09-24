@@ -733,7 +733,7 @@ export function adminPages(): A11yPage[] {
             hasYear: true,
             nextDate: "2026-09-25",
             daysUntil: 1,
-            roleActive: false,
+            roleGranted: false,
             lastAnnouncedYear: 2025,
           },
         ],
