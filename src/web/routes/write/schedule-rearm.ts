@@ -12,6 +12,7 @@
 import type { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { DigestService } from "../../../services/digest-service.js";
+import { defaultConfig } from "../../../services/config-schema.js";
 
 interface ScheduleRearm {
   /** Name used in the flash note when the re-arm fails. */
@@ -49,6 +50,23 @@ export async function rearmScheduledServices(
     }
   }
   return failed;
+}
+
+/**
+ * Whether a write actually changed a key's effective value. Feature cards
+ * submit every row on each save, so a threshold-only edit still re-posts the
+ * unchanged enable flag and cron; comparing lets those saves leave the live
+ * schedule alone instead of stopping and re-arming it. `before` is the stored
+ * value, or null when nothing was stored (the schema default then applies).
+ * Compared as strings because a stored value may predate type coercion.
+ */
+export function effectiveValueChanged(
+  key: string,
+  before: unknown,
+  after: unknown,
+): boolean {
+  const fallback = defaultConfig[key as keyof typeof defaultConfig];
+  return String(before ?? fallback) !== String(after ?? fallback);
 }
 
 /** Flash suffix for {@link rearmScheduledServices} failures ("" when none). */

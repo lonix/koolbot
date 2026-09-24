@@ -41,7 +41,11 @@ import {
   findSectionMasterKey,
   resetConfigToDefaults,
 } from "./helpers.js";
-import { rearmScheduledServices, rearmFailureNote } from "./schedule-rearm.js";
+import {
+  rearmScheduledServices,
+  rearmFailureNote,
+  effectiveValueChanged,
+} from "./schedule-rearm.js";
 
 export function createSettingsRouter(client: Client): Router {
   const router = Router();
@@ -114,7 +118,9 @@ export function createSettingsRouter(client: Client): Router {
           unknown.length > 0
             ? ` Note: ${unknown.join(", ")} ${unknown.length === 1 ? "is not a" : "are not"} recognised emoji shortcode${unknown.length === 1 ? "" : "s"} (kept as typed; custom server emoji can't appear in channel names).`
             : "";
-        const rearmFailed = await rearmScheduledServices(client, [key]);
+        const rearmFailed = effectiveValueChanged(key, before, coerced.value)
+          ? await rearmScheduledServices(client, [key])
+          : [];
         flashRedirect(res, redirectTo, {
           type: unknown.length > 0 || rearmFailed.length > 0 ? "warn" : "ok",
           text: `Set ${key} = ${String(coerced.value)}.${hint}${rearmFailureNote(rearmFailed)}`,
@@ -180,7 +186,11 @@ export function createSettingsRouter(client: Client): Router {
           },
           result: "success",
         });
-        const rearmFailed = await rearmScheduledServices(client, [key]);
+        // `before` is undefined only when the read failed; re-arm to be safe.
+        const rearmFailed =
+          before === undefined || effectiveValueChanged(key, before, null)
+            ? await rearmScheduledServices(client, [key])
+            : [];
         flashRedirect(res, redirectTo, {
           type: rearmFailed.length > 0 ? "warn" : "ok",
           text: `Reset ${key} to default.${rearmFailureNote(rearmFailed)}`,
@@ -514,10 +524,14 @@ export function createSettingsRouter(client: Client): Router {
       });
 
       // A changed schedule or enable flag re-arms its cron job now rather
-      // than on the next restart (#976).
+      // than on the next restart (#976). Only keys whose value moved count:
+      // a card re-posts every row, and re-arming on an unchanged cron would
+      // stop the live schedule for nothing.
       const rearmFailed = await rearmScheduledServices(
         client,
-        applied.map((a) => a.key),
+        applied
+          .filter((a) => effectiveValueChanged(a.key, a.before, a.after))
+          .map((a) => a.key),
       );
       const rearmNote = rearmFailureNote(rearmFailed);
       const label = category || "section";

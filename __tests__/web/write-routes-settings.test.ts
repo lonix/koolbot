@@ -246,6 +246,16 @@ describe("POST /settings/set", () => {
     expect(mockDigestReload).toHaveBeenCalledTimes(1);
   });
 
+  it("does not re-arm the digest job when the value is re-saved unchanged (#976)", async () => {
+    mockConfigGet.mockResolvedValue("0 9 * * 1");
+    await harness.post("/settings/set", {
+      key: "digest.cron",
+      value: "0 9 * * 1",
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
   it("does not re-arm the digest job for an unrelated key (#976)", async () => {
     await harness.post("/settings/set", {
       key: "quotes.max_length",
@@ -256,7 +266,13 @@ describe("POST /settings/set", () => {
 });
 
 describe("POST /settings/reset", () => {
+  it("does not re-arm when resetting a schedule that was never overridden (#976)", async () => {
+    await harness.post("/settings/reset", { key: "digest.cron" });
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
   it("re-arms the digest job when its schedule is reset (#976)", async () => {
+    mockConfigGet.mockResolvedValue("0 16 * * 5");
     const res = await harness.post("/settings/reset", {
       key: "digest.cron",
       redirect: "/admin/digest",
@@ -589,6 +605,9 @@ describe("POST /settings/save-section", () => {
   });
 
   it("re-arms the digest job when disabled from its page (#976)", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "digest.enabled" ? true : null,
+    );
     const res = await harness.post("/settings/save-section", {
       category: "digest",
       redirect: "/admin/digest",
@@ -605,15 +624,48 @@ describe("POST /settings/save-section", () => {
   });
 
   it("does not re-arm the digest job for a threshold-only save (#976)", async () => {
+    // The card re-posts every row, so the unchanged enable flag and cron
+    // arrive alongside the edited threshold, exactly as a browser sends it.
+    const stored: Record<string, unknown> = {
+      "digest.enabled": true,
+      "digest.cron": "0 16 * * 5",
+      "digest.min_active_minutes": 30,
+      "digest.streak_min_minutes": 30,
+      "digest.include_achievements": true,
+    };
+    mockConfigGet.mockImplementation(async (key) => stored[key] ?? null);
+    const res = await harness.post("/settings/save-section", {
+      category: "digest",
+      redirect: "/admin/digest",
+      keys: Object.keys(stored),
+      "value_digest.enabled": "true",
+      "value_digest.cron": "0 16 * * 5",
+      "value_digest.min_active_minutes": "45",
+      "value_digest.streak_min_minutes": "30",
+      "value_digest.include_achievements": "true",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(5);
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
+  it("re-arms the digest job when only the cron changes in a full card save (#976)", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "digest.enabled"
+        ? true
+        : key === "digest.cron"
+          ? "0 9 * * 1"
+          : null,
+    );
     await harness.post("/settings/save-section", {
       category: "digest",
-      no_cascade: "1",
       redirect: "/admin/digest",
-      keys: ["digest.min_active_minutes"],
-      "value_digest.min_active_minutes": "45",
+      keys: ["digest.enabled", "digest.cron", "digest.min_active_minutes"],
+      "value_digest.enabled": "true",
+      "value_digest.cron": "0 16 * * 5",
+      "value_digest.min_active_minutes": "30",
     });
-    expect(mockConfigSet).toHaveBeenCalledTimes(1);
-    expect(mockDigestReload).not.toHaveBeenCalled();
+    expect(mockDigestReload).toHaveBeenCalledTimes(1);
   });
 
   it("rejects an invalid digest cron without writing or re-arming (#976)", async () => {
