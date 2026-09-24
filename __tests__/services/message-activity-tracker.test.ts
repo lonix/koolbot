@@ -213,6 +213,21 @@ describe("MessageActivityTracker", () => {
   });
 
   describe("tracking opt-out (#918)", () => {
+    it("re-checks at write time, so an opt-out during the channel lookup wins", async () => {
+      stubTrackingOptOuts();
+      const { tracker, mockConfigService } = createTracker();
+      mockConfigService.get.mockImplementation(async () => {
+        (
+          TrackingOptOutService.getInstance() as unknown as {
+            optedOut: Set<string>;
+          }
+        ).optedOut.add("guild1:user1");
+        return null;
+      });
+      await tracker.handleMessageCreate(makeMessage());
+      expect(updateOne).not.toHaveBeenCalled();
+    });
+
     it("records nothing for a member who opted out", async () => {
       stubTrackingOptOuts([["user1", "guild1"]]);
       const { tracker } = createTracker();

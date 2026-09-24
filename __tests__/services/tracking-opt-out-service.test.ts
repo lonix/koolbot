@@ -212,4 +212,113 @@ describe("TrackingOptOutService", () => {
     findOne.mockReturnValue({ lean: jest.fn(async () => null) });
     await expect(service.getOptedOutAt("u1", "g1")).resolves.toBeNull();
   });
+
+  describe("in-flight writes and serialisation", () => {
+    function deferred(): { promise: Promise<void>; resolve: () => void } {
+      let resolve: () => void = () => undefined;
+      const promise = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    it("runs a tracker write for a tracked member", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      const write = jest.fn(async () => undefined);
+
+      await expect(service.trackWrite("u1", "g1", write)).resolves.toBe(true);
+      expect(write).toHaveBeenCalledTimes(1);
+    });
+
+    it("never starts a tracker write for an opted-out member", async () => {
+      findReturns([{ userId: "u1", guildId: "g1" }]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      const write = jest.fn(async () => undefined);
+
+      await expect(service.trackWrite("u1", "g1", write)).resolves.toBe(false);
+      expect(write).not.toHaveBeenCalled();
+    });
+
+    it("does not return from an opt-out until a write it was too late to stop has settled", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      const gate = deferred();
+      let written = false;
+      const writing = service.trackWrite("u1", "g1", async () => {
+        await gate.promise;
+        written = true;
+      });
+
+      let optedOut = false;
+      const optingOut = service.optOut("u1", "g1").then(() => {
+        optedOut = true;
+      });
+      await flush();
+      // The cache already blocks new writes, but the old one is still open.
+      expect(service.isOptedOut("u1", "g1")).toBe(true);
+      expect(optedOut).toBe(false);
+
+      gate.resolve();
+      await writing;
+      await optingOut;
+      expect(written).toBe(true);
+      expect(optedOut).toBe(true);
+    });
+
+    it("runs opt-out hooks after the cache knows, and survives one that throws", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      const seen: boolean[] = [];
+      service.onOptOut(async () => {
+        throw new Error("hook broke");
+      });
+      service.onOptOut(async (userId, guildId) => {
+        seen.push(service.isOptedOut(userId, guildId));
+      });
+
+      await expect(service.optOut("u1", "g1")).resolves.toBeUndefined();
+      expect(seen).toEqual([true]);
+    });
+
+    it("serialises overlapping opt-out and opt-in so the cache matches the last write", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      // The opt-out's Mongo write is slow; the opt-in's is instant. Without
+      // serialisation the opt-out's cache add would land last.
+      const slow = deferred();
+      updateOne.mockImplementationOnce(async () => {
+        await slow.promise;
+        return { upsertedCount: 1 };
+      });
+      const optingOut = service.optOut("u1", "g1");
+      const optingIn = service.optIn("u1", "g1");
+      await flush();
+      expect(deleteOne).not.toHaveBeenCalled();
+
+      slow.resolve();
+      await optingOut;
+      await optingIn;
+      expect(deleteOne).toHaveBeenCalledTimes(1);
+      expect(service.isOptedOut("u1", "g1")).toBe(false);
+    });
+
+    it("keeps serving later mutations after one fails", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      updateOne.mockRejectedValueOnce(new Error("write failed") as never);
+      await expect(service.optOut("u1", "g1")).rejects.toThrow("write failed");
+      await service.optOut("u1", "g1");
+      expect(service.isOptedOut("u1", "g1")).toBe(true);
+    });
+  });
 });

@@ -124,36 +124,36 @@ export class ReactionActivityTracker {
 
       const guildId = message.guild.id;
       const year = String(new Date().getFullYear());
-      // Member tracking opt-out (#918), checked per side: an opted-out
-      // reactor records nothing given, an opted-out author nothing received.
+      // Member tracking opt-out (#918), checked per side and at write time:
+      // an opted-out reactor records nothing given, an opted-out author
+      // nothing received. `trackWrite` also registers each write as in
+      // flight, so an opt-out waits for one it was too late to stop.
       const optOuts = TrackingOptOutService.getInstance();
+      const reactor = user;
 
       // The reactor "gives" a reaction.
-      if (!optOuts.isOptedOut(user.id, guildId)) {
-        await this.recordReaction(
-          user.id,
+      await optOuts.trackWrite(reactor.id, guildId, () =>
+        this.recordReaction(
+          reactor.id,
           guildId,
-          user.username ?? "unknown",
+          reactor.username ?? "unknown",
           "given",
           year,
-        );
-      }
+        ),
+      );
 
       // The message author "receives" a reaction. Skip when the author is a
       // bot, missing, or the reactor themselves (don't inflate own totals).
       const author = message.author;
-      if (
-        author &&
-        !author.bot &&
-        author.id !== user.id &&
-        !optOuts.isOptedOut(author.id, guildId)
-      ) {
-        await this.recordReaction(
-          author.id,
-          guildId,
-          author.username ?? "unknown",
-          "received",
-          year,
+      if (author && !author.bot && author.id !== user.id) {
+        await optOuts.trackWrite(author.id, guildId, () =>
+          this.recordReaction(
+            author.id,
+            guildId,
+            author.username ?? "unknown",
+            "received",
+            year,
+          ),
         );
       }
 

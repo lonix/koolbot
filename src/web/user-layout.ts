@@ -1441,7 +1441,12 @@ export interface PrivacyPageBodyOptions {
  */
 function renderTrackingOptOutCard(
   optOut: NonNullable<PrivacyPageBodyOptions["trackingOptOut"]>,
+  resetAvailable: boolean,
 ): string {
+  // Only point at the reset when its card is actually on the page (#918).
+  const removeIt = resetAvailable
+    ? "reset your data below to remove it"
+    : "only a data reset removes it, and this server has not enabled one";
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(optOut.csrfToken)}">`;
   if (optOut.optedOutAt) {
     return [
@@ -1451,7 +1456,7 @@ function renderTrackingOptOutCard(
         "Koolbot does not record your messages, reactions, poll votes or voice sessions, " +
         "and leaves you out of other members' voice history.</p>",
       '<p class="muted">What was stored before you opted out is still there, and still shows on ' +
-        "leaderboards, digests and your Rewind — reset your data below to remove it. Opting back " +
+        `leaderboards, digests and your Rewind — ${removeIt}. Opting back ` +
         "in starts tracking again from that moment; nothing from the time you were opted out " +
         "can be restored, because it was never recorded.</p>",
       '<form method="POST" action="/me/privacy/tracking" class="stack">',
@@ -1470,8 +1475,10 @@ function renderTrackingOptOutCard(
     "<ul>",
     "<li>Nothing new is recorded about you from the moment you opt out, and you are left " +
       "out of other members' voice history.</li>",
-    "<li>What is already stored stays, and keeps showing on leaderboards, digests and Rewind " +
-      "until you reset it. Opting out and then resetting is a real deletion.</li>",
+    "<li>What is already stored stays, and keeps showing on leaderboards, digests and Rewind" +
+      (resetAvailable
+        ? " until you reset it. Opting out and then resetting is a real deletion.</li>"
+        : ". Only a data reset removes it, and this server has not enabled one.</li>"),
     "<li>Koolbot has to remember that you opted out, so the opt-out itself is stored — it is " +
       "the one thing a reset does not remove. Opting back in deletes it.</li>",
     "</ul>",
@@ -1577,6 +1584,7 @@ function renderPrivacyTable(
  * copy describing it.
  */
 export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
+  const resetAvailable = opts.featureEnabled && opts.reset?.enabled === true;
   const disabledNotice = renderUserFeatureDisabledNotice({
     enabled: opts.featureEnabled,
     label: "self-service data export",
@@ -1628,9 +1636,9 @@ export function renderUserPrivacyBody(opts: PrivacyPageBodyOptions): string {
     opts.trackingOptOut &&
     ((opts.featureEnabled && opts.trackingOptOut.offered) ||
       opts.trackingOptOut.optedOutAt)
-      ? renderTrackingOptOutCard(opts.trackingOptOut)
+      ? renderTrackingOptOutCard(opts.trackingOptOut, resetAvailable)
       : "",
-    opts.featureEnabled && opts.reset?.enabled
+    resetAvailable && opts.reset
       ? renderPrivacyResetCard(opts.reset, opts.trackingOptOut)
       : "",
   ].join("");

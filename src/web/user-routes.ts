@@ -1621,7 +1621,7 @@ export function createUserRouter(
           type: "ok",
           text:
             action === "opt-out"
-              ? "You are opted out of tracking. Reset your data below to remove what is already stored."
+              ? "You are opted out of tracking. Nothing new is recorded about you from now on."
               : "You are opted back in. Tracking starts again from now.",
         }),
       );

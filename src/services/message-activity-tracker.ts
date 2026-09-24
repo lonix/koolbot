@@ -90,13 +90,10 @@ export class MessageActivityTracker {
         return;
       }
 
-      // Member tracking opt-out (#918). An in-memory lookup, not a query.
-      if (
-        TrackingOptOutService.getInstance().isOptedOut(
-          message.author.id,
-          message.guild.id,
-        )
-      ) {
+      // Member tracking opt-out (#918). An in-memory lookup, not a query;
+      // repeated in `trackWrite` below, which is the check that counts.
+      const optOuts = TrackingOptOutService.getInstance();
+      if (optOuts.isOptedOut(message.author.id, message.guild.id)) {
         return;
       }
 
@@ -112,7 +109,12 @@ export class MessageActivityTracker {
         return;
       }
 
-      await this.recordMessage(message);
+      // Checked again at write time and registered as in flight, so an
+      // opt-out landing during the awaits above either stops this write or
+      // waits for it to finish.
+      await optOuts.trackWrite(message.author.id, message.guild.id, () =>
+        this.recordMessage(message),
+      );
     } catch (error: unknown) {
       logger.error("Error handling messageCreate in tracker:", error);
     }

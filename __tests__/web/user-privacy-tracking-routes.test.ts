@@ -397,5 +397,29 @@ describe("renderUserPrivacyBody tracking opt-out", () => {
     });
 
     expect(html).toContain('name="action" value="opt-in"');
+    // No reset card on the page, so nothing may point "below" at one.
+    expect(html).not.toContain("reset your data below");
+    expect(html).toContain("this server has not enabled one");
+  });
+
+  it("points at the reset only when its card renders", () => {
+    const withReset = renderUserPrivacyBody({
+      ...base,
+      trackingOptOut: {
+        offered: true,
+        optedOutAt: new Date("2026-09-01T12:00:00Z"),
+        csrfToken: "tok",
+      },
+    });
+    expect(withReset).toContain("reset your data below");
+
+    const withoutReset = renderUserPrivacyBody({
+      ...base,
+      reset: { enabled: false, cooldownHours: 0, csrfToken: "tok" },
+      trackingOptOut: { offered: true, optedOutAt: null, csrfToken: "tok" },
+    });
+    expect(withoutReset).not.toContain("/me/privacy/delete");
+    expect(withoutReset).not.toContain("until you reset it");
+    expect(withoutReset).toContain("this server has not enabled one");
   });
 });

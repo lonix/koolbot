@@ -28,6 +28,7 @@ jest.mock("../../src/services/achievements-service.js", () => ({
 // Static imports — mocks are registered before these load (jest.mock is hoisted)
 import { VoiceChannelTracker } from "../../src/services/voice-channel-tracker.js";
 import { VoiceChannelTracking } from "../../src/models/voice-channel-tracking.js";
+import { TrackingOptOutService } from "../../src/services/tracking-opt-out-service.js";
 
 // Helper to create a configured tracker with injected mock config service
 function createTracker(mockClient: Partial<Client>) {
@@ -921,6 +922,70 @@ describe("VoiceChannelTracker", () => {
 
         // Opt out while still in the channel.
         stubTrackingOptOuts([["u1", "g1"]]);
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+        await tracker.handleVoiceStateUpdate(
+          { member, channel } as unknown as VoiceState,
+          { member, channel: null } as unknown as VoiceState,
+        );
+
+        expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
+        expect(tracker.getActiveSession("u1")).toBeNull();
+      });
+
+      it("evicts a live session through the opt-out hook, so opting straight back in cannot persist it", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        await tracker.initialize();
+        const member = inGuild(memberInChannel("u1", "c1", "C1", []));
+        const channel = { id: "c1", name: "C1" };
+
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          { member, channel } as unknown as VoiceState,
+        );
+        expect(tracker.getActiveSession("u1")).not.toBeNull();
+
+        // What `optOut` runs once the cache knows.
+        const hooks = (
+          TrackingOptOutService.getInstance() as unknown as {
+            optOutHooks: Array<(u: string, g: string) => Promise<unknown>>;
+          }
+        ).optOutHooks;
+        expect(hooks).toHaveLength(1);
+        await hooks[0]("u1", "g1");
+        expect(tracker.getActiveSession("u1")).toBeNull();
+
+        // Opted back in (the cache is empty again) — the disconnect still
+        // finds nothing to write.
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+        await tracker.handleVoiceStateUpdate(
+          { member, channel } as unknown as VoiceState,
+          { member, channel: null } as unknown as VoiceState,
+        );
+        expect(VoiceChannelTracking.findOneAndUpdate).not.toHaveBeenCalled();
+      });
+
+      it("drops the session when the opt-out lands while the persist is fetching the user", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const member = inGuild(memberInChannel("u1", "c1", "C1", []));
+        const channel = { id: "c1", name: "C1" };
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          { member, channel } as unknown as VoiceState,
+        );
+
+        // The opt-out lands during the user fetch, after the first check.
+        (mockClient.users as any).fetch = jest.fn(async () => {
+          (
+            TrackingOptOutService.getInstance() as unknown as {
+              optedOut: Set<string>;
+            }
+          ).optedOut.add("g1:u1");
+          return { username: "u1", id: "u1" };
+        });
         (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
         await tracker.handleVoiceStateUpdate(
           { member, channel } as unknown as VoiceState,

@@ -102,7 +102,8 @@ export class PollParticipationTracker {
       // Member tracking opt-out (#918). Checked before the user fetch so an
       // opted-out vote costs no API call; the vote also stays out of the
       // shared per-poll turnout row.
-      if (TrackingOptOutService.getInstance().isOptedOut(userId, guildId)) {
+      const optOuts = TrackingOptOutService.getInstance();
+      if (optOuts.isOptedOut(userId, guildId)) {
         return;
       }
 
@@ -118,8 +119,12 @@ export class PollParticipationTracker {
 
       const now = new Date();
       const year = String(now.getFullYear());
-      await this.recordVote(userId, guildId, user.username, year, now);
-      await this.recordTurnout(guildId, message, userId, now);
+      // Re-checked at write time, and registered as in flight so an opt-out
+      // during the user fetch above either stops both writes or waits them out.
+      await optOuts.trackWrite(userId, guildId, async () => {
+        await this.recordVote(userId, guildId, user.username, year, now);
+        await this.recordTurnout(guildId, message, userId, now);
+      });
 
       if (isDebugMode()) {
         logger.info(

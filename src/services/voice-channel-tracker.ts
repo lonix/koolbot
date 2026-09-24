@@ -214,6 +214,21 @@ export class VoiceChannelTracker {
     return VoiceChannelTracker.instance;
   }
 
+  /**
+   * On a tracking opt-out (#918), evict the member's live session and wait
+   * out any persist already in flight — the same eviction a purge uses, so
+   * opting out (and even opting straight back in) mid-session never lets the
+   * session be written. Registered once per tracker instance.
+   */
+  private optOutHookRegistered = false;
+  private registerOptOutHook(): void {
+    if (this.optOutHookRegistered) return;
+    this.optOutHookRegistered = true;
+    TrackingOptOutService.getInstance().onOptOut((userId) =>
+      this.forgetActiveSession(userId),
+    );
+  }
+
   public getActiveSession(userId: string): { channelName: string } | null {
     const session = this.activeSessions.get(userId);
     return session ? { channelName: session.channelName } : null;
@@ -705,15 +720,7 @@ export class VoiceChannelTracker {
       // can claim it between the check and the discard.
       const optOuts = TrackingOptOutService.getInstance();
       if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
-        this.activeSessions.delete(userId);
-        this.userChannels.delete(userId);
-        this.encounteredUsers.delete(userId);
-        this.companionSince.delete(userId);
-        this.companionSeconds.delete(userId);
-        this.sessionFirsts.delete(userId);
-        logger.info(
-          `Discarded voice session for user ${userId}: they opted out of tracking`,
-        );
+        this.discardOptedOutSession(userId, session);
         return;
       }
       // Other members who opted out while co-present stay out of this row.
@@ -804,6 +811,14 @@ export class VoiceChannelTracker {
           : [];
       }
 
+      // Re-checked immediately before the write (#918): the fetch and config
+      // read above yield, and an opt-out landing there must still win. The
+      // opt-out's own hook then waits for any write already issued.
+      if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+        this.discardOptedOutSession(userId, session);
+        return;
+      }
+
       // Update or create user tracking record
       await VoiceChannelTracking.findOneAndUpdate(
         { userId },
@@ -836,7 +851,11 @@ export class VoiceChannelTracker {
         );
       }
 
-      // Check for accolades and achievements after session ends
+      // Check for accolades and achievements after session ends — unless
+      // the member opted out while the session was being written.
+      if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+        return;
+      }
       try {
         const achievementsService = AchievementsService.getInstance(
           this.client,
@@ -875,6 +894,27 @@ export class VoiceChannelTracker {
       // persists a session with no companions and no encountered users.
       this.returnClaimedState(userId, session, claimed);
     }
+  }
+
+  /**
+   * Drop a session instead of persisting it, because its member opted out of
+   * tracking (#918). Only touches the maps while `session` still owns them —
+   * a later session under the same key is not this call's to clear. The
+   * companion maps were already claimed (or are being cleared here before a
+   * claim), so a newer session's copies are left alone the same way.
+   */
+  private discardOptedOutSession(userId: string, session: VoiceSession): void {
+    if (this.activeSessions.get(userId) === session) {
+      this.activeSessions.delete(userId);
+      this.userChannels.delete(userId);
+      this.encounteredUsers.delete(userId);
+      this.companionSince.delete(userId);
+      this.companionSeconds.delete(userId);
+      this.sessionFirsts.delete(userId);
+    }
+    logger.info(
+      `Discarded voice session for user ${userId}: they opted out of tracking`,
+    );
   }
 
   /**
@@ -1144,6 +1184,9 @@ export class VoiceChannelTracker {
 
   async initialize(): Promise<void> {
     try {
+      // Before the connection check, so a slow Mongo at boot cannot leave
+      // opt-outs without their session eviction.
+      this.registerOptOutHook();
       await this.mongo.ensureConnection();
       logger.info("VoiceChannelTracker initialized");
     } catch (error) {

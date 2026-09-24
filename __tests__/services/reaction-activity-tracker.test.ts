@@ -14,6 +14,7 @@ jest.mock("../../src/utils/logger.js", () => ({
 
 import { ReactionActivityTracker } from "../../src/services/reaction-activity-tracker.js";
 import { ReactionActivityTracking } from "../../src/models/reaction-activity-tracking.js";
+import { TrackingOptOutService } from "../../src/services/tracking-opt-out-service.js";
 
 // The global mongoose mock does not provide updateOne; attach it to the
 // shared model object so the tracker can call it.
@@ -212,6 +213,27 @@ describe("ReactionActivityTracker", () => {
   });
 
   describe("tracking opt-out (#918)", () => {
+    it("re-checks at write time, so an opt-out during the channel lookup wins", async () => {
+      stubTrackingOptOuts();
+      const { tracker, mockConfigService } = createTracker();
+      mockConfigService.get.mockImplementation(async () => {
+        (
+          TrackingOptOutService.getInstance() as unknown as {
+            optedOut: Set<string>;
+          }
+        ).optedOut.add("guild1:reactor1");
+        return null;
+      });
+      await tracker.handleReactionAdd(makeReaction(), makeUser());
+
+      // Only the author's side is written.
+      expect(updateOne).toHaveBeenCalledTimes(1);
+      expect(updateOne.mock.calls[0][0]).toEqual({
+        userId: "author1",
+        guildId: "guild1",
+      });
+    });
+
     it("records nothing given by an opted-out reactor", async () => {
       stubTrackingOptOuts([["reactor1", "guild1"]]);
       const { tracker } = createTracker();

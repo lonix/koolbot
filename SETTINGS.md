@@ -876,6 +876,9 @@ Web UI only — there is no slash command for either.
   co-presence (`otherUsers`, companions). The opt-out is one row in the
   `tracking-opt-out` collection, loaded into memory at startup, so the check
   on each tracker's write path is a single in-memory lookup, not a query.
+- Opting out waits for any tracker write already in flight for the member
+  and evicts a live voice session, so nothing more is written about them
+  once the opt-out completes — a reset straight afterwards stays a deletion.
 - The opt-out **stops accumulation only**. Existing data still shows on
   leaderboards, digests, `/voicestats` and Rewind until the member resets it.
   Opt-out plus reset is the deletion. Opting back in deletes the row, starts
