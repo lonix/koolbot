@@ -42,10 +42,10 @@ export default {
   // to raise the numbers below to just under the new actuals.
   coverageThreshold: {
     global: {
-      branches: 60,
-      functions: 72,
-      lines: 66,
-      statements: 66,
+      branches: 64,
+      functions: 77,
+      lines: 72,
+      statements: 72,
     },
   },
   testTimeout: 10000,

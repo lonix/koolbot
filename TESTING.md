@@ -187,10 +187,10 @@ Current coverage thresholds (`coverageThreshold.global` in `jest.config.js`):
 
 | Metric | Floor |
 | --- | ---: |
-| Statements | 66% |
-| Branches | 60% |
-| Functions | 72% |
-| Lines | 66% |
+| Statements | 72% |
+| Branches | 64% |
+| Functions | 77% |
+| Lines | 72% |
 
 These floors sit a few points under measured coverage rather than at a token baseline, so a real
 regression fails CI. They are not ratcheted on a schedule — `npm run coverage:drift` fails once actual
