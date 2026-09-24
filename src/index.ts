@@ -992,8 +992,15 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       );
     }
 
+    // Before the first await (#918): the tracker checks this ticket, so an
+    // opt-out or reset landing while the channel manager runs still wins.
+    const trackingAdmission = TrackingOptOutService.getInstance().admission();
     await voiceChannelManager.handleVoiceStateUpdate(oldState, newState);
-    await voiceChannelTracker.handleVoiceStateUpdate(oldState, newState);
+    await voiceChannelTracker.handleVoiceStateUpdate(
+      oldState,
+      newState,
+      trackingAdmission,
+    );
 
     // Update bot status with current VC user count (username logic removed)
     if (botStatusService) {

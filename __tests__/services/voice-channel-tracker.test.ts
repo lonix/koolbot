@@ -1097,6 +1097,93 @@ describe("VoiceChannelTracker", () => {
         );
       });
 
+      /** Opt `userId` out and straight back in, as the service does. */
+      function optOutAndBackIn(userId: string): void {
+        const service = TrackingOptOutService.getInstance() as unknown as {
+          optedOut: Set<string>;
+          engageBarrier: (key: string) => void;
+        };
+        service.optedOut.add(`g1:${userId}`);
+        service.engageBarrier(`g1:${userId}`);
+        service.optedOut.delete(`g1:${userId}`);
+        service.engageBarrier(`g1:${userId}`);
+      }
+
+      it("starts no session for a join suspended across an opt-out and back in", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        const gateFn = gate(true);
+        let fired = false;
+        mockConfigService.getBoolean.mockImplementation((async (
+          key: string,
+        ) => {
+          if (!fired && key === "voicetracking.enabled") {
+            fired = true;
+            optOutAndBackIn("u1");
+          }
+          return gateFn(key);
+        }) as never);
+        const member = inGuild(memberInChannel("u1", "c1", "C1", []));
+
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          {
+            member,
+            channel: { id: "c1", name: "C1" },
+          } as unknown as VoiceState,
+        );
+        expect(tracker.getActiveSession("u1")).toBeNull();
+      });
+
+      it("rejects a ticket the caller took before an opt-out and back in", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const member = inGuild(memberInChannel("u1", "c1", "C1", []));
+
+        // As index.ts does: ticket first, then the channel manager's await.
+        const ticket = TrackingOptOutService.getInstance().admission();
+        optOutAndBackIn("u1");
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          {
+            member,
+            channel: { id: "c1", name: "C1" },
+          } as unknown as VoiceState,
+          ticket,
+        );
+        expect(tracker.getActiveSession("u1")).toBeNull();
+      });
+
+      it("adds no co-presence for a join suspended across the joiner's opt-out and back in", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const owner = inGuild(memberInChannel("u1", "c1", "C1", []));
+        const channel = { id: "c1", name: "C1" };
+        await tracker.handleVoiceStateUpdate(
+          { member: owner, channel: null } as unknown as VoiceState,
+          { member: owner, channel } as unknown as VoiceState,
+        );
+
+        const ticket = TrackingOptOutService.getInstance().admission();
+        optOutAndBackIn("later");
+        const joiner = inGuild(memberInChannel("later", "c1", "C1", ["u1"]));
+        await tracker.handleVoiceStateUpdate(
+          { member: joiner, channel: null } as unknown as VoiceState,
+          { member: joiner, channel } as unknown as VoiceState,
+          ticket,
+        );
+
+        const maps = tracker as unknown as {
+          encounteredUsers: Map<string, Set<string>>;
+          companionSince: Map<string, Map<string, number>>;
+        };
+        expect(maps.encounteredUsers.get("u1")?.has("later")).toBe(false);
+        expect(maps.companionSince.get("u1")?.has("later")).toBe(false);
+        expect(tracker.getActiveSession("later")).toBeNull();
+      });
+
       it("records no co-presence for a member who joins while opted out", async () => {
         stubTrackingOptOuts([["hidden", "g1"]]);
         const { tracker, mockConfigService } = createTracker(mockClient);
