@@ -80,6 +80,14 @@ export class TrackingOptOutService {
   > = [];
   /** Members whose tracking is paused while their data is reset. */
   private paused = new Set<string>();
+  /**
+   * Admission epochs (see `admission`). `epoch` ticks each time any
+   * member's barrier engages; `barrierAt` records, per member, the epoch of
+   * the last one. A write whose handler took its ticket before that is
+   * stale.
+   */
+  private epoch = 0;
+  private barrierAt = new Map<string, number>();
 
   private constructor() {}
 
@@ -129,18 +137,43 @@ export class TrackingOptOutService {
   }
 
   /**
-   * Run a tracker write for a member unless they are opted out. The check
-   * and the registration happen together, synchronously, so `optOut` either
-   * stops the write or waits for it — there is no gap between the two.
-   * Resolves `false` when the member is opted out and nothing ran.
+   * An admission ticket for a tracker handler. Take it synchronously, before
+   * the handler's first await, and pass it to `trackWrite`: a write is then
+   * refused if an opt-out or a reset for that member engaged after the
+   * ticket was taken — even when the barrier has since been released (a
+   * reset that finished, an opt-out undone by a quick opt-in). Without it,
+   * a handler suspended across a whole reset would write straight after it.
+   * One global counter, so a handler can take it before it knows which
+   * members it will write for.
+   */
+  public admission(): number {
+    return this.epoch;
+  }
+
+  /** Mark a member's barrier as engaged now (see `admission`). */
+  private engageBarrier(key: string): void {
+    this.epoch += 1;
+    this.barrierAt.set(key, this.epoch);
+  }
+
+  /**
+   * Run a tracker write for a member unless they are opted out, paused, or
+   * the handler's `since` ticket predates their latest barrier. The check
+   * and the registration happen together, synchronously, so a barrier
+   * either stops the write or waits for it — there is no gap between the
+   * two. Resolves `false` when nothing ran.
    */
   public async trackWrite(
     userId: string,
     guildId: string,
     write: () => Promise<void>,
+    since?: number,
   ): Promise<boolean> {
     if (this.isOptedOut(userId, guildId)) return false;
     const key = TrackingOptOutService.key(userId, guildId);
+    if (since !== undefined && (this.barrierAt.get(key) ?? 0) > since) {
+      return false;
+    }
     const pending = this.inFlight.get(key) ?? new Set<Promise<unknown>>();
     this.inFlight.set(key, pending);
     const running = write();
@@ -205,6 +238,7 @@ export class TrackingOptOutService {
       );
       await this.settleLoad();
       this.optedOut?.add(key);
+      this.engageBarrier(key);
       logger.info(
         `Member ${sanitizeForLog(userId)} opted out of tracking in guild ${sanitizeForLog(guildId)}`,
       );
@@ -227,6 +261,15 @@ export class TrackingOptOutService {
   ): Promise<{ removed: boolean; settled: boolean }> {
     const key = TrackingOptOutService.key(userId, guildId);
     return this.serialise(key, async () => {
+      await this.settleLoad();
+      // A member the loaded cache does not hold has nothing to quiesce, and
+      // quiescing would evict their live voice session for nothing (a
+      // duplicate or stale opt-in POST). The row delete is kept — harmless,
+      // and it covers a row the cache somehow missed.
+      if (this.optedOut !== null && !this.optedOut.has(key)) {
+        const deleted = await TrackingOptOut.deleteOne({ userId, guildId });
+        return { removed: (deleted?.deletedCount ?? 0) > 0, settled: true };
+      }
       // Still opted out here, so nothing new can start while this waits.
       const { settled } = await this.quiesce(userId, guildId, key);
       if (!settled) {
@@ -264,6 +307,7 @@ export class TrackingOptOutService {
     const key = TrackingOptOutService.key(userId, guildId);
     return this.serialise(key, async () => {
       this.paused.add(key);
+      this.engageBarrier(key);
       try {
         return await fn(await this.quiesce(userId, guildId, key));
       } finally {

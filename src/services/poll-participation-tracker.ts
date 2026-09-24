@@ -82,6 +82,9 @@ export class PollParticipationTracker {
     pollAnswer: PollAnswer | PartialPollAnswer,
     userId: Snowflake,
   ): Promise<void> {
+    // Before the first await (#918): see MessageActivityTracker.
+    const optOuts = TrackingOptOutService.getInstance();
+    const since = optOuts.admission();
     try {
       const isEnabled = await this.configService.getBoolean(
         "polls.participation.enabled",
@@ -102,7 +105,6 @@ export class PollParticipationTracker {
       // Member tracking opt-out (#918). Checked before the user fetch so an
       // opted-out vote costs no API call; the vote also stays out of the
       // shared per-poll turnout row.
-      const optOuts = TrackingOptOutService.getInstance();
       if (optOuts.isOptedOut(userId, guildId)) {
         return;
       }
@@ -121,10 +123,15 @@ export class PollParticipationTracker {
       const year = String(now.getFullYear());
       // Re-checked at write time, and registered as in flight so an opt-out
       // during the user fetch above either stops both writes or waits them out.
-      await optOuts.trackWrite(userId, guildId, async () => {
-        await this.recordVote(userId, guildId, user.username, year, now);
-        await this.recordTurnout(guildId, message, userId, now);
-      });
+      await optOuts.trackWrite(
+        userId,
+        guildId,
+        async () => {
+          await this.recordVote(userId, guildId, user.username, year, now);
+          await this.recordTurnout(guildId, message, userId, now);
+        },
+        since,
+      );
 
       if (isDebugMode()) {
         logger.info(

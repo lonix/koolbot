@@ -457,6 +457,66 @@ describe("TrackingOptOutService", () => {
       expect(service.isOptedOut("u1", "g1")).toBe(true);
     });
 
+    it("does not quiesce, or run the hooks, on an opt-in from a member who is tracked", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      const hook = jest.fn(async () => true);
+      service.onOptOut(hook);
+      deleteOne.mockResolvedValue({ deletedCount: 0 } as never);
+
+      await expect(service.optIn("u1", "g1")).resolves.toEqual({
+        removed: false,
+        settled: true,
+      });
+      // Their live voice session must not be evicted by a duplicate POST.
+      expect(hook).not.toHaveBeenCalled();
+    });
+
+    it("refuses a write whose ticket predates an opt-out, even after opting back in", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      const ticket = service.admission();
+      await service.optOut("u1", "g1");
+      await service.optIn("u1", "g1");
+      expect(service.isOptedOut("u1", "g1")).toBe(false);
+
+      const stale = jest.fn(async () => undefined);
+      await expect(service.trackWrite("u1", "g1", stale, ticket)).resolves.toBe(
+        false,
+      );
+      expect(stale).not.toHaveBeenCalled();
+
+      // A handler that starts after the opt-in writes normally.
+      const fresh = jest.fn(async () => undefined);
+      await expect(
+        service.trackWrite("u1", "g1", fresh, service.admission()),
+      ).resolves.toBe(true);
+      expect(fresh).toHaveBeenCalled();
+    });
+
+    it("refuses a write whose ticket predates a reset that has since finished", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+
+      const ticket = service.admission();
+      await service.withTrackingPaused("u1", "g1", async () => undefined);
+
+      const stale = jest.fn(async () => undefined);
+      await expect(service.trackWrite("u1", "g1", stale, ticket)).resolves.toBe(
+        false,
+      );
+      expect(stale).not.toHaveBeenCalled();
+      // Other members' tickets are unaffected.
+      const other = jest.fn(async () => undefined);
+      await expect(service.trackWrite("u2", "g1", other, ticket)).resolves.toBe(
+        true,
+      );
+    });
+
     it("keeps serving later mutations after one fails", async () => {
       findReturns([]);
       const service = TrackingOptOutService.getInstance();

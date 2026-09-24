@@ -82,6 +82,9 @@ export class ReactionActivityTracker {
     reaction: MessageReaction | PartialMessageReaction,
     user: User | PartialUser,
   ): Promise<void> {
+    // Before the first await (#918): see MessageActivityTracker.
+    const optOuts = TrackingOptOutService.getInstance();
+    const since = optOuts.admission();
     try {
       const isEnabled = await this.configService.getBoolean(
         "reactiontracking.enabled",
@@ -128,32 +131,39 @@ export class ReactionActivityTracker {
       // an opted-out reactor records nothing given, an opted-out author
       // nothing received. `trackWrite` also registers each write as in
       // flight, so an opt-out waits for one it was too late to stop.
-      const optOuts = TrackingOptOutService.getInstance();
       const reactor = user;
 
       // The reactor "gives" a reaction.
-      await optOuts.trackWrite(reactor.id, guildId, () =>
-        this.recordReaction(
-          reactor.id,
-          guildId,
-          reactor.username ?? "unknown",
-          "given",
-          year,
-        ),
+      await optOuts.trackWrite(
+        reactor.id,
+        guildId,
+        () =>
+          this.recordReaction(
+            reactor.id,
+            guildId,
+            reactor.username ?? "unknown",
+            "given",
+            year,
+          ),
+        since,
       );
 
       // The message author "receives" a reaction. Skip when the author is a
       // bot, missing, or the reactor themselves (don't inflate own totals).
       const author = message.author;
       if (author && !author.bot && author.id !== user.id) {
-        await optOuts.trackWrite(author.id, guildId, () =>
-          this.recordReaction(
-            author.id,
-            guildId,
-            author.username ?? "unknown",
-            "received",
-            year,
-          ),
+        await optOuts.trackWrite(
+          author.id,
+          guildId,
+          () =>
+            this.recordReaction(
+              author.id,
+              guildId,
+              author.username ?? "unknown",
+              "received",
+              year,
+            ),
+          since,
         );
       }
 
