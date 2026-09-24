@@ -9,6 +9,8 @@ import type { ConfigSchema } from "../services/config-schema.js";
 import { getInactivityWindowMs } from "./session.js";
 import { THEME } from "./theme.js";
 import { escapeHtml, escapeJsInAttr } from "./html.js";
+import { getBotVersion } from "../utils/version.js";
+import { formatVersion } from "../utils/semver.js";
 
 // Re-exported from session.ts so the renderer and the cookie middleware
 // share a single source of truth for the inactivity sliding window.
@@ -164,6 +166,47 @@ export async function resolveNavFeatureStatus(
   return status;
 }
 
+/**
+ * Update-available state for the banner badge (#1029). `null` (or no
+ * provider) means "nothing to advertise" — the banner then shows only the
+ * running version.
+ */
+export interface AdminUpdateBadge {
+  latest: string;
+  kind: "major" | "minor" | "patch";
+}
+
+let updateBadgeProvider: (() => AdminUpdateBadge | null) | null = null;
+
+/**
+ * Register the synchronous source of the banner's "update available" badge.
+ * `createWebRouter` points it at `VersionCheckService`'s cached snapshot, so
+ * every admin page shows the badge without each renderer threading it
+ * through, and this module stays free of a service dependency.
+ */
+export function setAdminUpdateBadgeProvider(
+  provider: (() => AdminUpdateBadge | null) | null,
+): void {
+  updateBadgeProvider = provider;
+}
+
+function renderVersionPills(): string {
+  const running = `<span class="pill mono" title="Running version">${escapeHtml(formatVersion(getBotVersion()))}</span>`;
+  let badge: AdminUpdateBadge | null;
+  try {
+    badge = updateBadgeProvider?.() ?? null;
+  } catch {
+    // A broken provider must never take an admin page down with it.
+    badge = null;
+  }
+  if (!badge) return running;
+  return (
+    running +
+    `<a class="pill pill-update" href="/admin/#version" title="A newer KoolBot release is available">` +
+    `Update available: ${escapeHtml(badge.latest)} (${escapeHtml(badge.kind)})</a>`
+  );
+}
+
 export interface AdminPageOptions {
   title: string;
   active: string;
@@ -188,6 +231,8 @@ const STYLE = [
   ".banner .right{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
   ".banner .left{display:flex;gap:.75rem;align-items:center}",
   ".banner .pill{background:#374151;color:#d1d5db;padding:.15rem .5rem;border-radius:999px;font-size:.75rem}",
+  ".banner a.pill-update{background:#1e3a8a;color:#bfdbfe;font-weight:600}",
+  ".banner a.pill-update:hover,.banner a.pill-update:focus-visible{background:#1d4ed8;color:#fff;text-decoration:none}",
   ".banner form{display:inline;margin:0}",
   // #dc2626 (not #ef4444) so the white label reaches 4.5:1 (WCAG 1.4.3, #855).
   `.banner button{background:${THEME.danger};color:#fff;border:0;padding:.3rem .7rem;border-radius:4px;cursor:pointer;font-weight:600}`,
@@ -734,7 +779,7 @@ export function renderAdminPage(opts: AdminPageOptions): string {
     // countdown / Finish button aren't stranded outside every landmark
     // (axe `region`, #856).
     '<header class="banner">',
-    '<div class="left"><strong>Koolbot Admin</strong></div>',
+    `<div class="left"><strong>Koolbot Admin</strong>${renderVersionPills()}</div>`,
     '<div class="right">',
     // "My preferences" link to the parallel `/me` surface added in #481.
     // The same session covers both surfaces; clicking this never forces

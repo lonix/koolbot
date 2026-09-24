@@ -25,6 +25,8 @@ import { THEME } from "./theme.js";
 import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import type { ModerationAction } from "../models/moderation-log.js";
+import type { VersionCheckSnapshot } from "../services/version-check-service.js";
+import { formatVersion } from "../utils/semver.js";
 
 interface CommonProps {
   csrfToken: string;
@@ -73,6 +75,119 @@ export interface DashboardProps extends CommonProps {
     notices: number;
   };
   features: Array<{ key: string; label: string; on: boolean }>;
+  /** Update-check result (#1029). Omitted → the card is not rendered. */
+  version?: VersionCheckSnapshot;
+  flash?: FlashMessage | null;
+}
+
+function formatUtc(date: Date | null | undefined): string {
+  if (!date || Number.isNaN(date.getTime())) return "—";
+  return `${date.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+const CHANGELOG_URL = "https://github.com/lonix/koolbot/blob/main/CHANGELOG.md";
+
+/**
+ * Dashboard "Version" card (#1029): running vs latest release, the update
+ * state, a "Check now" button and, when behind, how to update. A failed
+ * check is a state of the card ("couldn't check", with the last good
+ * result), never an error page.
+ */
+export function renderVersionCard(
+  v: VersionCheckSnapshot,
+  csrfToken: string,
+): string {
+  const running = formatVersion(v.running);
+  const statusTag = ((): string => {
+    switch (v.status) {
+      case "disabled":
+        return `<span class="tag tag-off">check off</span>`;
+      case "unchecked":
+        return `<span class="tag tag-info">not checked yet</span>`;
+      case "error":
+        return `<span class="tag tag-off">couldn't check</span>`;
+      case "unknown-running":
+        return `<span class="tag tag-warn">running version unknown</span>`;
+      case "up-to-date":
+        return `<span class="tag tag-on">up to date</span>`;
+      case "ahead":
+        return `<span class="tag tag-info">newer than latest release</span>`;
+      case "update-available":
+        return `<span class="tag tag-warn">update available</span>`;
+    }
+  })();
+
+  if (!v.enabled) {
+    return `
+<div class="card" id="version">
+  <h2>Version</h2>
+  <dl class="kv">
+    <dt>Running</dt><dd class="mono">${escapeHtml(running)}</dd>
+    <dt>Status</dt><dd>${statusTag}</dd>
+  </dl>
+  <p class="muted">The update check is off (<span class="mono">core.updatecheck.enabled</span>), so only the running version is shown. Turn it on in <a href="/admin/settings#section-core">Settings</a>.</p>
+</div>`;
+  }
+
+  const latest = v.latest;
+  const kindTag = v.updateKind
+    ? ` <span class="tag ${v.updateKind === "major" ? "tag-off" : "tag-info"}">${escapeHtml(v.updateKind)}</span>`
+    : "";
+  const latestHtml = latest
+    ? `<span class="mono">${escapeHtml(latest.version)}</span>${kindTag}` +
+      (latest.publishedAt
+        ? ` <span class="muted">released ${escapeHtml(formatUtc(latest.publishedAt))}</span>`
+        : "")
+    : `<span class="muted">—</span>`;
+
+  const errorNotice =
+    v.status === "error"
+      ? `<div class="notice warn">Couldn't check for updates: ${escapeHtml(v.lastError ?? "unknown error")}` +
+        (latest
+          ? ` Showing the last successful result, fetched ${escapeHtml(formatUtc(latest.fetchedAt))}.`
+          : "") +
+        `</div>`
+      : "";
+
+  const majorNotice =
+    v.updateKind === "major"
+      ? `<div class="notice warn">This is a <strong>major</strong> update and may include breaking changes. Read the release notes before updating.</div>`
+      : "";
+
+  const links = latest
+    ? `<p><a href="${escapeHtml(latest.url)}" rel="noopener noreferrer" target="_blank">Release notes for ${escapeHtml(latest.version)}</a> · <a href="${CHANGELOG_URL}" rel="noopener noreferrer" target="_blank">CHANGELOG</a></p>`
+    : "";
+
+  const instructions = v.updateKind
+    ? `
+  <details class="helper">
+    <summary>How to update</summary>
+    <p>Docker Compose (the published image):</p>
+    <pre class="mono">docker compose pull &amp;&amp; docker compose up -d</pre>
+    <p>Plain Docker: <span class="mono">docker pull ghcr.io/lonix/koolbot:latest</span>, then recreate the container.</p>
+    <p>From source:</p>
+    <pre class="mono">git pull &amp;&amp; npm ci &amp;&amp; npm run build &amp;&amp; npm start</pre>
+    <p class="muted">See <a href="https://github.com/lonix/koolbot#-docker-management" rel="noopener noreferrer" target="_blank">Docker Management</a> in the README for details.</p>
+  </details>`
+    : "";
+
+  return `
+<div class="card" id="version">
+  <h2>Version</h2>
+  ${errorNotice}${majorNotice}
+  <dl class="kv">
+    <dt>Running</dt><dd class="mono">${escapeHtml(running)}</dd>
+    <dt>Latest release</dt><dd>${latestHtml}</dd>
+    <dt>Status</dt><dd>${statusTag}</dd>
+    <dt>Last checked</dt><dd>${escapeHtml(formatUtc(latest?.fetchedAt ?? null))}</dd>
+  </dl>
+  ${links}${instructions}
+  <form method="POST" action="/admin/version/check" class="inline-form">
+    <input type="hidden" name="_csrf" value="${escapeHtml(csrfToken)}">
+    <button type="submit" class="btn btn-secondary">Check now</button>
+    <span class="muted">Anonymous request for public release data; nothing about this instance is sent.</span>
+  </form>
+</div>`;
 }
 
 export function renderDashboardPage(props: DashboardProps): string {
@@ -87,6 +202,8 @@ export function renderDashboardPage(props: DashboardProps): string {
   const body = `
 <h1>Dashboard</h1>
 <p class="subtitle">Read-only overview of the bot's current state.</p>
+${renderFlash(props.flash)}
+${props.version ? renderVersionCard(props.version, props.csrfToken) : ""}
 
 <div class="card">
   <h2>Discord</h2>

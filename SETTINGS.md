@@ -1538,9 +1538,26 @@ apply to the next log message — no restart is needed.
 | `core.config.enabled` / `core.config.channel_id` | bool / channel | `false` / `""` | Configuration reloads and their outcome |
 | `core.cron.enabled` / `core.cron.channel_id` | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks) |
 | `core.moderation.enabled` / `core.moderation.channel_id` | bool / channel | `false` / `""` | Recorded moderation actions plus the member's prior history (needs `moderation.enabled`) |
+| `core.updates.enabled` / `core.updates.channel_id` | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
 
 Point every category at one channel for a single consolidated log, or split
 them (e.g. `#bot-status` for startup, `#admin-alerts` for errors).
+
+#### Update check (running version vs latest release)
+
+- `core.updatecheck.enabled` (bool, default: true) — compare the running
+  version with the latest KoolBot release on GitHub and show the result on the
+  Web UI dashboard, with an "update available" badge on every admin page. It
+  checks at startup, every 12 hours and when an admin clicks **Check now**. The
+  check is an anonymous `GET` of public release metadata
+  (`api.github.com/repos/lonix/koolbot/releases/latest`). It sends nothing
+  about this instance: no version, guild or identifier, only a generic
+  `User-Agent`. Turn it off for air-gapped or privacy-strict installs; the Web
+  UI then shows only the running version.
+
+The optional `core.updates.*` log category above posts a one-time note when a
+newer release is first seen. The announced version is remembered across
+restarts, so the note is not reposted.
 
 ### Bootstrap env vars (read-only in Web UI)
 

@@ -73,6 +73,7 @@ describe("DiscordLogger (#844)", () => {
         "errors",
         "moderation",
         "startup",
+        "updates",
       ]);
       for (const type of DISCORD_LOG_TYPES) {
         expect(`core.${type}.enabled` in defaultConfig).toBe(true);

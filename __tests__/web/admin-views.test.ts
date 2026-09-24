@@ -21,6 +21,7 @@ import {
   renderQuotesPage,
   renderReactionRolesPage,
   renderSettingsPage,
+  renderVersionCard,
   renderVoiceChannelsPage,
   renderWizardConfirmPage,
   renderWizardPage,
@@ -44,6 +45,120 @@ const EMPTY_PICKERS = {
   roles: [] as Array<{ id: string; name: string }>,
   enabledByKey: {} as Record<string, boolean>,
 };
+
+describe("renderVersionCard (#1029)", () => {
+  const latest = {
+    version: "v2.1.0",
+    url: "https://github.com/lonix/koolbot/releases/tag/v2.1.0",
+    publishedAt: new Date("2026-09-01T12:00:00Z"),
+    fetchedAt: new Date("2026-09-24T08:30:00Z"),
+  };
+  const base = {
+    enabled: true,
+    running: "2.0.0",
+    latest,
+    status: "up-to-date" as const,
+    updateKind: null,
+    lastAttemptAt: latest.fetchedAt,
+    lastError: null,
+  };
+
+  it("shows running vs latest and an up-to-date state", () => {
+    const html = renderVersionCard({ ...base, running: "2.1.0" }, "tok");
+    expect(html).toContain('id="version"');
+    expect(html).toContain("v2.1.0");
+    expect(html).toContain("up to date");
+    expect(html).toContain("2026-09-24 08:30 UTC");
+    expect(html).toContain('action="/admin/version/check"');
+    expect(html).toContain('name="_csrf" value="tok"');
+    expect(html).toContain(latest.url);
+    // Nothing to update, so no instructions.
+    expect(html).not.toContain("How to update");
+  });
+
+  it("shows the update kind and how to update when behind", () => {
+    const html = renderVersionCard(
+      { ...base, status: "update-available", updateKind: "minor" },
+      "tok",
+    );
+    expect(html).toContain("update available");
+    expect(html).toContain(">minor<");
+    expect(html).toContain("How to update");
+    expect(html).toContain("docker compose pull");
+    expect(html).toContain("npm ci");
+    expect(html).not.toContain("breaking changes");
+  });
+
+  it("warns about breaking changes on a major update", () => {
+    const html = renderVersionCard(
+      { ...base, status: "update-available", updateKind: "major" },
+      "tok",
+    );
+    expect(html).toContain("breaking changes");
+  });
+
+  it("shows couldn't check with the last good result on failure", () => {
+    const html = renderVersionCard(
+      {
+        ...base,
+        status: "error",
+        lastError: "Rate-limited by GitHub <soon>.",
+      },
+      "tok",
+    );
+    expect(html).toContain("couldn't check");
+    expect(html).toContain("Rate-limited by GitHub &lt;soon&gt;.");
+    expect(html).toContain("last successful result");
+    expect(html).toContain("v2.1.0");
+  });
+
+  it("handles a failure with no result yet", () => {
+    const html = renderVersionCard(
+      { ...base, latest: null, status: "error", lastError: "offline" },
+      "tok",
+    );
+    expect(html).toContain("offline");
+    expect(html).not.toContain("last successful result");
+    expect(html).not.toContain("Release notes");
+  });
+
+  it("shows only the running version while the check is off", () => {
+    const html = renderVersionCard(
+      { ...base, enabled: false, status: "disabled", latest: null },
+      "tok",
+    );
+    expect(html).toContain("v2.0.0");
+    expect(html).toContain("core.updatecheck.enabled");
+    expect(html).not.toContain("Check now");
+    expect(html).not.toContain("Latest release");
+  });
+
+  it("is rendered on the dashboard only when a snapshot is passed", () => {
+    const props = {
+      ...COMMON,
+      guild: {
+        id: "g1",
+        name: "G",
+        memberCount: 1,
+        voiceUsers: 0,
+        botTag: null,
+      },
+      mongoState: "connected",
+      counts: {
+        announcements: 0,
+        pollSchedules: 0,
+        pollItems: 0,
+        reactionRoles: 0,
+        notices: 0,
+      },
+      features: [],
+    };
+    expect(renderDashboardPage(props)).not.toContain('id="version"');
+    expect(renderDashboardPage({ ...props, version: base })).toContain(
+      'id="version"',
+    );
+  });
+});
 
 describe("renderDashboardPage", () => {
   it("renders feature toggles with status tags", () => {

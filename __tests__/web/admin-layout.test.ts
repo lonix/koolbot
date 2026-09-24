@@ -7,7 +7,9 @@ import {
   NAV_ITEMS,
   renderAdminPage,
   resolveNavFeatureStatus,
+  setAdminUpdateBadgeProvider,
 } from "../../src/web/admin-layout.js";
+import { getBotVersion } from "../../src/utils/version.js";
 
 describe("admin-layout escapeHtml", () => {
   it("returns empty string for null/undefined", () => {
@@ -550,5 +552,44 @@ describe("getInactivityWindowMs", () => {
     expect(getInactivityWindowMs()).toBe(30 * 60 * 1000);
     process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "-5";
     expect(getInactivityWindowMs()).toBe(30 * 60 * 1000);
+  });
+});
+
+describe("admin-layout version banner (#1029)", () => {
+  const render = (): string =>
+    renderAdminPage({
+      title: "T",
+      active: "/admin/",
+      body: "",
+      csrfToken: "c",
+      remainingMs: 1000,
+    });
+
+  afterEach(() => {
+    setAdminUpdateBadgeProvider(null);
+  });
+
+  it("shows the running version on every page", () => {
+    const version = getBotVersion();
+    const html = render();
+    expect(html).toContain('title="Running version"');
+    expect(html).toContain(version === "unknown" ? version : `v${version}`);
+    expect(html).not.toContain("Update available");
+  });
+
+  it("adds a badge linking to the dashboard card when behind", () => {
+    setAdminUpdateBadgeProvider(() => ({ latest: "v9.0.0", kind: "major" }));
+    const html = render();
+    expect(html).toContain('href="/admin/#version"');
+    expect(html).toContain("Update available: v9.0.0 (major)");
+  });
+
+  it("shows no badge when the provider has nothing, or throws", () => {
+    setAdminUpdateBadgeProvider(() => null);
+    expect(render()).not.toContain("Update available");
+    setAdminUpdateBadgeProvider(() => {
+      throw new Error("boom");
+    });
+    expect(render()).not.toContain("Update available");
   });
 });

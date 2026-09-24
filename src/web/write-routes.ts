@@ -29,6 +29,7 @@ import { createDatabaseRouter } from "./routes/write/database.js";
 import { createVoiceChannelsRouter } from "./routes/write/voice-channels.js";
 import { createDigestRouter } from "./routes/write/digest.js";
 import { createBotStatusRouter } from "./routes/write/bot-status.js";
+import { createVersionCheckRouter } from "./routes/write/version-check.js";
 
 export * from "./routes/write/helpers.js";
 
@@ -57,6 +58,7 @@ export function createWriteRouter(
   router.use(createVoiceChannelsRouter(client));
   router.use(createDigestRouter(client));
   router.use(createBotStatusRouter(client));
+  router.use(createVersionCheckRouter(client));
 
   return router;
 }
