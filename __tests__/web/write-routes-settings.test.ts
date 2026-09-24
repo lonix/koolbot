@@ -1164,6 +1164,63 @@ describe("POST /settings/save-section", () => {
       invalidKeys: ["quotes.cooldown"],
     });
   });
+
+  it("asks a feature page to reload when its card flips the enable flag", async () => {
+    // Stored off (null → schema default false), submitted on.
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        redirect: "/admin/polls",
+        keys: ["polls.enabled", "polls.cooldown_days"],
+        "value_polls.enabled": "true",
+        "value_polls.cooldown_days": "7",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(body.reload).toBeDefined();
+    const flash = parseFlashRedirect(body.reload ?? null);
+    expect(flash.path).toBe("/admin/polls");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 2 settings in polls.");
+  });
+
+  it("keeps the in-place flash when the enable flag is unchanged", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "polls.enabled" ? true : null,
+    );
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        redirect: "/admin/polls",
+        keys: ["polls.enabled", "polls.cooldown_days"],
+        "value_polls.enabled": "true",
+        "value_polls.cooldown_days": "14",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(body.reload).toBeUndefined();
+  });
+
+  it("does not reload the Settings page when a section flips its master", async () => {
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        keys: ["polls.enabled"],
+        "value_polls.enabled": "true",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(body.reload).toBeUndefined();
+  });
 });
 
 // Issue #971: a feature-page settings card includes its `<feature>.enabled`

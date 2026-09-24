@@ -678,6 +678,12 @@ const SETTINGS_SAVE_SCRIPT =
   // own envelope) must NOT be mistaken for a successful save, so fall through.
   "var jt=r.json&&typeof r.json==='object'?r.json.text:null;" +
   "var okStatus=r.status>=200&&r.status<300;" +
+  // A feature-card save that flipped an enable flag asks for a reload so
+  // the page's banner, Status card and nav reflect the new state; the URL is
+  // the no-JS flash redirect, so the result still shows. Same-origin admin
+  // paths only.
+  "var rl=r.json&&typeof r.json==='object'?r.json.reload:null;" +
+  "if(typeof rl==='string'&&rl.indexOf('/admin/')===0&&rl.indexOf('//')<0){window.location.assign(rl);return}" +
   "if(typeof jt==='string'&&jt){" +
   "var n=show(form,(r.json.type)||(okStatus?'ok':'err'),jt);" +
   "applyResult(form,r.json,n?n.id:'');return}" +

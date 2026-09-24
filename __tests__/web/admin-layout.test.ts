@@ -125,6 +125,22 @@ describe("renderAdminPage", () => {
     expect(html).not.toContain("body:new FormData(form)");
   });
 
+  it("follows a same-origin reload URL from a feature-card save (#970)", () => {
+    const html = renderAdminPage({
+      title: "Polls",
+      active: "/admin/polls",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // An enable-flag flip returns `reload`; the script navigates only to an
+    // /admin/ path so a tampered reply can't send the browser off-site.
+    expect(html).toContain("r.json.reload");
+    expect(html).toContain(
+      "rl.indexOf('/admin/')===0&&rl.indexOf('//')<0){window.location.assign(rl)",
+    );
+  });
+
   it("marks and focuses the fields a save rejected (issue #854)", () => {
     const html = renderAdminPage({
       title: "Settings",
