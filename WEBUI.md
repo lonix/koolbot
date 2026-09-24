@@ -751,7 +751,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Settings**       | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
 | **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
 | **Setup Wizard**   | `/setup wizard`                                                                                     |
-| **Announcements**  | `/announce create`, `list`, `delete`                                                                |
+| **Announcements**  | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
 | **Events**         | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
 | **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
 | **Reaction Roles** | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
@@ -762,7 +762,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**  | (new — read-only Discord slash-command audit log)                                                   |
 | **Command Metrics**| (new — historical per-command usage / error-rate / latency dashboard)                               |
-| **Moderation**     | `/modlog` (read-only, server-wide; also surfaces `/warn` entries)                                   |
+| **Moderation**     | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
 | **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
 
 Feature pages (Announcements, Events, Polls, Reaction Roles, Notices, Voice
@@ -920,7 +920,11 @@ Two filters narrow the view — an **action** dropdown (warn, kick, ban, unban,
 timeout, untimeout) and a **user** filter — and results are paginated 50 rows
 per page. The page is gated by `moderation.enabled` (the #610 disabled-feature
 pattern): when moderation is off it renders the disabled banner and an empty
-table without touching the database.
+table without querying the moderation log. A **Settings** card on the page edits
+`moderation.enabled`, `moderation.retention_days` and the Discord log channel
+(`core.moderation.enabled` / `core.moderation.channel_id`, which also stay in the
+Core section of Settings); saving returns to the page with a flash message, and
+unticking `moderation.enabled` writes only that flag so the other values are kept.
 
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
