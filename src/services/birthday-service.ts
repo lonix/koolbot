@@ -242,6 +242,26 @@ export interface BirthdayEdit {
   clearYear?: boolean;
 }
 
+/**
+ * The filter for a scheduled-run write to a row it read: its id plus the
+ * date and year the run acted on. An admin who corrected the entry mid-run
+ * (#986) either moved the date — they reset `lastAnnouncedYear`, and writing
+ * this year back would stop the corrected date firing — or removed the birth
+ * year, and a post rendered from the stale year shows an age the member no
+ * longer shares. Either way the write matches nothing, and the not-persisted
+ * path withdraws what the run just posted. (The role-marker cleanup uses a
+ * plain `save()`: it only writes the marker fields, which an edit never
+ * touches.)
+ */
+function runRowFilter(row: IUserBirthday): Record<string, unknown> {
+  return {
+    _id: row._id,
+    month: row.month,
+    day: row.day,
+    year: typeof row.year === "number" ? row.year : null,
+  };
+}
+
 function rowToStored(row: IUserBirthday): StoredBirthday {
   return {
     month: row.month,
@@ -617,9 +637,13 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
         const member = await guild.members.fetch(row.userId).catch(() => null);
         if (!member) {
           // Member left the guild — mark as announced so we don't
-          // retry every tick, and skip.
-          row.lastAnnouncedYear = local.year;
-          await row.save();
+          // retry every tick, and skip. Conditional like `writeRunRow`: if
+          // an admin corrected the entry mid-run (#986), stamping this year
+          // would undo their reset, so the write matches nothing and the
+          // next run looks again.
+          await UserBirthday.updateOne(runRowFilter(row), {
+            $set: { lastAnnouncedYear: local.year },
+          });
           continue;
         }
 
@@ -1151,12 +1175,8 @@ export class BirthdayService extends ScheduledService<BirthdayRunSummary | null>
 
   private async writeRunRow(row: IUserBirthday): Promise<boolean> {
     const result = await UserBirthday.updateOne(
-      // And on the date this run announced: an admin who moved it mid-run
-      // (#986) has reset `lastAnnouncedYear`, and writing this year back
-      // would stop the corrected date firing. The post was for a date the
-      // admin says is wrong, so the not-persisted path withdrawing it is the
-      // right outcome too.
-      { _id: row._id, month: row.month, day: row.day },
+      // And on the entry this run announced from (see `runRowFilter`).
+      runRowFilter(row),
       {
         $set: {
           lastAnnouncedYear: row.lastAnnouncedYear,

@@ -476,7 +476,7 @@ describe("BirthdayService", () => {
       expect(mockBirthdayUpdateOne).toHaveBeenCalledWith(
         // Conditional on the announced date, so an admin edit mid-run (#986)
         // is not overwritten.
-        { _id: "row-1", month: row.month, day: row.day },
+        { _id: "row-1", month: row.month, day: row.day, year: null },
         expect.objectContaining({
           $set: expect.objectContaining({
             announcements: [
@@ -487,6 +487,86 @@ describe("BirthdayService", () => {
             ],
           }),
         }),
+      );
+    });
+
+    it("withdraws an age-bearing post when the year was removed mid-run (#986)", async () => {
+      // The run read the row with a year and posted an age; an admin then
+      // removed the year. The write is conditional on the year it rendered
+      // from, so it matches nothing and the post comes back down.
+      const today = new Date();
+      const row = {
+        _id: "row-1",
+        userId: "user-1",
+        guildId: "guild-1",
+        month: today.getUTCMonth() + 1,
+        day: today.getUTCDate(),
+        year: 1990,
+      };
+      mockBirthdayFind
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([row as never]);
+      mockBirthdayUpdateOne.mockResolvedValue({ matchedCount: 0 });
+
+      const deletePost = jest.fn(async () => undefined);
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        id: string;
+        send: jest.Mock;
+      };
+      channel.id = "chan-1";
+      channel.send = jest.fn(async () => ({ id: "msg-9", delete: deletePost }));
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        channels: { fetch: jest.fn(async () => channel) },
+        members: {
+          fetch: jest.fn(async () => ({ displayName: "Ada", id: "user-1" })),
+        },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      const summary = await svc.runNow();
+
+      expect(mockBirthdayUpdateOne).toHaveBeenCalledWith(
+        { _id: "row-1", month: row.month, day: row.day, year: 1990 },
+        expect.anything(),
+      );
+      expect(deletePost).toHaveBeenCalledTimes(1);
+      expect(summary?.announced).toBe(0);
+    });
+
+    it("stamps a departed member conditionally, never with a blind save (#986)", async () => {
+      const today = new Date();
+      const save = jest.fn(async () => undefined);
+      const row = {
+        _id: "row-1",
+        userId: "user-1",
+        guildId: "guild-1",
+        month: today.getUTCMonth() + 1,
+        day: today.getUTCDate(),
+        save,
+      };
+      mockBirthdayFind
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([row as never]);
+
+      const channel = Object.create(TextChannel.prototype) as TextChannel & {
+        send: jest.Mock;
+      };
+      channel.send = jest.fn();
+      const client = makeClient();
+      (client.guilds.fetch as jest.Mock).mockResolvedValue({
+        channels: { fetch: jest.fn(async () => channel) },
+        members: { fetch: jest.fn(async () => null) },
+      });
+
+      const svc: ServiceInstance = BirthdayService.getInstance(client);
+      await svc.runNow();
+
+      expect(channel.send).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+      expect(mockBirthdayUpdateOne).toHaveBeenCalledWith(
+        { _id: "row-1", month: row.month, day: row.day, year: null },
+        { $set: { lastAnnouncedYear: today.getUTCFullYear() } },
       );
     });
 
