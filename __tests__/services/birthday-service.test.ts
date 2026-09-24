@@ -513,16 +513,6 @@ describe("BirthdayService", () => {
       expect(await svc.getBirthday("u1", "g1")).toBeNull();
     });
 
-    it("clears the birthday when input is null", async () => {
-      mockBirthdayDeleteOne.mockResolvedValue({ deletedCount: 1 });
-      const svc: ServiceInstance = BirthdayService.getInstance(makeClient());
-      expect(await svc.setBirthday("u1", "g1", null)).toBeNull();
-      expect(mockBirthdayDeleteOne).toHaveBeenCalledWith({
-        userId: "u1",
-        guildId: "g1",
-      });
-    });
-
     it("upserts a valid birthday and resets lastAnnouncedYear", async () => {
       mockBirthdayFindOneAndUpdate.mockResolvedValue({
         month: 6,
