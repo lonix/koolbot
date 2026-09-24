@@ -310,6 +310,28 @@ describe("TrackingOptOutService", () => {
       expect(service.isOptedOut("u1", "g1")).toBe(false);
     });
 
+    it("holds an opt-in back until the opt-out's drain and hooks have finished", async () => {
+      findReturns([]);
+      const service = TrackingOptOutService.getInstance();
+      await service.initialize();
+      const hookGate = deferred();
+      service.onOptOut(() => hookGate.promise);
+
+      const optingOut = service.optOut("u1", "g1");
+      await flush();
+      const optingIn = service.optIn("u1", "g1");
+      await flush();
+      // The opt-out's hook is still running, so the opt-in must not start.
+      expect(deleteOne).not.toHaveBeenCalled();
+      expect(service.isOptedOut("u1", "g1")).toBe(true);
+
+      hookGate.resolve();
+      await optingOut;
+      await optingIn;
+      expect(deleteOne).toHaveBeenCalledTimes(1);
+      expect(service.isOptedOut("u1", "g1")).toBe(false);
+    });
+
     it("keeps serving later mutations after one fails", async () => {
       findReturns([]);
       const service = TrackingOptOutService.getInstance();

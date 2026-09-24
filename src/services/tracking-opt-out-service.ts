@@ -172,6 +172,10 @@ export class TrackingOptOutService {
    */
   public async optOut(userId: string, guildId: string): Promise<void> {
     const key = TrackingOptOutService.key(userId, guildId);
+    // The whole opt-out — write, cache, drain and hooks — holds the member's
+    // mutation barrier, so an opt-in cannot overtake work that is still
+    // finishing the opt-out (and a hook's eviction cannot hit a session that
+    // started after the member opted back in).
     await this.serialise(key, async () => {
       await TrackingOptOut.updateOne(
         { userId, guildId },
@@ -180,27 +184,27 @@ export class TrackingOptOutService {
       );
       await this.settleLoad();
       this.optedOut?.add(key);
-    });
-    logger.info(
-      `Member ${sanitizeForLog(userId)} opted out of tracking in guild ${sanitizeForLog(guildId)}`,
-    );
-
-    // From here no new write can start; wait out the ones that already had.
-    if (!(await this.drainWrites(key))) {
-      logger.warn(
-        `Timed out waiting for in-flight tracking writes for ${sanitizeForLog(userId)} after opt-out`,
+      logger.info(
+        `Member ${sanitizeForLog(userId)} opted out of tracking in guild ${sanitizeForLog(guildId)}`,
       );
-    }
-    for (const hook of this.optOutHooks) {
-      try {
-        await hook(userId, guildId);
-      } catch (error) {
+
+      // From here no new write can start; wait out the ones that already had.
+      if (!(await this.drainWrites(key))) {
         logger.warn(
-          `Tracking opt-out hook failed for ${sanitizeForLog(userId)}`,
-          error,
+          `Timed out waiting for in-flight tracking writes for ${sanitizeForLog(userId)} after opt-out`,
         );
       }
-    }
+      for (const hook of this.optOutHooks) {
+        try {
+          await hook(userId, guildId);
+        } catch (error) {
+          logger.warn(
+            `Tracking opt-out hook failed for ${sanitizeForLog(userId)}`,
+            error,
+          );
+        }
+      }
+    });
   }
 
   /**

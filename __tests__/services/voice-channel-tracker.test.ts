@@ -996,6 +996,75 @@ describe("VoiceChannelTracker", () => {
         expect(tracker.getActiveSession("u1")).toBeNull();
       });
 
+      it("purges a companion's live co-presence on opt-out, so opting back in cannot leak it", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        await tracker.initialize();
+        const member = inGuild(
+          memberInChannel("u1", "c1", "C1", ["other1", "later"]),
+        );
+        const channel = { id: "c1", name: "C1" };
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          { member, channel } as unknown as VoiceState,
+        );
+
+        const service = TrackingOptOutService.getInstance() as unknown as {
+          optedOut: Set<string>;
+          optOutHooks: Array<(u: string, g: string) => Promise<unknown>>;
+        };
+        // "later" opts out (hook runs) and straight back in.
+        service.optedOut.add("g1:later");
+        await service.optOutHooks[0]("later", "g1");
+        service.optedOut.delete("g1:later");
+
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+        await tracker.handleVoiceStateUpdate(
+          { member, channel } as unknown as VoiceState,
+          { member, channel: null } as unknown as VoiceState,
+        );
+
+        const pushed = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+          .calls[0][1].$push.sessions;
+        expect(pushed.otherUsers).toEqual(["other1"]);
+        expect(pushed.joinedExisting).toEqual(["other1"]);
+        expect(
+          (pushed.companions as Array<{ userId: string }>).map((c) => c.userId),
+        ).toEqual(["other1"]);
+      });
+
+      it("records no co-presence for a member who joins while opted out", async () => {
+        stubTrackingOptOuts([["hidden", "g1"]]);
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const member = inGuild(memberInChannel("u1", "c1", "C1", []));
+        const channel = { id: "c1", name: "C1" };
+        await tracker.handleVoiceStateUpdate(
+          { member, channel: null } as unknown as VoiceState,
+          { member, channel } as unknown as VoiceState,
+        );
+
+        const hidden = inGuild(memberInChannel("hidden", "c1", "C1", ["u1"]));
+        await tracker.handleVoiceStateUpdate(
+          { member: hidden, channel: null } as unknown as VoiceState,
+          { member: hidden, channel } as unknown as VoiceState,
+        );
+        // Opted back in before u1 leaves: nothing from the opted-out
+        // period may surface.
+        stubTrackingOptOuts();
+        (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mockClear();
+        await tracker.handleVoiceStateUpdate(
+          { member, channel } as unknown as VoiceState,
+          { member, channel: null } as unknown as VoiceState,
+        );
+
+        const pushed = (VoiceChannelTracking.findOneAndUpdate as jest.Mock).mock
+          .calls[0][1].$push.sessions;
+        expect(pushed.otherUsers).toEqual([]);
+        expect(pushed.companions).toEqual([]);
+      });
+
       it("leaves an opted-out member out of another member's session", async () => {
         stubTrackingOptOuts([["hidden", "g1"]]);
         const { tracker, mockConfigService } = createTracker(mockClient);

@@ -224,9 +224,49 @@ export class VoiceChannelTracker {
   private registerOptOutHook(): void {
     if (this.optOutHookRegistered) return;
     this.optOutHookRegistered = true;
-    TrackingOptOutService.getInstance().onOptOut((userId) =>
-      this.forgetActiveSession(userId),
-    );
+    TrackingOptOutService.getInstance().onOptOut(async (userId, guildId) => {
+      await this.forgetActiveSession(userId);
+      await this.forgetCompanion(userId, guildId);
+    });
+  }
+
+  /**
+   * Remove an opted-out member from every other live session's co-presence
+   * state in the guild (#918), then wait out every persist already in
+   * flight, since any of them may have filtered its companions before the
+   * opt-out and still be writing. Without the first half, opting out and
+   * back in before a co-present session ends would let the entries from the
+   * opted-out period through the persist-time filter.
+   */
+  private async forgetCompanion(
+    userId: string,
+    guildId: string,
+  ): Promise<void> {
+    for (const [sessionUserId, session] of this.activeSessions) {
+      if (sessionUserId === userId) continue;
+      if (session.guildId && session.guildId !== guildId) continue;
+      this.encounteredUsers.get(sessionUserId)?.delete(userId);
+      this.companionSince.get(sessionUserId)?.delete(userId);
+      this.companionSeconds.get(sessionUserId)?.delete(userId);
+      const firsts = this.sessionFirsts.get(sessionUserId);
+      if (firsts) {
+        firsts.joinedExisting = firsts.joinedExisting.filter(
+          (id) => id !== userId,
+        );
+      }
+    }
+
+    const inFlight = [...this.endingSessions.values()].flatMap((set) => [
+      ...set,
+    ]);
+    if (
+      inFlight.length > 0 &&
+      !(await settleWithin(inFlight, DRAIN_TIMEOUT_MS))
+    ) {
+      logger.warn(
+        `Timed out waiting for in-flight voice persists after ${userId} opted out; one may still name them as co-present`,
+      );
+    }
   }
 
   public getActiveSession(userId: string): { channelName: string } | null {
@@ -470,9 +510,14 @@ export class VoiceChannelTracker {
    * Records that a user was encountered in a channel for all active sessions in that channel
    */
   private recordUserInteraction(channelId: string, userId: string): void {
+    const optOuts = TrackingOptOutService.getInstance();
     // Find all active sessions in this channel
     for (const [sessionUserId, session] of this.activeSessions.entries()) {
       if (session.channelId === channelId && sessionUserId !== userId) {
+        // An opted-out member is not recorded in anyone's session (#918).
+        if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+          continue;
+        }
         // Add this user to the encountered users set for this session
         const encounteredSet = this.encounteredUsers.get(sessionUserId);
         if (encounteredSet) {
@@ -489,8 +534,13 @@ export class VoiceChannelTracker {
    */
   private companionJoined(channelId: string, companionId: string): void {
     const now = Date.now();
+    const optOuts = TrackingOptOutService.getInstance();
     for (const [sessionUserId, session] of this.activeSessions.entries()) {
       if (session.channelId !== channelId || sessionUserId === companionId) {
+        continue;
+      }
+      // No interval opens for an opted-out companion (#918).
+      if (session.guildId && optOuts.isOptedOut(companionId, session.guildId)) {
         continue;
       }
       const since = this.companionSince.get(sessionUserId);
@@ -817,6 +867,21 @@ export class VoiceChannelTracker {
       if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
         this.discardOptedOutSession(userId, session);
         return;
+      }
+      // Same for companions: re-filter synchronously, so a companion who
+      // opted out during the awaits above is not written into this row. A
+      // write already issued is waited out by their opt-out hook
+      // (`forgetCompanion`).
+      sessionDoc.otherUsers = otherUsers.filter(tracked);
+      if (Array.isArray(sessionDoc.companions)) {
+        sessionDoc.companions = (
+          sessionDoc.companions as Array<{ userId: string }>
+        ).filter((c) => tracked(c.userId));
+      }
+      if (Array.isArray(sessionDoc.joinedExisting)) {
+        sessionDoc.joinedExisting = (
+          sessionDoc.joinedExisting as string[]
+        ).filter(tracked);
       }
 
       // Update or create user tracking record
