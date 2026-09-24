@@ -97,6 +97,35 @@ export function sumLikeEventsSince(
   return total;
 }
 
+/** Escape every regex metacharacter so `text` matches only itself. */
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * The Mongo filter for {@link QuoteService.listQuotes}'s `search`: empty
+ * matches everything; otherwise the text as a literal substring of the
+ * quote, or an exact quote / message / author / saver ID.
+ */
+export function quoteSearchFilter(search: string): Record<string, unknown> {
+  const text = search.trim();
+  if (!text) return {};
+  const or: Record<string, unknown>[] = [
+    { content: { $regex: escapeRegex(text), $options: "i" } },
+  ];
+  if (/^\d+$/.test(text)) {
+    // Older rows store members in mention form (`<@123>`), so match those too.
+    const forms = userIdMatchForms(text);
+    or.push(
+      { messageId: text },
+      { authorId: { $in: forms } },
+      { addedById: { $in: forms } },
+    );
+  }
+  if (isValidObjectId(text)) or.push({ _id: text });
+  return { $or: or };
+}
+
 /** Bumped if the export shape ever changes in a backwards-incompatible way. */
 export const QUOTE_EXPORT_VERSION = 1;
 
@@ -382,16 +411,24 @@ export class QuoteService {
     await this.model.findByIdAndUpdate(quoteId, { $inc: { dislikes: 1 } });
   }
 
+  /**
+   * One page of quotes, newest first. `search` narrows the page (#984): it
+   * matches the quote text case-insensitively as a literal (never as a
+   * regex, so an admin typing `(` or `.*` gets what they typed), and an
+   * exact quote, message or member ID.
+   */
   async listQuotes(
     page: number = 1,
     limit: number = 10,
+    search: string = "",
   ): Promise<{ quotes: IQuote[]; total: number; totalPages: number }> {
     const skip = (page - 1) * limit;
-    const total = await this.model.countDocuments();
+    const filter = quoteSearchFilter(search);
+    const total = await this.model.countDocuments(filter);
     const totalPages = Math.ceil(total / limit);
 
     const quotes = await this.model
-      .find()
+      .find(filter)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit);
@@ -401,6 +438,17 @@ export class QuoteService {
 
   async getQuoteById(quoteId: string): Promise<IQuote | null> {
     return this.model.findById(quoteId);
+  }
+
+  /**
+   * Remove a quote row with no permission check, for the admin Web UI
+   * (#984), whose session has already passed the admin-role gate. Returns
+   * the removed row, or null when there was none. The quote-channel post is
+   * the caller's to remove (`QuoteChannelManager.deleteQuoteMessage`).
+   */
+  async removeQuote(quoteId: string): Promise<IQuote | null> {
+    if (!isValidObjectId(quoteId)) return null;
+    return this.model.findByIdAndDelete(quoteId);
   }
 
   /**

@@ -4,6 +4,7 @@ import {
   likeEventCutoff,
   hasExpiredLikeEvents,
   sumLikeEventsSince,
+  quoteSearchFilter,
 } from "../../src/services/quote-service.js";
 
 // Mock mongoose and dependencies
@@ -294,6 +295,49 @@ describe("QuoteService", () => {
 
     it("treats missing history as zero", () => {
       expect(sumLikeEventsSince(undefined, new Date())).toBe(0);
+    });
+  });
+
+  describe("quoteSearchFilter (#984)", () => {
+    it("matches everything for an empty search", () => {
+      expect(quoteSearchFilter("")).toEqual({});
+      expect(quoteSearchFilter("   ")).toEqual({});
+    });
+
+    it("matches text as a literal, not a regex", () => {
+      const filter = quoteSearchFilter("a.b (c)*") as {
+        $or: Array<{ content?: { $regex: string; $options: string } }>;
+      };
+      expect(filter.$or).toHaveLength(1);
+      const { $regex, $options } = filter.$or[0].content!;
+      expect($options).toBe("i");
+      const re = new RegExp($regex, $options);
+      expect(re.test("x A.B (C)* y")).toBe(true);
+      expect(re.test("aXb cc")).toBe(false);
+    });
+
+    it("also matches a numeric search as a message or member ID", () => {
+      const filter = quoteSearchFilter("111111111111111111") as {
+        $or: Array<Record<string, unknown>>;
+      };
+      expect(filter.$or).toEqual(
+        expect.arrayContaining([
+          { messageId: "111111111111111111" },
+          {
+            authorId: {
+              $in: expect.arrayContaining(["<@111111111111111111>"]),
+            },
+          },
+          { addedById: { $in: expect.any(Array) } },
+        ]),
+      );
+    });
+
+    it("also matches an ObjectId-shaped search as the quote id", () => {
+      const filter = quoteSearchFilter("0123456789abcdef01234567") as {
+        $or: Array<Record<string, unknown>>;
+      };
+      expect(filter.$or).toContainEqual({ _id: "0123456789abcdef01234567" });
     });
   });
 });

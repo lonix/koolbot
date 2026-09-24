@@ -2770,6 +2770,156 @@ ${groupSections}
   });
 }
 
+// ---------- Quotes ----------
+
+export interface QuoteRow {
+  id: string;
+  content: string;
+  /** Normalised author snowflake — what the edit form submits back. */
+  authorId: string;
+  /** Display name when the member resolved, else the raw ID. */
+  authorLabel: string;
+  addedByLabel: string;
+  addedAt: string;
+  likes: number;
+  dislikes: number;
+  messageId: string;
+}
+
+export interface QuotesProps extends CommonProps {
+  enabled: boolean;
+  channel: { name: string; id: string } | null;
+  /** The auto-managed `quotes.header_message_id`, shown read-only. */
+  headerMessageId: string;
+  /**
+   * The editable `quotes.*` settings rendered in place on the page (#984).
+   * Excludes the auto-managed `quotes.header_message_id`.
+   */
+  settingRows: SettingRow[];
+  settingsPickers?: FeatureSettingsPickers;
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /** The stored config could not be read; the card shows a notice instead. */
+  settingsUnavailable?: boolean;
+  /** `quotes.max_length`, applied to the edit form's textarea. */
+  maxLength: number;
+  rows: QuoteRow[];
+  /** Quotes matching {@link search} (every quote when it is empty). */
+  total: number;
+  page: number;
+  pageSize: number;
+  search: string;
+  flash?: FlashMessage | null;
+}
+
+function quotesQueryString(search: string, page: number): string {
+  const parts: string[] = [];
+  if (search) parts.push(`q=${encodeURIComponent(search)}`);
+  if (page > 1) parts.push(`page=${page}`);
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
+export function renderQuotesPage(props: QuotesProps): string {
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
+  const page = Math.min(Math.max(1, props.page), totalPages);
+
+  const rowsHtml = props.rows
+    .map((q) => {
+      const preview =
+        q.content.length > 160 ? `${q.content.slice(0, 160)}…` : q.content;
+      return `<tr>
+<td>${escapeHtml(preview)}<div class="muted mono">id: ${escapeHtml(q.id)}</div></td>
+<td title="${escapeHtml(q.authorId)}">${escapeHtml(q.authorLabel)}</td>
+<td>${escapeHtml(q.addedByLabel)}</td>
+<td class="muted">${escapeHtml(q.addedAt)}</td>
+<td>👍 ${q.likes} · 👎 ${q.dislikes}</td>
+<td class="mono muted">${escapeHtml(q.messageId)}</td>
+<td class="actions">
+  <details class="helper edit-details"><summary>Edit</summary>
+    <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/edit" class="stack">${csrfInput}
+      <label>Quote<textarea name="content" rows="4" maxlength="${props.maxLength}" required>${escapeHtml(q.content)}</textarea></label>
+      <label>Author (Discord user ID)<input type="text" name="author_id" inputmode="numeric" pattern="\\d{17,20}" value="${escapeHtml(q.authorId)}" required></label>
+      <button type="submit" class="btn btn-primary">Save changes</button>
+    </form>
+  </details>
+  <form method="POST" action="/admin/quotes/${escapeHtml(q.id)}/delete" onsubmit="return confirm('Delete quote ${escapeJsInAttr(q.id)}? Its channel post is removed too.');">${csrfInput}<button type="submit" class="btn btn-danger" aria-label="Delete quote ${escapeHtml(q.id)}">Delete</button></form>
+</td>
+</tr>`;
+    })
+    .join("");
+
+  const emptyText = props.search
+    ? "No quotes match this search."
+    : "No quotes stored.";
+  const tableHtml =
+    props.rows.length === 0
+      ? `<div class="empty">${emptyText}</div>`
+      : `<table><thead><tr><th scope="col">Quote</th><th scope="col">Author</th><th scope="col">Added by</th><th scope="col">Added</th><th scope="col">Votes</th><th scope="col">Message ID</th><th scope="col">Actions</th></tr></thead><tbody>${rowsHtml}</tbody></table>`;
+
+  const prevLink =
+    page > 1
+      ? `<a class="btn btn-sm" href="/admin/quotes${quotesQueryString(props.search, page - 1)}">← Prev</a>`
+      : `<button class="btn btn-sm" disabled>← Prev</button>`;
+  const nextLink =
+    page < totalPages
+      ? `<a class="btn btn-sm" href="/admin/quotes${quotesQueryString(props.search, page + 1)}">Next →</a>`
+      : `<button class="btn btn-sm" disabled>Next →</button>`;
+  const clearLink = props.search
+    ? ` <a class="btn" href="/admin/quotes">Clear</a>`
+    : "";
+
+  const body = `
+<h1>Quotes</h1>
+<p class="subtitle">Every stored quote, newest first. Edits and deletes update the quote channel as well.</p>
+${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Quotes", featureKey: "quotes.enabled", returnTo: "/admin/quotes", csrfToken: props.csrfToken })}
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
+    <dt>Channel</dt><dd>${props.channel ? `#${escapeHtml(props.channel.name)} <span class="muted mono">${escapeHtml(props.channel.id)}</span>` : '<span class="muted">unset</span>'}</dd>
+    <dt>Header post</dt><dd>${props.headerMessageId ? `<span class="mono">${escapeHtml(props.headerMessageId)}</span> <span class="muted">(auto-managed)</span>` : '<span class="muted">none</span>'}</dd>
+    <dt>${props.search ? "Matching quotes" : "Total quotes"}</dt><dd>${props.total}</dd>
+  </dl>
+  <form method="POST" action="/admin/quotes/sync" class="inline-form" onsubmit="return confirm('Rebuild the quote channel? This deletes every message in it and reposts all quotes with their saved votes.');">
+    ${csrfInput}
+    <button type="submit" class="btn btn-primary"${props.enabled ? "" : " disabled"}>Resync quote channel</button>
+    <span class="muted">Clears the channel, posts a fresh header and reposts every quote with its saved vote tally.</span>
+  </form>
+  <p class="inline-form"><a class="btn" href="/admin/quotes/export">Export quotes (JSON)</a> <span class="muted">The same backup <code>/quote export</code> produces; restore it with <code>/quote import</code>.</span></p>
+</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change quote settings here without leaving the page. Changing the channel does not move quotes already posted: after saving, use Resync quote channel above to repost them in the new channel.",
+  category: "quotes",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/quotes",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
+<div class="card">
+  <h2>Quotes</h2>
+  <form method="GET" action="/admin/quotes" class="inline-form" role="search">
+    <label for="quote-search">Search</label>
+    <input type="search" id="quote-search" name="q" value="${escapeHtml(props.search)}" maxlength="200" placeholder="Text, quote ID, message ID or user ID">
+    <button type="submit" class="btn">Search</button>${clearLink}
+  </form>
+  ${tableHtml}
+  <div class="inline-form">${prevLink} <span class="muted">Page ${page} of ${totalPages}</span> ${nextLink}</div>
+</div>
+`;
+  return renderAdminPage({
+    title: "Quotes",
+    active: "/admin/quotes",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
 // ---------- Database ----------
 
 export interface DbTrunkHistoryRow {
@@ -3381,10 +3531,24 @@ export interface DigestPreviewView {
 
 export interface DigestProps extends CommonProps {
   enabled: boolean;
-  cron: string;
-  minActiveMinutes: number;
-  streakMinMinutes: number;
-  includeAchievements: boolean;
+  /**
+   * Every `digest.*` key, edited in place on this page (#976) through
+   * {@link renderFeatureSettingsCard}. Includes `digest.enabled`, so the
+   * digest can be switched off here as well as on.
+   */
+  settingRows: SettingRow[];
+  /** Picker lists the card's rows render (none today; kept for parity). */
+  settingsPickers?: FeatureSettingsPickers;
+  /**
+   * On/off state of off-card dependencies of {@link settingRows}
+   * (`voicetracking.enabled`, `achievements.enabled`).
+   */
+  dependencyState?: ReadonlyMap<string, boolean>;
+  /**
+   * True when the stored config could not be read. The card then renders a
+   * notice instead of controls pre-filled with schema defaults.
+   */
+  settingsUnavailable?: boolean;
   /** Populated only when a preview was requested (`?preview=1`). */
   preview: DigestPreviewView | null;
   flash?: FlashMessage | null;
@@ -3475,19 +3639,20 @@ export function renderDigestPage(props: DigestProps): string {
 .digest-embed-footer{margin-top:.75rem;padding-top:.5rem;border-top:1px solid #2d3748;font-size:.78rem;color:#94a3b8}
 </style>
 <h1>Weekly Digest</h1>
-<p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent. Configure the thresholds and schedule under <a href="/admin/settings">Settings</a>.</p>
+<p class="subtitle">Preview the weekly voice digest before it sends — a dry run of the same query and embeds the cron job DMs to qualifying members, with no DMs sent.</p>
 ${renderFlash(props.flash)}
 ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Weekly Digest", featureKey: "digest.enabled", returnTo: "/admin/digest", csrfToken: props.csrfToken })}
-<div class="card">
-  <h2>Configuration</h2>
-  <dl class="kv">
-    <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
-    <dt>Schedule</dt><dd class="mono">${escapeHtml(props.cron || "(unset)")}</dd>
-    <dt>Minimum active time to qualify</dt><dd>${props.minActiveMinutes} min/week</dd>
-    <dt>Minimum time counting toward a streak</dt><dd>${props.streakMinMinutes} min/week</dd>
-    <dt>Include achievements</dt><dd>${tagOnOff(props.includeAchievements, "yes", "no")}</dd>
-  </dl>
-</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Change the digest schedule and thresholds here without leaving the page. A schedule change re-arms the digest job on save — no restart needed.",
+  category: "digest",
+  settingRows: props.settingRows,
+  pickers: props.settingsPickers,
+  returnTo: "/admin/digest",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
 <div class="card">
   <h2>Actions</h2>
   <form method="GET" action="/admin/digest" class="inline-form">

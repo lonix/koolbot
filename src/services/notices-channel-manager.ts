@@ -5,6 +5,9 @@ import logger from "../utils/logger.js";
 import { waitForClientReady } from "../utils/discord.js";
 import Notice, { INotice } from "../models/notice.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
+import { BOT_FEATURES } from "../content/bot-features.js";
+import { defaultConfig, hasOwn, settingsMetadata } from "./config-schema.js";
+import { getBotVersion } from "../utils/version.js";
 
 // Internal sweep interval for purging unauthorised messages from the
 // notices channel. Demoted from `notices.cleanup_interval` config key in
@@ -12,12 +15,70 @@ import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 // detail of the channel-cleanup loop.
 const CLEANUP_INTERVAL_MINUTES = 5;
 
+// Mirrors the `maxlength` on `Notice.content` (models/notice.ts).
+const NOTICE_CONTENT_MAX_LENGTH = 4000;
+
+// A top-level feature gate: exactly `<feature>.enabled`. Sub-feature toggles
+// (`voicetracking.seen.enabled`) and the `core.*` logging categories have
+// three or more segments and are deliberately not listed as features.
+const FEATURE_ENABLED_KEY = /^([a-z0-9_]+)\.enabled$/;
+
+/**
+ * Every top-level `<feature>.enabled` key in the schema, in schema order.
+ * Read from `defaultConfig` on each call so the list can never drift from
+ * the features that actually exist.
+ */
+export function getFeatureEnabledKeys(): string[] {
+  return Object.keys(defaultConfig).filter((key) =>
+    FEATURE_ENABLED_KEY.test(key),
+  );
+}
+
+/**
+ * One notice line for an enabled feature. Uses the copy in `BOT_FEATURES`
+ * when present, otherwise falls back to a label built from the key prefix and
+ * the key's Settings description, so an undecorated feature still shows up.
+ */
+export function formatFeatureLine(key: string): string {
+  const feature = FEATURE_ENABLED_KEY.exec(key)?.[1] ?? key;
+  const info = hasOwn(BOT_FEATURES, feature)
+    ? BOT_FEATURES[feature]
+    : undefined;
+  const emoji = info?.emoji ?? "✅";
+  const label =
+    info?.label ??
+    feature
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  const meta = (
+    settingsMetadata as Record<string, { description?: string } | undefined>
+  )[key];
+  const description = info?.description ?? meta?.description;
+  return description
+    ? `**${emoji} ${label}** - ${description}`
+    : `**${emoji} ${label}**`;
+}
+
 export class NoticesChannelManager {
   private static instance: NoticesChannelManager;
   private client: Client;
   private configService: ConfigService;
   private isInitialized: boolean = false;
   private cleanupJob: CronJob | null = null;
+  // Regenerates the features notice on `/config reload` so toggling a
+  // feature updates it without a restart (#1007). Registered once the
+  // manager is initialized, removed again in stop().
+  private reloadCallbackRegistered = false;
+  private readonly onConfigReload = async (): Promise<void> => {
+    if (!this.isInitialized) return;
+    const enabled = await this.configService.getBoolean(
+      "notices.enabled",
+      false,
+    );
+    if (!enabled) return;
+    await this.ensureBotInfoNotice();
+  };
 
   private constructor(client: Client) {
     this.client = client;
@@ -100,6 +161,9 @@ export class NoticesChannelManager {
 
       // Start cleanup job to remove non-bot messages
       this.startCleanupJob();
+
+      this.configService.registerReloadCallback(this.onConfigReload);
+      this.reloadCallbackRegistered = true;
     } catch (error) {
       logger.error("Error initializing notices channel manager:", error);
     }
@@ -308,80 +372,27 @@ export class NoticesChannelManager {
   }
 
   /**
-   * Generate bot info content based on enabled features
+   * Generate bot info content: the running version plus every enabled
+   * feature. The feature list is derived from the schema's top-level
+   * `<feature>.enabled` keys (#1007) rather than a hand-maintained subset, so
+   * a newly shipped feature appears without touching this method.
    */
   private async generateBotInfoContent(): Promise<string> {
     const features: string[] = [];
 
-    // Check for enabled features and add descriptions
-    const quotesEnabled = await this.configService.getBoolean(
-      "quotes.enabled",
-      false,
-    );
-    if (quotesEnabled) {
-      features.push(
-        '**📝 Quotes** - Save memorable quotes with `/quote text:"..." author:@user`',
-      );
+    for (const key of getFeatureEnabledKeys()) {
+      if (await this.configService.getBoolean(key, false)) {
+        features.push(formatFeatureLine(key));
+      }
     }
 
-    const voiceChannelsEnabled = await this.configService.getBoolean(
-      "voicechannels.enabled",
-      false,
-    );
-    if (voiceChannelsEnabled) {
-      features.push(
-        "**🎤 Voice Channels** - Dynamic voice channel creation (join lobby to create)",
-      );
-    }
-
-    const voiceTrackingEnabled = await this.configService.getBoolean(
-      "voicetracking.enabled",
-      false,
-    );
-    if (voiceTrackingEnabled) {
-      features.push(
-        "**📊 Voice Tracking** - Track your voice activity with `/voicestats`",
-      );
-    }
-
-    const achievementsEnabled = await this.configService.getBoolean(
-      "achievements.enabled",
-      false,
-    );
-    if (achievementsEnabled) {
-      features.push(
-        "**🏆 Achievements** - Earn badges for voice activity milestones",
-      );
-    }
-
-    const announcementsEnabled = await this.configService.getBoolean(
-      "announcements.enabled",
-      false,
-    );
-    if (announcementsEnabled) {
-      features.push("**📢 Announcements** - Scheduled automated announcements");
-    }
-
-    const reactionRolesEnabled = await this.configService.getBoolean(
-      "reactionroles.enabled",
-      false,
-    );
-    if (reactionRolesEnabled) {
-      features.push(
-        "**⭐ Reaction Roles** - Self-assign roles by reacting to messages",
-      );
-    }
-
-    // Always available commands
-    features.push("**❓ Help** - Use `/help` to see all available commands");
-
-    // Build the content
-    let content =
+    let content = `🤖 **KoolBot v${getBotVersion()}**\n\n`;
+    content +=
       "Welcome! Here are the features currently available on this server:\n\n";
 
-    if (features.length > 1) {
-      // More than just help
-      content += features.join("\n\n");
+    if (features.length > 0) {
+      content += features.join("\n");
+      content += "\n**❓ Help** - Use `/help` to see all available commands";
     } else {
       content += "**❓ Help** - Use `/help` to see all available commands\n\n";
       content += "*More features can be enabled by server administrators.*";
@@ -391,6 +402,12 @@ export class NoticesChannelManager {
     content += "• Use `/help` to see detailed command information\n";
     content += "• Commands are organized by feature category\n";
     content += "• Some features may require specific roles or permissions";
+
+    // Notice.content is capped at 4000 chars; never let a long feature list
+    // make the save fail and leave the notice stale.
+    if (content.length > NOTICE_CONTENT_MAX_LENGTH) {
+      content = `${content.slice(0, NOTICE_CONTENT_MAX_LENGTH - 1)}…`;
+    }
 
     return content;
   }
@@ -467,6 +484,10 @@ export class NoticesChannelManager {
   }
 
   public async stop(): Promise<void> {
+    if (this.reloadCallbackRegistered) {
+      this.configService.removeReloadCallback(this.onConfigReload);
+      this.reloadCallbackRegistered = false;
+    }
     if (this.cleanupJob) {
       this.cleanupJob.stop();
       logger.info("Stopped notices channel cleanup job");

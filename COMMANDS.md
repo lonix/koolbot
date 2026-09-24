@@ -361,13 +361,17 @@ announcement in the configured weekly voice stats channel.
 channel. All quotes are posted in a channel where users can react with
 👍/👎.
 
-**Enable:** Web UI → Settings:
+**Enable:** Web UI → **Quotes** (or Settings):
 
 - `quotes.enabled = true`
 - `quotes.channel_id = <channel-id>`
 - (Optional) `quotes.cooldown`, `quotes.max_length`, `quotes.delete_roles`
 
 Then reload commands.
+
+Admins can also list, search, edit and delete any quote, rebuild the quote
+channel and download a backup from the Web UI's **Quotes** page
+(`/admin/quotes`) — see [WEBUI.md](WEBUI.md).
 
 #### `/quote add`
 
@@ -417,7 +421,8 @@ Edit an existing quote that you added.
 
 Download a JSON backup of every quote, including each quote's 👍/👎 vote
 tally. Requires the **Administrator** permission. The reply is ephemeral and
-includes the backup as a file attachment.
+includes the backup as a file attachment. The Web UI's **Quotes** page has an
+**Export quotes (JSON)** button that downloads the same file.
 
 ```text
 /quote export
@@ -451,7 +456,9 @@ Purge the quote channel and rebuild it from the database: clears all
 messages, recreates a single header post, and re-posts every stored quote
 with its saved vote tally restored. Requires the **Administrator**
 permission. Useful for recovering a channel left in a bad state (for example
-after a bot reinstall duplicated the header or reset the vote counts).
+after a bot reinstall duplicated the header or reset the vote counts). The Web
+UI's **Quotes** page runs the same rebuild from its **Resync quote channel**
+button.
 
 ```text
 /quote reset

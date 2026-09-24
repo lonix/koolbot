@@ -8,6 +8,15 @@ KoolBot is a modular Discord bot (TypeScript, ESM, Node >= 22) with voice-channe
 tracking, quotes, stats, polls, achievements, and an optional Express-based web UI. Persistence is MongoDB
 via Mongoose. Discord interactions use discord.js v14.
 
+**Self-hosted by design.** Each community runs its own instance (its own Discord application, usually in a
+single guild, and its own MongoDB) and owns all of its data. Design for that:
+
+- Never add a hosted or central service, telemetry, or third-party data sink.
+- Retention periods are the community's choice (`0` = keep forever, as in `moderation.retention_days`).
+  Member data export/reset must still cover every new data store (`user-data-registry.ts`).
+- Privileged gateway intents (e.g. `GuildMembers`) are a one-time switch in the operator's own developer
+  portal. There is no Discord review below 100 guilds. Degrade clearly and warn when an intent is off.
+
 ## Commands
 
 ```bash

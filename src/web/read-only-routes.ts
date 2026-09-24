@@ -37,6 +37,8 @@ import { PollItem } from "../models/poll-item.js";
 import { ReactionRoleService } from "../services/reaction-role-service.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import Notice from "../models/notice.js";
+import { quoteService } from "../services/quote-service.js";
+import { normalizeUserId } from "../utils/user-id.js";
 import { NOTICE_CATEGORIES } from "../content/notice-categories.js";
 import { BotStatusMessage } from "../models/bot-status-message.js";
 import {
@@ -85,6 +87,7 @@ import {
   renderPermissionsPage,
   renderPollsPage,
   renderModerationPage,
+  renderQuotesPage,
   renderReactionRolesPage,
   renderSettingsPage,
   renderVoiceChannelsPage,
@@ -95,6 +98,7 @@ import {
   type DigestPreviewView,
   type FlashMessage,
   type NoticeCategoryOption,
+  type QuoteRow,
   type ReactionRoleRow,
   type FeatureSettingsPickers,
   type RoleOption,
@@ -163,6 +167,19 @@ export const EVENTS_SETTING_KEYS = [
 ] as const;
 
 /**
+ * Every `digest.*` key, edited in place on the Weekly Digest page (#976).
+ * Includes the `digest.enabled` master, so the card cascades like a Settings
+ * section and the digest can be switched off from its own page.
+ */
+export const DIGEST_SETTING_KEYS = [
+  "digest.enabled",
+  "digest.cron",
+  "digest.min_active_minutes",
+  "digest.streak_min_minutes",
+  "digest.include_achievements",
+] as const;
+
+/**
  * The `reactionroles.*` keys surfaced as editable controls on the Reaction
  * Roles feature page (#974). Unlike Voice Channels, the feature master
  * `reactionroles.enabled` is included so the page can turn the feature off as
@@ -226,6 +243,24 @@ export const COMMAND_AUDIT_SETTING_KEYS = [
   "core.command_audit.enabled",
   "core.command_audit.retention_days",
   "core.web_audit.retention_days",
+] as const;
+
+/**
+ * The `quotes.*` keys editable in place on the Quotes page (#984). Includes
+ * the feature master so the page can switch quotes off as well as on; the
+ * auto-managed `quotes.header_message_id` is bookkeeping, shown read-only in
+ * the page's status card instead.
+ */
+export const QUOTES_SETTING_KEYS = [
+  "quotes.enabled",
+  "quotes.channel_id",
+  "quotes.header_enabled",
+  "quotes.header_pin_enabled",
+  "quotes.clear_on_sync",
+  "quotes.cooldown",
+  "quotes.max_length",
+  "quotes.vote_history_days",
+  "quotes.delete_roles",
 ] as const;
 
 /**
@@ -1197,6 +1232,111 @@ export function createReadOnlyRouter(
     }),
   );
 
+  // ---------- Quotes (#984) ----------
+  router.get(
+    "/quotes",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+      const pageSize = 25;
+      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const requestedPage =
+        Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+      const search = String(req.query.q ?? "")
+        .trim()
+        .slice(0, 200);
+
+      const [
+        enabled,
+        channelId,
+        headerMessageId,
+        maxLength,
+        quoteSettings,
+        firstPage,
+      ] = await Promise.all([
+        config.getBoolean("quotes.enabled", false),
+        config.getString("quotes.channel_id", ""),
+        config.getString("quotes.header_message_id", ""),
+        config.getNumber("quotes.max_length", 1000),
+        loadFeatureSettings(client, common.guildId, QUOTES_SETTING_KEYS),
+        quoteService.listQuotes(requestedPage, pageSize, search),
+      ]);
+      // A page past the end (a stale link after deletes) shows the last page
+      // rather than an empty table under "Page 9 of 3".
+      const lastPage = Math.max(1, firstPage.totalPages);
+      const page = Math.min(requestedPage, lastPage);
+      const { quotes, total } =
+        page === requestedPage
+          ? firstPage
+          : await quoteService.listQuotes(page, pageSize, search);
+
+      const channelNames = new Map<string, string>();
+      for (const c of quoteSettings.pickers.textChannels ?? []) {
+        channelNames.set(c.id, c.name);
+      }
+
+      // Show names rather than raw snowflakes: one batched member fetch per
+      // request, best-effort — a miss falls back to the ID.
+      const memberIds = new Set<string>();
+      for (const q of quotes) {
+        memberIds.add(normalizeUserId(q.authorId));
+        memberIds.add(normalizeUserId(q.addedById));
+      }
+      const userLabels = new Map<string, string>();
+      const ids = [...memberIds].filter((id) => /^\d{17,20}$/.test(id));
+      if (ids.length > 0) {
+        try {
+          const guild = await client.guilds.fetch(common.guildId);
+          const members = await guild.members.fetch({ user: ids });
+          for (const [id, member] of members) {
+            userLabels.set(id, member.displayName ?? member.user.username);
+          }
+        } catch (err) {
+          logger.debug("quotes page member-label fetch failed", err);
+        }
+      }
+
+      const rows: QuoteRow[] = quotes.map((q) => {
+        const authorId = normalizeUserId(q.authorId);
+        const addedById = normalizeUserId(q.addedById);
+        const added = q.addedAt ?? q.createdAt;
+        return {
+          id: String(q._id),
+          content: q.content,
+          authorId,
+          authorLabel: userLabels.get(authorId) ?? authorId,
+          addedByLabel: userLabels.get(addedById) ?? addedById,
+          addedAt: added ? new Date(added).toISOString() : "",
+          likes: q.likes ?? 0,
+          dislikes: q.dislikes ?? 0,
+          messageId: q.messageId ?? "",
+        };
+      });
+
+      res.type("text/html").send(
+        renderQuotesPage({
+          ...common,
+          enabled,
+          channel: channelId
+            ? { name: channelNames.get(channelId) ?? channelId, id: channelId }
+            : null,
+          headerMessageId,
+          settingRows: quoteSettings.settingRows,
+          settingsPickers: quoteSettings.pickers,
+          dependencyState: quoteSettings.dependencyState,
+          settingsUnavailable: quoteSettings.unavailable,
+          maxLength,
+          rows,
+          total,
+          page,
+          pageSize,
+          search,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
   // ---------- Bot Status (issue #557) ----------
   router.get(
     "/bot-status",
@@ -1475,18 +1615,10 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const config = ConfigService.getInstance();
 
-      const [
-        enabled,
-        cron,
-        minActiveMinutes,
-        streakMinMinutes,
-        includeAchievements,
-      ] = await Promise.all([
+      const [enabled, digestSettings] = await Promise.all([
         config.getBoolean("digest.enabled", false),
-        config.getString("digest.cron", "0 9 * * 1"),
-        config.getNumber("digest.min_active_minutes", 30),
-        config.getNumber("digest.streak_min_minutes", 30),
-        config.getBoolean("digest.include_achievements", true),
+        // Editable `digest.*` settings card (#976).
+        loadFeatureSettings(client, common.guildId, DIGEST_SETTING_KEYS),
       ]);
 
       // Preview is a read-only dry run, so it's GET-driven: the "Preview"
@@ -1526,10 +1658,10 @@ export function createReadOnlyRouter(
         renderDigestPage({
           ...common,
           enabled,
-          cron,
-          minActiveMinutes,
-          streakMinMinutes,
-          includeAchievements,
+          settingRows: digestSettings.settingRows,
+          settingsPickers: digestSettings.pickers,
+          dependencyState: digestSettings.dependencyState,
+          settingsUnavailable: digestSettings.unavailable,
           preview,
           flash: readFlash(req),
         }),

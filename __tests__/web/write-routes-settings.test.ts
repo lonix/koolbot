@@ -40,6 +40,7 @@ const mockRegisterCommands = jest.fn<() => Promise<void>>();
 const mockPopulateClientCommands = jest.fn<() => Promise<void>>();
 const mockSetConfigReloadStatus = jest.fn();
 const mockGuildsFetch = jest.fn<() => Promise<{ name: string }>>();
+const mockDigestReload = jest.fn<() => Promise<void>>();
 
 jest.unstable_mockModule("../../src/web/audit.js", () => ({
   recordAudit: mockRecordAudit,
@@ -87,6 +88,13 @@ jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
   },
 }));
 
+// A save that touches the digest schedule re-arms the digest job (#976).
+jest.unstable_mockModule("../../src/services/digest-service.js", () => ({
+  DigestService: {
+    getInstance: (): unknown => ({ reload: mockDigestReload }),
+  },
+}));
+
 const { createSettingsRouter } =
   await import("../../src/web/routes/write/settings.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");
@@ -108,6 +116,7 @@ beforeEach(async () => {
   mockConfigGetAll.mockResolvedValue([]);
   mockFindDependencyIssues.mockResolvedValue([]);
   mockGuildsFetch.mockResolvedValue({ name: "Kool Guild" });
+  mockDigestReload.mockResolvedValue(undefined);
   harness = await startAdminHarness([
     stubRequireSession(session),
     requireAdminRoleMiddleware(),
@@ -225,9 +234,55 @@ describe("POST /settings/set", () => {
       errorMessage: "write concern failed",
     });
   });
+  it("re-arms the digest job when the enable notice switches it on (#976)", async () => {
+    const res = await harness.post("/settings/set", {
+      key: "digest.enabled",
+      value: "true",
+      redirect: "/admin/digest",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.type).toBe("ok");
+    expect(mockDigestReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-arm the digest job when the value is re-saved unchanged (#976)", async () => {
+    mockConfigGet.mockResolvedValue("0 9 * * 1");
+    await harness.post("/settings/set", {
+      key: "digest.cron",
+      value: "0 9 * * 1",
+    });
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
+  it("does not re-arm the digest job for an unrelated key (#976)", async () => {
+    await harness.post("/settings/set", {
+      key: "quotes.max_length",
+      value: "500",
+    });
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /settings/reset", () => {
+  it("does not re-arm when resetting a schedule that was never overridden (#976)", async () => {
+    await harness.post("/settings/reset", { key: "digest.cron" });
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
+  it("re-arms the digest job when its schedule is reset (#976)", async () => {
+    mockConfigGet.mockResolvedValue("0 16 * * 5");
+    const res = await harness.post("/settings/reset", {
+      key: "digest.cron",
+      redirect: "/admin/digest",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.msg).toBe("Reset digest.cron to default.");
+    expect(mockDigestReload).toHaveBeenCalledTimes(1);
+  });
+
   it("deletes the stored override and reports the default", async () => {
     const res = await harness.post("/settings/reset", {
       key: "quotes.max_length",
@@ -515,6 +570,135 @@ describe("POST /settings/save-section", () => {
       "core.command_audit.retention_days": 30,
       "core.web_audit.retention_days": 0,
     });
+  });
+
+  it("saves the Digest page card and returns to /admin/digest (#976)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "digest",
+      redirect: "/admin/digest",
+      keys: [
+        "digest.enabled",
+        "digest.cron",
+        "digest.min_active_minutes",
+        "digest.streak_min_minutes",
+        "digest.include_achievements",
+      ],
+      "value_digest.enabled": "true",
+      "value_digest.cron": "0 16 * * 5",
+      "value_digest.min_active_minutes": "45",
+      "value_digest.streak_min_minutes": "20",
+      "value_digest.include_achievements": "true",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 5 settings in digest.");
+    expect(mockConfigSet).toHaveBeenCalledWith(
+      "digest.cron",
+      "0 16 * * 5",
+      expect.any(String),
+      "digest",
+      expect.anything(),
+    );
+    // The new schedule is armed now, not on the next restart.
+    expect(mockDigestReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("re-arms the digest job when disabled from its page (#976)", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "digest.enabled" ? true : null,
+    );
+    const res = await harness.post("/settings/save-section", {
+      category: "digest",
+      redirect: "/admin/digest",
+      keys: ["digest.enabled", "digest.cron", "digest.min_active_minutes"],
+      "value_digest.cron": "0 16 * * 5",
+      "value_digest.min_active_minutes": "45",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
+    expect(mockConfigSet.mock.calls[0][0]).toBe("digest.enabled");
+    expect(mockDigestReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-arm the digest job for a threshold-only save (#976)", async () => {
+    // The card re-posts every row, so the unchanged enable flag and cron
+    // arrive alongside the edited threshold, exactly as a browser sends it.
+    const stored: Record<string, unknown> = {
+      "digest.enabled": true,
+      "digest.cron": "0 16 * * 5",
+      "digest.min_active_minutes": 30,
+      "digest.streak_min_minutes": 30,
+      "digest.include_achievements": true,
+    };
+    mockConfigGet.mockImplementation(async (key) => stored[key] ?? null);
+    const res = await harness.post("/settings/save-section", {
+      category: "digest",
+      redirect: "/admin/digest",
+      keys: Object.keys(stored),
+      "value_digest.enabled": "true",
+      "value_digest.cron": "0 16 * * 5",
+      "value_digest.min_active_minutes": "45",
+      "value_digest.streak_min_minutes": "30",
+      "value_digest.include_achievements": "true",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(5);
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
+  it("re-arms the digest job when only the cron changes in a full card save (#976)", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "digest.enabled"
+        ? true
+        : key === "digest.cron"
+          ? "0 9 * * 1"
+          : null,
+    );
+    await harness.post("/settings/save-section", {
+      category: "digest",
+      redirect: "/admin/digest",
+      keys: ["digest.enabled", "digest.cron", "digest.min_active_minutes"],
+      "value_digest.enabled": "true",
+      "value_digest.cron": "0 16 * * 5",
+      "value_digest.min_active_minutes": "30",
+    });
+    expect(mockDigestReload).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an invalid digest cron without writing or re-arming (#976)", async () => {
+    const res = await harness.post("/settings/save-section", {
+      category: "digest",
+      redirect: "/admin/digest",
+      keys: ["digest.enabled", "digest.cron"],
+      "value_digest.enabled": "true",
+      "value_digest.cron": "every monday",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("digest.cron (invalid cron expression)");
+    expect(mockConfigSet).not.toHaveBeenCalled();
+    expect(mockDigestReload).not.toHaveBeenCalled();
+  });
+
+  it("warns when the digest job can't be re-armed but keeps the save (#976)", async () => {
+    mockDigestReload.mockRejectedValueOnce(new Error("boom"));
+    const res = await harness.post("/settings/save-section", {
+      category: "digest",
+      no_cascade: "1",
+      redirect: "/admin/digest",
+      keys: ["digest.cron"],
+      "value_digest.cron": "0 16 * * 5",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.path).toBe("/admin/digest");
+    expect(flash.type).toBe("warn");
+    expect(flash.msg).toContain("Saved 1 setting in digest.");
+    expect(flash.msg).toContain("could not be re-armed");
+    expect(mockConfigSet).toHaveBeenCalledTimes(1);
   });
 
   it("saves the Events page card and returns to /admin/events (#975)", async () => {

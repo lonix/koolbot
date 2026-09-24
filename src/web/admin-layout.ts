@@ -114,6 +114,12 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "notices.enabled",
   },
   {
+    href: "/admin/quotes",
+    label: "Quotes",
+    group: "Features",
+    featureKey: "quotes.enabled",
+  },
+  {
     href: "/admin/voice-channels",
     label: "Voice Channels",
     group: "Features",
