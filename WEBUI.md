@@ -745,26 +745,27 @@ No dashboard JSON ships with the bot — wire these up to taste:
 
 ### Admin panel (`/admin/*`, admin-role sessions only)
 
-| Page               | Replaces                                                                                            |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| **Dashboard**      | `/botstats`                                                                                         |
-| **Settings**       | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
-| **Permissions**    | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
-| **Setup Wizard**   | `/setup wizard`                                                                                     |
-| **Announcements**  | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
-| **Events**         | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
-| **Polls**          | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
-| **Reaction Roles** | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
-| **Notices**        | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
-| **Quotes**         | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
-| **Bot Status**     | (new — edit the "Watching …" presence message pools)                                                |
-| **Voice Channels** | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
-| **Weekly Digest**  | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
-| **Database**       | `/dbtrunk status`, `/dbtrunk run`                                                                   |
-| **Command Audit**  | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
-| **Command Metrics**| (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
-| **Moderation**     | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
-| **Bootstrap**      | (new — read-only env diagnostics)                                                                   |
+| Page                  | Replaces                                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| **Dashboard**         | `/botstats`                                                                                         |
+| **Settings**          | `/config list`, `get`, `set`, `reset`, `reset-all` (Danger zone), `import`, `export`, `reload`      |
+| **Permissions**       | `/permissions set`, `add`, `remove`, `clear`, `list`, `view`                                        |
+| **Setup Wizard**      | `/setup wizard`                                                                                     |
+| **Announcements**     | `/announce create`, `list`, `delete` + editable `announcements.enabled`                             |
+| **Events**            | `/event create`, `list`, `cancel`, `start` + editable `events.*` settings                           |
+| **Polls**             | `/poll create`, `list`, `add-item`, `delete`, `delete-item`, `test`, `list-items` + `polls.*` edits |
+| **Reaction Roles**    | `/reactrole` create, archive, unarchive, delete, list, status + editable `reactionroles.*` settings |
+| **Notices**           | `/notice add`, `edit`, `delete`, `sync` + editable `notices.*` settings                             |
+| **Quotes**            | (new — list/search/edit/delete quotes, **Resync**, JSON export) + editable `quotes.*` settings      |
+| **Bot Status**        | (new — edit the "Watching …" presence message pools)                                                |
+| **Voice Channels**    | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
+| **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
+| **Leaderboard Roles** | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
+| **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
+| **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
+| **Command Metrics**   | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
+| **Moderation**        | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
+| **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
 
 The **Dashboard** has a **Version** card (#1029) that shows the running version
 next to the latest KoolBot release, with its state: *up to date*, *update
@@ -792,9 +793,10 @@ minute). The result is cached, so no page waits on GitHub. A failed check
   is off by default.
 
 Feature pages (Announcements, Events, Polls, Reaction Roles, Notices, Quotes,
-Voice Channels, Weekly Digest) are gated by their `<feature>.enabled` config
-key. When a feature is **off**, its sidebar link is still shown — greyed
-with an "off" badge — rather than hidden, so the page stays discoverable (#610);
+Voice Channels, Weekly Digest, Leaderboard Roles) are gated by their
+`<feature>.enabled` config key. When a feature is **off**, its sidebar link is
+still shown — greyed with an "off" badge — rather than hidden, so the page stays
+discoverable (#610);
 hiding it created a chicken-and-egg where the natural place to enable a
 feature was the very page you couldn't reach. Opening a disabled feature's
 page renders a banner explaining the state with an inline **Enable** button
@@ -936,6 +938,32 @@ immediately, so a new schedule takes effect without a restart. A cron value the
 scheduler can't parse is refused at save time, so a typo can't stop the job.
 If the stored config can't be read, the card shows a notice instead of
 controls pre-filled with defaults.
+
+The **Leaderboard Roles** page (`/admin/leaderboard-roles`, #985) manages the
+voice-leaderboard role rewards. Its settings card edits `leaderboard_roles.enabled`
+(on and off), the period (week / month / all time), the recalculation cron and the
+role-change announcement channel; a save that changes the enable flag or the cron
+re-arms the recalculation job immediately, as on the Digest page. The **Tiers** card edits `leaderboard_roles.tiers`
+as rows — a *Top N* number plus a role picker, with **Add tier** / **Remove** (without
+JavaScript, one spare row is rendered and clearing a row removes it). On save each
+Top N must be unique and between 1 and 1000, each tier needs its own role, and every
+role must exist, not be integration-managed, and sit below the bot's highest role;
+the rows are then serialised back to the same `topN:roleId` string the service reads,
+so the stored format does not change. Saving the tiers unchanged writes nothing, so
+an existing config's string round-trips untouched. Stored entries the service ignores
+(malformed, or shadowed by a later entry with the same Top N) are listed in a warning
+and dropped by the next change. When a tier is removed or given a different role, the
+next recalculation takes the old role back from the members the bot recorded and drops
+that roster (a failed revoke is kept and retried), including when every tier is removed.
+If the stored config can't be read, the editor is replaced by a notice so a save can't
+overwrite the real tiers. **Current holders** lists, per tier, the members the
+bot recorded on its last recalculation (the bot has no GuildMembers intent, so this
+roster — not a live read of the role — is the source of truth), and flags roles that
+are missing or above the bot's role. **Run now** recalculates immediately through
+`ScheduledService.runNow()`, the same run the cron triggers (including the
+announcement); concurrent runs coalesce, and the per-tier grant/revoke counts are
+reported in the flash message. Tier saves and runs are audited. **Settings** keeps the
+raw text field for `leaderboard_roles.tiers`.
 
 The **Voice Analytics** page (`/admin/analytics`) is a read-only, guild-wide
 voice-activity heatmap (#675, Part B). It aggregates the already-stored

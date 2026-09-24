@@ -28,6 +28,7 @@ import { createQuotesRouter } from "./routes/write/quotes.js";
 import { createDatabaseRouter } from "./routes/write/database.js";
 import { createVoiceChannelsRouter } from "./routes/write/voice-channels.js";
 import { createDigestRouter } from "./routes/write/digest.js";
+import { createLeaderboardRolesRouter } from "./routes/write/leaderboard-roles.js";
 import { createBotStatusRouter } from "./routes/write/bot-status.js";
 import { createVersionCheckRouter } from "./routes/write/version-check.js";
 
@@ -57,6 +58,7 @@ export function createWriteRouter(
   router.use(createDatabaseRouter(client));
   router.use(createVoiceChannelsRouter(client));
   router.use(createDigestRouter(client));
+  router.use(createLeaderboardRolesRouter(client));
   router.use(createBotStatusRouter(client));
   router.use(createVersionCheckRouter(client));
 
