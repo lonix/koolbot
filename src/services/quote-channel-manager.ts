@@ -574,6 +574,8 @@ export class QuoteChannelManager {
    * A purge has to tell "the channel was deleted, so every quote post went
    * with it" apart from "we could not reach it this time": the first owes
    * nothing, the second leaves the member's words publicly readable (#916).
+   * `gone` is also set when there is no channel to look in at all — none
+   * recorded and none configured — since then there is no post (#919).
    */
   private async getQuoteChannelDetailed(postedIn?: string): Promise<{
     channel: TextChannel | null;
@@ -591,7 +593,15 @@ export class QuoteChannelManager {
         postedIn ||
         (await this.configService.getString("quotes.channel_id", ""));
       if (!channelId) {
-        return { channel: null, gone: false };
+        // No recorded channel and none configured: there is nowhere a post
+        // could be, so there is nothing to delete or redraw. `postQuote`
+        // needs a channel, so a row added while none was set was never
+        // posted at all. Reporting "unreachable" here kept those rows — and
+        // a purge of their author — failing on every retry, since no retry
+        // could ever find a channel to look in (#919). The one case this
+        // gives up on is a pre-#916 row whose channel the operator has since
+        // unset; no retry could locate that post either.
+        return { channel: null, gone: true };
       }
 
       const channel = await this.client.channels.fetch(channelId);
@@ -707,7 +717,8 @@ export class QuoteChannelManager {
   ): Promise<boolean> {
     const { channel, gone } = await this.getQuoteChannelDetailed(postedIn);
     if (!channel) {
-      // A deleted channel took every post in it, this one included, so
+      // A deleted channel took every post in it, this one included — and
+      // with no channel recorded or configured there was never a post — so
       // there is nothing left to remove and nothing to report.
       if (gone) return true;
       logger.warn(
