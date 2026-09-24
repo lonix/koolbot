@@ -29,6 +29,7 @@ import { createBirthdaysRouter } from "./routes/write/birthdays.js";
 import { createDatabaseRouter } from "./routes/write/database.js";
 import { createVoiceChannelsRouter } from "./routes/write/voice-channels.js";
 import { createDigestRouter } from "./routes/write/digest.js";
+import { createLeaderboardRolesRouter } from "./routes/write/leaderboard-roles.js";
 import { createBotStatusRouter } from "./routes/write/bot-status.js";
 
 export * from "./routes/write/helpers.js";
@@ -58,6 +59,7 @@ export function createWriteRouter(
   router.use(createDatabaseRouter(client));
   router.use(createVoiceChannelsRouter(client));
   router.use(createDigestRouter(client));
+  router.use(createLeaderboardRolesRouter(client));
   router.use(createBotStatusRouter(client));
 
   return router;
