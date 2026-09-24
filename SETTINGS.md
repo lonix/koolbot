@@ -820,6 +820,7 @@ Web UI only — there is no slash command for either.
 | `privacy.export.max_items` | `5000` | Ceiling on rows (and append-only array entries) per collection in one export |
 | `privacy.delete.enabled` | `false` | Enables the self-service "Reset my data" action (also needs `privacy.enabled`) |
 | `privacy.delete.cooldown_hours` | `168` | Per-member wait after a completed reset before another is allowed (`0` = off) |
+| `privacy.tracking_opt_out.enabled` | `false` | Offers members a tracking opt-out on `/me/privacy` (also needs `privacy.enabled`) |
 
 **Notes:**
 
@@ -845,9 +846,10 @@ Web UI only — there is no slash command for either.
   `user.privacy.export` row in the Web UI audit log naming which collections
   were served.
 - **Reset (`privacy.delete.enabled`)** runs the per-user purge coordinator
-  (`UserDataDeletionService`) and signs the member out. It is a **reset, not
-  a deletion**: the activity trackers start writing again on the member's
-  next message, reaction or voice join. Moderation records and audit logs
+  (`UserDataDeletionService`) and signs the member out. On its own it is a
+  **reset, not a deletion**: the activity trackers start writing again on the
+  member's next message, reaction or voice join — unless the member has opted
+  out of tracking (below), in which case the page describes it as a deletion. Moderation records and audit logs
   are kept, other members' voice rows may still name the member as
   co-present, and timezone/notification preferences return to defaults
   (DMs fail closed to off).
@@ -868,6 +870,36 @@ Web UI only — there is no slash command for either.
 - ⚠️ Resetting clears achievements, so marquee accolades become re-earnable —
   and re-earning one `@`-mentions the member in `celebrations.channel_id`
   again. The cooldown bounds how often that can happen.
+- **Tracking opt-out (`privacy.tracking_opt_out.enabled`)** lets a member stop
+  the message, reaction, poll-participation and voice trackers recording
+  anything about them. They are also no longer added to other members' voice
+  co-presence (`otherUsers`, companions); mentions already stored in other
+  members' rows are kept, as with a reset. The opt-out is one row in the
+  `tracking-opt-out` collection, loaded into memory at startup, so the check
+  on each tracker's write path is a single in-memory lookup, not a query.
+- Opting out waits for any tracker write already in flight for the member
+  and evicts a live voice session, so nothing more is written about them
+  once the opt-out completes — a reset straight afterwards stays a deletion.
+  If that wait times out, the member is told to wait before resetting.
+- Opt-out, opt-in and a reset for the same member never overlap. A reset
+  pauses tracking for the member for its whole run and first waits out
+  in-flight writes; if one is still pending, the purge is reported incomplete
+  and the member is told to retry. Opting back in likewise refuses (and says
+  so) until work left over from the opt-out has settled.
+- The opt-out **stops accumulation only**. Existing data still shows on
+  leaderboards, digests, `/voicestats` and Rewind until the member resets it.
+  Opt-out plus reset is the deletion. Opting back in deletes the row, starts
+  tracking from that moment and restores nothing. A voice channel the member
+  is already in when they opt back in is not counted; voice time resumes from
+  the next channel they join.
+- The opt-out row is the one thing a reset **keeps** — it is what stops the
+  trackers starting again — so it is itself a small piece of personal data
+  the reset cannot remove. The page says so; opting back in removes it. It is
+  included in the member's export.
+- The setting only gates the _offer_. Turning it off stops new opt-outs, but
+  opt-outs already on file are still honoured and members can always opt back
+  in. If the opt-outs cannot be loaded at startup, the trackers fail closed
+  (record nothing for anyone) and retry the load every 30 seconds.
 
 ---
 

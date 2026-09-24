@@ -13,6 +13,7 @@ import { safeReply } from "../utils/safe-reply.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { AchievementsService } from "./achievements-service.js";
 
 export type TimePeriod = "week" | "month" | "alltime";
@@ -41,6 +42,11 @@ interface VoiceSession {
   startTime: Date;
   channelId: string;
   channelName: string;
+  /**
+   * The guild the session is in, for the tracking opt-out checks at persist
+   * time (#918). The tracking row itself is not guild-scoped.
+   */
+  guildId?: string;
   /**
    * Set while an `endTracking` call is persisting this session (#916).
    *
@@ -199,6 +205,10 @@ export class VoiceChannelTracker {
   private constructor(client: Client) {
     this.client = client;
     this.configService = ConfigService.getInstance();
+    // At construction, not in `initialize()`: the voice-state listener and
+    // the Web UI are live before startup finishes, and an opt-out in that
+    // window must still evict the session (#918).
+    this.registerOptOutHook();
   }
 
   public static getInstance(client: Client): VoiceChannelTracker {
@@ -206,6 +216,71 @@ export class VoiceChannelTracker {
       VoiceChannelTracker.instance = new VoiceChannelTracker(client);
     }
     return VoiceChannelTracker.instance;
+  }
+
+  /**
+   * On a tracking opt-out (#918), evict the member's live session and wait
+   * out any persist already in flight — the same eviction a purge uses, so
+   * opting out (and even opting straight back in) mid-session never lets the
+   * session be written. Registered once, from the constructor. Resolves
+   * false when a drain timed out, so `optOut` can report it as unsettled.
+   */
+  private registerOptOutHook(): void {
+    TrackingOptOutService.getInstance().onOptOut(async (userId, guildId) => {
+      const { timedOut } = await this.forgetActiveSession(userId);
+      const companionSettled = await this.forgetCompanion(userId, guildId);
+      return !timedOut && companionSettled;
+    });
+  }
+
+  /**
+   * Remove an opted-out member from every other live session's co-presence
+   * state in the guild (#918), then wait out every persist already in
+   * flight, since any of them may have filtered its companions before the
+   * opt-out and still be writing. Without the first half, opting out and
+   * back in before a co-present session ends would let the entries from the
+   * opted-out period through the persist-time filter.
+   */
+  private async forgetCompanion(
+    userId: string,
+    guildId: string,
+  ): Promise<boolean> {
+    this.dropCompanion(userId, guildId);
+
+    const inFlight = [...this.endingSessions.values()].flatMap((set) => [
+      ...set,
+    ]);
+    if (
+      inFlight.length > 0 &&
+      !(await settleWithin(inFlight, DRAIN_TIMEOUT_MS))
+    ) {
+      logger.warn(
+        `Timed out waiting for in-flight voice persists after ${userId} opted out; one may still name them as co-present`,
+      );
+      return false;
+    }
+    // Again after the drain: a persist that failed while we waited hands its
+    // claimed co-presence back to the live maps (`returnClaimedState`),
+    // which can put the member straight back into another session.
+    this.dropCompanion(userId, guildId);
+    return true;
+  }
+
+  /** Remove a member from every other live session's co-presence state. */
+  private dropCompanion(userId: string, guildId: string): void {
+    for (const [sessionUserId, session] of this.activeSessions) {
+      if (sessionUserId === userId) continue;
+      if (session.guildId && session.guildId !== guildId) continue;
+      this.encounteredUsers.get(sessionUserId)?.delete(userId);
+      this.companionSince.get(sessionUserId)?.delete(userId);
+      this.companionSeconds.get(sessionUserId)?.delete(userId);
+      const firsts = this.sessionFirsts.get(sessionUserId);
+      if (firsts) {
+        firsts.joinedExisting = firsts.joinedExisting.filter(
+          (id) => id !== userId,
+        );
+      }
+    }
   }
 
   public getActiveSession(userId: string): { channelName: string } | null {
@@ -449,9 +524,14 @@ export class VoiceChannelTracker {
    * Records that a user was encountered in a channel for all active sessions in that channel
    */
   private recordUserInteraction(channelId: string, userId: string): void {
+    const optOuts = TrackingOptOutService.getInstance();
     // Find all active sessions in this channel
     for (const [sessionUserId, session] of this.activeSessions.entries()) {
       if (session.channelId === channelId && sessionUserId !== userId) {
+        // An opted-out member is not recorded in anyone's session (#918).
+        if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+          continue;
+        }
         // Add this user to the encountered users set for this session
         const encounteredSet = this.encounteredUsers.get(sessionUserId);
         if (encounteredSet) {
@@ -468,8 +548,13 @@ export class VoiceChannelTracker {
    */
   private companionJoined(channelId: string, companionId: string): void {
     const now = Date.now();
+    const optOuts = TrackingOptOutService.getInstance();
     for (const [sessionUserId, session] of this.activeSessions.entries()) {
       if (session.channelId !== channelId || sessionUserId === companionId) {
+        continue;
+      }
+      // No interval opens for an opted-out companion (#918).
+      if (session.guildId && optOuts.isOptedOut(companionId, session.guildId)) {
         continue;
       }
       const since = this.companionSince.get(sessionUserId);
@@ -581,10 +666,25 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // Member tracking opt-out (#918): no session, so nothing to persist.
+      // Checked here, with the purge generation, for the same reason — the
+      // awaits above leave time for an opt-out to land.
+      const optOuts = TrackingOptOutService.getInstance();
+      const guildId = member.guild?.id;
+      if (guildId && optOuts.isOptedOut(member.id, guildId)) {
+        if (debugModeEnabled) {
+          logger.info(
+            `[DEBUG] Not tracking user ${member.id}: they opted out of tracking`,
+          );
+        }
+        return;
+      }
+
       this.activeSessions.set(member.id, {
         startTime: new Date(),
         channelId,
         channelName,
+        guildId,
       });
 
       // Initialize encountered users Set with current channel members
@@ -603,7 +703,9 @@ export class VoiceChannelTracker {
           // Add all current members except the joining user
           if (channel.members) {
             channel.members.forEach((m) => {
-              if (m.id !== member.id) {
+              // An opted-out member is not recorded as co-present in
+              // anyone else's session either (#918).
+              if (m.id !== member.id && !optOuts.isOptedOut(m.id, guild.id)) {
                 encounteredSet.add(m.id);
                 since.set(m.id, now);
                 presentAtJoin.push(m.id);
@@ -677,6 +779,19 @@ export class VoiceChannelTracker {
         return;
       }
 
+      // The member opted out of tracking mid-session (#918): drop the
+      // session instead of persisting it. Synchronous, so no other handler
+      // can claim it between the check and the discard.
+      const optOuts = TrackingOptOutService.getInstance();
+      if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+        this.discardOptedOutSession(userId, session);
+        return;
+      }
+      // Other members who opted out while co-present stay out of this row.
+      const guildId = session.guildId;
+      const tracked = (id: string): boolean =>
+        !guildId || !optOuts.isOptedOut(id, guildId);
+
       // Take this session's bookkeeping out of the shared per-user maps in
       // one synchronous step (#916). Everything below awaits — a user fetch,
       // a config read, the write itself — and a rejoin in that window
@@ -718,7 +833,7 @@ export class VoiceChannelTracker {
 
       // Get accumulated users from the encountered users Set
       const otherUsers: string[] = claimed.encountered
-        ? Array.from(claimed.encountered)
+        ? Array.from(claimed.encountered).filter(tracked)
         : [];
 
       // Build the optional companion/firsts payload only when the feature is
@@ -746,18 +861,41 @@ export class VoiceChannelTracker {
         const since = new Map(claimed.since ?? []);
         const seconds = new Map(claimed.seconds ?? []);
         closeCompanionIntervals(since, seconds);
-        sessionDoc.companions = Array.from(seconds.entries()).map(
-          ([id, secs]) => ({
+        sessionDoc.companions = Array.from(seconds.entries())
+          .filter(([id]) => tracked(id))
+          .map(([id, secs]) => ({
             userId: id,
             seconds: secs,
-          }),
-        );
+          }));
         sessionDoc.wasFirst = claimed.firsts
           ? claimed.firsts.wasFirst
           : otherUsers.length === 0;
         sessionDoc.joinedExisting = claimed.firsts
-          ? claimed.firsts.joinedExisting
+          ? claimed.firsts.joinedExisting.filter(tracked)
           : [];
+      }
+
+      // Re-checked immediately before the write (#918): the fetch and config
+      // read above yield, and an opt-out landing there must still win. The
+      // opt-out's own hook then waits for any write already issued.
+      if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+        this.discardOptedOutSession(userId, session);
+        return;
+      }
+      // Same for companions: re-filter synchronously, so a companion who
+      // opted out during the awaits above is not written into this row. A
+      // write already issued is waited out by their opt-out hook
+      // (`forgetCompanion`).
+      sessionDoc.otherUsers = otherUsers.filter(tracked);
+      if (Array.isArray(sessionDoc.companions)) {
+        sessionDoc.companions = (
+          sessionDoc.companions as Array<{ userId: string }>
+        ).filter((c) => tracked(c.userId));
+      }
+      if (Array.isArray(sessionDoc.joinedExisting)) {
+        sessionDoc.joinedExisting = (
+          sessionDoc.joinedExisting as string[]
+        ).filter(tracked);
       }
 
       // Update or create user tracking record
@@ -792,7 +930,11 @@ export class VoiceChannelTracker {
         );
       }
 
-      // Check for accolades and achievements after session ends
+      // Check for accolades and achievements after session ends — unless
+      // the member opted out while the session was being written.
+      if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+        return;
+      }
       try {
         const achievementsService = AchievementsService.getInstance(
           this.client,
@@ -831,6 +973,27 @@ export class VoiceChannelTracker {
       // persists a session with no companions and no encountered users.
       this.returnClaimedState(userId, session, claimed);
     }
+  }
+
+  /**
+   * Drop a session instead of persisting it, because its member opted out of
+   * tracking (#918). Only touches the maps while `session` still owns them —
+   * a later session under the same key is not this call's to clear. The
+   * companion maps were already claimed (or are being cleared here before a
+   * claim), so a newer session's copies are left alone the same way.
+   */
+  private discardOptedOutSession(userId: string, session: VoiceSession): void {
+    if (this.activeSessions.get(userId) === session) {
+      this.activeSessions.delete(userId);
+      this.userChannels.delete(userId);
+      this.encounteredUsers.delete(userId);
+      this.companionSince.delete(userId);
+      this.companionSeconds.delete(userId);
+      this.sessionFirsts.delete(userId);
+    }
+    logger.info(
+      `Discarded voice session for user ${userId}: they opted out of tracking`,
+    );
   }
 
   /**

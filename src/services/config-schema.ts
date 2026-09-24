@@ -128,6 +128,7 @@ export interface ConfigSchema {
   "privacy.export.max_items": number; // Per-collection ceiling on exported rows
   "privacy.delete.enabled": boolean; // Gates the self-service "Reset my data" action
   "privacy.delete.cooldown_hours": number; // Per-member wait between two completed resets
+  "privacy.tracking_opt_out.enabled": boolean; // Offers the member tracking opt-out on /me/privacy (#918)
 
   // Reaction Roles
   "reactionroles.enabled": boolean;
@@ -388,6 +389,9 @@ export const defaultConfig: ConfigSchema = {
   // UI audit log), unlike the in-memory, per-IP rate limiter in front of it.
   "privacy.delete.enabled": false,
   "privacy.delete.cooldown_hours": 168,
+  // Member tracking opt-out (#918). Gates only the *offer*: opt-outs already
+  // on file are always honoured, and opting back in is always allowed.
+  "privacy.tracking_opt_out.enabled": false,
 
   // Reaction Roles defaults
   "reactionroles.enabled": false,
@@ -1632,7 +1636,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "privacy.delete.enabled": {
     label: "Self-service data reset enabled",
     description:
-      'Add a "Reset my data" action to /me/privacy (also needs the data export enabled). It wipes the member\'s tracking history, achievements, preferences and other per-member rows, then signs them out. Moderation records and audit logs are kept. Tracking starts again on their next message, reaction or voice join, so this is a reset, not a deletion. Note: achievements become re-earnable, and re-earning a marquee accolade @-mentions the member in the celebrations channel again — the cooldown bounds how often that can happen.',
+      'Add a "Reset my data" action to /me/privacy (also needs the data export enabled). It wipes the member\'s tracking history, achievements, preferences and other per-member rows, then signs them out. Moderation records and audit logs are kept. Tracking starts again on their next message, reaction or voice join, so this is a reset, not a deletion — unless the member has opted out of tracking (privacy.tracking_opt_out.enabled), in which case it is a real deletion. Note: achievements become re-earnable, and re-earning a marquee accolade @-mentions the member in the celebrations channel again — the cooldown bounds how often that can happen.',
     category: "privacy",
     type: "boolean",
   },
@@ -1643,6 +1647,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "privacy",
     type: "number",
     min: 0,
+  },
+  "privacy.tracking_opt_out.enabled": {
+    label: "Member tracking opt-out enabled",
+    description:
+      "Let members opt out of activity tracking from /me/privacy (also needs the data export enabled). An opted-out member's messages, reactions, poll votes and voice sessions are not recorded, and they are no longer added to other members' voice co-presence (older mentions in other members' rows are kept). Existing data is not hidden — combined with a data reset, the opt-out is what makes the reset a real deletion. The opt-out itself is a small stored flag the reset keeps; the member removes it by opting back in. Turning this off stops new opt-outs but existing ones stay honoured, and members can always opt back in.",
+    category: "privacy",
+    type: "boolean",
   },
   "reactionroles.enabled": {
     label: "Reaction roles enabled",

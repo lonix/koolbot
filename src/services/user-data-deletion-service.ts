@@ -67,6 +67,7 @@ import { QuoteChannelManager } from "./quote-channel-manager.js";
 import { quoteService } from "./quote-service.js";
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { WebSessionService } from "./web-session-service.js";
 import { ChannelInvite } from "../models/channel-invite.js";
 import { DigestState } from "../models/digest-state.js";
@@ -599,6 +600,9 @@ export const VOICE_SESSION_CACHE = "voice-session-cache";
 /** Note marking the quote step that covers the Discord posts, not the rows. */
 export const QUOTE_CHANNEL_POSTS = "quote-channel posts";
 
+/** Step label for the in-flight tracker-write drain (#918). */
+export const TRACKING_WRITES = "tracking writes";
+
 export class UserDataDeletionService {
   private static instance: UserDataDeletionService | null = null;
 
@@ -630,32 +634,46 @@ export class UserDataDeletionService {
       `Starting per-user purge for ${sanitizeForLog(userId)} in guild ${sanitizeForLog(guildId)}`,
     );
 
-    // Hold the member out of leaderboard reconciliation until their voice
-    // data is gone, and wait out any reconcile already running, so no run
-    // can re-grant a reward role after step 2 revokes it (#917). Best
-    // effort: failing to take the hold must not stop an erasure.
-    let releaseLeaderboard: () => void = () => undefined;
-    try {
-      releaseLeaderboard = await LeaderboardRoleService.getInstance(
-        this.client,
-      ).holdOutForPurge(userId);
-    } catch (err) {
-      logger.warn(
-        `Purge for ${sanitizeForLog(userId)}: could not hold the member out of leaderboard reconciliation`,
-        err,
-      );
-    }
-    try {
-      return await this.runPurge(ctx, userId);
-    } finally {
-      releaseLeaderboard();
-    }
+    // Pause every tracker write about the member for the whole purge, under
+    // the same per-member barrier as opt-out and opt-in (#918): a handler
+    // that passed an early check cannot write after the deletes, and an
+    // opt-in cannot resume tracking halfway through.
+    return TrackingOptOutService.getInstance().withTrackingPaused(
+      userId,
+      guildId,
+      async (quiesced) => {
+        // Hold the member out of leaderboard reconciliation until their
+        // voice data is gone, and wait out any reconcile already running, so
+        // no run can re-grant a reward role after step 2 revokes it (#917).
+        // Best effort: failing to take the hold must not stop an erasure.
+        let releaseLeaderboard: () => void = () => undefined;
+        try {
+          releaseLeaderboard = await LeaderboardRoleService.getInstance(
+            this.client,
+          ).holdOutForPurge(userId);
+        } catch (err) {
+          logger.warn(
+            `Purge for ${sanitizeForLog(userId)}: could not hold the member out of leaderboard reconciliation`,
+            err,
+          );
+        }
+        try {
+          return await this.runPurge(ctx, userId, quiesced);
+        } finally {
+          releaseLeaderboard();
+        }
+      },
+    );
   }
 
-  /** The purge steps proper; `purge` wraps them in the leaderboard hold. */
+  /**
+   * The purge steps proper; `purge` wraps them in the tracking pause and the
+   * leaderboard hold. `quiesced` is what the pause found when it started.
+   */
   private async runPurge(
     ctx: PurgeContext,
     userId: string,
+    quiesced: { pending: number; settled: boolean },
   ): Promise<PurgeReport> {
     const steps: PurgeStep[] = [];
 
@@ -690,6 +708,27 @@ export class UserDataDeletionService {
         error: timedOut
           ? "timed out waiting for an in-flight voice session persist; a tracking row may be recreated after this purge"
           : undefined,
+      });
+    });
+
+    // 1b. Report the tracking pause (#918). Before this purge started, the
+    //     pause blocked new tracker writes and waited out the ones already
+    //     in flight, which could otherwise land after the deletes below and
+    //     recreate a row. A write that never settled is reported rather than
+    //     let the reset be called a clean deletion.
+    await this.runStep(steps, TRACKING_WRITES, "evict", async (emit) => {
+      const { pending, settled } = quiesced;
+      emit({
+        action: "evict",
+        matched: pending,
+        removed: settled ? pending : 0,
+        note:
+          pending > 0
+            ? `waited for ${pending} in-flight tracking write(s)`
+            : "no in-flight tracking writes",
+        error: settled
+          ? undefined
+          : "timed out waiting for an in-flight tracking write; a row may be recreated after this purge",
       });
     });
 

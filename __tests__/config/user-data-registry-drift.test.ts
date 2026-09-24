@@ -219,6 +219,14 @@ describe("user-data registry / schema drift", () => {
     ).toEqual([]);
   });
 
+  it("keeps the tracking opt-out through a purge", () => {
+    // #918: the opt-out is what stops the trackers writing again after a
+    // reset. A purge that deleted it would quietly turn every deletion back
+    // into a reset — so it must stay retained, and stay in the export.
+    expect(DELETABLE_COLLECTIONS).not.toContain("tracking-opt-out");
+    expect(EXPORTABLE_COLLECTIONS).toContain("tracking-opt-out");
+  });
+
   it("purges only collections a member can also export", () => {
     // Anything a purge touches is by definition the member's own data, so it
     // must already be classified as exportable. The reverse does not hold:

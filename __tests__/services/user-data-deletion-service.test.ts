@@ -246,7 +246,10 @@ const {
   DELETER_COLLECTIONS,
   PURGE_ORDER,
   VOICE_SESSION_CACHE,
+  TRACKING_WRITES,
 } = await import("../../src/services/user-data-deletion-service.js");
+const { TrackingOptOutService } =
+  await import("../../src/services/tracking-opt-out-service.js");
 const { ANONYMISED_USER_ID } =
   await import("../../src/services/user-data-registry.js");
 
@@ -329,6 +332,65 @@ describe("UserDataDeletionService.purge", () => {
         collection: VOICE_SESSION_CACHE,
         action: "evict",
       });
+    });
+
+    /** Run the purge through a pause that reports `quiesced`. */
+    function pauseReporting(quiesced: { pending: number; settled: boolean }) {
+      return jest
+        .spyOn(TrackingOptOutService.getInstance(), "withTrackingPaused")
+        .mockImplementation((async (
+          _userId: string,
+          _guildId: string,
+          fn: (q: typeof quiesced) => Promise<unknown>,
+        ) => fn(quiesced)) as never);
+    }
+
+    it("runs the whole purge inside a tracking pause and reports it (#918)", async () => {
+      const paused = pauseReporting({ pending: 1, settled: true });
+      try {
+        const report = await service().purge(USER, GUILD);
+
+        expect(paused).toHaveBeenCalledWith(USER, GUILD, expect.any(Function));
+        expect(report.steps[1]).toMatchObject({
+          collection: TRACKING_WRITES,
+          action: "evict",
+          matched: 1,
+          removed: 1,
+        });
+        expect(report.steps[1].error).toBeUndefined();
+      } finally {
+        paused.mockRestore();
+      }
+    });
+
+    it("reports the purge incomplete when an in-flight tracking write never settled (#918)", async () => {
+      const paused = pauseReporting({ pending: 1, settled: false });
+      try {
+        const report = await service().purge(USER, GUILD);
+
+        expect(report.ok).toBe(false);
+        const step = report.steps.find(
+          (s: PurgeStep) => s.collection === TRACKING_WRITES,
+        );
+        expect(step?.error).toContain("timed out");
+      } finally {
+        paused.mockRestore();
+      }
+    });
+
+    it("blocks tracking for the member while the purge runs, and only then (#918)", async () => {
+      const optOuts = TrackingOptOutService.getInstance();
+      const seen: boolean[] = [];
+      revokeSessionsForUser.mockImplementationOnce(async () => {
+        seen.push(optOuts.isOptedOut(USER, GUILD));
+        return 0;
+      });
+      (optOuts as unknown as { optedOut: Set<string> }).optedOut = new Set();
+
+      await service().purge(USER, GUILD);
+
+      expect(seen).toEqual([true]);
+      expect(optOuts.isOptedOut(USER, GUILD)).toBe(false);
     });
 
     it("revokes the leaderboard role on Discord before any collection is touched", async () => {

@@ -32,6 +32,7 @@ import { MessageActivityTracker } from "./services/message-activity-tracker.js";
 import { MessageActivityCleanupService } from "./services/message-activity-cleanup.js";
 import { ReactionActivityTracker } from "./services/reaction-activity-tracker.js";
 import { PollParticipationTracker } from "./services/poll-participation-tracker.js";
+import { TrackingOptOutService } from "./services/tracking-opt-out-service.js";
 import { CommandAuditCleanupService } from "./services/command-audit-cleanup.js";
 import { WebAuditLogCleanupService } from "./services/web-audit-cleanup.js";
 import { VersionCheckService } from "./services/version-check-service.js";
@@ -691,6 +692,18 @@ async function initializeServices(): Promise<void> {
     // delete semantics survive the #813 schema change. Idempotent no-op once
     // every row carries the field.
     await runReactionRoleMigrations();
+
+    // Load the member tracking opt-outs before any tracker can write (#918).
+    // A failed load must not stop startup: the service fails closed (no
+    // tracking at all) and retries in the background until it succeeds.
+    try {
+      await TrackingOptOutService.getInstance().initialize();
+    } catch (error) {
+      logger.error(
+        "Failed to load tracking opt-outs; tracking is paused until they load",
+        error,
+      );
+    }
 
     // Initialize voice channel services
     await voiceChannelManager.initialize(guildId);

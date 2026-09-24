@@ -9,6 +9,7 @@ import logger, { isDebugMode } from "../utils/logger.js";
 import { MongoConnectionGuard } from "../utils/mongo.js";
 import { ReactionActivityTracking } from "../models/reaction-activity-tracking.js";
 import { ConfigService } from "./config-service.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 
 /**
  * Tracks reaction activity the same way `MessageActivityTracker` tracks
@@ -81,6 +82,9 @@ export class ReactionActivityTracker {
     reaction: MessageReaction | PartialMessageReaction,
     user: User | PartialUser,
   ): Promise<void> {
+    // Before the first await (#918): see MessageActivityTracker.
+    const optOuts = TrackingOptOutService.getInstance();
+    const since = optOuts.admission();
     try {
       const isEnabled = await this.configService.getBoolean(
         "reactiontracking.enabled",
@@ -123,26 +127,43 @@ export class ReactionActivityTracker {
 
       const guildId = message.guild.id;
       const year = String(new Date().getFullYear());
+      // Member tracking opt-out (#918), checked per side and at write time:
+      // an opted-out reactor records nothing given, an opted-out author
+      // nothing received. `trackWrite` also registers each write as in
+      // flight, so an opt-out waits for one it was too late to stop.
+      const reactor = user;
 
       // The reactor "gives" a reaction.
-      await this.recordReaction(
-        user.id,
+      await optOuts.trackWrite(
+        reactor.id,
         guildId,
-        user.username ?? "unknown",
-        "given",
-        year,
+        () =>
+          this.recordReaction(
+            reactor.id,
+            guildId,
+            reactor.username ?? "unknown",
+            "given",
+            year,
+          ),
+        since,
       );
 
       // The message author "receives" a reaction. Skip when the author is a
       // bot, missing, or the reactor themselves (don't inflate own totals).
       const author = message.author;
       if (author && !author.bot && author.id !== user.id) {
-        await this.recordReaction(
+        await optOuts.trackWrite(
           author.id,
           guildId,
-          author.username ?? "unknown",
-          "received",
-          year,
+          () =>
+            this.recordReaction(
+              author.id,
+              guildId,
+              author.username ?? "unknown",
+              "received",
+              year,
+            ),
+          since,
         );
       }
 

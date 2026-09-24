@@ -3,6 +3,7 @@ import logger, { isDebugMode } from "../utils/logger.js";
 import { MongoConnectionGuard } from "../utils/mongo.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
 import { ConfigService } from "./config-service.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 
 /**
  * Tracks text-message activity the same way `VoiceChannelTracker` tracks
@@ -65,9 +66,14 @@ export class MessageActivityTracker {
   /**
    * Handle a `messageCreate` event. Writes are gated on
    * `messagetracking.enabled = true`; bot messages, DMs (non-guild
-   * messages), and excluded channels are skipped.
+   * messages), members who opted out of tracking, and excluded channels are
+   * skipped.
    */
   public async handleMessageCreate(message: Message): Promise<void> {
+    // Before the first await (#918): an opt-out or reset that engages while
+    // this handler is suspended invalidates its write, even once released.
+    const optOuts = TrackingOptOutService.getInstance();
+    const since = optOuts.admission();
     try {
       // Master switch — turning this off stops tracking entirely.
       const isEnabled = await this.configService.getBoolean(
@@ -88,6 +94,12 @@ export class MessageActivityTracker {
         return;
       }
 
+      // Member tracking opt-out (#918). An in-memory lookup, not a query;
+      // repeated in `trackWrite` below, which is the check that counts.
+      if (optOuts.isOptedOut(message.author.id, message.guild.id)) {
+        return;
+      }
+
       const channelId = message.channelId;
 
       // Skip excluded channels.
@@ -100,7 +112,15 @@ export class MessageActivityTracker {
         return;
       }
 
-      await this.recordMessage(message);
+      // Checked again at write time and registered as in flight, so an
+      // opt-out landing during the awaits above either stops this write or
+      // waits for it to finish.
+      await optOuts.trackWrite(
+        message.author.id,
+        message.guild.id,
+        () => this.recordMessage(message),
+        since,
+      );
     } catch (error: unknown) {
       logger.error("Error handling messageCreate in tracker:", error);
     }

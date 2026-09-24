@@ -503,6 +503,9 @@ describe("Config Schema", () => {
       // Self-service data reset (#917) — destructive, so its own opt-in
       // on top of privacy.enabled.
       "privacy.delete.enabled": false,
+      // Member tracking opt-out (#918) — gates only the offer; opt-outs on
+      // file are always honoured.
+      "privacy.tracking_opt_out.enabled": false,
       // Rewind end-of-year DM nudge — auxiliary opt-in under the rewind
       // feature gate, independent of `rewind.enabled` (#608).
       "rewind.nudge.enabled": false,

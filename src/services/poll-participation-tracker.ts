@@ -5,6 +5,7 @@ import { PollParticipationTracking } from "../models/poll-participation-tracking
 import { PollTurnout } from "../models/poll-turnout.js";
 import mongoose from "mongoose";
 import { ConfigService } from "./config-service.js";
+import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { getIsoWeekKey } from "../utils/time.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -73,14 +74,17 @@ export class PollParticipationTracker {
 
   /**
    * Handle a `messagePollVoteAdd` event. Writes are gated on
-   * `polls.participation.enabled = true`; DM polls and bot voters are
-   * skipped. Each selected answer fires its own event, so a multi-select
+   * `polls.participation.enabled = true`; DM polls, bot voters and members
+   * who opted out of tracking are skipped. Each selected answer fires its own event, so a multi-select
    * vote counts once per chosen answer (i.e. "votes cast").
    */
   public async handlePollVoteAdd(
     pollAnswer: PollAnswer | PartialPollAnswer,
     userId: Snowflake,
   ): Promise<void> {
+    // Before the first await (#918): see MessageActivityTracker.
+    const optOuts = TrackingOptOutService.getInstance();
+    const since = optOuts.admission();
     try {
       const isEnabled = await this.configService.getBoolean(
         "polls.participation.enabled",
@@ -98,6 +102,13 @@ export class PollParticipationTracker {
         return;
       }
 
+      // Member tracking opt-out (#918). Checked before the user fetch so an
+      // opted-out vote costs no API call; the vote also stays out of the
+      // shared per-poll turnout row.
+      if (optOuts.isOptedOut(userId, guildId)) {
+        return;
+      }
+
       // Resolve the voter so we can store a friendly username and skip bots.
       // Prefer the in-memory cache to avoid an API round-trip on every vote;
       // only hit the REST API when the user isn't cached.
@@ -110,8 +121,17 @@ export class PollParticipationTracker {
 
       const now = new Date();
       const year = String(now.getFullYear());
-      await this.recordVote(userId, guildId, user.username, year, now);
-      await this.recordTurnout(guildId, message, userId, now);
+      // Re-checked at write time, and registered as in flight so an opt-out
+      // during the user fetch above either stops both writes or waits them out.
+      await optOuts.trackWrite(
+        userId,
+        guildId,
+        async () => {
+          await this.recordVote(userId, guildId, user.username, year, now);
+          await this.recordTurnout(guildId, message, userId, now);
+        },
+        since,
+      );
 
       if (isDebugMode()) {
         logger.info(

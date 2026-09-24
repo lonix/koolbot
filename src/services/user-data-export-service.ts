@@ -48,6 +48,7 @@ import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { UserAchievements } from "../models/user-achievements.js";
 import { UserBirthday } from "../models/user-birthday.js";
 import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
+import { TrackingOptOut } from "../models/tracking-opt-out.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 
@@ -244,6 +245,11 @@ const READERS: Record<string, CollectionReader> = {
 
   "user-notification-prefs": async ({ userId, guildId }) => {
     const doc = await UserNotificationPrefs.findOne({ userId, guildId }).lean();
+    return { value: doc ? toPlain(doc) : null };
+  },
+
+  "tracking-opt-out": async ({ userId, guildId }) => {
+    const doc = await TrackingOptOut.findOne({ userId, guildId }).lean();
     return { value: doc ? toPlain(doc) : null };
   },
 
