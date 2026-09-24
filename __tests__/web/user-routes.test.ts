@@ -18,6 +18,7 @@ import {
   afterEach,
 } from "@jest/globals";
 import { Buffer } from "buffer";
+import { URLSearchParams } from "url";
 import {
   assertSelfScope,
   createUserRouter,
@@ -1594,5 +1595,228 @@ describe("/me/timezone (#524)", () => {
       body: { timezone: "UTC" },
     });
     expect(out.statusCode).toBe(403);
+  });
+});
+
+describe("/me/birthday clear (#1033)", () => {
+  beforeEach(() => {
+    process.env.WEBUI_SESSION_SECRET = SECRET;
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "30";
+    (WebSessionService as unknown as { instance: unknown }).instance = null;
+  });
+
+  interface PurgeResult {
+    matched: number;
+    removed: number;
+    roleRevoked: boolean;
+    announcementsAttempted: number;
+    announcementsDeleted: number;
+    announcementsFailed: number;
+    error?: string;
+  }
+
+  const CLEAN_PURGE: PurgeResult = {
+    matched: 1,
+    removed: 1,
+    roleRevoked: true,
+    announcementsAttempted: 2,
+    announcementsDeleted: 2,
+    announcementsFailed: 0,
+  };
+
+  async function dispatch(opts: {
+    body: Record<string, unknown>;
+    purgeImpl?: jest.Mock;
+  }): Promise<{
+    statusCode: number;
+    redirectedTo?: string;
+    audit?: Record<string, unknown>;
+    purgeForUser: jest.Mock;
+    setBirthday: jest.Mock;
+  }> {
+    const now = Date.now();
+    const payload: CookiePayload = {
+      sid: "session-id",
+      uid: "user-1",
+      gid: "guild-1",
+      rol: "user",
+      iat: now - 60_000,
+      act: now - 60_000,
+    };
+    const cookie = `koolbot_session=${buildCookie(payload)}; koolbot_csrf=csrf-1`;
+
+    const svc = WebSessionService.getInstance();
+    jest.spyOn(svc, "findById").mockResolvedValue({
+      discordUserId: "user-1",
+      guildId: "guild-1",
+      role: "user",
+      scopes: [],
+      revokedAt: null,
+      expiresAt: new Date(now + 60 * 60 * 1000),
+    } as never);
+
+    const { PermissionsService } =
+      await import("../../src/services/permissions-service.js");
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      checkCommandPermission: async () => true,
+    } as never);
+
+    const { BirthdayService } =
+      await import("../../src/services/birthday-service.js");
+    const getBirthday = jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValue({ month: 6, day: 16, year: 1990 });
+    const setBirthday = jest.fn<() => Promise<unknown>>();
+    const purgeForUser =
+      opts.purgeImpl ??
+      jest.fn<() => Promise<PurgeResult>>().mockResolvedValue(CLEAN_PURGE);
+    jest.spyOn(BirthdayService, "getInstance").mockReturnValue({
+      getBirthday,
+      setBirthday,
+      purgeForUser,
+    } as never);
+
+    const { WebAuditLog } = await import("../../src/models/web-audit-log.js");
+    const createSpy = jest
+      .spyOn(WebAuditLog, "create")
+      .mockResolvedValue({} as never);
+
+    const mockClient = {} as never;
+    const { createSessionMiddleware } =
+      await import("../../src/web/session.js");
+    const requireSession = createSessionMiddleware(mockClient);
+    const router = createUserRouter(mockClient, requireSession);
+
+    const headers: Record<string, unknown> = {
+      cookie,
+      "x-csrf-token": "csrf-1",
+    };
+
+    const captured: { statusCode: number; redirectedTo?: string } = {
+      statusCode: 200,
+    };
+    const res = makeRes() as ReturnType<typeof makeRes> & {
+      redirect: jest.Mock;
+      header: jest.Mock;
+    };
+    res.status.mockImplementation((code: number) => {
+      captured.statusCode = code;
+      res.statusCode = code;
+      return res;
+    });
+    res.redirect = jest.fn((code: unknown, url?: unknown) => {
+      captured.statusCode = code as number;
+      captured.redirectedTo = String(url);
+      return res;
+    });
+    res.header = jest.fn(() => res);
+
+    const req = {
+      method: "POST",
+      url: "/birthday",
+      originalUrl: "/me/birthday",
+      path: "/birthday",
+      baseUrl: "/me",
+      headers,
+      body: opts.body,
+      query: {},
+      csrfToken: "csrf-1",
+      header: (name: string) => headers[name.toLowerCase()],
+    } as never as Parameters<typeof router>[0];
+
+    await new Promise<void>((resolve) => {
+      router(req as never, res as never, (() => resolve()) as never);
+      setTimeout(resolve, 0);
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const auditCall = createSpy.mock.calls.at(-1)?.[0] as
+      Record<string, unknown> | undefined;
+    return {
+      ...captured,
+      audit: auditCall,
+      purgeForUser: purgeForUser as jest.Mock,
+      setBirthday: setBirthday as jest.Mock,
+    };
+  }
+
+  const flashOf = (url?: string): URLSearchParams =>
+    new URLSearchParams((url ?? "").split("?")[1] ?? "");
+
+  it("purges through the service instead of a raw delete", async () => {
+    const out = await dispatch({ body: { _csrf: "csrf-1", clear: "1" } });
+    expect(out.purgeForUser).toHaveBeenCalledWith("guild-1", "user-1");
+    expect(out.setBirthday).not.toHaveBeenCalled();
+    expect(out.statusCode).toBe(303);
+    expect(flashOf(out.redirectedTo).get("flash")).toBe("ok");
+    expect(out.audit).toMatchObject({
+      action: "user.birthday.set",
+      result: "success",
+      details: { after: null, purge: CLEAN_PURGE },
+    });
+  });
+
+  it("treats a member with no stored birthday as a clean no-op", async () => {
+    const purgeImpl = jest.fn<() => Promise<PurgeResult>>().mockResolvedValue({
+      ...CLEAN_PURGE,
+      matched: 0,
+      removed: 0,
+      roleRevoked: false,
+      announcementsAttempted: 0,
+      announcementsDeleted: 0,
+    });
+    const out = await dispatch({
+      body: { _csrf: "csrf-1", clear: "1" },
+      purgeImpl,
+    });
+    expect(flashOf(out.redirectedTo).get("flash")).toBe("ok");
+    expect(out.audit).toMatchObject({ result: "success" });
+  });
+
+  it("reports a purge error as an error flash and a failed audit", async () => {
+    const purgeImpl = jest.fn<() => Promise<PurgeResult>>().mockResolvedValue({
+      ...CLEAN_PURGE,
+      removed: 0,
+      roleRevoked: false,
+      error: "could not revoke the birthday role",
+    });
+    const out = await dispatch({
+      body: { _csrf: "csrf-1", clear: "1" },
+      purgeImpl,
+    });
+    const flash = flashOf(out.redirectedTo);
+    expect(flash.get("flash")).toBe("err");
+    expect(flash.toString()).toContain("revoke");
+    expect(out.audit).toMatchObject({
+      action: "user.birthday.set",
+      result: "failure",
+      errorMessage: "could not revoke the birthday role",
+      details: { attempted: { clear: true } },
+    });
+  });
+
+  it("reports a kept row with no error message as incomplete", async () => {
+    const purgeImpl = jest.fn<() => Promise<PurgeResult>>().mockResolvedValue({
+      ...CLEAN_PURGE,
+      removed: 0,
+    });
+    const out = await dispatch({
+      body: { _csrf: "csrf-1", clear: "1" },
+      purgeImpl,
+    });
+    expect(flashOf(out.redirectedTo).get("flash")).toBe("err");
+    expect(out.audit).toMatchObject({ result: "failure" });
+  });
+
+  it("still saves a date through setBirthday", async () => {
+    const out = await dispatch({
+      body: { _csrf: "csrf-1", month: "3", day: "4" },
+    });
+    expect(out.setBirthday).toHaveBeenCalledWith("user-1", "guild-1", {
+      month: 3,
+      day: 4,
+      year: null,
+    });
+    expect(out.purgeForUser).not.toHaveBeenCalled();
   });
 });
