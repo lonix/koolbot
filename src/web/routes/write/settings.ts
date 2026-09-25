@@ -485,8 +485,26 @@ export function createSettingsRouter(client: Client): Router {
       const applied: Array<{ key: string; before: unknown; after: unknown }> =
         [];
       const failed: Array<{ key: string; reason: string }> = [];
+      // Enable flags whose prior value could not be read. `get()` reports a
+      // failed read as null, which the `??` below turns into the schema
+      // default, so a real flip could look unchanged; the reload decision
+      // below treats these as changed instead.
+      const unknownBefore = new Set<string>();
       for (const { key, value } of coerced) {
-        const stored = await config.get(key);
+        let stored: unknown;
+        if (key.endsWith(".enabled")) {
+          try {
+            stored = await config.getBooleanStrict(
+              key,
+              defaultConfig[key as keyof typeof defaultConfig] === true,
+            );
+          } catch {
+            stored = null;
+            unknownBefore.add(key);
+          }
+        } else {
+          stored = await config.get(key);
+        }
         const before =
           stored ?? defaultConfig[key as keyof typeof defaultConfig];
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
@@ -551,7 +569,8 @@ export function createSettingsRouter(client: Client): Router {
       // in-place flash.
       const reload =
         redirectTo !== "/admin/settings" &&
-        changedKeys.some((k) => k.endsWith(".enabled"));
+        (changedKeys.some((k) => k.endsWith(".enabled")) ||
+          applied.some((a) => unknownBefore.has(a.key)));
       const rearmNote = rearmFailureNote(rearmFailed);
       const label = category || "section";
       if (failed.length === 0) {

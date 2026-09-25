@@ -30,6 +30,15 @@ import { PROTECTED_KEYS } from "../../src/web/bootstrap-vars.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockConfigGet = jest.fn<(key: string) => Promise<unknown>>();
+// Delegates to mockConfigGet so a test that stubs `get` also sets what the
+// strict boolean read sees; a test can still make it reject on its own.
+const mockConfigGetBooleanStrict = jest.fn(
+  async (key: string, defaultValue: boolean): Promise<boolean> => {
+    const v = await mockConfigGet(key);
+    if (v === null || v === undefined) return defaultValue;
+    return v === true || v === "true";
+  },
+);
 const mockConfigSet = jest.fn<() => Promise<void>>();
 const mockConfigDelete = jest.fn<() => Promise<void>>();
 const mockConfigGetAll =
@@ -65,6 +74,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
       get: mockConfigGet,
+      getBooleanStrict: mockConfigGetBooleanStrict,
       set: mockConfigSet,
       delete: mockConfigDelete,
       getAll: mockConfigGetAll,
@@ -1205,6 +1215,32 @@ describe("POST /settings/save-section", () => {
     const body = (await res.json()) as { type: string; reload?: string };
     expect(body.type).toBe("ok");
     expect(body.reload).toBeUndefined();
+  });
+
+  it("reloads the feature page when the enable flag's prior value can't be read", async () => {
+    // Stored `true` but the read fails: `get()` would report null and the
+    // schema default (false) would make true → true look like a flip, or a
+    // real flip look unchanged. Either way the page must not stay stale.
+    mockConfigGetBooleanStrict.mockRejectedValueOnce(new Error("db down"));
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        redirect: "/admin/polls",
+        keys: ["polls.enabled"],
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledWith(
+      "polls.enabled",
+      false,
+      expect.any(String),
+      "polls",
+      expect.anything(),
+    );
+    expect(parseFlashRedirect(body.reload ?? null).path).toBe("/admin/polls");
   });
 
   it("does not reload the Settings page when a section flips its master", async () => {
