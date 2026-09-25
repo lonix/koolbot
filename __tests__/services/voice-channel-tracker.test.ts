@@ -1261,6 +1261,68 @@ describe("VoiceChannelTracker", () => {
         ]);
       });
 
+      it.each([
+        ["the companion's", "later"],
+        ["the session owner's", "u1"],
+      ])(
+        "does not let a stale leave close a fresh interval when %s barrier moved",
+        async (_label, flipped) => {
+          stubTrackingOptOuts();
+          const { tracker, mockConfigService } = createTracker(mockClient);
+          companionsOn(mockConfigService);
+          const owner = inGuild(memberInChannel("u1", "c1", "C1", ["later"]));
+          await tracker.handleVoiceStateUpdate(
+            { member: owner, channel: null } as unknown as VoiceState,
+            {
+              member: owner,
+              channel: { id: "c1", name: "C1" },
+            } as unknown as VoiceState,
+          );
+          const internals = tracker as unknown as {
+            companionSince: Map<string, Map<string, number>>;
+            companionSeconds: Map<string, Map<string, number>>;
+            companionLeft: (c: string, id: string, t: number) => void;
+          };
+          expect(internals.companionSince.get("u1")?.has("later")).toBe(true);
+
+          // The leave event's ticket predates a barrier that has since moved;
+          // the open interval belongs to state newer than the event.
+          const staleTicket = TrackingOptOutService.getInstance().admission();
+          optOutAndBackIn(flipped);
+          internals.companionLeft("c1", "later", staleTicket);
+
+          expect(internals.companionSince.get("u1")?.has("later")).toBe(true);
+          expect(internals.companionSeconds.get("u1")?.has("later")).toBe(
+            false,
+          );
+        },
+      );
+
+      it("still closes the interval for a current leave", async () => {
+        stubTrackingOptOuts();
+        const { tracker, mockConfigService } = createTracker(mockClient);
+        companionsOn(mockConfigService);
+        const owner = inGuild(memberInChannel("u1", "c1", "C1", ["later"]));
+        await tracker.handleVoiceStateUpdate(
+          { member: owner, channel: null } as unknown as VoiceState,
+          {
+            member: owner,
+            channel: { id: "c1", name: "C1" },
+          } as unknown as VoiceState,
+        );
+        const internals = tracker as unknown as {
+          companionSince: Map<string, Map<string, number>>;
+          companionLeft: (c: string, id: string, t: number) => void;
+        };
+
+        internals.companionLeft(
+          "c1",
+          "later",
+          TrackingOptOutService.getInstance().admission(),
+        );
+        expect(internals.companionSince.get("u1")?.has("later")).toBe(false);
+      });
+
       it("adds no co-presence for a join suspended across the joiner's opt-out and back in", async () => {
         stubTrackingOptOuts();
         const { tracker, mockConfigService } = createTracker(mockClient);
