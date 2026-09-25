@@ -1871,13 +1871,14 @@ describe("renderPollsPage settings card (#973)", () => {
       category: "polls",
       min: settingsMetadata[key].min,
     }));
-  const render = (settingRows: SettingRow[]) =>
+  const render = (settingRows: SettingRow[], settingsUnavailable?: boolean) =>
     renderPollsPage({
       ...COMMON,
       enabled: true,
       defaultDurationHours: 24,
       cooldownDays: 7,
       settingRows,
+      settingsUnavailable,
       schedules: [],
       items: [],
       textChannels: [],
@@ -1921,6 +1922,12 @@ describe("renderPollsPage settings card (#973)", () => {
     expect(render([])).not.toContain(
       '<form method="POST" action="/admin/settings/save-section"',
     );
+  });
+
+  it("renders a notice instead of controls when settings are unavailable", () => {
+    const html = render([], true);
+    expect(html).toContain("Settings could not be loaded");
+    expect(html).not.toContain('<input type="hidden" name="keys"');
   });
 });
 
@@ -5086,6 +5093,16 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     expect(tbody).toContain('value="222" selected>@222 (unavailable)');
     expect(html).toContain('action="/admin/leaderboard-roles/tiers"');
     expect(html).toContain('<template id="lb-tier-template">');
+  });
+
+  it("hides the JS-only Add and Remove buttons until the script reveals them", () => {
+    const html = render();
+    // Without JS a visible Remove would do nothing; rows are removed by
+    // clearing them, so both buttons start hidden.
+    const removes = html.match(/<button[^>]*lb-tier-remove[^>]*>/g) ?? [];
+    expect(removes.length).toBeGreaterThan(0);
+    for (const b of removes) expect(b).toContain(" hidden");
+    expect(html).toMatch(/id="lb-tier-add" hidden/);
   });
 
   it("lists current holders, escaped, and flags a missing role", () => {

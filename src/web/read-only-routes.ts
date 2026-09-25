@@ -1201,6 +1201,7 @@ export function createReadOnlyRouter(
           cooldownDays,
           settingRows: pollSettings.settingRows,
           dependencyState: pollSettings.dependencyState,
+          settingsUnavailable: pollSettings.unavailable,
           textChannels: channelData.textChannels,
           roles: roleData.roles,
           flash: readFlash(req),

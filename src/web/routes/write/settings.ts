@@ -485,8 +485,26 @@ export function createSettingsRouter(client: Client): Router {
       const applied: Array<{ key: string; before: unknown; after: unknown }> =
         [];
       const failed: Array<{ key: string; reason: string }> = [];
+      // Enable flags whose prior value could not be read. `get()` reports a
+      // failed read as null, which the `??` below turns into the schema
+      // default, so a real flip could look unchanged; the reload decision
+      // below treats these as changed instead.
+      const unknownBefore = new Set<string>();
       for (const { key, value } of coerced) {
-        const stored = await config.get(key);
+        let stored: unknown;
+        if (key.endsWith(".enabled")) {
+          try {
+            stored = await config.getBooleanStrict(
+              key,
+              defaultConfig[key as keyof typeof defaultConfig] === true,
+            );
+          } catch {
+            stored = null;
+            unknownBefore.add(key);
+          }
+        } else {
+          stored = await config.get(key);
+        }
         const before =
           stored ?? defaultConfig[key as keyof typeof defaultConfig];
         const meta = settingsMetadata[key as keyof typeof settingsMetadata];
@@ -540,12 +558,19 @@ export function createSettingsRouter(client: Client): Router {
       // than on the next restart (#976). Only keys whose value moved count:
       // a card re-posts every row, and re-arming on an unchanged cron would
       // stop the live schedule for nothing.
-      const rearmFailed = await rearmScheduledServices(
-        client,
-        applied
-          .filter((a) => effectiveValueChanged(a.key, a.before, a.after))
-          .map((a) => a.key),
-      );
+      const changedKeys = applied
+        .filter((a) => effectiveValueChanged(a.key, a.before, a.after))
+        .map((a) => a.key);
+      const rearmFailed = await rearmScheduledServices(client, changedKeys);
+      // A feature page's card that flipped an enable flag leaves the rest of
+      // that page (disabled banner, Status card, nav badge, action buttons)
+      // describing the old state, so the AJAX save reloads it. The Settings
+      // page itself renders nothing else from these values and keeps the
+      // in-place flash.
+      const reload =
+        redirectTo !== "/admin/settings" &&
+        (changedKeys.some((k) => k.endsWith(".enabled")) ||
+          applied.some((a) => unknownBefore.has(a.key)));
       const rearmNote = rearmFailureNote(rearmFailed);
       const label = category || "section";
       if (failed.length === 0) {
@@ -557,6 +582,8 @@ export function createSettingsRouter(client: Client): Router {
             text: `Saved ${applied.length} setting${applied.length === 1 ? "" : "s"} in ${label}.${rearmNote}`,
           },
           redirectTo,
+          [],
+          reload,
         );
         return;
       }
@@ -570,6 +597,7 @@ export function createSettingsRouter(client: Client): Router {
         },
         redirectTo,
         failed.map((f) => f.key),
+        reload,
       );
     }),
   );

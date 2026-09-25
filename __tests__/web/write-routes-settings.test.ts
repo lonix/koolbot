@@ -30,6 +30,15 @@ import { PROTECTED_KEYS } from "../../src/web/bootstrap-vars.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockConfigGet = jest.fn<(key: string) => Promise<unknown>>();
+// Delegates to mockConfigGet so a test that stubs `get` also sets what the
+// strict boolean read sees; a test can still make it reject on its own.
+const mockConfigGetBooleanStrict = jest.fn(
+  async (key: string, defaultValue: boolean): Promise<boolean> => {
+    const v = await mockConfigGet(key);
+    if (v === null || v === undefined) return defaultValue;
+    return v === true || v === "true";
+  },
+);
 const mockConfigSet = jest.fn<() => Promise<void>>();
 const mockConfigDelete = jest.fn<() => Promise<void>>();
 const mockConfigGetAll =
@@ -65,6 +74,7 @@ jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: (): unknown => ({
       get: mockConfigGet,
+      getBooleanStrict: mockConfigGetBooleanStrict,
       set: mockConfigSet,
       delete: mockConfigDelete,
       getAll: mockConfigGetAll,
@@ -1163,6 +1173,89 @@ describe("POST /settings/save-section", () => {
       type: "err",
       invalidKeys: ["quotes.cooldown"],
     });
+  });
+
+  it("asks a feature page to reload when its card flips the enable flag", async () => {
+    // Stored off (null → schema default false), submitted on.
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        redirect: "/admin/polls",
+        keys: ["polls.enabled", "polls.cooldown_days"],
+        "value_polls.enabled": "true",
+        "value_polls.cooldown_days": "7",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(body.reload).toBeDefined();
+    const flash = parseFlashRedirect(body.reload ?? null);
+    expect(flash.path).toBe("/admin/polls");
+    expect(flash.type).toBe("ok");
+    expect(flash.msg).toBe("Saved 2 settings in polls.");
+  });
+
+  it("keeps the in-place flash when the enable flag is unchanged", async () => {
+    mockConfigGet.mockImplementation(async (key) =>
+      key === "polls.enabled" ? true : null,
+    );
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        redirect: "/admin/polls",
+        keys: ["polls.enabled", "polls.cooldown_days"],
+        "value_polls.enabled": "true",
+        "value_polls.cooldown_days": "14",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(body.reload).toBeUndefined();
+  });
+
+  it("reloads the feature page when the enable flag's prior value can't be read", async () => {
+    // Stored `true` but the read fails: `get()` would report null and the
+    // schema default (false) would make true → true look like a flip, or a
+    // real flip look unchanged. Either way the page must not stay stale.
+    mockConfigGetBooleanStrict.mockRejectedValueOnce(new Error("db down"));
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        redirect: "/admin/polls",
+        keys: ["polls.enabled"],
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledWith(
+      "polls.enabled",
+      false,
+      expect.any(String),
+      "polls",
+      expect.anything(),
+    );
+    expect(parseFlashRedirect(body.reload ?? null).path).toBe("/admin/polls");
+  });
+
+  it("does not reload the Settings page when a section flips its master", async () => {
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "polls",
+        keys: ["polls.enabled"],
+        "value_polls.enabled": "true",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(body.reload).toBeUndefined();
   });
 });
 

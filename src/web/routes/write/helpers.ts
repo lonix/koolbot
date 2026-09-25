@@ -155,12 +155,21 @@ export function respondSectionFlash(
   // set `aria-invalid` on those controls and move focus to the first one,
   // instead of leaving the operator to find the bad field among ~318 (#854).
   invalidKeys: string[] = [],
+  // The save changed something the rest of the page renders from (a feature
+  // page's enable flag drives its disabled banner, Status card, nav badge and
+  // action buttons). The AJAX reply then carries the same flash URL the no-JS
+  // path redirects to, and the page script navigates there instead of
+  // showing the flash in place over a now-stale page.
+  reload = false,
 ): void {
   if (wantsJson(req)) {
     res.status(200).json({
       type: flash.type,
       text: truncateFlash(flash.text),
       invalidKeys: invalidKeys.slice(0, INVALID_KEYS_MAX),
+      ...(reload
+        ? { reload: `${redirectTo}?${flashRedirectQuery(flash, invalidKeys)}` }
+        : {}),
     });
     return;
   }
