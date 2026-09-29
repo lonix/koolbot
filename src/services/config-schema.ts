@@ -127,7 +127,7 @@ export interface ConfigSchema {
   "privacy.enabled": boolean; // Gates the /me/privacy page and its export route
   "privacy.export.max_items": number; // Per-collection ceiling on exported rows
   "privacy.delete.enabled": boolean; // Gates the self-service "Reset my data" action
-  "privacy.delete.cooldown_hours": number; // Per-member wait between two completed resets
+  "privacy.delete.cooldown_hours": number; // Per-member wait from the start of one reset to the next
   "privacy.tracking_opt_out.enabled": boolean; // Offers the member tracking opt-out on /me/privacy (#918)
 
   // Reaction Roles
@@ -1643,7 +1643,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "privacy.delete.cooldown_hours": {
     label: "Reset cooldown (hours)",
     description:
-      "How long a member must wait after a completed reset before they can run another. Persisted per member, so it survives restarts. 0 turns the cooldown off. Keep it below the Web UI audit retention (core.web_audit.retention_days), which is where the last reset is read back from.",
+      "How long a member must wait after starting a reset before they can run another (a reset that recorded a failure lifts it, so they can retry). Persisted per member, so it survives restarts. 0 turns the cooldown off. Keep it below the Web UI audit retention (core.web_audit.retention_days), which is where the last reset is read back from.",
     category: "privacy",
     type: "number",
     min: 0,

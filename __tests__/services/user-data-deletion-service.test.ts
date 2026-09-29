@@ -247,6 +247,7 @@ const {
   PURGE_ORDER,
   VOICE_SESSION_CACHE,
   TRACKING_WRITES,
+  LEADERBOARD_HOLD,
 } = await import("../../src/services/user-data-deletion-service.js");
 const { TrackingOptOutService } =
   await import("../../src/services/tracking-opt-out-service.js");
@@ -481,7 +482,27 @@ describe("UserDataDeletionService.purge", () => {
       expect(CALLS).toContain("leaderboard.revokeForUser");
       expect(CALLS).toContain("session.revokeForUser");
       expect(CALLS).not.toContain("leaderboard.release");
-      expect(report.steps.length).toBeGreaterThan(0);
+      // The purge ran without closing the re-grant window, so it must not be
+      // audited as clean (#919).
+      const holdStep = report.steps.find(
+        (s: PurgeStep) => s.collection === LEADERBOARD_HOLD,
+      );
+      expect(holdStep?.error).toContain("hold failed");
+      expect(report.ok).toBe(false);
+    });
+
+    it("reports a leaderboard hold that was taken as complete", async () => {
+      const report = await service().purge(USER, GUILD);
+
+      const holdStep = report.steps.find(
+        (s: PurgeStep) => s.collection === LEADERBOARD_HOLD,
+      );
+      expect(holdStep).toMatchObject({
+        action: "evict",
+        matched: 0,
+        removed: 0,
+      });
+      expect(holdStep?.error).toBeUndefined();
     });
 
     it("runs every declared deleter once, in the declared order", () => {
@@ -1054,6 +1075,7 @@ describe("UserDataDeletionService.purge", () => {
         matched: 1,
         removed: 1,
         roleRevoked: true,
+        ...NO_BIRTHDAY_POSTS,
       });
       revokeSessionsForUser.mockResolvedValue(1);
 
@@ -1061,6 +1083,27 @@ describe("UserDataDeletionService.purge", () => {
       const first = await instance.purge(USER, GUILD);
       expect(first.ok).toBe(true);
       expect(first.steps.some((step) => step.removed > 0)).toBe(true);
+
+      // What makes a second run a no-op against a real database: every write
+      // leaves the member's id nowhere its own filter would find it again. A
+      // `$set` that wrote the id back (or anything else the filter matches)
+      // would keep re-matching the same rows on every retry.
+      const firstFilters = JSON.parse(JSON.stringify(FILTERS));
+      const firstUpdates = JSON.parse(JSON.stringify(UPDATES));
+      for (const update of Object.values(firstUpdates) as Array<{
+        $set?: Record<string, unknown>;
+        $pull?: Record<string, unknown>;
+      }>) {
+        if (update.$set) {
+          expect(Object.values(update.$set)).not.toContain(USER);
+        }
+        if (update.$pull) {
+          expect(Object.values(update.$pull)).toContain(USER);
+        }
+      }
+      expect(firstUpdates["channel-invite.updateMany"]).toEqual({
+        $set: { invitedBy: ANONYMISED_USER_ID },
+      });
 
       // Second run: the rows are gone, so every step matches nothing. The
       // mocks stand in for the database having been emptied by the first.
@@ -1091,6 +1134,7 @@ describe("UserDataDeletionService.purge", () => {
         matched: 0,
         removed: 0,
         roleRevoked: false,
+        ...NO_BIRTHDAY_POSTS,
       });
       revokeSessionsForUser.mockResolvedValue(0);
 
@@ -1101,6 +1145,10 @@ describe("UserDataDeletionService.purge", () => {
         first.steps.map((step) => step.collection),
       );
       expect(second.steps.every((step) => step.removed === 0)).toBe(true);
+      // The retry targets exactly what the first run did — no wider, and not
+      // re-derived from anything the first run changed.
+      expect(FILTERS).toEqual(firstFilters);
+      expect(UPDATES).toEqual(firstUpdates);
     });
   });
 });

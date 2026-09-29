@@ -1778,6 +1778,15 @@ export function createUserRouter(
         `Privacy reset cooldown lookup failed for ${sanitizeForLog(userId)}`,
         err,
       );
+      // Audited like every other refusal (#919). No `phase`, so this row can
+      // neither start nor lift a cooldown.
+      await recordAudit(session, {
+        action: PRIVACY_RESET_ACTION,
+        targetId: userId,
+        details: { reason: "cooldown-check-failed" },
+        result: "failure",
+        errorMessage: "could not check the reset cooldown",
+      });
       res.redirect(
         303,
         flashUrl("/me/privacy", {

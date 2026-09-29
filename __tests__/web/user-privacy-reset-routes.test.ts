@@ -565,6 +565,16 @@ describe("POST /me/privacy/delete", () => {
     expect(purgeCalls).toEqual([]);
     expect(captured.statusCode).toBe(303);
     expect(flashText(captured)).toContain("could not check");
+    // Audited like every other refusal, with no `phase`, so the row can
+    // neither start nor lift a cooldown (#919).
+    expect(auditRows).toHaveLength(1);
+    expect(auditRows[0]).toMatchObject({
+      result: "failure",
+      details: { reason: "cooldown-check-failed" },
+    });
+    expect(
+      (auditRows[0].details as Record<string, unknown>).phase,
+    ).toBeUndefined();
   });
 
   it("rate-limits repeated attempts from one client on its own bucket", async () => {

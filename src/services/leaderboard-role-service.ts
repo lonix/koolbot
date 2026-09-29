@@ -640,7 +640,11 @@ export class LeaderboardRoleService extends ScheduledService<LeaderboardRoleRunS
     roleId: string,
     userId: string,
   ): Promise<boolean> {
-    const role = await guild.roles.fetch(roleId).catch(() => null);
+    // `fetchRoleOrNull`, not a blanket `.catch(() => null)`: a rate limit or
+    // 5xx must not read as "role deleted", or the roster entry would be
+    // dropped while the member still holds the role. Anything but Unknown
+    // Role rethrows, which the caller classifies as retained.
+    const role = await fetchRoleOrNull(guild, roleId);
     if (!role) {
       // The role itself no longer exists, so there is no grant left to take
       // back and nothing for a retry to fix.

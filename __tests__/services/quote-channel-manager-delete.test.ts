@@ -10,10 +10,11 @@ jest.mock("../../src/utils/logger.js");
  * (#916).
  *
  * The per-user purge counts what this returns and shows it to the member as
- * posts removed from Discord, while `QuoteService.purgeForUser` deletes the
- * database row either way. So swallowing a failure and reporting nothing
- * would tell someone their words had been erased from the quote channel
- * while they are still on screen, with no row left to find them by.
+ * posts removed from Discord, and `QuoteService.purgeForUser` keeps the
+ * database row only when this says the post may still be up. So swallowing
+ * a failure and reporting success would tell someone their words had been
+ * erased from the quote channel while they are still on screen, with no row
+ * left to find them by.
  */
 describe("QuoteChannelManager.deleteQuoteMessage", () => {
   let mockClient: Client;

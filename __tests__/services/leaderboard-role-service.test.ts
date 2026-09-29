@@ -1044,6 +1044,46 @@ describe("LeaderboardRoleService", () => {
       expect(mockAssignmentUpdateOne).toHaveBeenCalledTimes(1);
     });
 
+    it("pulls the id when the role fetch reports Unknown Role", async () => {
+      rosterRows("99999001");
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: { fetch: jest.fn().mockRejectedValue(unknownRoleError()) },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result.revoked).toEqual(["99999001"]);
+      expect(mockAssignmentUpdateOne).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the roster entry when the role fetch merely failed", async () => {
+      // A rate limit or 5xx is not proof the role is gone. Reading it as
+      // "deleted" would drop the roster id — the only record of the grant —
+      // while the member still holds the role (#919).
+      rosterRows("99999001");
+      mockClientGuildsFetch.mockResolvedValue({
+        id: "guild-1",
+        members: { fetch: mockGuildMembersFetch },
+        roles: {
+          fetch: jest.fn().mockRejectedValue(new Error("rate limited")),
+        },
+        channels: { fetch: mockGuildChannelsFetch },
+      });
+
+      const svc: ServiceInstance =
+        LeaderboardRoleService.getInstance(makeClient());
+      const result = await svc.revokeForUser("guild-1", "u1");
+
+      expect(result).toEqual({ revoked: [], retained: ["99999001"] });
+      expect(mockRolesRemove).not.toHaveBeenCalled();
+      expect(mockAssignmentUpdateOne).not.toHaveBeenCalled();
+    });
+
     it("retains every row when the guild is unreachable", async () => {
       rosterRows("99999001", "99999002");
       mockClientGuildsFetch.mockRejectedValue(new Error("Unknown guild"));

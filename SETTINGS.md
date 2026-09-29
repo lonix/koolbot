@@ -821,7 +821,7 @@ Web UI only — there is no slash command for either.
 | `privacy.enabled` | `false` | Master switch — enables the `/me/privacy` page and its download |
 | `privacy.export.max_items` | `5000` | Ceiling on rows (and append-only array entries) per collection in one export |
 | `privacy.delete.enabled` | `false` | Enables the self-service "Reset my data" action (also needs `privacy.enabled`) |
-| `privacy.delete.cooldown_hours` | `168` | Per-member wait after a completed reset before another is allowed (`0` = off) |
+| `privacy.delete.cooldown_hours` | `168` | Per-member wait after a reset starts before another is allowed (`0` = off) |
 | `privacy.tracking_opt_out.enabled` | `false` | Offers members a tracking opt-out on `/me/privacy` (also needs `privacy.enabled`) |
 
 **Notes:**
