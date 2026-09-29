@@ -327,6 +327,9 @@ const STYLE = [
   "form.stack fieldset legend{color:#94a3b8;padding:0 .35rem}",
   ".inline-form{margin:.75rem 0 0;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap}",
   ".btn{background:#374151;color:#e4e6eb;border:0;padding:.35rem .7rem;border-radius:4px;cursor:pointer;font-size:.8rem;font-weight:600;display:inline-block;text-decoration:none}",
+  // `.btn` sets display, which overrides the UA rule for `hidden`; keep a
+  // hidden button (a JS-only control before its script runs) out of view.
+  ".btn[hidden]{display:none}",
   ".btn:hover{background:#4b5563;text-decoration:none}",
   ".btn-primary{background:#2563eb;color:#fff}",
   ".btn-primary:hover{background:#1d4ed8}",
@@ -678,6 +681,12 @@ const SETTINGS_SAVE_SCRIPT =
   // own envelope) must NOT be mistaken for a successful save, so fall through.
   "var jt=r.json&&typeof r.json==='object'?r.json.text:null;" +
   "var okStatus=r.status>=200&&r.status<300;" +
+  // A feature-card save that flipped an enable flag asks for a reload so
+  // the page's banner, Status card and nav reflect the new state; the URL is
+  // the no-JS flash redirect, so the result still shows. Same-origin admin
+  // paths only.
+  "var rl=r.json&&typeof r.json==='object'?r.json.reload:null;" +
+  "if(typeof rl==='string'&&rl.indexOf('/admin/')===0&&rl.indexOf('//')<0){window.location.assign(rl);return}" +
   "if(typeof jt==='string'&&jt){" +
   "var n=show(form,(r.json.type)||(okStatus?'ok':'err'),jt);" +
   "applyResult(form,r.json,n?n.id:'');return}" +

@@ -811,6 +811,43 @@ page renders a banner explaining the state with an inline **Enable** button
 (flips the flag via `/admin/settings/set` and returns you to the page) plus
 an **Open Settings** link.
 
+Every feature page also has a **Settings** card (#970) that edits all of that
+feature's config keys in place, with the same controls, validation, dependency
+locks and accessibility wiring as the Settings page. The card saves through the
+shared `/admin/settings/save-section` route, is audited as
+`settings.save-section`, and returns you to the page with a flash message. The
+Settings page still lists and edits every key; the card is a second view of the
+same values, not a copy. When the card includes the feature's
+`<feature>.enabled` toggle, that toggle is the form's cascade master: unticking
+it greys out the rest, and saving writes only `<feature>.enabled = false`, so
+turning a feature off from its page never blanks its other settings. Saving
+normally shows the result inside the card without reloading. A save that turns
+a feature on or off reloads the page instead, so the disabled banner, the Status
+card, the sidebar badge and the page's action buttons all match the new state.
+Auto-managed keys (`notices.header_message_id`, `quotes.header_message_id`) are
+never editable here.
+
+The **Announcements** page's card is a single `announcements.enabled` toggle, so
+scheduled announcements can be switched off as well as on without leaving the
+page.
+
+The **Notices** page's card (#972) edits `notices.enabled`, the notices channel
+(`notices.channel_id`, a text-channel picker), the header post
+(`notices.header_enabled`) and whether it is pinned
+(`notices.header_pin_enabled`). Changing the channel does not move notices that
+are already posted: after saving, use **Resync notices to channel** to repost
+them in the new channel. The Status card keeps the total notice count.
+
+The **Polls** page's card (#973) edits every `polls.*` key: the enable flag, the
+default duration, the cooldown, participation tracking and the retention periods
+for weekly participation and turnout.
+
+The **Voice Channels** page's card (#979) edits every `voicechannels.*` key: the
+enable flag, the category (a category picker), the lobby names, the channel
+prefix and suffix, the control panel and the per-user preset limit. Next to it,
+**Force VC cleanup** removes empty unmanaged channels in the category and makes
+sure the lobby exists.
+
 The **Reaction Roles** page offers two ways to add a mapping (#813). *Create a
 reaction role* mints a brand-new Discord role and posts a picker message; the
 *Create a private category + channel* checkbox is on by default (preserving the
@@ -827,11 +864,8 @@ unbinds the mapping and never deletes the role).
 
 Its **Settings** card (#974) edits `reactionroles.enabled`, the message channel
 (`reactionroles.message_channel_id`, a text-channel picker) and the surface
-style (`reactionroles.style`) in place, saving through the shared
-`/admin/settings/save-section` route and returning to the page. The enable
-toggle is the form's cascade master: unticking it greys out the other two, and
-saving then writes only `reactionroles.enabled = false`, so turning the feature
-off from here leaves its channel and style untouched.
+style (`reactionroles.style`) in place. Turning the feature off from here leaves
+its channel and style untouched.
 
 The **Quotes** page (#984) is where moderators manage stored quotes without
 going through `/quote` in Discord. The list is newest first, 25 per page, and

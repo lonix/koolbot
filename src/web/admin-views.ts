@@ -2305,6 +2305,8 @@ export interface PollsProps extends CommonProps {
   settingRows: SettingRow[];
   /** On/off state of off-card dependencies of {@link settingRows}. */
   dependencyState?: ReadonlyMap<string, boolean>;
+  /** True when the settings could not be read; the card renders a warning. */
+  settingsUnavailable?: boolean;
   schedules: PollScheduleRow[];
   items: PollItemRow[];
   textChannels: ChannelOption[];
@@ -2431,6 +2433,7 @@ ${renderFeatureSettingsCard({
   returnTo: "/admin/polls",
   csrfToken: props.csrfToken,
   dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
 })}
 <div class="card">
   <h2>Schedules</h2>
@@ -4070,18 +4073,21 @@ export interface LeaderboardRolesProps extends CommonProps {
 }
 
 // Progressive enhancement for the tier editor: "Add tier" clones the blank
-// row template and each row's "Remove" drops it. Without JS the page renders
-// one spare blank row, and clearing a row's fields removes it on save.
+// row template and each row's "Remove" drops it. Both buttons render hidden
+// and only this script reveals them, so a no-JS page never shows a dead
+// control: it renders one spare blank row, and clearing a row's fields
+// removes it on save.
 const LEADERBOARD_TIER_EDITOR_SCRIPT =
   "(function(){" +
   "var body=document.getElementById('lb-tier-rows');" +
   "var tpl=document.getElementById('lb-tier-template');" +
   "var add=document.getElementById('lb-tier-add');" +
   "if(!body||!tpl||!add||!('content' in tpl))return;" +
-  "add.hidden=false;" +
+  "function reveal(el){el.querySelectorAll('.lb-tier-remove').forEach(function(b){b.hidden=false})}" +
+  "add.hidden=false;reveal(body);" +
   "add.addEventListener('click',function(){" +
   "var row=tpl.content.firstElementChild.cloneNode(true);" +
-  "body.appendChild(row);" +
+  "reveal(row);body.appendChild(row);" +
   "var f=row.querySelector('input');if(f)f.focus()});" +
   "body.addEventListener('click',function(e){" +
   "var t=e.target;if(!t||!t.closest)return;" +
@@ -4099,7 +4105,7 @@ function renderTierEditorRow(
   return `<tr>
 <td><input type="number" name="topN" min="1" max="${Math.max(MAX_TIER_TOP_N, tier?.topN ?? 0)}" step="1" inputmode="numeric" aria-label="Top N" value="${tier ? tier.topN : ""}" style="width:6rem"></td>
 <td><select name="roleId" aria-label="Role">${roleOptionsHtml(roles, tier?.roleId)}</select></td>
-<td><button type="button" class="btn lb-tier-remove">Remove</button></td>
+<td><button type="button" class="btn lb-tier-remove" hidden>Remove</button></td>
 </tr>`;
 }
 

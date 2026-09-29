@@ -125,6 +125,35 @@ describe("renderAdminPage", () => {
     expect(html).not.toContain("body:new FormData(form)");
   });
 
+  it("follows a same-origin reload URL from a feature-card save (#970)", () => {
+    const html = renderAdminPage({
+      title: "Polls",
+      active: "/admin/polls",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // An enable-flag flip returns `reload`; the script navigates only to an
+    // /admin/ path so a tampered reply can't send the browser off-site.
+    expect(html).toContain("r.json.reload");
+    expect(html).toContain(
+      "rl.indexOf('/admin/')===0&&rl.indexOf('//')<0){window.location.assign(rl)",
+    );
+  });
+
+  it("keeps a hidden .btn hidden despite the .btn display rule", () => {
+    const html = renderAdminPage({
+      title: "Leaderboard Roles",
+      active: "/admin/leaderboard-roles",
+      body: "",
+      csrfToken: "",
+      remainingMs: 0,
+    });
+    // `.btn{display:inline-block}` beats the UA `[hidden]` rule, so JS-only
+    // controls such as the tier editor's Add/Remove need this override.
+    expect(html).toContain(".btn[hidden]{display:none}");
+  });
+
   it("marks and focuses the fields a save rejected (issue #854)", () => {
     const html = renderAdminPage({
       title: "Settings",
