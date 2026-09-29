@@ -151,6 +151,18 @@ export class TrackingOptOutService {
   }
 
   /**
+   * Whether a handler holding the `since` ticket may still act for this
+   * member: false once an opt-out or reset barrier for them has engaged or
+   * been released since the ticket was taken. For state changes that are
+   * not writes (the voice tracker's session start and co-presence maps);
+   * `trackWrite` applies the same rule to writes.
+   */
+  public admitted(userId: string, guildId: string, since: number): boolean {
+    const key = TrackingOptOutService.key(userId, guildId);
+    return (this.barrierAt.get(key) ?? 0) <= since;
+  }
+
+  /**
    * Mark a member's barrier as engaged — or released — now (see
    * `admission`). Called on both edges: a ticket taken while a barrier is
    * active would otherwise equal its epoch and be admitted once it lifts,
@@ -176,7 +188,7 @@ export class TrackingOptOutService {
   ): Promise<boolean> {
     if (this.isOptedOut(userId, guildId)) return false;
     const key = TrackingOptOutService.key(userId, guildId);
-    if (since !== undefined && (this.barrierAt.get(key) ?? 0) > since) {
+    if (since !== undefined && !this.admitted(userId, guildId, since)) {
       return false;
     }
     const pending = this.inFlight.get(key) ?? new Set<Promise<unknown>>();

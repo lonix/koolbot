@@ -398,9 +398,18 @@ export class VoiceChannelTracker {
     return this.purgeGenerations.get(userId) ?? 0;
   }
 
+  /**
+   * `ticket` is the tracking admission ticket (#918): the caller in
+   * `index.ts` takes it before its own awaits, and the default takes it at
+   * the call, before this handler's first await. An opt-out or reset that
+   * engages or releases while the event is in flight then invalidates it,
+   * so a delayed event from the opted-out or reset period can neither start
+   * a session nor add the member to another one.
+   */
   public async handleVoiceStateUpdate(
     oldState: VoiceState,
     newState: VoiceState,
+    ticket: number = TrackingOptOutService.getInstance().admission(),
   ): Promise<void> {
     try {
       const member = newState.member || oldState.member; // Try to get member from either state
@@ -440,6 +449,27 @@ export class VoiceChannelTracker {
         `Active session exists: ${this.activeSessions.has(member.id)}`,
       );
 
+      // A stale event for this member (#918): an opt-out or reset engaged or
+      // released since it arrived. Its barrier already evicted any session
+      // the event could belong to, so whatever session exists now started
+      // later — ending it here would persist a fresh session on the say-so
+      // of an obsolete event. Nothing below may act for this member: no
+      // session start or end, no co-presence either way.
+      const eventGuildId = member.guild?.id;
+      if (
+        eventGuildId &&
+        !TrackingOptOutService.getInstance().admitted(
+          member.id,
+          eventGuildId,
+          ticket,
+        )
+      ) {
+        logger.info(
+          `Ignoring stale voice state update for ${member.id}: their tracking changed while it was in flight`,
+        );
+        return;
+      }
+
       // User joined a channel (including initial join)
       if (!oldChannel && newChannel) {
         logger.info(
@@ -450,6 +480,7 @@ export class VoiceChannelTracker {
           newChannel.id,
           newChannel.name,
           generation,
+          ticket,
         );
       }
       // User switched channels
@@ -457,7 +488,7 @@ export class VoiceChannelTracker {
         logger.info(
           `Ending tracking for user ${member.displayName} (${member.id}) in old channel ${oldChannel.name}`,
         );
-        await this.endTrackingTracked(member.id);
+        await this.endTrackingTracked(member.id, ticket);
         logger.info(
           `Starting tracking for user ${member.displayName} (${member.id}) in new channel ${newChannel.name}`,
         );
@@ -469,6 +500,7 @@ export class VoiceChannelTracker {
           newChannel.id,
           newChannel.name,
           generation,
+          ticket,
         );
       }
       // User left a channel (disconnect) - handle both cases:
@@ -487,7 +519,7 @@ export class VoiceChannelTracker {
             `Found active session in channel ${activeSession.channelName} (${activeSession.channelId})`,
           );
         }
-        await this.endTrackingTracked(member.id);
+        await this.endTrackingTracked(member.id, ticket);
       }
 
       // Track users joining/leaving channels where we have active sessions
@@ -500,19 +532,21 @@ export class VoiceChannelTracker {
       );
       if (oldChannel && !newChannel) {
         // User left a channel - record interaction for all active sessions in that channel
-        this.recordUserInteraction(oldChannel.id, member.id);
-        if (companionsEnabled) this.companionLeft(oldChannel.id, member.id);
+        this.recordUserInteraction(oldChannel.id, member.id, ticket);
+        if (companionsEnabled)
+          this.companionLeft(oldChannel.id, member.id, ticket);
       } else if (!oldChannel && newChannel) {
         // User joined a channel - record interaction for all active sessions in that channel
-        this.recordUserInteraction(newChannel.id, member.id);
-        if (companionsEnabled) this.companionJoined(newChannel.id, member.id);
+        this.recordUserInteraction(newChannel.id, member.id, ticket);
+        if (companionsEnabled)
+          this.companionJoined(newChannel.id, member.id, ticket);
       } else if (oldChannel && newChannel && oldChannel.id !== newChannel.id) {
         // User switched channels - record for both
-        this.recordUserInteraction(oldChannel.id, member.id);
-        this.recordUserInteraction(newChannel.id, member.id);
+        this.recordUserInteraction(oldChannel.id, member.id, ticket);
+        this.recordUserInteraction(newChannel.id, member.id, ticket);
         if (companionsEnabled) {
-          this.companionLeft(oldChannel.id, member.id);
-          this.companionJoined(newChannel.id, member.id);
+          this.companionLeft(oldChannel.id, member.id, ticket);
+          this.companionJoined(newChannel.id, member.id, ticket);
         }
       }
     } catch (error) {
@@ -523,13 +557,17 @@ export class VoiceChannelTracker {
   /**
    * Records that a user was encountered in a channel for all active sessions in that channel
    */
-  private recordUserInteraction(channelId: string, userId: string): void {
-    const optOuts = TrackingOptOutService.getInstance();
+  private recordUserInteraction(
+    channelId: string,
+    userId: string,
+    ticket: number,
+  ): void {
     // Find all active sessions in this channel
     for (const [sessionUserId, session] of this.activeSessions.entries()) {
       if (session.channelId === channelId && sessionUserId !== userId) {
-        // An opted-out member is not recorded in anyone's session (#918).
-        if (session.guildId && optOuts.isOptedOut(userId, session.guildId)) {
+        // An opted-out member is not recorded in anyone's session, and nor
+        // is an event that predates either person's latest barrier (#918).
+        if (!this.eventApplies(sessionUserId, userId, session, ticket)) {
           continue;
         }
         // Add this user to the encountered users set for this session
@@ -546,15 +584,19 @@ export class VoiceChannelTracker {
    * session currently in `channelId`. Called when a user joins a channel.
    * In-memory only — persistence is gated separately in `endTracking`.
    */
-  private companionJoined(channelId: string, companionId: string): void {
+  private companionJoined(
+    channelId: string,
+    companionId: string,
+    ticket: number,
+  ): void {
     const now = Date.now();
-    const optOuts = TrackingOptOutService.getInstance();
     for (const [sessionUserId, session] of this.activeSessions.entries()) {
       if (session.channelId !== channelId || sessionUserId === companionId) {
         continue;
       }
-      // No interval opens for an opted-out companion (#918).
-      if (session.guildId && optOuts.isOptedOut(companionId, session.guildId)) {
+      // No interval opens for an opted-out companion, or for an event that
+      // predates either person's latest barrier (#918).
+      if (!this.eventApplies(sessionUserId, companionId, session, ticket)) {
         continue;
       }
       const since = this.companionSince.get(sessionUserId);
@@ -569,13 +611,46 @@ export class VoiceChannelTracker {
    * tracked session in `channelId`, accumulating the elapsed seconds. Called
    * when a user leaves a channel.
    */
-  private companionLeft(channelId: string, companionId: string): void {
+  private companionLeft(
+    channelId: string,
+    companionId: string,
+    ticket: number,
+  ): void {
     for (const [sessionUserId, session] of this.activeSessions.entries()) {
       if (session.channelId !== channelId || sessionUserId === companionId) {
         continue;
       }
+      // A stale leave must not close an interval that a later join opened
+      // (#918).
+      if (!this.eventApplies(sessionUserId, companionId, session, ticket)) {
+        continue;
+      }
       this.accumulateCompanion(sessionUserId, companionId);
     }
+  }
+
+  /**
+   * Whether a voice event (taken with `ticket`) about `companionId` may
+   * change `session`'s co-presence state (#918). Both people matter: an
+   * opted-out companion is never recorded, and if either the companion's or
+   * the session owner's barrier moved since the event arrived, the state it
+   * would touch is newer than the event — a session or interval started
+   * after an opt-out/reset — and a stale event must leave it alone.
+   */
+  private eventApplies(
+    sessionUserId: string,
+    companionId: string,
+    session: VoiceSession,
+    ticket: number,
+  ): boolean {
+    const guildId = session.guildId;
+    if (!guildId) return true;
+    const optOuts = TrackingOptOutService.getInstance();
+    return (
+      !optOuts.isOptedOut(companionId, guildId) &&
+      optOuts.admitted(companionId, guildId, ticket) &&
+      optOuts.admitted(sessionUserId, guildId, ticket)
+    );
   }
 
   /**
@@ -642,6 +717,7 @@ export class VoiceChannelTracker {
     channelId: string,
     channelName: string,
     generation: number,
+    ticket: number,
   ): Promise<void> {
     try {
       const debugModeEnabled = isDebugMode();
@@ -671,7 +747,11 @@ export class VoiceChannelTracker {
       // awaits above leave time for an opt-out to land.
       const optOuts = TrackingOptOutService.getInstance();
       const guildId = member.guild?.id;
-      if (guildId && optOuts.isOptedOut(member.id, guildId)) {
+      if (
+        guildId &&
+        (optOuts.isOptedOut(member.id, guildId) ||
+          !optOuts.admitted(member.id, guildId, ticket))
+      ) {
         if (debugModeEnabled) {
           logger.info(
             `[DEBUG] Not tracking user ${member.id}: they opted out of tracking`,
@@ -704,8 +784,13 @@ export class VoiceChannelTracker {
           if (channel.members) {
             channel.members.forEach((m) => {
               // An opted-out member is not recorded as co-present in
-              // anyone else's session either (#918).
-              if (m.id !== member.id && !optOuts.isOptedOut(m.id, guild.id)) {
+              // anyone else's session either, nor one whose barrier moved
+              // while this event was in flight (#918).
+              if (
+                m.id !== member.id &&
+                !optOuts.isOptedOut(m.id, guild.id) &&
+                optOuts.admitted(m.id, guild.id, ticket)
+              ) {
                 encounteredSet.add(m.id);
                 since.set(m.id, now);
                 presentAtJoin.push(m.id);
@@ -737,19 +822,31 @@ export class VoiceChannelTracker {
    * `forgetActiveSession` can wait for it (#916). Every call site goes
    * through here; calling `endTracking` directly reopens the race.
    */
-  private async endTrackingTracked(userId: string): Promise<void> {
+  private async endTrackingTracked(
+    userId: string,
+    ticket?: number,
+  ): Promise<void> {
     const pending = this.endingSessions.get(userId) ?? new Set();
     this.endingSessions.set(userId, pending);
 
-    const running: Promise<void> = this.endTracking(userId).finally(() => {
-      pending.delete(running);
-      if (pending.size === 0) this.endingSessions.delete(userId);
-    });
+    const running: Promise<void> = this.endTracking(userId, ticket).finally(
+      () => {
+        pending.delete(running);
+        if (pending.size === 0) this.endingSessions.delete(userId);
+      },
+    );
     pending.add(running);
     await running;
   }
 
-  private async endTracking(userId: string): Promise<void> {
+  /**
+   * `ticket` is the originating event's admission ticket (#918). It is
+   * re-checked the moment the session is read, after this method's own
+   * await: an opt-out or reset landing in between evicts the session the
+   * event belonged to, so whatever is there now is a later session that a
+   * stale event must not end.
+   */
+  private async endTracking(userId: string, ticket?: number): Promise<void> {
     // Hoisted so the failure path can hand the claimed bookkeeping back:
     // `activeSessions` is deliberately left in place when the persist throws,
     // so the session is retried on the next disconnect, and it has to be
@@ -762,6 +859,20 @@ export class VoiceChannelTracker {
       await this.mongo.ensureConnection();
 
       session = this.activeSessions.get(userId);
+      if (
+        ticket !== undefined &&
+        session?.guildId &&
+        !TrackingOptOutService.getInstance().admitted(
+          userId,
+          session.guildId,
+          ticket,
+        )
+      ) {
+        logger.info(
+          `Not ending the voice session for ${userId}: the event is stale and the session is newer`,
+        );
+        return;
+      }
       if (session?.persisting) {
         // Another handler is already writing this very session. Persisting
         // it again would double-count it (#916).
