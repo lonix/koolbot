@@ -138,7 +138,7 @@ vs. `user` writes. An admin acting on their own `/me/*` is logged with
                             │ checked each req │
                             └──────────────────┘
                                  │
-                                 ├─ click "Finish" or re-run /config
+                                 ├─ click "Finish" or re-run /config or /me
                                  │  → session revoked server-side,
                                  │    cookie cleared, /admin/* → 401
                                  │
@@ -638,7 +638,7 @@ Could not DM web sign-in link to <user-id>; falling back to ephemeral reply
 
 | Trigger                            | Effect                                                                                  |
 | ---------------------------------- | --------------------------------------------------------------------------------------- |
-| Run `/config`                      | Revokes all your prior unrevoked sessions server-side; mints new                        |
+| Run `/config` or `/me`             | Revokes all your prior unrevoked sessions server-side; mints new                        |
 | Click DM link                      | Marks token `usedAt`; sets signed session cookie                                        |
 | Idle longer than inactivity window | Cookie is rejected on the next request; the DB row remains until TTL or explicit revoke |
 | Reach session's hard `expiresAt`   | Cookie is rejected on the next request; the DB row is past its TTL                      |

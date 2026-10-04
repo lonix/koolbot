@@ -143,6 +143,7 @@ describe("createSessionMiddleware sliding window (#486)", () => {
     // exercising the permission path here.
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
+      isAdministrator: async () => true,
     } as never);
 
     const middleware = createSessionMiddleware({} as Client);

@@ -1223,12 +1223,13 @@ These commands are **admin-only** by default:
 - `/config` — opens the Web UI
 
 `/config` is registered with Discord's `setDefaultMemberPermissions(Administrator)`,
-so Discord enforces the admin gate before the bot's `PermissionsService`
-ever runs. To grant `/config` to non-admin roles, an operator must
-override the command in Discord (**Server Settings → Integrations →
-KoolBot → /config**). The Web UI's Permissions page only **narrows**
-who is allowed once Discord has admitted the interaction; it does not
-widen Discord's default member-permission gate.
+so Discord hides it from non-admins, and the handler re-checks the
+invoker's live Administrator permission at run time. Overriding the
+command's permissions in Discord therefore does **not** grant `/config`
+to other roles: non-admins who reach it are pointed to `/me`, and an
+admin web session is revalidated against the live Administrator bit on
+every request. Members use `/me`, which is open to everyone; the Web
+UI's Permissions page can narrow `/me` per role.
 
 All other commands default to accessible by everyone unless you add
 permissions.

@@ -231,6 +231,29 @@ export class PermissionsService {
   }
 
   /**
+   * Whether the member currently holds the Administrator permission, read
+   * live from Discord. A definitive Unknown Guild/Member answer is `false`;
+   * any other lookup failure throws `PermissionCheckError` so callers can
+   * tell "couldn't check" from a genuine denial (#781).
+   */
+  public async isAdministrator(
+    userId: string,
+    guildId: string,
+  ): Promise<boolean> {
+    try {
+      const guild = await this.client.guilds.fetch(guildId);
+      const member = await guild.members.fetch(userId);
+      return member.permissions.has("Administrator");
+    } catch (error) {
+      if (isUnknownTargetError(error)) return false;
+      throw new PermissionCheckError(
+        "Administrator check could not be completed",
+        error,
+      );
+    }
+  }
+
+  /**
    * Set permissions for a command (replaces existing)
    * @param guildId - Discord guild ID
    * @param commandName - Name of the command

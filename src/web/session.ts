@@ -224,14 +224,19 @@ export function createSessionMiddleware(
       // Revalidate against the command that issued the session (#1016):
       // `/config` for admin sessions, `/me` for user sessions. A user
       // session must not inherit an admin-only role gate on `/config`.
-      const issuingCommand =
-        normalizeSessionRole(dbSession.role) === "admin" ? "config" : "me";
-      const allowed = await permissions.checkCommandPermission(
-        payload.uid,
-        payload.gid,
-        issuingCommand,
-        { onUnavailable: "throw" },
-      );
+      // Admin sessions additionally require the live Administrator bit:
+      // `/config` is admin-only, but `checkCommandPermission` is default-open
+      // for a non-admin when no role gate is configured, so a session issued
+      // before Administrator was removed would otherwise stay valid.
+      const isAdminSession = normalizeSessionRole(dbSession.role) === "admin";
+      const allowed = isAdminSession
+        ? await permissions.isAdministrator(payload.uid, payload.gid)
+        : await permissions.checkCommandPermission(
+            payload.uid,
+            payload.gid,
+            "me",
+            { onUnavailable: "throw" },
+          );
       if (!allowed) {
         clearSessionCookie(res);
         await sessionService.revokeSession(payload.sid);

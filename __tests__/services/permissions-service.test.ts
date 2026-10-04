@@ -400,6 +400,48 @@ describe("PermissionsService", () => {
     });
   });
 
+  describe("isAdministrator (#1016)", () => {
+    const guildWithMember = (hasAdmin: boolean) => ({
+      members: {
+        fetch: jest.fn().mockResolvedValue({
+          permissions: { has: jest.fn().mockReturnValue(hasAdmin) },
+        }),
+      },
+    });
+
+    it("returns true for a member holding Administrator", async () => {
+      mockClient.guilds.fetch = jest
+        .fn()
+        .mockResolvedValue(guildWithMember(true));
+      expect(await service.isAdministrator("u1", "g1")).toBe(true);
+    });
+
+    it("returns false for a member without Administrator", async () => {
+      mockClient.guilds.fetch = jest
+        .fn()
+        .mockResolvedValue(guildWithMember(false));
+      expect(await service.isAdministrator("u1", "g1")).toBe(false);
+    });
+
+    it("returns false when Discord reports the member/guild unknown", async () => {
+      mockClient.guilds.fetch = jest
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error("Unknown"), { code: 10007 }),
+        );
+      expect(await service.isAdministrator("u1", "g1")).toBe(false);
+    });
+
+    it("throws PermissionCheckError on a transient lookup failure", async () => {
+      mockClient.guilds.fetch = jest
+        .fn()
+        .mockRejectedValue(new Error("Discord API timeout"));
+      await expect(service.isAdministrator("u1", "g1")).rejects.toThrow(
+        PermissionCheckError,
+      );
+    });
+  });
+
   describe("checkCommandPermission", () => {
     it("should allow admins to bypass permission checks", async () => {
       const mockGuild = {
