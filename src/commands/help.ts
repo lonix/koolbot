@@ -155,6 +155,11 @@ export async function execute(
   interaction: ChatInputCommandInteraction,
 ): Promise<void> {
   try {
+    // Acknowledge before any config/DB read: after `/config reload` clears
+    // the ConfigService cache, the enablement lookups below hit Mongo and
+    // could outrun Discord's 3-second ACK window (#842, #1042).
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
     const requestedCommand = interaction.options
       .getString("command")
       ?.trim()
@@ -167,9 +172,8 @@ export async function execute(
       // Show detailed help for a specific command
       const commandInfo = helpEntries.get(requestedCommand);
       if (!commandInfo) {
-        await interaction.reply({
+        await interaction.editReply({
           content: `❌ Command \`/${requestedCommand}\` not found. Use \`/help\` to see all available commands.`,
-          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -205,25 +209,25 @@ export async function execute(
         });
       }
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed] });
     } else {
       // Show list of all commands
       const enabledCommands: string[] = [];
       const disabledCommands: string[] = [];
 
-      for (const [commandName, commandInfo] of helpEntries) {
-        let isEnabled = true;
-        if (commandInfo.configKey) {
-          isEnabled = await configService.getBoolean(
-            commandInfo.configKey,
-            false,
-          );
-        }
+      // The enablement lookups are independent reads, so resolve them
+      // concurrently rather than one Mongo round trip at a time.
+      const entries = [...helpEntries];
+      const enabledFlags = await Promise.all(
+        entries.map(([, commandInfo]) =>
+          commandInfo.configKey
+            ? configService.getBoolean(commandInfo.configKey, false)
+            : Promise.resolve(true),
+        ),
+      );
 
-        if (isEnabled) {
+      entries.forEach(([commandName, commandInfo], index) => {
+        if (enabledFlags[index]) {
           enabledCommands.push(
             `\`/${commandName}\` - ${commandInfo.description}`,
           );
@@ -232,7 +236,7 @@ export async function execute(
             `\`/${commandName}\` - ${commandInfo.description}`,
           );
         }
-      }
+      });
 
       const embed = new EmbedBuilder()
         .setColor(0x0099ff)
@@ -265,10 +269,7 @@ export async function execute(
         inline: false,
       });
 
-      await interaction.reply({
-        embeds: [embed],
-        flags: MessageFlags.Ephemeral,
-      });
+      await interaction.editReply({ embeds: [embed] });
     }
   } catch (error) {
     logger.error("Error in help command:", error);
