@@ -347,6 +347,42 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "aka.enabled",
     "namehistory.retention_days",
   ],
+  moderation: ["moderation.enabled", "moderation.retention_days"],
+  events: [
+    "events.enabled",
+    "events.category_id",
+    "events.announcement_channel_id",
+    "events.timezone",
+    "events.channel_prefix",
+    "events.reminder_minutes",
+    "events.create_lead_minutes",
+    "events.default_duration_minutes",
+    "events.channel_grace_minutes",
+  ],
+  digest: [
+    "digest.enabled",
+    "digest.cron",
+    "digest.min_active_minutes",
+    "digest.streak_min_minutes",
+    "digest.include_achievements",
+  ],
+  birthdays: [
+    "birthdays.enabled",
+    "birthdays.cron",
+    "birthdays.channel_id",
+    "birthdays.message",
+    "birthdays.mention",
+    "birthdays.role_id",
+    "birthdays.role_duration_hours",
+  ],
+  reminders: ["reminders.enabled", "reminders.max_pending"],
+  leaderboard_roles: [
+    "leaderboard_roles.enabled",
+    "leaderboard_roles.period",
+    "leaderboard_roles.update_cron",
+    "leaderboard_roles.tiers",
+    "leaderboard_roles.announcement_channel_id",
+  ],
 };
 
 /**
@@ -370,6 +406,12 @@ export const WIZARD_FEATURE_ORDER = [
   "polls",
   "lfg",
   "namehistory",
+  "moderation",
+  "events",
+  "digest",
+  "birthdays",
+  "reminders",
+  "leaderboard_roles",
 ];
 
 /**
