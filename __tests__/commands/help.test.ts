@@ -7,6 +7,7 @@ import {
   usageFromCommand,
 } from "../../src/commands/help.js";
 import { COMMAND_CONFIGS } from "../../src/services/command-registry.js";
+import { ConfigService } from "../../src/services/config-service.js";
 import {
   ApplicationCommandOptionType,
   type APIApplicationCommandSubcommandOption,
@@ -64,14 +65,64 @@ describe("Help Command", () => {
         options: {
           getString: jest.fn().mockReturnValue(null),
         } as any,
+        deferReply: jest.fn().mockResolvedValue(undefined),
+        editReply: jest.fn().mockResolvedValue(undefined),
         reply: jest.fn().mockResolvedValue(undefined),
       };
+    });
+
+    it("should defer ephemerally before any reply (#842, #1042)", async () => {
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.deferReply).toHaveBeenCalledWith({
+        flags: MessageFlags.Ephemeral,
+      });
+      const deferOrder = (mockInteraction.deferReply as jest.Mock).mock
+        .invocationCallOrder[0];
+      const editOrder = (mockInteraction.editReply as jest.Mock).mock
+        .invocationCallOrder[0];
+      expect(deferOrder).toBeLessThan(editOrder);
+      expect(mockInteraction.reply).not.toHaveBeenCalled();
+    });
+
+    it("should defer before reading any config for a single command", async () => {
+      (mockInteraction.options!.getString as jest.Mock).mockReturnValue("ping");
+      const getBoolean = jest.spyOn(ConfigService.prototype, "getBoolean");
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      const deferOrder = (mockInteraction.deferReply as jest.Mock).mock
+        .invocationCallOrder[0];
+      expect(getBoolean).toHaveBeenCalled();
+      expect(deferOrder).toBeLessThan(getBoolean.mock.invocationCallOrder[0]);
+      expect(mockInteraction.editReply).toHaveBeenCalledTimes(1);
+      expect(mockInteraction.reply).not.toHaveBeenCalled();
+      getBoolean.mockRestore();
+    });
+
+    it("should report errors through editReply once deferred", async () => {
+      const getBoolean = jest
+        .spyOn(ConfigService.prototype, "getBoolean")
+        .mockRejectedValue(new Error("mongo down"));
+      (mockInteraction as any).deferReply = jest.fn(async () => {
+        (mockInteraction as any).deferred = true;
+      });
+
+      await execute(mockInteraction as ChatInputCommandInteraction);
+
+      expect(mockInteraction.editReply).toHaveBeenCalledWith(
+        expect.objectContaining({
+          content: "There was an error while executing this command!",
+        }),
+      );
+      expect(mockInteraction.reply).not.toHaveBeenCalled();
+      getBoolean.mockRestore();
     });
 
     it("should show general help when no command is specified", async () => {
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
@@ -79,7 +130,6 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -88,7 +138,7 @@ describe("Help Command", () => {
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
@@ -96,7 +146,6 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -107,9 +156,8 @@ describe("Help Command", () => {
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         content: expect.stringContaining("Command `/nonexistent` not found"),
-        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -120,7 +168,7 @@ describe("Help Command", () => {
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalled();
+      expect(mockInteraction.editReply).toHaveBeenCalled();
     });
 
     it("should include usage information in specific command help", async () => {
@@ -130,7 +178,7 @@ describe("Help Command", () => {
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
@@ -142,7 +190,6 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        flags: MessageFlags.Ephemeral,
       });
     });
 
@@ -153,7 +200,7 @@ describe("Help Command", () => {
 
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      expect(mockInteraction.reply).toHaveBeenCalledWith({
+      expect(mockInteraction.editReply).toHaveBeenCalledWith({
         embeds: expect.arrayContaining([
           expect.objectContaining({
             data: expect.objectContaining({
@@ -161,18 +208,17 @@ describe("Help Command", () => {
             }),
           }),
         ]),
-        flags: MessageFlags.Ephemeral,
       });
     });
 
     it("should answer /help <command> for every command in the registry", async () => {
       for (const { name } of COMMAND_CONFIGS) {
-        mockInteraction.reply = jest.fn().mockResolvedValue(undefined);
+        mockInteraction.editReply = jest.fn().mockResolvedValue(undefined);
         (mockInteraction.options!.getString as jest.Mock).mockReturnValue(name);
 
         await execute(mockInteraction as ChatInputCommandInteraction);
 
-        expect(mockInteraction.reply).toHaveBeenCalledWith({
+        expect(mockInteraction.editReply).toHaveBeenCalledWith({
           embeds: expect.arrayContaining([
             expect.objectContaining({
               data: expect.objectContaining({
@@ -180,7 +226,6 @@ describe("Help Command", () => {
               }),
             }),
           ]),
-          flags: MessageFlags.Ephemeral,
         });
       }
     });
@@ -188,7 +233,7 @@ describe("Help Command", () => {
     it("should list every registered command in the general help", async () => {
       await execute(mockInteraction as ChatInputCommandInteraction);
 
-      const embed = (mockInteraction.reply as jest.Mock).mock.calls[0][0]
+      const embed = (mockInteraction.editReply as jest.Mock).mock.calls[0][0]
         .embeds[0];
       const listed = embed.data.fields
         .filter((field: { name: string }) =>
@@ -206,12 +251,12 @@ describe("Help Command", () => {
       const commands = ["ping", "help", "quote", "achievements"];
 
       for (const cmd of commands) {
-        mockInteraction.reply = jest.fn().mockResolvedValue(undefined);
+        mockInteraction.editReply = jest.fn().mockResolvedValue(undefined);
         (mockInteraction.options!.getString as jest.Mock).mockReturnValue(cmd);
 
         await execute(mockInteraction as ChatInputCommandInteraction);
 
-        expect(mockInteraction.reply).toHaveBeenCalled();
+        expect(mockInteraction.editReply).toHaveBeenCalled();
       }
     });
   });
