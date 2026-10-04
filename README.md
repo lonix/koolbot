@@ -624,6 +624,7 @@ docker compose restart mongodb
 - **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** — Architecture and contribution patterns
 - **[TESTING.md](TESTING.md)** — Testing guide and best practices
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** — Common issues and solutions
+- **[RELEASE_NOTES_2.0.md](RELEASE_NOTES_2.0.md)** — What's new in 2.0, plus upgrade notes
 - **[CHANGELOG.md](CHANGELOG.md)** — Version history (managed by release-please)
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — Contribution guidelines for developers
 - **[SECURITY.md](SECURITY.md)** — Security policy and vulnerability reporting
