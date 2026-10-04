@@ -1488,6 +1488,34 @@ const WIZARD_FEATURE_LABELS: Record<string, { name: string; desc: string }> = {
     name: "Polls",
     desc: "Periodic polls for icebreaker discussions.",
   },
+  lfg: {
+    name: "Looking for Group",
+    desc: "Let members post short-lived group-finder requests.",
+  },
+  moderation: {
+    name: "Moderation",
+    desc: "Warnings, mod log and how long moderation history is kept.",
+  },
+  events: {
+    name: "Events",
+    desc: "Scheduled community events with temporary voice channels.",
+  },
+  digest: {
+    name: "Weekly Digest",
+    desc: "Personal weekly voice-activity summary sent by DM.",
+  },
+  birthdays: {
+    name: "Birthdays",
+    desc: "Birthday announcements and an optional birthday role.",
+  },
+  reminders: {
+    name: "Reminders",
+    desc: "Let members set personal reminders.",
+  },
+  leaderboard_roles: {
+    name: "Leaderboard Roles",
+    desc: "Award roles to top voice-activity members each period.",
+  },
 };
 
 export function renderWizardPage(props: WizardPageProps): string {
