@@ -22,6 +22,11 @@ updates:
       # upstream's target for native-API support.
       - dependency-name: "typescript"
         versions: [">=7.0.0 <7.1.0"]
+      # undici 8 breaks discord.js login ("Headers constructor: Key
+      # Symbol(sensitiveHeaders) ... ByteString"): the "$undici" override forces
+      # @discordjs/rest onto it. Stay on 7.x until discord.js supports 8.
+      - dependency-name: "undici"
+        update-types: ["version-update:semver-major"]
     groups:
       # Group development dependencies together
       dev-dependencies:
