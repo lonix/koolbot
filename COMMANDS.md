@@ -1353,17 +1353,17 @@ Verify excluded channels on the Settings page.
 ### Magic link doesn't arrive
 
 - DMs from server members might be disabled. The bot falls back to an
-  ephemeral reply in the channel where you ran `/config` — check there.
+  ephemeral reply in the channel where you ran `/me` (or `/config`) — check there.
 - The bot might not have permission to DM you for other reasons. Run
-  `/config` again and look at the channel reply.
+  `/me` (or `/config` for admins) again and look at the channel reply.
 
 ### Magic link 404s when clicked
 
 - Already used (single-use).
 - Expired (default 10 minutes).
-- Superseded by a newer `/config` invocation.
+- Superseded by a newer `/me` or `/config` invocation.
 
-Run `/config` again.
+Run `/me` again (administrators: `/config`).
 
 See [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting) for more.
 

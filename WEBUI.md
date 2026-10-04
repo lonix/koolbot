@@ -161,7 +161,7 @@ Key properties:
   that hard cap is bumped to `now + WEBUI_SESSION_LIFETIME_HOURS`
   (default 24h) so an active operator isn't kicked out at the much
   shorter link TTL.
-- **Re-issuing kills the prior session.** Running `/config` again revokes
+- **Re-issuing kills the prior session.** Running `/me` or `/config` again revokes
   all of *your* unrevoked sessions and mints a new one. Other admins'
   sessions are untouched.
 - **Permissions re-checked every request.** The cookie-session middleware
@@ -1457,9 +1457,9 @@ Exactly what it says. Set both in `.env` and restart.
 
 One of:
 
-- It was already redeemed (single-use). Run `/config` again.
-- It expired (default 10 minutes). Run `/config` again.
-- You ran `/config` a second time and got a *newer* link, which revoked
+- It was already redeemed (single-use). Run `/me` again (administrators: `/config`).
+- It expired (default 10 minutes). Run `/me` again (administrators: `/config`).
+- You ran `/me` or `/config` a second time and got a *newer* link, which revoked
   this one. Use the most recent DM.
 - `WEBUI_SESSION_SECRET` changed between issuance and redemption.
 
@@ -1470,13 +1470,13 @@ Possible causes (in roughly decreasing likelihood):
 - Your cookie expired (idle past `WEBUI_INACTIVITY_TIMEOUT_MINUTES`).
 - The DB session row passed its hard cap (`WEBUI_SESSION_LIFETIME_HOURS`
   from redemption).
-- You ran `/config` again and revoked this session server-side.
+- You ran `/me` or `/config` again and revoked this session server-side.
 - Permission re-check failed: someone configured Web UI Permissions →
   `config` to restrict the command, and your roles no longer match.
 - The bot was restarted with a new `WEBUI_SESSION_SECRET`, invalidating
   the cookie signature.
 
-Run `/config` again to mint a fresh link.
+Run `/me` again to mint a fresh link (administrators: `/config`).
 
 The cookie is **not** bound to your client IP — switching networks does
 not by itself end a session.

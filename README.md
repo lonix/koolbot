@@ -577,9 +577,9 @@ One of:
 
 - It was already used (single-use).
 - It expired (default 10 minutes).
-- You ran `/config` again and got a newer link, which revoked this one.
+- You ran `/me` or `/config` again and got a newer link, which revoked this one.
 
-Run `/config` again to mint a fresh one.
+Run `/me` again to mint a fresh one (administrators: `/config`).
 
 See [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting) for more.
 
