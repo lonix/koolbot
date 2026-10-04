@@ -33,6 +33,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/help](#help)
   - [/voicestats](#voicestats)
   - [/seen](#seen)
+  - [/aka](#aka)
   - [/achievements](#achievements)
   - [/quote](#quote)
   - [/event](#event)
@@ -232,6 +233,36 @@ Then reload commands.
 📍 In: Gaming Room
 ⏱️ Duration: 3h 45m
 ```
+
+---
+
+### `/aka`
+
+**Description:** Show the names a member has previously gone by — usernames,
+global display names and server nicknames, newest first, with first/last-seen
+dates. The reply is only visible to you.
+
+**Enable:** Web UI → Settings:
+
+- `aka.enabled = true`
+- `namehistory.enabled = true` (records the names; history starts from when this is turned on)
+
+Then reload commands.
+
+**Usage:**
+
+```text
+/aka user:@Username
+```
+
+**Parameters:**
+
+- `user` (required) — The member to look up
+
+**Notes:** Server nicknames are only recorded when the bot runs with
+`GUILD_MEMBERS_INTENT=true` (see [SETTINGS.md](SETTINGS.md#-name-history));
+`/aka` says when they are not. Members who opted out of tracking are not
+recorded.
 
 ---
 
@@ -1074,6 +1105,7 @@ surfaces share the same validation.
 | `/voicestats`                  | Everyone\*       | Voice tracking enabled        |
 | `/achievements`                | Everyone\*       | Achievements enabled          |
 | `/seen`                        | Everyone\*       | Voice tracking + seen enabled |
+| `/aka`                         | Everyone\*       | Name history enabled          |
 | `/quote`                       | Everyone\*       | Quotes enabled                |
 | `/event list`                  | Everyone\*       | Events enabled                |
 | `/event` create/cancel/start   | Administrator    | Events enabled                |
@@ -1180,6 +1212,7 @@ when its message, role, category, or channel is deleted.
 /voicestats user [user] [period]    # Personal voice stats
 /achievements [user]                # View earned accolades
 /seen user:@User                    # Last-seen lookup
+/aka user:@User                     # Previously known names
 /quote add text:"..." author:@User  # Add a quote
 /quote edit id:"..." [text:"..."] [author:@User]
 /event list                         # List upcoming events

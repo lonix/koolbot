@@ -37,6 +37,8 @@ import { CommandAuditCleanupService } from "./services/command-audit-cleanup.js"
 import { WebAuditLogCleanupService } from "./services/web-audit-cleanup.js";
 import { VersionCheckService } from "./services/version-check-service.js";
 import { ModerationLogCleanupService } from "./services/moderation-log-cleanup.js";
+import { NameHistoryCleanupService } from "./services/name-history-cleanup.js";
+import { NameHistoryService } from "./services/name-history-service.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
 import { StartupMigrator } from "./services/startup-migrator.js";
@@ -128,6 +130,10 @@ const client = new Client({
     // Required to receive messagePollVoteAdd events for poll-participation
     // tracking (#570). The events still only fire for guild polls.
     GatewayIntentBits.GuildMessagePolls,
+    // Privileged: only requested when the operator opts in (#1038), because
+    // asking for an intent the developer portal has not enabled makes login
+    // fail. Feeds guildMemberUpdate for server-nickname history.
+    ...(env.guildMembersIntent ? [GatewayIntentBits.GuildMembers] : []),
   ],
   // Partials.User is required for messageReactionAdd/Remove to fire for
   // uncached users (#809). Without it, discord.js drops the event before any
@@ -507,6 +513,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         WebAuditLogCleanupService.getInstance().destroy();
         VersionCheckService.getInstance().destroy();
         ModerationLogCleanupService.getInstance().destroy();
+        NameHistoryCleanupService.getInstance().destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
         pollParticipationTracker.destroy();
@@ -772,6 +779,21 @@ async function initializeServices(): Promise<void> {
     // `moderation.enabled` and `moderation.retention_days` at run time.
     ModerationLogCleanupService.getInstance().start();
 
+    // Name history (#1038): retention cleanup cron, plus a clear startup
+    // warning when nicknames cannot be recorded for lack of the intent.
+    NameHistoryCleanupService.getInstance().start();
+    if (
+      await ConfigService.getInstance()
+        .getBoolean("namehistory.enabled", false)
+        .catch(() => false)
+    ) {
+      if (!env.guildMembersIntent) {
+        logger.warn(
+          "namehistory.enabled is on but GUILD_MEMBERS_INTENT is not set: server nickname changes are not recorded (usernames and display names still are). Enable the Server Members Intent in the Discord developer portal and set GUILD_MEMBERS_INTENT=true to record nicknames.",
+        );
+      }
+    }
+
     // Start the update check (#1029). An anonymous GET of the latest public
     // release, at startup and every 12h; gates on `core.updatecheck.enabled`
     // at run time and never blocks startup on the network round-trip.
@@ -1002,6 +1024,14 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       trackingAdmission,
     );
 
+    // Name history (#1038): snapshot the member on a voice join.
+    if (newState.member && newState.channelId && !oldState.channelId) {
+      await NameHistoryService.getInstance().recordMember(
+        newState.member,
+        trackingAdmission,
+      );
+    }
+
     // Update bot status with current VC user count (username logic removed)
     if (botStatusService) {
       const vcUserCount = await voiceChannelManager.getTotalVcUserCount();
@@ -1018,6 +1048,11 @@ client.on(Events.MessageCreate, async (message) => {
   recordDiscordEvent("messageCreate");
   try {
     await messageActivityTracker.handleMessageCreate(message);
+    // Name history (#1038): a message is a free chance to snapshot the
+    // author's names; the service throttles unchanged members to no I/O.
+    if (message.member && !message.author.bot) {
+      await NameHistoryService.getInstance().recordMember(message.member);
+    }
   } catch (error) {
     logger.error("Error handling messageCreate:", error);
   }
@@ -1042,6 +1077,12 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       user = await user.fetch();
     }
     await reactionActivityTracker.handleReactionAdd(reaction, user);
+    if (reaction.message.guildId) {
+      await NameHistoryService.getInstance().recordUser(
+        reaction.message.guildId,
+        user,
+      );
+    }
     await reactionRoleService.handleReactionAdd(reaction, user);
   } catch (error) {
     logger.error("Error handling messageReactionAdd:", error);
@@ -1172,6 +1213,22 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
   } catch (error) {
     logger.error("Error handling channel update:", error);
   }
+});
+
+// Name history (#1038). `userUpdate` needs no privileged intent but only fires
+// for cached users; it carries no guild, so it is attributed to the bot's
+// configured guild (the bot is single-guild via GUILD_ID).
+client.on(Events.UserUpdate, async (_oldUser, newUser) => {
+  recordDiscordEvent("userUpdate");
+  if (!env.guildId) return;
+  await NameHistoryService.getInstance().recordUser(env.guildId, newUser);
+});
+
+// Nickname changes. Only delivered when the GuildMembers intent is on
+// (GUILD_MEMBERS_INTENT=true); harmless to register either way.
+client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
+  recordDiscordEvent("guildMemberUpdate");
+  await NameHistoryService.getInstance().recordMember(newMember);
 });
 
 // Easter egg: Creator detection when joining the server

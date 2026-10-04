@@ -260,6 +260,18 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Deliberately kept: it is the flag that stops the trackers writing again after the reset, and so the only thing that turns a reset into a deletion. It is itself a small piece of the member's data — the reset cannot remove it, but opting back in on /me/privacy deletes it.",
   },
   {
+    source: "src/models/user-name-history.ts",
+    collection: "user-name-history",
+    field: "userId",
+    exportable: true,
+    guildScoped: true,
+    note: "Usernames, display names and server nicknames the bot has seen the member use, with first/last-seen dates (#1038).",
+    onDelete: "hard-delete",
+    subject: "self",
+    deleteNote:
+      "The member's own name history; every row is about them, so the lot goes.",
+  },
+  {
     source: "src/models/user-voice-preferences.ts",
     collection: "user-voice-preferences",
     field: "userId",

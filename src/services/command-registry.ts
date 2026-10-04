@@ -27,6 +27,7 @@ export const COMMAND_CONFIGS: readonly CommandConfig[] = [
     file: "voicestats",
   },
   { name: "seen", configKey: "voicetracking.seen.enabled", file: "seen" },
+  { name: "aka", configKey: "aka.enabled", file: "aka" },
   {
     name: "achievements",
     configKey: "achievements.enabled",
