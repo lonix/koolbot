@@ -96,10 +96,20 @@ export class NameHistoryService {
     try {
       if (user.bot) return;
       const names = this.collectNames(user, nickname);
-      if (names.length === 0) return;
-
       const key = `${guildId}:${user.id}`;
       const cached = this.recent.get(key);
+
+      // A name observed as *absent* (`null`, as opposed to `undefined` =
+      // "not known here") must drop its cache entry. Otherwise a name that
+      // goes away and comes back inside the throttle window would look
+      // unchanged and skip its write.
+      if (cached) {
+        if (user.globalName === null || user.globalName === "") {
+          delete cached.globalName;
+        }
+        if (nickname === null || nickname === "") delete cached.nickname;
+      }
+      if (names.length === 0) return;
       const now = Date.now();
       if (
         cached &&

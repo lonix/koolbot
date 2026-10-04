@@ -126,6 +126,15 @@ describe("NameHistoryService", () => {
     expect(mockBulkWrite).toHaveBeenCalledTimes(1);
   });
 
+  it("a name that goes away and returns inside the window writes again", async () => {
+    const service = NameHistoryService.getInstance();
+    await service.recordUser("g1", user, "Ally");
+    await service.recordUser("g1", { ...user, globalName: null }, null);
+    expect(mockBulkWrite).toHaveBeenCalledTimes(1); // username unchanged
+    await service.recordUser("g1", user, "Ally");
+    expect(mockBulkWrite).toHaveBeenCalledTimes(2);
+  });
+
   it("passes the admission ticket through to trackWrite", async () => {
     await NameHistoryService.getInstance().recordUser("g1", user, null, 42);
     expect(mockTrackWrite.mock.calls[0]?.[3]).toBe(42);

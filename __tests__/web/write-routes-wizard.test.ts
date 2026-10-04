@@ -331,6 +331,8 @@ describe("POST /wizard/apply", () => {
       if (feature === "quotes") continue;
       expect(disabled).toContain(`${feature}.enabled`);
     }
+    // Independent command gates go off with their feature.
+    expect(disabled).toContain("aka.enabled");
   });
 
   it("ends the session and lands on Settings after a successful apply", async () => {

@@ -1,7 +1,7 @@
 import { TextChannel, VoiceChannel, CategoryChannel } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
-import { DependencyError, hasOwn } from "./config-schema.js";
+import { DependencyError, hasOwn, settingsMetadata } from "./config-schema.js";
 import type { IConfig } from "../models/config.js";
 
 export interface WizardConfiguration {
@@ -337,7 +337,12 @@ export class WizardService {
     let failedKey: string | undefined;
     let errorMessage: string | undefined;
     for (const [key, value] of entries) {
-      const category = key.split(".")[0];
+      // The key's declared category, not its prefix: `aka.enabled` lives in
+      // the `namehistory` category, and `ConfigService.set` rejects unknown ones.
+      const category =
+        (settingsMetadata as Record<string, { category: string } | undefined>)[
+          key
+        ]?.category ?? key.split(".")[0];
       const description = this.getSettingDescription(key);
       try {
         await this.configService.set(key, value, description, category, {

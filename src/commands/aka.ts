@@ -10,6 +10,7 @@ import {
   NameHistoryService,
 } from "../services/name-history-service.js";
 import { NAME_KINDS, NameKind } from "../models/user-name-history.js";
+import { TrackingOptOutService } from "../services/tracking-opt-out-service.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 
@@ -106,6 +107,10 @@ export async function execute(
       return;
     }
 
+    // Before the first await (#918): a target who opts out or resets while
+    // this command is suspended must not be re-recorded by it.
+    const admission = TrackingOptOutService.getInstance().admission();
+
     // Acknowledge before the DB lookup (#842). Ephemeral: past names are the
     // kind of thing a member may not want broadcast to the channel.
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
@@ -118,7 +123,12 @@ export async function execute(
       const member = interaction.options.getMember("user");
       const nickname =
         member && "nickname" in member ? (member.nickname ?? null) : undefined;
-      await service.recordUser(interaction.guildId, targetUser, nickname);
+      await service.recordUser(
+        interaction.guildId,
+        targetUser,
+        nickname,
+        admission,
+      );
     }
 
     const history = await service.getHistory(

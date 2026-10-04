@@ -14,6 +14,13 @@ jest.unstable_mockModule("../../src/services/name-history-service.js", () => ({
   },
 }));
 
+jest.unstable_mockModule(
+  "../../src/services/tracking-opt-out-service.js",
+  () => ({
+    TrackingOptOutService: { getInstance: () => ({ admission: () => 7 }) },
+  }),
+);
+
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: jest.fn(),
@@ -114,6 +121,12 @@ describe("aka command", () => {
     expect(mockRecordUser).not.toHaveBeenCalled();
     const { content } = (i.editReply.mock.calls[0] as [{ content: string }])[0];
     expect(content).toContain("recording is turned off");
+  });
+
+  it("passes an admission ticket captured before deferring", async () => {
+    const i = makeInteraction();
+    await execute(i);
+    expect(mockRecordUser.mock.calls[0]?.[3]).toBe(7);
   });
 
   it("refuses outside a guild", async () => {

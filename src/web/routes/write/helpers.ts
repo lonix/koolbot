@@ -349,6 +349,16 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
   ],
 };
 
+/**
+ * Independent `.enabled` gates a feature has beyond its master gate (the
+ * first `.enabled` key in its list). Unticking the feature in the wizard
+ * switches these off too, so a deselected feature cannot keep serving data
+ * through a gate the apply step did not know about.
+ */
+export const WIZARD_FEATURE_EXTRA_GATES: Record<string, string[]> = {
+  namehistory: ["aka.enabled"],
+};
+
 export const WIZARD_FEATURE_ORDER = [
   "voicechannels",
   "voicetracking",
