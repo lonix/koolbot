@@ -1,3 +1,5 @@
+import { isMeCommandEnabled } from "../web/me-surfaces.js";
+
 /**
  * The single source of truth for which slash commands KoolBot ships.
  *
@@ -14,8 +16,25 @@ export interface CommandConfig {
    * `null` for core commands that are always enabled.
    */
   readonly configKey: string | null;
+  /**
+   * Derived gate for commands whose availability is not a single config key
+   * (e.g. `/me`). When set, it replaces `configKey` as the enablement check
+   * and is re-evaluated on every registration, so `/config reload` picks up
+   * changes to the underlying keys.
+   */
+  readonly isEnabled?: () => Promise<boolean>;
   /** Module basename under `src/commands/` (without extension). */
   readonly file: string;
+}
+
+/** Resolve whether a registry entry is currently enabled. */
+export async function isCommandEnabled(
+  config: Pick<CommandConfig, "configKey" | "isEnabled">,
+  getBoolean: (key: string, defaultValue: boolean) => Promise<boolean>,
+): Promise<boolean> {
+  if (config.isEnabled) return config.isEnabled();
+  if (config.configKey) return getBoolean(config.configKey, false);
+  return true;
 }
 
 export const COMMAND_CONFIGS: readonly CommandConfig[] = [
@@ -40,5 +59,7 @@ export const COMMAND_CONFIGS: readonly CommandConfig[] = [
   { name: "timeout", configKey: "moderation.enabled", file: "timeout" },
   { name: "ban", configKey: "moderation.enabled", file: "ban" },
   { name: "modlog", configKey: "moderation.enabled", file: "modlog" },
-  { name: "config", configKey: null, file: "config" }, // Always enabled - WebUI launcher
+  { name: "config", configKey: null, file: "config" }, // Always enabled - admin WebUI launcher
+  // Derived gate (no `me.enabled` key): Web UI on and a /me/* surface on (#1016)
+  { name: "me", configKey: null, isEnabled: isMeCommandEnabled, file: "me" },
 ];

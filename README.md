@@ -144,7 +144,7 @@ admin launcher.
 
 **User commands** (registered on demand — each one is gated by a
 `*.enabled` setting in the Web UI; `/help` and `/config` are the only
-commands always registered):
+commands always registered, and `/me` follows the Web UI):
 
 - `/ping` — Check bot responsiveness (`ping.enabled`)
 - `/help` — Discover commands (always on)
@@ -159,6 +159,7 @@ commands always registered):
 - `/timeout` — Time a member out for any duration up to 28 days (`moderation.enabled`)
 - `/ban` — Ban a member and record it (`moderation.enabled`)
 - `/modlog` — Look up a member's moderation history (`moderation.enabled`)
+- `/me` — DMs you a single-use link to your personal settings (registered whenever the Web UI is enabled)
 
 A fresh install only sees `/help` and `/config` in Discord until you
 enable the others on the Settings page and click **Reload commands to
@@ -166,7 +167,7 @@ Discord**.
 
 **Admin launcher** (Discord → Web UI):
 
-- `/config` — DMs you a single-use sign-in link for the admin Web UI.
+- `/config` — Administrators only: DMs you a single-use sign-in link for the admin Web UI.
   Everything formerly behind `/permissions`, `/setup`, `/announce`,
   `/announce-vc-stats`, `/poll`, `/reactrole`, `/notice`, `/dbtrunk`,
   `/vc`, `/botstats`, and the `/config` subcommand tree now lives in

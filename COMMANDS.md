@@ -6,21 +6,19 @@ KoolBot's slash-command surface is intentionally small. All
 **day-to-day chat interaction** stays in Discord (`/ping`, `/voicestats`,
 `/seen`, `/quote`, `/achievements`, `/help`). All
 **administration and configuration** lives in the Web UI, reached via the
-single `/config` launcher.
+`/config` launcher (admins) and the `/me` launcher (members).
 
-`/config` is open to **every guild member**, not just admins. The
-sign-in link it DMs you lands on the surface that matches your
-permissions: administrators get the **admin panel** (`/admin/`) plus
-their own **personal preferences** (`/me/`), while everyone else gets
-the personal self-service surface (`/me/`) only — opt in to DM
+`/me` is open to **every guild member**, admins included. It DMs you a
+sign-in link to the personal self-service surface (`/me/`) — opt in to DM
 notifications (off by default), view your Rewind, and manage your own
-settings. There are
+settings. `/config` is **Administrator-only** and opens the **admin
+panel** (`/admin/`). There are
 deliberately **no per-feature slash commands** (no `/notifications`,
-`/digest`, `/rewind`); those preferences live behind `/config` → `/me/`.
+`/digest`, `/rewind`); those preferences live behind `/me`.
 See [WEBUI.md](WEBUI.md) for the full surface breakdown.
 
 > **Note:** Most commands must be enabled before they appear in Discord.
-> Toggle them from the Web UI's **Settings** page (run `/config` to get a
+> Toggle them from the Web UI's **Settings** page (run `/config` as an administrator to get a
 > single-use sign-in link), then click **Reload commands to Discord** to
 > push the registration change.
 
@@ -45,6 +43,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/modlog](#modlog)
 - [Web UI launcher](#-web-ui-launcher)
   - [/config](#config)
+  - [/me](#me)
 - [Voice Channel Control Panel](#voice-channel-control-panel)
 - [Permission Requirements](#-permission-requirements)
 - [Quick Command Reference](#-quick-command-reference)
@@ -340,7 +339,7 @@ Re-evaluated each week and shown under **Recent Achievements**:
 **Notes on time-based accolades:**
 
 - Night Owl / Early Bird evaluate their hour windows in **your configured
-  timezone** (set it on your personal Web UI page: `/config` → **My
+  timezone** (set it on your personal Web UI page: `/me` → **My
   preferences** → **Timezone**, i.e. `/me/timezone`). If you haven't set one,
   they fall back to **UTC**.
 - Weekend Warrior / Weekday Warrior bucket day-of-week in your configured
@@ -808,37 +807,58 @@ Discord's embed; the full reason is kept and shown in the Web UI moderation log.
 
 ## 🔧 Web UI launcher
 
-KoolBot has exactly one Web UI slash command. It does one thing: mint a
-single-use sign-in link for the Web UI and DM it to you. The surface you
-land on depends on your permissions — administrators get the admin panel
-(and their own preferences); everyone else gets the personal
-self-service surface.
+KoolBot has two Web UI launcher commands. Each does one thing: mint a
+single-use sign-in link for the Web UI and DM it to you. `/config` is for
+administrators (admin panel); `/me` is for everyone (personal settings).
+
+### `/me`
+
+**Description:** Open your personal Koolbot settings. Sends you a
+single-use, time-limited sign-in link via DM that opens the **personal
+self-service surface** (`/me/`): birthday, timezone, notification opt-ins,
+voice presets, Rewind, and privacy export/reset.
+
+**Permission:** Every guild member, admins included. `/me` **always**
+issues a `user`-role session, even for administrators, so a personal link
+never carries admin scope.
+
+**Availability:** There is no `me.enabled` key. `/me` is registered when
+the Web UI is enabled and at least one `/me/*` surface is enabled. The
+Notifications and Timezone pages are ungated, so in practice `/me` is
+available whenever the Web UI is. The derivation lives in
+`src/web/me-surfaces.ts`.
+
+**Usage:**
+
+```text
+/me
+```
+
+Behaviour (DM first, ephemeral fallback when DMs are closed; the same
+Web UI enabled/valid-config checks as `/config`) is otherwise identical to
+[`/config`](#config).
 
 ### `/config`
 
-**Description:** Open the Web UI. Sends you a single-use, time-limited
-sign-in link via DM. The link lands on the surface that matches your
-permissions:
+**Description:** Open the admin Web UI. Sends you a single-use,
+time-limited sign-in link via DM that opens the **admin panel**
+(`/admin/`) — settings, permissions, the setup wizard, announcements,
+polls, reaction roles, notices, voice channel management, database
+cleanup, bot stats. Administrators can jump to their own **personal
+preferences** (`/me/`) from a header link; to open them directly (with a
+non-admin session), use [`/me`](#me).
 
-- **Administrators** reach the **admin panel** (`/admin/`) — settings,
-  permissions, the setup wizard, announcements, polls, reaction roles,
-  notices, voice channel management, database cleanup, bot stats — and
-  can jump to their own **personal preferences** (`/me/`) from a header
-  link without re-running `/config`.
-- **Everyone else** reaches the **personal self-service surface**
-  (`/me/`) — opt in to DM notifications (off by default), view their
-  Rewind, and manage their own per-user settings. They never see the
-  admin panel.
-
-**Permission:** Open to **every guild member**. `/config` is no longer
-registered with `setDefaultMemberPermissions(Administrator)` — any member
-can run it. The session **role** is decided at issue time from the
-invoker's live guild permissions: a member with **Administrator** gets an
-`admin` session (authorised for both `/admin/*` and their own `/me/*`);
-everyone else gets a `user` session (authorised for `/me/*` only). A
-`user` session that tries to reach `/admin/*` gets a clear 403 pointing
-it at `/me/`. The Web UI's Permissions page governs the *other* slash
+**Permission:** **Administrator only.** `/config` is registered with
+`setDefaultMemberPermissions(Administrator)`, so non-admins do not see it
+in the command picker, and the handler re-checks the invoker's live guild
+permissions as defence in depth. A non-admin who reaches it gets an
+ephemeral reply pointing them to `/me`. The session it issues is always
+an `admin` session (authorised for both `/admin/*` and the admin's own
+`/me/*`). The Web UI's Permissions page governs the *other* slash
 commands, not `/config` itself.
+
+> **Upgrade note (#1016):** members who used `/config` for their personal
+> settings should now use `/me`.
 
 **Prerequisites:** Operator must have set `WEBUI_ENABLED=true`,
 `WEBUI_BASE_URL`, and `WEBUI_SESSION_SECRET` in `.env` and restarted the
@@ -854,27 +874,25 @@ No subcommands, no parameters.
 
 **Behavior:**
 
-1. Discord routes the interaction to the bot (any guild member may run
-   `/config`).
-2. Bot determines your session **role** from your live guild
-   permissions: `admin` if you have Administrator, otherwise `user`.
+1. Discord routes the interaction to the bot.
+2. Bot verifies you have Administrator; otherwise it replies that
+   `/config` is for administrators and points you to `/me`.
 3. Bot revokes any prior unrevoked sessions you have.
 4. Bot generates a single-use token bound to your Discord user ID and
-   the chosen role (default TTL: 10 minutes; configurable via
+   the `admin` role (default TTL: 10 minutes; configurable via
    `WEBUI_SESSION_TTL_MINUTES`).
 5. Bot DMs you a unique URL of the form
-   `https://your-bot.example.com/admin/s/<token>`. (The redemption path
-   is the same for both roles; an admin DM additionally points out the
-   `/me/` entry point.)
+   `https://your-bot.example.com/admin/s/<token>`. (The DM also points
+   out the `/me/` entry point.)
 6. You open the link. The bot exchanges the token for a signed session
    cookie scoped to your user ID and role, then redirects you to
-   `/admin/` (admin role) or `/me/` (user role).
+   `/admin/`.
 7. You use the Web UI (configure the bot, or manage your own
    preferences). The session sliding window defaults to 30 minutes of
    inactivity and is hard-capped at the server-side TTL.
 8. You end the session one of four ways:
    - Click **Finish** — server-side revoke + cookie cleared, immediate.
-   - Re-run `/config` — server-side revoke of the prior session +
+   - Re-run `/config` or `/me` — server-side revoke of the prior session +
      fresh link minted.
    - Idle past the inactivity window or hard TTL — the next request
      rejects the cookie (the server-side row stays in MongoDB until
@@ -892,30 +910,17 @@ DM is delivered:
 ✅ I've DMed you a single-use sign-in link. Check your direct messages.
 ```
 
-DM is blocked (fallback to ephemeral reply, visible only to you). The
-body depends on your role.
-
-For an **admin** session (both entry points advertised):
+DM is blocked (fallback to ephemeral reply, visible only to you):
 
 ```text
-🔗 Koolbot sign-in link
+🔗 Koolbot admin sign-in link
 https://bot.example.com/admin/s/9f4b...
 
 Once you've signed in:
 • Admin panel: the link above drops you on /admin/.
-• My preferences: switch to /me/ for your own settings (also reachable
-  via the header link on every admin page).
-
-This link is single-use and expires in about 10 minute(s).
-If you did not run /config, ignore this message.
-```
-
-For a **user** session (personal surface only):
-
-```text
-🔗 Koolbot sign-in link
-https://bot.example.com/admin/s/9f4b...
-Opens My preferences (/me/) — your personal Koolbot settings for this server.
+• My preferences: your own settings are at /me/ (also reachable via the
+  header link on every admin page). Run /me for a link that opens them
+  directly.
 
 This link is single-use and expires in about 10 minute(s).
 If you did not run /config, ignore this message.
@@ -1096,17 +1101,13 @@ your behalf.
 
 ### Web UI launcher permissions
 
-| Command   | Permission                                                                                                |
-| --------- | --------------------------------------------------------------------------------------------------------- |
-| `/config` | Everyone — session role (`admin` vs `user`) is derived from the invoker's Administrator permission at run |
+| Command   | Permission                                                                    |
+| --------- | ----------------------------------------------------------------------------- |
+| `/config` | Administrator only — always issues an `admin` session                         |
+| `/me`     | Everyone — always issues a `user` session (even for admins), scoped to `/me/` |
 
-`/config` is intentionally **not** gated to Administrator. Any guild
-member can run it; what differs is the surface they reach. A member with
-Administrator gets an `admin` session (admin panel + their own `/me/`);
-everyone else gets a `user` session scoped to `/me/` only. The
-ownership check on `/me/*` ensures a session — admin or user — can only
-read and write its **own** `(userId, guildId)` rows, so widening
-`/config` access never grants visibility into anyone else's data.
+The ownership check on `/me/*` ensures a session — admin or user — can only
+read and write its **own** `(userId, guildId)` rows.
 
 ### Bot permissions required
 
@@ -1197,7 +1198,8 @@ when its message, role, category, or channel is deleted.
 ### Web UI launcher
 
 ```text
-/config                             # Open the Web UI (DMs a sign-in link)
+/config                             # Open the admin Web UI (admins; DMs a sign-in link)
+/me                                 # Open your personal settings (DMs a sign-in link)
 ```
 
 Available to every member. Admins land on the admin panel below; other
@@ -1322,9 +1324,8 @@ disabled, so it is already saved when an admin turns the feature on.
 
 ### "Permission denied" errors
 
-- `/config` itself is open to everyone — but only **Administrators** get
-  the admin panel. If a non-admin's link lands on `/me/` and `/admin/*`
-  returns 403, that's expected: admin pages need an Administrator.
+- `/config` is Administrator-only; members use `/me`. A `user` session
+  reaching `/admin/*` gets a 403, which is expected.
 - Is the bot's role high enough in the Discord role hierarchy?
 - Is the feature enabled in the Web UI's Settings page?
 - For `/config`: is `WEBUI_ENABLED=true` and are the other `WEBUI_*`

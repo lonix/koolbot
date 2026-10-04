@@ -11,7 +11,10 @@ import {
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { ConfigService } from "../services/config-service.js";
-import { COMMAND_CONFIGS } from "../services/command-registry.js";
+import {
+  COMMAND_CONFIGS,
+  isCommandEnabled,
+} from "../services/command-registry.js";
 
 export const data = new SlashCommandBuilder()
   .setName("help")
@@ -29,6 +32,7 @@ export interface CommandHelpEntry {
   description: string;
   usage: string;
   configKey: string | null;
+  isEnabled?: () => Promise<boolean>;
 }
 
 type SubcommandLike =
@@ -113,6 +117,7 @@ export async function buildHelpEntries(
         description: json.description,
         usage: usageFromCommand(json),
         configKey: config.configKey,
+        isEnabled: config.isEnabled,
       });
     } catch (error) {
       complete = false;
@@ -122,6 +127,7 @@ export async function buildHelpEntries(
         description: "Description unavailable (command module failed to load).",
         usage: `/${config.name}`,
         configKey: config.configKey,
+        isEnabled: config.isEnabled,
       });
     }
   }
@@ -179,13 +185,9 @@ export async function execute(
       }
 
       // Check if command is enabled
-      let isEnabled = true;
-      if (commandInfo.configKey) {
-        isEnabled = await configService.getBoolean(
-          commandInfo.configKey,
-          false,
-        );
-      }
+      const isEnabled = await isCommandEnabled(commandInfo, (key, def) =>
+        configService.getBoolean(key, def),
+      );
 
       const embed = new EmbedBuilder()
         .setColor(isEnabled ? 0x00ff00 : 0xff0000)
@@ -220,9 +222,9 @@ export async function execute(
       const entries = [...helpEntries];
       const enabledFlags = await Promise.all(
         entries.map(([, commandInfo]) =>
-          commandInfo.configKey
-            ? configService.getBoolean(commandInfo.configKey, false)
-            : Promise.resolve(true),
+          isCommandEnabled(commandInfo, (key, def) =>
+            configService.getBoolean(key, def),
+          ),
         ),
       );
 

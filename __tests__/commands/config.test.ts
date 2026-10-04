@@ -6,7 +6,11 @@ import {
   beforeEach,
   afterEach,
 } from "@jest/globals";
-import { MessageFlags, type ChatInputCommandInteraction } from "discord.js";
+import {
+  MessageFlags,
+  PermissionFlagsBits,
+  type ChatInputCommandInteraction,
+} from "discord.js";
 
 const mockCreateSession = jest.fn();
 const mockGetInstance = jest.fn(() => ({
@@ -53,13 +57,11 @@ describe("Config Command — metadata", () => {
     expect(json).toHaveProperty("description");
   });
 
-  it("does NOT gate via default_member_permissions (#481: every guild member can run /config)", () => {
-    // Role is decided server-side from the invoker's live permissions
-    // and baked into the redeemed session; the slash-command itself is
-    // open. Discord's `default_member_permissions` would otherwise hide
-    // the command from non-admins, defeating the user surface.
+  it("is Administrator-only via default_member_permissions (#1016)", () => {
     const json = data.toJSON();
-    expect(json.default_member_permissions ?? null).toBeNull();
+    expect(json.default_member_permissions).toBe(
+      PermissionFlagsBits.Administrator.toString(),
+    );
   });
 
   it("exposes no subcommands (bare /config launches the WebUI)", () => {
@@ -100,7 +102,7 @@ describe("Config Command — execute", () => {
       /**
        * Permission bitfield string as Discord's interaction payload
        * delivers it for non-cached members. "8" sets the Administrator
-       * bit. Omit to simulate a non-admin guild member.
+       * bit (the default here). Pass "0" for a non-admin guild member.
        */
       permissionsBitfield?: string;
     } = {},
@@ -115,12 +117,9 @@ describe("Config Command — execute", () => {
       replied: false,
       editReply,
       guildId: overrides.guildId === undefined ? "g1" : overrides.guildId,
-      member:
-        overrides.guildId === null
-          ? null
-          : {
-              permissions: overrides.permissionsBitfield ?? "0",
-            },
+      member: {
+        permissions: overrides.permissionsBitfield ?? "8",
+      },
       user: {
         id: overrides.userId ?? "u1",
         send: userSend,
@@ -222,7 +221,7 @@ describe("Config Command — execute", () => {
 
     await execute(interaction);
 
-    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1", "user");
+    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1", "admin");
     expect(userSend).toHaveBeenCalledWith(
       expect.stringContaining("https://example.test/admin/s/tok"),
     );
@@ -250,21 +249,17 @@ describe("Config Command — execute", () => {
     expect(dm).toContain("/me/");
   });
 
-  it("issues a user-role session for non-administrators", async () => {
-    mockCreateSession.mockResolvedValue({
-      url: "https://example.test/admin/s/tok",
-      expiresAt: new Date(Date.now() + 10 * 60_000),
-      role: "user",
-    });
+  it("rejects non-administrators and points them to /me", async () => {
     const interaction = buildInteraction({ permissionsBitfield: "0" });
 
     await execute(interaction);
 
-    expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1", "user");
-    // Non-admin DM body must NOT advertise the admin panel.
-    const dm = userSend.mock.calls[0][0] as string;
-    expect(dm).toContain("/me/");
-    expect(dm).not.toMatch(/admin panel/i);
+    expect(deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
+    expect(editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("`/me`"),
+    });
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(userSend).not.toHaveBeenCalled();
   });
 
   it("falls back to ephemeral reply when DM fails", async () => {

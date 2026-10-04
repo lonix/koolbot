@@ -87,8 +87,8 @@ export function renderSignedOut(
       "<h1>Signed out</h1>",
       message ? `<p>${escapeHtml(message)}</p>` : "",
       revoked
-        ? "<p>Your session has been revoked. Run <code>/config</code> in Discord to start a new one.</p>"
-        : "<p>This browser has been signed out, but the server could not confirm your session was revoked; it will expire on its own. Run <code>/config</code> in Discord to start a new one.</p>",
+        ? "<p>Your session has been revoked. Run <code>/me</code> (or <code>/config</code> for admins) in Discord to start a new one.</p>"
+        : "<p>This browser has been signed out, but the server could not confirm your session was revoked; it will expire on its own. Run <code>/me</code> (or <code>/config</code> for admins) in Discord to start a new one.</p>",
     ].join(""),
   );
 }
@@ -117,7 +117,7 @@ export function renderInvalidLink(): string {
     "Invalid link",
     [
       "<h1>Link invalid or expired</h1>",
-      "<p>Magic-link tokens are single-use and expire quickly. Run <code>/config</code> in Discord again to receive a fresh link.</p>",
+      "<p>Magic-link tokens are single-use and expire quickly. Run <code>/me</code> (or <code>/config</code> for admins) in Discord again to receive a fresh link.</p>",
     ].join(""),
   );
 }

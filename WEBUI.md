@@ -4,13 +4,12 @@ The Web UI is the **only** admin surface for KoolBot from v1.0 onward.
 Everything that used to live behind `/config set`, `/permissions`, `/setup`,
 `/announce`, `/poll`, `/reactrole`, `/notice`, `/dbtrunk`, `/vc`, and
 `/botstats` is now reached by running a single Discord slash command,
-`/config`, which DMs you a one-time sign-in link.
+`/config` (Administrators only), which DMs you a one-time sign-in link.
 
-Since #481 the same `/config` flow also opens a **user self-service
-surface** at `/me/*` — non-admin guild members can manage their own
-preferences (notifications, Rewind, etc.) without ever touching the
-admin panel, while admins can hop between the two surfaces using a
-single redeemed session.
+Since #481 a **user self-service surface** at `/me/*` lets guild members
+manage their own preferences (notifications, Rewind, etc.) without ever
+touching the admin panel. Members reach it with `/me` (#1016); admins can
+hop between the two surfaces from their `/config` session.
 
 This document explains how to enable it, expose it, and operate it.
 
@@ -43,7 +42,7 @@ This document explains how to enable it, expose it, and operate it.
 2. Publish or reverse-proxy port `3000` so the URL in `WEBUI_BASE_URL`
    actually reaches the container.
 3. Restart the bot.
-4. In Discord, run `/config`. The bot DMs you a single-use link.
+4. In Discord, run `/config` (Administrators only). The bot DMs you a single-use link.
 5. Click the link, configure the bot, click **Finish** when you're done.
 
 The Web UI mounts on the **same Express server** that already serves
@@ -64,9 +63,14 @@ gated by the same magic-link flow:
 
 What changes per session:
 
-- **Non-admin guild member runs `/config`.** They get a session with
-  `role:user`, the DM points at `/me/`, and `/admin/*` returns 403
-  (the page tells them to head to `/me`).
+- **Any guild member runs `/me`.** They get a session with
+  `role:user` (even if they are an administrator, so a personal link never
+  carries admin scope), the DM points at `/me/`, and `/admin/*` returns 403
+  (the page tells them to head to `/me`). `/me` has no `me.enabled` key:
+  it is registered when the Web UI is on and at least one `/me/*` surface
+  is enabled (see `src/web/me-surfaces.ts`).
+- **A non-admin runs `/config`.** `/config` is hidden from them in the
+  command picker and, if reached anyway, replies pointing them to `/me`.
 - **Administrator runs `/config`.** They get a session with `role:admin`.
   The DM mentions both entry points. They land on `/admin/` by default,
   but every admin page header carries a "My preferences" link that takes
@@ -85,12 +89,10 @@ What changes per session:
 > session model, layout, and self-scope helper are all in place so those
 > issues can bolt on without touching auth, routing, or layout.
 
-The role is decided **server-side** at `/config` time from the invoker's
-live guild permissions (`Administrator` bit → `admin`, anything else →
-`user`) and baked into the redeemed session row + signed cookie. The
-slash-command itself is not gated by `default_member_permissions` —
-that would hide the command from non-admins entirely, defeating the
-user surface.
+The role is fixed by the command: `/config` always issues `admin` (and
+re-checks the invoker's live `Administrator` bit, besides registering with
+`default_member_permissions = Administrator`), `/me` always issues `user`.
+It is baked into the redeemed session row + signed cookie.
 
 Audit-log rows produced through the Web UI now record the role the
 session was acting under, so the admin audit page can filter by `admin`

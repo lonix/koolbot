@@ -9,7 +9,7 @@ Complete configuration reference for all KoolBot settings.
 >   **Bootstrap** page; they are never editable from the browser.
 > - **Feature settings** live in MongoDB and are edited exclusively
 >   through the **Web UI**'s Settings, Permissions, Setup Wizard, and
->   per-feature pages. Run `/config` in Discord to get a single-use
+>   per-feature pages. Run `/config` (administrators) in Discord to get a single-use
 >   sign-in link.
 >
 > Legacy `/config set` / `/permissions add` / `/setup wizard` etc. slash
@@ -166,6 +166,8 @@ and `/config` are the exceptions — both are always registered by
 always has access to the Web UI launcher and help discovery. Neither
 has an enablement key in `config-schema.ts` — `command-registry.ts`
 declares them with `configKey: null`, so there is nothing to toggle.
+`/me` also has no key: it is registered whenever the Web UI is enabled
+and at least one `/me/*` surface is on (derived in `src/web/me-surfaces.ts`).
 
 | Setting | Default | Description |
 | --- | --- | --- |

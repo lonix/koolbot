@@ -633,7 +633,7 @@ export class DigestService extends ScheduledService<DigestRunSummary | null> {
       )
       .addFields(fields)
       .setFooter({
-        text: `${footer}\nYou opted in to these. Run /config → Notifications to manage your preferences.`,
+        text: `${footer}\nYou opted in to these. Run /me → Notifications to manage your preferences.`,
       })
       .setTimestamp(new Date());
   }

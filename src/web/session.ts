@@ -402,7 +402,7 @@ function respondUnauthorized(res: Response): void {
         heading: "Sign in required",
         bodyHtml:
           "<p>Your session has expired or you are not signed in. " +
-          "Run <code>/config</code> in Discord to receive a fresh sign-in link.</p>",
+          "Run <code>/me</code> (or <code>/config</code> for admins) in Discord to receive a fresh sign-in link.</p>",
       }),
     );
 }

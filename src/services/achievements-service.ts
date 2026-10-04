@@ -1821,7 +1821,7 @@ export class AchievementsService {
           "",
           "Use `/achievements` to see all your earned badges!",
           "",
-          "Manage notifications: run `/config`.",
+          "Manage notifications: run `/me`.",
         ].join("\n");
 
         await user.send(message);

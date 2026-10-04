@@ -564,7 +564,7 @@ export function renderUserIndexBody(opts: {
     '<div class="card">',
     "<h2>Account context</h2>",
     `<p class="mono">User: ${escapeHtml(opts.discordUserId)} · Guild: ${escapeHtml(opts.guildId)}</p>`,
-    "<p>To sign in as a different user, run <code>/config</code> in Discord with that account.</p>",
+    "<p>To sign in as a different user, run <code>/me</code> in Discord with that account.</p>",
     "</div>",
   ].join("");
 }
