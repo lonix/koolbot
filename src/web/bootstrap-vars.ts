@@ -22,6 +22,7 @@ export const BOOTSTRAP_VARS: readonly BootstrapEnvVar[] = [
   { key: "CLIENT_ID", category: "Discord", isSecret: false },
   { key: "GUILD_ID", category: "Discord", isSecret: false },
   { key: "MONGODB_URI", category: "Database", isSecret: true },
+  { key: "GUILD_MEMBERS_INTENT", category: "Discord", isSecret: false },
   { key: "NODE_ENV", category: "Process", isSecret: false },
   { key: "DEBUG", category: "Process", isSecret: false },
   { key: "WEBUI_ENABLED", category: "WebUI", isSecret: false },

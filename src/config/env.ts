@@ -125,6 +125,13 @@ export const env = Object.freeze({
   get isProduction(): boolean {
     return process.env.NODE_ENV === "production";
   },
+  // Opt-in to the privileged GuildMembers intent (#1038). Intents are fixed at
+  // client construction, before any config is loaded, so this is a bootstrap
+  // env var. Requesting an intent the portal has not enabled makes login fail,
+  // which is why it is never requested by default.
+  get guildMembersIntent(): boolean {
+    return (process.env.GUILD_MEMBERS_INTENT || "").toLowerCase() === "true";
+  },
   webui: Object.freeze({
     get enabled(): boolean {
       return (process.env.WEBUI_ENABLED || "").toLowerCase() === "true";

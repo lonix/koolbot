@@ -34,6 +34,7 @@ Complete configuration reference for all KoolBot settings.
 - [Voice Channel Cleanup](#-voice-channel-cleanup)
 - [Message Tracking](#-message-tracking)
 - [Reaction Tracking](#-reaction-tracking)
+- [Name History](#-name-history)
 - [Announcements](#-announcements)
 - [Achievements System](#-achievements-system)
 - [Milestone Celebrations](#-milestone-celebrations)
@@ -104,6 +105,18 @@ WEBUI_INACTIVITY_TIMEOUT_MINUTES=30
 
 See [WEBUI.md → Bootstrap environment variables](WEBUI.md#bootstrap-environment-variables)
 for full descriptions and threat-model notes.
+
+### Server nickname history (optional)
+
+```env
+# Request the privileged GuildMembers intent so the bot is told about server
+# nickname changes (used by Name History). Off by default: turning it on
+# without first enabling "Server Members Intent" in the Discord developer
+# portal makes login fail.
+GUILD_MEMBERS_INTENT=false
+```
+
+See [Name History](#-name-history).
 
 ### Prometheus metrics (optional)
 
@@ -1147,6 +1160,36 @@ all-time leaderboards.
 
 ---
 
+## 📛 Name History
+
+Remember the usernames, global display names and server nicknames members have
+used, so `/aka @user` can answer "what did they used to go by?". History only
+starts from when `namehistory.enabled` was turned on — nothing is back-filled.
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `aka.enabled` | `false` | Enable the `/aka` command |
+| `namehistory.enabled` | `false` | Record names as the bot sees them. Works even while `/aka` is off, so history can build up first |
+| `namehistory.retention_days` | `365` | Days to keep a name that has not been seen again before the daily cleanup prunes it. Set to `0` to keep names forever |
+
+**How names are captured:**
+
+- Username and display-name changes arrive via Discord's `userUpdate` event
+  (no privileged intent; only fires for users the bot has cached).
+- The bot also snapshots a member whenever it already sees them — a message,
+  a reaction, a voice join, or a `/aka` lookup. Unchanged members are
+  throttled in memory, so this is not a database write per event.
+- **Server nicknames** need the privileged `GuildMembers` intent. Enable
+  **Server Members Intent** in the Discord developer portal, then set
+  `GUILD_MEMBERS_INTENT=true` in `.env`. Without it the bot logs a startup
+  warning, nicknames are recorded only when the bot happens to see the member
+  (they're still captured on messages and voice joins), and `/aka` says so.
+
+**Privacy:** members who opted out of tracking are never recorded. The
+history is included in `/me/privacy` data export, and removed by a data reset.
+
+---
+
 ## 😀 Reaction Tracking
 
 Track how many reactions each user **gives** (adds to other people's
@@ -1493,6 +1536,12 @@ leave the graph in a broken state.
 - `birthdays.mention` (bool, default: true)
 - `birthdays.role_id` (string, default: "")
 - `birthdays.role_duration_hours` (number, default: 24)
+
+#### Name History
+
+- `aka.enabled` (bool, default: false)
+- `namehistory.enabled` (bool, default: false)
+- `namehistory.retention_days` (number, default: 365)
 
 #### Moderation
 

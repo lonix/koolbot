@@ -487,6 +487,9 @@ describe("Config Schema", () => {
       "messagetracking.enabled": false,
       "reactiontracking.enabled": false,
       "moderation.enabled": false,
+      // Name history (#1038) — both gates ship off.
+      "aka.enabled": false,
+      "namehistory.enabled": false,
       "reminders.enabled": false,
       "privacy.enabled": false,
 

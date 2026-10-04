@@ -117,6 +117,7 @@ describe("PROTECTED_KEYS", () => {
         "DEBUG",
         "DISCORD_TOKEN",
         "GUILD_ID",
+        "GUILD_MEMBERS_INTENT",
         "MONGODB_URI",
         "NODE_ENV",
         "WEBUI_BASE_URL",

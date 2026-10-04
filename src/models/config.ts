@@ -27,6 +27,7 @@ export const CONFIG_CATEGORIES = [
   "lfg",
   "messagetracking",
   "moderation",
+  "namehistory",
   "notices",
   "ping",
   "polls",

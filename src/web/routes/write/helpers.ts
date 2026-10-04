@@ -339,6 +339,24 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "lfg.max_active_per_user",
     "lfg.voice_channel.enabled",
   ],
+  namehistory: [
+    // `namehistory.enabled` stays first: it is the master gate the apply step
+    // derives (the first `.enabled` key), and it controls recording; the
+    // command itself is gated separately by `aka.enabled`.
+    "namehistory.enabled",
+    "aka.enabled",
+    "namehistory.retention_days",
+  ],
+};
+
+/**
+ * Independent `.enabled` gates a feature has beyond its master gate (the
+ * first `.enabled` key in its list). Unticking the feature in the wizard
+ * switches these off too, so a deselected feature cannot keep serving data
+ * through a gate the apply step did not know about.
+ */
+export const WIZARD_FEATURE_EXTRA_GATES: Record<string, string[]> = {
+  namehistory: ["aka.enabled"],
 };
 
 export const WIZARD_FEATURE_ORDER = [
@@ -351,6 +369,7 @@ export const WIZARD_FEATURE_ORDER = [
   "notices",
   "polls",
   "lfg",
+  "namehistory",
 ];
 
 /**

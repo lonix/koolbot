@@ -49,6 +49,7 @@ import { UserAchievements } from "../models/user-achievements.js";
 import { UserBirthday } from "../models/user-birthday.js";
 import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
 import { TrackingOptOut } from "../models/tracking-opt-out.js";
+import { UserNameHistory } from "../models/user-name-history.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
 
@@ -251,6 +252,15 @@ const READERS: Record<string, CollectionReader> = {
   "tracking-opt-out": async ({ userId, guildId }) => {
     const doc = await TrackingOptOut.findOne({ userId, guildId }).lean();
     return { value: doc ? toPlain(doc) : null };
+  },
+
+  "user-name-history": async ({ userId, guildId, maxItems }) => {
+    const rows = await UserNameHistory.find({ userId, guildId })
+      .sort({ lastSeenAt: -1 })
+      .limit(maxItems + 1)
+      .lean();
+    const { rows: kept, truncated } = capped(rows, maxItems);
+    return { value: kept.map(toPlain), truncated };
   },
 
   "user-voice-preferences": async ({ userId }) => {

@@ -67,6 +67,7 @@ import { QuoteChannelManager } from "./quote-channel-manager.js";
 import { quoteService } from "./quote-service.js";
 import { ANONYMISED_USER_ID } from "./user-data-registry.js";
 import { VoiceChannelTracker } from "./voice-channel-tracker.js";
+import { NameHistoryService } from "./name-history-service.js";
 import { TrackingOptOutService } from "./tracking-opt-out-service.js";
 import { WebSessionService } from "./web-session-service.js";
 import { ChannelInvite } from "../models/channel-invite.js";
@@ -79,6 +80,7 @@ import { Reminder } from "../models/reminder.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { UserAchievements } from "../models/user-achievements.js";
+import { UserNameHistory } from "../models/user-name-history.js";
 import { UserNotificationPrefs } from "../models/user-notification-prefs.js";
 import { UserVoicePreferences } from "../models/user-voice-preferences.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
@@ -437,6 +439,17 @@ const DELETERS: Record<string, CollectionDeleter> = {
     },
   },
 
+  "user-name-history": {
+    actions: ["hard-delete"],
+    run: async ({ userId, guildId }, emit) => {
+      const result = await UserNameHistory.deleteMany({ userId, guildId });
+      // Drop the throttle fingerprint too, so the next sighting after the
+      // member's opt-in is written afresh rather than skipped as "unchanged".
+      NameHistoryService.getInstance().forget(guildId, userId);
+      emit(deleted(result.deletedCount));
+    },
+  },
+
   "user-voice-preferences": {
     actions: ["hard-delete"],
     run: async ({ userId }, emit) => {
@@ -586,6 +599,7 @@ export const PURGE_ORDER: readonly string[] = [
   "poll-turnout",
   "user-achievements",
   "user-notification-prefs",
+  "user-name-history",
   "user-voice-preferences",
   "rewind-snapshot",
   "rewind-nudge-state",

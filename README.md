@@ -150,6 +150,7 @@ commands always registered):
 - `/help` — Discover commands (always on)
 - `/voicestats top` / `/voicestats user` — Leaderboards and personal stats (`voicetracking.enabled` + per-subcommand flag)
 - `/seen` — Last-seen lookup (`voicetracking.seen.enabled`)
+- `/aka` — Previously known names for a member (`aka.enabled`)
 - `/achievements` — View earned accolades (`achievements.enabled`)
 - `/quote add` / `/quote edit` — Manage memorable quotes (`quotes.enabled`)
 - `/event` — Create, browse and RSVP to server events (`events.enabled`)
@@ -220,6 +221,7 @@ Web UI's Settings page once the bot is running.
 | **Voice Tracking** | Time in voice, leaderboards, last-seen, excluded channels |
 | **Message Tracking** | Per-user, per-channel text activity with retention-trimmed detail |
 | **Reaction Tracking** | Reactions given and received, lifetime and per-year |
+| **Name History** | Remembered usernames, display names and nicknames, shown by `/aka` |
 | **Ping** | The `/ping` latency check command |
 | **Quotes** | Cooldowns, permissions, max length |
 | **Rate Limiting** | Command spam protection with admin bypass |
@@ -315,6 +317,7 @@ Usage from Discord:
 /voicestats user period:alltime
 
 /seen user:@JohnDoe                 # Last-seen lookup
+/aka user:@JohnDoe                  # Previously known names
 ```
 
 ### Automated stats announcements

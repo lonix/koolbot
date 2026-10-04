@@ -193,6 +193,11 @@ export interface ConfigSchema {
   // Moderation log (issue #728)
   "moderation.enabled": boolean;
   "moderation.retention_days": number; // 0 = keep history forever (issue #742)
+
+  // Name history + /aka (issue #1038)
+  "aka.enabled": boolean;
+  "namehistory.enabled": boolean;
+  "namehistory.retention_days": number; // 0 = keep forever
 }
 
 /**
@@ -481,6 +486,13 @@ export const defaultConfig: ConfigSchema = {
   // 0 disables pruning entirely for operators who want the log kept forever.
   "moderation.enabled": false,
   "moderation.retention_days": 365,
+
+  // Name history (#1038). Both gates off (rule 1). `namehistory.enabled`
+  // records names even while the command is off, so history can build up
+  // before the community turns /aka on. 0 = keep forever.
+  "aka.enabled": false,
+  "namehistory.enabled": false,
+  "namehistory.retention_days": 365,
 };
 
 /**
@@ -874,6 +886,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Reaction Tracking",
     description:
       "Per-user counts of reactions given and received, stored as lifetime + per-year totals. Data-capture foundation for a future Rewind stat; surfacing lives in a follow-up.",
+  },
+  namehistory: {
+    title: "Name History",
+    description:
+      "Remember the usernames, display names and server nicknames members have used, and show them with /aka.",
   },
   ping: {
     title: "Ping",
@@ -1968,6 +1985,28 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "Days to keep moderation-log rows before the daily cleanup job prunes them. Set to 0 to keep moderation history forever.",
     category: "moderation",
+    type: "number",
+    min: RETENTION_MIN,
+  },
+  "aka.enabled": {
+    label: "/aka command enabled",
+    description:
+      "Enable the /aka command, which lists the names a member has previously gone by. Only shows history recorded while Name History recording is on.",
+    category: "namehistory",
+    type: "boolean",
+  },
+  "namehistory.enabled": {
+    label: "Record name history",
+    description:
+      "Record usernames, display names and (with the GuildMembers intent) server nicknames as the bot sees them. Recording works even while /aka is off. History starts from when this is turned on.",
+    category: "namehistory",
+    type: "boolean",
+  },
+  "namehistory.retention_days": {
+    label: "Name history retention (days)",
+    description:
+      "Days to keep a name that has not been seen again before the daily cleanup job prunes it. Set to 0 to keep name history forever.",
+    category: "namehistory",
     type: "number",
     min: RETENTION_MIN,
   },

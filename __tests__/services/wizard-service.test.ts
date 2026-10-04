@@ -234,6 +234,15 @@ describe("WizardService", () => {
       expect(mockConfigService.triggerReload).toHaveBeenCalledTimes(1);
     });
 
+    it("stores each key under its declared category, not its prefix", async () => {
+      service.addConfiguration(mockUserId, mockGuildId, "aka.enabled", true);
+      await service.applyConfiguration(mockUserId, mockGuildId);
+      const call = mockConfigService.set.mock.calls.find(
+        (c: unknown[]) => c[0] === "aka.enabled",
+      );
+      expect(call?.[3]).toBe("namehistory");
+    });
+
     it("returns a failure result when no session exists", async () => {
       const result = await service.applyConfiguration("nobody", "nowhere");
 

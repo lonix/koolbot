@@ -36,6 +36,7 @@ import {
   navStatusForPage,
   WIZARD_FEATURE_SETTINGS,
   WIZARD_FEATURE_ORDER,
+  WIZARD_FEATURE_EXTRA_GATES,
   wizardApplyFailureMessage,
   coerceConfigValue,
   truncateFlash,
@@ -407,12 +408,17 @@ export function createWizardRouter(client: Client): Router {
           k.endsWith(".enabled"),
         );
         if (!enabledKey) continue;
-        wizard.addConfiguration(
-          session.discordUserId,
-          session.guildId,
+        for (const gate of [
           enabledKey,
-          false,
-        );
+          ...(WIZARD_FEATURE_EXTRA_GATES[fk] ?? []),
+        ]) {
+          wizard.addConfiguration(
+            session.discordUserId,
+            session.guildId,
+            gate,
+            false,
+          );
+        }
       }
 
       const pendingKeys = Object.keys(state.configuration);
