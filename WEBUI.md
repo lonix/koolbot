@@ -165,13 +165,13 @@ Key properties:
   all of *your* unrevoked sessions and mints a new one. Other admins'
   sessions are untouched.
 - **Permissions re-checked every request.** The cookie-session middleware
-  re-runs `PermissionsService.checkCommandPermission(uid, gid, "config")`
-  on every hit. That check returns `false` (and the middleware logs the
-  user out) when the user has lost Administrator **and** the bot's
-  Permissions page has explicit role gating configured for `config` that
-  no longer matches the user's roles. With no explicit gating configured,
-  a re-check after demotion still passes — the magic-link gate at
-  `/admin/s/<token>` is the primary defense, not this revalidation.
+  re-validates the session on every hit, per role: an `admin` session
+  requires the user's **live Administrator permission**
+  (`PermissionsService.isAdministrator`), so a demoted admin is logged out
+  on the next request; a `user` session must pass the `me` command's role
+  gating on the Permissions page (with none configured, every member
+  passes). `/config` is fixed Administrator-only and is not editable on
+  the Permissions page.
   If the check itself cannot be performed (Discord API hiccup, rate
   limit), the request fails with a 503 and the session is left intact —
   only a definitive denial revokes it.
@@ -643,17 +643,9 @@ Could not DM web sign-in link to <user-id>; falling back to ephemeral reply
 | Idle longer than inactivity window | Cookie is rejected on the next request; the DB row remains until TTL or explicit revoke |
 | Reach session's hard `expiresAt`   | Cookie is rejected on the next request; the DB row is past its TTL                      |
 | Click **Finish** in the UI         | Session revoked server-side; cookie cleared                                             |
-| Admin role removed in Discord      | Next request re-runs the permission check — caveat ↓                                    |
+| Administrator removed in Discord   | Next request revokes the admin session (live Administrator check)                       |
 | Bot restart                        | Sessions survive (stored in MongoDB)                                                    |
 | `WEBUI_SESSION_SECRET` rotated     | All existing sessions and outstanding tokens invalid                                    |
-
-> **Caveat on the "admin role removed" row.** The permission re-check
-> only returns `false` when there's explicit role gating configured for
-> `config` on the Web UI's Permissions page that no longer matches the
-> user's roles. With no explicit gating, the check returns `true` and
-> the session continues. If you want demotions to log existing sessions
-> out, configure Permissions → `config` to an admin-only role, then
-> the role removal will kick the session on the next request.
 
 Two admins can be in the Web UI at the same time. Re-running `/config`
 only invalidates **your own** sessions.
@@ -1471,8 +1463,9 @@ Possible causes (in roughly decreasing likelihood):
 - The DB session row passed its hard cap (`WEBUI_SESSION_LIFETIME_HOURS`
   from redemption).
 - You ran `/me` or `/config` again and revoked this session server-side.
-- Permission re-check failed: someone configured Web UI Permissions →
-  `config` to restrict the command, and your roles no longer match.
+- Permission re-check failed: an admin session lost the Administrator
+  permission, or (user sessions) Web UI Permissions → `me` now restricts
+  the command to roles you no longer have.
 - The bot was restarted with a new `WEBUI_SESSION_SECRET`, invalidating
   the cookie signature.
 

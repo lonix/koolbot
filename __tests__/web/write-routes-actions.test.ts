@@ -162,6 +162,18 @@ describe("POST /permissions/set", () => {
     expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 
+  it("rejects edits to /config, which is always Administrator-only (#1016)", async () => {
+    const res = await harness.post("/permissions/set", {
+      command: "config",
+      roleIds: ["role-a"],
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toContain("Administrator-only");
+    expect(mockSetCommandPermissions).not.toHaveBeenCalled();
+    expect(mockClearCommandPermissions).not.toHaveBeenCalled();
+  });
+
   it("stores the roles a <select multiple> posted as repeated fields", async () => {
     const res = await harness.post("/permissions/set", {
       command: "ping",

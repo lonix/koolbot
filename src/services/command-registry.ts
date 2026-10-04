@@ -37,6 +37,13 @@ export async function isCommandEnabled(
   return true;
 }
 
+/**
+ * The command that is always Administrator-only (#1016). Role gating on the
+ * Web UI's Permissions page cannot affect it, so that page neither lists nor
+ * accepts edits for it.
+ */
+export const ADMIN_ONLY_COMMAND = "config";
+
 export const COMMAND_CONFIGS: readonly CommandConfig[] = [
   { name: "ping", configKey: "ping.enabled", file: "ping" },
   { name: "help", configKey: null, file: "help" }, // Always enabled - core feature

@@ -16,6 +16,7 @@ import { ChannelType, Client, type Guild } from "discord.js";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
+import { ADMIN_ONLY_COMMAND } from "../services/command-registry.js";
 import {
   defaultConfig,
   getDependencies,
@@ -1029,7 +1030,11 @@ export function createReadOnlyRouter(
       const common = await commonFromReq(req);
       const permissions = PermissionsService.getInstance(client);
       const all = await permissions.listAllPermissions(common.guildId);
-      const commands = Array.from(client.commands.keys()).sort();
+      // `/config` is fixed Administrator-only (#1016), so role gating on it
+      // could never take effect; keep it off the editable list.
+      const commands = Array.from(client.commands.keys())
+        .filter((name) => name !== ADMIN_ONLY_COMMAND)
+        .sort();
       const { names: roleNames, roles: guildRoles } = await fetchRoleData(
         client,
         common.guildId,

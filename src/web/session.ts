@@ -182,9 +182,10 @@ function readSessionCookie(req: Request): CookiePayload | null {
 /**
  * Session middleware: verifies the signed cookie, enforces the sliding
  * inactivity window, hard-caps the session to its server-side expiresAt,
- * and re-checks the user's command permission on every request via
- * PermissionsService (admins always pass; otherwise the configured roles
- * for "config" must allow the user). Only a definitive denial revokes
+ * and re-validates the session's authority on every request via
+ * PermissionsService, per role (#1016): `admin` sessions require the live
+ * Administrator permission; `user` sessions must pass the `me` command's
+ * role gating (admins always pass it). Only a definitive denial revokes
  * the session; if the check itself fails transiently the request gets a
  * 503 and the session survives (#781).
  */
