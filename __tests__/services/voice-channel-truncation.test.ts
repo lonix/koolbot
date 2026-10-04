@@ -82,12 +82,12 @@ describe("VoiceChannelTruncationService", () => {
     ): { isActive: boolean; cronTime: { source: unknown } } | null {
       return (
         svc as unknown as {
-          cleanupJob: {
+          job: {
             isActive: boolean;
             cronTime: { source: unknown };
           } | null;
         }
-      ).cleanupJob;
+      ).job;
     }
 
     it("registers a reload callback that replaces the old cron job with the new schedule", async () => {
@@ -120,14 +120,20 @@ describe("VoiceChannelTruncationService", () => {
       svc.destroy();
     });
 
-    it("does not clear the overlap guard of an in-flight cleanup when reloading", async () => {
+    it("leaves an in-flight cleanup running when reloading", async () => {
       const { svc, getReloadCallback } = createServiceWithCapturedReload(true);
 
-      (svc as unknown as { isRunning: boolean }).isRunning = true;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      (svc as unknown as { inFlight: Promise<unknown> | null }).inFlight = gate;
       await getReloadCallback()!();
 
       expect(svc.getStatus().isRunning).toBe(true);
       expect(svc.getStatus().isScheduled).toBe(true);
+      release();
+      (svc as unknown as { inFlight: Promise<unknown> | null }).inFlight = null;
       svc.destroy();
     });
 

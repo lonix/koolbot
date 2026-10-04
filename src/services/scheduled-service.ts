@@ -226,6 +226,16 @@ export abstract class ScheduledService<TSummary = void> {
     }
   }
 
+  /** Whether a cron job is currently armed (false while disabled or idle). */
+  protected isScheduled(): boolean {
+    return this.job !== null;
+  }
+
+  /** Whether a run is in flight right now. */
+  protected isRunning(): boolean {
+    return this.inFlight !== null;
+  }
+
   /**
    * Resolve once any run already in flight has finished, however it ended;
    * resolves straight away when idle. Lets a caller order its own work after
