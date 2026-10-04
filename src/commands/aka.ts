@@ -38,19 +38,52 @@ function stamp(date: Date): string {
   return `<t:${Math.floor(new Date(date).getTime() / 1000)}:D>`;
 }
 
-/** Render grouped history; exported so the layout can be tested directly. */
-export function formatHistory(history: NameHistoryByKind): string {
-  const sections: string[] = [];
+/** Discord's message limit is 2000; leave headroom. */
+const CHUNK_LIMIT = 1900;
+
+/** Render grouped history as lines (section headers + one line per name). */
+export function historyLines(history: NameHistoryByKind): string[] {
+  const lines: string[] = [];
   for (const kind of NAME_KINDS) {
     const rows = history[kind];
     if (rows.length === 0) continue;
-    const lines = rows.map(
-      (row) =>
+    if (lines.length > 0) lines.push("");
+    lines.push(`**${KIND_TITLES[kind]}**`);
+    for (const row of rows) {
+      lines.push(
         `• **${plain(row.name)}** — first seen ${stamp(row.firstSeenAt)}, last seen ${stamp(row.lastSeenAt)}`,
-    );
-    sections.push(`**${KIND_TITLES[kind]}**\n${lines.join("\n")}`);
+      );
+    }
   }
-  return sections.join("\n\n");
+  return lines;
+}
+
+/** Render grouped history as one string. */
+export function formatHistory(history: NameHistoryByKind): string {
+  return historyLines(history).join("\n");
+}
+
+/**
+ * Pack whole lines into messages no longer than `limit`, never splitting a
+ * line, so a long history spills into follow-ups instead of being cut off.
+ */
+export function chunkLines(
+  lines: string[],
+  limit: number = CHUNK_LIMIT,
+): string[] {
+  const chunks: string[] = [];
+  let current = "";
+  for (const line of lines) {
+    const next = current ? `${current}\n${line}` : line;
+    if (next.length > limit && current) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = next;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 export async function execute(
@@ -92,7 +125,7 @@ export async function execute(
       interaction.guildId,
       targetUser.id,
     );
-    const body = formatHistory(history);
+    const lines = historyLines(history);
     const notes: string[] = [];
     if (!recording) {
       notes.push(
@@ -100,19 +133,39 @@ export async function execute(
       );
     } else if (!env.guildMembersIntent) {
       notes.push(
-        "Server nickname history isn't being recorded: the bot's `GuildMembers` intent is off.",
+        "Live nickname-change tracking is off (the bot's `GuildMembers` intent isn't enabled), so nicknames are only captured when the bot happens to see the member.",
       );
     }
 
     const header = `Names previously known for <@${targetUser.id}>`;
-    const text = body
-      ? `${header}\n\n${body}`
-      : `No name history recorded yet for <@${targetUser.id}>. History only starts from when recording was enabled.`;
-    const footer = notes.length ? `\n\n_${notes.join(" ")}_` : "";
+    const messages =
+      lines.length > 0
+        ? chunkLines([header, "", ...lines])
+        : [
+            `No name history recorded yet for <@${targetUser.id}>. History only starts from when recording was enabled.`,
+          ];
+    if (notes.length > 0) {
+      const footer = `_${notes.join(" ")}_`;
+      const last = messages[messages.length - 1];
+      if (last.length + footer.length + 2 <= 2000) {
+        messages[messages.length - 1] = `${last}\n\n${footer}`;
+      } else {
+        messages.push(footer);
+      }
+    }
+
+    const [first, ...rest] = messages;
     await interaction.editReply({
-      content: (text + footer).slice(0, 2000),
+      content: first,
       allowedMentions: { parse: [] },
     });
+    for (const content of rest) {
+      await interaction.followUp({
+        content,
+        flags: MessageFlags.Ephemeral,
+        allowedMentions: { parse: [] },
+      });
+    }
   } catch (error) {
     logger.error("Error in aka command:", error);
     await safeReply(interaction, {

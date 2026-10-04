@@ -49,8 +49,16 @@ const MAX_NAME_LENGTH = 64;
 export class NameHistoryService {
   private static instance: NameHistoryService | null = null;
   private configService: ConfigService;
-  /** `guildId:userId` -> fingerprint of the last recorded names + time. */
-  private recent = new Map<string, { fingerprint: string; at: number }>();
+  /**
+   * `guildId:userId` -> per-kind last recorded name and time. Tracked per
+   * kind so a user-only snapshot (no nickname known, e.g. from a reaction)
+   * and a full member snapshot (message, voice join) don't evict each other
+   * and defeat the throttle by alternating.
+   */
+  private recent = new Map<
+    string,
+    Partial<Record<NameKind, { name: string; at: number }>>
+  >();
 
   private constructor() {
     this.configService = ConfigService.getInstance();
@@ -91,13 +99,16 @@ export class NameHistoryService {
       if (names.length === 0) return;
 
       const key = `${guildId}:${user.id}`;
-      const fingerprint = JSON.stringify(names);
       const cached = this.recent.get(key);
       const now = Date.now();
       if (
         cached &&
-        cached.fingerprint === fingerprint &&
-        now - cached.at < SNAPSHOT_THROTTLE_MS
+        names.every(({ kind, name }) => {
+          const last = cached[kind];
+          return (
+            last && last.name === name && now - last.at < SNAPSHOT_THROTTLE_MS
+          );
+        })
       ) {
         return;
       }
@@ -113,7 +124,9 @@ export class NameHistoryService {
       );
       if (wrote) {
         if (this.recent.size >= MAX_CACHE_ENTRIES) this.recent.clear();
-        this.recent.set(key, { fingerprint, at: now });
+        const entry = this.recent.get(key) ?? {};
+        for (const { kind, name } of names) entry[kind] = { name, at: now };
+        this.recent.set(key, entry);
       }
     } catch (error) {
       logger.error(

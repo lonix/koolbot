@@ -244,8 +244,8 @@ dates. The reply is only visible to you.
 
 **Enable:** Web UI → Settings:
 
-- `aka.enabled = true`
-- `namehistory.enabled = true` (records the names; history starts from when this is turned on)
+- `aka.enabled = true` (turns the command on)
+- `namehistory.enabled = true` (separate switch that records the names; `/aka` has nothing to show until it has been on for a while)
 
 Then reload commands.
 

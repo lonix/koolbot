@@ -118,6 +118,19 @@ describe("NameHistoryService", () => {
     expect(mockBulkWrite).toHaveBeenCalledTimes(2);
   });
 
+  it("alternating user-only and member snapshots does not defeat the throttle", async () => {
+    const service = NameHistoryService.getInstance();
+    await service.recordUser("g1", user, "Ally"); // message
+    await service.recordUser("g1", user); // reaction (nickname unknown)
+    await service.recordUser("g1", user, "Ally"); // message again
+    expect(mockBulkWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the admission ticket through to trackWrite", async () => {
+    await NameHistoryService.getInstance().recordUser("g1", user, null, 42);
+    expect(mockTrackWrite.mock.calls[0]?.[3]).toBe(42);
+  });
+
   it("re-snapshots an unchanged member after the throttle window", async () => {
     const service = NameHistoryService.getInstance();
     const now = jest.spyOn(Date, "now");

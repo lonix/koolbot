@@ -339,6 +339,14 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "lfg.max_active_per_user",
     "lfg.voice_channel.enabled",
   ],
+  namehistory: [
+    // `namehistory.enabled` stays first: it is the master gate the apply step
+    // derives (the first `.enabled` key), and it controls recording; the
+    // command itself is gated separately by `aka.enabled`.
+    "namehistory.enabled",
+    "aka.enabled",
+    "namehistory.retention_days",
+  ],
 };
 
 export const WIZARD_FEATURE_ORDER = [
@@ -351,6 +359,7 @@ export const WIZARD_FEATURE_ORDER = [
   "notices",
   "polls",
   "lfg",
+  "namehistory",
 ];
 
 /**

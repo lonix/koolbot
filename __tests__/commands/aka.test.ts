@@ -23,7 +23,7 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   },
 }));
 
-const { data, execute, formatHistory } =
+const { data, execute, formatHistory, chunkLines } =
   await import("../../src/commands/aka.js");
 
 const d = new Date("2025-03-01T00:00:00Z");
@@ -39,7 +39,9 @@ function makeInteraction(guildId: string | null = "g1") {
     reply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     deferReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
     editReply: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    followUp: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
   } as unknown as ChatInputCommandInteraction & {
+    followUp: jest.Mock;
     reply: jest.Mock;
     deferReply: jest.Mock;
     editReply: jest.Mock;
@@ -119,6 +121,32 @@ describe("aka command", () => {
     await execute(i);
     expect(i.reply).toHaveBeenCalled();
     expect(i.deferReply).not.toHaveBeenCalled();
+  });
+
+  it("spills a long history into ephemeral follow-ups without dropping rows", async () => {
+    const rows = Array.from({ length: 60 }, (_, n) => ({
+      name: `name_${n}_${"x".repeat(30)}`,
+      firstSeenAt: d,
+      lastSeenAt: d,
+    }));
+    mockGetHistory.mockResolvedValue({ ...empty, username: rows });
+    const i = makeInteraction();
+    await execute(i);
+    const sent = [
+      (i.editReply.mock.calls[0] as [{ content: string }])[0].content,
+      ...(i.followUp.mock.calls as [{ content: string }][]).map(
+        (c) => c[0].content,
+      ),
+    ];
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.every((m) => m.length <= 2000)).toBe(true);
+    const all = sent.join("\n");
+    for (let n = 0; n < 60; n++) expect(all).toContain(`name\\_${n}\\_`);
+  });
+
+  it("chunkLines never splits a line", () => {
+    const chunks = chunkLines(["aaaa", "bbbb", "cccc"], 9);
+    expect(chunks).toEqual(["aaaa\nbbbb", "cccc"]);
   });
 
   it("formatHistory escapes markdown and mentions in names", () => {

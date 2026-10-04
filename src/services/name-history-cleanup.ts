@@ -1,61 +1,73 @@
-import { CronJob } from "cron";
+import type { Client } from "discord.js";
 import logger from "../utils/logger.js";
 import { UserNameHistory } from "../models/user-name-history.js";
-import { ConfigService } from "./config-service.js";
+import { ScheduledService } from "./scheduled-service.js";
+
+/** Daily at 03:45 — offset from the moderation-log cleanup at 03:30. */
+const CLEANUP_CRON = "45 3 * * *";
+
+export interface NameHistoryCleanupSummary {
+  deleted: number;
+}
 
 /**
  * Daily prune of name-history rows not seen for more than
- * `namehistory.retention_days` (#1038). Runs at 03:45, offset from the
- * moderation-log cleanup at 03:30. `0` (or negative) keeps history forever.
+ * `namehistory.retention_days` (#1038). `0` (or negative) keeps history
+ * forever.
  *
- * Gated on `namehistory.enabled`, so a disabled feature does not keep
- * pruning a static table.
+ * Built on `ScheduledService`, so it is armed only while
+ * `namehistory.enabled` is on and re-arms on `/config reload`; run
+ * coalescing and tick-failure handling come from the base class.
  */
-export class NameHistoryCleanupService {
+export class NameHistoryCleanupService extends ScheduledService<NameHistoryCleanupSummary | null> {
   private static instance: NameHistoryCleanupService;
-  private configService: ConfigService;
-  private job: CronJob | null = null;
 
-  private constructor() {
-    this.configService = ConfigService.getInstance();
+  private constructor(client: Client) {
+    super(client, {
+      label: "Name history cleanup",
+      disabledMessage: "Name history is disabled; cleanup not scheduled",
+      cronContext: "name history cleanup",
+      runLabel: "Name history cleanup",
+    });
   }
 
-  public static getInstance(): NameHistoryCleanupService {
+  public static getInstance(client: Client): NameHistoryCleanupService {
     if (!NameHistoryCleanupService.instance) {
-      NameHistoryCleanupService.instance = new NameHistoryCleanupService();
+      NameHistoryCleanupService.instance = new NameHistoryCleanupService(
+        client,
+      );
+    } else if (NameHistoryCleanupService.instance.client !== client) {
+      throw new Error(
+        "NameHistoryCleanupService already initialised with a different client",
+      );
     }
     return NameHistoryCleanupService.instance;
   }
 
   public static reset(): void {
+    if (NameHistoryCleanupService.instance) {
+      NameHistoryCleanupService.instance.destroy();
+    }
     NameHistoryCleanupService.instance =
       undefined as unknown as NameHistoryCleanupService;
   }
 
-  public start(): void {
-    if (this.job) return;
-    this.job = new CronJob("45 3 * * *", () => {
-      this.runCleanup().catch((err) => {
-        logger.error("Name history cleanup failed:", err);
-      });
-    });
-    this.job.start();
-    logger.info("Name history cleanup scheduled (daily at 03:45)");
-  }
-
-  public destroy(): void {
-    if (this.job) {
-      this.job.stop();
-      this.job = null;
-    }
-  }
-
-  public async runCleanup(): Promise<{ deleted: number } | null> {
-    const enabled = await this.configService
+  protected async isEnabled(): Promise<boolean> {
+    return this.configService
       .getBoolean("namehistory.enabled", false)
       .catch(() => false);
-    if (!enabled) return null;
+  }
 
+  protected async resolveSchedule(): Promise<string> {
+    return CLEANUP_CRON;
+  }
+
+  /** Run one prune now (same as `runNow`; kept for callers and tests). */
+  public runCleanup(): Promise<NameHistoryCleanupSummary | null> {
+    return this.runNow();
+  }
+
+  protected async runOnce(): Promise<NameHistoryCleanupSummary | null> {
     const retentionDays = await this.configService
       .getNumber("namehistory.retention_days", 365)
       .catch(() => 365);

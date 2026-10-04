@@ -513,7 +513,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         WebAuditLogCleanupService.getInstance().destroy();
         VersionCheckService.getInstance().destroy();
         ModerationLogCleanupService.getInstance().destroy();
-        NameHistoryCleanupService.getInstance().destroy();
+        nameHistoryCleanup?.destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
         pollParticipationTracker.destroy();
@@ -587,6 +587,7 @@ let noticesChannelManager: NoticesChannelManager;
 let reactionRoleService: ReactionRoleService;
 let pollService: PollService;
 let leaderboardRoleService: LeaderboardRoleService;
+let nameHistoryCleanup: NameHistoryCleanupService;
 let digestService: DigestService;
 let rewindNudgeService: RewindNudgeService;
 let birthdayService: BirthdayService;
@@ -781,7 +782,8 @@ async function initializeServices(): Promise<void> {
 
     // Name history (#1038): retention cleanup cron, plus a clear startup
     // warning when nicknames cannot be recorded for lack of the intent.
-    NameHistoryCleanupService.getInstance().start();
+    nameHistoryCleanup = NameHistoryCleanupService.getInstance(client);
+    await nameHistoryCleanup.start();
     if (
       await ConfigService.getInstance()
         .getBoolean("namehistory.enabled", false)
@@ -1047,11 +1049,16 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 client.on(Events.MessageCreate, async (message) => {
   recordDiscordEvent("messageCreate");
   try {
+    // Before the first await (#918): see the voice handler.
+    const nameAdmission = TrackingOptOutService.getInstance().admission();
     await messageActivityTracker.handleMessageCreate(message);
     // Name history (#1038): a message is a free chance to snapshot the
     // author's names; the service throttles unchanged members to no I/O.
     if (message.member && !message.author.bot) {
-      await NameHistoryService.getInstance().recordMember(message.member);
+      await NameHistoryService.getInstance().recordMember(
+        message.member,
+        nameAdmission,
+      );
     }
   } catch (error) {
     logger.error("Error handling messageCreate:", error);
@@ -1064,6 +1071,7 @@ client.on(Events.MessageCreate, async (message) => {
 // gating (enabled, DM, excluded channels) lives in each service.
 client.on(Events.MessageReactionAdd, async (reaction, user) => {
   recordDiscordEvent("messageReactionAdd");
+  const nameAdmission = TrackingOptOutService.getInstance().admission();
   try {
     // Bots are always ignored; `bot` is populated even on partial users, so
     // guard first to avoid unnecessary fetches for bot reactions.
@@ -1081,6 +1089,8 @@ client.on(Events.MessageReactionAdd, async (reaction, user) => {
       await NameHistoryService.getInstance().recordUser(
         reaction.message.guildId,
         user,
+        undefined,
+        nameAdmission,
       );
     }
     await reactionRoleService.handleReactionAdd(reaction, user);
@@ -1221,14 +1231,22 @@ client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
 client.on(Events.UserUpdate, async (_oldUser, newUser) => {
   recordDiscordEvent("userUpdate");
   if (!env.guildId) return;
-  await NameHistoryService.getInstance().recordUser(env.guildId, newUser);
+  await NameHistoryService.getInstance().recordUser(
+    env.guildId,
+    newUser,
+    undefined,
+    TrackingOptOutService.getInstance().admission(),
+  );
 });
 
 // Nickname changes. Only delivered when the GuildMembers intent is on
 // (GUILD_MEMBERS_INTENT=true); harmless to register either way.
 client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   recordDiscordEvent("guildMemberUpdate");
-  await NameHistoryService.getInstance().recordMember(newMember);
+  await NameHistoryService.getInstance().recordMember(
+    newMember,
+    TrackingOptOutService.getInstance().admission(),
+  );
 });
 
 // Easter egg: Creator detection when joining the server
