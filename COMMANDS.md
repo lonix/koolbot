@@ -1202,9 +1202,10 @@ when its message, role, category, or channel is deleted.
 /me                                 # Open your personal settings (DMs a sign-in link)
 ```
 
-Available to every member. Admins land on the admin panel below; other
-members land on their personal `/me/` self-service surface (notification
-opt-outs, Rewind, personal settings).
+`/config` is Administrator-only and lands on the admin panel below. `/me`
+is available to every member (admins included) and always lands on the
+personal `/me/` self-service surface (notification opt-outs, Rewind,
+personal settings).
 
 Once in the admin Web UI (admin sessions):
 

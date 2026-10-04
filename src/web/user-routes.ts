@@ -25,6 +25,7 @@ import {
   type NotificationPrefs,
 } from "../services/user-notification-prefs-service.js";
 import { ConfigService } from "../services/config-service.js";
+import { readMeSurfaceFlags } from "./me-surfaces.js";
 import { requireCsrf } from "./csrf.js";
 import {
   AuthenticatedRequest,
@@ -217,29 +218,6 @@ export class SelfScopeError extends Error {
 }
 
 /**
- * Whether the Rewind feature (the `/me/rewind` page + its nav entry) is
- * enabled (#608). Distinct from the end-of-year DM nudge, which has its
- * own `rewind.nudge.enabled` toggle handled by `RewindNudgeService`.
- * Defaults to `false`, following the repo's opt-in feature-gate convention.
- */
-async function isRewindFeatureEnabled(): Promise<boolean> {
-  return ConfigService.getInstance().getBoolean("rewind.enabled", false);
-}
-
-/**
- * Whether the per-user voice-preferences feature (`/me/voice` + its nav
- * entry) is enabled (#656). Shares the `voicechannels.presets.enabled`
- * gate with the Discord modal surface so both turn on together. Defaults
- * to `false`, following the repo's opt-in feature-gate convention.
- */
-async function isVoicePresetsEnabled(): Promise<boolean> {
-  return ConfigService.getInstance().getBoolean(
-    "voicechannels.presets.enabled",
-    false,
-  );
-}
-
-/**
  * Whether per-user poll-participation capture is enabled (#655). Gates the
  * read-only "Poll participation" card on the `/me/` overview: when off we
  * skip the lookup entirely and the card is omitted (no rows exist anyway).
@@ -249,15 +227,6 @@ async function isPollParticipationEnabled(): Promise<boolean> {
     "polls.participation.enabled",
     false,
   );
-}
-
-/**
- * Whether birthday celebrations are enabled (#657). Used only to soften
- * the `/me/birthday` page copy — the page stays reachable either way so
- * members can pre-set their date before an admin flips the feature on.
- */
-async function isBirthdayFeatureEnabled(): Promise<boolean> {
-  return ConfigService.getInstance().getBoolean("birthdays.enabled", false);
 }
 
 /**
@@ -383,14 +352,7 @@ async function findActiveResetCooldown(
  * features are disabled — regardless of which page you're on.
  */
 async function readUserFeatureFlags(): Promise<Required<UserFeatureFlags>> {
-  const [rewindEnabled, presetsEnabled, birthdayEnabled, privacyEnabled] =
-    await Promise.all([
-      isRewindFeatureEnabled(),
-      isVoicePresetsEnabled(),
-      isBirthdayFeatureEnabled(),
-      isPrivacyExportEnabled(),
-    ]);
-  return { rewindEnabled, presetsEnabled, birthdayEnabled, privacyEnabled };
+  return readMeSurfaceFlags();
 }
 
 /**

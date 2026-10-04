@@ -1,18 +1,45 @@
 import { env } from "../config/env.js";
+import { ConfigService } from "../services/config-service.js";
 
 /**
- * `/me/*` surfaces with no feature gate: they are always available whenever
- * the Web UI is on (#1016, Option A). Because at least one surface is always
- * on, `/me` needs no `me.enabled` key and is available exactly when the Web
- * UI is. If one of these ever gains a gate, add its check to
- * `isAnyMeSurfaceEnabled` — the command registry and the `/me/` nav both
- * derive from here so they cannot drift.
+ * Single derivation of which `/me/*` surfaces are enabled (#1016). The
+ * `/me/` routes/nav (`readUserFeatureFlags` in `user-routes.ts`) and the
+ * `/me` command registration both read from here, so they cannot drift.
+ */
+
+/** Feature-gated surfaces and the config key that gates each. */
+export const GATED_ME_SURFACES = {
+  rewindEnabled: "rewind.enabled",
+  presetsEnabled: "voicechannels.presets.enabled",
+  birthdayEnabled: "birthdays.enabled",
+  privacyEnabled: "privacy.enabled",
+} as const;
+
+export type MeSurfaceFlags = Record<keyof typeof GATED_ME_SURFACES, boolean>;
+
+/**
+ * `/me/*` surfaces with no feature gate (#1016, Option A): always available
+ * whenever the Web UI is on. If one gains a gate, move it to
+ * `GATED_ME_SURFACES`.
  */
 export const UNGATED_ME_SURFACES = ["notifications", "timezone"] as const;
 
+/** Enabled-state of every feature-gated `/me/*` surface. */
+export async function readMeSurfaceFlags(): Promise<MeSurfaceFlags> {
+  const config = ConfigService.getInstance();
+  const entries = await Promise.all(
+    Object.entries(GATED_ME_SURFACES).map(
+      async ([flag, key]) =>
+        [flag, await config.getBoolean(key, false)] as const,
+    ),
+  );
+  return Object.fromEntries(entries) as MeSurfaceFlags;
+}
+
 /** Whether at least one `/me/*` surface is enabled. */
 export async function isAnyMeSurfaceEnabled(): Promise<boolean> {
-  return UNGATED_ME_SURFACES.length > 0;
+  if (UNGATED_ME_SURFACES.length > 0) return true;
+  return Object.values(await readMeSurfaceFlags()).some(Boolean);
 }
 
 /** Whether the `/me` command should be registered: Web UI on + a surface on. */

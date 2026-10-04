@@ -3,7 +3,14 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 const mockEnv = { webui: { enabled: true } };
 jest.unstable_mockModule("../../src/config/env.js", () => ({ env: mockEnv }));
 
-const { isMeCommandEnabled, isAnyMeSurfaceEnabled } =
+const mockGetBoolean = jest
+  .fn<(key: string, def: boolean) => Promise<boolean>>()
+  .mockResolvedValue(false);
+jest.unstable_mockModule("../../src/services/config-service.js", () => ({
+  ConfigService: { getInstance: () => ({ getBoolean: mockGetBoolean }) },
+}));
+
+const { readMeSurfaceFlags, isMeCommandEnabled, isAnyMeSurfaceEnabled } =
   await import("../../src/web/me-surfaces.js");
 const { COMMAND_CONFIGS, isCommandEnabled } =
   await import("../../src/services/command-registry.js");
@@ -15,6 +22,16 @@ describe("/me availability (#1016)", () => {
 
   it("counts the ungated surfaces, so a surface is always on", async () => {
     expect(await isAnyMeSurfaceEnabled()).toBe(true);
+  });
+
+  it("reads every gated surface from its config key", async () => {
+    mockGetBoolean.mockImplementation(async (key) => key === "rewind.enabled");
+    expect(await readMeSurfaceFlags()).toEqual({
+      rewindEnabled: true,
+      presetsEnabled: false,
+      birthdayEnabled: false,
+      privacyEnabled: false,
+    });
   });
 
   it("is enabled when the Web UI is on", async () => {
