@@ -33,7 +33,7 @@ __tests__/
 ├── services/       # Tests for business logic services
 ├── utils/          # Tests for utility functions
 ├── web/            # Tests for the Express Web UI (routes, renderers, a11y)
-├── setup.ts        # Global mocks (mongoose, ConfigService) — runs per suite
+├── setup.ts        # Global mocks (mongoose, ConfigService) — runs per suite via setupFilesAfterEnv
 └── test-utils.ts   # Shared Discord client/interaction mock builders
 ```
 
@@ -76,7 +76,12 @@ mocks (issue #849).
 - `__tests__/test-utils.ts` — `createMockClient`,
   `createMockChatInputInteraction`, `createMockButtonInteraction`,
   `createRawMember` (the string permission bitfield an uncached interaction
-  member carries) and `createMockCollection`.
+  member carries) and `createMockCollection`. Two service-level stubs live
+  here too: `stubMongoGuard(service)` replaces a service's
+  `MongoConnectionGuard` (`src/utils/mongo.ts`) so `ensureConnection()` is a
+  no-op, and `stubTrackingOptOuts(pairs)` puts the tracking opt-out cache into
+  a loaded state — the activity trackers fail closed (record nothing) while it
+  is unloaded, so any tracker test that expects a write needs it.
 - `__tests__/web/admin-harness.ts` — mounts real Express routers on an
   ephemeral port and drives them with `fetch`. `startAdminHarness()` handles
   body encoding and the double-submit CSRF token; `createTestSession()` /
@@ -88,6 +93,26 @@ The harness deliberately imports nothing from `src/`: suites register their
 service mocks with `jest.unstable_mockModule` and then `await import()` the
 routers, so a static import in the harness would load them too early and
 defeat the mocks.
+
+### Drift guards
+
+`__tests__/config/` holds tests that keep code and documentation in step. A
+new key, model or wizard feature that skips its bookkeeping fails one of them:
+
+- `settings-doc-drift.test.ts` — every `defaultConfig` key appears in
+  `SETTINGS.md` and every key `SETTINGS.md` names exists.
+- `coverage-floor-doc-drift.test.ts` — the table below matches
+  `jest.config.js`, and no other doc quotes a second copy of the numbers.
+- `user-data-registry-drift.test.ts` — every model field that carries a Discord
+  user id is classified in `src/services/user-data-registry.ts` (member data
+  export and reset).
+- `wizard-coverage-drift.test.ts` — a config category with several keys is
+  either a Setup Wizard step or has a stated opt-out.
+- `readme-doc-drift.test.ts` — the `README.md` command and settings tables against
+  `COMMAND_CONFIGS` and the config schema.
+
+`__tests__/services/settings-metadata.test.ts` checks that every category used
+in `settingsMetadata` is listed in `CONFIG_CATEGORIES` (`src/models/config.ts`).
 
 ### Generating sample data for manual testing
 
@@ -306,7 +331,6 @@ and `typecheck` jobs:
 
 - [ ] Add integration tests for Discord interactions
 - [ ] Add end-to-end tests for voice channel management
-- [ ] Increase coverage to >70% for critical paths
 - [ ] Replace the global mongoose mock with `mongodb-memory-server` so model
       validators, indexes, defaults and TTLs are actually exercised
 - [ ] Add snapshot testing for command outputs

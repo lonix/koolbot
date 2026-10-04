@@ -67,7 +67,8 @@ Keys use dot notation grouped by feature: `voicechannels.*`, `voicetracking.*`, 
 Always access via `ConfigService.getBoolean|getString|getNumber` (never direct env mid-runtime).
 Add new keys to `config-schema.ts`; if renaming, keep backward compat fallbacks (see `voice-channel-manager.ts`).
 
-Reload: `/config reload` calls `ConfigService.triggerReload()` (cache clear + callbacks).
+Reload: `ConfigService.triggerReload()` clears the cache and fires registered callbacks (the Setup Wizard calls it). There is no `/config reload`
+subcommand; the Web UI Settings page's "Reload commands" button re-registers slash commands.
 Do not reintroduce implicit reload logic in `CommandManager` (intentionally removed).
 
 ## Logging
@@ -91,7 +92,7 @@ Voice tracking: append session objects (`voice-channel-tracking.ts` shape). Keep
 1. Define config keys in `config-schema.ts` (dot notation + defaults).
 2. New service: singleton `getInstance(client)` pattern.
 3. Gate activation via `ConfigService.getBoolean` (copy voice manager initialize pattern).
-4. Register reload callback if runtime adjust needed post `/config reload`.
+4. Register reload callback if runtime adjust needed after a config reload (`ConfigService.triggerReload()`).
 5. Log lifecycle via `DiscordLogger` if user-visible.
 
 ## Reusable Patterns

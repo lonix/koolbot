@@ -1242,26 +1242,29 @@ personal settings).
 
 Once in the admin Web UI (admin sessions):
 
-| Page            | Replaces (legacy slash command)                                     |
-| --------------- | ------------------------------------------------------------------- |
-| Dashboard       | `/botstats`                                                         |
-| Bot Status      | `/botstats` (live health, uptime, connection detail)                |
-| Database        | `/dbtrunk status`, `/dbtrunk run`                                   |
-| Command Audit   | (new — slash-command audit log)                                     |
-| Command Metrics | (new — per-command usage metrics)                                   |
-| Moderation      | (new — history browser; the moderation commands stay in Discord)    |
-| Bootstrap       | (new — read-only `.env` diagnostics)                                |
-| Settings        | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
-| Permissions     | `/permissions set/add/remove/clear/list/view`                       |
-| Setup Wizard    | `/setup wizard`                                                     |
-| Announcements   | `/announce create/list/delete`, `/announce-vc-stats`                |
-| Events          | `/event create/list/cancel/start`                                   |
-| Polls           | `/poll create/list/add-item/delete/delete-item/test/list-items`     |
-| Reaction Roles  | `/reactrole create/archive/unarchive/delete/list/status`            |
-| Notices         | `/notice add/edit/delete/sync`                                      |
-| Voice Channels  | `/vc reload`, `/vc force-reload`                                    |
-| Weekly Digest   | (new — weekly DM digest configuration and preview)                  |
-| Voice Analytics | (new — voice activity charts and channel breakdowns)                |
+| Page              | Replaces (legacy slash command)                                     |
+| ----------------- | ------------------------------------------------------------------- |
+| Dashboard         | `/botstats`                                                         |
+| Bot Status        | `/botstats` (live health, uptime, connection detail)                |
+| Database          | `/dbtrunk status`, `/dbtrunk run`                                   |
+| Command Audit     | (new — slash-command audit log)                                     |
+| Command Metrics   | (new — per-command usage metrics)                                   |
+| Moderation        | (new — history browser; the moderation commands stay in Discord)    |
+| Bootstrap         | (new — read-only `.env` diagnostics)                                |
+| Settings          | `/config list`, `get`, `set`, `reset`, `import`, `export`, `reload` |
+| Permissions       | `/permissions set/add/remove/clear/list/view`                       |
+| Setup Wizard      | `/setup wizard`                                                     |
+| Announcements     | `/announce create/list/delete`, `/announce-vc-stats`                |
+| Events            | `/event create/list/cancel/start`                                   |
+| Polls             | `/poll create/list/add-item/delete/delete-item/test/list-items`     |
+| Reaction Roles    | `/reactrole create/archive/unarchive/delete/list/status`            |
+| Birthdays         | (new — birthday announcements and schedule)                         |
+| Quotes            | (new — list, search, edit, delete, resync and export quotes)        |
+| Leaderboard Roles | (new — roles rewarded to top voice-time members)                    |
+| Notices           | `/notice add/edit/delete/sync`                                      |
+| Voice Channels    | `/vc reload`, `/vc force-reload`                                    |
+| Weekly Digest     | (new — weekly DM digest configuration and preview)                  |
+| Voice Analytics   | (new — voice activity charts and channel breakdowns)                |
 
 Feature pages stay in the nav while their `*.enabled` setting is off —
 greyed out, badged **off**, and sorted below the enabled ones. The page
@@ -1278,6 +1281,7 @@ reach it from a header link on any admin page):
 | Voice         | `/me/voice` — your personal voice channel presets (`voicechannels.enabled`)        |
 | Birthday      | `/me/birthday` — set or clear your birthday (`birthdays.enabled`)                  |
 | Rewind        | `/me/rewind` — personal year-in-review (voice time, top channels, rank journey, …) |
+| Privacy       | `/me/privacy` — export or reset your data (`privacy.enabled`)                      |
 
 Feature-gated pages stay in the nav when their feature is off — greyed
 out and badged **off**. Voice and Birthday still accept your choice while

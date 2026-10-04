@@ -1,15 +1,15 @@
 # KoolBot Web UI
 
-The Web UI is the **only** admin surface for KoolBot from v1.0 onward.
-Everything that used to live behind `/config set`, `/permissions`, `/setup`,
-`/announce`, `/poll`, `/reactrole`, `/notice`, `/dbtrunk`, `/vc`, and
-`/botstats` is now reached by running a single Discord slash command,
-`/config` (Administrators only), which DMs you a one-time sign-in link.
+The Web UI is the **only** admin surface for KoolBot. The old admin slash
+commands (`/config set`, `/permissions`, `/setup`, `/announce`, `/poll`,
+`/reactrole`, `/notice`, `/dbtrunk`, `/vc` and `/botstats`) were retired; their
+jobs now live here. You reach the Web UI by running a single Discord slash
+command, `/config` (Administrators only), which DMs you a one-time sign-in link.
 
-Since #481 a **user self-service surface** at `/me/*` lets guild members
-manage their own preferences (notifications, Rewind, etc.) without ever
-touching the admin panel. Members reach it with `/me` (#1016); admins can
-hop between the two surfaces from their `/config` session.
+A **user self-service surface** at `/me/*` lets guild members manage their
+own preferences (notifications, timezone, birthday, voice presets, Rewind,
+privacy) without ever touching the admin panel. Members reach it with `/me`;
+admins can hop between the two surfaces from their `/config` session.
 
 This document explains how to enable it, expose it, and operate it.
 
@@ -37,8 +37,9 @@ This document explains how to enable it, expose it, and operate it.
 
 ## TL;DR
 
-1. Set `WEBUI_ENABLED=true` plus the four other `WEBUI_*` bootstrap env vars
-   in `.env` (see [Bootstrap environment variables](#bootstrap-environment-variables)).
+1. Set `WEBUI_ENABLED=true`, `WEBUI_BASE_URL` and `WEBUI_SESSION_SECRET` in
+   `.env` (the other `WEBUI_*` variables are optional tuning; see
+   [Bootstrap environment variables](#bootstrap-environment-variables)).
 2. Publish or reverse-proxy port `3000` so the URL in `WEBUI_BASE_URL`
    actually reaches the container.
 3. Restart the bot.
@@ -56,10 +57,10 @@ port to learn. It is dark unless `WEBUI_ENABLED=true`.
 The Web UI ships two parallel surfaces on the same Express server, both
 gated by the same magic-link flow:
 
-| Surface | Mount     | Who can reach it           | What it's for                                            |
-| ------- | --------- | -------------------------- | -------------------------------------------------------- |
-| Admin   | `/admin/` | sessions with `role:admin` | Server-wide config — Settings, Permissions, Wizard, etc. |
-| Self    | `/me/`    | both `admin` and `user`    | The signed-in **user's own** preferences and Rewind      |
+| Surface | Mount     | Who can reach it           | What it's for                                             |
+| ------- | --------- | -------------------------- | --------------------------------------------------------- |
+| Admin   | `/admin/` | sessions with `role:admin` | Server-wide config — Settings, Permissions, Wizard, etc.  |
+| Self    | `/me/`    | both `admin` and `user`    | The signed-in **user's own** preferences, Rewind, privacy |
 
 What changes per session:
 
@@ -83,21 +84,15 @@ What changes per session:
   who need to act on another user's data do so via the admin panel's
   audit/user tooling, not by impersonating them on `/me/*`.
 
-> **v1 is foundations only.** Today `/me/` is a stub index page that
-> announces the surface; the per-user features (notifications, Rewind,
-> achievements, etc.) land in the dependent sub-issues of #480. The
-> session model, layout, and self-scope helper are all in place so those
-> issues can bolt on without touching auth, routing, or layout.
-
 The role is fixed by the command: `/config` always issues `admin` (and
 re-checks the invoker's live `Administrator` bit, besides registering with
 `default_member_permissions = Administrator`), `/me` always issues `user`.
 It is baked into the redeemed session row + signed cookie.
 
-Audit-log rows produced through the Web UI now record the role the
-session was acting under, so the admin audit page can filter by `admin`
-vs. `user` writes. An admin acting on their own `/me/*` is logged with
-`role: "admin"` (the role is the session's, not the URL surface's).
+Audit-log rows produced through the Web UI record the role the session was
+acting under, so `admin` and `user` writes can be told apart. An admin acting
+on their own `/me/*` is logged with `role: "admin"` (the role is the
+session's, not the URL surface's).
 
 ---
 
@@ -119,7 +114,16 @@ vs. `user` writes. An admin acting on their own `/me/*` is logged with
                                  │ open link in browser
                                  ▼
                             ┌──────────────────┐
-                            │ GET /admin/s/    │
+                            │ GET /admin/s/…   │
+                            │ - peek token     │
+                            │ - consent page   │
+                            │   (Sign in btn)  │
+                            └──────────────────┘
+                                 │
+                                 │ click "Sign in" (POST, CSRF-checked)
+                                 ▼
+                            ┌──────────────────┐
+                            │ POST /admin/s/…  │
                             │ - validate token │
                             │ - mark used      │
                             │ - issue cookie   │
@@ -153,6 +157,14 @@ Key properties:
 
 - **Single-use.** Each link is bound to one Discord user ID and one token
   hash. Redeeming it marks `usedAt` server-side. A second click 404s.
+- **Opening the link does not burn it.** `GET /admin/s/<token>` only checks
+  the token and shows a consent page, so link previewers (Discord, Slack)
+  can't consume it. The token is spent when you click **Sign in**, a `POST`
+  that also requires a CSRF token, so another site can't sign your browser
+  in to an attacker's session (login CSRF).
+- **Role is fixed by the command.** `/config` issues an `admin` link; `/me`
+  always issues a `user` link, even for administrators, so a `/me` link
+  never carries admin scope.
 - **Short TTL.** Default `WEBUI_SESSION_TTL_MINUTES=10`. Tokens expire
   whether or not they're used.
 - **Sliding inactivity.** Once redeemed, the cookie has a sliding
@@ -226,14 +238,15 @@ by editing `.env` and restarting the container.
 
 ### Required for the bot itself
 
-| Variable        | Required | Example                                  |
-| --------------- | -------- | ---------------------------------------- |
-| `DISCORD_TOKEN` | yes      | `MTIzNDU2Nzg5MDEy...`                    |
-| `CLIENT_ID`     | yes      | `1234567890123456789`                    |
-| `GUILD_ID`      | yes      | `9876543210987654321`                    |
-| `MONGODB_URI`   | yes      | `mongodb://mongodb:27017/koolbot`        |
-| `NODE_ENV`      | no       | `production` (default) / `development`   |
-| `DEBUG`         | no       | `false` (default) / `true`               |
+| Variable               | Required | Example                                |
+| ---------------------- | -------- | -------------------------------------- |
+| `DISCORD_TOKEN`        | yes      | `MTIzNDU2Nzg5MDEy...`                  |
+| `CLIENT_ID`            | yes      | `1234567890123456789`                  |
+| `GUILD_ID`             | yes      | `9876543210987654321`                  |
+| `MONGODB_URI`          | yes      | `mongodb://mongodb:27017/koolbot`      |
+| `NODE_ENV`             | no       | `production` (default) / `development` |
+| `DEBUG`                | no       | `false` (default) / `true`             |
+| `GUILD_MEMBERS_INTENT` | no       | `false` (default) / `true`             |
 
 ### Required when the Web UI is enabled
 
@@ -246,6 +259,9 @@ by editing `.env` and restarting the container.
 | `WEBUI_SESSION_LIFETIME_HOURS`      | no                | `24`    | Hard cap on a redeemed session, measured from redemption. Bounds the sliding inactivity window.  |
 | `WEBUI_INACTIVITY_TIMEOUT_MINUTES`  | no                | `30`    | Sliding cookie window after redemption.                                                          |
 | `WEBUI_TRUST_PROXY`                 | no                | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.     |
+
+`WEBUI_SESSION_SECRET` must be at least 32 bytes; a shorter value is
+rejected at startup and the Web UI is not mounted.
 
 > ⚠️ **Treat `WEBUI_SESSION_SECRET` like `DISCORD_TOKEN`.** Anyone who
 > can read it can forge sign-in cookies. Rotating it invalidates every
@@ -319,10 +335,10 @@ docker compose logs -f bot | grep -i webui
 Look for:
 
 ```text
-WebUI mounted at /admin
+WebUI mounted at /admin and user surface at /me
 ```
 
-If you see `WEBUI_ENABLED=true but missing required env vars: ...`, the
+If you see `WEBUI_ENABLED=true but its configuration is invalid: ...`, the
 bot started without the Web UI mounted — fix the env vars and restart.
 
 ### 4. Run `/config`
@@ -387,19 +403,18 @@ With this, `WEBUI_BASE_URL=http://your-host:3000`.
 
 ⚠️ **No HTTPS — read this before using this recipe in production.**
 
-The Web UI sets the session cookie's `Secure` flag whenever
-`NODE_ENV=production` (see `shouldUseSecureCookies()` in
-`src/web/csrf.ts`). Browsers refuse to send `Secure` cookies over plain
-HTTP, so a production-mode bot reached at `http://your-host:3000`
-**will not maintain a session** — every page click logs you back out.
+The Web UI decides the session cookie's `Secure` flag from the scheme of
+`WEBUI_BASE_URL` (see `shouldUseSecureCookies()` in `src/web/csrf.ts`):
+`https://` sets it, `http://` does not, so a plain-HTTP `WEBUI_BASE_URL`
+such as `http://your-host:3000` works regardless of `NODE_ENV`. Only when
+`WEBUI_BASE_URL` is missing or malformed does it fall back to
+`NODE_ENV=production`. Keep `WEBUI_BASE_URL` matching the URL you actually
+browse to, or the browser will drop the cookie and every page click will
+log you back out.
 
-Pick one:
-
-- Set `NODE_ENV=development` while you accept plain HTTP (the cookie
-  drops the `Secure` flag), **or**
-- Put a reverse proxy in front of the bot and terminate TLS there
-  (recommended — see [Caddy reverse proxy](#caddy-reverse-proxy-recommended)
-  below).
+Plain HTTP is fine on a trusted LAN. For anything else, put a reverse proxy
+in front of the bot and terminate TLS there (recommended — see
+[Caddy reverse proxy](#caddy-reverse-proxy-recommended) below).
 
 Either way, plain HTTP exposes the magic-link bearer token in transit
 and the session cookie in subsequent requests. Don't run plain HTTP on
@@ -531,12 +546,12 @@ requirements are:
 1. **Terminate TLS at the proxy.** The bot itself does not speak HTTPS.
 2. **Forward `Host`** so URL generation inside the app matches
    `WEBUI_BASE_URL`. Most proxies do this by default.
-3. **Run the bot with `NODE_ENV=production`.** That's what flips the
-   session cookie's `Secure` flag on (`shouldUseSecureCookies()` in
-   `src/web/csrf.ts`). The bot does not look at `X-Forwarded-Proto` —
-   the decision is `NODE_ENV`-only. You can still forward
-   `X-Forwarded-Proto` for your own logging, it just doesn't affect
-   cookie flagging.
+3. **Set `WEBUI_BASE_URL` to the public `https://` URL.** That's what flips
+   the session cookie's `Secure` flag on (`shouldUseSecureCookies()` in
+   `src/web/csrf.ts`); it falls back to `NODE_ENV=production` only when
+   `WEBUI_BASE_URL` is missing or malformed. The bot does not look at
+   `X-Forwarded-Proto`. You can still forward it for your own logging, it
+   just doesn't affect cookie flagging.
 4. **Set `WEBUI_TRUST_PROXY`** to the hop count of trusted proxies in
    front of the bot. `1` for "one Caddy/nginx", larger for chained
    setups. Without this, the bot ignores `X-Forwarded-*` headers
@@ -763,11 +778,19 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Voice Channels**    | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
 | **Leaderboard Roles** | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
+| **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
 | **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
 | **Command Metrics**   | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
 | **Moderation**        | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
 | **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
+
+The sidebar groups the pages under three headings, in this order: **Info**
+(Dashboard, Bot Status, Database, Command Audit, Command Metrics, Moderation,
+Bootstrap), **Settings** (Settings, Permissions, Setup Wizard) and **Features**
+(Announcements, Birthdays, Events, Polls, Reaction Roles, Notices, Quotes, Voice
+Channels, Weekly Digest, Leaderboard Roles, Voice Analytics). Feature pages that
+are switched off sort to the bottom of their group.
 
 The **Dashboard** has a **Version** card (#1029) that shows the running version
 next to the latest KoolBot release, with its state: *up to date*, *update
@@ -795,8 +818,9 @@ minute). The result is cached, so no page waits on GitHub. A failed check
   is off by default.
 
 Feature pages (Announcements, Birthdays, Events, Polls, Reaction Roles,
-Notices, Quotes, Voice Channels, Weekly Digest, Leaderboard Roles) are gated by their
-`<feature>.enabled` config key. When a feature is **off**, its sidebar link is
+Notices, Quotes, Voice Channels, Weekly Digest, Leaderboard Roles, Moderation,
+Voice Analytics) are gated by their `<feature>.enabled` config key
+(`voicetracking.enabled` for Voice Analytics). When a feature is **off**, its sidebar link is
 still shown — greyed with an "off" badge — rather than hidden, so the page stays
 discoverable (#610);
 hiding it created a chicken-and-egg where the natural place to enable a
@@ -821,6 +845,12 @@ card, the sidebar badge and the page's action buttons all match the new state.
 Auto-managed keys (`notices.header_message_id`, `quotes.header_message_id`) are
 never editable here.
 
+The **Announcements** page lists the scheduled announcements, each with a
+**Post now** button that sends it to its channel immediately, off schedule, plus
+enable/disable and delete. **Post weekly VC stats now** triggers the weekly
+voice-stats announcement on demand, and **Compose & send once** posts a one-off
+announcement without storing a schedule. Every action is CSRF-protected and audited.
+
 The **Announcements** page's card is a single `announcements.enabled` toggle, so
 scheduled announcements can be switched off as well as on without leaving the
 page.
@@ -831,6 +861,12 @@ The **Notices** page's card (#972) edits `notices.enabled`, the notices channel
 (`notices.header_pin_enabled`). Changing the channel does not move notices that
 are already posted: after saving, use **Resync notices to channel** to repost
 them in the new channel. The Status card keeps the total notice count.
+
+The **Polls** page manages poll schedules and the question library. Questions
+are imported from a file you upload or a YAML/JSON document you paste into the
+box (`{ polls: [{ question, answers, multiselect?, tags? }] }`); the content goes
+from your browser straight to the bot. There is no import-from-URL option and no
+host allowlist.
 
 The **Polls** page's card (#973) edits every `polls.*` key: the enable flag, the
 default duration, the cooldown, participation tracking and the retention periods
@@ -855,6 +891,14 @@ target) and surface an actionable error instead of silently failing at reaction
 time. Rows are tagged **managed** (bot-created; delete tears down the role +
 category + channel) or **bound** (points at a pre-existing role; *Remove* only
 unbinds the mapping and never deletes the role).
+
+A third path, *Create a role group*, posts one shared message with two or more
+role options and an assignment mode: **unique** (pick exactly one, the default
+for groups), **sticky** (add-only, removing the reaction never revokes the role)
+or **toggle** (each option independently added and removed). The two single-role
+paths accept **toggle** or **sticky**. How a new message lets members pick
+(emoji reactions, buttons or a select menu) comes from the surface style,
+`reactionroles.style`; existing messages keep the style they were created with.
 
 Its **Settings** card (#974) edits `reactionroles.enabled`, the message channel
 (`reactionroles.message_channel_id`, a text-channel picker) and the surface
@@ -934,7 +978,11 @@ disagree. The greying survives an enabled parent section (a dependency lock wins
 over the per-section cascade), and Rewind toggles are never greyed this way
 because Rewind is a graceful aggregator that declares no `dependsOn`.
 
-The **Setup Wizard** (`/admin/wizard`) renders each step's fields through the
+The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
+one step each: voice channels, voice tracking, quotes, achievements, reaction
+roles, announcements, notices, polls, LFG, name history, moderation, events,
+weekly digest, birthdays, reminders and leaderboard roles. It renders each
+step's fields through the
 same shared control renderer the Settings page uses (#702), so a channel /
 role / category key gets a real picker dropdown instead of a raw-ID text box,
 fixed-option keys get a `<select>`, and each field is titled by its
@@ -950,7 +998,7 @@ are in voice: the *empty*, *one user*, and *multiple users* pools. Each
 pool has an add / edit / remove / reorder list plus a paste-a-list
 import/export box (newline- or JSON-encoded), built on a reusable
 string-array editor. Entries are stored per-guild in MongoDB and take
-effect immediately — no redeploy or `/config reload` needed. A pool with
+effect immediately — no redeploy or restart needed. A pool with
 no stored rows falls back to the built-in defaults in
 `src/content/statuses.ts`, so behaviour is unchanged on a fresh install;
 use **Seed defaults into store** to start editing from those defaults.
@@ -974,9 +1022,9 @@ place on the page's **Settings** card, which saves back to `/admin/metrics`.
 The **Command Audit** page (`/admin/audit/commands`) carries the same kind of
 card for `core.command_audit.enabled`, `core.command_audit.retention_days` and
 the WebUI audit's `core.web_audit.retention_days`. This is
-complementary to the Prometheus `/metrics` endpoint, which exposes
-process-level gauges (uptime, memory) rather than historical per-command
-counters.
+complementary to the Prometheus `/metrics` endpoint, which is a live
+scrape target (command counters since the last restart, process metrics)
+rather than a persisted per-day history.
 
 The **Weekly Digest** page (`/admin/digest`) lets an admin **preview** the
 weekly voice digest before it sends (#539). **Preview** is a read-only dry run:
@@ -1441,9 +1489,11 @@ by computing the ratios from the tokens.
 `WEBUI_ENABLED` is not `true` (case-insensitive). Update `.env` and
 restart the bot.
 
-### `/config` says "missing env vars: WEBUI_BASE_URL, WEBUI_SESSION_SECRET"
+### `/config` says "Web UI is enabled but its configuration is invalid"
 
-Exactly what it says. Set both in `.env` and restart.
+The reason follows, e.g. `WEBUI_BASE_URL is missing`,
+`WEBUI_SESSION_SECRET is missing` or a `WEBUI_SESSION_SECRET` shorter than
+32 bytes. Fix it in `.env` and restart.
 
 ### The DM link 404s when I click it
 
@@ -1477,15 +1527,17 @@ not by itself end a session.
 ### The Web UI URL loads but won't accept my cookie
 
 Browsers refuse `Secure`-flagged cookies over plain HTTP. The Web UI
-flags its session cookie `Secure` whenever `NODE_ENV=production`
-(see `shouldUseSecureCookies()` in `src/web/csrf.ts`). Pick one:
+flags its session cookie `Secure` when `WEBUI_BASE_URL` starts with
+`https://` (see `shouldUseSecureCookies()` in `src/web/csrf.ts`). So:
 
-- Run behind HTTPS via a reverse proxy (recommended), **or**
-- Set `NODE_ENV=development` in `.env` and restart, so the cookie is
-  not flagged `Secure`. Only do this for local testing.
+- If you browse over HTTPS, make sure `WEBUI_BASE_URL` is the `https://`
+  URL, **or**
+- If you browse over plain HTTP (LAN or local testing), make sure
+  `WEBUI_BASE_URL` starts with `http://`.
 
-Changing only `WEBUI_BASE_URL` to `http://...` is **not** enough — the
-URL scheme does not influence cookie flagging.
+A mismatch between `WEBUI_BASE_URL` and the URL in your browser is the
+usual cause. `NODE_ENV` only matters when `WEBUI_BASE_URL` is missing or
+malformed.
 
 ### Behind a proxy, rate limits trigger on the proxy's IP
 
