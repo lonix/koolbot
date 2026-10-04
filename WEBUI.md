@@ -167,8 +167,8 @@ Key properties:
 - **Permissions re-checked every request.** The cookie-session middleware
   re-validates the session on every hit, per role: an `admin` session
   requires the user's **live Administrator permission**
-  (`PermissionsService.isAdministrator`), so a demoted admin is logged out
-  on the next request; a `user` session must pass the `me` command's role
+  (`PermissionsService.isAdministrator`, a forced REST lookup reused for
+  ~15 s), so a demoted admin is logged out within seconds; a `user` session must pass the `me` command's role
   gating on the Permissions page (with none configured, every member
   passes). `/config` is fixed Administrator-only and is not editable on
   the Permissions page.

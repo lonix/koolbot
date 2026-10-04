@@ -41,11 +41,18 @@ function isUnknownTargetError(error: unknown): boolean {
   );
 }
 
+/** How long a live Administrator lookup is reused (see `isAdministrator`). */
+const ADMIN_CHECK_TTL_MS = 15_000;
+
 export class PermissionsService {
   private static instance: PermissionsService;
   private client: Client;
   private configService: ConfigService;
   private permissionsCache: Map<string, string[]> = new Map();
+  private adminCheckCache = new Map<
+    string,
+    { value: boolean; expiresAt: number }
+  >();
   private cacheInitialized = false;
   private cacheInitializing: Promise<void> | null = null;
   /**
@@ -240,10 +247,22 @@ export class PermissionsService {
     userId: string,
     guildId: string,
   ): Promise<boolean> {
+    const cacheKey = `${guildId}:${userId}`;
+    const cached = this.adminCheckCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.value;
     try {
       const guild = await this.client.guilds.fetch(guildId);
-      const member = await guild.members.fetch(userId);
-      return member.permissions.has("Administrator");
+      // Bypass the member cache: without the GuildMembers intent it is not
+      // refreshed when roles change, so a demoted admin could keep passing.
+      const member = await guild.members.fetch({ user: userId, force: true });
+      const value = member.permissions.has("Administrator");
+      // Short TTL so each page load does not cost a REST call, while a
+      // demotion still takes effect within seconds.
+      this.adminCheckCache.set(cacheKey, {
+        value,
+        expiresAt: Date.now() + ADMIN_CHECK_TTL_MS,
+      });
+      return value;
     } catch (error) {
       if (isUnknownTargetError(error)) return false;
       throw new PermissionCheckError(

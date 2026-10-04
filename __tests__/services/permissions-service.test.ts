@@ -409,6 +409,18 @@ describe("PermissionsService", () => {
       },
     });
 
+    it("forces a REST fetch and reuses the result briefly", async () => {
+      const guild = guildWithMember(true);
+      mockClient.guilds.fetch = jest.fn().mockResolvedValue(guild);
+      await service.isAdministrator("u9", "g1");
+      await service.isAdministrator("u9", "g1");
+      expect(guild.members.fetch).toHaveBeenCalledTimes(1);
+      expect(guild.members.fetch).toHaveBeenCalledWith({
+        user: "u9",
+        force: true,
+      });
+    });
+
     it("returns true for a member holding Administrator", async () => {
       mockClient.guilds.fetch = jest
         .fn()
