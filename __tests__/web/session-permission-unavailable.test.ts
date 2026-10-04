@@ -145,6 +145,39 @@ describe("createSessionMiddleware permission re-check failures (#781)", () => {
     });
   }
 
+  it("revalidates user-role sessions against /me, not the admin-only /config gate (#1016)", async () => {
+    jest.spyOn(WebSessionService.getInstance(), "findById").mockResolvedValue({
+      discordUserId: "u-1",
+      guildId: "g-1",
+      role: "user",
+      scopes: [],
+      revokedAt: null,
+      expiresAt: new Date(now + 24 * 60 * 60 * 1000),
+    } as never);
+    const check = jest.fn(async () => true);
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      checkCommandPermission: check,
+    } as never);
+
+    const cookie = buildCookie({
+      sid: "session-id",
+      uid: "u-1",
+      gid: "g-1",
+      rol: "user",
+      iat: now,
+      act: now,
+    });
+    const middleware = createSessionMiddleware({} as Client);
+    const res = makeRes();
+    const next = jest.fn() as unknown as NextFunction;
+    await middleware(makeReq(cookie), res as unknown as Response, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledWith("u-1", "g-1", "me", {
+      onUnavailable: "throw",
+    });
+  });
+
   it("asks checkCommandPermission to throw instead of masking failures as denial", async () => {
     const check = jest.fn(async () => true);
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({

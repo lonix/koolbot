@@ -161,9 +161,9 @@ commands always registered, and `/me` follows the Web UI):
 - `/modlog` — Look up a member's moderation history (`moderation.enabled`)
 - `/me` — DMs you a single-use link to your personal settings (registered whenever the Web UI is enabled)
 
-A fresh install only sees `/help` and `/config` in Discord until you
-enable the others on the Settings page and click **Reload commands to
-Discord**.
+A fresh install only sees `/help` and `/config` in Discord (plus `/me`
+once `WEBUI_ENABLED=true`) until you enable the others on the Settings
+page and click **Reload commands to Discord**.
 
 **Admin launcher** (Discord → Web UI):
 

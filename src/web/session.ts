@@ -220,10 +220,16 @@ export function createSessionMiddleware(
       // API hiccup, rate limit, network blip) surfaces as a
       // PermissionCheckError instead of being conflated with a `false`
       // denial — only a genuine denial may revoke the session (#781).
+      //
+      // Revalidate against the command that issued the session (#1016):
+      // `/config` for admin sessions, `/me` for user sessions. A user
+      // session must not inherit an admin-only role gate on `/config`.
+      const issuingCommand =
+        normalizeSessionRole(dbSession.role) === "admin" ? "config" : "me";
       const allowed = await permissions.checkCommandPermission(
         payload.uid,
         payload.gid,
-        "config",
+        issuingCommand,
         { onUnavailable: "throw" },
       );
       if (!allowed) {
