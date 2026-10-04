@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.1](https://github.com/lonix/koolbot/compare/v2.0.0...v2.0.1) (2026-10-04)
+
+
+### 🐛 Bug Fixes
+
+* **deps:** pin undici to 7.x to restore Discord login ([#1058](https://github.com/lonix/koolbot/issues/1058)) ([8d98737](https://github.com/lonix/koolbot/commit/8d98737aac2589b0cde810447567276bb6584425))
+
+
+### 📚 Documentation
+
+* refresh documentation for the 2.0 release ([#1057](https://github.com/lonix/koolbot/issues/1057)) ([a080f1b](https://github.com/lonix/koolbot/commit/a080f1b9879c23f98acfdbffd4bc9f9c6768105f))
+
 ## [2.0.0](https://github.com/lonix/koolbot/compare/v1.2.2...v2.0.0) (2026-10-04)
 
 
