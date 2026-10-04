@@ -1,11 +1,12 @@
 import { Client } from "discord.js";
 import logger from "../utils/logger.js";
-import { sanitizeCronExpression } from "../utils/cron.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { MessageActivityTracking } from "../models/message-activity-tracking.js";
-import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import mongoose from "mongoose";
-import { CronJob } from "cron";
+
+/** Daily at 03:00 — used when no cleanup schedule is configured. */
+const DEFAULT_CLEANUP_SCHEDULE = "0 3 * * *";
 
 export interface IMessageCleanupStats {
   /** Number of `recentMessages` entries pruned across all users. */
@@ -30,38 +31,19 @@ export interface IMessageCleanupStats {
  * all-time `channels[]` totals and `totalCount` are intentionally kept so
  * they can feed all-time leaderboards. See issue #495.
  */
-export class MessageActivityCleanupService {
+export class MessageActivityCleanupService extends ScheduledService<IMessageCleanupStats> {
   private static instance: MessageActivityCleanupService;
-  private client: Client;
-  private configService: ConfigService;
   private discordLogger: DiscordLogger;
-  private isRunning = false;
-  private isScheduled = false;
   private lastCleanupDate: Date | null = null;
-  private cleanupJob: CronJob | null = null;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-    this.discordLogger = DiscordLogger.getInstance(client);
-
-    // Apply config changes at runtime (e.g. after /config reload) so the
-    // cron is (re)started, rescheduled, or stopped without a bot restart —
-    // matching digest-service and scheduled-announcement-service.
-    this.configService.registerReloadCallback(async () => {
-      try {
-        logger.info("Message cleanup configuration changed, reloading...");
-        // Tear down any existing schedule, then re-evaluate from config.
-        // startScheduledCleanup() is a no-op when the feature is disabled.
-        this.destroy();
-        await this.startScheduledCleanup();
-      } catch (error) {
-        logger.error(
-          "Error reloading message cleanup service after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Message activity cleanup service",
+      disabledMessage: "Message activity cleanup is disabled",
+      cronContext: "message activity cleanup",
+      runLabel: "Message cleanup run",
     });
+    this.discordLogger = DiscordLogger.getInstance(client);
   }
 
   public static getInstance(client: Client): MessageActivityCleanupService {
@@ -94,8 +76,8 @@ export class MessageActivityCleanupService {
     lastCleanupDate: Date | null;
   } {
     return {
-      isRunning: this.isRunning,
-      isScheduled: this.isScheduled,
+      isRunning: this.isRunning(),
+      isScheduled: this.isScheduled(),
       isConnected: mongoose.connection.readyState === 1,
       lastCleanupDate: this.lastCleanupDate,
     };
@@ -114,6 +96,10 @@ export class MessageActivityCleanupService {
       );
       return null;
     }
+  }
+
+  protected async resolveSchedule(): Promise<string> {
+    return (await this.getSchedule()) || DEFAULT_CLEANUP_SCHEDULE;
   }
 
   private async getRetentionDays(): Promise<number> {
@@ -135,7 +121,7 @@ export class MessageActivityCleanupService {
     try {
       logger.info("Initializing message activity cleanup service...");
       await this.loadLastCleanupDate();
-      await this.startScheduledCleanup();
+      await this.start();
       logger.info("Message activity cleanup service initialized successfully");
     } catch (error) {
       logger.error(
@@ -178,68 +164,33 @@ export class MessageActivityCleanupService {
     }
   }
 
-  private async startScheduledCleanup(): Promise<void> {
-    try {
-      if (this.isScheduled && this.cleanupJob) {
-        logger.warn(
-          "Message activity cleanup scheduler is already running, skipping...",
-        );
-        return;
-      }
-
-      const enabled = await this.isEnabled();
-      logger.info(`Message cleanup service enabled: ${enabled}`);
-
-      if (!enabled) {
-        if (this.cleanupJob) {
-          this.cleanupJob.stop();
-          this.cleanupJob = null;
-        }
-        this.isScheduled = false;
-        return;
-      }
-
-      const schedule = await this.getSchedule();
-      const cleanSchedule = schedule
-        ? sanitizeCronExpression(schedule)
-        : "0 3 * * *";
-
-      this.cleanupJob = new CronJob(cleanSchedule, () => {
-        logger.info("Scheduled message activity cleanup triggered");
-        this.runCleanup().catch((error) => {
-          logger.error("Error in scheduled message cleanup:", error);
-        });
-      });
-
-      this.cleanupJob.start();
-      this.isScheduled = true;
-      logger.info(
-        `✅ Message activity cleanup scheduled successfully with cron: ${cleanSchedule}`,
-      );
-    } catch (error) {
-      logger.error("❌ Error starting scheduled message cleanup:", error);
-      this.isScheduled = false;
-    }
+  /**
+   * Run a cleanup pass now (WebUI "run now", or a test). Shares the base
+   * class's overlap guard: a call arriving mid-run joins the in-flight pass.
+   */
+  public async runCleanup(): Promise<IMessageCleanupStats> {
+    const stats = await this.runNow();
+    return stats ?? this.failureStats("Message cleanup service is disabled");
   }
 
-  public async runCleanup(): Promise<IMessageCleanupStats> {
-    if (this.isRunning) {
-      throw new Error("Message cleanup is already running");
-    }
+  private failureStats(message: string): IMessageCleanupStats {
+    return {
+      messagesPruned: 0,
+      usersProcessed: 0,
+      executionTime: 0,
+      errors: [message],
+      timestamp: new Date(),
+    };
+  }
 
+  protected async runOnce(): Promise<IMessageCleanupStats> {
     if (mongoose.connection.readyState !== 1) {
       throw new Error("Database not connected");
     }
 
     const startTime = Date.now();
-    this.isRunning = true;
 
     try {
-      const enabled = await this.isEnabled();
-      if (!enabled) {
-        throw new Error("Message cleanup service is disabled");
-      }
-
       // Enforce a 24h minimum interval between runs.
       if (this.lastCleanupDate) {
         const timeSinceLastCleanup =
@@ -279,14 +230,9 @@ export class MessageActivityCleanupService {
       );
 
       return {
-        messagesPruned: 0,
-        usersProcessed: 0,
+        ...this.failureStats(errorMessage),
         executionTime: Date.now() - startTime,
-        errors: [errorMessage],
-        timestamp: new Date(),
       };
-    } finally {
-      this.isRunning = false;
     }
   }
 
@@ -374,18 +320,5 @@ export class MessageActivityCleanupService {
       executionTime: Date.now() - startTime,
       timestamp: new Date(),
     };
-  }
-
-  public destroy(): void {
-    if (this.cleanupJob) {
-      this.cleanupJob.stop();
-      this.cleanupJob = null;
-    }
-    // Deliberately leave `isRunning` alone: it mirrors whether a cleanup
-    // pass is actually in flight and is owned by runCleanup()'s finally
-    // block. destroy() runs on every /config reload (see the constructor
-    // callback), and clearing the flag there would let a second pass start
-    // while performCleanup() is still iterating the collection.
-    this.isScheduled = false;
   }
 }

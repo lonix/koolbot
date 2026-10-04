@@ -1,11 +1,9 @@
 import { Client } from "discord.js";
 import logger from "../utils/logger.js";
-import { sanitizeCronExpression } from "../utils/cron.js";
+import { ScheduledService } from "./scheduled-service.js";
 import { VoiceChannelTracking } from "../models/voice-channel-tracking.js";
-import { ConfigService } from "./config-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import mongoose from "mongoose";
-import { CronJob } from "cron";
 
 /** Daily at midnight — used when no cleanup schedule is configured. */
 const DEFAULT_CLEANUP_SCHEDULE = "0 0 * * *";
@@ -30,41 +28,19 @@ export interface IRetentionConfig {
   yearlySummariesYears: number;
 }
 
-export class VoiceChannelTruncationService {
+export class VoiceChannelTruncationService extends ScheduledService<ICleanupStats> {
   private static instance: VoiceChannelTruncationService;
-  private client: Client;
-  private configService: ConfigService;
   private discordLogger: DiscordLogger;
-  private isRunning = false;
-  private isScheduled = false;
   private lastCleanupDate: Date | null = null;
-  private isConnected = false;
-  private cleanupJob: CronJob | null = null;
 
   private constructor(client: Client) {
-    this.client = client;
-    this.configService = ConfigService.getInstance();
-    this.discordLogger = DiscordLogger.getInstance(client);
-
-    // Apply config changes at runtime (e.g. after /config reload) so the
-    // cron is (re)started, rescheduled, or stopped without a bot restart —
-    // matching message-activity-cleanup-service and digest-service.
-    this.configService.registerReloadCallback(async () => {
-      try {
-        logger.info("Voice cleanup configuration changed, reloading...");
-        // Tear down only the schedule (not the run state — an in-flight
-        // cleanup must keep runCleanup()'s overlap guard armed), then
-        // re-evaluate from config. startScheduledCleanup() is a no-op when
-        // the feature is disabled.
-        this.stopScheduledCleanup();
-        await this.startScheduledCleanup();
-      } catch (error) {
-        logger.error(
-          "Error reloading voice cleanup service after configuration change:",
-          error,
-        );
-      }
+    super(client, {
+      label: "Voice channel cleanup service",
+      disabledMessage: "Voice channel cleanup service is disabled",
+      cronContext: "voice channel cleanup",
+      runLabel: "Voice cleanup run",
     });
+    this.discordLogger = DiscordLogger.getInstance(client);
   }
 
   public static getInstance(client: Client): VoiceChannelTruncationService {
@@ -103,8 +79,8 @@ export class VoiceChannelTruncationService {
     lastCleanupDate: Date | null;
   } {
     return {
-      isRunning: this.isRunning,
-      isScheduled: this.isScheduled,
+      isRunning: this.isRunning(),
+      isScheduled: this.isScheduled(),
       isConnected: mongoose.connection.readyState === 1, // 1 = connected
       lastCleanupDate: this.lastCleanupDate,
     };
@@ -128,6 +104,10 @@ export class VoiceChannelTruncationService {
     }
   }
 
+  protected async resolveSchedule(): Promise<string> {
+    return (await this.getSchedule()) || DEFAULT_CLEANUP_SCHEDULE;
+  }
+
   /**
    * Initialize the cleanup service
    */
@@ -135,10 +115,7 @@ export class VoiceChannelTruncationService {
     try {
       logger.info("Initializing voice channel truncation service...");
 
-      // Check database connection
-      this.isConnected = mongoose.connection.readyState === 1;
-
-      if (!this.isConnected) {
+      if (mongoose.connection.readyState !== 1) {
         logger.warn(
           "Database not connected, cleanup service will not function properly",
         );
@@ -148,7 +125,7 @@ export class VoiceChannelTruncationService {
       await this.loadLastCleanupDate();
 
       // Start the scheduled cleanup if enabled
-      await this.startScheduledCleanup();
+      await this.start();
 
       logger.info("Voice channel truncation service initialized successfully");
     } catch (error) {
@@ -201,96 +178,38 @@ export class VoiceChannelTruncationService {
   }
 
   /**
-   * Start the scheduled cleanup job
+   * Run a cleanup pass now (WebUI "run now", or a test). Shares the base
+   * class's overlap guard: a call arriving mid-run joins the in-flight pass.
    */
-  private async startScheduledCleanup(): Promise<void> {
-    try {
-      // Guard against multiple scheduled cleanups
-      if (this.isScheduled && this.cleanupJob) {
-        logger.warn(
-          "Voice channel cleanup scheduler is already running, skipping...",
-        );
-        return;
-      }
+  public async runCleanup(): Promise<ICleanupStats> {
+    const stats = await this.runNow();
+    return stats ?? this.failureStats("Cleanup service is disabled");
+  }
 
-      logger.info("Starting voice channel cleanup scheduler...");
-
-      const enabled = await this.isEnabled();
-      logger.info(`Cleanup service enabled: ${enabled}`);
-
-      if (!enabled) {
-        logger.info("Voice channel cleanup service is disabled");
-        // Stop any existing cron job and update flags
-        if (this.cleanupJob) {
-          this.cleanupJob.stop();
-          this.cleanupJob = null;
-          logger.info("Stopped existing cleanup cron job");
-        }
-        this.isScheduled = false;
-        return;
-      }
-
-      const schedule = await this.getSchedule();
-      logger.info(`Cleanup schedule from config: "${schedule}"`);
-
-      if (!schedule) {
-        logger.warn(
-          "No cleanup schedule configured, using default (daily at midnight)",
-        );
-        // Default to daily at midnight
-        this.cleanupJob = new CronJob(DEFAULT_CLEANUP_SCHEDULE, () => {
-          logger.info("Scheduled cleanup triggered");
-          this.runCleanup().catch((error) => {
-            logger.error("Error in scheduled cleanup:", error);
-          });
-        });
-      } else {
-        const cleanSchedule = sanitizeCronExpression(schedule);
-        logger.info(`Using cleaned schedule: "${cleanSchedule}"`);
-
-        this.cleanupJob = new CronJob(cleanSchedule, () => {
-          logger.info("Scheduled cleanup triggered");
-          this.runCleanup().catch((error) => {
-            logger.error("Error in scheduled cleanup:", error);
-          });
-        });
-      }
-
-      this.cleanupJob.start();
-      this.isScheduled = true;
-      logger.info(
-        `✅ Voice channel cleanup scheduled successfully with cron: ${schedule ? sanitizeCronExpression(schedule) : DEFAULT_CLEANUP_SCHEDULE}`,
-      );
-    } catch (error) {
-      logger.error("❌ Error starting scheduled cleanup:", error);
-      this.isScheduled = false;
-    }
+  private failureStats(message: string): ICleanupStats {
+    return {
+      sessionsRemoved: 0,
+      dataAggregated: 0,
+      executionTime: 0,
+      errors: [message],
+      timestamp: new Date(),
+    };
   }
 
   /**
-   * Run the cleanup process
+   * One cleanup pass. Called by the base class only when the feature is
+   * enabled and no other pass is in flight.
    */
-  public async runCleanup(): Promise<ICleanupStats> {
-    if (this.isRunning) {
-      throw new Error("Cleanup is already running");
-    }
-
+  protected async runOnce(): Promise<ICleanupStats> {
     // Check live database connection status
     if (mongoose.connection.readyState !== 1) {
       throw new Error("Database not connected");
     }
 
     const startTime = Date.now();
-    this.isRunning = true;
 
     try {
       logger.info("Starting voice channel cleanup process...");
-
-      // Check if cleanup is enabled
-      const enabled = await this.isEnabled();
-      if (!enabled) {
-        throw new Error("Cleanup service is disabled");
-      }
 
       // Check minimum interval between cleanups
       if (this.lastCleanupDate) {
@@ -331,23 +250,16 @@ export class VoiceChannelTruncationService {
         error instanceof Error ? error.message : String(error);
       logger.error("Error during cleanup:", error);
 
-      const errorStats: ICleanupStats = {
-        sessionsRemoved: 0,
-        dataAggregated: 0,
-        executionTime: Date.now() - startTime,
-        errors: [errorMessage],
-        timestamp: new Date(),
-      };
-
       // Log error to Discord
       await this.discordLogger.logError(
         error instanceof Error ? error : new Error(errorMessage),
         "Voice Channel Cleanup",
       );
 
-      return errorStats;
-    } finally {
-      this.isRunning = false;
+      return {
+        ...this.failureStats(errorMessage),
+        executionTime: Date.now() - startTime,
+      };
     }
   }
 
@@ -480,26 +392,5 @@ export class VoiceChannelTruncationService {
         yearlySummariesYears: 1,
       };
     }
-  }
-
-  /**
-   * Stop the scheduled cron job without touching the run state, so a
-   * cleanup already in progress keeps runCleanup()'s overlap guard armed.
-   */
-  private stopScheduledCleanup(): void {
-    if (this.cleanupJob) {
-      this.cleanupJob.stop();
-      this.cleanupJob = null;
-    }
-    this.isScheduled = false;
-  }
-
-  /**
-   * Destroy the cleanup service and stop the cron job
-   */
-  public destroy(): void {
-    this.stopScheduledCleanup();
-    this.isRunning = false;
-    this.isConnected = false;
   }
 }

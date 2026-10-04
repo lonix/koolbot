@@ -144,7 +144,7 @@ describe("MessageActivityCleanupService", () => {
     expect(stats.errors).toEqual([]);
   });
 
-  it("keeps the mutual-exclusion guard intact when destroy() fires mid-run (issue #779)", async () => {
+  it("keeps the overlap guard intact when destroy() fires mid-run (issue #779)", async () => {
     const { service } = createService();
 
     let releaseAggregate!: () => void;
@@ -172,14 +172,15 @@ describe("MessageActivityCleanupService", () => {
     expect(service.getStatus().isRunning).toBe(true);
     expect(service.getStatus().isScheduled).toBe(false);
 
-    // A second run (next cron tick, or a web UI "run now") stays blocked.
-    await expect(service.runCleanup()).rejects.toThrow(
-      "Message cleanup is already running",
-    );
+    // A second run (next cron tick, or a web UI "run now") joins the
+    // in-flight pass instead of starting another one.
+    const secondRun = service.runCleanup();
 
     releaseAggregate();
-    await firstRun;
-    // The finally block in runCleanup() — not destroy() — clears the flag.
+    const [first, second] = await Promise.all([firstRun, secondRun]);
+    expect(second).toBe(first);
+    expect(aggregate).toHaveBeenCalledTimes(1);
+    // The run settling — not destroy() — clears the flag.
     expect(service.getStatus().isRunning).toBe(false);
   });
 
