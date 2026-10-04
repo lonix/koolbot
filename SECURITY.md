@@ -101,6 +101,27 @@ rate limiting is enabled in production: in the Web UI's Settings page,
 set `ratelimit.enabled = true` (run `/config` in Discord to receive a
 sign-in link to the Web UI).
 
+### Web UI
+
+The optional Web UI is protected by single-use, short-lived sign-in links
+(`/config` for administrators, `/me` for members), server-side session
+revocation, double-submit-cookie CSRF protection on every state-changing
+request, and per-IP rate limiting. Admin sessions are re-checked against the
+live Administrator permission. Serve it over HTTPS and set `WEBUI_BASE_URL`
+to the `https://` address; behind a reverse proxy, set `WEBUI_TRUST_PROXY`
+so the rate limiter sees real client addresses. See `WEBUI.md`.
+
+### Fail-closed Permissions
+
+If KoolBot cannot load its command-permission data from MongoDB it refuses
+non-administrator commands rather than running them ungated.
+
+### Supply Chain
+
+Container images are built on `node:24-alpine`, run as a non-root numeric
+user (`1000:1000`), are scanned with Trivy, and are signed with cosign
+(keyless) when published to GHCR. CodeQL and dependency review run in CI.
+
 ### Input Validation
 
 All user inputs are validated and sanitized. Report any instances where user input is not properly validated.
@@ -111,6 +132,8 @@ Review bot permissions carefully:
 
 - **Required**: `SendMessages`, `UseSlashCommands`
 - **Voice features**: `ManageChannels`, `MoveMembers`
+- **Moderation features**: `ViewAuditLog`, `ModerateMembers`, `BanMembers`
+- **Reaction roles / role rewards**: `ManageRoles`
 - **Avoid**: `Administrator` (use specific permissions instead)
 
 ### Data Privacy
@@ -118,7 +141,8 @@ Review bot permissions carefully:
 - **Personal data**: KoolBot stores user IDs and voice activity data
 - **Data retention**: Configure cleanup policies to minimize data storage
 - **Data access**: Only bot administrators can access stored data
-- **GDPR compliance**: Users can request data deletion via bot administrators
+- **GDPR compliance**: Members can export or reset their data from the Web UI (`/me`, when `privacy.enabled` is on), or ask a bot administrator to do so
+- **Optional privileged intents**: the Server Members intent is only requested when you set `GUILD_MEMBERS_INTENT=true`
 - **Outbound requests**: the only request KoolBot makes on its own, beyond Discord and your
   MongoDB, is the update check (`core.updatecheck.enabled`, on by default). It is an anonymous
   `GET` of public release metadata from the GitHub API that sends nothing about your instance,

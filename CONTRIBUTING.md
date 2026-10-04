@@ -111,7 +111,7 @@ docker-compose -f docker-compose.dev.yml up
 docker-compose -f docker-compose.dev.yml up -d
 
 # View logs
-docker-compose -f docker-compose.dev.yml logs -f bot
+docker-compose -f docker-compose.dev.yml logs -f koolbot
 
 # Stop containers
 docker-compose -f docker-compose.dev.yml down
@@ -141,10 +141,15 @@ npm run format:check     # Check code formatting
 npm run check            # Run build + lint + format check
 npm run check:all        # Run all checks including tests
 
-# Utilities
+# Coverage
+npm run coverage:drift   # Fail if coverage sits >10 points above a jest.config.js floor
+
+# Operational scripts (run against dist/ — build first)
 npm run validate-config  # Validate stored config against the schema
 npm run migrate-config   # Migrate old configuration
 npm run cleanup-global-commands  # Clean up Discord commands
+npm run unregister-guild-commands  # Remove guild-registered commands
+npm run seed-sample-data -- --yes  # Seed fake activity into a dev/test DB only
 ```
 
 ## Development Workflow
@@ -215,13 +220,14 @@ npm run format:check
 npm run format
 ```
 
+Prettier runs with its defaults (there is no Prettier config file) over `src/**/*.ts`, so `npm run format`
+is the authority: 2-space indentation, double quotes, semicolons, trailing commas and an 80-column wrap.
+`format:check` is a CI gate. ESLint treats `no-unused-vars`, `no-duplicate-imports` and `prefer-const` as
+errors; `no-explicit-any` and missing return types are warnings.
+
 **Key conventions:**
 
-- **Indentation**: 2 spaces
-- **Quotes**: Single quotes for strings
-- **Semicolons**: Required
-- **Line length**: Max 120 characters (enforced by Prettier)
-- **Trailing commas**: Required in multi-line objects/arrays
+- **ESM imports**: relative imports use `.js` extensions, even from `.ts` files
 
 ### Architecture Patterns
 
@@ -230,17 +236,22 @@ Follow the established architecture:
 1. **Services** (`src/services/`) - Business logic and core functionality
    - Use singleton pattern with `getInstance()`
    - Handle initialization and cleanup
-   - Emit events for important state changes
+   - Cron-driven services extend `ScheduledService` (`src/services/scheduled-service.ts`) and supply only
+     `isEnabled()`, `resolveSchedule()` and `runOnce()` — do not hand-roll the cron lifecycle
+   - Import the shared helpers (`utils/cron.ts`, `utils/discord.ts`, `utils/mongo.ts`, `web/html.ts`)
+     instead of copying them
 
 2. **Commands** (`src/commands/`) - Discord slash commands
    - Export `data` (SlashCommandBuilder) and `execute` function
    - Handle errors gracefully with user-friendly messages
-   - Use `interaction.deferReply()` for long-running operations
+   - Call `interaction.deferReply()` before the first database query or other slow `await`
 
 3. **Models** (`src/models/`) - MongoDB schemas
    - Define clear TypeScript interfaces
    - Use Mongoose schemas for validation
    - Export both interface and model
+   - A model that stores a Discord user id must also be classified in `src/services/user-data-registry.ts`
+     (member data export and reset); `__tests__/config/user-data-registry-drift.test.ts` fails otherwise
 
 4. **Utils** (`src/utils/`) - Helper functions
    - Pure functions when possible
@@ -274,6 +285,10 @@ with Discord but lack a handler ("The application did not respond"), or ship wit
 2. ✅ Add `{ name, configKey, file }` to `COMMAND_CONFIGS` in `src/services/command-registry.ts`
 3. ✅ Add `mycmd.enabled` to `config-schema.ts`
 4. ✅ Document in `COMMANDS.md`
+5. ✅ Call `interaction.deferReply()` before the first slow `await`, then finish with `editReply`
+
+Slash commands are for day-to-day moderation and member self-service only. Admin setup and management belong
+in the Web UI (`src/web/`), not in a new slash command.
 
 ### Configuration
 
@@ -281,6 +296,10 @@ with Discord but lack a handler ("The application did not respond"), or ship wit
 - Add configuration schema in `src/services/config-schema.ts`
 - Use dot notation for keys (e.g., `feature.subfeature.enabled`)
 - Document new config keys in `SETTINGS.md`
+- A key with a new category must also add that category to `CONFIG_CATEGORIES` in `src/models/config.ts`,
+  or the startup cleanup sweep deletes its rows
+- Multi-setting features are also wired into the Setup Wizard (`WIZARD_FEATURE_SETTINGS` and
+  `WIZARD_FEATURE_ORDER` in `src/web/routes/write/helpers.ts`)
 - Use `ConfigService` for all configuration access
 
 ### Error Handling
@@ -514,7 +533,7 @@ When you open a PR, the template will guide you through the required information
    - Prettier formatting
    - Jest tests with coverage
    - Markdown linting (for doc changes)
-   - Docker build validation
+   - CodeQL and dependency review
 
 2. **Code review** by maintainers:
    - Code quality and adherence to standards

@@ -77,7 +77,7 @@ Fixes #
 - [ ] New features are disabled by default and toggleable via configuration
 - [ ] I have added configuration schema entries in `config-schema.ts`
 - [ ] I have documented new configuration keys in `SETTINGS.md`
-- [ ] I have tested configuration reload (`/config reload`)
+- [ ] I have tested configuration reload (Web UI → Settings → Reload commands)
 
 ## Screenshots (if applicable)
 

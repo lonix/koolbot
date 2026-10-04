@@ -13,7 +13,8 @@ single guild, and its own MongoDB) and owns all of its data. Design for that:
 
 - Never add a hosted or central service, telemetry, or third-party data sink.
 - Retention periods are the community's choice (`0` = keep forever, as in `moderation.retention_days`).
-  Member data export/reset must still cover every new data store (`user-data-registry.ts`).
+  Member data export/reset must still cover every new data store (`user-data-registry.ts`;
+  `__tests__/config/user-data-registry-drift.test.ts` fails when a user-id field is unclassified).
 - Privileged gateway intents (e.g. `GuildMembers`) are a one-time switch in the operator's own developer
   portal. There is no Discord review below 100 guilds. Degrade clearly and warn when an intent is off.
 
@@ -64,17 +65,19 @@ prefix so `--clean` removes only seeded rows; see `DEVELOPER_GUIDE.md`).
 Discord client event handlers, and starts the voice/web/metrics subsystems. It is the one place that
 constructs services and routes raw Discord events to them.
 
-**Services (`src/services/`, ~30 of them)** each own one domain (config, command lifecycle, voice
+**Services (`src/services/`, 50+ modules)** each own one domain (config, command lifecycle, voice
 management/tracking/announcing/truncation, quotes, notices, polls, achievements, reaction roles,
-leaderboard roles, digests, monitoring, logging, migration). Services are singletons constructed with a
+leaderboard roles, digests, events, birthdays, reminders, LFG, moderation, member data export/deletion,
+monitoring, logging, migration). Services are singletons constructed with a
 `getInstance(client)` pattern and own their own timers/intervals for periodic work (e.g. cleanup ~5m,
 health ~15m). Periodic jobs store their interval handle, log errors, and must never crash the process.
 
 **Cron-driven services extend `ScheduledService` (`services/scheduled-service.ts`, #851)** — birthdays,
-digest, rewind nudge, events, reminders and leaderboard roles all do. The base class owns the whole
+digest, rewind nudge, events, reminders, leaderboard roles, LFG and the message-activity, voice-channel
+truncation and name-history cleanup jobs all do. The base class owns the whole
 `start` / `runNow` / `reload` / `destroy` lifecycle: the enablement gate, cron sanitising/validation,
 arming and stopping the `CronJob`, coalescing concurrent runs, swallowing tick failures, and the
-`/config reload` callback. A subclass supplies only `isEnabled()`, `resolveSchedule()` and `runOnce()`
+config-reload callback. A subclass supplies only `isEnabled()`, `resolveSchedule()` and `runOnce()`
 (plus its own `getInstance`/`reset`). Do not hand-roll the skeleton again, and do not re-add an
 `isRunning` guard inside a `runOnce` — the base class already guarantees runs never overlap.
 
@@ -85,7 +88,7 @@ use dot notation grouped by feature (`voicechannels.*`, `voicetracking.*`, `quot
 key must be declared with a default in `services/config-schema.ts`; when renaming a key, keep a
 backward-compat fallback (see `voice-channel-manager.ts`). A key whose `category` is new must also be
 added to `CONFIG_CATEGORIES` in `models/config.ts`, or the startup cleanup sweep deletes its rows as
-"unknown" on every restart (#609, #834). `/config reload` calls
+"unknown" on every restart (#609, #834). Saving settings in the Web UI (and the wizard) calls
 `ConfigService.triggerReload()` (clears cache + fires registered reload callbacks) — do not reintroduce
 implicit reload logic into `CommandManager`.
 
@@ -117,9 +120,9 @@ holds example poll libraries.
 
 ### Admin surface: Web UI only (design decision — read before proposing a new command)
 
-**From v1.0 onward the Web UI is the _only_ admin surface.** Slash commands are reserved for day-to-day
+**The Web UI is the _only_ admin surface.** Slash commands are reserved for day-to-day
 moderation and member self-service (e.g. `/warn`, `/modlog`, `/quote`, `/seen`, `/voicestats`,
-`/achievements`, plus `/config`, which just DMs a one-time Web UI sign-in link). Everything that
+`/achievements`, plus `/me` for members and the admin-only `/config`, which each just DM a one-time Web UI sign-in link). Everything that
 _configures or manages_ a feature lives in `src/web/` — the admin management commands that used to exist
 (`/permissions`, `/setup`, `/announce`, `/poll`, `/reactrole`, `/notice`, `/dbtrunk`, `/vc`, `/botstats`)
 were **deliberately retired** in the Web UI migration, not lost. See `WEBUI.md` and the "Replaces (legacy

@@ -185,7 +185,15 @@ and at least one `/me/*` surface is on (derived in `src/web/me-surfaces.ts`).
 | Setting | Default | Description |
 | --- | --- | --- |
 | `ping.enabled` | `false` | Enable/disable the `/ping` command |
-| `quotes.enabled` | `false` | Enable/disable the quote system |
+| `quotes.enabled` | `false` | Enable/disable the quote system and the `/quote` command |
+| `voicetracking.enabled` | `false` | Enables `/voicestats` (its `top` and `user` subcommands also need `voicetracking.stats.top.enabled` / `voicetracking.stats.user.enabled`) |
+| `voicetracking.seen.enabled` | `false` | Enable/disable the `/seen` command |
+| `aka.enabled` | `false` | Enable/disable the `/aka` command |
+| `achievements.enabled` | `false` | Enable/disable the achievements system and the `/achievements` command |
+| `events.enabled` | `false` | Enable/disable the `/event` command |
+| `lfg.enabled` | `false` | Enable/disable the `/lfg` command |
+| `reminders.enabled` | `false` | Enable/disable the `/remind` command |
+| `moderation.enabled` | `false` | Enables `/warn`, `/timeout`, `/ban` and `/modlog` together |
 
 After changing any `*.enabled` value, click **Reload commands to
 Discord** on the Settings page so Discord picks up the change.
@@ -296,13 +304,13 @@ on the Web UI's **Polls** page; the settings below are global defaults.
 
 - **Native polls** — Discord's built-in poll feature
 - **Scheduled posting** — Cron-driven automatic polls
-- **URL import** — Fetch poll questions from YAML or JSON files
+- **File or paste import** — Load poll questions from YAML or JSON (upload a file or paste the text)
 - **Smart rotation** — Avoids repeating polls within the cooldown
 - **Database storage** — Local library of poll questions
 - **Role pinging** — Optional role mention when posting
 - **Multi-select support** — Polls can accept multiple selections
 
-**URL formats:**
+**Import formats** (Web UI **Polls → Import questions**, file upload or paste):
 
 ```yaml
 polls:
@@ -331,7 +339,7 @@ Schedule CRUD and question CRUD live on the Polls page.
 
 1. Excludes polls used within the cooldown
 2. Prioritizes lower usage counts
-3. Random selection from the top 20% least-used eligible polls
+3. Random selection from the least-used eligible polls (the top 20%, but at least 3)
 4. Fallback to the oldest-used poll if all are within cooldown
 
 **Notes:**
@@ -339,7 +347,7 @@ Schedule CRUD and question CRUD live on the Polls page.
 - Poll questions must have 2-10 answer options (Discord limitation)
 - Questions limited to 300 characters (Discord limitation)
 - Polls can run for 1 hour to 32 days (768 hours)
-- URL import copies all polls to the database for local management
+- Import copies all polls to the database for local management. Import by URL was removed in 2.0, so no outbound fetch or host allowlist is involved
 
 ---
 
@@ -1286,13 +1294,23 @@ permissions.
 All DB-backed settings are edited on the Web UI's **Settings** page.
 The Settings page groups settings by feature, coerces inputs to the
 declared primitive type (boolean / number / string), and shows inline
-help. Number fields refuse blank input (a cleared field is an error, not
-`0`) and enforce the lower bound declared for the key — today that is
-the retention keys, see [Retention values](#retention-values) — but the
-page does **not** otherwise enforce schema-level constraints like numeric
-ranges or enum allow-lists. Invalid-but-well-typed values are accepted,
-so double-check inputs against the docs for keys with valid ranges (cron
-expressions, etc.). After changing any `*.enabled` value, click **Reload
+help. Every write path (single save, section save, YAML import, wizard)
+enforces these checks and refuses a bad value with a field-level error
+rather than clamping it:
+
+- Number fields refuse blank input (a cleared field is an error, not `0`)
+  and enforce the lower bound declared for the key. That covers the
+  retention keys (see [Retention values](#retention-values)) and a few
+  others, such as `lfg.default_size` (at least `2`),
+  `reminders.max_pending` and `privacy.export.max_items` (at least `1`).
+- Cron keys must parse as a valid cron expression.
+- Keys with a fixed set of choices (`leaderboard_roles.period`,
+  `reactionroles.style`) only accept one of those values.
+- Text values are length-capped.
+
+The page does **not** enforce other numeric ranges (for example the
+1-768 hour window on `polls.default_duration_hours`), so double-check those
+inputs against the docs. After changing any `*.enabled` value, click **Reload
 commands to Discord** so Discord re-syncs the registration.
 
 ### Retention values
@@ -1311,6 +1329,45 @@ entire history on the next cleanup tick.
 The one exception is `monitoring.metrics_retention_days`, which is
 enforced by a MongoDB TTL index rather than a cleanup job and therefore
 needs a finite window: it must be at least `1`.
+
+### Environment fallback and legacy keys
+
+`ConfigService` reads a feature setting from MongoDB first. Only when no
+row exists does it fall back to an environment variable named exactly like
+the dot-notation key (a backward-compatibility path; the Web UI never
+writes to it). Anything missing at startup is created with its default
+from `config-schema.ts`. `.env` is otherwise only for the bootstrap
+variables in [Environment Variables](#-environment-variables).
+
+Older installs may still carry flat environment variables. At startup the
+migrator copies each one into its matching key when that key has no stored
+value yet (`npm run migrate-config` does the same on demand); after
+that, edit the setting in the Web UI:
+
+| Legacy variable | Setting |
+| --- | --- |
+| `ENABLE_VC_MANAGEMENT` | `voicechannels.enabled` |
+| `LOBBY_CHANNEL_NAME` | `voicechannels.lobby.name` |
+| `LOBBY_CHANNEL_NAME_OFFLINE` | `voicechannels.lobby.offlinename` |
+| `VC_CHANNEL_PREFIX` | `voicechannels.channel.prefix` |
+| `VC_SUFFIX` | `voicechannels.channel.suffix` |
+| `ENABLE_VC_TRACKING` | `voicetracking.enabled` |
+| `ENABLE_SEEN` | `voicetracking.seen.enabled` |
+| `EXCLUDED_VC_CHANNELS` | `voicetracking.excluded_channels` |
+| `ENABLE_VC_WEEKLY_ANNOUNCEMENT` | `voicetracking.announcements.enabled` |
+| `VC_ANNOUNCEMENT_SCHEDULE` | `voicetracking.announcements.schedule` |
+| `ENABLE_PING` | `ping.enabled` |
+| `ENABLE_QUOTES` | `quotes.enabled` |
+| `QUOTE_DELETE_ROLES` | `quotes.delete_roles` |
+| `QUOTE_MAX_LENGTH` | `quotes.max_length` |
+| `QUOTE_COOLDOWN` | `quotes.cooldown` |
+
+Renamed keys keep a one-way fallback so existing stored values survive an
+upgrade: the old `gamification` keys are migrated to `achievements.*`, the
+older name-based voice-stats announcement channel and voice category settings
+are resolved to IDs and stored as `voicetracking.announcements.channel_id` and
+`voicechannels.category_id`, and `rewind.nudge.enabled` falls back to the old
+`rewind.enabled` value (see [Rewind](#-rewind-year-in-review)).
 
 ### YAML export / import
 
@@ -1406,6 +1463,7 @@ Current hard dependencies:
 | `achievements.enabled` | `voicetracking.enabled` |
 | `celebrations.enabled` | `achievements.enabled` |
 | `voicetracking.announcements.enabled` | `voicetracking.enabled` |
+| `core.updates.enabled` | `core.updatecheck.enabled` |
 
 **Write-time enforcement.** Every config write surface — `ConfigService.set`,
 the Settings single-key save and section save, the YAML import, and the setup
@@ -1540,6 +1598,45 @@ leave the graph in a broken state.
 - `birthdays.role_id` (string, default: "")
 - `birthdays.role_duration_hours` (number, default: 24)
 
+#### Events
+
+- `events.enabled` (bool, default: false)
+- `events.category_id` (category, default: "")
+- `events.announcement_channel_id` (channel, default: "")
+- `events.timezone` (string, default: "")
+- `events.channel_prefix` (string, default: "📅")
+- `events.reminder_minutes` (number, default: 30)
+- `events.create_lead_minutes` (number, default: 15)
+- `events.default_duration_minutes` (number, default: 120)
+- `events.channel_grace_minutes` (number, default: 15)
+
+#### LFG (Looking for Group)
+
+- `lfg.enabled` (bool, default: false)
+- `lfg.channel_id` (channel, default: "")
+- `lfg.expiry_minutes` (number, default: 60)
+- `lfg.default_size` (number, default: 4)
+- `lfg.max_active_per_user` (number, default: 1)
+- `lfg.voice_channel.enabled` (bool, default: true)
+
+#### Reminders
+
+- `reminders.enabled` (bool, default: false)
+- `reminders.max_pending` (number, default: 10)
+
+#### Privacy & Data Export
+
+- `privacy.enabled` (bool, default: false)
+- `privacy.export.max_items` (number, default: 5000)
+- `privacy.delete.enabled` (bool, default: false)
+- `privacy.delete.cooldown_hours` (number, default: 168)
+- `privacy.tracking_opt_out.enabled` (bool, default: false)
+
+#### Reaction Tracking
+
+- `reactiontracking.enabled` (bool, default: false)
+- `reactiontracking.excluded_channels` (string, default: "")
+
 #### Name History
 
 - `aka.enabled` (bool, default: false)
@@ -1653,6 +1750,10 @@ restarts, so the note is not reposted.
 - `WEBUI_SESSION_TTL_MINUTES`, `WEBUI_SESSION_LIFETIME_HOURS`,
   `WEBUI_INACTIVITY_TIMEOUT_MINUTES`
 - `WEBUI_TRUST_PROXY`
+- `GUILD_MEMBERS_INTENT`
+
+`METRICS_ENABLED` and `METRICS_TOKEN` are also `.env`-only but are not listed
+on the Bootstrap page.
 
 These are visible on the Web UI's **Bootstrap** page (secrets masked).
 Edit them in `.env` and restart the bot to change them.

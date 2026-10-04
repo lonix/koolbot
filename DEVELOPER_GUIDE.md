@@ -27,17 +27,17 @@ KoolBot follows a service-oriented architecture where each service owns a specif
 src/
 ├── index.ts              # Entry point, service initialization, Express bootstrap
 ├── unregister-guild-commands.ts  # Operational script that predates src/scripts/ (see below)
-├── commands/             # Discord slash commands (small surface from v1.0)
+├── commands/             # Discord slash commands (day-to-day moderation + member self-service)
 │                         #   The authoritative list is COMMAND_CONFIGS in
 │                         #   services/command-registry.ts — read that, not this tree
 ├── config/               # env.ts — the only sanctioned reader of process.env
 ├── content/              # Achievement / accolade / status / notice definitions (has its own README.md)
 ├── database/             # schema.ts — shared Mongoose schema fragments
-├── handlers/             # Discord component/interaction handlers (VC buttons, modals, RSVP)
+├── handlers/             # Discord component/interaction handlers (VC buttons, modals, event RSVP, LFG)
 ├── interfaces/           # Shared TypeScript interfaces (command.ts)
 ├── models/               # MongoDB schemas
 ├── scripts/              # One-shot operational tools (see Operational Scripts below)
-├── services/             # Business logic services (single source of truth)
+├── services/             # Business logic services (single source of truth; ~55 modules)
 ├── utils/                # Shared utilities (cron, discord, mongo, logger, …)
 └── web/                  # Web UI — /admin (admin) and /me (self-service)
     ├── index.ts          # createWebRouter(client) + createUserWebRouter(client)
@@ -78,6 +78,12 @@ PermissionsService         // re-checked on every /admin/* request
 - **CommandManager**: Discord command registration and routing
 - **VoiceChannelManager**: Dynamic voice channel lifecycle
 - **QuoteChannelManager**: Quote channel management and permissions
+- **ScheduledService** (base class): the cron lifecycle shared by birthdays, digest, rewind nudge, events,
+  reminders, leaderboard roles, LFG and the message / voice-channel / name-history cleanup jobs
+- **ModerationService**, **EventService**, **BirthdayService**, **ReminderService**, **LfgService**: the
+  moderation log, events + RSVP, birthdays, reminders and looking-for-group features
+- **UserDataExportService** / **UserDataDeletionService**: member data export and reset for `/me/privacy`,
+  driven by `user-data-registry.ts`
 - **DiscordLogger**: Logging to Discord channels
 - **WebSessionService**: Magic-link issuance, redemption, revocation
 - **PermissionsService**: Per-command role gating (admins always bypass)
@@ -147,7 +153,7 @@ count.
 
 ### The `/me` self-service surface
 
-`/me/*` is the member-facing half of the Web UI (#481) — close to 3,000 lines
+`/me/*` is the member-facing half of the Web UI (#481) — about 3,500 lines
 across two modules, not an appendix to the admin panel. Routes live in
 `user-routes.ts`; `user-layout.ts` holds `USER_NAV_ITEMS`, the `renderUserPage`
 shell and one `renderUser*Body` function per page. `createUserWebRouter` in
@@ -212,7 +218,8 @@ The goal — not yet fully reached in the existing code — is to keep
 Current state of the code:
 
 - `src/web/routes/write/helpers.ts` still owns some input coercion
-  (`coerceConfigValue`, `normalizeCron`, `validCron`) and reads/writes
+  (`coerceConfigValue`; `normalizeCron` and `validCron` are thin aliases
+  of the `utils/cron.ts` helpers) and reads/writes
   to Mongoose models directly. Same for `read-only-routes.ts`, which
   imports several models for page data.
 - These are *not* prohibited today, but new write paths should prefer
@@ -624,12 +631,28 @@ await myService.initialize();
 
 ---
 
+### Scheduled (cron-driven) services
+
+Services that run on a cron schedule extend `ScheduledService`
+(`src/services/scheduled-service.ts`, #851): `BirthdayService`, `DigestService`,
+`RewindNudgeService`, `EventService`, `ReminderService`, `LeaderboardRoleService`,
+`LfgService`, `MessageActivityCleanupService`, `VoiceChannelTruncationService`
+and `NameHistoryCleanupService`. The base class owns `start` / `runNow` /
+`reload` / `destroy`: the enablement gate, cron sanitising and validation,
+arming and stopping the `CronJob`, coalescing concurrent runs, swallowing tick
+failures and the config-reload callback. A subclass supplies only
+`isEnabled()`, `resolveSchedule()` and `runOnce()`, plus its own
+`getInstance` / `reset`. Do not hand-roll the skeleton and do not add an
+`isRunning` guard inside `runOnce` — runs never overlap.
+
 ### Shared service helpers
 
 Cron parsing, gateway-readiness waits and MongoDB reconnects are the three
 things nearly every service needs, and each of them used to be copy-pasted
 into the services that needed it (#851). Import the shared helper instead of
-writing a local copy:
+writing a local copy (a cron-driven service gets the cron half from
+`ScheduledService`; the `MyService` sketch below is for a service that is not
+one):
 
 | Need | Helper | Module |
 | --- | --- | --- |
@@ -763,7 +786,7 @@ export const defaultConfig: ConfigSchema = {
 If the key introduces a **new category** (a new dot-prefix such as `myfeature`), also add that
 category to `CONFIG_CATEGORIES` in `src/models/config.ts`. That list backs the Mongoose enum *and* the
 set `ConfigService.cleanupUnknownSettings()` uses to decide which rows to keep; a category declared in
-`settingsMetadata` but missing from it is silently deleted from Mongo on every restart / `/config reload`
+`settingsMetadata` but missing from it is silently deleted from Mongo on every restart
 (see #609 and #834). `__tests__/services/settings-metadata.test.ts` fails if the two drift.
 
 **Step 2**: Access in code (only inside a service):
@@ -775,21 +798,23 @@ const setting = await configService.getString("myfeature.setting", "default");
 
 **Step 3**: Document in `SETTINGS.md`.
 
-**Step 4**: If the setting needs to appear on the Setup Wizard, add it to
-`WIZARD_FEATURE_SETTINGS` in `src/web/routes/write/helpers.ts`. The Settings page
-discovers settings from `defaultConfig` automatically.
+**Step 4**: If the feature has several settings, wire it into the Setup Wizard
+(`/admin/wizard`): add its key list to `WIZARD_FEATURE_SETTINGS` and its position
+to `WIZARD_FEATURE_ORDER`, both in `src/web/routes/write/helpers.ts`
+(`__tests__/config/wizard-coverage-drift.test.ts` fails for a multi-key category
+that is neither wired nor opted out). A feature with a second independent
+`.enabled` gate also lists it in `WIZARD_FEATURE_EXTRA_GATES`. Single settings
+need no wiring: the Settings page discovers them from `defaultConfig`.
 
 #### Configuration Best Practices
 
 - Use dot notation: `feature.subsetting`
 - Group by domain: `voicechannels.*`, `quotes.*`, etc.
 - Always provide defaults
-- **Prefer `ConfigService` for runtime feature settings.** Direct
-  `process.env` reads are expected at boot in `src/index.ts`,
-  `src/web/`, and a small allowlist of services (see the
-  "Configuration Management" section above for the current list). New
-  runtime feature code should go through `ConfigService` so the slash
-  command and Web UI surfaces see the same value.
+- **Read runtime feature settings through `ConfigService`.** Only
+  `src/config/env.ts` touches `process.env` (see "Reading environment
+  variables" above), so the slash-command and Web UI surfaces see the same
+  value.
 - Use appropriate type methods: `getBoolean()`, `getString()`, `getNumber()`
 
 ---
@@ -811,8 +836,11 @@ discovers settings from `defaultConfig` automatically.
 
 3. **Integration**
    - [ ] Register in `src/index.ts`
-   - [ ] Add command (if needed)
+   - [ ] Add command (if needed) — only for day-to-day moderation or member
+     self-service; admin setup belongs in the Web UI
    - [ ] Setup permissions
+   - [ ] If it stores per-member data, classify the new fields in
+     `src/services/user-data-registry.ts` so `/me/privacy` export and reset cover them
 
 4. **Testing**
    - [ ] Write unit tests
@@ -826,6 +854,8 @@ discovers settings from `defaultConfig` automatically.
    - [ ] Link the page from `NAV_ITEMS` in `admin-layout.ts` (set its `group`:
      `Info`, `Settings`, or `Features`; gated pages go under `Features`)
    - [ ] Routes stay thin — no business logic outside services
+   - [ ] Multi-setting feature: add it to the Setup Wizard
+     (`WIZARD_FEATURE_SETTINGS` / `WIZARD_FEATURE_ORDER`)
 
 6. **Documentation**
    - [ ] Update `COMMANDS.md` (only if there's a user-facing slash command — admin commands now live in the Web UI)
@@ -1004,6 +1034,11 @@ Global mocks are configured in `__tests__/setup.ts`:
 - Mongoose (mocked globally)
 - Discord.js (mock per test)
 
+Prefer the shared builders in `__tests__/test-utils.ts` (`createMockClient`,
+`createMockChatInputInteraction`, `stubMongoGuard`, …) over hand-rolled stubs.
+[TESTING.md](./TESTING.md) covers the helpers, the Web UI harness and the
+coverage floors.
+
 ---
 
 ## Code Style
@@ -1012,7 +1047,8 @@ Global mocks are configured in `__tests__/setup.ts`:
 
 - **Strict Mode**: Enabled in `tsconfig.json`
 - **ESLint**: Run `npm run lint` before committing
-- **Prettier**: Run `npm run format` to auto-format
+- **Prettier**: Run `npm run format` to auto-format (defaults, no config file;
+  `format:check` gates CI)
 
 ### Naming Conventions
 

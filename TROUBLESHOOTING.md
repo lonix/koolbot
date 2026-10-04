@@ -2,10 +2,14 @@
 
 Common issues and solutions for KoolBot deployment and operation.
 
-> **From v1.0:** Configuration is edited from the **Web UI** (run
-> `/config` in Discord to receive a single-use sign-in link). Steps
-> below say "Web UI → Settings" when they mean the Settings page in
-> that UI. For Web-UI-specific issues, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
+> **Configuration lives in the Web UI.** Administrators run `/config` in
+> Discord to receive a single-use sign-in link; `/config` is
+> Administrator-only. Members run `/me` to open their own settings
+> (notifications, timezone and so on). Steps below say "Web UI → Settings"
+> when they mean the Settings page in that UI. The old admin slash commands
+> (`/permissions`, `/setup`, `/announce`, `/poll`, `/reactrole`, `/notice`,
+> `/dbtrunk`, `/vc`, `/botstats`) were retired in favour of Web UI pages.
+> For Web-UI-specific issues, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 
 ---
 
@@ -17,6 +21,7 @@ Common issues and solutions for KoolBot deployment and operation.
 - [Web UI Issues](#-web-ui-issues)
 - [Command Issues](#-command-issues)
 - [Voice Channel Issues](#-voice-channel-issues)
+- [Feature Issues (2.0)](#-feature-issues-20)
 - [Database Issues](#-database-issues)
 - [Configuration Issues](#-configuration-issues)
 - [Performance Issues](#-performance-issues)
@@ -62,7 +67,7 @@ Common issues and solutions for KoolBot deployment and operation.
    ```env
    WEBUI_ENABLED=true
    WEBUI_BASE_URL=https://bot.example.com
-   WEBUI_SESSION_SECRET=...
+   WEBUI_SESSION_SECRET=...   # at least 32 bytes: openssl rand -base64 32
    ```
 
 3. **Verify Discord token is valid:**
@@ -88,10 +93,15 @@ Common issues and solutions for KoolBot deployment and operation.
 ```bash
 # Fix file permissions
 chmod 600 .env
-
-# Fix Docker permissions (Linux)
-sudo chmod 666 /var/run/docker.sock
 ```
+
+If `docker` itself is denied on Linux, add your user to the `docker` group
+(`sudo usermod -aG docker $USER`, then log in again) rather than loosening
+permissions on `/var/run/docker.sock`.
+
+The image runs as the non-root numeric user `1000:1000`. If you bind-mount a
+host directory into the container and the bot cannot write to it, make that
+directory writable by UID 1000 (`sudo chown -R 1000:1000 <dir>`).
 
 ---
 
@@ -114,6 +124,9 @@ docker compose logs -f bot
 2. **Invalid configuration:**
    - Review error messages in logs
    - Verify all required env vars are set
+   - With `WEBUI_ENABLED=true`, a missing `WEBUI_BASE_URL` or a
+     `WEBUI_SESSION_SECRET` shorter than 32 bytes is reported by `/config`
+     (see [Web UI Issues](#-web-ui-issues))
 
 3. **Port conflicts:**
 
@@ -139,6 +152,16 @@ docker compose logs -f bot
    # makes the database publicly accessible for both reads and writes
    # — don't do it.
    ```
+
+### Container shows "unhealthy"
+
+The image health check (exec-form, `wget --spider http://localhost:3000/ready`)
+only passes once the bot has finished starting up, Discord is connected and
+MongoDB is reachable. While any of those is down, `/ready` (and its alias
+`/health`) returns 503. Check `docker compose logs -f bot` for the cause, which
+is usually a bad `DISCORD_TOKEN` or an unreachable `MONGODB_URI`. `/live`
+only reports that the process is up. If you override the health check or change
+the port, keep it pointed at the health server's port (3000 by default).
 
 ### "docker compose: command not found"
 
@@ -257,7 +280,9 @@ Error: An invalid token was provided
    https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=8&scope=bot%20applications.commands
    ```
 
-   Replace `YOUR_CLIENT_ID` with your actual Client ID.
+   Replace `YOUR_CLIENT_ID` with your actual Client ID. `permissions=8`
+   (Administrator) is the quickest way to rule permissions out; once things
+   work, prefer granting only the specific permissions listed below.
 
 2. **Check role hierarchy:**
    - Bot's role must be ABOVE roles it needs to manage
@@ -271,6 +296,27 @@ Error: An invalid token was provided
    - Send Messages
    - Use Slash Commands
    - Embed Links
+   - View Audit Log, Moderate Members and Ban Members for
+     the moderation features (see
+     [Moderation log is missing native kicks, bans or timeouts](#moderation-log-is-missing-native-kicks-bans-or-timeouts))
+
+### Bot logs in but "Used disallowed intents" / login fails
+
+KoolBot always requests Guilds, GuildMessages, GuildVoiceStates,
+MessageContent, GuildMessageReactions, GuildModeration and
+GuildMessagePolls. **Message Content** is a privileged intent: enable it
+under Developer Portal → Your App → Bot → Privileged Gateway Intents, or
+login is rejected.
+
+The **Server Members** intent is optional and only requested when you set
+`GUILD_MEMBERS_INTENT=true` in `.env`. Enable it in the portal *first*,
+because requesting an intent the portal has not enabled makes login fail.
+Without it the bot still works; the only visible loss is server-nickname
+history (`namehistory.enabled`), and the bot logs a warning at startup:
+
+```text
+namehistory.enabled is on but GUILD_MEMBERS_INTENT is not set: server nickname changes are not recorded ...
+```
 
 ### Commands reply "Permissions can't be verified right now"
 
@@ -287,8 +333,8 @@ bypass reads live Discord data rather than the cache.
 1. Check the bot log for `Error initializing permissions cache` and fix
    the underlying MongoDB connectivity problem (see
    [Database Issues](#-database-issues)).
-2. Once Mongo is reachable the cache reloads on the next command; you can
-   force it from the Web UI's Permissions page or with `/config reload`.
+2. Once Mongo is reachable the cache is loaded again on the next command;
+   no manual reload is needed.
 
 ---
 
@@ -308,9 +354,11 @@ Then restart the bot:
 docker compose up -d --force-recreate
 ```
 
-### `/config` says "missing env vars: WEBUI_BASE_URL, WEBUI_SESSION_SECRET"
+### `/config` says "Web UI is enabled but its configuration is invalid"
 
-Both must be set in `.env` when `WEBUI_ENABLED=true`. Generate the
+The message lists what is wrong, for example `WEBUI_BASE_URL is missing`,
+`WEBUI_SESSION_SECRET is missing`, or a secret shorter than 32 bytes. Both
+variables must be set in `.env` when `WEBUI_ENABLED=true`. Generate the
 secret on your host first (dotenv does not run shell substitutions):
 
 ```bash
@@ -325,6 +373,12 @@ WEBUI_SESSION_SECRET=<paste-the-output-here>
 ```
 
 Restart the bot.
+
+### `/config` says "is for administrators"
+
+`/config` is Administrator-only. Members should run `/me` to open their own
+settings page (it is only registered while the Web UI is enabled). See
+[`/config` Command Not Working](#config-command-not-working).
 
 ### `/config` ran but I didn't get a DM
 
@@ -358,10 +412,11 @@ One of:
 Possible causes:
 
 - Cookie expired (idle past `WEBUI_INACTIVITY_TIMEOUT_MINUTES`).
-- DB session row passed its hard TTL.
-- You ran `/config` again, which server-side-revoked this session.
-- Permission re-check failed (Web UI Permissions → `config` was
-  configured and your roles no longer match).
+- DB session row passed its hard TTL (`WEBUI_SESSION_LIFETIME_HOURS`).
+- You ran `/config` (or `/me`) again, which server-side-revoked this session.
+- The live permission re-check failed: admin sessions need the Administrator
+  permission in Discord, and `/me` sessions must still pass the `me`
+  command's role gating. Losing either revokes the session.
 - The bot restarted with a new `WEBUI_SESSION_SECRET`.
 
 The cookie is **not** bound to your client IP — switching networks
@@ -369,19 +424,30 @@ does not by itself end a session.
 
 Run `/config` again to mint a fresh link.
 
+### "Security check failed (CSRF token ...)"
+
+State-changing requests use a double-submit CSRF cookie (`koolbot_csrf`)
+plus a matching token in the form or `x-csrf-token` header. "token missing"
+means the cookie or the token was absent (cookies blocked or cleared, or a
+stale page); "token mismatch" means they differ (for example the page was
+loaded before the cookie was reissued). Reload the page and submit again.
+
 ### Web UI URL loads but won't accept my cookie
 
-Browsers refuse `Secure`-flagged cookies over plain HTTP. The Web UI
-flags its session cookie `Secure` whenever `NODE_ENV=production`
-(`shouldUseSecureCookies()` in `src/web/csrf.ts`). Pick one:
+Browsers refuse `Secure`-flagged cookies over plain HTTP. The Web UI sets
+`Secure` on its session cookie based on the scheme of `WEBUI_BASE_URL`
+(`shouldUseSecureCookies()` in `src/web/csrf.ts`): `https://` means
+`Secure`, `http://` means not `Secure`. Only if `WEBUI_BASE_URL` is missing
+or malformed does it fall back to `NODE_ENV=production`. So:
 
-- Run behind HTTPS via a reverse proxy (recommended) — see
-  [WEBUI.md → Reverse-proxy guidance](WEBUI.md#reverse-proxy-guidance).
-- Set `NODE_ENV=development` in `.env` and restart. The cookie loses
-  the `Secure` flag and plain HTTP works again. **Local testing only.**
-
-Changing `WEBUI_BASE_URL` to `http://...` alone does **not** fix this —
-the URL scheme is not what flips the `Secure` flag.
+- If you serve the UI over HTTPS (recommended, see
+  [WEBUI.md → Reverse-proxy guidance](WEBUI.md#reverse-proxy-guidance)),
+  set `WEBUI_BASE_URL` to the `https://` URL you actually browse to.
+- If you browse over plain HTTP (local testing), set `WEBUI_BASE_URL` to the
+  `http://` URL.
+- A `WEBUI_BASE_URL` that does not match the address in your browser is the
+  usual cause: the magic link is built from it, so the cookie lands on the
+  wrong origin.
 
 ### Behind a reverse proxy, rate limits trigger on the proxy's IP
 
@@ -425,7 +491,8 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 
 **Solutions:**
 
-1. **Run `/config` → Web UI → Settings**, set `<command>.enabled` to
+1. **Run `/config` → Web UI → Settings** (members cannot do this; it is
+   Administrator-only), set `<command>.enabled` to
    `true`, save.
 2. Click **Reload commands to Discord** on the Settings page (required
    after enabling/disabling a command).
@@ -465,7 +532,7 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 **Solutions:**
 
 1. **Verify you have Administrator permission** in Discord. `/config`
-   is registered with `setDefaultMemberPermissions(Administrator)`, so
+   is Administrator-only (members use `/me`) and is registered with `setDefaultMemberPermissions(Administrator)`, so
    Discord blocks non-admins from even invoking it. If you need to
    allow a non-admin role, an operator must override the command in
    Discord under **Server Settings → Integrations → KoolBot → /config**.
@@ -479,7 +546,7 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
    docker compose logs -f bot | grep -i webui
    ```
 
-   You should see `WebUI mounted at /admin`.
+   You should see `WebUI mounted at /admin and user surface at /me`.
 
 4. **Verify MongoDB is connected** — the Bootstrap page in the Web UI
    shows this, but if you can't even reach the UI:
@@ -498,7 +565,9 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 **Check configuration** in the Web UI's Settings page:
 
 - `voicechannels.enabled` = `true`
-- `voicechannels.category.name` = the exact category name in Discord
+- `voicechannels.category_id` = the ID of the category in Discord (older
+  installs that used `voicechannels.category.name` are migrated to the ID
+  automatically on startup)
 
 **Solutions:**
 
@@ -511,7 +580,8 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
    - The wizard auto-detects categories.
 
 3. **Verify category exists:**
-   - Create the category in Discord with the exact name configured
+   - `voicechannels.category_id` must point at a category in this server;
+     otherwise the bot logs `voicechannels.category_id is not set or doesn't resolve to a category in this guild`
    - Bot role must have permissions in that category
 
 4. **Check bot permissions:**
@@ -529,18 +599,15 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 
 **Solutions:**
 
-1. **Manual cleanup** — Web UI → Voice Channels → **Reload empty
-   channels**.
+1. **Force cleanup** — Web UI → Voice Channels → **Force VC cleanup**.
 
-2. **Force cleanup** — Web UI → Voice Channels → **Force cleanup**.
-
-   ⚠️ **Warning:** Force cleanup removes all empty unmanaged channels in
+   ⚠️ **Warning:** Force VC cleanup removes all empty unmanaged channels in
    the category and then ensures the lobby exists. Unmanaged channels with
    members in them are kept until they empty. An offline lobby is renamed
    back online; otherwise the lobby is deleted and re-created, which
    disconnects anyone currently sitting in it.
 
-3. **Check bot logs:**
+2. **Check bot logs:**
 
    ```bash
    docker compose logs -f bot | grep -i voice
@@ -589,6 +656,83 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
 
 ---
 
+## 🗓 Feature Issues (2.0)
+
+### Event has no voice channel
+
+Event channels are created by the event scan shortly before the start time
+(`events.create_lead_minutes`). Check the bot log for:
+
+- `events.category_id not set — cannot create channel for event ...`: set
+  `events.category_id` in Web UI → Settings (or the Events page).
+- `Event category ... not found or not a category`: the ID is wrong or not a
+  category.
+- `Error creating event channel:`: the bot lacks Manage Channels in that
+  category.
+- `events.announcement_channel_id not set — skipping event announcement`: the
+  announcement is skipped (the channel is unaffected).
+
+Also confirm `events.enabled` is `true` and that you reloaded commands so
+`/event` appears.
+
+### Reminders are not delivered
+
+`/remind` delivers by DM first. If DMs are closed it falls back to the
+channel where the reminder was set, and the bot logs `Reminder: DMs closed
+for <user>, falling back to channel`. The fallback is dropped (logged as
+`dropping`) if the channel is no longer sendable, is in another server, or
+the member has left. Ask the member to allow DMs from server members, and
+check `reminders.enabled` and `reminders.max_pending`.
+
+### Birthdays are not announced
+
+- `birthdays.enabled` must be `true` and `birthdays.channel_id` must be a
+  text channel; otherwise the run logs `Birthday run aborted: ...`
+  (`birthdays.channel_id not configured`, `channel ... not found or not a
+  text channel`, or `guild ... not found`).
+- Members must have set their own birthday under `/me/birthday` (Web UI,
+  reached with `/me`). The job runs on `birthdays.cron` (hourly by default)
+  and announces in each member's own timezone.
+- To grant a temporary role, `birthdays.role_id` needs the bot's role above
+  it and Manage Roles.
+
+### Notification DMs (achievements, digest, rewind) never arrive
+
+Notification DMs are opt-in. A member who has never opened `/me/notifications`
+receives nothing, by design, and so does anyone whose preferences cannot be
+read. Ask the member to run `/me` and enable the channels they want, and to
+allow DMs from server members.
+
+### Moderation log is missing native kicks, bans or timeouts
+
+Actions taken through KoolBot's own `/warn`, `/timeout` and `/ban` are
+recorded directly. Kicks, bans and timeouts done with Discord's built-in
+tools are mirrored from the server audit log, which needs
+`moderation.enabled`, the bot's **View Audit Log** permission, and the
+GuildModeration intent (requested automatically). Actions executed by the
+bot itself are not mirrored a second time. Failures are logged as
+`Error mirroring moderation audit-log entry:`. `/ban` also needs Ban
+Members and `/timeout` needs Moderate Members.
+
+### A scheduled job did not pick up its new schedule
+
+Saving a cron key in the Web UI re-arms the matching job (birthdays, digest,
+events, reminders, leaderboard roles and so on). If re-arming fails, the
+saved page says the schedule "could not be re-armed" and the log shows
+`Failed to re-arm <job> after settings save`; the new schedule then applies
+after a bot restart. An invalid cron expression is refused rather than
+armed. A scheduled run that throws is logged as
+`scheduled run failed:` and does not stop later runs.
+
+### Poll import fails
+
+Poll libraries are imported from an uploaded file or pasted text only. URL
+import was removed in 2.0, and `POLL_IMPORT_ALLOWED_HOSTS` no longer exists.
+Download the file and upload it from Web UI → Polls. See
+[`examples/polls/`](examples/polls/README.md) for the format.
+
+---
+
 ## 💾 Database Issues
 
 ### "MongoDB connection timeout"
@@ -620,6 +764,18 @@ For more, see [WEBUI.md → Troubleshooting](WEBUI.md#troubleshooting).
    ```
 
    Should be: `mongodb://mongodb:27017/koolbot`
+
+### Bot lost MongoDB and features stopped saving
+
+The data-keeping services watch the Mongoose connection and log
+`MongoDB connection lost for <service>` when it drops and
+`MongoDB connection established for <service>` when the driver reconnects.
+Before the next query they try to reconnect themselves and log
+`Reconnected to MongoDB for <service>`; if that fails you will see
+`Error reconnecting to MongoDB:`. The Docker health check (`/ready`) also
+reports 503 while MongoDB is down. If the log shows repeated reconnect
+errors, fix the database (see the steps above) and, if it does not recover,
+`docker compose restart bot`.
 
 ### Database Connection Refused
 

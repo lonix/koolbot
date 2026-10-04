@@ -20,7 +20,7 @@ contributors edit copy without touching unrelated code.
 - **Logic.** `checkFunction`/`metadataFunction` for accolades stay in
   `achievements-service.ts` next to the rest of the awarding code.
 - **Anything user-configurable at runtime.** Server admins set those via
-  `ConfigService` and the `/config` wizard, not by editing source files.
+  `ConfigService` via the Web UI (Settings page and Setup Wizard), not by editing source files.
 - **Per-deploy secrets / IDs.** Channel IDs, role IDs, tokens, etc. belong in
   environment variables or `ConfigService`.
 

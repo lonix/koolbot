@@ -57,11 +57,13 @@ WEBUI_SESSION_SECRET=replace-with-output-from-openssl-rand-base64-32
 
 # Optional
 DEBUG=false
-# For local testing over plain HTTP, use NODE_ENV=development. The Web UI
-# session cookie is flagged `Secure` whenever NODE_ENV=production, which
-# browsers refuse over a `http://localhost` URL.
-NODE_ENV=development
+# The Web UI session cookie is flagged `Secure` only when WEBUI_BASE_URL is
+# https://, so plain-HTTP localhost sign-in works with any NODE_ENV.
+NODE_ENV=production
 ```
+
+Other optional settings (`WEBUI_SESSION_TTL_MINUTES`, `WEBUI_SESSION_LIFETIME_HOURS`, `WEBUI_INACTIVITY_TIMEOUT_MINUTES`,
+`GUILD_MEMBERS_INTENT`, `METRICS_ENABLED`) are documented in `.env.example`.
 
 Generate a strong `WEBUI_SESSION_SECRET` by running this on your host
 **before** editing the file (paste the output in as the value above —
@@ -134,13 +136,19 @@ Look for `WebUI mounted at /admin` to confirm the Web UI is live.
 - **🌐 Web UI Admin** — Magic-link sign-in, no persistent OAuth setup
 - **📝 Discord Logging** — Bot events logged to Discord channels
 - **🎭 Quote System** — Save and retrieve memorable quotes
+- **🎪 Events** — Scheduled events with RSVPs and temporary voice channels
+- **🎮 Looking for Group** — Ad-hoc `/lfg` posts with a live roster
+- **⏰ Reminders** — Personal one-off reminders KoolBot DMs when due
+- **🎂 Birthdays** — Timezone-aware birthday announcements
+- **🛡️ Moderation Log** — `/warn`, `/timeout`, `/ban` and a per-member history
+- **🙋 Member Self-Service** — `/me` for birthday, timezone, notifications, Rewind and privacy tools
 - **🤖 Bot Status** — Dynamic status showing bot state and user count
 - **🔒 Rate Limiting** — Protect against command spam with configurable limits
 
 ### Available Commands
 
-KoolBot ships **two** kinds of commands: user-facing chat commands, and one
-admin launcher.
+KoolBot ships **three** kinds of commands: member chat commands, moderation commands, and
+the Web UI launchers (`/me` for members, `/config` for administrators).
 
 **User commands** (registered on demand — each one is gated by a
 `*.enabled` setting in the Web UI; `/help` and `/config` are the only
@@ -152,8 +160,8 @@ commands always registered, and `/me` follows the Web UI):
 - `/seen` — Last-seen lookup (`voicetracking.seen.enabled`)
 - `/aka` — Previously known names for a member (`aka.enabled`)
 - `/achievements` — View earned accolades (`achievements.enabled`)
-- `/quote add` / `/quote edit` — Manage memorable quotes (`quotes.enabled`)
-- `/event` — Create, browse and RSVP to server events (`events.enabled`)
+- `/quote add` / `/quote edit` — Manage memorable quotes; admins also get `/quote export` / `import` / `reset` (`quotes.enabled`)
+- `/event` — Browse server events (`list`); administrators schedule them with `create`, `cancel` and `start` (`events.enabled`)
 - `/lfg` — Post a "looking for group" call for a game right now (`lfg.enabled`)
 - `/remind` — Set personal one-off reminders KoolBot DMs when due (`reminders.enabled`)
 - `/warn` — Record a moderation warning (`moderation.enabled`)
@@ -161,6 +169,8 @@ commands always registered, and `/me` follows the Web UI):
 - `/ban` — Ban a member and record it (`moderation.enabled`)
 - `/modlog` — Look up a member's moderation history (`moderation.enabled`)
 - `/me` — DMs you a single-use link to your personal settings (registered whenever the Web UI is enabled)
+
+`/warn`, `/timeout`, `/ban` and `/modlog` are moderation commands: Discord shows them only to members with the matching permission.
 
 A fresh install only sees `/help` and `/config` in Discord (plus `/me`
 once `WEBUI_ENABLED=true`) until you enable the others on the Settings
@@ -637,6 +647,10 @@ docker compose restart mongodb
 > If you want to **develop** or **contribute** to KoolBot, you'll need to clone the
 > full repository.
 
+### Requirements
+
+Node.js 22 or newer (the Docker images use Node 24) and a MongoDB instance.
+
 ### Cloning for development
 
 ```bash
@@ -802,7 +816,7 @@ This project is licensed under the MIT License — see the LICENSE file for deta
 
 <div align="center">
 
-**KoolBot v1.0** — Making Discord servers more engaging! 🚀
+**KoolBot v2.0** — Making Discord servers more engaging! 🚀
 
 Built with ❤️ using TypeScript and Discord.js
 
