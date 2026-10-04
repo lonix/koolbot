@@ -576,7 +576,7 @@ describe("AchievementsService", () => {
 
       expect(mockUser.send).toHaveBeenCalledTimes(1);
       const sent = (mockUser.send as jest.Mock).mock.calls[0][0] as string;
-      expect(sent).toContain("Manage notifications: run `/config`");
+      expect(sent).toContain("Manage notifications: run `/me`");
     });
 
     it("fails closed and skips the DM when GUILD_ID is unset (#686)", async () => {

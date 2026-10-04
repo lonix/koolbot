@@ -290,6 +290,10 @@ describe("RewindNudgeService", () => {
 
       expect(result!.sent).toBe(1);
       expect(mockUserSend).toHaveBeenCalledTimes(1);
+      // Members (non-admins) can only run /me, so the DM must point there.
+      const dm = JSON.stringify(mockUserSend.mock.calls[0][0]);
+      expect(dm).toContain("/me");
+      expect(dm).not.toContain("/config");
       expect(mockNudgeStateFindOneAndUpdate).toHaveBeenCalledTimes(1);
       const [filter, update] = mockNudgeStateFindOneAndUpdate.mock.calls[0] as [
         Record<string, unknown>,

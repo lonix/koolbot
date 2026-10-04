@@ -182,9 +182,10 @@ function readSessionCookie(req: Request): CookiePayload | null {
 /**
  * Session middleware: verifies the signed cookie, enforces the sliding
  * inactivity window, hard-caps the session to its server-side expiresAt,
- * and re-checks the user's command permission on every request via
- * PermissionsService (admins always pass; otherwise the configured roles
- * for "config" must allow the user). Only a definitive denial revokes
+ * and re-validates the session's authority on every request via
+ * PermissionsService, per role (#1016): `admin` sessions require the live
+ * Administrator permission; `user` sessions must pass the `me` command's
+ * role gating (admins always pass it). Only a definitive denial revokes
  * the session; if the check itself fails transiently the request gets a
  * 503 and the session survives (#781).
  */
@@ -220,12 +221,23 @@ export function createSessionMiddleware(
       // API hiccup, rate limit, network blip) surfaces as a
       // PermissionCheckError instead of being conflated with a `false`
       // denial — only a genuine denial may revoke the session (#781).
-      const allowed = await permissions.checkCommandPermission(
-        payload.uid,
-        payload.gid,
-        "config",
-        { onUnavailable: "throw" },
-      );
+      //
+      // Revalidate against the command that issued the session (#1016):
+      // `/config` for admin sessions, `/me` for user sessions. A user
+      // session must not inherit an admin-only role gate on `/config`.
+      // Admin sessions additionally require the live Administrator bit:
+      // `/config` is admin-only, but `checkCommandPermission` is default-open
+      // for a non-admin when no role gate is configured, so a session issued
+      // before Administrator was removed would otherwise stay valid.
+      const isAdminSession = normalizeSessionRole(dbSession.role) === "admin";
+      const allowed = isAdminSession
+        ? await permissions.isAdministrator(payload.uid, payload.gid)
+        : await permissions.checkCommandPermission(
+            payload.uid,
+            payload.gid,
+            "me",
+            { onUnavailable: "throw" },
+          );
       if (!allowed) {
         clearSessionCookie(res);
         await sessionService.revokeSession(payload.sid);
@@ -402,7 +414,7 @@ function respondUnauthorized(res: Response): void {
         heading: "Sign in required",
         bodyHtml:
           "<p>Your session has expired or you are not signed in. " +
-          "Run <code>/config</code> in Discord to receive a fresh sign-in link.</p>",
+          "Run <code>/me</code> (or <code>/config</code> for admins) in Discord to receive a fresh sign-in link.</p>",
       }),
     );
 }

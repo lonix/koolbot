@@ -145,10 +145,45 @@ describe("createSessionMiddleware permission re-check failures (#781)", () => {
     });
   }
 
-  it("asks checkCommandPermission to throw instead of masking failures as denial", async () => {
+  it("revalidates user-role sessions against /me, not the admin-only /config gate (#1016)", async () => {
+    jest.spyOn(WebSessionService.getInstance(), "findById").mockResolvedValue({
+      discordUserId: "u-1",
+      guildId: "g-1",
+      role: "user",
+      scopes: [],
+      revokedAt: null,
+      expiresAt: new Date(now + 24 * 60 * 60 * 1000),
+    } as never);
     const check = jest.fn(async () => true);
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: check,
+    } as never);
+
+    const cookie = buildCookie({
+      sid: "session-id",
+      uid: "u-1",
+      gid: "g-1",
+      rol: "user",
+      iat: now,
+      act: now,
+    });
+    const middleware = createSessionMiddleware({} as Client);
+    const res = makeRes();
+    const next = jest.fn() as unknown as NextFunction;
+    await middleware(makeReq(cookie), res as unknown as Response, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledWith("u-1", "g-1", "me", {
+      onUnavailable: "throw",
+    });
+  });
+
+  it("validates admin sessions against the live Administrator bit (#1016)", async () => {
+    const isAdministrator = jest.fn(async () => true);
+    const check = jest.fn(async () => true);
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      checkCommandPermission: check,
+      isAdministrator,
     } as never);
 
     const middleware = createSessionMiddleware({} as Client);
@@ -157,14 +192,30 @@ describe("createSessionMiddleware permission re-check failures (#781)", () => {
     await middleware(makeReq(freshCookie()), res as unknown as Response, next);
 
     expect(next).toHaveBeenCalledTimes(1);
-    expect(check).toHaveBeenCalledWith("u-1", "g-1", "config", {
-      onUnavailable: "throw",
-    });
+    expect(isAdministrator).toHaveBeenCalledWith("u-1", "g-1");
+    expect(check).not.toHaveBeenCalled();
+  });
+
+  it("revokes an admin session once Administrator has been removed (#1016)", async () => {
+    jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
+      // Default-open for non-admins when /config has no role gate; must not matter.
+      checkCommandPermission: async () => true,
+      isAdministrator: async () => false,
+    } as never);
+
+    const middleware = createSessionMiddleware({} as Client);
+    const res = makeRes();
+    const next = jest.fn() as unknown as NextFunction;
+    await middleware(makeReq(freshCookie()), res as unknown as Response, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(401);
+    expect(revokeSession).toHaveBeenCalledWith("session-id");
   });
 
   it("responds 503 and keeps the session when the check fails transiently", async () => {
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
-      checkCommandPermission: async () => {
+      isAdministrator: async () => {
         throw new PermissionCheckError(
           "Permission check could not be completed",
           new Error("Discord API timeout"),
@@ -188,7 +239,7 @@ describe("createSessionMiddleware permission re-check failures (#781)", () => {
 
   it("still revokes the session on a genuine denial", async () => {
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
-      checkCommandPermission: async () => false,
+      isAdministrator: async () => false,
     } as never);
 
     const middleware = createSessionMiddleware({} as Client);

@@ -10,6 +10,7 @@ import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { PermissionsService } from "../../../services/permissions-service.js";
+import { ADMIN_ONLY_COMMAND } from "../../../services/command-registry.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
@@ -34,6 +35,14 @@ export function createPermissionsRouter(client: Client): Router {
         flashRedirect(res, "/admin/permissions", {
           type: "err",
           text: "Missing command name.",
+        });
+        return;
+      }
+
+      if (command === ADMIN_ONLY_COMMAND) {
+        flashRedirect(res, "/admin/permissions", {
+          type: "err",
+          text: "/config is always Administrator-only; its roles cannot be changed.",
         });
         return;
       }

@@ -190,6 +190,7 @@ describe("createUserRouter / index page", () => {
       await import("../../src/services/permissions-service.js");
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
+      isAdministrator: async () => true,
     } as never);
 
     const { createSessionMiddleware } =
@@ -358,6 +359,7 @@ describe("/me/notifications", () => {
       await import("../../src/services/permissions-service.js");
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
+      isAdministrator: async () => true,
     } as never);
 
     const { UserNotificationPrefsService } =
@@ -702,6 +704,7 @@ describe("/me/rewind", () => {
       await import("../../src/services/permissions-service.js");
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
+      isAdministrator: async () => true,
     } as never);
 
     const { UserNotificationPrefsService } =
@@ -1085,6 +1088,7 @@ describe("/me/voice (#656)", () => {
       await import("../../src/services/permissions-service.js");
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
+      isAdministrator: async () => true,
     } as never);
 
     const presetsEnabled = opts.presetsEnabled ?? true;
@@ -1417,6 +1421,7 @@ describe("/me/timezone (#524)", () => {
       await import("../../src/services/permissions-service.js");
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
+      isAdministrator: async () => true,
     } as never);
 
     const { UserNotificationPrefsService } =
@@ -1659,6 +1664,7 @@ describe("/me/birthday clear (#1033)", () => {
       await import("../../src/services/permissions-service.js");
     jest.spyOn(PermissionsService, "getInstance").mockReturnValue({
       checkCommandPermission: async () => true,
+      isAdministrator: async () => true,
     } as never);
 
     const { BirthdayService } =

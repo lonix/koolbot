@@ -291,8 +291,8 @@ export class RewindNudgeService extends ScheduledService<RewindNudgeRunSummary |
       .setColor(EMBED_COLOR)
       .setDescription(
         `Hey ${username}, your year-in-review is waiting for you.\n\n` +
-          `Open the user portal with **\`/config\`** and follow the magic link to **/me/rewind** to see your top voice and text channels, peak day, longest streak, and the badges you earned this year.\n\n` +
-          `_Don't want these? Run \`/config\` → Notifications to manage your preferences._`,
+          `Open the user portal with **\`/me\`** and follow the magic link to **/me/rewind** to see your top voice and text channels, peak day, longest streak, and the badges you earned this year.\n\n` +
+          `_Don't want these? Run \`/me\` → Notifications to manage your preferences._`,
       )
       .setTimestamp(new Date());
   }

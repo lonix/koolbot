@@ -13,7 +13,7 @@ import logger, { isDebugMode } from "../utils/logger.js";
 import { getErrorMessage } from "../utils/error-guards.js";
 import { recordCommandAudit } from "../utils/record-command-audit.js";
 import { ConfigService } from "./config-service.js";
-import { COMMAND_CONFIGS } from "./command-registry.js";
+import { COMMAND_CONFIGS, isCommandEnabled } from "./command-registry.js";
 import { MonitoringService } from "./monitoring-service.js";
 import { recordCommandInvocation } from "../web/metrics.js";
 import { CooldownManager } from "./cooldown-manager.js";
@@ -82,15 +82,9 @@ export class CommandManager {
       // Process each command
       for (const config of COMMAND_CONFIGS) {
         try {
-          let shouldEnable = true;
-
-          // Check configuration if required
-          if (config.configKey) {
-            shouldEnable = await this.configService.getBoolean(
-              config.configKey,
-              false,
-            );
-          }
+          const shouldEnable = await isCommandEnabled(config, (key, def) =>
+            this.configService.getBoolean(key, def),
+          );
 
           if (shouldEnable) {
             // Import the command data
@@ -298,15 +292,9 @@ export class CommandManager {
       // Process each command
       for (const config of COMMAND_CONFIGS) {
         try {
-          let shouldEnable = true;
-
-          // Check configuration if required
-          if (config.configKey) {
-            shouldEnable = await this.configService.getBoolean(
-              config.configKey,
-              false,
-            );
-          }
+          const shouldEnable = await isCommandEnabled(config, (key, def) =>
+            this.configService.getBoolean(key, def),
+          );
 
           if (shouldEnable) {
             // Import the command execute function
