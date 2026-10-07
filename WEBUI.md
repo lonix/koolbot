@@ -779,6 +779,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
 | **Leaderboard Roles** | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
 | **Role Groups**       | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
+| **Rules**             | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
 | **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
 | **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
@@ -1188,6 +1189,43 @@ every feature keeps its current behaviour.
 
 Every write is audited. There is no slash command for this page: role groups are admin
 configuration and live in the Web UI only.
+
+The **Rules** page (`/admin/rules`, #1024, part of the server-adoption epic #1017) manages the
+optional rules / terms acceptance gate. It is off by default (`rules.enabled`) and is the one
+case where KoolBot gives a role to everyone: a role that means "has accepted the rules". The
+settings (`rules.channel_id`, `rules.role_id`, `rules.message`, `rules.button_label`) live on
+**Settings** and in the Setup Wizard; this page does the work around them.
+
+- **Post the rules message.** KoolBot posts the text with an **Accept** button in the rules
+  channel (and edits that same message when you change the text). Make the channel read-only for
+  members in Discord. A press grants the acceptance role and records *accepted at* for the member.
+  Removing the role again, for example when the rules change and you want re-acceptance, is up
+  to you; KoolBot never takes the role back on its own.
+- **Use an existing role.** Pick any role as the acceptance role (for example a "verified" role
+  you already use as a gate), or tick *Create a role* in the rollout to have the engine make one.
+  Members who already hold the role count as accepted: **Record current role holders as
+  accepted** stores them as *adopted* without touching Discord, and a holder who clicks Accept
+  isn't asked again.
+- **Roll out (plan → preview → apply → snapshot).** Optionally: create the role, **grant it to all
+  current members** (so adopting the gate doesn't lock the existing community out; batched and
+  resumable by the engine), and **gate channels** (deny View Channel for @everyone, allow it for
+  the role). The preview shows the shared adoption diff plus how many members hold the role and
+  how many would lose sight of the gated channels; the owner and administrators always see
+  everything. Nothing is written until **Apply plan**, every apply saves a snapshot (rolling back
+  from the Web UI isn't available yet), and re-running on an adopted server gives an empty plan. The rules channel itself
+  can't be gated, and the plan refuses changes to managed roles or roles at or above the bot's.
+- **Native Discord gate.** On Community servers Discord has its own rules channel, Membership
+  Screening and Onboarding. Use the native gate there; the KoolBot role is for non-Community
+  servers, or when you want a custom message or button flow. The page warns when Membership
+  Screening is on or the server is a Community, because two gates make new members accept the
+  rules twice.
+- **Welcome message.** Set `welcome.rules_channel_id` to the same channel so `{rules}` in the
+  welcome message (#767) points new members at the rules.
+- **Privacy.** *Accepted at* is the member's own data: it is in their `/me/privacy` export and is
+  deleted by a data reset (the Discord role is left alone).
+
+Every write is audited. There is no slash command: this is admin configuration and lives in the
+Web UI only.
 
 The **Voice Analytics** page (`/admin/analytics`) is a read-only, guild-wide
 voice-activity heatmap (#675, Part B). It aggregates the already-stored

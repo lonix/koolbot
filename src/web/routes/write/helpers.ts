@@ -396,6 +396,13 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "welcome.roles_message_id",
     "welcome.rules_channel_id",
   ],
+  rules: [
+    "rules.enabled",
+    "rules.channel_id",
+    "rules.role_id",
+    "rules.message",
+    "rules.button_label",
+  ],
   reminders: ["reminders.enabled", "reminders.max_pending"],
   tickets: [
     "tickets.enabled",
@@ -439,6 +446,7 @@ export const WIZARD_FEATURE_ORDER = [
   "digest",
   "birthdays",
   "welcome",
+  "rules",
   "reminders",
   "tickets",
   "leaderboard_roles",
