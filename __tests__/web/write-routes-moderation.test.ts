@@ -171,6 +171,9 @@ describe("POST /moderation/cases/open", () => {
     ["0 days", { review_in_days: "0" }],
     ["too many days", { review_in_days: "99999" }],
     ["non-numeric days", { review_in_days: "soon" }],
+    ["a numeric prefix", { review_in_days: "30days" }],
+    ["fractional days", { review_in_days: "1.5" }],
+    ["a day that does not exist", { review_at: "2030-02-31" }],
     ["a malformed date", { review_at: "1 May" }],
     ["an impossible date", { review_at: "2030-13-45" }],
   ])("rejects %s before touching the service", async (_label, body) => {

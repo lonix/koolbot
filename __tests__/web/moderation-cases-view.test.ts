@@ -289,7 +289,7 @@ describe("buildCaseGroups", () => {
       new Map([["entry-1", { reason: "Repeated spam" } as never]]),
       new Map([
         [
-          "u1",
+          "case-1",
           [
             {
               createdAt: new Date("2025-11-01T00:00:00Z"),
@@ -336,23 +336,48 @@ describe("buildCaseGroups", () => {
     });
   });
 
-  it("reads each member's history once, newest first, and survives a failed read", async () => {
+  it("reads history per case, cut off at that case's origin entry, and survives a failed read", async () => {
     const getHistory = jest.fn(async (_g: string, userId: string) => {
       if (userId === "bad") throw new Error("mongo down");
       return [{ action: "warn" }];
     });
-    const result = await loadCaseHistory({ getHistory } as never, "g1", [
-      doc({ userId: "u1" }),
-      doc({ userId: "u1" }),
-      doc({ userId: "bad" }),
+    const older = new Date("2026-01-12T00:00:00Z");
+    const newer = new Date("2026-06-01T00:00:00Z");
+    const origins = new Map([
+      ["entry-a", { createdAt: older } as never],
+      ["entry-b", { createdAt: newer } as never],
     ]);
-    expect(getHistory).toHaveBeenCalledTimes(2);
+    const result = await loadCaseHistory(
+      { getHistory } as never,
+      "g1",
+      [
+        doc({ _id: "c1", userId: "u1", originEntryId: "entry-a" }),
+        // A second case for the same member gets its own cutoff.
+        doc({ _id: "c2", userId: "u1", originEntryId: "entry-b" }),
+        doc({ _id: "c3", userId: "bad", originEntryId: "entry-gone" }),
+      ],
+      origins,
+    );
+
+    expect(getHistory).toHaveBeenCalledTimes(3);
     expect(getHistory).toHaveBeenCalledWith("g1", "u1", {
       limit: CASE_HISTORY_LIMIT,
       skip: 0,
+      before: older,
     });
-    expect(result.get("u1")).toHaveLength(1);
-    expect(result.get("bad")).toEqual([]);
+    expect(getHistory).toHaveBeenCalledWith("g1", "u1", {
+      limit: CASE_HISTORY_LIMIT,
+      skip: 0,
+      before: newer,
+    });
+    // No origin row, so no cutoff to apply.
+    expect(getHistory).toHaveBeenCalledWith("g1", "bad", {
+      limit: CASE_HISTORY_LIMIT,
+      skip: 0,
+      before: undefined,
+    });
+    expect(result.get("c1")).toHaveLength(1);
+    expect(result.get("c3")).toEqual([]);
   });
 });
 
@@ -401,7 +426,7 @@ describe("loadModerationCaseData", () => {
     });
     expect(data.casesByEntry.get("e9")).toMatchObject({ caseNumber: 3 });
     expect(data.originEntries.get("e1")).toMatchObject({ reason: "spam" });
-    expect(data.queueHistory.get("u1")).toHaveLength(1);
+    expect(data.queueHistory.get("c1")).toHaveLength(1);
     expect(services.caseService.getCasesForEntries).toHaveBeenCalledWith("g1", [
       "e9",
     ]);

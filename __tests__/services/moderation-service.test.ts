@@ -367,6 +367,20 @@ describe("ModerationService query helpers", () => {
     expect(rows).toEqual([{ id: "h1" }]);
   });
 
+  it("getHistory can cut off at an instant, for history prior to a case (#908)", async () => {
+    const query = makeQuery([]);
+    findMock.mockReturnValueOnce(query);
+    const before = new Date("2026-01-12T00:00:00Z");
+
+    await freshService().getHistory("g1", "u1", { limit: 10, skip: 0, before });
+
+    expect(findMock).toHaveBeenCalledWith({
+      guildId: "g1",
+      userId: "u1",
+      createdAt: { $lt: before },
+    });
+  });
+
   it("getRecent applies action + user filters when provided", async () => {
     const query = makeQuery([]);
     findMock.mockReturnValueOnce(query);

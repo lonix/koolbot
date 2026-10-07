@@ -71,6 +71,7 @@ import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { ModerationService } from "../services/moderation-service.js";
 import { ModerationCaseService } from "../services/moderation-case-service.js";
+import { SYSTEM_ACTOR } from "../models/moderation-case.js";
 import {
   buildCaseGroups,
   loadModerationCaseData,
@@ -2367,7 +2368,11 @@ export function createReadOnlyRouter(
         idsOnPage.add(c.userId);
         idsOnPage.add(c.openedByUserId);
         if (c.originModeratorId) idsOnPage.add(c.originModeratorId);
-        for (const e of c.events) idsOnPage.add(e.byUserId);
+        // The review job records itself as "system", which is not a
+        // snowflake and would invalidate the whole batched member fetch.
+        for (const e of c.events) {
+          if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
+        }
       }
       const labels = new Map<string, string>();
       if (idsOnPage.size > 0) {

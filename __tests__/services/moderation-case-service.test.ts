@@ -64,6 +64,7 @@ const { ModerationCaseService, ModerationCaseError } =
   await import("../../src/services/moderation-case-service.js");
 
 const DAY = 24 * 60 * 60 * 1000;
+const VERSION = new Date("2026-02-01T00:00:00Z");
 const future = (days = 30): Date => new Date(Date.now() + days * DAY);
 
 function service(): InstanceType<typeof ModerationCaseService> {
@@ -72,7 +73,14 @@ function service(): InstanceType<typeof ModerationCaseService> {
 }
 
 function liveCase(status: string, extra: Record<string, unknown> = {}) {
-  return { _id: CASE_ID, guildId: "g1", caseNumber: 14, status, ...extra };
+  return {
+    _id: CASE_ID,
+    guildId: "g1",
+    caseNumber: 14,
+    status,
+    updatedAt: VERSION,
+    ...extra,
+  };
 }
 
 /** Assert the promise rejects with a ModerationCaseError of this code. */
@@ -337,6 +345,8 @@ describe("decide", () => {
       _id: CASE_ID,
       guildId: "g1",
       status: t.from,
+      // The version read, so an open → open decision cannot be applied twice.
+      updatedAt: VERSION,
     });
     expect(update.$set.status).toBe(t.to);
     expect(update.$set.reviewAt).toEqual(t.keepsDate ? next : null);
@@ -453,6 +463,54 @@ describe("decide", () => {
     expect(loser.reason.code).toBe("status-changed");
     expect(loser.reason.foundStatus).toBe("lifted");
     expect(loser.reason.message).toContain("lifted");
+  });
+});
+
+describe("decide: open → open races", () => {
+  it("lets exactly one of two concurrent upholds win, though the status never changes", async () => {
+    // Both staff read the case as `open` at the same version. The first
+    // conditional update matches and bumps `updatedAt`; the second filter
+    // still carries the old version, so it matches nothing even though the
+    // status is still `open`.
+    let version = VERSION;
+    caseFindOne.mockImplementation(() =>
+      query(liveCase("open", { updatedAt: version })),
+    );
+    caseFindOneAndUpdate.mockImplementation((filter: Record<string, any>) => {
+      if (filter.updatedAt.getTime() !== version.getTime()) return query(null);
+      version = new Date(version.getTime() + 1000);
+      return query(liveCase("open", { updatedAt: version }));
+    });
+
+    const svc = service();
+    caseFindOne.mockImplementationOnce(() => query(liveCase("open")));
+    caseFindOne.mockImplementationOnce(() => query(liveCase("open")));
+    const results = await Promise.allSettled([
+      svc.decide({
+        guildId: "g1",
+        caseId: CASE_ID,
+        decision: "uphold",
+        byUserId: "s1",
+        nextReviewAt: future(),
+        note: "a",
+      }),
+      svc.decide({
+        guildId: "g1",
+        caseId: CASE_ID,
+        decision: "extend",
+        byUserId: "s2",
+        nextReviewAt: future(),
+        note: "b",
+      }),
+    ]);
+
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const loser = results.find(
+      (r) => r.status === "rejected",
+    ) as PromiseRejectedResult;
+    expect(loser.reason.code).toBe("status-changed");
+    expect(loser.reason.foundStatus).toBe("open");
+    expect(loser.reason.message).toContain("just decided by someone else");
   });
 });
 

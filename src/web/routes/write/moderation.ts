@@ -64,7 +64,11 @@ function parseReviewDate(
   const days = getString(req, `${prefix}_in_days`);
   const at = getString(req, `${prefix}_at`);
   if (days) {
-    const n = parseIntInRange(days, 1, MAX_REVIEW_DAYS);
+    // `parseInt` takes a numeric prefix, so "30days" and "1.5" would pass
+    // for 30 and 1; require the whole string to be digits first.
+    const n = /^\d+$/.test(days)
+      ? parseIntInRange(days, 1, MAX_REVIEW_DAYS)
+      : null;
     if (n === null) {
       return {
         ok: false,
@@ -78,7 +82,12 @@ function parseReviewDate(
       return { ok: false, reason: "Review date must be a valid date." };
     }
     const date = new Date(`${at}T09:00:00.000Z`);
-    if (Number.isNaN(date.getTime())) {
+    // `Date` rolls impossible dates over (2030-02-31 becomes March 3), so the
+    // parsed day must round-trip to what was submitted.
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.toISOString().slice(0, 10) !== at
+    ) {
       return { ok: false, reason: "Review date must be a valid date." };
     }
     return { ok: true, date };

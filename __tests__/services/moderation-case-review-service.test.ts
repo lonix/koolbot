@@ -107,7 +107,9 @@ function enable(moderation: boolean, cases: boolean): void {
 beforeEach(() => {
   jest.clearAllMocks();
   enable(true, true);
-  getStringMock.mockImplementation(async (_k, def) => def);
+  getStringMock.mockImplementation(async (k, def) =>
+    k === "GUILD_ID" ? "g1" : def,
+  );
   isReady.mockReturnValue(true);
   isCategoryEnabled.mockResolvedValue(true);
   logToChannel.mockResolvedValue(true);
@@ -136,6 +138,8 @@ describe("ModerationCaseReviewService", () => {
     const filter = caseFind.mock.calls[0]?.[0] as Record<string, any>;
     expect(filter.status).toBe("open");
     expect(filter.reviewAt.$lte).toBeInstanceOf(Date);
+    // Scoped to the configured guild, like the other scheduled services.
+    expect(filter.guildId).toBe("g1");
     expect(dueQuery.sort).toHaveBeenCalledWith({ reviewAt: 1 });
   });
 
@@ -209,6 +213,19 @@ describe("ModerationCaseReviewService", () => {
       flipped: 1,
       notified: false,
     });
+  });
+
+  it("aborts without querying when GUILD_ID is not configured", async () => {
+    getStringMock.mockImplementation(async (_k, def) => def);
+    dueRows([row(1)]);
+    expect(await service().runNow()).toEqual({
+      due: 0,
+      flipped: 0,
+      notified: false,
+    });
+    expect(caseFind).not.toHaveBeenCalled();
+    expect(markUnderReview).not.toHaveBeenCalled();
+    expect(logToChannel).not.toHaveBeenCalled();
   });
 
   it("reads its schedule from moderation.cases.review_cron", async () => {

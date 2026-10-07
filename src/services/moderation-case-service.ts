@@ -315,7 +315,15 @@ export class ModerationCaseService {
       note: input.note,
     };
     const updated = await ModerationCase.findOneAndUpdate(
-      { _id: current._id, guildId: input.guildId, status: current.status },
+      {
+        _id: current._id,
+        guildId: input.guildId,
+        status: current.status,
+        // `uphold` and `extend` leave the status at `open`, so the status
+        // alone cannot tell a second writer it lost. Every transition stamps
+        // `updatedAt`, so the value read is the version token.
+        updatedAt: current.updatedAt,
+      },
       {
         $set: { status: transition.to, reviewAt, updatedAt: now },
         $push: { events: event },
@@ -323,7 +331,7 @@ export class ModerationCaseService {
       { new: true },
     ).exec();
     if (!updated) {
-      throw await this.lostRace(input.guildId, input.caseId);
+      throw await this.lostRace(input.guildId, input.caseId, current.status);
     }
     logger.info(
       `Moderation case #${updated.caseNumber} ${transition.outcome} in guild ${input.guildId}`,
@@ -368,6 +376,7 @@ export class ModerationCaseService {
   private async lostRace(
     guildId: string,
     caseId: string,
+    expected: ModerationCaseStatus,
   ): Promise<ModerationCaseError> {
     const found = await this.findCase(guildId, caseId);
     if (!found) {
@@ -376,11 +385,12 @@ export class ModerationCaseService {
         "That case does not exist.",
       );
     }
-    return new ModerationCaseError(
-      "status-changed",
-      `Case #${found.caseNumber} was already ${found.status.replace("_", " ")}.`,
-      found.status,
-    );
+    // Same status but a newer version: another decision landed first.
+    const message =
+      found.status === expected
+        ? `Case #${found.caseNumber} was just decided by someone else. Reload the page to see the latest.`
+        : `Case #${found.caseNumber} was already ${found.status.replace("_", " ")}.`;
+    return new ModerationCaseError("status-changed", message, found.status);
   }
 
   public async findCase(

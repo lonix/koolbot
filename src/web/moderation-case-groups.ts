@@ -70,23 +70,35 @@ export interface CaseGroups {
 const iso = (d: Date | null | undefined): string | null =>
   d instanceof Date ? d.toISOString() : d ? String(d) : null;
 
-/** Newest history per member, one read each; a failed read just shows none. */
+/**
+ * What came before each case: the member's newest entries created strictly
+ * before the case's origin entry, so the origin itself and anything that
+ * happened after it are not shown as "prior" history, and a member's older
+ * and newer cases each get their own list. Keyed by case id; one read per
+ * case, and a failed read just shows none. A case whose origin entry is gone
+ * has no cutoff to apply and shows the member's newest entries.
+ */
 export async function loadCaseHistory(
   moderation: Pick<ModerationService, "getHistory">,
   guildId: string,
   cases: readonly IModerationCase[],
+  originEntries: ReadonlyMap<string, IModerationLog>,
 ): Promise<Map<string, IModerationLog[]>> {
-  const byUser = new Map<string, IModerationLog[]>();
-  const users = [...new Set(cases.map((c) => c.userId))];
+  const byCase = new Map<string, IModerationLog[]>();
   await Promise.all(
-    users.map(async (userId) => {
+    cases.map(async (c) => {
+      const origin = originEntries.get(String(c.originEntryId));
       const rows = await moderation
-        .getHistory(guildId, userId, { limit: CASE_HISTORY_LIMIT, skip: 0 })
+        .getHistory(guildId, c.userId, {
+          limit: CASE_HISTORY_LIMIT,
+          skip: 0,
+          before: origin?.createdAt,
+        })
         .catch(() => []);
-      byUser.set(userId, rows);
+      byCase.set(String(c._id), rows);
     }),
   );
-  return byUser;
+  return byCase;
 }
 
 export function buildCaseGroups(
@@ -117,7 +129,7 @@ export function buildCaseGroups(
       outcome: e.outcome,
       note: e.note,
     })),
-    history: (history.get(c.userId) ?? []).map((h) => ({
+    history: (history.get(String(c._id)) ?? []).map((h) => ({
       createdAt: iso(h.createdAt) ?? "",
       action: h.action,
       reason: h.reason ?? null,
@@ -196,12 +208,16 @@ export async function loadModerationCaseData(args: {
         ...queue.recentlyResolved,
       ]
     : [];
-  const [originEntries, queueHistory] = await Promise.all([
-    caseService
-      .getOriginEntries(queueCases)
-      .catch(() => new Map<string, IModerationLog>()),
-    loadCaseHistory(moderationService, guildId, queueCases),
-  ]);
+  // History is read relative to each case's origin entry, so origins load first.
+  const originEntries = await caseService
+    .getOriginEntries(queueCases)
+    .catch(() => new Map<string, IModerationLog>());
+  const queueHistory = await loadCaseHistory(
+    moderationService,
+    guildId,
+    queueCases,
+    originEntries,
+  );
   return {
     casesEnabled,
     defaultReviewDays,

@@ -86,8 +86,17 @@ export class ModerationCaseReviewService extends ScheduledService<ModerationCase
   }
 
   protected async runOnce(): Promise<ModerationCaseReviewSummary> {
+    // Scoped to the configured guild like the other scheduled services, so a
+    // case left in the database for another guild is never flipped or named
+    // in this instance's review digest.
+    const guildId = await this.configService.getString("GUILD_ID", "");
+    if (!guildId) {
+      logger.error("Moderation case review aborted: GUILD_ID not configured");
+      return { due: 0, flipped: 0, notified: false };
+    }
     const caseService = ModerationCaseService.getInstance(this.client);
     const due = await ModerationCase.find({
+      guildId,
       status: "open",
       reviewAt: { $lte: new Date() },
     })
