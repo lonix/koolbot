@@ -658,7 +658,12 @@ describe("claimEventChannel (start-now path)", () => {
     expect(result?.state).toBe("active");
     expect(event.save).toHaveBeenCalledTimes(1);
     expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "evt-1", channelId: null },
+      expect.objectContaining({
+        _id: "evt-1",
+        channelId: null,
+        state: { $in: ["scheduled", "active"] },
+        seriesCancelled: { $ne: true },
+      }),
       { $set: { channelId: "chan-win" } },
     );
   });

@@ -1332,7 +1332,14 @@ export class EventService extends ScheduledService {
     let claimed: IEvent | null;
     try {
       claimed = await Event.findOneAndUpdate(
-        { _id: event._id, channelId: null },
+        {
+          _id: event._id,
+          channelId: null,
+          // A cancel that landed while the channel was being created must
+          // win: the claim then fails and the unclaimed channel is removed.
+          state: { $in: ["scheduled", "active"] },
+          seriesCancelled: { $ne: true },
+        },
         { $set: { channelId: channel.id } },
       );
     } catch (error) {
