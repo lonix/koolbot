@@ -54,6 +54,10 @@ import { DigestService } from "./services/digest-service.js";
 import { RewindNudgeService } from "./services/rewind-nudge-service.js";
 import { BirthdayService } from "./services/birthday-service.js";
 import { WelcomeService } from "./services/welcome-service.js";
+import {
+  RulesService,
+  RULES_ACCEPT_CUSTOM_ID,
+} from "./services/rules-service.js";
 import { EventService } from "./services/event-service.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
@@ -916,6 +920,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
         const { handleLfgButton } =
           await import("./handlers/lfg-button-handler.js");
         await handleLfgButton(interaction);
+      } else if (interaction.customId === RULES_ACCEPT_CUSTOM_ID) {
+        await RulesService.getInstance(client).handleAcceptButton(interaction);
       } else if (interaction.customId.startsWith("reactrole:btn:")) {
         await reactionRoleService.handleButtonInteraction(interaction);
       } else {

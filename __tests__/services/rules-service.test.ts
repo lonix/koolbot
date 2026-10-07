@@ -1,0 +1,152 @@
+import { describe, it, expect, beforeEach, jest } from "@jest/globals";
+import type { ButtonInteraction } from "discord.js";
+
+const mockGetBoolean =
+  jest.fn<(key: string, def?: boolean) => Promise<boolean>>();
+const mockGetString = jest.fn<(key: string, def?: string) => Promise<string>>();
+const mockSet = jest.fn<(...args: unknown[]) => Promise<void>>();
+const mockEnv = { guildId: "g1", guildMembersIntent: true };
+const mockLogger = {
+  warn: jest.fn(),
+  error: jest.fn(),
+  info: jest.fn(),
+  debug: jest.fn(),
+};
+const mockUpdateOne = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+
+jest.unstable_mockModule("../../src/services/config-service.js", () => ({
+  ConfigService: {
+    getInstance: jest.fn(() => ({
+      getBoolean: mockGetBoolean,
+      getString: mockGetString,
+      set: mockSet,
+    })),
+  },
+}));
+jest.unstable_mockModule("../../src/config/env.js", () => ({ env: mockEnv }));
+jest.unstable_mockModule("../../src/utils/logger.js", () => ({
+  default: mockLogger,
+}));
+jest.unstable_mockModule("../../src/models/rules-acceptance.js", () => ({
+  RulesAcceptance: {
+    updateOne: mockUpdateOne,
+    find: jest.fn(),
+    bulkWrite: jest.fn(),
+  },
+}));
+
+const { RulesService, roleProblem, RULES_ACCEPT_CUSTOM_ID } =
+  await import("../../src/services/rules-service.js");
+
+describe("roleProblem", () => {
+  const role = { id: "r1", managed: false, position: 2 };
+  it("accepts a normal role below the bot", () => {
+    expect(roleProblem(role, "g1", 5, true)).toBeNull();
+  });
+  it("refuses missing, @everyone, managed, too-high roles and no permission", () => {
+    expect(roleProblem(undefined, "g1", 5, true)).toBe("role-missing");
+    expect(roleProblem({ ...role, id: "g1" }, "g1", 5, true)).toBe(
+      "role-everyone",
+    );
+    expect(roleProblem({ ...role, managed: true }, "g1", 5, true)).toBe(
+      "role-managed",
+    );
+    expect(roleProblem({ ...role, position: 5 }, "g1", 5, true)).toBe(
+      "role-too-high",
+    );
+    expect(roleProblem(role, "g1", 5, false)).toBe("no-manage-roles");
+  });
+});
+
+describe("handleAcceptButton", () => {
+  const order: string[] = [];
+  const add = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+  let hasRole = false;
+  let config: Record<string, boolean | string>;
+
+  const interaction = (): ButtonInteraction =>
+    ({
+      customId: RULES_ACCEPT_CUSTOM_ID,
+      user: { id: "u1" },
+      deferReply: jest.fn(async () => {
+        order.push("defer");
+      }),
+      editReply: jest.fn(async () => {
+        order.push("edit");
+      }),
+      guild: {
+        id: "g1",
+        roles: {
+          fetch: jest.fn(
+            async () =>
+              new Map([["r1", { id: "r1", managed: false, position: 1 }]]),
+          ),
+        },
+        members: {
+          me: {
+            roles: { highest: { position: 5 } },
+            permissions: { has: () => true },
+          },
+          fetch: jest.fn(async () => ({
+            id: "u1",
+            roles: { cache: { has: () => hasRole }, add },
+          })),
+        },
+      },
+    }) as unknown as ButtonInteraction;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    order.length = 0;
+    hasRole = false;
+    config = { "rules.enabled": true, "rules.role_id": "r1" };
+    mockGetBoolean.mockImplementation(async (k) => Boolean(config[k]));
+    mockGetString.mockImplementation(async (k) => String(config[k] ?? ""));
+    add.mockResolvedValue(undefined);
+    mockUpdateOne.mockResolvedValue({});
+  });
+
+  const service = (): InstanceType<typeof RulesService> => {
+    RulesService.reset();
+    return RulesService.getInstance({} as never);
+  };
+
+  it("defers before any other work, grants the role and records it", async () => {
+    const i = interaction();
+    await service().handleAcceptButton(i);
+    expect(order[0]).toBe("defer");
+    expect(add).toHaveBeenCalledTimes(1);
+    const [filter, update] = mockUpdateOne.mock.calls[0] as [
+      Record<string, string>,
+      { $setOnInsert: { source: string } },
+    ];
+    expect(filter).toEqual({ userId: "u1", guildId: "g1" });
+    expect(update.$setOnInsert.source).toBe("button");
+  });
+
+  it("records an existing holder as adopted without re-granting", async () => {
+    hasRole = true;
+    await service().handleAcceptButton(interaction());
+    expect(add).not.toHaveBeenCalled();
+    const update = mockUpdateOne.mock.calls[0][1] as {
+      $setOnInsert: { source: string };
+    };
+    expect(update.$setOnInsert.source).toBe("adopted");
+  });
+
+  it("does nothing when the feature is off", async () => {
+    config["rules.enabled"] = false;
+    await service().handleAcceptButton(interaction());
+    expect(order[0]).toBe("defer");
+    expect(add).not.toHaveBeenCalled();
+    expect(mockUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("never throws and tells the member when Discord rejects the grant", async () => {
+    add.mockRejectedValue(new Error("Missing Permissions"));
+    const i = interaction();
+    await expect(service().handleAcceptButton(i)).resolves.toBeUndefined();
+    expect(i.editReply).toHaveBeenCalled();
+    expect(mockUpdateOne).not.toHaveBeenCalled();
+  });
+});

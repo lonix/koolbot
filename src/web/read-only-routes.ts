@@ -8,6 +8,11 @@
 import { loadRoleGroupsPage } from "./role-groups-page.js";
 import { renderRoleGroupsPage } from "./role-groups-views.js";
 import {
+  loadRulesPage,
+  parseRulesOptions,
+  renderRulesPage,
+} from "./rules-page.js";
+import {
   Router,
   type NextFunction,
   type Request,
@@ -2152,6 +2157,42 @@ export function createReadOnlyRouter(
         renderRoleGroupsPage({
           ...common,
           ...data,
+          jobId:
+            typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
+              ? jobParam
+              : null,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Rules acceptance (#1024) ----------
+  router.get(
+    "/rules",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const session = req.webSession;
+      if (!session) throw new Error("requireSession middleware must run first");
+      const query = req.query as Record<string, unknown>;
+      const previewing =
+        query["preview"] !== undefined ||
+        query["createRole"] !== undefined ||
+        query["grantExisting"] !== undefined ||
+        query["gate"] !== undefined;
+      const options = parseRulesOptions(query);
+      const jobParam = req.query.job;
+      const data = await loadRulesPage(
+        client,
+        common.guildId,
+        session.discordUserId,
+        previewing ? options : null,
+      );
+      res.type("text/html").send(
+        renderRulesPage({
+          ...common,
+          ...data,
+          options,
           jobId:
             typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
               ? jobParam

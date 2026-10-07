@@ -479,6 +479,7 @@ describe("Config Schema", () => {
       "rewind.enabled": false,
       "birthdays.enabled": false,
       "welcome.enabled": false,
+      "rules.enabled": false,
       "events.enabled": false,
       "lfg.enabled": false,
       "reactionroles.enabled": false,

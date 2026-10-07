@@ -35,6 +35,7 @@ import { createTicketsRouter } from "./routes/write/tickets.js";
 import { createModerationRouter } from "./routes/write/moderation.js";
 import { createVersionCheckRouter } from "./routes/write/version-check.js";
 import { createRoleGroupsRouter } from "./routes/write/role-groups.js";
+import { createRulesRouter } from "./routes/write/rules.js";
 
 export * from "./routes/write/helpers.js";
 
@@ -69,6 +70,7 @@ export function createWriteRouter(
   router.use(createModerationRouter(client));
   router.use(createVersionCheckRouter(client));
   router.use(createRoleGroupsRouter(client));
+  router.use(createRulesRouter(client));
 
   return router;
 }
