@@ -1160,7 +1160,7 @@ naming the status it found.
 routes, and never writes to Discord. It lists **roles** (position, colour, cached member count, `managed` flag,
 whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
 whether permissions are synced to the parent, every overwrite as allow/deny, and which feature is bound to the
-channel by a `*.channel_id` / `*.category_id` / `*_roles` setting), **other bots** (integration role and the
+channel by a `*.channel_id` / `*.category_id` / `*_channels` setting), **other bots** (integration role and the
 channels where they have overwrites) and **bot readiness**: the bot's guild permissions, its role-hierarchy
 position, and actionable warnings (for example "move the KoolBot role above X") that link to
 [TROUBLESHOOTING.md](TROUBLESHOOTING.md#bot-cant-manage-roles-or-channels). It also shows what Discord already

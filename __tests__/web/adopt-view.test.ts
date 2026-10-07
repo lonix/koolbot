@@ -100,9 +100,9 @@ const scan: ServerScan = {
     systemChannelId: null,
     publicUpdatesChannelId: null,
     onboardingEnabled: true,
-    onboardingRoleIds: [],
+    onboardingRoleIds: ["r1"],
     onboardingChannelIds: [],
-    onboardingPrompts: [],
+    onboardingPrompts: [{ title: "Pick", roleIds: ["r1", "r-gone"] }],
   },
   naming: {
     pattern: "lower-kebab",
@@ -137,6 +137,12 @@ describe("renderAdoptPage (#1019)", () => {
     expect(html).toContain("SendMessages");
     expect(html).toContain("Some parts could not be read");
     expect(html).toContain("4+");
+    expect(html).toContain("&lt;script&gt;x&lt;/script&gt;");
+  });
+  it("shows onboarding role names, falling back to ids", () => {
+    const html = renderAdoptPage({ ...common, scan });
+    expect(html).toContain("Pick");
+    expect(html).toContain("r-gone");
   });
   it("has no forms: the page is read-only", () => {
     const html = renderAdoptPage({ ...common, scan });

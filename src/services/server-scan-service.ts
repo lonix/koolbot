@@ -12,6 +12,7 @@ import {
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { ConfigService } from "./config-service.js";
+import { getEnvConfigValue } from "../config/env.js";
 import { defaultConfig } from "./config-schema.js";
 import {
   permissionNames,
@@ -561,14 +562,12 @@ export class ServerScanService {
       logger.debug(`server scan: ${what}: ${sanitizeForLog(err)}`);
     };
 
-    await guild.roles.fetch().catch((e) => note("roles", e));
-    await guild.channels.fetch().catch((e) => note("channels", e));
-    const me =
-      guild.members.me ??
-      (await guild.members.fetchMe().catch((e) => {
-        note("bot member", e);
-        return null;
-      }));
+    // Roles, channels, the bot's own member and the config are the planner's
+    // baseline: a failed read must abort the scan, not yield a partial one
+    // that makes existing roles or channels look absent.
+    await guild.roles.fetch();
+    await guild.channels.fetch();
+    const me = guild.members.me ?? (await guild.members.fetchMe());
 
     const config = await this.readConfig();
     const bindings = mapFeatureBindings(config);
@@ -718,24 +717,27 @@ export class ServerScanService {
     }
   }
 
+  /**
+   * The effective configuration for every known key: the stored value, else
+   * the environment fallback, else the schema default. A failed database read
+   * throws, so the planner never diffs against a half-read config.
+   */
   private async readConfig(): Promise<Record<string, ConfigValue | undefined>> {
+    const known = defaultConfig as unknown as Record<string, unknown>;
+    const rows = await ConfigService.getInstance().getAll();
+    const stored = new Map<string, unknown>(rows.map((r) => [r.key, r.value]));
     const out: Record<string, ConfigValue | undefined> = {};
-    try {
-      const rows = await ConfigService.getInstance().getAll();
-      const known = defaultConfig as unknown as Record<string, unknown>;
-      for (const row of rows) {
-        if (!(row.key in known)) continue;
-        const v = row.value as unknown;
-        if (
-          typeof v === "string" ||
-          typeof v === "number" ||
-          typeof v === "boolean"
-        ) {
-          out[row.key] = v;
-        }
+    for (const [key, fallback] of Object.entries(known)) {
+      const value = stored.has(key)
+        ? stored.get(key)
+        : (getEnvConfigValue(key) ?? fallback);
+      if (
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+      ) {
+        out[key] = value;
       }
-    } catch (err) {
-      logger.debug(`server scan: config read failed: ${sanitizeForLog(err)}`);
     }
     return out;
   }
@@ -1009,12 +1011,10 @@ export class ServerScanService {
     const { guild } = input;
     let adminRoleIds: string[] = [];
     if (input.adminUserId) {
-      try {
-        const member = await guild.members.fetch(input.adminUserId);
-        adminRoleIds = [...member.roles.cache.keys()];
-      } catch (err) {
-        logger.debug(`server scan: admin fetch failed: ${sanitizeForLog(err)}`);
-      }
+      // The planner's lockout check needs the admin's real roles; an
+      // unreadable admin aborts the scan rather than looking role-less.
+      const member = await guild.members.fetch(input.adminUserId);
+      adminRoleIds = [...member.roles.cache.keys()];
     }
     const roleStates: RoleState[] = input.roles
       .filter((r) => !r.isEveryone)

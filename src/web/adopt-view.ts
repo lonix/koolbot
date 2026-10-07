@@ -203,10 +203,11 @@ function renderCommunity(scan: ServerScan): string {
       : c.onboardingEnabled
         ? "enabled"
         : "disabled";
+  const roleName = new Map(scan.roles.map((r) => [r.id, r.name]));
   const prompts = c.onboardingPrompts
     .map(
       (p) =>
-        `<li>${escapeHtml(p.title)} <span class="muted">(${p.roleIds.length} role(s))</span></li>`,
+        `<li>${escapeHtml(p.title)}: <span class="muted">${escapeHtml(p.roleIds.map((id) => roleName.get(id) ?? id).join(", ") || "no roles")}</span></li>`,
     )
     .join("");
   const n = scan.naming;

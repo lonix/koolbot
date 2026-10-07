@@ -6,6 +6,7 @@ import {
   detectNamingConvention,
   mapFeatureBindings,
 } from "../../src/services/server-scan-service.js";
+import { defaultConfig } from "../../src/services/config-schema.js";
 import { ConfigService } from "../../src/services/config-service.js";
 
 const F = PermissionsBitField.Flags;
@@ -284,6 +285,46 @@ describe("ServerScanService (#1019)", () => {
     expect(scan.partial.join(" ")).toContain("webhooks");
     expect(scan.partial).toContain("onboarding");
     expect(scan.roles.length).toBeGreaterThan(0);
+  });
+
+  it("aborts when the roles, channels, bot member, admin or config read fails", async () => {
+    const svc = ServerScanService.getInstance(client);
+    const a = makeGuild().guild;
+    a.roles.fetch = jest.fn(async () => {
+      throw new Error("roles down");
+    });
+    await expect(svc.scanGuild(a)).rejects.toThrow("roles down");
+
+    const b = makeGuild().guild;
+    b.channels.fetch = jest.fn(async () => {
+      throw new Error("channels down");
+    });
+    await expect(svc.scanGuild(b)).rejects.toThrow("channels down");
+
+    const c = makeGuild().guild;
+    c.members.fetch = jest.fn(async () => {
+      throw new Error("admin gone");
+    });
+    await expect(svc.scanGuild(c, { adminUserId: "x" })).rejects.toThrow(
+      "admin gone",
+    );
+
+    jest.spyOn(ConfigService, "getInstance").mockReturnValue({
+      getAll: async () => {
+        throw new Error("db down");
+      },
+    } as any);
+    await expect(svc.scanGuild(makeGuild().guild)).rejects.toThrow("db down");
+  });
+
+  it("reads effective config: stored value, else default", async () => {
+    const { guild } = makeGuild();
+    const { scanned } =
+      await ServerScanService.getInstance(client).scanGuild(guild);
+    expect(scanned.config["quotes.channel_id"]).toBe("ch-quotes-real");
+    expect(scanned.config["quotes.enabled"]).toBe(
+      defaultConfig["quotes.enabled"],
+    );
   });
 
   it("never fetches the member list", async () => {
