@@ -162,7 +162,11 @@ async function handleStaffOrAuthor(
   const settings = await manager.getSettings();
   const member = await interaction.guild!.members.fetch(interaction.user.id);
   const staff = manager.isStaff(member, settings.staffRoleId);
-  const isAuthor = ticket.authorId === interaction.user.id;
+  // The author may close only from inside the ticket channel; reaching it by
+  // ID from elsewhere is a staff privilege.
+  const isAuthor =
+    ticket.authorId === interaction.user.id &&
+    ticket.channelId === interaction.channelId;
 
   // Staff can act on any ticket; the author may only close their own.
   if (!staff && !(sub === "close" && isAuthor)) {

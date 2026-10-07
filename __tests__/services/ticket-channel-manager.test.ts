@@ -25,10 +25,12 @@ jest.unstable_mockModule("../../src/services/command-manager.js", () => ({
 }));
 
 const mockCreate = jest.fn<(doc: unknown) => Promise<unknown>>();
+const mockFindOneAndUpdate = jest.fn<(...a: unknown[]) => unknown>();
 jest.unstable_mockModule("../../src/models/ticket.js", () => ({
   Ticket: {
     create: mockCreate,
     findOne: jest.fn(),
+    findOneAndUpdate: mockFindOneAndUpdate,
     find: jest.fn(),
     countDocuments: jest.fn(),
   },
@@ -217,6 +219,27 @@ describe("TicketChannelManager.openTicket", () => {
     expect(result).toEqual({ ok: false, reason: "discord-error" });
     expect(del).toHaveBeenCalled();
   });
+
+  it("keeps the ticket when only the welcome message fails", async () => {
+    const del = jest.fn(async () => undefined);
+    const send = jest.fn(async () => {
+      throw new Error("cannot send");
+    });
+    mockCreate.mockResolvedValue({
+      _id: "t1",
+      authorId: "u1",
+      subject: "help",
+    });
+    const { client } = makeClient();
+    const result = await TicketChannelManager.getInstance(client).openTicket({
+      guild: guildWith(send, del),
+      authorId: "u1",
+      authorName: "ola",
+      subject: "help",
+    });
+    expect(result.ok).toBe(true);
+    expect(del).not.toHaveBeenCalled();
+  });
 });
 
 describe("TicketChannelManager transitions", () => {
@@ -258,16 +281,52 @@ describe("TicketChannelManager transitions", () => {
     return { client, channel };
   }
 
-  it("claims an open ticket and refuses a second claim", async () => {
+  it("claims atomically and refuses when the conditional update misses", async () => {
     const { client } = clientWithChannel();
     const manager = TicketChannelManager.getInstance(client);
     const t = ticket("open");
+    mockFindOneAndUpdate.mockReturnValueOnce({
+      exec: async () => ({ status: "claimed", claimedBy: "staff-1" }),
+    });
     const first = await manager.claimTicket(t as never, "staff-1");
     expect(first.ok).toBe(true);
-    expect(t.status).toBe("claimed");
+    expect(mockFindOneAndUpdate).toHaveBeenCalledWith(
+      { _id: "t1", status: "open" },
+      { $set: { status: "claimed", claimedBy: "staff-1" } },
+      { new: true },
+    );
     expect(t.claimedBy).toBe("staff-1");
-    const second = await manager.claimTicket(t as never, "staff-2");
+
+    // A racing claim: the row is no longer open, so the update matches nothing.
+    mockFindOneAndUpdate.mockReturnValueOnce({ exec: async () => null });
+    const second = await manager.claimTicket(
+      ticket("open") as never,
+      "staff-2",
+    );
     expect(second).toEqual({ ok: false, reason: "already-claimed" });
+  });
+
+  it("still locks and renames when the transcript fails", async () => {
+    config({ "tickets.transcript_on_close": true });
+    const { client, channel } = clientWithChannel();
+    (channel as unknown as { messages: unknown }).messages = {
+      fetch: jest.fn(async () => {
+        throw new Error("no history access");
+      }),
+    };
+    const result = await TicketChannelManager.getInstance(client).closeTicket(
+      ticket("open") as never,
+      "staff-1",
+    );
+    expect(result.ok).toBe(true);
+    expect(channel.setName).toHaveBeenCalledWith("closed-ola-ab12");
+    expect(
+      (channel.permissionOverwrites as unknown as { edit: jest.Mock }).edit,
+    ).toHaveBeenCalledWith(
+      "u1",
+      { SendMessages: false, SendMessagesInThreads: false },
+      expect.anything(),
+    );
   });
 
   it("closes: locks the author, archives the name, records who closed it", async () => {
@@ -280,7 +339,11 @@ describe("TicketChannelManager transitions", () => {
     expect(result.ok).toBe(true);
     expect(
       (channel.permissionOverwrites as unknown as { edit: jest.Mock }).edit,
-    ).toHaveBeenCalledWith("u1", { SendMessages: false }, expect.anything());
+    ).toHaveBeenCalledWith(
+      "u1",
+      { SendMessages: false, SendMessagesInThreads: false },
+      expect.anything(),
+    );
     expect(channel.setName).toHaveBeenCalledWith("closed-ola-ab12");
     expect(t.status).toBe("closed");
     expect(t.closedBy).toBe("staff-1");

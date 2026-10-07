@@ -129,13 +129,30 @@ describe("/ticket", () => {
 
   it("lets the author close their own ticket", async () => {
     const { interaction, editReply } = makeInteraction("close");
-    manager.findByChannel.mockResolvedValue({ authorId: "u1" });
+    manager.findByChannel.mockResolvedValue({
+      authorId: "u1",
+      channelId: "chan-1",
+    });
     manager.isStaff.mockReturnValue(false);
     manager.closeTicket.mockResolvedValue({ ok: true });
     await execute(interaction);
     expect(manager.closeTicket).toHaveBeenCalled();
     expect(editReply).toHaveBeenCalledWith({
       content: expect.stringContaining("closed"),
+    });
+  });
+
+  it("stops an author closing their own ticket by ID from another channel", async () => {
+    const { interaction, editReply } = makeInteraction("close", { id: "abc" });
+    manager.findById.mockResolvedValue({
+      authorId: "u1",
+      channelId: "some-other-channel",
+    });
+    manager.isStaff.mockReturnValue(false);
+    await execute(interaction);
+    expect(manager.closeTicket).not.toHaveBeenCalled();
+    expect(editReply).toHaveBeenCalledWith({
+      content: "Only staff can do that.",
     });
   });
 

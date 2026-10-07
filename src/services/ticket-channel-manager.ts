@@ -261,7 +261,13 @@ export class TicketChannelManager {
           subject,
           status: "open",
         });
-        await this.sendWelcome(channel, ticket, settings.staffRoleId);
+        // Best-effort: the ticket exists and is usable without the greeting.
+        await this.sendWelcome(channel, ticket, settings.staffRoleId).catch(
+          (error) =>
+            logger.warn(
+              `Ticket ${String(ticket._id)} welcome failed: ${sanitizeForLog(getErrorMessage(error))}`,
+            ),
+        );
         return { ok: true, ticket: { ticket, channelId } };
       } catch (error) {
         // The row is the source of truth; a channel with no row is an orphan
@@ -288,9 +294,16 @@ export class TicketChannelManager {
     if (ticket.status === "claimed") {
       return { ok: false, reason: "already-claimed" };
     }
-    ticket.status = "claimed";
-    ticket.claimedBy = staffId;
-    await ticket.save();
+    // Conditional on the row still being open, so two simultaneous claims
+    // cannot both succeed and the later one silently take over.
+    const claimed = await Ticket.findOneAndUpdate(
+      { _id: ticket._id, status: "open" },
+      { $set: { status: "claimed", claimedBy: staffId } },
+      { new: true },
+    ).exec();
+    if (!claimed) return { ok: false, reason: "already-claimed" };
+    ticket.status = claimed.status;
+    ticket.claimedBy = claimed.claimedBy;
     await this.say(ticket, `🙋 <@${staffId}> claimed this ticket.`, [staffId]);
     return { ok: true, ticket };
   }
@@ -307,15 +320,23 @@ export class TicketChannelManager {
     if (channel) {
       try {
         if (settings.transcriptOnClose) {
-          const sent = await this.postTranscript(channel, ticket);
-          if (sent) ticket.transcriptMessageId = sent.id;
+          // Best-effort: a failed transcript must not leave a "closed" ticket
+          // unlocked, so it is isolated from the lock and rename below.
+          try {
+            const sent = await this.postTranscript(channel, ticket);
+            if (sent) ticket.transcriptMessageId = sent.id;
+          } catch (error) {
+            logger.warn(
+              `Ticket ${String(ticket._id)} transcript failed: ${sanitizeForLog(getErrorMessage(error))}`,
+            );
+          }
         }
         const manager = CommandManager.getInstance(this.client);
         await manager.makeDiscordApiCall(
           () =>
             channel.permissionOverwrites.edit(
               ticket.authorId,
-              { SendMessages: false },
+              { SendMessages: false, SendMessagesInThreads: false },
               { reason: `Ticket closed by ${closerId}` },
             ),
           "lock closed ticket channel",
@@ -358,7 +379,7 @@ export class TicketChannelManager {
         () =>
           channel.permissionOverwrites.edit(
             ticket.authorId,
-            { SendMessages: true },
+            { SendMessages: true, SendMessagesInThreads: true },
             { reason: `Ticket reopened by ${staffId}` },
           ),
         "unlock reopened ticket channel",
