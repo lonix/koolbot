@@ -1021,3 +1021,80 @@ describe("planAdoption: renames and replacement grants", () => {
     expect(withGrant.errors).toEqual([]);
   });
 });
+
+describe("planAdoption: round twelve", () => {
+  it("rejects conflicting duplicate overwrites and ignores identical ones", () => {
+    const base = { channelId: "chat", target: { id: "member" }, allow: VIEW };
+    const conflict = planAdoption(scan(), {
+      overwrites: [
+        { ...base, deny: "0" },
+        { ...base, allow: "0", deny: VIEW },
+      ],
+    });
+    expect(codes(conflict)).toEqual(["conflicting-overwrite"]);
+    const same = planAdoption(scan(), {
+      overwrites: [
+        { ...base, deny: "0" },
+        { ...base, deny: "0" },
+      ],
+    });
+    expect(same.errors).toEqual([]);
+    expect(same.operations).toHaveLength(1);
+  });
+
+  it("protects channels already bound to features, even if the request does not name them", () => {
+    const state = scan({
+      boundChannelIds: ["chat"],
+      roles: scan().roles.map((r) =>
+        r.id === "botrole"
+          ? { ...r, permissions: (F.ViewChannel | F.ManageRoles).toString() }
+          : r,
+      ),
+    });
+    const plan = planAdoption(state, {
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { id: "botrole" },
+          allow: "0",
+          deny: VIEW,
+        },
+      ],
+    });
+    expect(codes(plan)).toEqual(["bot-lockout"]);
+  });
+
+  it("blocks an early role edit that strips the bot's management permission", () => {
+    const state = scan({
+      botRoleIds: ["botrole", "helper"],
+      roles: [
+        ...scan().roles.map((r) =>
+          r.id === "botrole"
+            ? { ...r, permissions: F.ViewChannel.toString() }
+            : r,
+        ),
+        role({
+          id: "helper",
+          name: "Helper",
+          permissions: F.ManageRoles.toString(),
+          position: 4,
+        }),
+      ],
+    });
+    const plan = planAdoption(state, {
+      roles: [{ id: "helper", name: "Helper", permissions: "0" }],
+      overwrites: [
+        { channelId: "chat", target: { id: "member" }, allow: VIEW, deny: "0" },
+      ],
+    });
+    expect(codes(plan)).toContain("bot-lacks-permission");
+    expect(plan.errors.map((e) => e.message).join()).toMatch(
+      /remove the bot's own Manage Roles/,
+    );
+  });
+
+  it("records the names of roles to be created so apply can check they are still absent", () => {
+    const plan = planAdoption(scan(), { roles: [{ name: "Newcomers" }] });
+    expect(plan.baseline.absentRoleNames).toEqual(["Newcomers"]);
+  });
+});

@@ -9,7 +9,7 @@ const base: AdoptionPlan = {
   operations: [],
   warnings: [],
   errors: [],
-  baseline: { roles: [], channels: [], config: {} },
+  baseline: { absentRoleNames: [], roles: [], channels: [], config: {} },
 };
 
 describe("renderAdoptionDiff", () => {

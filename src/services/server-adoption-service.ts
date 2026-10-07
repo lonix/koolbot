@@ -62,6 +62,11 @@ export {
  * skipped if anything earlier failed.
  */
 
+/** `once`: never auto-retry; for writes that are not safe to repeat. */
+export interface CallOptions {
+  once?: boolean;
+}
+
 /** Everything the executor touches, injectable so it can be tested offline. */
 export interface AdoptionGateway {
   createRole(input: {
@@ -158,7 +163,11 @@ export interface AdoptionDeps {
   store: AdoptionStore;
   config: AdoptionConfigWriter;
   /** Wraps a Discord REST call (timeout + backoff); default: CommandManager. */
-  callApi: <T>(call: () => Promise<T>, name: string) => Promise<T>;
+  callApi: <T>(
+    call: () => Promise<T>,
+    name: string,
+    opts?: CallOptions,
+  ) => Promise<T>;
   audit: (session: WebSessionContext, entry: AuditEntry) => Promise<void>;
   /** Like `audit` but throws if the row cannot be stored. */
   auditStrict: (session: WebSessionContext, entry: AuditEntry) => Promise<void>;
@@ -233,8 +242,12 @@ export const DESTRUCTIVE_RESTORE_NOTE =
 const isDestructive = (op: PlanOperation): boolean =>
   op.class === "destructive";
 
+/** Finished jobs stay pollable this long, then are dropped. */
+const JOB_RETENTION_MS = 60 * 60 * 1000;
+
 export interface AdoptionJob {
   id: string;
+  finishedAt?: number;
   status: "running" | "done" | "failed";
   progress: ApplyProgress;
   result: ApplyResult | null;
@@ -243,6 +256,7 @@ export interface AdoptionJob {
 
 export interface RollbackJob {
   id: string;
+  finishedAt?: number;
   status: "running" | "done" | "failed";
   result: RollbackResult | null;
   error: string | null;
@@ -276,8 +290,12 @@ export class ServerAdoptionService {
         gateway: new DiscordAdoptionGateway(guild),
         store: new MongoAdoptionStore(),
         config: new ConfigServiceWriter(),
-        callApi: <T>(call: () => Promise<T>, name: string): Promise<T> =>
-          manager.makeDiscordApiCall(call, name),
+        callApi: <T>(
+          call: () => Promise<T>,
+          name: string,
+          opts?: CallOptions,
+        ): Promise<T> =>
+          manager.makeDiscordApiCall(call, name, 30000, opts?.once ? 1 : 3),
         audit: recordAudit,
         auditStrict: recordAuditOrThrow,
         sleep: (ms: number): Promise<void> =>
@@ -300,6 +318,7 @@ export class ServerAdoptionService {
    */
   public startApply(plan: AdoptionPlan, options: ApplyOptions): AdoptionJob {
     this.assertApplicable(plan);
+    this.pruneJobs();
     const job: AdoptionJob = {
       id: randomUUID(),
       status: "running",
@@ -324,13 +343,29 @@ export class ServerAdoptionService {
       .then((result) => {
         job.result = result;
         job.status = "done";
+        job.finishedAt = Date.now();
       })
       .catch((error) => {
         job.error = getErrorMessage(error);
         job.status = "failed";
+        job.finishedAt = Date.now();
         logger.error("Server adoption apply failed:", error);
       });
     return job;
+  }
+
+  /** Drop finished jobs past their polling window so the maps stay bounded. */
+  private pruneJobs(): void {
+    const cutoff = Date.now() - JOB_RETENTION_MS;
+    for (const map of [this.jobs, this.rollbackJobs] as Array<
+      Map<string, { finishedAt?: number }>
+    >) {
+      for (const [id, job] of map) {
+        if (job.finishedAt !== undefined && job.finishedAt < cutoff) {
+          map.delete(id);
+        }
+      }
+    }
   }
 
   public getJob(id: string): AdoptionJob | undefined {
@@ -342,6 +377,7 @@ export class ServerAdoptionService {
     snapshotId: string,
     options: RollbackOptions,
   ): RollbackJob {
+    this.pruneJobs();
     const job: RollbackJob = {
       id: randomUUID(),
       status: "running",
@@ -353,10 +389,12 @@ export class ServerAdoptionService {
       .then((result) => {
         job.result = result;
         job.status = "done";
+        job.finishedAt = Date.now();
       })
       .catch((error) => {
         job.error = getErrorMessage(error);
         job.status = "failed";
+        job.finishedAt = Date.now();
         logger.error("Server adoption rollback failed:", error);
       });
     return job;
@@ -646,6 +684,15 @@ export class ServerAdoptionService {
         drifted.push(`role "${role.name}"`);
       }
     }
+    // A role the plan will create must still not exist; otherwise planning
+    // would have treated it as an edit.
+    for (const name of plan.baseline.absentRoleNames ?? []) {
+      const exists = await callApi(
+        () => gateway.findRoleByName(name, new Date(0)),
+        `look up role ${name}`,
+      ).catch(() => "ambiguous");
+      if (exists) drifted.push(`role "${name}" now exists`);
+    }
     for (const [key, expected] of Object.entries(plan.baseline.config)) {
       const live = await this.deps.config.read(key);
       if (
@@ -900,6 +947,9 @@ export class ServerAdoptionService {
                 position: op.position,
               }),
             `create role ${op.name}`,
+            // A retry after a timeout could create a second role; resume
+            // reconciles instead.
+            { once: true },
           ));
         snapshot.createdRoles.push({ ref: op.ref, roleId, name: op.name });
         return roleId;
@@ -1097,23 +1147,30 @@ export class ServerAdoptionService {
     if (snapshot.guildId !== options.actor.guildId)
       throw new AdoptionPlanError("Snapshot belongs to a different server.");
     await store.recoverStale(snapshot.guildId, ADOPTION_STALE_AFTER_MS);
-    if (options.revalidate) {
-      const problems = await options.revalidate();
-      if (problems.length > 0) {
-        throw new AdoptionPlanError(
-          `Cannot roll back: ${problems.join("; ")}.`,
-        );
-      }
-    }
-    await this.reconcileForRollback(snapshot);
     const priorStatus =
       (await store.get(snapshotId))?.status ?? snapshot.status;
+    // Take the lock before anything is read-modify-written, so a concurrent
+    // resume cannot have its progress overwritten by reconciliation.
     if (
       !(await store.claim(snapshotId, ["applied", "partial"], "rolling_back"))
     ) {
       throw new AdoptionPlanError(
         "Snapshot is still being applied or rolled back; wait for it to finish before rolling back.",
       );
+    }
+    try {
+      if (options.revalidate) {
+        const problems = await options.revalidate();
+        if (problems.length > 0) {
+          throw new AdoptionPlanError(
+            `Cannot roll back: ${problems.join("; ")}.`,
+          );
+        }
+      }
+      await this.reconcileForRollback(snapshot);
+    } catch (error) {
+      await store.update(snapshotId, { status: priorStatus });
+      throw error;
     }
 
     const { plan, baseline } = snapshot;
@@ -1157,10 +1214,17 @@ export class ServerAdoptionService {
         case "role.create": {
           const created = snapshot.createdRoles.find((r) => r.ref === op.ref);
           if (created && options.deleteCreatedRoles) {
-            await callApi(
-              () => gateway.deleteRole(created.roleId),
-              `delete created role ${created.roleId}`,
+            // A timed-out delete may already have gone through.
+            const live = await callApi(
+              () => gateway.readRole(created.roleId),
+              `read role ${created.roleId}`,
             );
+            if (live) {
+              await callApi(
+                () => gateway.deleteRole(created.roleId),
+                `delete created role ${created.roleId}`,
+              );
+            }
           }
           break;
         }
@@ -1253,6 +1317,7 @@ export class ServerAdoptionService {
                     overwrites: prior.overwrites.map(remapOverwrite),
                   }),
                 `recreate channel ${prior.name}`,
+                { once: true },
               ));
             snapshot.restoredChannels.push({ oldId: prior.id, newId });
             notes.push(DESTRUCTIVE_RESTORE_NOTE);
@@ -1295,6 +1360,7 @@ export class ServerAdoptionService {
                     position: prior.position,
                   }),
                 `recreate role ${prior.name}`,
+                { once: true },
               ));
             snapshot.restoredRoles.push({ oldId: prior.id, newId });
             notes.push(DESTRUCTIVE_RESTORE_NOTE);

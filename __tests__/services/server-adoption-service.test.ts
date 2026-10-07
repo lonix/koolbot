@@ -131,6 +131,8 @@ function harness() {
   const staleIds = new Set<string>();
   const recoveries: string[] = [];
   const existingRoleByName = new Map<string, string>();
+  const lookups: string[] = [];
+  const createdRoleIds = new Set<string>();
   let configIssues: string[] = [];
   let strictAuditFails = false;
   const strictAudits: string[] = [];
@@ -143,7 +145,9 @@ function harness() {
     gateway: {
       createRole: async (i) => {
         run(`createRole:${i.name}`);
-        return `role-${++n}`;
+        const id = `role-${++n}`;
+        createdRoleIds.add(id);
+        return id;
       },
       editRole: async (id, c) => {
         run(`editRole:${id}:${Object.keys(c).join(",")}`);
@@ -178,13 +182,23 @@ function harness() {
         run(`setParent:${ch}:${parent}`);
       },
       findRoleByName: async (name) => {
-        calls.push(`findRole:${name}`);
+        lookups.push(name);
         return existingRoleByName.get(name) ?? null;
       },
       readRole: async (id) =>
         (live.roles.get(id) ??
           scanned().roles.find((r) => r.id === id) ??
-          null) as never,
+          (createdRoleIds.has(id) ||
+          [...existingRoleByName.values()].includes(id)
+            ? {
+                id,
+                name: "x",
+                color: 0,
+                permissions: "0",
+                position: 1,
+                managed: false,
+              }
+            : null)) as never,
       readChannel: async (id) =>
         (live.channels.get(id) ??
           scanned().channels.find((c) => c.id === id) ??
@@ -287,6 +301,7 @@ function harness() {
     alreadyHolds,
     liveConfig,
     existingChannelByName,
+    createdRoleIds,
     strictAudits,
     staleIds,
     recoveries,
@@ -1267,8 +1282,9 @@ describe("review hardening, round six", () => {
     const first = await h.service.apply(p, opts);
     h.failOn.clear();
     await h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId });
-    expect(seen).toHaveLength(1);
-    expect(seen[0].getTime()).toBeGreaterThan(Date.now() - 60_000);
+    const reconcile = seen.filter((d) => d.getTime() > 0);
+    expect(reconcile).toHaveLength(1);
+    expect(reconcile[0].getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
 });
 
@@ -1442,5 +1458,95 @@ describe("review hardening, round ten", () => {
     expect(h.records.get(r.snapshotId)!.memberProgress["op-1"].granted).toEqual(
       ["b"],
     );
+  });
+});
+
+describe("review hardening, round twelve", () => {
+  it("refuses to apply when a role it would create now exists", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    h.existingRoleByName.set("New", "someone-elses");
+    await expect(h.service.apply(p, opts)).rejects.toThrow(
+      /role "New" now exists/,
+    );
+    expect(h.calls.some((c) => c.startsWith("createRole"))).toBe(false);
+  });
+
+  it("creates roles and recreates channels and roles with a single attempt", async () => {
+    const h = harness();
+    const once: string[] = [];
+    h.deps.callApi = async (call, name, opts2) => {
+      if (opts2?.once) once.push(name);
+      return call();
+    };
+    const p = planAdoption(scanned(), {
+      roles: [{ name: "New" }],
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+    const applied = await new ServerAdoptionService(h.deps).apply(p, opts);
+    await new ServerAdoptionService(h.deps).rollback(applied.snapshotId, {
+      actor,
+    });
+    expect(once).toEqual(["create role New", "recreate channel Old"]);
+  });
+
+  it("claims the snapshot before reconciling, and puts its status back if rollback is refused", async () => {
+    const h = harness();
+    const applied = await h.service.apply(
+      planAdoption(scanned(), {
+        roles: [{ id: "member", name: "Member", color: 2 }],
+      }),
+      opts,
+    );
+    const order: string[] = [];
+    const claim = h.deps.store.claim;
+    h.deps.store.claim = async (...args) => {
+      order.push("claim");
+      return claim(...args);
+    };
+    await expect(
+      new ServerAdoptionService(h.deps).rollback(applied.snapshotId, {
+        actor,
+        revalidate: async () => {
+          order.push("revalidate");
+          return ["not now"];
+        },
+      }),
+    ).rejects.toThrow(/Cannot roll back: not now/);
+    expect(order).toEqual(["claim", "revalidate"]);
+    expect(h.records.get(applied.snapshotId)!.status).toBe("applied");
+  });
+
+  it("treats an already-deleted adoption-created role as rolled back", async () => {
+    const h = harness();
+    const applied = await h.service.apply(
+      planAdoption(scanned(), { roles: [{ name: "New" }] }),
+      opts,
+    );
+    h.deps.gateway.readRole = async () => null; // a timed-out delete already went through
+    h.calls.length = 0;
+    const r = await new ServerAdoptionService(h.deps).rollback(
+      applied.snapshotId,
+      {
+        actor,
+        deleteCreatedRoles: true,
+      },
+    );
+    expect(r.failed).toEqual([]);
+    expect(h.calls.some((c) => c.startsWith("deleteRole"))).toBe(false);
+  });
+
+  it("drops finished jobs after their polling window", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    const first = h.service.startApply(p, opts);
+    await new Promise((r) => setTimeout(r, 10));
+    first.finishedAt = Date.now() - 2 * 60 * 60 * 1000;
+    h.service.startApply(
+      planAdoption(scanned(), { roles: [{ name: "Other" }] }),
+      opts,
+    );
+    expect(h.service.getJob(first.id)).toBeUndefined();
   });
 });

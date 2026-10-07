@@ -580,6 +580,18 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
   {
     source: "src/models/adoption-snapshot.ts",
     collection: "adoption-snapshot",
+    field: "baseline",
+    exportable: false,
+    guildScoped: true,
+    note: "Prior state of the roles, channels and settings a plan touched, including member-targeted permission overwrites. Needed to roll back; admin tooling, not member data.",
+    onDelete: "expires",
+    subject: "mention",
+    deleteNote:
+      "Member ids appear only as overwrite targets inside saved channel structure; removed with the whole snapshot by adoption.snapshot.retention_days.",
+  },
+  {
+    source: "src/models/adoption-snapshot.ts",
+    collection: "adoption-snapshot",
     field: "memberProgress",
     exportable: false,
     guildScoped: true,

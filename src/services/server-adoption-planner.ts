@@ -246,6 +246,8 @@ export interface PlanIssue {
 
 /** Prior state of everything the plan touches; the snapshot is built from it. */
 export interface PlanBaseline {
+  /** Names of roles the plan creates; they must still be absent at apply. */
+  absentRoleNames: string[];
   roles: RoleState[];
   channels: ChannelState[];
   config: Record<string, ConfigValue | null>;
@@ -711,6 +713,7 @@ export function planAdoption(
   }
 
   // ---- overwrites ----------------------------------------------------
+  const seenOverwrites = new Map<string, { allow: string; deny: string }>();
   for (const want of desired.overwrites ?? []) {
     const channel = channelsById.get(want.channelId);
     if (!channel) {
@@ -759,6 +762,24 @@ export function planAdoption(
       );
       continue;
     }
+    // The same (channel, target) twice would be diffed against the original
+    // scan, so a later entry could silently undo an earlier one.
+    const seenKey = `${channel.id}:${targetId}`;
+    const earlier = seenOverwrites.get(seenKey);
+    if (earlier) {
+      if (
+        big(earlier.allow) !== big(want.allow) ||
+        big(earlier.deny) !== big(want.deny)
+      ) {
+        err(
+          "conflicting-overwrite",
+          `"${channel.name}" has two different overwrites requested for the same target.`,
+          channel.id,
+        );
+      }
+      continue;
+    }
+    seenOverwrites.set(seenKey, { allow: want.allow, deny: want.deny });
     // Discord only lets the bot allow what it holds itself.
     if ((big(want.allow) & ~botBase) !== 0n) {
       err(
@@ -1106,6 +1127,36 @@ export function planAdoption(
       ...scanned.botRoleIds,
       ...grantedTo(scanned.botUserId),
     ].filter((id) => !after.removedRoles.has(id));
+    // An early role edit must not strip a management permission that a later
+    // step in the same plan still needs.
+    const botAfter = effectivePermissions({
+      userId: scanned.botUserId,
+      roleIds: botRoles,
+      ownerId: scanned.ownerId,
+      everyoneId,
+      rolePermissions: after.rolePermissions,
+    });
+    // (A bot that never had the permission is already reported above.)
+    if (
+      needsManageRoles &&
+      (botBase & ManageRoles) === ManageRoles &&
+      (botAfter & ManageRoles) !== ManageRoles
+    ) {
+      err(
+        "bot-lacks-permission",
+        "This plan would remove the bot's own Manage Roles permission before its later steps run.",
+      );
+    }
+    if (
+      needsManageChannels &&
+      (botBase & ManageChannels) === ManageChannels &&
+      (botAfter & ManageChannels) !== ManageChannels
+    ) {
+      err(
+        "bot-lacks-permission",
+        "This plan would remove the bot's own Manage Channels permission before its later steps run.",
+      );
+    }
     const check = (
       userId: string,
       roleIdsBefore: string[],
@@ -1175,7 +1226,22 @@ export function planAdoption(
         "This change would remove your own Administrator permission.",
       );
 
-    for (const feature of desired.featureChannels ?? []) {
+    // Channels already bound to KoolBot features need the bot's access even
+    // when the request does not repeat them.
+    const named = new Set(
+      (desired.featureChannels ?? []).map((f) => f.channelId),
+    );
+    const featureChannels = [
+      ...(desired.featureChannels ?? []),
+      ...scanned.boundChannelIds
+        .filter((id) => !named.has(id))
+        .map((channelId) => ({
+          channelId,
+          feature: "a bound KoolBot",
+          permissions: undefined as string | undefined,
+        })),
+    ];
+    for (const feature of featureChannels) {
       const channel = channelsById.get(feature.channelId);
       if (!channel) continue;
       const needed = feature.permissions
@@ -1205,6 +1271,9 @@ export function planAdoption(
   }
 
   const baseline: PlanBaseline = {
+    absentRoleNames: ordered.flatMap((o) =>
+      o.type === "role.create" ? [o.name] : [],
+    ),
     roles: scanned.roles.filter((r) => touchedRoles.has(r.id)),
     channels: scanned.channels.filter((c) => touchedChannels.has(c.id)),
     config: baselineConfig,
