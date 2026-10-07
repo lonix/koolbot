@@ -20,12 +20,17 @@ on:
     types: [labeled, synchronize, reopened, closed]
 
 # Cancel in-progress runs for the same workflow and ref (except on tags).
-# A pull_request event that neither builds a preview nor cleans one up (an
-# unrelated label, an unlabelled PR, a fork) gets a group of its own, so it
-# cannot cancel a preview build that is still running for the same PR.
+# pull_request events are keyed by PR number instead: on a merged PR's
+# `closed` event github.ref is the base branch, which would put cleanup in the
+# same group as the release build on main. A pull_request event that neither
+# builds a preview nor cleans one up (an unrelated label, an unlabelled PR, a
+# fork) gets a group of its own, so it cannot cancel a preview build that is
+# still running for the same PR.
 concurrency:
   group: >-
-    ${{ github.workflow }}-${{ github.ref }}${{
+    ${{ github.workflow }}-${{
+      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref
+    }}${{
       github.event_name == 'pull_request' && !(
         github.event.pull_request.head.repo.full_name == github.repository && (
           github.event.action == 'closed' ||
@@ -89,20 +94,18 @@ jobs:
           category: hadolint
 
   build-and-push:
-    name: Build, scan, sign and push
+    name: Build and push
     runs-on: ubuntu-latest
     needs: hadolint
     timeout-minutes: 30
     outputs:
       digest: ${{ steps.build.outputs.digest }}
+      tags: ${{ steps.meta.outputs.tags }}
+    # Previews run this job too, so it only gets what a push needs. The
+    # release-only grants live on sign-and-scan, which previews never reach.
     permissions:
       contents: read
       packages: write
-      # Required for cosign keyless signing and SLSA provenance attestations.
-      id-token: write
-      attestations: write
-      # Required for uploading the Trivy SARIF report to the Security tab.
-      security-events: write
 
     steps:
       - name: Checkout repository
@@ -188,28 +191,55 @@ jobs:
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          # Provenance, SBOM, attestation, signing and the Trivy scan are
-          # release concerns; previews skip them to stay fast and cheap.
+          # Provenance and SBOM (like sign-and-scan) are release concerns;
+          # previews skip them to stay fast and cheap.
           provenance: ${{ github.event_name == 'pull_request' && 'false' || 'mode=max' }}
           sbom: ${{ github.event_name != 'pull_request' }}
 
+  sign-and-scan:
+    name: Attest, sign and scan
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    timeout-minutes: 15
+    # Release concern only: preview images are not attested, signed or scanned.
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      # Push the attestation and cosign signature next to the image.
+      packages: write
+      # Required for cosign keyless signing and SLSA provenance attestations.
+      id-token: write
+      attestations: write
+      # Required for uploading the Trivy SARIF report to the Security tab.
+      security-events: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Generate SLSA build provenance attestation
-        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v4.2.2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ needs.build-and-push.outputs.digest }}
           push-to-registry: true
 
       - name: Install cosign
-        if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign published image with cosign (keyless)
-        if: github.event_name != 'pull_request'
         env:
-          DIGEST: ${{ steps.build.outputs.digest }}
-          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ needs.build-and-push.outputs.digest }}
+          TAGS: ${{ needs.build-and-push.outputs.tags }}
         run: |
           set -euo pipefail
           for tag in ${TAGS}; do
@@ -217,10 +247,9 @@ jobs:
           done
 
       - name: Run Trivy vulnerability scan
-        if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
-          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ needs.build-and-push.outputs.digest }}
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
@@ -231,7 +260,7 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy SARIF
-        if: always() && github.event_name != 'pull_request'
+        if: always()
         uses: github/codeql-action/upload-sarif@v4.38.2
         with:
           sarif_file: trivy-results.sarif
