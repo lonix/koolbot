@@ -64,6 +64,13 @@ jest.unstable_mockModule("../../src/services/reaction-role-service.js", () => ({
   },
 }));
 
+jest.unstable_mockModule(
+  "../../src/services/reaction-role-group-service.js",
+  () => ({
+    ReactionRoleGroupService: { getInstance: (): unknown => ({}) },
+  }),
+);
+
 const { createReactionRolesRouter } =
   await import("../../src/web/routes/write/reaction-roles.js");
 const { requireCsrf } = await import("../../src/web/csrf.js");

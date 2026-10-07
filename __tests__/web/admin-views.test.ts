@@ -2300,6 +2300,23 @@ describe("renderModerationPage settings card (#977)", () => {
 });
 
 describe("renderReactionRolesPage", () => {
+  it("renders all 20 option rows per group form (extras in a details)", () => {
+    const html = renderReactionRolesPage({
+      ...COMMON,
+      enabled: true,
+      configChannel: null,
+      active: [],
+      archived: [],
+    });
+    expect(html.match(/name="roleName"/g)).toHaveLength(40);
+    expect(html).toContain("More options (up to 20)");
+    // every option field has a distinct accessible name
+    const labels =
+      html.match(/aria-label="[^"]*option \d+ (?:role name|emoji)"/g) ?? [];
+    expect(labels).toHaveLength(80);
+    expect(new Set(labels).size).toBe(80);
+  });
+
   it("shows the empty state for active and archived", () => {
     const html = renderReactionRolesPage({
       ...COMMON,

@@ -1019,7 +1019,7 @@ export class ReactionRoleService {
    * are kept as their full `<:name:id>` / `<a:name:id>` markup; standard
    * emojis are stored as their Unicode character unchanged.
    */
-  private normalizeEmoji(emoji: string): string {
+  public normalizeEmoji(emoji: string): string {
     const customEmojiMatch = emoji.match(/<a?:(\w+):(\d+)>/);
     return customEmojiMatch ? customEmojiMatch[0] : emoji;
   }
@@ -1044,12 +1044,20 @@ export class ReactionRoleService {
    * surfaced as a `logger.error` deep inside `handleReactionAdd`. Surfacing it
    * at create/bind time turns a silent no-op into an actionable message.
    */
-  private async validateRoleAssignable(
+  public async validateRoleAssignable(
     guild: Guild,
     role: Role,
+    resolvedBotMember?: GuildMember | null,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
+    // Callers that must route REST through a timeout/retry wrapper can pass
+    // the bot member they already fetched; otherwise fall back to cache/fetch.
+    // `undefined` (omitted) keeps the cache/fetch fallback; an explicit `null`
+    // means the caller's own wrapped fetch failed, so do not retry outside it.
     const botMember =
-      guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+      resolvedBotMember !== undefined
+        ? resolvedBotMember
+        : (guild.members.me ??
+          (await guild.members.fetchMe().catch(() => null)));
 
     if (!botMember) {
       return {
@@ -2009,9 +2017,19 @@ export class ReactionRoleService {
         logger.warn("Could not delete group category:", error);
       }
 
-      // Delete every role in the group.
+      // Delete every role in the group, except roles the bot did not create
+      // (the grouped-role generator reuses existing roles, #1064).
       for (const config of configs) {
+        if (config.autoCreated === false) continue;
         try {
+          // Same guard as deleteReactionRole: a role reused by a mapping
+          // outside this group must survive, or that picker would dangle.
+          const stillUsed = await ReactionRoleConfig.countDocuments({
+            guildId,
+            roleId: config.roleId,
+            groupId: { $ne: groupId },
+          });
+          if (stillUsed > 0) continue;
           const role = await guild.roles.fetch(config.roleId);
           if (role) {
             await role.delete();

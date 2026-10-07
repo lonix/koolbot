@@ -24,6 +24,10 @@ import {
 } from "../services/config-schema.js";
 import { DAY_NAMES, formatHourLabel } from "../services/rewind-service.js";
 import { THEME } from "./theme.js";
+import {
+  MAX_GROUP_ENTRIES,
+  reactionRoleGroupPresets,
+} from "../content/reaction-role-groups.js";
 import { MONTH_NAMES } from "./user-layout.js";
 import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
@@ -2669,6 +2673,29 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
 </tr>`;
 }
 
+/**
+ * Option rows for the grouped-role forms: the first six are always visible,
+ * the rest (up to MAX_GROUP_ENTRIES) sit in a native <details> so the full
+ * advertised limit is reachable without JavaScript.
+ */
+function groupOptionRows(
+  formLabel: string,
+  placeholders: (i: number) => [string, string],
+): string {
+  const row = (i: number): string => {
+    const [role, emoji] = placeholders(i);
+    return `<div class="inline-form">
+      <input type="text" name="roleName" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} role name`)}" placeholder="${escapeHtml(role)}">
+      <input type="text" name="emoji" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} emoji`)}" placeholder="${escapeHtml(emoji)}">
+    </div>`;
+  };
+  const visible = 6;
+  const rows = (from: number, to: number): string =>
+    Array.from({ length: to - from }, (_unused, i) => row(from + i)).join("");
+  return `${rows(0, visible)}
+    <details><summary>More options (up to ${MAX_GROUP_ENTRIES})</summary>${rows(visible, MAX_GROUP_ENTRIES)}</details>`;
+}
+
 export function renderReactionRolesPage(props: ReactionRolesProps): string {
   const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
   const activeRows = props.active
@@ -2775,15 +2802,34 @@ ${settingsCard}
         <option value="toggle">Toggle — independent add/remove per option</option>
       </select>
     </label>
-    ${Array.from(
-      { length: 6 },
-      (_unused, i) =>
-        `<div class="inline-form">
-      <input type="text" name="roleName" maxlength="100" placeholder="Role name${i < 2 ? " (required)" : ""}">
-      <input type="text" name="emoji" maxlength="100" placeholder="Emoji${i < 2 ? " (required)" : ""}">
-    </div>`,
-    ).join("")}
+    ${groupOptionRows("Role group", (i) => [`Role name${i < 2 ? " (required)" : ""}`, `Emoji${i < 2 ? " (required)" : ""}`])}
     <button type="submit" class="btn btn-primary">Create role group</button>
+  </form>
+</div>
+<div class="card">
+  <h2>Generate a grouped set</h2>
+  <p class="muted">Creates a whole set of roles and one picker message in one step. Existing roles with the same name are reused untouched; new roles get no permissions (colour: <code>reactionroles.group_role_colour</code>). Safe to run again: only missing options are added, nothing is removed or duplicated. Up to 20 options per group.</p>
+  <form method="POST" action="/admin/reaction-roles/group/generate" class="stack">
+    ${csrfInput}
+    <label>Source
+      <select name="preset">
+        ${reactionRoleGroupPresets.map((p) => `<option value="${escapeHtml(p.key)}">${escapeHtml(p.name)} preset — ${escapeHtml(p.description)} (${p.entries.length} roles)</option>`).join("")}
+        <option value="custom">Custom group (fill in below)</option>
+      </select>
+    </label>
+    <label>Custom group name <span class="muted">(custom only)</span>
+      <input type="text" name="groupName" maxlength="100" placeholder="Platform">
+    </label>
+    <label>Group mode <span class="muted">(blank = preset default; unique for custom)</span>
+      <select name="mode">
+        <option value="">Default</option>
+        <option value="unique">Unique — pick exactly one</option>
+        <option value="sticky">Sticky — add-only</option>
+        <option value="toggle">Toggle — independent add/remove</option>
+      </select>
+    </label>
+    ${groupOptionRows("Custom role group", (i) => [`Custom role name${i < 1 ? " (custom only)" : ""}`, "Emoji"])}
+    <button type="submit" class="btn btn-primary">Generate roles</button>
   </form>
 </div>
 <div class="card">

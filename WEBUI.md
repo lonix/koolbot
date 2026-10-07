@@ -906,6 +906,22 @@ paths accept **toggle** or **sticky**. How a new message lets members pick
 (emoji reactions, buttons or a select menu) comes from the surface style,
 `reactionroles.style`; existing messages keep the style they were created with.
 
+**Generate a grouped set** (#1064) creates a whole group of roles and one picker
+message in one step, from a preset (**Region**: seven world regions; **Country**:
+twenty common countries with flag emoji, Nordics first) or a custom group (a name
+plus role/emoji rows, up to 20 options per group, which is Discord's reaction limit
+per message). Preset lists live in `src/content/reaction-role-groups.ts`. The
+generator is idempotent and non-destructive: a role with the same name
+(case-insensitive) is reused and left untouched, roles it creates get no
+permissions and aren't mentionable (colour from `reactionroles.group_role_colour`,
+Discord's default), and running a group again only adds the missing options by
+editing the existing picker message. It never removes roles, mappings or
+reactions. If the picker message was deleted in Discord, the run stops and changes
+nothing: remove the group on this page and generate it again. The mode defaults to
+**unique** (pick exactly one, e.g. one region);
+choose sticky or toggle if members may hold several. Deleting a generated group
+removes only roles the bot created, so reused roles survive.
+
 Its **Settings** card (#974) edits `reactionroles.enabled`, the message channel
 (`reactionroles.message_channel_id`, a text-channel picker) and the surface
 style (`reactionroles.style`) in place. Turning the feature off from here leaves

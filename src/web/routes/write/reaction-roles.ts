@@ -10,6 +10,8 @@ import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { ReactionRoleService } from "../../../services/reaction-role-service.js";
+import { ReactionRoleGroupService } from "../../../services/reaction-role-group-service.js";
+import { findReactionRoleGroupPreset } from "../../../content/reaction-role-groups.js";
 import type { ReactionRoleMode } from "../../../models/reaction-role-config.js";
 import { recordAudit } from "../../audit.js";
 import {
@@ -450,6 +452,105 @@ export function createReactionRolesRouter(client: Client): Router {
         flashRedirect(res, "/admin/reaction-roles", {
           type: "err",
           text: `Failed to create role group: ${text}`,
+        });
+      }
+    }),
+  );
+
+  // Generate (or top up) a grouped set of roles (#1064): from a preset in
+  // src/content/ or a custom list. Idempotent: existing roles are reused and
+  // a re-run only adds what is missing.
+  router.post(
+    "/reaction-roles/group/generate",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const presetKey = getString(req, "preset");
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const toArray = (raw: unknown): string[] =>
+        Array.isArray(raw)
+          ? raw.map(String)
+          : typeof raw === "string"
+            ? [raw]
+            : [];
+
+      let groupName = getString(req, "groupName");
+      let entries: Array<{ roleName: string; emoji: string }> = [];
+      let defaultMode: ReactionRoleMode = "unique";
+      if (presetKey && presetKey !== "custom") {
+        const preset = findReactionRoleGroupPreset(presetKey);
+        if (!preset) {
+          flashRedirect(res, "/admin/reaction-roles", {
+            type: "err",
+            text: "Unknown preset.",
+          });
+          return;
+        }
+        groupName = preset.name;
+        entries = preset.entries.map((e) => ({ ...e }));
+        defaultMode = preset.mode;
+      } else {
+        const roleNames = toArray(body["roleName"]);
+        const emojis = toArray(body["emoji"]);
+        for (let i = 0; i < Math.max(roleNames.length, emojis.length); i++) {
+          const roleName = (roleNames[i] ?? "").trim();
+          const emoji = (emojis[i] ?? "").trim();
+          if (roleName && emoji) entries.push({ roleName, emoji });
+        }
+      }
+      const modeRaw = getString(req, "mode");
+      const mode: ReactionRoleMode =
+        modeRaw === "sticky" || modeRaw === "toggle" || modeRaw === "unique"
+          ? modeRaw
+          : defaultMode;
+
+      if (!groupName) {
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: "Group name is required.",
+        });
+        return;
+      }
+
+      const service = ReactionRoleGroupService.getInstance(client);
+      try {
+        const result = await service.provisionGroup(
+          session.guildId,
+          groupName,
+          entries,
+          mode,
+        );
+        await recordAudit(session, {
+          action: "reactionrole.group.generate",
+          targetId: result.groupId ?? null,
+          details: {
+            groupName,
+            preset: presetKey || "custom",
+            mode,
+            created: result.createdRoles,
+            reused: result.reusedRoles,
+            added: result.addedEntries,
+            skipped: result.skippedEntries,
+            messageId: result.messageId,
+          },
+          result: result.success ? "success" : "failure",
+          errorMessage: result.success ? null : result.message,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: result.success ? "ok" : "err",
+          text: result.message,
+        });
+      } catch (err) {
+        const text = err instanceof Error ? err.message : "Unknown error";
+        logger.error("Generate reaction role group failed", err);
+        await recordAudit(session, {
+          action: "reactionrole.group.generate",
+          details: { groupName, preset: presetKey || "custom", mode },
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, "/admin/reaction-roles", {
+          type: "err",
+          text: `Failed to generate role group: ${text}`,
         });
       }
     }),

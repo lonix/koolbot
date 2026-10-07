@@ -64,6 +64,10 @@ export interface IReactionRoleConfig extends Document {
   // (#814). Populated only for grouped mappings; single mappings leave it
   // undefined. Equal to the group's anchor message id at creation time.
   groupId?: string;
+  // Lower-cased group name for groups made by the grouped-role generator
+  // (#1064). Lets a re-run find the existing group and add only what is
+  // missing. Undefined for every other mapping.
+  groupKey?: string;
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -127,6 +131,10 @@ const ReactionRoleConfigSchema = new Schema<IReactionRoleConfig>(
       type: String,
       required: false,
       index: true,
+    },
+    groupKey: {
+      type: String,
+      required: false,
     },
     isArchived: {
       type: Boolean,
