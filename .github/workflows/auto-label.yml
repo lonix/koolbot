@@ -61,6 +61,7 @@ jobs:
               dependencies: ['0366d6', 'Pull requests that update a dependency file'],
               'github-actions': ['ededed', 'Workflow and CI configuration changes'],
               docker: ['0db7ed', 'Dockerfile / docker-compose changes'],
+              'docker-preview': ['1d76db', 'Build a ghcr.io pr-<number> preview image on every push (docker.yml)'],
               tests: ['bfd4f2', 'Test suite changes'],
               chore: ['ededed', 'Maintenance, build and tooling changes'],
               refactor: ['ededed', 'Code changes with no functional effect'],

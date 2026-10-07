@@ -589,6 +589,43 @@ old title are dropped).
 New issues get the same `area: *` labels from keywords in their title and body,
 plus a type label when the issue form did not already set one.
 
+### Testing a PR in Docker
+
+Large changes often need a run in a real container before they merge. A
+maintainer (anyone with triage or write access) can add the **`docker-preview`**
+label to a PR opened from a branch in this repository. The `Docker Build and
+Push` workflow then builds the PR head and pushes:
+
+- `ghcr.io/lonix/koolbot:pr-<number>` - always the latest push to the PR
+- `ghcr.io/lonix/koolbot:pr-<number>-sha-<short-sha>` - one per commit
+
+Every new push to the PR rebuilds the image while the label is on. Remove the
+label to stop further builds. When a build finishes, the workflow posts a comment
+on the PR with the commit, the digest and the `docker pull` commands for both
+tags, and updates that same comment on every rebuild. Preview images are `linux/amd64` only and skip the
+release-only steps (Trivy scan, cosign signing, provenance and SBOM). PRs from
+forks never get a preview, because their workflow token cannot push to GHCR.
+
+Pull the preview in place of `latest`, for example in a copy of
+`docker-compose.yml`:
+
+```yaml
+services:
+  bot:
+    image: ghcr.io/lonix/koolbot:pr-123
+```
+
+**Give a preview its own Discord application and its own MongoDB.** Use a
+separate bot token (`DISCORD_TOKEN`, `CLIENT_ID`), a test guild (`GUILD_ID`) and
+a throwaway database (`MONGODB_URI`). Never point a preview at a production bot
+or database: unreleased code may run migrations or cleanup jobs on whatever
+data it can reach.
+
+When the PR is closed or merged, the workflow deletes its `pr-<number>` images
+from GHCR and marks the preview comment as removed. For that delete to succeed, the repository needs the **Admin** role
+on the package (package settings → Manage Actions access). Without it, the
+cleanup job fails and the tags can be deleted by hand from the package page.
+
 ## Issue Reporting
 
 ### Before Creating an Issue
