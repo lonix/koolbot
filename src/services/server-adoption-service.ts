@@ -456,6 +456,7 @@ export class ServerAdoptionService {
     };
     let earlierFailure = false;
     let destructiveChecked = false;
+    let configFailed = false;
 
     const persist = (): Promise<void> =>
       store.update(snapshot.id, {
@@ -475,6 +476,16 @@ export class ServerAdoptionService {
             continue;
           }
           progress.current = op.summary;
+          if (op.type === "config.set" && configFailed) {
+            // The batch was validated as a whole; applying a suffix alone could
+            // break dependencies, so the rest of the config phase waits.
+            record.status = "skipped";
+            record.error = "Skipped: an earlier config change failed.";
+            progress.skipped++;
+            await persist();
+            options.onProgress?.({ ...progress });
+            continue;
+          }
           // Destructive steps only run when every earlier step succeeded.
           if (isDestructive(op) && earlierFailure) {
             record.status = "skipped";
@@ -517,11 +528,18 @@ export class ServerAdoptionService {
               // row cannot be written the step does not run.
               await this.deps.auditStrict(options.actor, {
                 action: `adoption.${op.type}.intent`,
-                targetId: op.targetId,
+                targetId:
+                  op.type === "overwrite.remove"
+                    ? `${op.channelId}:${op.overwriteTargetId}`
+                    : op.targetId,
                 details: {
                   planId: plan.id,
                   snapshotId: snapshot.id,
                   opId: op.id,
+                  summary: op.summary,
+                  ...("approval" in op && op.approval
+                    ? { approval: op.approval }
+                    : {}),
                 },
                 result: "success",
               });
@@ -552,6 +570,7 @@ export class ServerAdoptionService {
             progress.failed++;
             logger.error(`Adoption operation ${op.id} failed:`, error);
             if (op.type === "config.set") {
+              configFailed = true;
               // Config writes skip per-key dependency checks, so a half-applied
               // batch could leave an invalid prefix. Put the prefix back.
               await this.revertConfigPrefix(plan, records);
@@ -660,6 +679,74 @@ export class ServerAdoptionService {
       throw new AdoptionPlanError(
         `Changed since the plan was made (${drifted.join(", ")}). Review and plan again.`,
       );
+    }
+  }
+
+  /**
+   * A crash or timeout can leave a write done on Discord while its record
+   * still reads pending/failed. Before choosing what to undo, look for the
+   * evidence each durable intent leaves and treat those operations as applied.
+   */
+  private async reconcileForRollback(
+    snapshot: AdoptionSnapshotRecord,
+  ): Promise<void> {
+    const { gateway, callApi, store } = this.deps;
+    let changed = false;
+    for (const op of snapshot.plan.operations) {
+      const record = snapshot.operations.find((r) => r.opId === op.id);
+      if (!record || record.status === "applied") continue;
+      if (op.type === "role.create" && record.startedAt) {
+        const roleId = await callApi(
+          () => gateway.findRoleByName(op.name, new Date(record.startedAt!)),
+          `look up role ${op.name}`,
+        );
+        if (roleId) {
+          snapshot.createdRoles.push({ ref: op.ref, roleId, name: op.name });
+          record.status = "applied";
+          changed = true;
+        }
+      } else if (op.type === "channel.delete" && record.startedAt) {
+        const live = await callApi(
+          () => gateway.readChannel(op.channelId),
+          `read channel ${op.channelId}`,
+        );
+        if (!live) {
+          record.status = "applied";
+          changed = true;
+        }
+      } else if (op.type === "role.delete" && record.startedAt) {
+        const live = await callApi(
+          () => gateway.readRole(op.roleId),
+          `read role ${op.roleId}`,
+        );
+        if (!live) {
+          record.status = "applied";
+          changed = true;
+        }
+      } else if (op.type === "member.role.add") {
+        const state = snapshot.memberProgress[op.id];
+        const roleId = op.roleId.startsWith("new:")
+          ? snapshot.createdRoles.find((r) => r.ref === op.roleId)?.roleId
+          : op.roleId;
+        for (const memberId of state?.inflight ?? []) {
+          if (!roleId || state.granted.includes(memberId)) continue;
+          const holds = await callApi(
+            () => gateway.memberHasRole(memberId, roleId),
+            `check role on ${memberId}`,
+          );
+          if (holds) {
+            state.granted.push(memberId);
+            changed = true;
+          }
+        }
+      }
+    }
+    if (changed) {
+      await store.update(snapshot.id, {
+        operations: snapshot.operations,
+        createdRoles: snapshot.createdRoles,
+        memberProgress: snapshot.memberProgress,
+      });
     }
   }
 
@@ -1007,6 +1094,7 @@ export class ServerAdoptionService {
         );
       }
     }
+    await this.reconcileForRollback(snapshot);
     const priorStatus =
       (await store.get(snapshotId))?.status ?? snapshot.status;
     if (

@@ -949,3 +949,75 @@ describe("planAdoption: duplicate creates and grant baselines", () => {
     expect(plan.baseline.roles.map((r) => r.id)).toEqual(["member"]);
   });
 });
+
+describe("planAdoption: renames and replacement grants", () => {
+  it("moves a renamed role between lookup names and keeps collisions", () => {
+    const state = scan({
+      roles: [
+        ...scan().roles,
+        role({ id: "other-regulars", name: "Regulars", position: 2 }),
+      ],
+    });
+    const stale = planAdoption(state, {
+      roles: [{ id: "member", name: "Veterans" }],
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { roleName: "Member" },
+          allow: VIEW,
+          deny: "0",
+        },
+      ],
+    });
+    expect(codes(stale)).toEqual(["unknown-role"]); // the old name no longer resolves
+    const collide = planAdoption(state, {
+      roles: [{ id: "member", name: "Regulars" }],
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { roleName: "Regulars" },
+          allow: VIEW,
+          deny: "0",
+        },
+      ],
+    });
+    expect(codes(collide)).toEqual(["ambiguous-role"]); // two roles now share it
+  });
+
+  it("does not flag a lockout when a replacement role is granted before the old one is deleted", () => {
+    const state = scan({
+      roles: [
+        ...scan().roles.map((r) =>
+          r.id === "g1" ? { ...r, permissions: "0" } : r,
+        ),
+        role({
+          id: "newstaff",
+          name: "NewStaff",
+          permissions: VIEW,
+          position: 4,
+        }),
+      ],
+      adminRoleIds: ["staff"],
+      channels: [
+        channel({
+          id: "chat",
+          overwrites: [
+            { id: "staff", type: "role", allow: VIEW, deny: "0" },
+            { id: "newstaff", type: "role", allow: VIEW, deny: "0" },
+          ],
+        }),
+      ],
+    });
+    const without = planAdoption(state, {
+      deletions: [{ kind: "role", id: "staff" }],
+      approvals: [approval("role.delete", "staff")],
+    });
+    expect(codes(without)).toContain("admin-access-lost");
+    const withGrant = planAdoption(state, {
+      memberGrants: [{ role: { id: "newstaff" }, memberIds: ["admin"] }],
+      deletions: [{ kind: "role", id: "staff" }],
+      approvals: [approval("role.delete", "staff")],
+    });
+    expect(withGrant.errors).toEqual([]);
+  });
+});

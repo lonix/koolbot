@@ -1302,3 +1302,113 @@ describe("review hardening, round eight", () => {
     );
   });
 });
+
+describe("review hardening, round nine", () => {
+  it("stops the config phase after the first config failure", async () => {
+    const h = harness();
+    const p = planAdoption(
+      scanned({ config: { "adoption.snapshot.retention_days": 90 } }),
+      {
+        config: {
+          "adoption.snapshot.retention_days": 30,
+          "core.web_audit.retention_days": 10,
+          "core.command_audit.retention_days": 10,
+        },
+      },
+    );
+    expect(p.operations).toHaveLength(3);
+    const second = p.operations[1] as { key: string; value: unknown };
+    h.failOn.add(`config:${second.key}=${second.value}`);
+    const r = await h.service.apply(p, opts);
+    expect(r.status).toBe("partial");
+    const third = p.operations[2] as { key: string; value: unknown };
+    expect(h.calls).not.toContain(`config:${third.key}=${third.value}`);
+    expect(r.skipped).toEqual(["op-3"]);
+  });
+
+  it("records approval and exact target in the destructive intent row", async () => {
+    const h = harness();
+    const rows: Array<{
+      targetId?: string | null;
+      details?: Record<string, unknown>;
+    }> = [];
+    h.deps.auditStrict = async (_s, e) => {
+      rows.push(e);
+    };
+    const state = scanned({
+      channels: [
+        {
+          ...scanned().channels[1],
+          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+        },
+      ],
+    });
+    const p = planAdoption(state, {
+      overwriteRemovals: [{ channelId: "chat", targetId: "member" }],
+      approvals: [approval("overwrite.remove", "chat:member")],
+    });
+    h.live.channels.set("chat", state.channels[0]);
+    await new ServerAdoptionService(h.deps).apply(p, opts);
+    expect(rows[0].targetId).toBe("chat:member");
+    expect(rows[0].details?.approval).toMatchObject({ approvedBy: "admin" });
+    expect(rows[0].details?.summary).toMatch(/Remove overwrite/);
+  });
+
+  it("rolls back what a crashed apply did, even though its record never said applied", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      roles: [{ name: "New" }],
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+    const applied = await h.service.apply(p, opts);
+    // Simulate a crash: the writes happened, but nothing was recorded as done.
+    const rec = h.records.get(applied.snapshotId)!;
+    rec.status = "partial";
+    rec.createdRoles = [];
+    for (const r of rec.operations) {
+      r.status = "pending";
+      r.startedAt = new Date().toISOString() as never;
+    }
+    h.existingRoleByName.set("New", "role-from-crash");
+    h.deps.gateway.readChannel = async () => null; // the channel is gone
+    h.calls.length = 0;
+    const r = await new ServerAdoptionService(h.deps).rollback(
+      applied.snapshotId,
+      {
+        actor,
+        deleteCreatedRoles: true,
+      },
+    );
+    expect(r.failed).toEqual([]);
+    expect(h.calls).toContain("recreateChannel:Old");
+    expect(h.calls).toContain("deleteRole:role-from-crash");
+  });
+
+  it("revokes members from an interrupted page when rolling back", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a", "b"] }],
+    });
+    const applied = await h.service.apply(p, opts);
+    const rec = h.records.get(applied.snapshotId)!;
+    rec.status = "partial";
+    rec.operations[0].status = "failed";
+    rec.memberProgress["op-1"] = {
+      done: 0,
+      failed: [],
+      granted: [],
+      inflight: ["a", "b"],
+    };
+    h.alreadyHolds.add("a");
+    h.alreadyHolds.add("b");
+    h.calls.length = 0;
+    await new ServerAdoptionService(h.deps).rollback(applied.snapshotId, {
+      actor,
+    });
+    expect(h.calls.filter((c) => c.startsWith("removeMember"))).toEqual([
+      "removeMember:a:member",
+      "removeMember:b:member",
+    ]);
+  });
+});

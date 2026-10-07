@@ -685,7 +685,14 @@ export function planAdoption(
     touchedRoles.add(existing.id);
     // Later overwrites and grants may name the role by what it is renamed to.
     if (changes.name !== undefined) {
-      rolesByName.set(changes.name.trim().toLowerCase(), [existing]);
+      const oldKey = existing.name.trim().toLowerCase();
+      const newKey = changes.name.trim().toLowerCase();
+      // Move the role between lookup buckets, keeping any collisions.
+      rolesByName.set(
+        oldKey,
+        (rolesByName.get(oldKey) ?? []).filter((r) => r.id !== existing.id),
+      );
+      rolesByName.set(newKey, [...(rolesByName.get(newKey) ?? []), existing]);
     }
     const before: Record<string, unknown> = {};
     for (const k of Object.keys(changes) as Array<keyof typeof changes>)
@@ -1083,12 +1090,22 @@ export function planAdoption(
   if (ordered.length > 0) {
     const before = simulate(scanned, []);
     const after = simulate(scanned, ordered);
-    const adminRoles = scanned.adminRoleIds.filter(
-      (id) => !after.removedRoles.has(id),
-    );
-    const botRoles = scanned.botRoleIds.filter(
-      (id) => !after.removedRoles.has(id),
-    );
+    // Grants run before the destructive phase, and a failed grant skips it,
+    // so a replacement role granted to the admin or bot counts as held.
+    const grantedTo = (userId: string): string[] =>
+      ordered.flatMap((o) =>
+        o.type === "member.role.add" && o.memberIds.includes(userId)
+          ? [o.roleId]
+          : [],
+      );
+    const adminRoles = [
+      ...scanned.adminRoleIds,
+      ...grantedTo(scanned.adminUserId),
+    ].filter((id) => !after.removedRoles.has(id));
+    const botRoles = [
+      ...scanned.botRoleIds,
+      ...grantedTo(scanned.botUserId),
+    ].filter((id) => !after.removedRoles.has(id));
     const check = (
       userId: string,
       roleIdsBefore: string[],
