@@ -25,6 +25,8 @@ const WIZARD_OPT_OUT: Record<string, string> = {
   reactiontracking: "Tracking tunables, configured on the Settings page.",
   rewind: "Annual nudge with its own admin handling.",
   celebrations: "Piggybacks on achievements; single channel opt-in.",
+  adoption:
+    "Server Adoption has its own Web UI flow (Role Groups); retention and sync tunables live on the Settings page.",
 };
 
 describe("Setup Wizard coverage", () => {

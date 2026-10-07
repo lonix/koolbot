@@ -352,6 +352,34 @@ describe("ServerAdoptionService.apply", () => {
       approvals: [approval("channel.delete", "old-cat")],
     });
 
+  it("applies an additive plan made for the bot itself as a system actor (role group sync, #1021)", async () => {
+    const system = {
+      sessionId: "system:role-group-sync",
+      discordUserId: "bot",
+      guildId: "g1",
+      role: "admin",
+      scopes: [],
+    } as never;
+    const p = planAdoption(
+      scanned({ adminUserId: "bot", adminRoleIds: ["botrole"] }),
+      { roles: [{ id: "member", name: "Member", color: 2 }] },
+      { approverId: "bot" },
+    );
+    expect(p.errors).toEqual([]);
+    expect(p.plannedBy).toBe("bot");
+    const result = await h.service.apply(p, {
+      actor: system,
+      batchDelayMs: 0,
+    });
+    expect(result.status).toBe("applied");
+    expect(h.calls).toContain("editRole:member:color");
+    expect(h.records.get(result.snapshotId)?.appliedBy).toBe("bot");
+    // Someone else can't apply a plan made for the bot.
+    await expect(
+      h.service.apply(p, { actor, batchDelayMs: 0 }),
+    ).rejects.toBeInstanceOf(AdoptionPlanError);
+  });
+
   it("takes the snapshot before the first Discord write, runs in order, audits each, reloads last", async () => {
     const result = await h.service.apply(plan(), opts);
     expect(result.status).toBe("applied");

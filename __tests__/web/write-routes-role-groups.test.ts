@@ -42,6 +42,10 @@ const svc: Svc = {
   remove: jest.fn(),
   list: jest.fn(),
   get: jest.fn(),
+  setSyncPolicy: jest.fn(),
+  markUnlinked: jest.fn(),
+  requestRecreate: jest.fn(),
+  relinkTo: jest.fn(),
 };
 jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
   RoleGroupService: { getInstance: () => svc },
@@ -49,9 +53,11 @@ jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
 
 const mockPlanRoles = jest.fn<(...a: any[]) => any>();
 const mockPlanDelete = jest.fn<(...a: any[]) => any>();
+const mockPlanAdminFix = jest.fn<(...a: any[]) => any>();
 jest.unstable_mockModule("../../src/services/role-group-adoption.js", () => ({
   planRoleGroups: mockPlanRoles,
   planRoleDeletion: mockPlanDelete,
+  planAdminFix: mockPlanAdminFix,
   planIsApplicable: (p: {
     plan: { errors: unknown[] };
     extraErrors: unknown[];
@@ -136,6 +142,10 @@ beforeEach(() => {
     group({ id: "c" }),
   ]);
   svc.get.mockResolvedValue(group());
+  svc.setSyncPolicy.mockResolvedValue(undefined);
+  svc.markUnlinked.mockResolvedValue(true);
+  svc.requestRecreate.mockResolvedValue(true);
+  svc.relinkTo.mockResolvedValue({ ok: true, group: group() });
 });
 afterEach(async () => {
   await harness?.close();
@@ -518,5 +528,265 @@ describe("POST /role-groups/apply", () => {
     const res = await harness.post("/role-groups/apply", { planId: "plan-1" });
     expect(flashOf(res).type).toBe("err");
     expect(mockPlanRoles).not.toHaveBeenCalled();
+  });
+});
+
+describe("role name tracking and sync policy (#1021)", () => {
+  it("remembers the linked role's name for drift detection", async () => {
+    await mount();
+    await harness.post("/role-groups/create", { roleId: "rOk", name: "Crew" });
+    expect(svc.create).toHaveBeenCalledWith(
+      "guild-1",
+      expect.objectContaining({ name: "Crew", roleName: "Helpers" }),
+    );
+  });
+
+  it("saves a per-group sync policy, or clears it", async () => {
+    await mount();
+    await harness.post("/role-groups/g1/edit", {
+      name: "Mod",
+      syncPolicy: "adopt",
+    });
+    expect(svc.setSyncPolicy).toHaveBeenLastCalledWith(
+      "guild-1",
+      "g1",
+      "adopt",
+    );
+    await harness.post("/role-groups/g1/edit", { name: "Mod", syncPolicy: "" });
+    expect(svc.setSyncPolicy).toHaveBeenLastCalledWith("guild-1", "g1", null);
+  });
+
+  it("rejects an unknown policy before saving anything", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/g1/edit", {
+      name: "Mod",
+      syncPolicy: "destroy",
+    });
+    expect(flashOf(res).type).toBe("err");
+    expect(svc.update).not.toHaveBeenCalled();
+    expect(svc.setSyncPolicy).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /role-groups/:id/relink (#1021)", () => {
+  const unlinked = (over = {}) =>
+    group({ unlinked: true, roleId: null, ...over });
+
+  it("only works on an unlinked group", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "recreate",
+    });
+    expect(flashOf(res).type).toBe("err");
+    expect(svc.requestRecreate).not.toHaveBeenCalled();
+  });
+
+  it("notices a role deleted while the sync was off, and offers the same choices", async () => {
+    svc.get
+      .mockResolvedValueOnce(group({ roleId: "gone" }))
+      .mockResolvedValueOnce(unlinked({ lostRoleId: "gone" }));
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "recreate",
+    });
+    expect(svc.markUnlinked).toHaveBeenCalledWith("guild-1", "g1", "gone");
+    expect(flashOf(res).type).toBe("ok");
+    expect(svc.requestRecreate).toHaveBeenCalledWith("guild-1", "g1");
+  });
+
+  it("leaves a group whose role still exists alone", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "recreate",
+    });
+    expect(svc.markUnlinked).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("err");
+  });
+
+  it("asks for a new role without creating anything in Discord", async () => {
+    svc.get.mockResolvedValue(unlinked());
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "recreate",
+    });
+    expect(flashOf(res).type).toBe("ok");
+    expect(svc.requestRecreate).toHaveBeenCalledWith("guild-1", "g1");
+    expect(mockStartApply).not.toHaveBeenCalled();
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "role-groups.relink" }),
+    );
+  });
+
+  it("never recreates a gate-only group", async () => {
+    svc.get.mockResolvedValue(unlinked({ gateOnly: true }));
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "recreate",
+    });
+    expect(flashOf(res).type).toBe("err");
+    expect(svc.requestRecreate).not.toHaveBeenCalled();
+  });
+
+  it("links another editable role", async () => {
+    svc.get.mockResolvedValue(unlinked());
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "link",
+      roleId: "rOk",
+    });
+    expect(flashOf(res).type).toBe("ok");
+    expect(svc.relinkTo).toHaveBeenCalledWith(
+      "guild-1",
+      "g1",
+      "rOk",
+      "Helpers",
+    );
+  });
+
+  it("refuses locked roles, and a managed role for an editable group", async () => {
+    svc.get.mockResolvedValue(unlinked());
+    await mount();
+    for (const roleId of ["rTop", "guild-1", "rBoost", "missing"]) {
+      const res = await harness.post("/role-groups/g1/relink", {
+        mode: "link",
+        roleId,
+      });
+      expect(flashOf(res).type).toBe("err");
+    }
+    expect(svc.relinkTo).not.toHaveBeenCalled();
+  });
+
+  it("lets a gate-only group link a managed role, and nothing else", async () => {
+    svc.get.mockResolvedValue(unlinked({ gateOnly: true }));
+    await mount();
+    expect(
+      flashOf(
+        await harness.post("/role-groups/g1/relink", {
+          mode: "link",
+          roleId: "rOk",
+        }),
+      ).type,
+    ).toBe("err");
+    expect(
+      flashOf(
+        await harness.post("/role-groups/g1/relink", {
+          mode: "link",
+          roleId: "rBoost",
+        }),
+      ).type,
+    ).toBe("ok");
+    expect(svc.relinkTo).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a role that is already taken", async () => {
+    svc.get.mockResolvedValue(unlinked());
+    svc.relinkTo.mockResolvedValue({ ok: false, error: "already backs" });
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "link",
+      roleId: "rOk",
+    });
+    expect(flashOf(res)).toMatchObject({ type: "err", msg: "already backs" });
+  });
+
+  it("rejects an unknown mode", async () => {
+    svc.get.mockResolvedValue(unlinked());
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", { mode: "x" });
+    expect(flashOf(res).type).toBe("err");
+  });
+});
+
+describe("POST /role-groups/admin-fix/apply (#1021)", () => {
+  const fix = (over: Record<string, unknown> = {}) => ({
+    plan: {
+      id: "fix-1",
+      errors: [],
+      operations: [{ id: "1" }],
+    },
+    extraErrors: [],
+    report: null,
+    ...over,
+  });
+
+  it("starts the previewed fix as a job and audits it", async () => {
+    mockPlanAdminFix.mockResolvedValue(fix());
+    mockStartApply.mockReturnValue({
+      id: "11111111-1111-1111-1111-111111111111",
+    });
+    await mount();
+    const res = await harness.post("/role-groups/admin-fix/apply", {
+      planId: "fix-1",
+      move: ["u1", "u2"],
+      drop: "r5",
+      grant: "1",
+    });
+    expect(res.status).toBe(303);
+    expect(res.headers.get("location")).toContain("?job=");
+    expect(mockPlanAdminFix).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      {
+        moveMemberIds: ["u1", "u2"],
+        dropRoleIds: ["r5"],
+        grantAdministrator: true,
+      },
+    );
+    expect(mockRecordAudit).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "role-groups.admin-fix",
+        result: "success",
+      }),
+    );
+  });
+
+  it("refuses a stale preview, blocking errors and an empty plan", async () => {
+    await mount();
+    mockPlanAdminFix.mockResolvedValue(fix());
+    expect(
+      flashOf(
+        await harness.post("/role-groups/admin-fix/apply", { planId: "old" }),
+      ).type,
+    ).toBe("warn");
+    mockPlanAdminFix.mockResolvedValue(
+      fix({ extraErrors: [{ code: "admin-lockout", message: "x" }] }),
+    );
+    expect(
+      flashOf(
+        await harness.post("/role-groups/admin-fix/apply", { planId: "fix-1" }),
+      ).type,
+    ).toBe("err");
+    mockPlanAdminFix.mockResolvedValue(
+      fix({ plan: { id: "fix-1", errors: [], operations: [] } }),
+    );
+    expect(
+      flashOf(
+        await harness.post("/role-groups/admin-fix/apply", { planId: "fix-1" }),
+      ).type,
+    ).toBe("err");
+    expect(mockStartApply).not.toHaveBeenCalled();
+  });
+
+  it("reports a busy engine without crashing", async () => {
+    mockPlanAdminFix.mockResolvedValue(fix());
+    mockStartApply.mockImplementation(() => {
+      throw new Error("busy");
+    });
+    await mount();
+    const res = await harness.post("/role-groups/admin-fix/apply", {
+      planId: "fix-1",
+    });
+    expect(flashOf(res)).toMatchObject({ type: "err", msg: "busy" });
+  });
+
+  it("does nothing when Discord can't be reached", async () => {
+    await mount(makeClient({ fetchFails: true }));
+    const res = await harness.post("/role-groups/admin-fix/apply", {
+      planId: "fix-1",
+    });
+    expect(flashOf(res).type).toBe("err");
+    expect(mockPlanAdminFix).not.toHaveBeenCalled();
   });
 });

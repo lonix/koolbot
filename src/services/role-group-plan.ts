@@ -9,6 +9,7 @@ import type {
 import {
   ROLE_GROUP_CAPABILITIES,
   type RoleGroupCapability,
+  type RoleGroupSyncPolicy,
 } from "../models/role-group.js";
 
 /**
@@ -29,6 +30,12 @@ export interface GroupSpec {
   colour: number | null;
   createdByKoolbot: boolean;
   gateOnly: boolean;
+  /** Expected role name (#1021); `null`/absent = not tracked. */
+  roleName?: string | null;
+  /** The role was deleted in Discord (#1021); the plan never recreates it. */
+  unlinked?: boolean;
+  /** Per-group sync policy override (#1021); `null`/absent = global setting. */
+  syncPolicy?: RoleGroupSyncPolicy | null;
 }
 
 const F = PermissionsBitField.Flags;
@@ -81,6 +88,27 @@ export const PERMISSION_PRESETS: ReadonlyArray<{
     capabilities: ["bot"],
   },
 ];
+
+/**
+ * The permission set a group wants on its (live) role. For an `admin` group
+ * the Administrator bit is managed on its own (#1021): it is only changed by
+ * the explicit, previewed grant, so an accepted grant is never undone by
+ * ordinary permission syncing, and a definition that omits it never strips it.
+ */
+export function effectivePermissions(
+  group: Pick<GroupSpec, "permissions" | "capabilities">,
+  live: string | undefined,
+): string | null {
+  if (group.permissions === null) return null;
+  if (live === undefined || !group.capabilities.includes("admin")) {
+    return group.permissions;
+  }
+  const admin = PermissionsBitField.Flags.Administrator;
+  return (
+    (BigInt(group.permissions) & ~admin) |
+    (BigInt(live) & admin)
+  ).toString();
+}
 
 export const MAX_GROUPS_PER_GUILD = 50;
 export const MAX_NAME_LENGTH = 100;
@@ -205,6 +233,10 @@ export interface DesiredFromGroups {
  * - Gate-only groups (managed roles) are never edited or created.
  * - Humans never join a `bot` group; a `bot` group instead plans a grant of
  *   its role to the bots that don't hold it yet.
+ * - An *unlinked* group (its role was deleted in Discord, #1021) is skipped:
+ *   it is never silently recreated; an admin re-links it or requests a new
+ *   role first.
+ * - A tracked role name (`roleName`) is restored when the role was renamed.
  */
 export function buildDesiredState(
   groups: readonly GroupSpec[],
@@ -220,6 +252,7 @@ export function buildDesiredState(
   const roles: DesiredRole[] = [];
   let floor = 0; // position of the group role below; @everyone is 0
   for (const g of editable) {
+    if (g.unlinked) continue;
     const existing = g.roleId ? byId.get(g.roleId) : undefined;
     if (g.roleId && !existing) {
       issues.push({
@@ -233,10 +266,11 @@ export function buildDesiredState(
       continue; // locked; the planner reports it if an edit were attempted
     }
     const desired: DesiredRole = existing
-      ? { id: existing.id, name: existing.name }
+      ? { id: existing.id, name: g.roleName ?? existing.name }
       : { name: g.name };
-    if (g.permissions !== null && g.permissions !== existing?.permissions) {
-      desired.permissions = g.permissions;
+    const wanted = effectivePermissions(g, existing?.permissions);
+    if (wanted !== null && wanted !== existing?.permissions) {
+      desired.permissions = wanted;
     }
     if (g.colour !== null && g.colour !== existing?.color) {
       desired.color = g.colour;
@@ -255,6 +289,7 @@ export function buildDesiredState(
     // Only emit a role the engine has something to do for.
     const changes =
       existing === undefined ||
+      desired.name !== existing.name ||
       desired.permissions !== undefined ||
       desired.color !== undefined ||
       desired.position !== undefined;

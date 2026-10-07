@@ -2,6 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { PermissionsBitField } from "discord.js";
 import {
   buildDesiredState,
+  effectivePermissions,
   formatColour,
   isValidPermissions,
   parseColour,
@@ -221,5 +222,62 @@ describe("buildDesiredState", () => {
     expect(desired.memberGrants).toEqual([
       { role: { id: "rb" }, memberIds: ["b2"] },
     ]);
+  });
+
+  it("skips an unlinked group instead of recreating its role (#1021)", () => {
+    const { desired, issues } = buildDesiredState(
+      [
+        group({ id: "gone", roleId: null, unlinked: true, permissions: "8" }),
+        group({ id: "new", roleId: null, rank: 2 }),
+      ],
+      scan(),
+    );
+    expect(issues).toEqual([]);
+    expect(desired.roles?.map((r) => r.name)).toEqual(["new"]);
+  });
+
+  it("restores a tracked role name that was changed in Discord (#1021)", () => {
+    const { desired } = buildDesiredState(
+      [group({ id: "a", roleId: "r1", roleName: "Mods" })],
+      scan({ roles: [role("g", 0), role("r1", 3, { name: "Renamed" })] }),
+    );
+    expect(desired.roles).toEqual([{ id: "r1", name: "Mods" }]);
+  });
+
+  it("leaves a role's name alone when none is tracked", () => {
+    const { desired } = buildDesiredState(
+      [group({ id: "a", roleId: "r1" })],
+      scan({ roles: [role("g", 0), role("r1", 3, { name: "Renamed" })] }),
+    );
+    expect(desired.roles).toEqual([]);
+  });
+
+  it("keeps an accepted Administrator grant when the definition omits it (#1021)", () => {
+    const state = scan({
+      roles: [role("g", 0), role("r1", 3, { permissions: "1032" })],
+    });
+    const admin = group({
+      id: "a",
+      roleId: "r1",
+      capabilities: ["admin"],
+      permissions: "1024",
+    });
+    expect(buildDesiredState([admin], state).desired.roles).toEqual([]);
+    expect(effectivePermissions(admin, "1032")).toBe("1032");
+    expect(effectivePermissions(admin, "0")).toBe("1024");
+    expect(effectivePermissions(admin, undefined)).toBe("1024");
+    // A non-admin group is still taken literally.
+    const mod = group({ id: "m", roleId: "r1", permissions: "1024" });
+    expect(effectivePermissions(mod, "1032")).toBe("1024");
+    expect(effectivePermissions(group({ id: "n" }), "8")).toBeNull();
+  });
+
+  it("never adds Administrator to an admin group's role on its own (#1021)", () => {
+    const { desired, issues } = buildDesiredState(
+      [group({ id: "a", roleId: "r1", capabilities: ["admin"] })],
+      scan({ roles: [role("g", 0), role("r1", 3)] }),
+    );
+    expect(issues).toEqual([]);
+    expect(desired.roles).toEqual([]);
   });
 });

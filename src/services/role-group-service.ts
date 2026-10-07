@@ -4,6 +4,7 @@ import {
   RoleGroup,
   type IRoleGroup,
   type RoleGroupCapability,
+  type RoleGroupSyncPolicy,
 } from "../models/role-group.js";
 import { ReactionRoleConfig } from "../models/reaction-role-config.js";
 import { ConfigService } from "./config-service.js";
@@ -14,6 +15,7 @@ import {
   type GroupSpec,
 } from "./role-group-plan.js";
 import type { ScannedState } from "./server-adoption-planner.js";
+import type { ScannedMember } from "./role-group-sync.js";
 
 /**
  * Role groups (#1020): admin-defined, ranked handles on Discord roles, plus
@@ -42,6 +44,12 @@ import type { ScannedState } from "./server-adoption-planner.js";
 
 export interface RoleGroupView extends GroupSpec {
   hoist: boolean;
+  roleName: string | null;
+  unlinked: boolean;
+  lostRoleId: string | null;
+  recreateRequestedAt: Date | null;
+  syncPolicy: RoleGroupSyncPolicy | null;
+  driftSignature: string | null;
   createdAt: Date;
 }
 
@@ -59,6 +67,12 @@ function toView(doc: IRoleGroup): RoleGroupView {
     hoist: doc.hoist === true,
     createdByKoolbot: doc.createdByKoolbot === true,
     gateOnly: doc.gateOnly === true,
+    roleName: doc.roleName ?? null,
+    unlinked: doc.unlinked === true,
+    lostRoleId: doc.lostRoleId ?? null,
+    recreateRequestedAt: doc.recreateRequestedAt ?? null,
+    syncPolicy: doc.syncPolicy ?? null,
+    driftSignature: doc.driftSignature ?? null,
     createdAt: doc.createdAt,
   };
 }
@@ -197,6 +211,8 @@ export class RoleGroupService {
     guildId: string,
     input: GroupInput & {
       roleId?: string | null;
+      /** Name the linked role carries now; tracked for drift (#1021). */
+      roleName?: string | null;
       createdByKoolbot?: boolean;
     },
   ): Promise<GroupResult> {
@@ -213,6 +229,7 @@ export class RoleGroupService {
         guildId,
         name: input.name.trim(),
         roleId: input.roleId ?? null,
+        roleName: input.roleId ? (input.roleName ?? null) : null,
         rank,
         permissions: input.permissions ?? null,
         capabilities: [
@@ -322,11 +339,184 @@ export class RoleGroupService {
     groupId: string,
     roleId: string,
     createdByKoolbot: boolean,
+    roleName?: string,
   ): Promise<void> {
     try {
       await RoleGroup.updateOne(
         { _id: groupId, guildId, roleId: null },
-        { $set: { roleId, createdByKoolbot } },
+        {
+          $set: {
+            roleId,
+            createdByKoolbot,
+            unlinked: false,
+            lostRoleId: null,
+            recreateRequestedAt: null,
+            ...(roleName !== undefined ? { roleName } : {}),
+          },
+        },
+      );
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
+  // ---- sync with Discord (#1021) -----------------------------------------
+
+  /**
+   * The role behind a group was deleted in Discord. The group keeps its
+   * definition but loses its role link; it is never recreated on its own
+   * (an admin re-links it, or the enforce policy asks for a new role).
+   * Returns false when the group no longer pointed at that role.
+   */
+  public async markUnlinked(
+    guildId: string,
+    groupId: string,
+    lostRoleId: string,
+  ): Promise<boolean> {
+    try {
+      const res = await RoleGroup.updateOne(
+        { _id: groupId, guildId, roleId: lostRoleId },
+        {
+          $set: {
+            roleId: null,
+            unlinked: true,
+            lostRoleId,
+            driftSignature: null,
+            recreateRequestedAt: null,
+          },
+        },
+      );
+      return res.modifiedCount > 0;
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
+  /**
+   * Ask for a new role for an unlinked group: the next plan creates one named
+   * after the group, and only roles created from now on may link back to it.
+   */
+  public async requestRecreate(
+    guildId: string,
+    groupId: string,
+  ): Promise<boolean> {
+    try {
+      const res = await RoleGroup.updateOne(
+        { _id: groupId, guildId, unlinked: true, gateOnly: false },
+        { $set: { unlinked: false, recreateRequestedAt: new Date() } },
+      );
+      return res.modifiedCount > 0;
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
+  /** Point an unlinked group at another existing role. */
+  public async relinkTo(
+    guildId: string,
+    groupId: string,
+    roleId: string,
+    roleName: string,
+  ): Promise<GroupResult> {
+    const all = await this.list(guildId);
+    if (all.some((g) => g.roleId === roleId)) {
+      return { ok: false, error: "That role already backs another group." };
+    }
+    try {
+      const doc = await RoleGroup.findOneAndUpdate(
+        { _id: groupId, guildId, unlinked: true },
+        {
+          $set: {
+            roleId,
+            roleName,
+            unlinked: false,
+            lostRoleId: null,
+            recreateRequestedAt: null,
+            createdByKoolbot: false,
+            driftSignature: null,
+          },
+        },
+        { new: true },
+      );
+      if (!doc) return { ok: false, error: "That group isn't unlinked." };
+      return { ok: true, group: toView(doc) };
+    } catch (error) {
+      if ((error as { code?: number }).code === 11000) {
+        return { ok: false, error: "That role already backs another group." };
+      }
+      throw error;
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
+  /** *Adopt*: make group definitions follow what Discord holds. */
+  public async applyAdopted(
+    guildId: string,
+    updates: ReadonlyArray<{
+      groupId: string;
+      set: { permissions?: string; roleName?: string; rank?: number };
+    }>,
+  ): Promise<void> {
+    if (updates.length === 0) return;
+    try {
+      await RoleGroup.bulkWrite(
+        updates.map((u) => ({
+          updateOne: {
+            filter: { _id: u.groupId, guildId },
+            update: { $set: u.set },
+          },
+        })),
+      );
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
+  /** Start tracking role names recorded for the first time (never overwrites). */
+  public async trackRoleNames(
+    guildId: string,
+    entries: ReadonlyArray<{ groupId: string; roleName: string }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    try {
+      await RoleGroup.bulkWrite(
+        entries.map((e) => ({
+          updateOne: {
+            filter: { _id: e.groupId, guildId, roleName: null },
+            update: { $set: { roleName: e.roleName } },
+          },
+        })),
+      );
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
+  public async setSyncPolicy(
+    guildId: string,
+    groupId: string,
+    policy: RoleGroupSyncPolicy | null,
+  ): Promise<void> {
+    try {
+      await RoleGroup.updateOne(
+        { _id: groupId, guildId },
+        { $set: { syncPolicy: policy } },
+      );
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
+  public async setDriftSignature(
+    guildId: string,
+    groupId: string,
+    signature: string | null,
+  ): Promise<void> {
+    try {
+      await RoleGroup.updateOne(
+        { _id: groupId, guildId },
+        { $set: { driftSignature: signature } },
       );
     } finally {
       this.invalidate(guildId);
@@ -387,21 +577,28 @@ export interface GuildScan {
   memberCounts: Map<string, number>;
   /** Bots known in the guild; `null` when the member list was unavailable. */
   botIds: string[] | null;
+  /**
+   * Every member's roles, only when requested and the list was available
+   * (`null` otherwise). Feeds the out-of-group administrator report (#1021).
+   */
+  members: ScannedMember[] | null;
 }
 
 /**
  * Read the guild into the planner's `ScannedState` (roles only: role groups
  * don't touch channels). `adminUserId` is the admin applying the plan.
  *
- * Bots are only enumerated when `needBots` is set (a bot group exists). That
- * needs the privileged `GuildMembers` intent; without it `botIds` is `null`
- * and the UI says so rather than planning against a partial member list.
+ * Bots are only enumerated when `needBots` is set (a bot group exists), and
+ * all members when `needMembers` is (an admin group exists, #1021). Both need
+ * the privileged `GuildMembers` intent; without it `botIds` / `members` are
+ * `null` and the UI says so rather than planning against a partial list.
  */
 export async function scanGuildRoles(
   guild: Guild,
   adminUserId: string,
   groups: readonly GroupSpec[],
   needBots: boolean,
+  needMembers = false,
 ): Promise<GuildScan> {
   const roles = await guild.roles.fetch();
   const me = guild.members.me ?? (await guild.members.fetchMe());
@@ -417,19 +614,31 @@ export async function scanGuildRoles(
   );
 
   let botIds: string[] | null = null;
+  let memberList: ScannedMember[] | null = null;
   const memberRoles: Record<string, string[]> = {};
-  if (needBots) {
+  if (needBots || needMembers) {
     try {
       const members = await guild.members.fetch();
-      botIds = [];
+      const bots: string[] = [];
+      const list: ScannedMember[] = [];
       for (const m of members.values()) {
+        const roleIds = [...m.roles.cache.keys()];
+        list.push({
+          id: m.id,
+          name: m.displayName,
+          bot: m.user.bot === true,
+          roleIds,
+        });
+        if (needMembers) memberRoles[m.id] = roleIds;
         if (m.user.bot && m.id !== me.id) {
-          botIds.push(m.id);
-          memberRoles[m.id] = [...m.roles.cache.keys()];
+          bots.push(m.id);
+          memberRoles[m.id] = roleIds;
         }
       }
+      botIds = bots;
+      memberList = list;
     } catch (error) {
-      logger.warn("role groups: could not list bots", error);
+      logger.warn("role groups: could not list members", error);
     }
   }
 
@@ -456,5 +665,5 @@ export async function scanGuildRoles(
     koolbotCreatedIds: koolbotCreatedRoleIds(groups),
     memberRoles,
   };
-  return { scanned, memberCounts, botIds };
+  return { scanned, memberCounts, botIds, members: memberList };
 }

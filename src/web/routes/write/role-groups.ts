@@ -16,10 +16,12 @@ import { Client, PermissionsBitField, type Guild } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { RoleGroupService } from "../../../services/role-group-service.js";
 import {
+  planAdminFix,
   planRoleDeletion,
   planRoleGroups,
   planIsApplicable,
 } from "../../../services/role-group-adoption.js";
+import { ROLE_GROUP_SYNC_POLICIES } from "../../../models/role-group.js";
 import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
 import {
   parseColour,
@@ -82,6 +84,7 @@ export function createRoleGroupsRouter(client: Client): Router {
       const capabilities = toArray(body["capability"]);
       let name = getString(req, "name");
       let gateOnly = false;
+      let roleName: string | null = null;
       let permissions: string | null = null;
 
       if (roleId) {
@@ -120,6 +123,7 @@ export function createRoleGroupsRouter(client: Client): Router {
           return;
         }
         gateOnly = lock === "managed";
+        roleName = role.name;
         name ||= role.name;
       }
       if (!gateOnly && (!roleId || getCheckbox(req, "editPermissions"))) {
@@ -135,6 +139,7 @@ export function createRoleGroupsRouter(client: Client): Router {
       const result = await groups().create(session.guildId, {
         name,
         roleId: roleId || null,
+        roleName,
         capabilities,
         permissions,
         colour: gateOnly ? null : colour,
@@ -232,12 +237,32 @@ export function createRoleGroupsRouter(client: Client): Router {
           return;
         }
       }
+      const policyRaw = getString(req, "syncPolicy");
+      if (
+        policyRaw !== "" &&
+        !(ROLE_GROUP_SYNC_POLICIES as readonly string[]).includes(policyRaw)
+      ) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "Unknown sync policy.",
+        });
+        return;
+      }
       const result = await groups().update(session.guildId, id, {
         name: getString(req, "name"),
         capabilities: toArray(body["capability"]),
         permissions,
         colour: current.gateOnly ? undefined : colour,
       });
+      if (result.ok) {
+        await groups().setSyncPolicy(
+          session.guildId,
+          id,
+          policyRaw === ""
+            ? null
+            : (policyRaw as (typeof ROLE_GROUP_SYNC_POLICIES)[number]),
+        );
+      }
       await recordAudit(session, {
         action: "role-groups.edit",
         targetId: id,
@@ -251,6 +276,100 @@ export function createRoleGroupsRouter(client: Client): Router {
           ? { type: "ok", text: "Group saved. Review the plan to apply it." }
           : { type: "err", text: result.error },
       );
+    }),
+  );
+
+  // A group whose role was deleted in Discord (#1021): re-link it to another
+  // role, or ask for a new one (created by the next plan). Never automatic.
+  router.post(
+    "/role-groups/:id/relink",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const id = String(req.params.id);
+      const mode = getString(req, "mode");
+      let group = await groups().get(session.guildId, id);
+      if (group && !group.unlinked && group.roleId) {
+        // The role may have been deleted while the sync is switched off:
+        // that is a fact, so record it and carry on.
+        const guild = await fetchGuild(session.guildId);
+        const roles = guild
+          ? await guild.roles.fetch().catch(() => null)
+          : null;
+        if (roles && !roles.has(group.roleId)) {
+          await groups().markUnlinked(session.guildId, id, group.roleId);
+          group = await groups().get(session.guildId, id);
+        }
+      }
+      if (!group?.unlinked) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "That group isn't unlinked.",
+        });
+        return;
+      }
+      let ok = false;
+      let text: string;
+      if (mode === "recreate" && !group.gateOnly) {
+        ok = await groups().requestRecreate(session.guildId, id);
+        text = ok
+          ? "A new role will be created for this group. Review the plan below and apply it."
+          : "That group can't be recreated.";
+      } else if (mode === "link") {
+        const roleId = getString(req, "roleId");
+        const guild = await fetchGuild(session.guildId);
+        const me = guild
+          ? (guild.members.me ??
+            (await guild.members.fetchMe().catch(() => null)))
+          : null;
+        const role = guild
+          ? (await guild.roles.fetch().catch(() => null))?.get(roleId)
+          : undefined;
+        if (!guild || !me || !role) {
+          flashRedirect(res, PAGE, {
+            type: "err",
+            text: "That role couldn't be read from Discord. Reload and try again.",
+          });
+          return;
+        }
+        const lock = roleLockReason(
+          { id: role.id, managed: role.managed, position: role.position },
+          guild.id,
+          me.roles.highest.position,
+        );
+        if (
+          lock === "everyone" ||
+          lock === "hierarchy" ||
+          (lock === "managed") !== group.gateOnly
+        ) {
+          text =
+            lock === "managed"
+              ? "That role is managed by an integration; only a gate-only group can use it."
+              : group.gateOnly
+                ? "A gate-only group needs an integration-managed role."
+                : "That role is locked (@everyone, or at or above the bot's role).";
+        } else {
+          const result = await groups().relinkTo(
+            session.guildId,
+            id,
+            role.id,
+            role.name,
+          );
+          ok = result.ok;
+          text = result.ok
+            ? `Group "${group.name}" is linked to @${role.name}. Review the plan below.`
+            : result.error;
+        }
+      } else {
+        text = "Unknown action.";
+      }
+      await recordAudit(session, {
+        action: "role-groups.relink",
+        targetId: id,
+        details: { mode },
+        result: ok ? "success" : "failure",
+        errorMessage: ok ? null : text,
+      });
+      flashRedirect(res, PAGE, { type: ok ? "ok" : "err", text });
     }),
   );
 
@@ -365,6 +484,74 @@ export function createRoleGroupsRouter(client: Client): Router {
         logger.error("role groups: apply failed to start", error);
         await recordAudit(session, {
           action: "role-groups.apply",
+          targetId: built.plan.id,
+          result: "failure",
+          errorMessage: text,
+        });
+        flashRedirect(res, PAGE, { type: "err", text });
+      }
+    }),
+  );
+
+  // Apply a previewed fix for administrators outside the admin group (#1021).
+  router.post(
+    "/role-groups/admin-fix/apply",
+    asyncHandler(async (req, res) => {
+      const session = requireSessionContext(req);
+      const body = (req.body as Record<string, unknown> | undefined) ?? {};
+      const choice = {
+        moveMemberIds: toArray(body["move"]),
+        dropRoleIds: toArray(body["drop"]),
+        grantAdministrator: getString(req, "grant") === "1",
+      };
+      const planId = getString(req, "planId");
+      const guild = await fetchGuild(session.guildId);
+      if (!guild) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "Discord couldn't be reached, so nothing was applied.",
+        });
+        return;
+      }
+      const built = await planAdminFix(guild, session.discordUserId, choice);
+      if (built.plan.id !== planId) {
+        flashRedirect(res, PAGE, {
+          type: "warn",
+          text: "The server changed since you previewed the plan. Preview it again.",
+        });
+        return;
+      }
+      if (
+        built.plan.errors.length > 0 ||
+        built.extraErrors.length > 0 ||
+        built.plan.operations.length === 0
+      ) {
+        flashRedirect(res, PAGE, {
+          type: "err",
+          text: "This plan can't be applied. Resolve the listed problems first.",
+        });
+        return;
+      }
+      const engine = await ServerAdoptionService.getInstance(client, guild);
+      try {
+        const job = engine.startApply(built.plan, { actor: session });
+        await recordAudit(session, {
+          action: "role-groups.admin-fix",
+          targetId: built.plan.id,
+          details: {
+            moved: choice.moveMemberIds.length,
+            dropped: choice.dropRoleIds.length,
+            grantAdministrator: choice.grantAdministrator,
+            operations: built.plan.operations.length,
+          },
+          result: "success",
+        });
+        res.redirect(303, `${PAGE}?job=${encodeURIComponent(job.id)}`);
+      } catch (error) {
+        const text = error instanceof Error ? error.message : "Unknown error";
+        logger.error("role groups: admin fix failed to start", error);
+        await recordAudit(session, {
+          action: "role-groups.admin-fix",
           targetId: built.plan.id,
           result: "failure",
           errorMessage: text,
