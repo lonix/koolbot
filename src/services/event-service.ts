@@ -895,7 +895,8 @@ export class EventService extends ScheduledService {
           },
         },
       ],
-      { new: true },
+      // Mongoose 9 rejects an array update unless `updatePipeline` is set (#1103).
+      { returnDocument: "after", updatePipeline: true },
     );
   }
 
@@ -959,7 +960,7 @@ export class EventService extends ScheduledService {
         const updated = await Event.findByIdAndUpdate(
           match._id,
           { $pull: { rsvps: { userId } } },
-          { new: true },
+          { returnDocument: "after" },
         );
         if (!updated) continue;
         removed++;

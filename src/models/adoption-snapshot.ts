@@ -125,8 +125,13 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
 
 AdoptionSnapshotSchema.index({ createdAt: 1 });
 // One apply or rollback at a time per server, enforced by the database.
+// Keyed on { guildId, active } rather than { guildId }: Mongoose treats a
+// second { guildId: 1 } index as a duplicate of the field-level `index: true`
+// and silently drops this one, so the unique constraint was never created
+// (#1102). The distinct key also cannot collide with an existing plain
+// `guildId_1` index in a deployed database.
 AdoptionSnapshotSchema.index(
-  { guildId: 1 },
+  { guildId: 1, active: 1 },
   { unique: true, partialFilterExpression: { active: true } },
 );
 

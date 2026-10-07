@@ -179,7 +179,7 @@ describe("PollParticipationTracker", () => {
       expect(turnoutUpdateOne).toHaveBeenCalledTimes(1);
       const [filter, pipeline, options] = turnoutUpdateOne.mock.calls[0];
       expect(filter).toEqual({ guildId: "guild1", messageId: "msg1" });
-      expect(options).toEqual({ upsert: true });
+      expect(options).toEqual({ upsert: true, updatePipeline: true });
 
       // An update pipeline, not plain operators: `firstVoteAt` and
       // `question` must fill in on first sight even when `recordPollPosted`
