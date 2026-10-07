@@ -10,6 +10,7 @@
 import { Router } from "express";
 import { Client, type Guild } from "discord.js";
 import logger from "../../../utils/logger.js";
+import { getErrorMessage } from "../../../utils/error-guards.js";
 import {
   RulesService,
   ROLE_PROBLEM_TEXT,
@@ -129,6 +130,12 @@ export function createRulesRouter(client: Client): Router {
         });
       } catch (error) {
         logger.warn("rules: recording holders failed", error);
+        // bulkWrite may already have recorded some holders before it threw.
+        await recordAudit(session, {
+          action: "rules.record-holders",
+          result: "failure",
+          errorMessage: getErrorMessage(error),
+        });
         flashRedirect(res, PAGE, {
           type: "err",
           text: "The member list couldn't be read. Is the Server Members intent on?",

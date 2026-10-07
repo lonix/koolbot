@@ -4,12 +4,16 @@ import { PermissionFlagsBits } from "discord.js";
 const mockGetString = jest.fn<(key: string, def?: string) => Promise<string>>();
 const mockGetBoolean =
   jest.fn<(key: string, def?: boolean) => Promise<boolean>>();
+const mockGetAll = jest.fn<
+  () => Promise<Array<{ key: string; value: unknown }>>
+>(async () => []);
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
       getString: mockGetString,
       getBoolean: mockGetBoolean,
       set: jest.fn(),
+      getAll: mockGetAll,
     })),
   },
 }));
@@ -80,6 +84,14 @@ interface FakeRole {
   managed: boolean;
 }
 
+/** How the rules message fetch behaves in a test. */
+let fetchRulesMessage: () => Promise<unknown> = async () => acceptMessage();
+const acceptMessage = (over: Record<string, unknown> = {}) => ({
+  author: { id: "bot" },
+  components: [{ components: [{ customId: "rules:accept" }] }],
+  ...over,
+});
+
 function fakeGuild(
   memberRoleIds: Record<string, string[]>,
   extraRoles: FakeRole[] = [],
@@ -132,6 +144,8 @@ function fakeGuild(
     rawPosition: 0,
     topic: null,
     permissionOverwrites: { cache: new Map() },
+    isTextBased: () => true,
+    messages: { fetch: () => fetchRulesMessage() },
   });
   return {
     id: "g1",
@@ -166,6 +180,8 @@ describe("planRulesGate", () => {
   beforeEach(() => {
     mockGetString.mockReset();
     mockGetBoolean.mockReset();
+    mockGetAll.mockResolvedValue([]);
+    fetchRulesMessage = async () => acceptMessage();
     mockGetBoolean.mockResolvedValue(true);
     mockGetString.mockImplementation(async (k) =>
       k === "rules.channel_id"
@@ -347,6 +363,110 @@ describe("planRulesGate", () => {
     const guild = fakeGuild({ admin: [], a: [] }, [role({})]);
     const p = await planRulesGate(guild as never, "admin", gateOnly);
     expect(p.extraErrors.map((e) => e.code)).toContain("acceptance-inactive");
+    expect(rulesPlanIsApplicable(p)).toBe(false);
+  });
+
+  it.each([
+    [
+      "the message is gone",
+      () => Promise.reject(Object.assign(new Error("gone"), { code: 10008 })),
+      "acceptance-inactive",
+    ],
+    [
+      "the message belongs to someone else",
+      async () => acceptMessage({ author: { id: "other" } }),
+      "acceptance-inactive",
+    ],
+    [
+      "the message has no Accept button",
+      async () => acceptMessage({ components: [] }),
+      "acceptance-inactive",
+    ],
+    [
+      "Discord can't be reached",
+      () => Promise.reject(new Error("socket hang up")),
+      "acceptance-unverified",
+    ],
+  ])("blocks gating when %s", async (_n, fetcher, code) => {
+    mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
+    fetchRulesMessage = fetcher as () => Promise<unknown>;
+    const guild = fakeGuild({ admin: [], a: [] }, [role({})]);
+    const p = await planRulesGate(guild as never, "admin", gateOnly);
+    expect(p.extraErrors.map((e) => e.code)).toContain(code);
+    expect(
+      p.plan.operations.filter((o) => o.type === "overwrite.set"),
+    ).toHaveLength(2);
+    expect(rulesPlanIsApplicable(p)).toBe(false);
+  });
+
+  it("refuses a configured role that carries Administrator or moderation rights", async () => {
+    for (const bits of [
+      PermissionFlagsBits.Administrator,
+      PermissionFlagsBits.BanMembers,
+    ]) {
+      mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
+      const guild = fakeGuild({ admin: [], a: [] }, [
+        role({ permissions: { bitfield: bits } }),
+      ]);
+      const p = await planRulesGate(guild as never, "admin", gateOnly);
+      expect(p.extraErrors.map((e) => e.code)).toContain("role-privileged");
+      expect(rulesPlanIsApplicable(p)).toBe(false);
+    }
+  });
+
+  it("still plans a created role (permissions 0) without a privilege error", async () => {
+    const guild = fakeGuild({ admin: [], a: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: true,
+      gateChannelIds: ["22222"],
+    });
+    expect(p.extraErrors).toHaveLength(0);
+    expect(rulesPlanIsApplicable(p)).toBe(true);
+  });
+
+  it("blocks gating a channel a KoolBot feature is bound to (bot lockout)", async () => {
+    mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
+    // Feature bindings only count real snowflakes, so use a long channel id.
+    const bound = "222222222222222222";
+    mockGetAll.mockResolvedValue([{ key: "notices.channel_id", value: bound }]);
+    const guild = fakeGuild({ admin: [], a: [] }, [role({})]);
+    const all = await guild.channels.fetch();
+    const chan = { ...all.get("22222")!, id: bound };
+    guild.channels.fetch = async () =>
+      new Map([...all.entries(), [bound, chan]]) as never;
+    (guild.roles as { fetch: unknown }).fetch = async () =>
+      new Map(
+        [
+          {
+            id: "g1",
+            name: "@everyone",
+            color: 0,
+            permissions: { bitfield: 0n },
+            position: 0,
+            managed: false,
+          },
+          role({}),
+          {
+            id: "100",
+            name: "Bot",
+            color: 0,
+            permissions: {
+              bitfield:
+                PermissionFlagsBits.ManageRoles |
+                PermissionFlagsBits.ManageChannels |
+                PermissionFlagsBits.ViewChannel,
+            },
+            position: 10,
+            managed: false,
+          },
+        ].map((r) => [r.id, r]),
+      );
+    const p = await planRulesGate(guild as never, "admin", {
+      ...gateOnly,
+      gateChannelIds: [bound],
+    });
+    expect(p.plan.errors.map((e) => e.code)).toContain("bot-lockout");
     expect(rulesPlanIsApplicable(p)).toBe(false);
   });
 

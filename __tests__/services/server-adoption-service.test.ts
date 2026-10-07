@@ -1817,15 +1817,4 @@ describe("grants before gating overwrites", () => {
       h.calls.indexOf("audit:adoption.rollback.role.create:success"),
     );
   });
-
-  it("calls onFinished with the result of a background apply", async () => {
-    const h = harness();
-    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
-    const onFinished = jest.fn<(r: unknown) => void>();
-    h.service.startApply(p, { ...opts, onFinished });
-    await new Promise((r) => setTimeout(r, 10));
-    expect(onFinished).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "applied" }),
-    );
-  });
 });

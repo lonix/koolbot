@@ -31,7 +31,52 @@ export type RulesProblem =
   | "role-managed"
   | "role-everyone"
   | "role-too-high"
+  | "role-privileged"
   | "no-manage-roles";
+
+/**
+ * Permissions nobody may self-grant by pressing a public button. The Accept
+ * button is open to every member, so an acceptance role carrying any of these
+ * would hand out server control (Administrator), configuration (Manage
+ * Server/Roles/Channels/Webhooks/Events/Expressions), moderation (Manage
+ * Messages/Threads/Nicknames, Kick, Ban, Timeout, voice Move/Mute/Deafen),
+ * audit-log visibility, or mass pings (Mention @everyone).
+ */
+export const UNSAFE_ACCEPTANCE_PERMISSIONS: bigint[] = [
+  PermissionFlagsBits.Administrator,
+  PermissionFlagsBits.ManageGuild,
+  PermissionFlagsBits.ManageRoles,
+  PermissionFlagsBits.ManageChannels,
+  PermissionFlagsBits.ManageWebhooks,
+  PermissionFlagsBits.ManageMessages,
+  PermissionFlagsBits.ManageThreads,
+  PermissionFlagsBits.ManageNicknames,
+  PermissionFlagsBits.ManageEvents,
+  PermissionFlagsBits.ManageGuildExpressions,
+  PermissionFlagsBits.KickMembers,
+  PermissionFlagsBits.BanMembers,
+  PermissionFlagsBits.ModerateMembers,
+  PermissionFlagsBits.MoveMembers,
+  PermissionFlagsBits.MuteMembers,
+  PermissionFlagsBits.DeafenMembers,
+  PermissionFlagsBits.ViewAuditLog,
+  PermissionFlagsBits.MentionEveryone,
+];
+
+const UNSAFE_MASK = UNSAFE_ACCEPTANCE_PERMISSIONS.reduce((a, b) => a | b, 0n);
+
+/** A discord.js Permissions, a bitfield, or a decimal string. */
+type PermissionsLike = bigint | string | { bitfield: bigint };
+
+const toBits = (p: PermissionsLike): bigint => {
+  try {
+    if (typeof p === "bigint") return p;
+    if (typeof p === "string") return BigInt(p);
+    return p.bitfield;
+  } catch {
+    return 0n;
+  }
+};
 
 /**
  * Why the bot cannot hand out `role`, or null when it can. Mirrors the
@@ -39,7 +84,12 @@ export type RulesProblem =
  * bot's own highest role.
  */
 export function roleProblem(
-  role: Pick<Role, "id" | "managed" | "position"> | undefined | null,
+  role:
+    | (Pick<Role, "id" | "managed" | "position"> & {
+        permissions?: PermissionsLike;
+      })
+    | undefined
+    | null,
   guildId: string,
   botHighestPosition: number,
   botCanManageRoles: boolean,
@@ -48,6 +98,11 @@ export function roleProblem(
   if (role.id === guildId) return "role-everyone";
   if (role.managed) return "role-managed";
   if (role.position >= botHighestPosition) return "role-too-high";
+  if (
+    role.permissions !== undefined &&
+    (toBits(role.permissions) & UNSAFE_MASK) !== 0n
+  )
+    return "role-privileged";
   if (!botCanManageRoles) return "no-manage-roles";
   return null;
 }
@@ -58,6 +113,8 @@ export const ROLE_PROBLEM_TEXT: Record<RulesProblem, string> = {
   "role-everyone": "@everyone can't be the acceptance role.",
   "role-too-high":
     "The acceptance role is at or above the bot's highest role, so the bot can't grant it.",
+  "role-privileged":
+    "The acceptance role carries administrative or moderation permissions (such as Administrator, Manage Server or Ban Members). Everyone can press Accept, so use a role without them.",
   "no-manage-roles": "The bot lacks the Manage Roles permission.",
 };
 

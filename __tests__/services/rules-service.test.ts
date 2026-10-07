@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, jest } from "@jest/globals";
-import { Collection, type ButtonInteraction } from "discord.js";
+import {
+  Collection,
+  PermissionFlagsBits as P,
+  type ButtonInteraction,
+} from "discord.js";
 
 const mockGetBoolean =
   jest.fn<(key: string, def?: boolean) => Promise<boolean>>();
@@ -35,8 +39,12 @@ jest.unstable_mockModule("../../src/models/rules-acceptance.js", () => ({
   },
 }));
 
-const { RulesService, roleProblem, RULES_ACCEPT_CUSTOM_ID } =
-  await import("../../src/services/rules-service.js");
+const {
+  RulesService,
+  roleProblem,
+  RULES_ACCEPT_CUSTOM_ID,
+  UNSAFE_ACCEPTANCE_PERMISSIONS,
+} = await import("../../src/services/rules-service.js");
 
 describe("roleProblem", () => {
   const role = { id: "r1", managed: false, position: 2 };
@@ -56,12 +64,44 @@ describe("roleProblem", () => {
     );
     expect(roleProblem(role, "g1", 5, false)).toBe("no-manage-roles");
   });
+  it("refuses a role carrying unsafe permissions, however they are given", () => {
+    for (const bit of UNSAFE_ACCEPTANCE_PERMISSIONS) {
+      expect(roleProblem({ ...role, permissions: bit }, "g1", 5, true)).toBe(
+        "role-privileged",
+      );
+    }
+    expect(
+      roleProblem(
+        { ...role, permissions: { bitfield: P.Administrator } },
+        "g1",
+        5,
+        true,
+      ),
+    ).toBe("role-privileged");
+    expect(
+      roleProblem(
+        { ...role, permissions: String(P.BanMembers) },
+        "g1",
+        5,
+        true,
+      ),
+    ).toBe("role-privileged");
+    expect(
+      roleProblem(
+        { ...role, permissions: P.ViewChannel | P.SendMessages },
+        "g1",
+        5,
+        true,
+      ),
+    ).toBeNull();
+  });
 });
 
 describe("handleAcceptButton", () => {
   const order: string[] = [];
   const add = jest.fn<(...args: unknown[]) => Promise<unknown>>();
   let hasRole = false;
+  let rolePerms: bigint = 0n;
   let config: Record<string, boolean | string>;
 
   const interaction = (): ButtonInteraction =>
@@ -81,7 +121,17 @@ describe("handleAcceptButton", () => {
         roles: {
           fetch: jest.fn(
             async () =>
-              new Map([["r1", { id: "r1", managed: false, position: 1 }]]),
+              new Map([
+                [
+                  "r1",
+                  {
+                    id: "r1",
+                    managed: false,
+                    position: 1,
+                    permissions: { bitfield: rolePerms },
+                  },
+                ],
+              ]),
           ),
         },
         members: {
@@ -101,6 +151,7 @@ describe("handleAcceptButton", () => {
     jest.clearAllMocks();
     order.length = 0;
     hasRole = false;
+    rolePerms = 0n;
     config = {
       "rules.enabled": true,
       "rules.role_id": "r1",
@@ -147,6 +198,17 @@ describe("handleAcceptButton", () => {
     });
   });
 
+  it("never grants a role that carries Administrator", async () => {
+    rolePerms = P.Administrator;
+    const i = interaction();
+    await service().handleAcceptButton(i);
+    expect(add).not.toHaveBeenCalled();
+    expect(mockUpdateOne).not.toHaveBeenCalled();
+    expect(i.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("can't grant"),
+    });
+  });
+
   it("records an existing holder as adopted without re-granting", async () => {
     hasRole = true;
     await service().handleAcceptButton(interaction());
@@ -178,7 +240,12 @@ describe("recordExistingHolders", () => {
   const bulkWrite = jest.fn<(...args: unknown[]) => Promise<unknown>>();
   let roleCfg = "r1";
 
-  type TestRole = { id: string; managed: boolean; position: number };
+  type TestRole = {
+    id: string;
+    managed: boolean;
+    position: number;
+    permissions?: bigint;
+  };
   const makeGuild = (role: TestRole | undefined, canManage = true): never =>
     ({
       id: "g1",
@@ -242,6 +309,12 @@ describe("recordExistingHolders", () => {
     ["a managed role", "r1", { ...ok, managed: true }, "role-managed"],
     ["a role above the bot", "r1", { ...ok, position: 5 }, "role-too-high"],
     ["a deleted role", "r1", undefined, "role-missing"],
+    [
+      "a role with Administrator",
+      "r1",
+      { ...ok, permissions: P.Administrator },
+      "role-privileged",
+    ],
   ])("refuses %s and records nothing", async (_n, cfgId, role, problem) => {
     roleCfg = cfgId;
     expect(

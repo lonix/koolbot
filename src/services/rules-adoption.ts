@@ -6,7 +6,15 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
-import { roleProblem, ROLE_PROBLEM_TEXT } from "./rules-service.js";
+import {
+  roleProblem,
+  ROLE_PROBLEM_TEXT,
+  RULES_ACCEPT_CUSTOM_ID,
+} from "./rules-service.js";
+import {
+  mapFeatureBindings,
+  readEffectiveConfig,
+} from "./server-scan-service.js";
 import {
   effectivePermissions,
   planAdoption,
@@ -174,6 +182,76 @@ export function countLockedOut(input: {
   return locked;
 }
 
+/** Discord error codes for a deleted channel / message. */
+const UNKNOWN_CHANNEL = 10003;
+const UNKNOWN_MESSAGE = 10008;
+
+/**
+ * Whether the configured acceptance flow works right now: rules acceptance is
+ * on and the configured channel and message exist, the message is the bot's
+ * own and carries the Accept button. Returns a blocking issue, or null. A
+ * transient read failure blocks too (with a retry message) rather than
+ * letting an unverified gate through.
+ */
+async function verifyAcceptanceMessage(input: {
+  enabled: boolean;
+  channel: GuildBasedChannel | null | undefined;
+  messageId: string | null;
+  botUserId: string;
+}): Promise<PlanIssue | null> {
+  const inactive = (detail: string): PlanIssue => ({
+    code: "acceptance-inactive",
+    message: `Gating needs a working acceptance flow first: ${detail} Nothing is hidden until then.`,
+  });
+  if (!input.enabled || !input.messageId) {
+    return inactive(
+      "turn on Rules acceptance, choose an existing rules channel and post the rules message.",
+    );
+  }
+  const channel = input.channel;
+  if (!channel || !channel.isTextBased() || !("messages" in channel)) {
+    return inactive(
+      "the rules channel doesn't exist or can't hold messages. Choose a text channel and post the rules message.",
+    );
+  }
+  try {
+    const message = await channel.messages.fetch(input.messageId);
+    if (message.author.id !== input.botUserId) {
+      return inactive(
+        "the configured rules message wasn't posted by the bot. Post the rules message again from the Rules page.",
+      );
+    }
+    const hasButton = message.components.some((row) =>
+      (
+        (
+          row as unknown as {
+            components?: Array<{ customId?: string | null }>;
+          }
+        ).components ?? []
+      ).some((c) => c.customId === RULES_ACCEPT_CUSTOM_ID),
+    );
+    if (!hasButton) {
+      return inactive(
+        "the rules message has no Accept button. Post the rules message again from the Rules page.",
+      );
+    }
+    return null;
+  } catch (error) {
+    const code = (error as { code?: number } | null)?.code;
+    if (code === UNKNOWN_MESSAGE || code === UNKNOWN_CHANNEL) {
+      return inactive(
+        "the configured rules message no longer exists. Post the rules message again from the Rules page.",
+      );
+    }
+    logger.warn("rules: could not verify the rules message", error);
+    return {
+      code: "acceptance-unverified",
+      message:
+        "Couldn't check the rules message with Discord just now. Nothing is hidden. Try again in a moment.",
+    };
+  }
+}
+
 export async function planRulesGate(
   guild: Guild,
   adminUserId: string,
@@ -243,6 +321,14 @@ export async function planRulesGate(
     });
   }
 
+  // The same binding inventory the server scan uses, so the planner blocks a
+  // gate that would hide a channel KoolBot features (notices, quotes,
+  // moderation, ...) from the bot itself. A failed read throws: gating
+  // without the inventory would silently disable the protection.
+  const boundChannelIds = [
+    ...mapFeatureBindings(await readEffectiveConfig()).channels.keys(),
+  ];
+
   const scanned: ScannedState = {
     guildId: guild.id,
     ownerId: guild.ownerId,
@@ -265,7 +351,7 @@ export async function planRulesGate(
     // engine reads at apply time and a rollback restores it exactly; whether
     // an override row exists is recorded by the engine in the snapshot.
     config: { "rules.role_id": roleId ?? "" },
-    boundChannelIds: [],
+    boundChannelIds,
     koolbotCreatedIds: [],
     memberRoles,
   };
@@ -324,15 +410,13 @@ export async function planRulesGate(
   if (options.gateChannelIds.length > 0) {
     // A gate with no way through hides channels from newcomers for good, so
     // the acceptance flow must be live before anything is hidden.
-    const rulesChannelOk =
-      !!rulesChannelId && scanned.channels.some((c) => c.id === rulesChannelId);
-    if (!rulesEnabled || !rulesChannelOk || !rulesMessageId) {
-      extraErrors.push({
-        code: "acceptance-inactive",
-        message:
-          "Gating needs a working acceptance flow first: turn on Rules acceptance, choose an existing rules channel and post the rules message. Nothing is hidden until then.",
-      });
-    }
+    const acceptance = await verifyAcceptanceMessage({
+      enabled: rulesEnabled,
+      channel: rulesChannelId ? channelMap.get(rulesChannelId) : undefined,
+      messageId: rulesMessageId,
+      botUserId: me.id,
+    });
+    if (acceptance) extraErrors.push(acceptance);
   }
   if (rulesChannelId && options.gateChannelIds.includes(rulesChannelId)) {
     extraErrors.push({

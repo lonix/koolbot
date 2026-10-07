@@ -195,11 +195,6 @@ export interface ApplyOptions {
   memberPageSize?: number;
   onProgress?: (progress: ApplyProgress) => void;
   /**
-   * `startApply` only: called once the background apply has produced a
-   * result (applied or partial). Errors thrown here are logged, not raised.
-   */
-  onFinished?: (result: ApplyResult) => Promise<void> | void;
-  /**
    * Extra live-state safety check run before a resume claims its snapshot.
    * Receives the operations that are still pending; return reasons to refuse.
    * The scanner that knows feature bindings supplies this.
@@ -356,12 +351,7 @@ export class ServerAdoptionService {
         options.onProgress?.(progress);
       },
     })
-      .then(async (result) => {
-        try {
-          await options.onFinished?.(result);
-        } catch (error) {
-          logger.warn("Server adoption onFinished hook failed:", error);
-        }
+      .then((result) => {
         job.result = result;
         job.status = "done";
         job.finishedAt = Date.now();
