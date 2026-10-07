@@ -73,11 +73,17 @@ const session = createTestSession();
 const CH = "300000000000000001";
 const CAT = "300000000000000002";
 
-function makeClient(opts: { fetchFails?: boolean } = {}): Client {
+function makeClient(
+  opts: { fetchFails?: boolean; many?: boolean } = {},
+): Client {
   const channels = new Map([
     [CAT, { id: CAT, type: 4, parentId: null }],
     [CH, { id: CH, type: 0, parentId: CAT }],
   ]);
+  for (let i = 0; opts.many && i < 400; i += 1) {
+    const id = `4000000000000000${String(i).padStart(2, "0")}`;
+    channels.set(id, { id, type: 0, parentId: CAT });
+  }
   const guild = { id: "guild-1", channels: { fetch: async () => channels } };
   return {
     guilds: {
@@ -259,11 +265,18 @@ describe("POST /adopt/claims/apply", () => {
   });
 
   it("carries only a token, so a large plan fits the request body limit", async () => {
-    await mount();
+    await mount(makeClient({ many: true }));
     const form: Record<string, string> = {};
-    for (let i = 0; i < 400; i += 1) form[`action_${CH}`] = "read-only";
+    for (let i = 0; i < 400; i += 1) {
+      form[`action_4000000000000000${String(i).padStart(2, "0")}`] =
+        "read-only";
+    }
     const token = await preview(form);
     expect(token.length).toBeLessThan(100);
+    // The claims really are held behind the token, not in the form.
+    expect(mockPlan.mock.calls.at(-1)![2]).toHaveLength(400);
+    await harness.post("/adopt/claims/apply", { planId: "plan-1", token });
+    expect(mockPlan.mock.calls.at(-1)![2]).toHaveLength(400);
   });
 
   it("the token can't be used to apply anything but what was previewed", async () => {

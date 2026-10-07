@@ -917,13 +917,17 @@ export function buildClaimsDesiredState(
         // e.g. the notices channel: read-only for everyone but the bot.
         // Never re-show a channel that is hidden from @everyone, whether by
         // this plan (a category gate) or already.
+        // Effective @everyone visibility: the role's own permissions, then the
+        // channel's (planned) overwrite on top, as Discord computes it.
+        const everyoneOverwrite = plannedOverwrites(channel).find(
+          (o) => o.id === everyoneId,
+        );
+        const effective =
+          (BigInt(roles.get(everyoneId)?.permissions ?? "0") &
+            ~BigInt(everyoneOverwrite?.deny ?? "0")) |
+          BigInt(everyoneOverwrite?.allow ?? "0");
         const hidden =
-          (BigInt(
-            plannedOverwrites(channel).find((o) => o.id === everyoneId)?.deny ??
-              "0",
-          ) &
-            PermissionsBitField.Flags.ViewChannel) !==
-          0n;
+          (effective & PermissionsBitField.Flags.ViewChannel) === 0n;
         layer(
           channel,
           everyoneId,
@@ -959,6 +963,27 @@ export function buildClaimsDesiredState(
   const unique = new Map<string, DesiredOverwrite>();
   for (const o of overwrites) unique.set(key(o.channelId, targetKey(o)), o);
 
+  // Discord caps a channel at 100 permission overwrites. Additions run before
+  // any removal, so the peak is what the channel has plus what the plan adds:
+  // refuse here rather than fail partway through an apply.
+  const peak = new Map<string, Set<string>>();
+  for (const c of scanned.channels) {
+    peak.set(c.id, new Set(c.overwrites.map((o) => o.id)));
+  }
+  for (const o of unique.values()) {
+    peak.get(o.channelId)?.add(targetKey(o));
+  }
+  for (const [channelId, ids] of peak) {
+    if (ids.size > MAX_OVERWRITES && touchedChannelIds(unique).has(channelId)) {
+      const name = channels.get(channelId)?.name ?? channelId;
+      err(
+        "overwrite-limit",
+        `"${name}" would need ${ids.size} permission overwrites; Discord allows at most ${MAX_OVERWRITES} per channel. Choose fewer roles or groups, or clear some of its existing overwrites in Discord first.`,
+        channelId,
+      );
+    }
+  }
+
   return {
     desired: {
       overwrites: [...unique.values()],
@@ -974,6 +999,15 @@ export function buildClaimsDesiredState(
     issues,
     gateTargetIds: [...gateTargetIds],
   };
+}
+
+/** Discord's limit on permission overwrites per channel. */
+export const MAX_OVERWRITES = 100;
+
+function touchedChannelIds(
+  overwrites: ReadonlyMap<string, DesiredOverwrite>,
+): Set<string> {
+  return new Set([...overwrites.values()].map((o) => o.channelId));
 }
 
 function targetKey(o: DesiredOverwrite): string {

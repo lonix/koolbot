@@ -1383,3 +1383,72 @@ describe("feature targets match what their managers do", () => {
     );
   });
 });
+
+describe("effective @everyone visibility and Discord's overwrite limit", () => {
+  it("a bound feature does not expose a channel the @everyone role can't see", () => {
+    const s = fixture();
+    s.roles = s.roles.map((r) =>
+      r.id === GUILD ? { ...r, permissions: "0" } : r,
+    );
+    const r = plan(
+      [{ channelId: C_LOOSE, action: "leave", bindKey: "notices.channel_id" }],
+      s,
+    );
+    const everyone = setFor(r.plan, C_LOOSE, GUILD)!;
+    expect(BigInt(everyone.allow) & F.ViewChannel).toBe(0n);
+    expect(BigInt(everyone.deny) & F.SendMessages).toBe(F.SendMessages);
+  });
+
+  it("still lets a channel that @everyone can see stay visible", () => {
+    const r = plan([
+      { channelId: C_LOOSE, action: "leave", bindKey: "notices.channel_id" },
+    ]);
+    expect(BigInt(setFor(r.plan, C_LOOSE, GUILD)!.allow) & F.ViewChannel).toBe(
+      F.ViewChannel,
+    );
+  });
+
+  const manyRoles = (n: number) => {
+    const s = fixture();
+    const ids: string[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const id = `5000000000000000${String(i).padStart(2, "0")}`;
+      ids.push(id);
+      s.roles.push(role(id, 5));
+    }
+    return { s, ids };
+  };
+
+  it("blocks a gate that needs more than 100 overwrites on a channel", () => {
+    const { s, ids } = manyRoles(100);
+    const r = plan(
+      [{ channelId: C_LOOSE, action: "gate", roleIds: [R_ADMIN, ...ids] }],
+      s,
+    );
+    expect(r.errors).toContain("overwrite-limit");
+  });
+
+  it("counts a channel's existing overwrites, and category mirroring onto children", () => {
+    const { s, ids } = manyRoles(98);
+    s.channels.find((c) => c.id === C_TEXT)!.overwrites = ids
+      .slice(0, 20)
+      .map((id) => ow(id, F.ViewChannel));
+    const r = plan(
+      [{ channelId: C_CAT, action: "gate", roleIds: [R_ADMIN, ...ids] }],
+      s,
+    );
+    // The category needs 98 + admin + @everyone + bot = 101, and the synced
+    // child (which already holds 21 overwrites) gets the same mirrored set.
+    expect(r.errors).toContain("overwrite-limit");
+  });
+
+  it("accepts a gate that fits", () => {
+    const { s, ids } = manyRoles(50);
+    expect(
+      plan(
+        [{ channelId: C_LOOSE, action: "gate", roleIds: [R_ADMIN, ...ids] }],
+        s,
+      ).errors,
+    ).toEqual([]);
+  });
+});
