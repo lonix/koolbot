@@ -90,8 +90,18 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
   function addChannel(id: string, name: string, memberCount = 0): any {
     const channel: any = makeChannel(id, name, memberCount);
     channel.guild = guild;
+    channel.parentId = CATEGORY_ID;
     guildChannels.set(id, channel);
     category.children.cache.set(id, channel);
+    return channel;
+  }
+
+  /** Add a voice channel that lives elsewhere in the guild (not in the category). */
+  function addOutsideChannel(id: string, name: string): any {
+    const channel: any = makeChannel(id, name, 0);
+    channel.guild = guild;
+    channel.parentId = "some-other-category";
+    guildChannels.set(id, channel);
     return channel;
   }
 
@@ -656,6 +666,30 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       await manager.handleVoiceStateUpdate(oldState, newState);
 
       expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores a lobby ID that points outside the managed category and falls back to the name (#1078 review)", async () => {
+      const outside = addOutsideChannel("outside-id", "Somewhere Else");
+      settings["voicechannels.lobby.channel_id"] = "outside-id";
+      const lobby = addChannel("lobby-id", "Lobby");
+
+      await manager.renameLobbyToOffline(guild);
+
+      // The unrelated channel is never renamed; the named lobby is.
+      expect(outside.name).toBe("Somewhere Else");
+      expect(lobby.name).toBe("Lobby (Offline)");
+    });
+
+    it("health check keeps an ID-selected lobby's quotes in its display name (#1078 review)", async () => {
+      settings["voicechannels.lobby.name"] = "Bob's Lobby";
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = addChannel("lobby-id", "Bob's Lobby");
+      jest.spyOn(manager as any, "getGuild").mockResolvedValue(guild as never);
+
+      await (manager as any).checkLobbyHealth();
+
+      expect(lobby.name).toBe("Bob's Lobby");
+      expect(lobby.setName).not.toHaveBeenCalled();
     });
 
     it("renames the lobby by its legacy name on shutdown and startup (#1078 review)", async () => {

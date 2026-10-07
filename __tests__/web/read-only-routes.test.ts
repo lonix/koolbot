@@ -10,6 +10,7 @@ import {
   EVENTS_SETTING_KEYS,
   DIGEST_SETTING_KEYS,
   VOICE_CHANNELS_SETTING_KEYS,
+  isLobbyRow,
   REACTION_ROLES_SETTING_KEYS,
   NOTICES_SETTING_KEYS,
   METRICS_SETTING_KEYS,
@@ -232,6 +233,33 @@ describe("buildSettingRows (#705)", () => {
       if (prev === undefined) delete process.env["notices.header_enabled"];
       else process.env["notices.header_enabled"] = prev;
     }
+  });
+
+  it("labels lobby rows by ID once the ID resolves, by name otherwise (#1078 review)", () => {
+    const base = {
+      lobbyChannelId: "lobby-id",
+      lobbyName: "Lobby",
+      offlineLobbyName: "Lobby (Offline)",
+    };
+    const selected = { id: "lobby-id", name: "Main Hall" };
+    const foreign = { id: "x", name: "Lobby" };
+
+    // ID resolves: only the selected channel is the lobby, a foreign
+    // channel named "Lobby" is not.
+    expect(isLobbyRow(selected, { ...base, lobbyIdResolves: true })).toBe(true);
+    expect(isLobbyRow(foreign, { ...base, lobbyIdResolves: true })).toBe(false);
+
+    // ID unset or unresolved: the name fallback applies.
+    expect(isLobbyRow(foreign, { ...base, lobbyIdResolves: false })).toBe(true);
+    expect(
+      isLobbyRow(
+        { id: "y", name: "Lobby (Offline)" },
+        { ...base, lobbyIdResolves: false },
+      ),
+    ).toBe(true);
+    expect(isLobbyRow(selected, { ...base, lobbyIdResolves: false })).toBe(
+      false,
+    );
   });
 
   it("lists every voicechannels key, master included (#979)", () => {

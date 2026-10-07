@@ -281,8 +281,11 @@ export class VoiceChannelManager {
 
   /**
    * The configured lobby channel ID (`voicechannels.lobby.channel_id`), but
-   * only when it still resolves to a voice channel in the guild. Null means
-   * "identify the lobby by name", the backward-compatible fallback.
+   * only when it still resolves to a voice channel inside the managed
+   * category (`voicechannels.category_id`), like every name-based lobby
+   * lookup. An ID pointing anywhere else is ignored so the bot never renames
+   * or reacts to an unrelated channel. Null means "identify the lobby by
+   * name", the backward-compatible fallback.
    */
   private async resolveLobbyChannelId(
     guild: Guild | null | undefined,
@@ -292,7 +295,10 @@ export class VoiceChannelManager {
     ).trim();
     if (!id || !guild?.channels?.cache) return null;
     const channel = guild.channels.cache.get(id);
-    return channel && channel.type === ChannelType.GuildVoice ? id : null;
+    if (!channel || channel.type !== ChannelType.GuildVoice) return null;
+    const category = await resolveManagedCategory(guild);
+    if (!category || channel.parentId !== category.id) return null;
+    return id;
   }
 
   /** The lobby channel when it is configured by ID and still exists. */
@@ -2646,10 +2652,7 @@ export class VoiceChannelManager {
         return;
       }
 
-      const lobbyChannelName = (await this.getLobbyChannelName()).replace(
-        /["']/g,
-        "",
-      );
+      const configuredLobbyName = await this.getLobbyChannelName();
       const offlineLobbyName = await configService.getString(
         "voicechannels.lobby.offlinename",
       );
@@ -2672,6 +2675,12 @@ export class VoiceChannelManager {
       // Check for offline lobby. A lobby configured by ID that is still
       // carrying a non-online name is the one to restore.
       const lobbyById = await this.getLobbyChannelById(guild);
+      // A lobby selected by ID keeps its configured display name exactly (a
+      // name like "Bob's Lobby" must not be rewritten); the legacy name-based
+      // lookup keeps its long-standing quote stripping.
+      const lobbyChannelName = lobbyById
+        ? configuredLobbyName
+        : configuredLobbyName.replace(/["']/g, "");
       const offlineLobby =
         (lobbyById && lobbyById.name !== lobbyChannelName
           ? lobbyById

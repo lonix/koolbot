@@ -151,6 +151,25 @@ function describeType(value: unknown): string {
  * cascades like a Settings section and the feature can be switched off from
  * its own page, not only on through the disabled notice (#610).
  */
+/**
+ * Should this managed-category channel be labelled "lobby" on the Voice
+ * Channels page? Mirrors runtime detection: once the configured lobby ID
+ * resolves to a channel in the category only that channel is the lobby;
+ * otherwise the (legacy) name match applies (#1032).
+ */
+export function isLobbyRow(
+  ch: { id: string; name: string },
+  ctx: {
+    lobbyChannelId: string;
+    lobbyIdResolves: boolean;
+    lobbyName: string;
+    offlineLobbyName: string;
+  },
+): boolean {
+  if (ctx.lobbyIdResolves) return ch.id === ctx.lobbyChannelId;
+  return ch.name === ctx.lobbyName || ch.name === ctx.offlineLobbyName;
+}
+
 export const VOICE_CHANNELS_SETTING_KEYS = [
   "voicechannels.enabled",
   "voicechannels.category_id",
@@ -1902,16 +1921,25 @@ export function createReadOnlyRouter(
             .filter((c) => c.type === ChannelType.GuildVoice)
             .sort((a, b) => a.name.localeCompare(b.name));
           totalManaged = voice.length;
+          // Runtime lobby detection ignores names once the configured ID
+          // resolves to a channel in the category, so label the same way.
+          const lobbyIdResolves =
+            lobbyChannelId !== "" &&
+            voice.some((ch) => ch.id === lobbyChannelId);
+          const labelAsLobby = (ch: { id: string; name: string }): boolean =>
+            isLobbyRow(ch, {
+              lobbyChannelId,
+              lobbyIdResolves,
+              lobbyName,
+              offlineLobbyName,
+            });
           for (const ch of voice) {
             const memberCount =
               "members" in ch && ch.members ? ch.members.size : 0;
             if (memberCount === 0) totalEmpty += 1;
             channels.push({
               name: ch.name,
-              isLobby:
-                (lobbyChannelId !== "" && ch.id === lobbyChannelId) ||
-                ch.name === lobbyName ||
-                ch.name === offlineLobbyName,
+              isLobby: labelAsLobby(ch),
               isLive: manager.isLive(ch.id),
               memberCount,
               customName: manager.getCustomChannelName(ch.id) ?? null,
