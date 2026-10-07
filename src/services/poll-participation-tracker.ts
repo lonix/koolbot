@@ -236,7 +236,8 @@ export class PollParticipationTracker {
           },
         },
       ],
-      { upsert: true },
+      // Mongoose 9 rejects an array update unless `updatePipeline` is set (#1103).
+      { upsert: true, updatePipeline: true },
     );
   }
 
