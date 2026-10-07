@@ -2020,6 +2020,11 @@ export class ReactionRoleService {
             guildId,
             roleId: config.roleId,
             groupId: { $ne: groupId },
+            // Archived rows from earlier picker incarnations of this same
+            // generated group are not outside references (#1064).
+            ...(first.groupKey
+              ? { $nor: [{ groupKey: first.groupKey, isArchived: true }] }
+              : {}),
           });
           if (stillUsed > 0) continue;
           const role = await guild.roles.fetch(config.roleId);
@@ -2032,6 +2037,13 @@ export class ReactionRoleService {
       }
 
       await ReactionRoleConfig.deleteMany({ guildId, groupId });
+      if (first.groupKey) {
+        await ReactionRoleConfig.deleteMany({
+          guildId,
+          groupKey: first.groupKey,
+          isArchived: true,
+        });
+      }
 
       logger.info(
         `Fully deleted reaction role group ${groupId} (${configs.length} roles)`,

@@ -122,8 +122,9 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
       name: "Asia",
       permissions: [],
       mentionable: false,
-      colour: 0x336699,
+      colors: { primaryColor: 0x336699 },
     });
+    expect(s.created[0]).not.toHaveProperty("colour");
     expect(r.reusedRoles).toEqual(["old1"]);
     expect(s.channel.send).toHaveBeenCalledTimes(1);
     expect(s.message.react).toHaveBeenCalledTimes(2);
@@ -208,6 +209,34 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(r.success).toBe(false);
     expect(s.message.delete).toHaveBeenCalled();
     expect(s.del).toHaveBeenCalledTimes(2);
+    // rollback cleanup is retried via the shared Discord API wrapper
+    const labels = mockApi.mock.calls.map((c) => String(c[1]));
+    expect(labels).toContain("delete group message m1");
+    expect(
+      labels.filter((l) => l.startsWith("delete group role")),
+    ).toHaveLength(2);
+  });
+
+  it("carries autoCreated from archived rows when a picker is recreated", async () => {
+    const s = setup([
+      { id: "old1", name: "Europe" },
+      { id: "foreign", name: "Asia" },
+    ]);
+    model.find.mockImplementation(async (q: unknown) =>
+      (q as { isArchived?: boolean }).isArchived === true
+        ? [{ roleId: "old1", autoCreated: true }]
+        : [],
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    const docs = (
+      model.insertMany.mock.calls[0] as unknown as [
+        Array<Record<string, unknown>>,
+      ]
+    )[0];
+    expect(docs.find((d) => d.roleId === "old1")?.autoCreated).toBe(true);
+    expect(docs.find((d) => d.roleId === "foreign")?.autoCreated).toBe(false);
   });
 
   it("serialises overlapping runs for the same guild", async () => {
@@ -309,6 +338,9 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(s.message.edit).toHaveBeenCalledTimes(2);
     expect(s.message.react).toHaveBeenCalledTimes(1);
     expect(reactionRemove).toHaveBeenCalledTimes(1);
+    const labels = mockApi.mock.calls.map((c) => String(c[1]));
+    expect(labels).toContain("restore group message m1");
+    expect(labels.some((l) => l.startsWith("remove reaction"))).toBe(true);
     expect(s.message.delete).not.toHaveBeenCalled();
   });
 

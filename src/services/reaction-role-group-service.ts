@@ -248,6 +248,19 @@ export class ReactionRoleGroupService {
           ? mode
           : "unique";
 
+      // A recreated picker finds the bot's own earlier roles by name; carry
+      // their ownership over from the archived incarnation(s) of this group.
+      const ownedRoleIds = new Set<string>();
+      if (!anchor) {
+        const archived = await ReactionRoleConfig.find({
+          guildId,
+          groupKey,
+          isArchived: true,
+          autoCreated: true,
+        });
+        for (const r of archived) ownedRoleIds.add(r.roleId);
+      }
+
       const haveRoleIds = new Set(liveRows.map((r) => r.roleId));
       const haveEmojis = new Set(liveRows.map((r) => r.emoji));
 
@@ -313,7 +326,9 @@ export class ReactionRoleGroupService {
           () =>
             guild.roles.create({
               name: t.roleName,
-              ...(colour !== undefined ? { colour } : {}),
+              ...(colour !== undefined
+                ? { colors: { primaryColor: colour } }
+                : {}),
               permissions: [],
               mentionable: false,
               reason: `Reaction role group generated: ${name}`,
@@ -381,7 +396,9 @@ export class ReactionRoleGroupService {
           roleName: t.role!.name,
           style: "reaction" as const,
           // Only roles the bot created are its to remove later.
-          autoCreated: createdRoles.some((r) => r.id === t.role!.id),
+          autoCreated:
+            createdRoles.some((r) => r.id === t.role!.id) ||
+            ownedRoleIds.has(t.role!.id),
           mode: effectiveMode,
           groupId,
           groupKey,
@@ -410,26 +427,32 @@ export class ReactionRoleGroupService {
       // Undo only what this run created. Existing roles/messages stay.
       if (editedAnchor) {
         const a = editedAnchor as Message;
-        await a
-          .edit({ embeds: previousEmbeds })
-          .catch((err) => logger.warn("Could not restore group message:", err));
+        await this.api(
+          () => a.edit({ embeds: previousEmbeds }),
+          `restore group message ${a.id}`,
+        ).catch((err) => logger.warn("Could not restore group message:", err));
         for (const emoji of addedReactions) {
           const id = emoji.match(/(\d{17,20})/)?.[1] ?? emoji;
-          await a.reactions
-            .resolve(id)
-            ?.remove()
-            .catch((err) => logger.warn("Could not remove reaction:", err));
+          const reaction = a.reactions.resolve(id);
+          if (!reaction) continue;
+          await this.api(
+            () => reaction.remove(),
+            `remove reaction ${emoji}`,
+          ).catch((err) => logger.warn("Could not remove reaction:", err));
         }
       }
       if (postedMessage) {
-        await postedMessage
-          .delete()
-          .catch((err) => logger.warn("Could not delete group message:", err));
+        const posted = postedMessage as Message;
+        await this.api(
+          () => posted.delete(),
+          `delete group message ${posted.id}`,
+        ).catch((err) => logger.warn("Could not delete group message:", err));
       }
       for (const role of createdRoles) {
-        await role
-          .delete()
-          .catch((err) => logger.warn("Could not delete group role:", err));
+        await this.api(
+          () => role.delete(),
+          `delete group role ${role.id}`,
+        ).catch((err) => logger.warn("Could not delete group role:", err));
       }
       return fail(
         `Failed to generate role group: ${error instanceof Error ? error.message : "Unknown error"}`,

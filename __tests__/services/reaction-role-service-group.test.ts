@@ -289,8 +289,18 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
     };
     const { service } = createService(client);
     model.find.mockResolvedValue([
-      { roleId: "shared", messageId: "grp1", autoCreated: true },
-      { roleId: "own", messageId: "grp1", autoCreated: true },
+      {
+        roleId: "shared",
+        messageId: "grp1",
+        autoCreated: true,
+        groupKey: "region",
+      },
+      {
+        roleId: "own",
+        messageId: "grp1",
+        autoCreated: true,
+        groupKey: "region",
+      },
     ]);
     model.deleteMany.mockResolvedValue({ deletedCount: 2 });
     model.countDocuments.mockImplementation(async (q: unknown) =>
@@ -303,6 +313,8 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
       guildId: "g1",
       roleId: "shared",
       groupId: { $ne: "grp1" },
+      // archived incarnations of the same generated group don't count
+      $nor: [{ groupKey: "region", isArchived: true }],
     });
     expect(roleDelete).toHaveBeenCalledTimes(1);
   });
