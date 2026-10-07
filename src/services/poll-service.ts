@@ -8,7 +8,7 @@ import { PollSchedule, IPollSchedule } from "../models/poll-schedule.js";
 import { PollItem, IPollItem } from "../models/poll-item.js";
 import { PollParticipationTracker } from "./poll-participation-tracker.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 
 interface ScheduledPollJob {
   schedule: IPollSchedule;
