@@ -38,6 +38,7 @@ import {
   type SettingRow,
 } from "../../src/web/admin-views.js";
 import { renderAdoptPage } from "../../src/web/adopt-view.js";
+import { renderChannelClaimsPage } from "../../src/web/channel-claims-view.js";
 import {
   renderUserBirthdayBody,
   renderUserIndexBody,
@@ -296,6 +297,58 @@ export function adminPages(): A11yPage[] {
           suggestions: [],
           partial: [],
         },
+      }),
+    },
+    {
+      name: "Channel claims",
+      html: renderChannelClaimsPage({
+        ...COMMON,
+        navFeatureStatus: {},
+        groups: [],
+        claims: [],
+        problems: [],
+        approvedAt: null,
+        plan: null,
+        scan: {
+          guildName: "Guild",
+          roles: [
+            {
+              id: "r1",
+              name: "Mod",
+              position: 3,
+              managed: false,
+              isEveryone: false,
+              botId: null,
+            },
+          ],
+          channels: [
+            {
+              id: "10",
+              name: "Games",
+              kind: "category",
+              typeName: "GuildCategory",
+              parentId: null,
+              position: 0,
+              usedBy: [],
+              gatedByRoleIds: [],
+              syncedToParent: null,
+              flags: {},
+            },
+            {
+              id: "11",
+              name: "news",
+              kind: "text",
+              typeName: "GuildText",
+              parentId: "10",
+              position: 1,
+              usedBy: [],
+              gatedByRoleIds: [],
+              syncedToParent: true,
+              flags: {},
+            },
+          ],
+          naming: { suggestedPrefix: null },
+        } as never,
       }),
     },
     {

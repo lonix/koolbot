@@ -170,6 +170,14 @@ export interface PlanOptions {
    * half-finished rollout (#1024).
    */
   grantsBeforeOverwrites?: boolean;
+  /**
+   * Managed roles that may be named as the target of a channel overwrite even
+   * though the role itself is never edited: gating a channel to Server
+   * Boosters or a subscription role (#1022). The caller must only list roles
+   * that do not belong to a bot integration. Unlike `allowOtherBotOverwrites`
+   * this opens nothing else: other bots' existing overwrites stay protected.
+   */
+  gateTargetIds?: string[];
 }
 
 interface OpBase {
@@ -542,8 +550,10 @@ export function planAdoption(
   const warn = (code: string, message: string, targetId?: string): number =>
     warnings.push({ code, message, targetId });
 
+  const gateTargets = new Set(options.gateTargetIds ?? []);
   const isOtherBotTarget = (id: string): boolean => {
     if (otherBots.has(id)) return true;
+    if (gateTargets.has(id)) return false;
     const role = rolesById.get(id);
     return !!role && role.managed && !botRoleSet.has(id);
   };

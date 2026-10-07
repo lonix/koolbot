@@ -1,4 +1,8 @@
 import {
+  VOICE_ROOM_EVERYONE,
+  VOICE_ROOM_OWNER,
+} from "../utils/channel-permissions.js";
+import {
   VoiceState,
   VoiceChannel,
   CategoryChannel,
@@ -2148,11 +2152,11 @@ export class VoiceChannelManager {
         permissionOverwrites: [
           {
             id: userId,
-            allow: ["ManageChannels", "Connect", "Speak", "ViewChannel"],
+            allow: [...VOICE_ROOM_OWNER.allow],
           },
           {
             id: guild.roles.everyone.id,
-            allow: ["Connect", "Speak", "ViewChannel"],
+            allow: [...VOICE_ROOM_EVERYONE.allow],
           },
         ],
       });
@@ -2476,7 +2480,7 @@ export class VoiceChannelManager {
           permissionOverwrites: [
             {
               id: guild.roles.everyone.id,
-              allow: ["Connect", "Speak", "ViewChannel"],
+              allow: [...VOICE_ROOM_EVERYONE.allow],
             },
           ],
         });
@@ -2595,7 +2599,7 @@ export class VoiceChannelManager {
           permissionOverwrites: [
             {
               id: guild.roles.everyone.id,
-              allow: ["Connect", "Speak", "ViewChannel"],
+              allow: [...VOICE_ROOM_EVERYONE.allow],
             },
           ],
         });

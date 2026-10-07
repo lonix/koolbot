@@ -780,6 +780,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Leaderboard Roles** | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
 | **Role Groups**       | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
 | **Rules**             | (new — post the rules message, preview/apply the acceptance-role rollout; gated by `rules.enabled`) |
+| **Channel Claims**    | (new — read-only, group-gated, sync-to-category and bind-to-feature claims; plan → preview → apply) |
 | **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
 | **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
@@ -1301,6 +1302,47 @@ cache (a `+` marks a possibly low count unless the GuildMembers intent is on). *
 hints** (`?sample=1`) additionally samples recent message authors to spot channels one bot posts in; it costs a
 REST call per channel, so it is off by default. The same data is available to code as
 `ServerScanService.scan()`, whose `scanned` member is the `ScannedState` the adoption planner diffs against.
+
+**Channel Claims** (`/admin/adopt/claims`, #1022, part of the server-adoption epic #1017) takes over existing
+categories and channels. Every row defaults to **Leave alone**; nothing is touched unless you pick an action:
+
+- **Read-only (bot posts)** denies `SendMessages`, `SendMessagesInThreads`, thread creation and (unless
+  "members may still react" is ticked) `AddReactions` for `@everyone`, allows the bot, and can let chosen roles
+  or groups post. The rules follow the channel type: a **forum** stops new posts but keeps replies open (tick
+  "also stop replies" to lock them), an **announcement** channel behaves like text, a **stage** gates
+  `RequestToSpeak`, and a **voice** channel gates `Speak`. A read-only claim never grants `@everyone` anything, so
+  it cannot undo a gate.
+- **Group-gated** hides the channel from `@everyone` and shows it to the roles you choose, or to "group X and
+  above" by rank. Voice and stage channels also lose `Connect`, so visibility and joining agree. Managed roles
+  such as Server Booster or a subscription role are valid targets; the role itself is never edited. Roles that
+  belong to a bot integration are refused. Gating a category also gates the channels in it that are synced to it.
+- **Sync to category** makes a channel's overwrites match its category. It is the one action that replaces
+  existing permissions, so it is flagged, never pre-selected, and removing a channel's own overwrites needs a
+  per-channel approval box. Those removals are listed as destructive steps and run last. Overwrites that belong
+  to other bots (or that cannot be told apart from them while the Server Members intent is off) are kept, and the
+  plan says the channel will not read as fully synced.
+- **Bind to a feature** writes the feature's `*.channel_id` / `*.category_id` key (quotes, notices,
+  announcements, birthdays, welcome, LFG, the `core.*` log channels, reaction-role picker, voice lobby, event and
+  ticket categories) and gives the bot the permissions that feature expects. Binding the notices channel applies
+  the same read-only permissions the notices channel manager sets. Binding an existing channel reuses it: KoolBot
+  does not create a second lobby or category afterwards, and existing messages, pins and webhooks are never
+  touched.
+- **Bulk select**: a category row has a "for every channel here left alone" choice that applies one action to
+  all of its channels (each row's own choice wins).
+
+Binding `voicechannels.category_id` to a category that holds other voice channels is **blocked** while legacy
+cleanup could delete them. The error lists the empty channels it would remove. Either use a dedicated category,
+or tick "also turn on managed-only cleanup", which sets `voicechannels.cleanup.managed_only` before the category
+is bound so only channels KoolBot created are ever deleted. A warning reminds you to disable another
+join-to-create bot before enabling `voicechannels.enabled`. "Use this server's naming prefix" pre-fills
+`voicechannels.channel.prefix` from the scan.
+
+Preview first, then apply: **Preview changes** shows the same diff as Role Groups (blocking errors, warnings,
+before and after), and **Apply plan** runs it through the adoption engine, which snapshots everything it touches
+and can roll it back. Only `@everyone`, the bot and the roles you chose are written; overwrites for other bots,
+other roles and members stay as they are, and unrelated bits on a changed overwrite are preserved. The planner
+refuses (as errors, not warnings) any step that would remove your own access, lock the bot out of a channel a
+feature needs, or touch another bot's overwrite. Planning an adopted server again gives an empty plan.
 
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,

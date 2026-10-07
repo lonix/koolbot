@@ -879,9 +879,12 @@ describe("createWriteRouter (#850)", () => {
     const routes = collectRoutes(buildRouter().stack).sort();
     expect(routes).toEqual(
       [
+        "GET /adopt/claims",
         "GET /quotes/export",
         "GET /settings/export",
         "GET /wizard",
+        "POST /adopt/claims/apply",
+        "POST /adopt/claims/preview",
         "POST /announcements/:id/delete",
         "POST /birthdays/:userId/edit",
         "POST /birthdays/:userId/remove",

@@ -90,6 +90,7 @@ export const NAV_ITEMS: NavItem[] = [
     group: "Features",
     featureKey: "rules.enabled",
   },
+  { href: "/admin/adopt/claims", label: "Channel Claims", group: "Settings" },
   { href: "/admin/wizard", label: "Setup Wizard", group: "Settings" },
   // Features — feature-gated pages. A page whose feature is off is greyed
   // with an "off" badge and sorted last, never hidden (#610, #706).
