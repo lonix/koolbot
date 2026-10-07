@@ -1047,9 +1047,14 @@ export class ReactionRoleService {
   public async validateRoleAssignable(
     guild: Guild,
     role: Role,
+    resolvedBotMember?: GuildMember | null,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
+    // Callers that must route REST through a timeout/retry wrapper can pass
+    // the bot member they already fetched; otherwise fall back to cache/fetch.
     const botMember =
-      guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
+      resolvedBotMember ??
+      guild.members.me ??
+      (await guild.members.fetchMe().catch(() => null));
 
     if (!botMember) {
       return {

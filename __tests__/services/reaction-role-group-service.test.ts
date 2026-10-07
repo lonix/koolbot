@@ -2,6 +2,9 @@ import { describe, it, expect, jest, beforeEach } from "@jest/globals";
 import type { Client } from "discord.js";
 
 const mockApi = jest.fn(async (fn: () => Promise<unknown>) => fn());
+const mockValidate = jest.fn<(...a: unknown[]) => Promise<{ ok: true }>>(
+  async () => ({ ok: true }),
+);
 const mockGetString = jest.fn<(k: string, d: string) => Promise<string>>();
 const model = {
   find: jest.fn<() => Promise<unknown[]>>(),
@@ -28,7 +31,7 @@ jest.unstable_mockModule("../../src/services/reaction-role-service.js", () => ({
   ReactionRoleService: {
     getInstance: () => ({
       normalizeEmoji: (e: string) => e,
-      validateRoleAssignable: async () => ({ ok: true }),
+      validateRoleAssignable: mockValidate,
     }),
   },
 }));
@@ -71,6 +74,7 @@ function setup(existingRoles: Array<{ id: string; name: string }>) {
       }),
     },
     channels: { fetch: jest.fn(async () => channel) },
+    members: { me: { id: "bot" }, fetchMe: jest.fn() },
   };
   const client = { guilds: { fetch: jest.fn(async () => guild) } };
   return {
@@ -90,6 +94,7 @@ const entries = [
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockValidate.mockImplementation(async () => ({ ok: true }));
   (ReactionRoleGroupService as unknown as { instance?: unknown }).instance =
     undefined;
   mockGetString.mockImplementation(async (k, d) =>
@@ -143,6 +148,22 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
       groupKey: "region",
       mode: "unique",
     });
+  });
+
+  it("fetches the bot member through the API wrapper when it is not cached", async () => {
+    const s = setup([{ id: "old1", name: "europe" }]);
+    const me = { id: "bot" };
+    const fetchMe = jest.fn(async () => me);
+    (s.guild as unknown as Record<string, unknown>).members = {
+      me: null,
+      fetchMe,
+    };
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries, "unique");
+    expect(r.success).toBe(true);
+    expect(fetchMe).toHaveBeenCalledTimes(1);
+    expect(mockApi.mock.calls.map((c) => c[1])).toContain("fetch bot member");
+    expect(mockValidate).toHaveBeenCalledWith(s.guild, expect.anything(), me);
   });
 
   it("is a no-op when everything is already present", async () => {

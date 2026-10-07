@@ -335,8 +335,20 @@ export class ReactionRoleGroupService {
         ...restoredRows.map((r) => allRoles.get(r.roleId)!),
         ...todo.flatMap((t) => (t.role ? [t.role] : [])),
       ];
+      // Resolve the bot member through the retry/timeout wrapper so the
+      // validator never falls back to an unwrapped fetchMe().
+      const botMember =
+        guild.members.me ??
+        (await this.api(
+          () => guild.members.fetchMe(),
+          "fetch bot member",
+        ).catch(() => null));
       for (const role of toValidate) {
-        const ok = await rrService.validateRoleAssignable(guild, role);
+        const ok = await rrService.validateRoleAssignable(
+          guild,
+          role,
+          botMember,
+        );
         if (!ok.ok) return fail(ok.message);
       }
 

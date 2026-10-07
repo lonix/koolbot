@@ -913,7 +913,7 @@ per message). Preset lists live in `src/content/reaction-role-groups.ts`. The
 generator is idempotent and non-destructive: a role with the same name
 (case-insensitive) is reused and left untouched, roles it creates get no
 permissions and aren't mentionable (colour from `reactionroles.group_role_colour`,
-default Discord's), and running a group again only adds the missing options by
+Discord's default), and running a group again only adds the missing options by
 editing the existing picker message. It never removes roles, mappings or
 reactions. The mode defaults to **unique** (pick exactly one, e.g. one region);
 choose sticky or toggle if members may hold several. Deleting a generated group
