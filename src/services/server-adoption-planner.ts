@@ -497,10 +497,10 @@ export function planAdoption(
   const everyoneId = scanned.guildId;
 
   const rolesById = new Map(scanned.roles.map((r) => [r.id, r]));
-  const rolesByName = new Map<string, RoleState>();
+  const rolesByName = new Map<string, RoleState[]>();
   for (const r of scanned.roles) {
     const key = r.name.trim().toLowerCase();
-    if (!rolesByName.has(key)) rolesByName.set(key, r);
+    rolesByName.set(key, [...(rolesByName.get(key) ?? []), r]);
   }
   const channelsById = new Map(scanned.channels.map((c) => [c.id, c]));
   const botRoleSet = new Set(scanned.botRoleIds);
@@ -543,26 +543,49 @@ export function planAdoption(
     return null;
   };
 
+  /** Discord allows duplicate role names; only a single match is usable. */
+  const byName = (
+    name: string,
+  ): { role: RoleState | null; ambiguous: boolean } => {
+    const matches = rolesByName.get(name.trim().toLowerCase()) ?? [];
+    return {
+      role: matches.length === 1 ? matches[0] : null,
+      ambiguous: matches.length > 1,
+    };
+  };
+
   const resolveRole = (
     ref: TargetRef,
-  ): { id: string; existing: RoleState | null } | null => {
+  ): { id: string; existing: RoleState | null } | "ambiguous" | null => {
     if ("id" in ref) {
       const role = rolesById.get(ref.id);
       if (role) return { id: ref.id, existing: role };
       return creating.has(ref.id) ? { id: ref.id, existing: null } : null;
     }
-    const found = rolesByName.get(ref.roleName.trim().toLowerCase());
-    if (found) return { id: found.id, existing: found };
+    const found = byName(ref.roleName);
+    if (found.ambiguous) return "ambiguous";
+    if (found.role) return { id: found.role.id, existing: found.role };
     const r = refFor(ref.roleName);
     return creating.has(r) ? { id: r, existing: null } : null;
   };
 
   // ---- roles ---------------------------------------------------------
   for (const want of desired.roles ?? []) {
+    // An explicit id is an exact identity: never fall back to the name.
+    if (want.id !== undefined && !rolesById.has(want.id)) {
+      err("unknown-role", `Role ${want.id} does not exist.`, want.id);
+      continue;
+    }
+    const named = want.id === undefined ? byName(want.name) : null;
+    if (named?.ambiguous) {
+      err(
+        "ambiguous-role",
+        `More than one role is named "${want.name}"; refer to it by id.`,
+      );
+      continue;
+    }
     const existing =
-      (want.id && rolesById.get(want.id)) ||
-      rolesByName.get(want.name.trim().toLowerCase()) ||
-      null;
+      (want.id !== undefined ? rolesById.get(want.id) : named?.role) ?? null;
     if (!existing) {
       const permissions = want.permissions ?? "0";
       if (!isValidBitfield(permissions)) {
@@ -655,7 +678,7 @@ export function planAdoption(
     touchedRoles.add(existing.id);
     // Later overwrites and grants may name the role by what it is renamed to.
     if (changes.name !== undefined) {
-      rolesByName.set(changes.name.trim().toLowerCase(), existing);
+      rolesByName.set(changes.name.trim().toLowerCase(), [existing]);
     }
     const before: Record<string, unknown> = {};
     for (const k of Object.keys(changes) as Array<keyof typeof changes>)
@@ -688,6 +711,13 @@ export function planAdoption(
     let targetType: "role" | "member" = want.targetType ?? "role";
     if ("roleName" in want.target) {
       const resolved = resolveRole(want.target);
+      if (resolved === "ambiguous") {
+        err(
+          "ambiguous-role",
+          `More than one role is named "${want.target.roleName}"; refer to it by id.`,
+        );
+        continue;
+      }
       if (!resolved) {
         err(
           "unknown-role",
@@ -765,6 +795,13 @@ export function planAdoption(
   // ---- member grants -------------------------------------------------
   for (const grant of desired.memberGrants ?? []) {
     const resolved = resolveRole(grant.role);
+    if (resolved === "ambiguous") {
+      err(
+        "ambiguous-role",
+        "A member grant names a role that more than one role shares; refer to it by id.",
+      );
+      continue;
+    }
     if (!resolved) {
       err(
         "unknown-role",

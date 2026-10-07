@@ -882,3 +882,51 @@ describe("planAdoption: review hardening, round six", () => {
     expect(codes(plan)).toEqual(["bot-lacks-permission"]);
   });
 });
+
+describe("planAdoption: role identity", () => {
+  const dupes = () =>
+    scan({
+      roles: [
+        ...scan().roles,
+        role({ id: "dup-a", name: "Mods", position: 2 }),
+        role({ id: "dup-b", name: "mods", position: 2 }),
+      ],
+    });
+
+  it("blocks an ambiguous role name instead of picking one", () => {
+    const plan = planAdoption(dupes(), {
+      roles: [{ name: "Mods", color: 3 }],
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { roleName: "MODS" },
+          allow: VIEW,
+          deny: "0",
+        },
+      ],
+      memberGrants: [{ role: { roleName: "Mods" }, memberIds: ["a"] }],
+    });
+    expect(codes(plan)).toEqual([
+      "ambiguous-role",
+      "ambiguous-role",
+      "ambiguous-role",
+    ]);
+    expect(plan.operations).toEqual([]);
+  });
+
+  it("accepts a duplicated name when the role is given by id", () => {
+    const plan = planAdoption(dupes(), {
+      roles: [{ id: "dup-a", name: "Mods", color: 3 }],
+    });
+    expect(plan.errors).toEqual([]);
+    expect(plan.operations).toHaveLength(1);
+  });
+
+  it("does not fall back to the name when an explicit role id is missing", () => {
+    const plan = planAdoption(scan(), {
+      roles: [{ id: "ghost", name: "Member", color: 3 }],
+    });
+    expect(codes(plan)).toEqual(["unknown-role"]);
+    expect(plan.operations).toEqual([]);
+  });
+});
