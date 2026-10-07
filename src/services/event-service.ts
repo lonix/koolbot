@@ -795,6 +795,15 @@ export class EventService extends ScheduledService {
     }
     event.state = "cancelled";
     await event.save();
+    // Re-read before refreshing the post: a concurrent announcement claim
+    // may have stored its message ids after this document was loaded, and an
+    // edit driven by the stale (null) ids would be skipped, leaving live RSVP
+    // buttons on a cancelled event.
+    const fresh = await Event.findById(event._id).catch(() => null);
+    if (fresh) {
+      event.announcementChannelId = fresh.announcementChannelId;
+      event.announcementMessageId = fresh.announcementMessageId;
+    }
     await this.updateAnnouncement(event);
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
   }
@@ -1132,8 +1141,13 @@ export class EventService extends ScheduledService {
         event.announcementMessageId = message.id;
         return;
       }
-      if (!stored?.announcementMessageId) {
-        await message.delete().catch(() => undefined);
+      // Either the row has no id (the scan reposts) or another sender won:
+      // our post is the untracked one. Drop it and adopt the winner's ids.
+      await message.delete().catch(() => undefined);
+      if (stored?.announcementMessageId) {
+        event.announcementChannelId =
+          stored.announcementChannelId ?? event.announcementChannelId;
+        event.announcementMessageId = stored.announcementMessageId;
       }
       return;
     }

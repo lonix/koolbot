@@ -1132,6 +1132,20 @@ describe("recurring event lifecycle", () => {
       expect(event.announcementMessageId).toBe("msg-mine");
     });
 
+    it("deletes its post and adopts the winner's ids when a rejected claim finds another message stored", async () => {
+      const { service, message, event } = setup();
+      EventMock.findOneAndUpdate = jest.fn(async () => {
+        throw new Error("db blip");
+      });
+      EventMock.findById = jest.fn(async () => ({
+        announcementChannelId: "chan-1",
+        announcementMessageId: "msg-winner",
+      }));
+      await realPost(service, event);
+      expect(message.delete).toHaveBeenCalled();
+      expect(event.announcementMessageId).toBe("msg-winner");
+    });
+
     it("leaves the post alone when the outcome of a rejected claim can't be read", async () => {
       const { service, message, event } = setup();
       EventMock.findOneAndUpdate = jest.fn(async () => {
@@ -1399,6 +1413,37 @@ describe("recurring event lifecycle", () => {
     expect(result?.state).toBe("cancelled");
     expect(created).toHaveLength(1);
     expect(created[0].occurrenceIndex).toBe(1);
+  });
+
+  it("cancelling refreshes the post from the re-read ids when a claim landed meanwhile", async () => {
+    const { service } = buildService();
+    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const occurrence = ended({
+      state: "scheduled",
+      channelId: null,
+      announcementChannelId: null,
+      announcementMessageId: null,
+      startTime: soon,
+      seriesStart: soon,
+    });
+    EventMock.findById = jest
+      .fn()
+      .mockResolvedValueOnce(occurrence) // getEvent
+      .mockResolvedValue({
+        announcementChannelId: "chan-1",
+        announcementMessageId: "msg-1",
+      });
+    let idsSeenByEdit: unknown;
+    (
+      service as unknown as { updateAnnouncement: jest.Mock }
+    ).updateAnnouncement = jest.fn(
+      async (e: { announcementMessageId: unknown }) => {
+        idsSeenByEdit = e.announcementMessageId;
+        return true;
+      },
+    );
+    await service.cancelEvent("occ-0", "guild-1");
+    expect(idsSeenByEdit).toBe("msg-1");
   });
 
   it("cancelEvent on a one-off event spawns nothing", async () => {
