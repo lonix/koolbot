@@ -26,6 +26,7 @@ const mockCreateEvent = jest.fn<() => Promise<unknown>>();
 const mockListEvents = jest.fn<() => Promise<Array<Record<string, unknown>>>>();
 const mockCancelEvent = jest.fn<() => Promise<unknown>>();
 const mockStartEventNow = jest.fn<() => Promise<unknown>>();
+const mockCancelSeries = jest.fn<() => Promise<unknown>>();
 const mockSetRsvp = jest.fn<() => Promise<unknown>>();
 const mockBuildAnnouncementPayload = jest.fn(() => ({ content: "refreshed" }));
 
@@ -59,6 +60,7 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
       createEvent: mockCreateEvent,
       listEvents: mockListEvents,
       cancelEvent: mockCancelEvent,
+      cancelSeries: mockCancelSeries,
       startEventNow: mockStartEventNow,
       setRsvp: mockSetRsvp,
       buildAnnouncementPayload: mockBuildAnnouncementPayload,
@@ -218,6 +220,49 @@ describe("/event create", () => {
     );
   });
 
+  it("creates a one-off event when no repeat is given", async () => {
+    const { date, time } = futureDateTime();
+    await execute(
+      interaction({
+        subcommand: "create",
+        strings: { title: "Raid", date, time },
+      }),
+    );
+    expect(mockCreateEvent.mock.calls[0][0]).toMatchObject({
+      recurrence: "none",
+    });
+  });
+
+  it("passes the repeat cadence through and says so in the reply", async () => {
+    const { date, time } = futureDateTime();
+    const it_ = interaction({
+      subcommand: "create",
+      strings: { title: "Game Night", date, time, repeat: "biweekly" },
+    });
+    await execute(it_);
+    expect(mockCreateEvent.mock.calls[0][0]).toMatchObject({
+      recurrence: "biweekly",
+    });
+    expect(it_.editReply).toHaveBeenCalledWith(
+      expect.stringContaining("repeats every 2 weeks"),
+    );
+  });
+
+  it("explains when recurring events are turned off", async () => {
+    const { RecurrenceDisabledError } =
+      await import("../../src/services/event-service.js");
+    mockCreateEvent.mockRejectedValue(new RecurrenceDisabledError());
+    const { date, time } = futureDateTime();
+    const it_ = interaction({
+      subcommand: "create",
+      strings: { title: "Game Night", date, time, repeat: "weekly" },
+    });
+    await execute(it_);
+    expect(it_.editReply).toHaveBeenCalledWith(
+      expect.stringContaining("events.recurrence_enabled"),
+    );
+  });
+
   it("falls back to the configured default duration", async () => {
     mockConfigGetNumber.mockResolvedValue(45);
     const { date, time } = futureDateTime();
@@ -281,6 +326,27 @@ describe("/event list", () => {
     );
   });
 
+  it("marks occurrences of a recurring series", async () => {
+    mockListEvents.mockResolvedValue([
+      {
+        _id: "e1",
+        title: "Game Night",
+        state: "scheduled",
+        startTime: new Date(Date.now() + 86_400_000),
+        timezone: "UTC",
+        rsvps: [],
+        recurrence: "weekly",
+        seriesId: "e1",
+      },
+    ]);
+    const it_ = interaction({ subcommand: "list" });
+    await execute(it_);
+    const reply = it_.editReply.mock.calls[0][0] as {
+      embeds: Array<{ toJSON: () => { fields: Array<{ value: string }> } }>;
+    };
+    expect(reply.embeds[0].toJSON().fields[0].value).toContain("🔁 weekly");
+  });
+
   it("renders scheduled and active events with their RSVP tallies", async () => {
     mockListEvents.mockResolvedValue([
       {
@@ -342,6 +408,58 @@ describe("/event cancel and /event start", () => {
     expect(mockCancelEvent).toHaveBeenCalledWith("event-1", "guild-1");
     expect(it_.editReply).toHaveBeenCalledWith(
       expect.stringContaining("Cancelled **Raid**"),
+    );
+  });
+
+  it("tells the admin a recurring cancel only skipped that date", async () => {
+    mockCancelEvent.mockResolvedValue({
+      _id: "event-1",
+      title: "Game Night",
+      recurrence: "weekly",
+      seriesId: "event-1",
+    });
+    const it_ = interaction({
+      subcommand: "cancel",
+      strings: { id: "event-1" },
+    });
+    await execute(it_);
+    expect(mockCancelSeries).not.toHaveBeenCalled();
+    expect(it_.editReply).toHaveBeenCalledWith(
+      expect.stringContaining("the series continues"),
+    );
+  });
+
+  it("cancels the whole series with scope:series", async () => {
+    mockCancelSeries.mockResolvedValue({
+      event: {
+        _id: "event-1",
+        title: "Game Night",
+        recurrence: "weekly",
+        seriesId: "event-1",
+      },
+      cancelled: 2,
+    });
+    const it_ = interaction({
+      subcommand: "cancel",
+      strings: { id: "event-1", scope: "series" },
+    });
+    await execute(it_);
+    expect(mockCancelSeries).toHaveBeenCalledWith("event-1", "guild-1");
+    expect(mockCancelEvent).not.toHaveBeenCalled();
+    expect(it_.editReply).toHaveBeenCalledWith(
+      expect.stringContaining("series (2 upcoming"),
+    );
+  });
+
+  it("reports a series cancel that matched nothing", async () => {
+    mockCancelSeries.mockResolvedValue(null);
+    const it_ = interaction({
+      subcommand: "cancel",
+      strings: { id: "missing", scope: "series" },
+    });
+    await execute(it_);
+    expect(it_.editReply).toHaveBeenCalledWith(
+      expect.stringContaining("not found"),
     );
   });
 

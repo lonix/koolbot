@@ -12,11 +12,12 @@ import {
   VoiceChannel,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { ScheduledService } from "./scheduled-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import {
   Event,
+  type EventRecurrence,
   type EventState,
   type IEvent,
   type RsvpStatus,
@@ -87,6 +88,10 @@ export interface RsvpCounts {
   cant: number;
 }
 
+/** How many skipped cadence steps one spawn will search through (bot offline
+ * for years, or a monthly series misconfigured) before giving up. */
+const MAX_OCCURRENCE_SKIP = 520;
+
 export interface CreateEventInput {
   guildId: string;
   title: string;
@@ -95,7 +100,17 @@ export interface CreateEventInput {
   timezone: string;
   durationMinutes: number;
   categoryId?: string;
+  /** Repeat cadence; omitted/`none` creates a one-off event (#744). */
+  recurrence?: EventRecurrence;
   createdBy: string;
+}
+
+/** Raised when a recurring event is requested while recurrence is off. */
+export class RecurrenceDisabledError extends Error {
+  constructor() {
+    super("Recurring events are disabled (events.recurrence_enabled).");
+    this.name = "RecurrenceDisabledError";
+  }
 }
 
 // ---------------------------------------------------------------
@@ -205,6 +220,78 @@ export function formatEventWhen(event: {
   return `${formatInTimeZone(event.startTime, zone, "yyyy-MM-dd HH:mm")} (${zone})`;
 }
 
+/** Whether an event row belongs to a repeating series. */
+export function isRecurring(event: {
+  recurrence?: EventRecurrence | null;
+  seriesId?: string | null;
+}): boolean {
+  return !!event.recurrence && event.recurrence !== "none" && !!event.seriesId;
+}
+
+/** Short human label for a cadence, e.g. `every 2 weeks`. */
+export function recurrenceLabel(recurrence: EventRecurrence): string {
+  switch (recurrence) {
+    case "weekly":
+      return "weekly";
+    case "biweekly":
+      return "every 2 weeks";
+    case "monthly":
+      return "monthly";
+    default:
+      return "one-off";
+  }
+}
+
+/**
+ * Start instant of occurrence `index` of a series anchored at `seriesStart`.
+ *
+ * Computed from the anchor's wall-clock date and time in `timezone` (not by
+ * adding fixed milliseconds), so "Friday 20:00" stays at 20:00 across a DST
+ * change. Monthly steps keep the anchor's day-of-month, clamped to the last
+ * day of shorter months, and return to it afterwards (Jan 31 → Feb 28 →
+ * Mar 31). A wall-clock time that does not exist on the target day (a DST
+ * gap) rolls forward rather than dropping the occurrence.
+ */
+export function computeOccurrenceStart(
+  seriesStart: Date,
+  recurrence: EventRecurrence,
+  index: number,
+  timezone: string,
+): Date {
+  if (recurrence === "none" || index <= 0) return new Date(seriesStart);
+  const zone = resolveTimezone(timezone);
+  const [y, m, d] = formatInTimeZone(seriesStart, zone, "yyyy-MM-dd")
+    .split("-")
+    .map(Number);
+  const time = formatInTimeZone(seriesStart, zone, "HH:mm:ss");
+
+  let target: Date;
+  if (recurrence === "monthly") {
+    const monthIndex = m - 1 + index;
+    const year = y + Math.floor(monthIndex / 12);
+    const month = ((monthIndex % 12) + 12) % 12;
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    target = new Date(Date.UTC(year, month, Math.min(d, lastDay)));
+  } else {
+    const stepDays = recurrence === "weekly" ? 7 : 14;
+    target = new Date(Date.UTC(y, m - 1, d + stepDays * index));
+  }
+  const date = target.toISOString().slice(0, 10);
+  const resolved = fromZonedTime(`${date}T${time}`, zone);
+  // A wall-clock time inside a DST gap does not exist; `fromZonedTime`
+  // resolves it backwards, to an instant that reads earlier than requested.
+  // Push it forward by the gap so 01:30 becomes 02:30 rather than 00:30.
+  const toSeconds = (hms: string): number => {
+    const [h, m, sec] = hms.split(":").map(Number);
+    return h * 3600 + m * 60 + sec;
+  };
+  let drift =
+    toSeconds(time) - toSeconds(formatInTimeZone(resolved, zone, "HH:mm:ss"));
+  if (drift > 43200) drift -= 86400;
+  else if (drift < -43200) drift += 86400;
+  return drift > 0 ? new Date(resolved.getTime() + drift * 1000) : resolved;
+}
+
 function accentColor(state: IEvent["state"]): number {
   switch (state) {
     case "active":
@@ -281,6 +368,15 @@ export class EventService extends ScheduledService {
       $or: [
         { state: { $in: ["scheduled", "active"] } },
         { state: "ended", channelId: { $ne: null } },
+        // Ended — or individually cancelled — recurring occurrences whose
+        // successor has not been created yet (e.g. a crash between ending
+        // and spawning, #744). A whole-series cancel is excluded.
+        {
+          state: { $in: ["ended", "cancelled"] },
+          recurrence: { $ne: "none" },
+          nextSpawned: false,
+          seriesCancelled: { $ne: true },
+        },
       ],
     });
 
@@ -317,6 +413,31 @@ export class EventService extends ScheduledService {
     windows: { reminderMs: number; leadMs: number; graceMs: number },
   ): Promise<void> {
     let changed = false;
+
+    // A series cancel that was interrupted (crash, failed query) leaves
+    // flagged rows still open: finish it instead of running their lifecycle.
+    if (
+      (event.state === "scheduled" || event.state === "active") &&
+      (event.seriesCancelled ||
+        (isRecurring(event) && (await this.isSeriesCancelled(event))))
+    ) {
+      // A successor inserted just after a series cancel can miss the flag
+      // (its spawner died before re-checking); a cancelled sibling anywhere
+      // in the series settles it, and the flag is carried onto this row.
+      event.seriesCancelled = true;
+      await this.cancelOne(event);
+      return;
+    }
+
+    // A recurring occurrence whose RSVP post failed (or was never made) is
+    // retried here, since nothing else would ever repair it.
+    if (
+      isRecurring(event) &&
+      !event.announcementMessageId &&
+      (event.state === "scheduled" || event.state === "active")
+    ) {
+      await this.ensureAnnouncement(event);
+    }
 
     // 1. Reminder (before start, once).
     if (shouldSendReminder(event, now, windows.reminderMs)) {
@@ -356,6 +477,218 @@ export class EventService extends ScheduledService {
       await event.save();
       await this.logLifecycle(event);
     }
+
+    // 5. A finished (or individually cancelled) occurrence hands over to the
+    // next one in its series.
+    if (
+      (event.state === "ended" || event.state === "cancelled") &&
+      isRecurring(event) &&
+      !event.nextSpawned &&
+      !event.seriesCancelled
+    ) {
+      await this.spawnNextOccurrence(event, now);
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Recurrence (#744)
+  // ---------------------------------------------------------------
+
+  public async isRecurrenceEnabled(): Promise<boolean> {
+    return this.configService.getBoolean("events.recurrence_enabled", true);
+  }
+
+  /**
+   * Create the occurrence after `previous`, exactly once.
+   *
+   * Idempotent rather than claim-first: the successor is inserted under the
+   * unique `(guildId, seriesId, occurrenceIndex)` key, so a crash, a restart
+   * or a concurrent caller (the scan, a cancel-this-occurrence, another
+   * replica) at worst finds the row already there and adopts it. Only after
+   * the successor exists is `previous.nextSpawned` set, as a "done" marker; a
+   * crash before that is simply retried on the next scan.
+   *
+   * Series cancellation is durable (`seriesCancelled` on every row, set
+   * before open rows are cancelled). A spawn that raced past the first check
+   * re-reads the flag after inserting and cancels its own successor, and
+   * `cancelSeries`' open-row query cannot miss a successor inserted before
+   * that re-read — so a cancelled series cannot be revived either way.
+   *
+   * The schedule comes from the series anchor (`computeOccurrenceStart`);
+   * cadence steps already in the past — the bot was down, or the series was
+   * paused — are skipped, not back-filled.
+   */
+  private async spawnNextOccurrence(
+    previous: IEvent,
+    now: Date,
+  ): Promise<IEvent | null> {
+    if (!isRecurring(previous) || !previous.seriesId) return null;
+    if (previous.nextSpawned || previous.seriesCancelled) return null;
+    if (!(await this.isRecurrenceEnabled())) return null;
+
+    const seriesId = previous.seriesId;
+    try {
+      // The caller's copy may predate a series cancel or another replica.
+      const fresh = await Event.findById(previous._id);
+      if (!fresh || fresh.nextSpawned || fresh.seriesCancelled) return null;
+
+      // A successor may already exist (saved, but `nextSpawned` never got
+      // set): adopt it rather than skipping past it and creating another.
+      const later = await Event.findOne({
+        guildId: previous.guildId,
+        seriesId,
+        occurrenceIndex: { $gt: previous.occurrenceIndex },
+      });
+      if (later) {
+        await Event.updateOne(
+          { _id: previous._id },
+          { $set: { nextSpawned: true } },
+        );
+        previous.nextSpawned = true;
+        return later;
+      }
+
+      const anchor = previous.seriesStart ?? previous.startTime;
+      let index = previous.occurrenceIndex + 1;
+      let start = computeOccurrenceStart(
+        anchor,
+        previous.recurrence,
+        index,
+        previous.timezone,
+      );
+      for (
+        let skipped = 0;
+        start.getTime() <= now.getTime() && skipped < MAX_OCCURRENCE_SKIP;
+        skipped++
+      ) {
+        index += 1;
+        start = computeOccurrenceStart(
+          anchor,
+          previous.recurrence,
+          index,
+          previous.timezone,
+        );
+      }
+      if (start.getTime() <= now.getTime()) {
+        throw new Error("no future occurrence within the search window");
+      }
+
+      const key = {
+        guildId: previous.guildId,
+        seriesId,
+        occurrenceIndex: index,
+      };
+      let next: IEvent | null = await Event.findOne(key);
+      let created = false;
+      if (!next) {
+        const doc = new Event({
+          guildId: previous.guildId,
+          title: previous.title,
+          description: previous.description,
+          startTime: start,
+          timezone: previous.timezone,
+          durationMinutes: previous.durationMinutes,
+          categoryId: previous.categoryId,
+          state: "scheduled",
+          reminderSent: false,
+          rsvps: [],
+          recurrence: previous.recurrence,
+          seriesId,
+          occurrenceIndex: index,
+          seriesStart: anchor,
+          spawnedFrom: String(previous._id),
+          nextSpawned: false,
+          seriesCancelled: false,
+          createdBy: previous.createdBy,
+        });
+        try {
+          await doc.save();
+          next = doc;
+          created = true;
+        } catch (error) {
+          // Lost the insert race to another caller: adopt their row.
+          if ((error as { code?: number }).code !== 11000) throw error;
+          next = await Event.findOne(key);
+        }
+      }
+      if (!next) return null;
+
+      if (created) {
+        // Two spawns whose `now` straddled a cadence boundary can pick
+        // different indices and both insert. Whoever sees a lower-indexed
+        // sibling removes its own just-inserted row; the lowest survives.
+        const sibling = await Event.findOne({
+          guildId: previous.guildId,
+          seriesId,
+          occurrenceIndex: { $gt: previous.occurrenceIndex, $lt: index },
+          // Only competing successors of THIS predecessor count; a later
+          // descendant legitimately spawned from another occurrence must not.
+          spawnedFrom: String(previous._id),
+          _id: { $ne: next._id },
+        });
+        if (sibling) {
+          await this.discardDuplicate(next);
+          await Event.updateOne(
+            { _id: previous._id },
+            { $set: { nextSpawned: true } },
+          );
+          previous.nextSpawned = true;
+          return sibling;
+        }
+        // The reverse insert order: a higher-indexed duplicate may have gone
+        // in (and passed its own check) before this lower row existed. This
+        // row is the lower one, so it wins and sweeps those up; between the
+        // two checks the lowest index always survives.
+        const higher = await Event.find({
+          guildId: previous.guildId,
+          seriesId,
+          occurrenceIndex: { $gt: index },
+          spawnedFrom: String(previous._id),
+          state: "scheduled",
+        });
+        for (const duplicate of higher) {
+          await this.discardDuplicate(duplicate);
+        }
+        await this.postAnnouncement(next).catch((error) =>
+          logger.error("Failed to post event announcement:", error),
+        );
+        // A series cancel may have landed between the check above and the
+        // insert; if so, take the successor down again.
+        const recheck = await Event.findById(previous._id);
+        if (recheck?.seriesCancelled) {
+          // Persist the flag too, so the recovery scan doesn't treat this
+          // as an individually cancelled occurrence and spawn again.
+          next.seriesCancelled = true;
+          await this.cancelOne(next);
+          return null;
+        }
+        logger.info(
+          `Spawned occurrence ${index} of event series ${sanitizeForLog(seriesId)}`,
+        );
+      }
+
+      await Event.updateOne(
+        { _id: previous._id },
+        { $set: { nextSpawned: true } },
+      );
+      previous.nextSpawned = true;
+      return next;
+    } catch (error) {
+      // Nothing to undo: `nextSpawned` is untouched, so the next scan retries.
+      logger.error(
+        `Failed to spawn the next occurrence of series ${sanitizeForLog(seriesId)}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /** Every occurrence of a series, oldest first. */
+  public async listSeries(
+    guildId: string,
+    seriesId: string,
+  ): Promise<IEvent[]> {
+    return Event.find({ guildId, seriesId }).sort({ occurrenceIndex: 1 });
   }
 
   // ---------------------------------------------------------------
@@ -363,6 +696,10 @@ export class EventService extends ScheduledService {
   // ---------------------------------------------------------------
 
   public async createEvent(input: CreateEventInput): Promise<IEvent> {
+    const recurrence = input.recurrence ?? "none";
+    if (recurrence !== "none" && !(await this.isRecurrenceEnabled())) {
+      throw new RecurrenceDisabledError();
+    }
     const event = new Event({
       guildId: input.guildId,
       title: input.title,
@@ -374,8 +711,15 @@ export class EventService extends ScheduledService {
       state: "scheduled",
       reminderSent: false,
       rsvps: [],
+      recurrence,
       createdBy: input.createdBy,
     });
+    if (recurrence !== "none") {
+      // The first occurrence's id doubles as the series id.
+      event.seriesId = String(event._id);
+      event.occurrenceIndex = 0;
+      event.seriesStart = input.startTime;
+    }
     await event.save();
     await this.postAnnouncement(event).catch((error) =>
       logger.error("Failed to post event announcement:", error),
@@ -392,7 +736,14 @@ export class EventService extends ScheduledService {
     return Event.findById(eventId).catch(() => null);
   }
 
-  /** Cancel an event: mark cancelled and tear down any live channel. */
+  /**
+   * Cancel one event: mark cancelled and tear down any live channel.
+   *
+   * For a recurring event this cancels just this occurrence; the series
+   * carries on, so the following occurrence is created straight away (it
+   * would otherwise only appear once this one ended, which it now never
+   * will). Use {@link cancelSeries} to stop the whole series.
+   */
   public async cancelEvent(
     eventId: string,
     guildId?: string,
@@ -402,6 +753,58 @@ export class EventService extends ScheduledService {
     if (guildId && event.guildId !== guildId) return null;
     if (event.state === "cancelled") return event;
 
+    await this.cancelOne(event);
+    if (isRecurring(event) && !event.nextSpawned && !event.seriesCancelled) {
+      await this.spawnNextOccurrence(event, new Date());
+    }
+    return event;
+  }
+
+  /**
+   * Cancel every unfinished occurrence of the series `eventId` belongs to and
+   * stop it spawning more. Returns the addressed event plus how many
+   * occurrences were cancelled, or null when it is missing / another guild's.
+   * A one-off event is just cancelled (count 1).
+   */
+  public async cancelSeries(
+    eventId: string,
+    guildId?: string,
+  ): Promise<{ event: IEvent; cancelled: number } | null> {
+    const event = await this.getEvent(eventId);
+    if (!event) return null;
+    if (guildId && event.guildId !== guildId) return null;
+    if (!isRecurring(event) || !event.seriesId) {
+      const wasLive = event.state !== "cancelled";
+      await this.cancelOne(event);
+      return { event, cancelled: wasLive ? 1 : 0 };
+    }
+
+    // Block spawning first, so an occurrence ending mid-cancel cannot
+    // resurrect the series.
+    await Event.updateMany(
+      { guildId: event.guildId, seriesId: event.seriesId },
+      { $set: { seriesCancelled: true } },
+    );
+    const open = await Event.find({
+      guildId: event.guildId,
+      seriesId: event.seriesId,
+      state: { $in: ["scheduled", "active"] },
+    });
+    let cancelled = 0;
+    for (const occurrence of open) {
+      // Rows inserted after the bulk update above are still blocked.
+      occurrence.seriesCancelled = true;
+      await this.cancelOne(occurrence);
+      cancelled += 1;
+    }
+    logger.info(
+      `Cancelled event series ${sanitizeForLog(event.seriesId)} (${cancelled} occurrence(s))`,
+    );
+    const fresh = (await this.getEvent(eventId)) ?? event;
+    return { event: fresh, cancelled };
+  }
+
+  private async cancelOne(event: IEvent): Promise<void> {
     if (event.channelId) {
       const guild = await this.client.guilds
         .fetch(event.guildId)
@@ -411,9 +814,17 @@ export class EventService extends ScheduledService {
     }
     event.state = "cancelled";
     await event.save();
+    // Re-read before refreshing the post: a concurrent announcement claim
+    // may have stored its message ids after this document was loaded, and an
+    // edit driven by the stale (null) ids would be skipped, leaving live RSVP
+    // buttons on a cancelled event.
+    const fresh = await Event.findById(event._id).catch(() => null);
+    if (fresh) {
+      event.announcementChannelId = fresh.announcementChannelId;
+      event.announcementMessageId = fresh.announcementMessageId;
+    }
     await this.updateAnnouncement(event);
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
-    return event;
   }
 
   /** Force the temp channel to spin up now, ahead of its scheduled lead. */
@@ -640,6 +1051,11 @@ export class EventService extends ScheduledService {
     if (event.description) {
       embed.setDescription(event.description);
     }
+    if (isRecurring(event)) {
+      embed.setFooter({
+        text: `🔁 Repeats ${recurrenceLabel(event.recurrence)}`,
+      });
+    }
     if (event.channelId && !finished) {
       embed.addFields({
         name: "Voice channel",
@@ -672,6 +1088,59 @@ export class EventService extends ScheduledService {
     return { embeds: [embed], components: [row] };
   }
 
+  /** Delete a duplicate successor row, taking down any RSVP post the scan's
+   * announcement retry already attached to it so nothing is orphaned. */
+  private async discardDuplicate(event: IEvent): Promise<void> {
+    const mine = await Event.findById(event._id).catch(() => null);
+    if (mine?.announcementChannelId && mine.announcementMessageId) {
+      await this.deleteAnnouncementPost(
+        mine.guildId,
+        mine.announcementChannelId,
+        mine.announcementMessageId,
+      );
+    }
+    await Event.deleteOne({ _id: event._id });
+  }
+
+  /** Best-effort removal of an announcement post whose row is going away. */
+  private async deleteAnnouncementPost(
+    guildId: string,
+    channelId: string,
+    messageId: string,
+  ): Promise<void> {
+    try {
+      const channel = await this.fetchTextChannel(guildId, channelId);
+      const message = await channel?.messages.fetch(messageId);
+      await message?.delete();
+    } catch (error) {
+      logger.warn(
+        `Could not remove orphaned event announcement ${sanitizeForLog(messageId)}:`,
+        error,
+      );
+    }
+  }
+
+  private async isSeriesCancelled(event: IEvent): Promise<boolean> {
+    return !!(await Event.exists({
+      guildId: event.guildId,
+      seriesId: event.seriesId,
+      seriesCancelled: true,
+    }));
+  }
+
+  /** Post the RSVP message for a saved event that has none, when a channel is
+   * configured (no channel is a deliberate no-op, not a failure to retry). */
+  private async ensureAnnouncement(event: IEvent): Promise<void> {
+    const channelId = await this.configService.getString(
+      "events.announcement_channel_id",
+      "",
+    );
+    if (!channelId) return;
+    await this.postAnnouncement(event).catch((error) =>
+      logger.error("Failed to post event announcement:", error),
+    );
+  }
+
   private async postAnnouncement(event: IEvent): Promise<void> {
     const channelId = await this.configService.getString(
       "events.announcement_channel_id",
@@ -687,9 +1156,63 @@ export class EventService extends ScheduledService {
     if (!channel) return;
 
     const message = await channel.send(this.buildAnnouncementPayload(event));
+    // Claim the message id atomically (as `claimEventChannel` does for the
+    // channel): the creator and the scan's retry can both be sending at once,
+    // and a plain save would leave the loser's post untracked and never
+    // updated. The loser deletes its post and adopts the winner's ids.
+    // Only an open, non-cancelled row may take the post: if a cancel landed
+    // while the send was pending (it skipped the edit because the ids were
+    // still null), the claim fails and the stale post is removed below.
+    let claimed: IEvent | null;
+    try {
+      claimed = await Event.findOneAndUpdate(
+        {
+          _id: event._id,
+          announcementMessageId: null,
+          state: { $in: ["scheduled", "active"] },
+          seriesCancelled: { $ne: true },
+        },
+        {
+          $set: {
+            announcementChannelId: channelId,
+            announcementMessageId: message.id,
+          },
+        },
+      );
+    } catch (error) {
+      // The write may or may not have applied. Reconcile against the stored
+      // id before touching the post: keep it if it is ours, drop it if the
+      // row has none (the scan reposts), and leave it alone when the outcome
+      // cannot be determined, rather than orphan or double-post.
+      logger.error("Failed to claim event announcement:", error);
+      const stored = await Event.findById(event._id).catch(() => undefined);
+      if (stored === undefined) return;
+      if (stored?.announcementMessageId === message.id) {
+        event.announcementChannelId = channelId;
+        event.announcementMessageId = message.id;
+        return;
+      }
+      // Either the row has no id (the scan reposts) or another sender won:
+      // our post is the untracked one. Drop it and adopt the winner's ids.
+      await message.delete().catch(() => undefined);
+      if (stored?.announcementMessageId) {
+        event.announcementChannelId =
+          stored.announcementChannelId ?? event.announcementChannelId;
+        event.announcementMessageId = stored.announcementMessageId;
+      }
+      return;
+    }
+    if (!claimed) {
+      await message.delete().catch(() => undefined);
+      const fresh = await Event.findById(event._id).catch(() => null);
+      event.announcementChannelId =
+        fresh?.announcementChannelId ?? event.announcementChannelId;
+      event.announcementMessageId =
+        fresh?.announcementMessageId ?? event.announcementMessageId;
+      return;
+    }
     event.announcementChannelId = channelId;
     event.announcementMessageId = message.id;
-    await event.save();
   }
 
   /**
@@ -809,7 +1332,14 @@ export class EventService extends ScheduledService {
     let claimed: IEvent | null;
     try {
       claimed = await Event.findOneAndUpdate(
-        { _id: event._id, channelId: null },
+        {
+          _id: event._id,
+          channelId: null,
+          // A cancel that landed while the channel was being created must
+          // win: the claim then fails and the unclaimed channel is removed.
+          state: { $in: ["scheduled", "active"] },
+          seriesCancelled: { $ne: true },
+        },
         { $set: { channelId: channel.id } },
       );
     } catch (error) {

@@ -30,6 +30,7 @@ const mockRecordAudit = jest.fn(async () => undefined);
 const mockCreateEvent = jest.fn<() => Promise<unknown>>();
 const mockCancelEvent = jest.fn<() => Promise<unknown>>();
 const mockStartEventNow = jest.fn<() => Promise<unknown>>();
+const mockCancelSeries = jest.fn<() => Promise<unknown>>();
 const mockConfigGetString = jest.fn<() => Promise<string>>();
 const mockConfigGetNumber = jest.fn<() => Promise<number>>();
 
@@ -66,6 +67,7 @@ jest.unstable_mockModule("../../src/services/event-service.js", () => ({
     getInstance: (): unknown => ({
       createEvent: mockCreateEvent,
       cancelEvent: mockCancelEvent,
+      cancelSeries: mockCancelSeries,
       startEventNow: mockStartEventNow,
     }),
   },
@@ -256,6 +258,72 @@ describe("POST /events/create — success", () => {
       result: "failure",
       errorMessage: "duplicate key",
     });
+  });
+});
+
+describe("recurring events", () => {
+  it("creates a one-off event by default", async () => {
+    const { date, time } = futureDateTime();
+    await createEvent({ title: "Raid", date, time });
+    expect(mockCreateEvent.mock.calls[0][0]).toMatchObject({
+      recurrence: "none",
+    });
+  });
+
+  it("passes a chosen cadence to the service and audit log", async () => {
+    const { date, time } = futureDateTime();
+    const flash = await createEvent({
+      title: "Game Night",
+      date,
+      time,
+      recurrence: "weekly",
+    });
+    expect(flash.type).toBe("ok");
+    expect(mockCreateEvent.mock.calls[0][0]).toMatchObject({
+      recurrence: "weekly",
+    });
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      details: expect.objectContaining({ recurrence: "weekly" }),
+    });
+  });
+
+  it("rejects an unknown cadence", async () => {
+    const { date, time } = futureDateTime();
+    const flash = await createEvent({
+      title: "Game Night",
+      date,
+      time,
+      recurrence: "daily",
+    });
+    expect(flash.type).toBe("err");
+    expect(flash.msg).toBe("Invalid recurrence: daily");
+    expect(mockCreateEvent).not.toHaveBeenCalled();
+  });
+
+  it("cancels the whole series when scope=series", async () => {
+    mockCancelSeries.mockResolvedValue({
+      event: { _id: "event-1" },
+      cancelled: 2,
+    });
+    const res = await harness.post("/events/event-1/cancel", {
+      scope: "series",
+    });
+    const flash = parseFlashRedirect(res.headers.get("location"));
+    expect(mockCancelSeries).toHaveBeenCalledWith("event-1", session.guildId);
+    expect(mockCancelEvent).not.toHaveBeenCalled();
+    expect(flash.type).toBe("ok");
+    expect(mockRecordAudit.mock.calls[0][1]).toMatchObject({
+      action: "event.cancel-series",
+      result: "success",
+    });
+  });
+
+  it("reports a series cancel that matched nothing", async () => {
+    mockCancelSeries.mockResolvedValue(null);
+    const res = await harness.post("/events/missing/cancel", {
+      scope: "series",
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("err");
   });
 });
 

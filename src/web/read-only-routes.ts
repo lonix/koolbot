@@ -38,6 +38,8 @@ import { ScheduledAnnouncement } from "../models/scheduled-announcement.js";
 import {
   EventService,
   formatEventWhen,
+  isRecurring,
+  recurrenceLabel,
   countRsvps,
 } from "../services/event-service.js";
 import { PollService } from "../services/poll-service.js";
@@ -220,6 +222,7 @@ export const EVENTS_SETTING_KEYS = [
   "events.create_lead_minutes",
   "events.channel_grace_minutes",
   "events.reminder_minutes",
+  "events.recurrence_enabled",
 ] as const;
 
 /**
@@ -1233,6 +1236,13 @@ export function createReadOnlyRouter(
           maybe: counts.maybe,
           cant: counts.cant,
           channelId: e.channelId,
+          recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
+          occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
+          awaitingSuccessor:
+            isRecurring(e) &&
+            (e.state === "ended" || e.state === "cancelled") &&
+            !e.nextSpawned &&
+            !e.seriesCancelled,
         };
       });
 
