@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { PermissionsBitField } from "discord.js";
-import { defaultConfig, settingsMetadata } from "./config-schema.js";
+import { defaultConfig } from "./config-schema.js";
+import { coerceConfigValue } from "../web/routes/write/helpers.js";
 
 /**
  * Pure planner for server adoption (#1018).
@@ -296,30 +297,24 @@ function isValidBitfield(value: unknown): boolean {
   return BigInt(value) <= PermissionsBitField.All;
 }
 
-/** Why a desired config value may not be written, or null if it may. */
-function configValueProblem(key: string, value: unknown): string | null {
+/**
+ * Validate a desired config value with the same rules the Settings page and
+ * the wizard apply at the write boundary (type, minimum, options, cron syntax,
+ * length). Returns the value to store (e.g. a sanitised cron), or why not.
+ */
+function checkConfigValue(
+  key: string,
+  value: unknown,
+): { ok: true; value: ConfigValue } | { ok: false; reason: string } {
   const expected = typeof (defaultConfig as unknown as Record<string, unknown>)[
     key
   ];
+  // `coerceConfigValue` is forgiving about primitives (it reads "yes" as
+  // false); a plan must name the exact type.
   if (typeof value !== expected) {
-    return `"${key}" expects a ${expected}, got ${typeof value}.`;
+    return { ok: false, reason: `expects a ${expected}, got ${typeof value}` };
   }
-  const meta = (
-    settingsMetadata as unknown as Record<
-      string,
-      { options?: Array<{ value: string }>; min?: number }
-    >
-  )[key];
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) return `"${key}" must be a finite number.`;
-    if (meta?.min !== undefined && value < meta.min) {
-      return `"${key}" must be at least ${meta.min}.`;
-    }
-  }
-  if (meta?.options && !meta.options.some((o) => o.value === String(value))) {
-    return `"${key}" must be one of: ${meta.options.map((o) => o.value).join(", ")}.`;
-  }
-  return null;
+  return coerceConfigValue(key, value);
 }
 
 function big(value: string | undefined): bigint {
@@ -468,6 +463,23 @@ function approvalFor(
       a.approvedBy === approverId &&
       !Number.isNaN(Date.parse(a.approvedAt)),
   );
+}
+
+/** Content hash of a plan; the executor recomputes it to detect tampering. */
+export function computePlanId(
+  plan: Pick<AdoptionPlan, "guildId" | "plannedBy" | "operations" | "baseline">,
+): string {
+  return createHash("sha256")
+    .update(
+      canonical({
+        g: plan.guildId,
+        by: plan.plannedBy,
+        ops: plan.operations,
+        baseline: plan.baseline,
+      }),
+    )
+    .digest("hex")
+    .slice(0, 24);
 }
 
 export function planAdoption(
@@ -637,6 +649,10 @@ export function planAdoption(
         );
     }
     touchedRoles.add(existing.id);
+    // Later overwrites and grants may name the role by what it is renamed to.
+    if (changes.name !== undefined) {
+      rolesByName.set(changes.name.trim().toLowerCase(), existing);
+    }
     const before: Record<string, unknown> = {};
     for (const k of Object.keys(changes) as Array<keyof typeof changes>)
       before[k] = existing[k];
@@ -769,25 +785,26 @@ export function planAdoption(
       err("unknown-config-key", `"${key}" is not a KoolBot setting.`, key);
       continue;
     }
-    const problem = configValueProblem(key, value);
-    if (problem) {
-      err("invalid-config-value", problem, key);
+    const checked = checkConfigValue(key, value);
+    if (!checked.ok) {
+      err("invalid-config-value", `"${key}" ${checked.reason}.`, key);
       continue;
     }
+    const wanted = checked.value;
     const current = scanned.config[key];
-    if (sameConfig(current, value)) continue;
+    if (sameConfig(current, wanted)) continue;
     baselineConfig[key] = current ?? null;
     ops.push({
       id: "",
       type: "config.set",
       class: "additive",
       key,
-      value,
+      value: wanted,
       previous: current ?? null,
       summary: `Set ${key}`,
       targetId: key,
       before: { value: current ?? null },
-      after: { value },
+      after: { value: wanted },
     });
   }
 
@@ -797,7 +814,9 @@ export function planAdoption(
     targetId: string,
     label: string,
   ): { ok: boolean; approval?: DestructiveApproval } => {
-    if (createdByUs.has(targetId.split(":").pop() ?? targetId))
+    // Only exact role/channel deletions can be exempt: KoolBot creating a role
+    // says nothing about who authored an overwrite that mentions it.
+    if (kind !== "overwrite.remove" && createdByUs.has(targetId))
       return { ok: true };
     const approval = approvalFor(
       desired,
@@ -1108,17 +1127,12 @@ export function planAdoption(
     config: baselineConfig,
   };
 
-  const id = createHash("sha256")
-    .update(
-      canonical({
-        g: scanned.guildId,
-        by: scanned.adminUserId,
-        ops: ordered,
-        baseline,
-      }),
-    )
-    .digest("hex")
-    .slice(0, 24);
+  const id = computePlanId({
+    guildId: scanned.guildId,
+    plannedBy: scanned.adminUserId,
+    operations: ordered,
+    baseline,
+  });
 
   return {
     id,

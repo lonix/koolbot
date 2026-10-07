@@ -126,10 +126,13 @@ function harness() {
     channels: new Map<string, unknown>(),
   };
   const alreadyHolds = new Set<string>();
+  const existingChannelByName = new Map<string, string>();
   const staleIds = new Set<string>();
   const recoveries: string[] = [];
   const existingRoleByName = new Map<string, string>();
   let configIssues: string[] = [];
+  let strictAuditFails = false;
+  const strictAudits: string[] = [];
   let n = 0;
   const run = (label: string) => {
     calls.push(label);
@@ -164,6 +167,11 @@ function harness() {
         run(`addMember:${m}:${r}`);
         if (failMembers.has(m)) throw new Error("no");
         return !alreadyHolds.has(m);
+      },
+      memberHasRole: async (m) => alreadyHolds.has(m),
+      findChannel: async (name) => {
+        calls.push(`findChannel:${name}`);
+        return existingChannelByName.get(name) ?? null;
       },
       setChannelParent: async (ch, parent) => {
         run(`setParent:${ch}:${parent}`);
@@ -256,6 +264,10 @@ function harness() {
       },
     },
     callApi: async (call) => call(),
+    auditStrict: async (_s, e) => {
+      if (strictAuditFails) throw new Error("audit store down");
+      strictAudits.push(e.action);
+    },
     audit: async (_s, e) => {
       calls.push(`audit:${e.action}:${e.result}`);
     },
@@ -268,10 +280,15 @@ function harness() {
     failOn,
     failMembers,
     alreadyHolds,
+    existingChannelByName,
+    strictAudits,
     staleIds,
     recoveries,
     existingRoleByName,
     live,
+    failStrictAudit: (): void => {
+      strictAuditFails = true;
+    },
     setConfigIssues: (v: string[]): void => {
       configIssues = v;
     },
@@ -279,7 +296,11 @@ function harness() {
   };
 }
 
-const opts = { actor, batchDelayMs: 0 };
+const opts = {
+  actor,
+  batchDelayMs: 0,
+  revalidate: async (): Promise<string[]> => [],
+};
 
 describe("ServerAdoptionService.apply", () => {
   let h: ReturnType<typeof harness>;
@@ -382,7 +403,7 @@ describe("ServerAdoptionService.apply", () => {
     const sleep = jest.fn(async () => {});
     h.deps.sleep = sleep;
     await new ServerAdoptionService(h.deps).apply(plan(), {
-      actor,
+      ...opts,
       batchSize: 2,
       batchDelayMs: 500,
     });
@@ -992,5 +1013,205 @@ describe("review hardening, round four", () => {
     h.calls.length = 0;
     await h.service.rollback(applied.snapshotId, { actor });
     expect(h.calls).toContain("setParent:chat:new-old-cat");
+  });
+});
+
+describe("review hardening, round five", () => {
+  const destructive = () =>
+    planAdoption(scanned(), {
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+
+  it("rejects a plan edited after planning (content hash mismatch)", async () => {
+    const h = harness();
+    const p = destructive();
+    const tampered = { ...p, operations: p.operations.slice(0, 0) };
+    await expect(h.service.apply(tampered, opts)).rejects.toThrow(
+      /changed after planning/,
+    );
+    const extra = destructive().operations[0];
+    const withExtraDelete = {
+      ...p,
+      operations: [
+        ...p.operations,
+        { ...extra, id: "op-9", channelId: "chat" },
+      ],
+    } as never;
+    await expect(h.service.apply(withExtraDelete, opts)).rejects.toThrow(
+      /changed after planning/,
+    );
+    expect(h.calls).toEqual([]);
+  });
+
+  it("requires a live-state check for plans with destructive steps", async () => {
+    const h = harness();
+    await expect(
+      h.service.apply(destructive(), { actor, batchDelayMs: 0 }),
+    ).rejects.toThrow(/live-state check/);
+  });
+
+  it("runs the live check before a fresh apply and again before the destructive phase", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      roles: [{ name: "New" }],
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+    await expect(
+      h.service.apply(p, {
+        ...opts,
+        revalidate: async () => ["admin lost a role"],
+      }),
+    ).rejects.toThrow(/Live check failed: admin lost a role/);
+    expect(h.calls.filter((c) => c.startsWith("createRole"))).toEqual([]);
+
+    const seen: number[] = [];
+    let calls = 0;
+    const r = await h.service.apply(p, {
+      ...opts,
+      revalidate: async (ops) => {
+        seen.push(ops.length);
+        return ++calls === 2 ? ["channel is now feature-bound"] : [];
+      },
+    });
+    expect(seen).toEqual([2, 1]);
+    expect(r.status).toBe("partial");
+    expect(r.failed[0].error).toMatch(/feature-bound/);
+    expect(h.calls.some((c) => c.startsWith("deleteChannel"))).toBe(false);
+  });
+
+  it("does not delete anything if its audit intent cannot be stored", async () => {
+    const h = harness();
+    h.failStrictAudit();
+    const r = await h.service.apply(destructive(), opts);
+    expect(r.failed[0].error).toMatch(/audit store down/);
+    expect(h.calls.some((c) => c.startsWith("deleteChannel"))).toBe(false);
+  });
+
+  it("writes an audit intent before each destructive step", async () => {
+    const h = harness();
+    await h.service.apply(destructive(), opts);
+    expect(h.strictAudits).toEqual(["adoption.channel.delete.intent"]);
+  });
+
+  it("treats a renamed, moved or re-topiced channel as drift", async () => {
+    const h = harness();
+    const p = destructive();
+    const base = scanned().channels[0];
+    for (const change of [
+      { name: "renamed" },
+      { parentId: "x" },
+      { topic: "new" },
+      { kind: "text" as const },
+    ]) {
+      h.live.channels.set("old-cat", { ...base, ...change });
+      await expect(h.service.apply(p, opts)).rejects.toThrow(
+        /Changed since the plan/,
+      );
+    }
+  });
+
+  it("a delete of something already gone is drift, unless our own earlier attempt began it", async () => {
+    const h = harness();
+    const p = destructive();
+    h.deps.gateway.readChannel = async (id) =>
+      id === "old-cat" && h.calls.includes("deleteChannel:old-cat")
+        ? null
+        : (scanned().channels[0] as never);
+    // First attempt: the delete reaches Discord but its result is lost.
+    h.deps.gateway.deleteChannel = async (id) => {
+      h.calls.push(`deleteChannel:${id}`);
+      throw new Error("timeout");
+    };
+    const first = await new ServerAdoptionService(h.deps).apply(p, opts);
+    expect(first.status).toBe("partial");
+    // Resume: the channel is gone and our intent is recorded: treated as done.
+    const second = await new ServerAdoptionService(h.deps).apply(p, {
+      ...opts,
+      resumeSnapshotId: first.snapshotId,
+    });
+    expect(second.status).toBe("applied");
+
+    // A fresh plan against a channel someone else already removed is drift.
+    const h2 = harness();
+    h2.deps.gateway.readChannel = async (id) =>
+      h2.calls.length === 0
+        ? (scanned().channels[0] as never)
+        : id === "old-cat"
+          ? null
+          : null;
+    h2.deps.store.create = ((create) => async (rec) => {
+      h2.calls.push("created");
+      return create(rec);
+    })(h2.deps.store.create);
+    const r = await new ServerAdoptionService(h2.deps).apply(
+      destructive(),
+      opts,
+    );
+    expect(r.failed[0].error).toMatch(/no longer exists/);
+  });
+
+  it("refuses a rollback when the caller's live check objects", async () => {
+    const h = harness();
+    const applied = await h.service.apply(
+      planAdoption(scanned(), {
+        roles: [{ id: "member", name: "Member", color: 2 }],
+      }),
+      opts,
+    );
+    await expect(
+      h.service.rollback(applied.snapshotId, {
+        actor,
+        revalidate: async () => ["staff role now needed"],
+      }),
+    ).rejects.toThrow(/Cannot roll back: staff role now needed/);
+    expect(h.records.get(applied.snapshotId)!.status).toBe("applied");
+  });
+
+  it("adopts a channel a crashed rollback already recreated", async () => {
+    const h = harness();
+    const applied = await h.service.apply(destructive(), opts);
+    h.deps.gateway.recreateChannel = async () => {
+      throw new Error("timeout after creation");
+    };
+    const first = await h.service.rollback(applied.snapshotId, { actor });
+    expect(first.failed).toHaveLength(1);
+    expect(h.records.get(applied.snapshotId)!.restoreIntents).toHaveLength(1);
+    h.existingChannelByName.set("Old", "new-from-crash");
+    const created: string[] = [];
+    h.deps.gateway.recreateChannel = async (c) => {
+      created.push(c.name);
+      return "dup";
+    };
+    const second = await h.service.rollback(applied.snapshotId, { actor });
+    expect(second.failed).toEqual([]);
+    expect(created).toEqual([]);
+    expect(h.records.get(applied.snapshotId)!.restoredChannels[0].newId).toBe(
+      "new-from-crash",
+    );
+  });
+
+  it("adopts a role a crashed rollback already recreated", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      deletions: [{ kind: "role", id: "member" }],
+      approvals: [approval("role.delete", "member")],
+    });
+    const applied = await h.service.apply(p, opts);
+    const create = h.deps.gateway.createRole;
+    h.deps.gateway.createRole = async () => {
+      throw new Error("timeout after creation");
+    };
+    await h.service.rollback(applied.snapshotId, { actor });
+    h.deps.gateway.createRole = create;
+    h.existingRoleByName.set("Member", "role-from-crash");
+    h.calls.length = 0;
+    const r = await h.service.rollback(applied.snapshotId, { actor });
+    expect(r.failed).toEqual([]);
+    expect(h.calls.some((c) => c.startsWith("createRole"))).toBe(false);
+    expect(h.records.get(applied.snapshotId)!.restoredRoles[0].newId).toBe(
+      "role-from-crash",
+    );
   });
 });

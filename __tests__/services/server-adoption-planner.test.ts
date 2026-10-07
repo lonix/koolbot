@@ -764,3 +764,66 @@ describe("planAdoption: input validation and conflicts", () => {
     ]);
   });
 });
+
+describe("planAdoption: review hardening, round five", () => {
+  it("does not let a KoolBot-created role exempt removing someone else's overwrite", () => {
+    const state = scan({
+      koolbotCreatedIds: ["member"],
+      channels: [
+        channel({
+          id: "chat",
+          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+        }),
+      ],
+    });
+    const plan = planAdoption(state, {
+      overwriteRemovals: [{ channelId: "chat", targetId: "member" }],
+    });
+    expect(codes(plan)).toEqual(["approval-required"]);
+  });
+
+  it("resolves a role by the name it is renamed to", () => {
+    const plan = planAdoption(scan(), {
+      roles: [{ id: "member", name: "Regulars" }],
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { roleName: "Regulars" },
+          allow: VIEW,
+          deny: "0",
+        },
+      ],
+    });
+    expect(plan.errors).toEqual([]);
+    expect(plan.operations.map((o) => o.type)).toEqual([
+      "role.edit",
+      "overwrite.set",
+    ]);
+  });
+
+  it("applies the settings write rules: cron syntax, length, exact type", () => {
+    const plan = planAdoption(scan(), {
+      config: {
+        "digest.cron": "not a cron",
+        "voicechannels.channel.prefix": "x".repeat(5000),
+      },
+    });
+    expect(codes(plan)).toEqual([
+      "invalid-config-value",
+      "invalid-config-value",
+    ]);
+    const ok = planAdoption(scan(), {
+      config: { "digest.cron": "0 9 * * 1" },
+    });
+    expect(ok.errors).toEqual([]);
+    expect(ok.operations).toHaveLength(1);
+  });
+
+  it("computes a stable content hash that changes with the plan", async () => {
+    const { computePlanId } =
+      await import("../../src/services/server-adoption-planner.js");
+    const p = planAdoption(scan(), { roles: [{ name: "New" }] });
+    expect(computePlanId(p)).toBe(p.id);
+    expect(computePlanId({ ...p, plannedBy: "someone" })).not.toBe(p.id);
+  });
+});

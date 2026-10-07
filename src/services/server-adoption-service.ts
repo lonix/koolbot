@@ -19,12 +19,18 @@ import {
   type AdoptionOperationStatus,
   type AdoptionSnapshotStatus,
   type IAdoptionOperationRecord,
+  type IRestoreIntent,
 } from "../models/adoption-snapshot.js";
-import { recordAudit, type AuditEntry } from "../web/audit.js";
+import {
+  recordAudit,
+  recordAuditOrThrow,
+  type AuditEntry,
+} from "../web/audit.js";
 import type { WebSessionContext } from "../web/session.js";
 import { ConfigService } from "./config-service.js";
 import { settingsMetadata } from "./config-schema.js";
 import {
+  computePlanId,
   isApplicable,
   type AdoptionPlan,
   type ChannelState,
@@ -75,6 +81,13 @@ export interface AdoptionGateway {
   readRole(roleId: string): Promise<RoleState | null>;
   /** Move a channel under a (possibly recreated) category. */
   setChannelParent(channelId: string, parentId: string): Promise<void>;
+  memberHasRole(memberId: string, roleId: string): Promise<boolean>;
+  /** Used to reconcile a channel recreation that was never recorded. */
+  findChannel(
+    name: string,
+    parentId: string | null,
+    rawType: number | null,
+  ): Promise<string | null>;
   /** Used to reconcile a role.create whose result was never recorded. */
   findRoleByName(name: string): Promise<string | null>;
   readChannel(channelId: string): Promise<ChannelState | null>;
@@ -92,6 +105,7 @@ export interface AdoptionSnapshotRecord {
   createdRoles: Array<{ ref: string; roleId: string; name: string }>;
   restoredChannels: Array<{ oldId: string; newId: string }>;
   restoredRoles: Array<{ oldId: string; newId: string }>;
+  restoreIntents: IRestoreIntent[];
   /** Operations whose rollback already succeeded, so a retry skips them. */
   rolledBackOps: string[];
   memberProgress: Record<
@@ -141,6 +155,8 @@ export interface AdoptionDeps {
   /** Wraps a Discord REST call (timeout + backoff); default: CommandManager. */
   callApi: <T>(call: () => Promise<T>, name: string) => Promise<T>;
   audit: (session: WebSessionContext, entry: AuditEntry) => Promise<void>;
+  /** Like `audit` but throws if the row cannot be stored. */
+  auditStrict: (session: WebSessionContext, entry: AuditEntry) => Promise<void>;
   sleep: (ms: number) => Promise<void>;
 }
 
@@ -181,6 +197,11 @@ export interface ApplyResult {
 
 export interface RollbackOptions {
   actor: WebSessionContext;
+  /**
+   * Live-state check run before the snapshot is claimed. Return reasons to
+   * refuse (e.g. the admin or bot would be locked out by the restore).
+   */
+  revalidate?: () => Promise<string[]>;
   /** Also delete roles the plan created. Default false. */
   deleteCreatedRoles?: boolean;
 }
@@ -201,7 +222,7 @@ export class AdoptionPlanError extends Error {
 }
 
 export const DESTRUCTIVE_RESTORE_NOTE =
-  "Deleted channels and roles are recreated from their saved structure only. Messages, pins, threads, webhooks and the original IDs can't be restored.";
+  "Deleted channels and roles are recreated from their saved structure only. Messages, pins, threads, webhooks, role memberships and the original IDs can't be restored.";
 
 /** Destructive operations always sit after every additive one in a plan. */
 const isDestructive = (op: PlanOperation): boolean =>
@@ -223,6 +244,13 @@ export interface RollbackJob {
 }
 
 const REVOKE_PAGE_SIZE = 50;
+
+/** Operations whose Discord write is recorded as intended before it happens. */
+const WRITE_INTENT_OPS = new Set<PlanOperation["type"]>([
+  "role.create",
+  "channel.delete",
+  "role.delete",
+]);
 
 export class ServerAdoptionService {
   private static instance: ServerAdoptionService | undefined;
@@ -246,6 +274,7 @@ export class ServerAdoptionService {
         callApi: <T>(call: () => Promise<T>, name: string): Promise<T> =>
           manager.makeDiscordApiCall(call, name),
         audit: recordAudit,
+        auditStrict: recordAuditOrThrow,
         sleep: (ms: number): Promise<void> =>
           new Promise((resolve) => setTimeout(resolve, ms)),
       });
@@ -336,7 +365,7 @@ export class ServerAdoptionService {
     plan: AdoptionPlan,
     options: ApplyOptions,
   ): Promise<ApplyResult> {
-    this.assertApplicable(plan);
+    this.assertApplicable(plan, options);
     if (plan.guildId !== options.actor.guildId) {
       throw new AdoptionPlanError("Plan belongs to a different server.");
     }
@@ -370,6 +399,14 @@ export class ServerAdoptionService {
     } else {
       await store.recoverStale(plan.guildId, ADOPTION_STALE_AFTER_MS);
       await this.assertBaselineCurrent(plan);
+      if (options.revalidate) {
+        const problems = await options.revalidate(plan.operations);
+        if (problems.length > 0) {
+          throw new AdoptionPlanError(
+            `Live check failed: ${problems.join("; ")}. Plan again.`,
+          );
+        }
+      }
       const configBatch = Object.fromEntries(
         plan.operations.flatMap((op) =>
           op.type === "config.set" ? [[op.key, op.value] as const] : [],
@@ -398,6 +435,7 @@ export class ServerAdoptionService {
         createdRoles: [],
         restoredChannels: [],
         restoredRoles: [],
+        restoreIntents: [],
         rolledBackOps: [],
         memberProgress: {},
       });
@@ -412,6 +450,7 @@ export class ServerAdoptionService {
       current: null,
     };
     let earlierFailure = false;
+    let destructiveChecked = false;
 
     const persist = (): Promise<void> =>
       store.update(snapshot.id, {
@@ -449,8 +488,40 @@ export class ServerAdoptionService {
             continue;
           }
           try {
+            if (
+              isDestructive(op) &&
+              options.revalidate &&
+              !destructiveChecked
+            ) {
+              // Members were added and config written since the preview; check
+              // the live guild again before anything is deleted.
+              const problems = await options.revalidate(
+                plan.operations.filter(
+                  (o) =>
+                    isDestructive(o) && records.get(o.id)?.status !== "applied",
+                ),
+              );
+              if (problems.length > 0) {
+                throw new Error(`Live check failed: ${problems.join("; ")}`);
+              }
+              destructiveChecked = true;
+            }
             const started = !!record.startedAt;
-            if (op.type === "role.create" && !started) {
+            if (isDestructive(op)) {
+              // A destructive write needs a stored trace first; if the audit
+              // row cannot be written the step does not run.
+              await this.deps.auditStrict(options.actor, {
+                action: `adoption.${op.type}.intent`,
+                targetId: op.targetId,
+                details: {
+                  planId: plan.id,
+                  snapshotId: snapshot.id,
+                  opId: op.id,
+                },
+                result: "success",
+              });
+            }
+            if (WRITE_INTENT_OPS.has(op.type) && !started) {
               // Durable intent, written before the non-idempotent write.
               record.startedAt = new Date();
               await persist();
@@ -557,8 +628,15 @@ export class ServerAdoptionService {
         () => gateway.readChannel(channel.id),
         `read channel ${channel.id}`,
       );
+      // Position is left out on purpose: it shifts whenever any other channel
+      // moves, which would flag nearly every plan.
       const same =
         !!live &&
+        live.name === channel.name &&
+        live.parentId === channel.parentId &&
+        live.kind === channel.kind &&
+        (live.topic ?? null) === (channel.topic ?? null) &&
+        (channel.rawType === undefined || live.rawType === channel.rawType) &&
         live.overwrites.map(overwriteKey).sort().join("|") ===
           channel.overwrites.map(overwriteKey).sort().join("|");
       if (!same) drifted.push(`channel "${channel.name}"`);
@@ -630,10 +708,28 @@ export class ServerAdoptionService {
     }
   }
 
-  private assertApplicable(plan: AdoptionPlan): void {
+  private assertApplicable(plan: AdoptionPlan, options?: ApplyOptions): void {
     if (!isApplicable(plan)) {
       throw new AdoptionPlanError(
         `Plan has ${plan.errors.length} blocking error(s) and cannot be applied.`,
+      );
+    }
+    // The id is a content hash. A plan edited after planning no longer
+    // matches it, so blockers cannot be cleared nor operations added by hand.
+    if (computePlanId(plan) !== plan.id) {
+      throw new AdoptionPlanError(
+        "The plan does not match its id and was changed after planning.",
+      );
+    }
+    // Destructive steps are only as safe as the live state they run against,
+    // so the caller must supply a fresh scan check for them.
+    if (
+      options &&
+      !options.revalidate &&
+      plan.operations.some((op) => isDestructive(op))
+    ) {
+      throw new AdoptionPlanError(
+        "Plans with destructive steps need a live-state check (revalidate) from a fresh scan.",
       );
     }
   }
@@ -711,7 +807,13 @@ export class ServerAdoptionService {
           () => gateway.readChannel(op.channelId),
           `read channel ${op.channelId}`,
         );
-        if (live && live.voiceMemberCount > 0) {
+        if (!live) {
+          // Gone. If an earlier attempt of ours began this delete it probably
+          // went through; otherwise someone else changed the server.
+          if (started) return op.channelId;
+          throw new Error("Channel no longer exists (changed since planned).");
+        }
+        if (live.voiceMemberCount > 0) {
           throw new Error("Channel has members connected; not deleting it.");
         }
         await callApi(
@@ -720,12 +822,21 @@ export class ServerAdoptionService {
         );
         return op.channelId;
       }
-      case "role.delete":
+      case "role.delete": {
+        const live = await callApi(
+          () => gateway.readRole(op.roleId),
+          `read role ${op.roleId}`,
+        );
+        if (!live) {
+          if (started) return op.roleId;
+          throw new Error("Role no longer exists (changed since planned).");
+        }
         await callApi(
           () => gateway.deleteRole(op.roleId),
           `delete role ${op.roleId}`,
         );
         return op.roleId;
+      }
       case "config.set":
         await config.set(op.key, op.value);
         return op.key;
@@ -775,9 +886,23 @@ export class ServerAdoptionService {
     await persist();
     while (state.done < op.memberIds.length) {
       const page = op.memberIds.slice(state.done, state.done + pageSize);
-      state.inflight = page;
+      // Intent is recorded only for members confirmed not to hold the role
+      // yet; a crash then leaves exactly the members we may have granted.
+      const toGrant: string[] = [];
+      for (const memberId of page) {
+        const holds = await callApi(
+          () => gateway.memberHasRole(memberId, roleId),
+          `check role on ${memberId}`,
+        ).catch(() => false);
+        if (!holds) toGrant.push(memberId);
+        else if (maybeOurs.has(memberId) && !state.granted.includes(memberId)) {
+          // Granted by the run that died before it could record the grant.
+          state.granted.push(memberId);
+        }
+      }
+      state.inflight = toGrant;
       await persist();
-      for (const memberId of page) await grant(memberId);
+      for (const memberId of toGrant) await grant(memberId);
       state.done += page.length;
       state.inflight = [];
       await persist();
@@ -833,6 +958,14 @@ export class ServerAdoptionService {
     if (snapshot.guildId !== options.actor.guildId)
       throw new AdoptionPlanError("Snapshot belongs to a different server.");
     await store.recoverStale(snapshot.guildId, ADOPTION_STALE_AFTER_MS);
+    if (options.revalidate) {
+      const problems = await options.revalidate();
+      if (problems.length > 0) {
+        throw new AdoptionPlanError(
+          `Cannot roll back: ${problems.join("; ")}.`,
+        );
+      }
+    }
     const priorStatus =
       (await store.get(snapshotId))?.status ?? snapshot.status;
     if (
@@ -941,15 +1074,44 @@ export class ServerAdoptionService {
         case "channel.delete": {
           const prior = baseline.channels.find((c) => c.id === op.channelId);
           if (prior) {
-            const newId = await callApi(
-              () =>
-                gateway.recreateChannel({
-                  ...prior,
-                  parentId: prior.parentId ? mapId(prior.parentId) : null,
-                  overwrites: prior.overwrites.map(remapOverwrite),
-                }),
-              `recreate channel ${prior.name}`,
+            const parentId = prior.parentId ? mapId(prior.parentId) : null;
+            const earlier = snapshot.restoreIntents.find(
+              (i) => i.kind === "channel" && i.oldId === prior.id,
             );
+            // A previous attempt that began this recreation may have created
+            // the channel before dying; adopt it rather than duplicate it.
+            const found = earlier
+              ? await callApi(
+                  () =>
+                    gateway.findChannel(
+                      prior.name,
+                      parentId,
+                      prior.rawType ?? null,
+                    ),
+                  `look up channel ${prior.name}`,
+                )
+              : null;
+            if (!earlier) {
+              snapshot.restoreIntents.push({
+                kind: "channel",
+                oldId: prior.id,
+                name: prior.name,
+                parentId,
+                rawType: prior.rawType ?? null,
+              });
+              await persist();
+            }
+            const newId =
+              found ??
+              (await callApi(
+                () =>
+                  gateway.recreateChannel({
+                    ...prior,
+                    parentId,
+                    overwrites: prior.overwrites.map(remapOverwrite),
+                  }),
+                `recreate channel ${prior.name}`,
+              ));
             snapshot.restoredChannels.push({ oldId: prior.id, newId });
             notes.push(DESTRUCTIVE_RESTORE_NOTE);
           }
@@ -958,16 +1120,35 @@ export class ServerAdoptionService {
         case "role.delete": {
           const prior = baseline.roles.find((r) => r.id === op.roleId);
           if (prior) {
-            const newId = await callApi(
-              () =>
-                gateway.createRole({
-                  name: prior.name,
-                  color: prior.color,
-                  permissions: prior.permissions,
-                  position: prior.position,
-                }),
-              `recreate role ${prior.name}`,
+            const earlier = snapshot.restoreIntents.find(
+              (i) => i.kind === "role" && i.oldId === prior.id,
             );
+            const found = earlier
+              ? await callApi(
+                  () => gateway.findRoleByName(prior.name),
+                  `look up role ${prior.name}`,
+                )
+              : null;
+            if (!earlier) {
+              snapshot.restoreIntents.push({
+                kind: "role",
+                oldId: prior.id,
+                name: prior.name,
+              });
+              await persist();
+            }
+            const newId =
+              found ??
+              (await callApi(
+                () =>
+                  gateway.createRole({
+                    name: prior.name,
+                    color: prior.color,
+                    permissions: prior.permissions,
+                    position: prior.position,
+                  }),
+                `recreate role ${prior.name}`,
+              ));
             snapshot.restoredRoles.push({ oldId: prior.id, newId });
             notes.push(DESTRUCTIVE_RESTORE_NOTE);
           }
@@ -1010,6 +1191,7 @@ export class ServerAdoptionService {
         rolledBackOps: snapshot.rolledBackOps,
         restoredChannels: snapshot.restoredChannels,
         restoredRoles: snapshot.restoredRoles,
+        restoreIntents: snapshot.restoreIntents,
         memberProgress: snapshot.memberProgress,
       });
     };
@@ -1194,6 +1376,7 @@ export class MongoAdoptionStore implements AdoptionStore {
       createdRoles: doc.createdRoles ?? [],
       restoredChannels: doc.restoredChannels ?? [],
       restoredRoles: doc.restoredRoles ?? [],
+      restoreIntents: doc.restoreIntents ?? [],
       rolledBackOps: doc.rolledBackOps ?? [],
       memberProgress: doc.memberProgress ?? {},
       rolledBackBy: doc.rolledBackBy ?? null,
@@ -1351,6 +1534,30 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
       });
     }
   }
+  public async memberHasRole(
+    memberId: string,
+    roleId: string,
+  ): Promise<boolean> {
+    const member = await this.guild.members
+      .fetch(memberId)
+      .catch(ignoreUnknown(RESTJSONErrorCodes.UnknownMember));
+    return !!member && member.roles.cache.has(roleId);
+  }
+  public async findChannel(
+    name: string,
+    parentId: string | null,
+    rawType: number | null,
+  ): Promise<string | null> {
+    const channels = await this.guild.channels.fetch();
+    const match = channels.find(
+      (c) =>
+        !!c &&
+        c.name === name &&
+        c.parentId === parentId &&
+        (rawType === null || c.type === rawType),
+    );
+    return match?.id ?? null;
+  }
   public async findRoleByName(name: string): Promise<string | null> {
     const roles = await this.guild.roles.fetch(undefined, { force: true });
     return roles.find((r) => r.name === name)?.id ?? null;
@@ -1368,9 +1575,10 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
         : channel.type === ChannelType.GuildCategory
           ? "category"
           : "text",
+      rawType: channel.type,
       parentId: channel.parentId,
       position: channel.position,
-      topic: null,
+      topic: "topic" in channel ? (channel.topic ?? null) : null,
       voiceMemberCount: channel.isVoiceBased() ? channel.members.size : 0,
       overwrites: channel.permissionOverwrites.cache.map((o) => ({
         id: o.id,
@@ -1430,7 +1638,11 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
     memberId: string,
     roleId: string,
   ): Promise<void> {
-    const member = await this.guild.members.fetch(memberId);
+    // A member who left has nothing to revoke; do not let them block the rest.
+    const member = await this.guild.members
+      .fetch(memberId)
+      .catch(ignoreUnknown(RESTJSONErrorCodes.UnknownMember));
+    if (!member) return;
     await member.roles.remove(roleId, "KoolBot server adoption");
   }
 }

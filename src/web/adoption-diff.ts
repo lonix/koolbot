@@ -71,7 +71,7 @@ export function renderAdoptionDiff(plan: AdoptionPlan): string {
   ).length;
   const note =
     destructiveCount > 0
-      ? `<p class="muted">${destructiveCount} destructive step(s) run last, only if everything before them succeeds. Messages, pins, threads, webhooks and IDs can't be restored by a rollback.</p>`
+      ? `<p class="muted">${destructiveCount} destructive step(s) run last, only if everything before them succeeds. Messages, pins, threads, webhooks and IDs can't be restored by a rollback, and deleting a role removes it from every member who holds it; those assignments are not restored either.</p>`
       : "";
   const body =
     plan.operations.length === 0

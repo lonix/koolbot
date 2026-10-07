@@ -30,6 +30,14 @@ export interface IAdoptionOperationRecord {
   resultId?: string | null;
 }
 
+export interface IRestoreIntent {
+  kind: "role" | "channel";
+  oldId: string;
+  name: string;
+  parentId?: string | null;
+  rawType?: number | null;
+}
+
 export interface IAdoptionSnapshot extends Document {
   planId: string;
   guildId: string;
@@ -44,6 +52,8 @@ export interface IAdoptionSnapshot extends Document {
   /** Channels recreated by a rollback of a destructive step: old id → new id. */
   restoredChannels: Array<{ oldId: string; newId: string }>;
   /** Member-operation progress, keyed by opId. */
+  /** Recreations a rollback began; a retry reconciles them instead of duplicating. */
+  restoreIntents: IRestoreIntent[];
   /** Roles recreated by a rollback of a delete: old id → new id. */
   restoredRoles: Array<{ oldId: string; newId: string }>;
   /** Operations whose rollback already succeeded (retry skips them). */
@@ -83,6 +93,7 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
     operations: { type: Schema.Types.Mixed, default: [] },
     createdRoles: { type: Schema.Types.Mixed, default: [] },
     restoredChannels: { type: Schema.Types.Mixed, default: [] },
+    restoreIntents: { type: Schema.Types.Mixed, default: [] },
     restoredRoles: { type: Schema.Types.Mixed, default: [] },
     rolledBackOps: { type: Schema.Types.Mixed, default: [] },
     memberProgress: { type: Schema.Types.Mixed, default: {} },

@@ -235,7 +235,7 @@ Web UI's Settings page once the bot is running.
 | **Message Tracking** | Per-user, per-channel text activity with retention-trimmed detail |
 | **Reaction Tracking** | Reactions given and received, lifetime and per-year |
 | **Name History** | Remembered usernames, display names and nicknames, shown by `/aka` |
-| **Server Adoption** | Plan, snapshot and roll back role and channel-permission changes when taking over an existing server |
+| **Server Adoption** | Retention for the saved snapshots of server-adoption changes (the planning and rollback engine; the guided Web UI flow follows) |
 | **Ping** | The `/ping` latency check command |
 | **Quotes** | Cooldowns, permissions, max length |
 | **Rate Limiting** | Command spam protection with admin bypass |
