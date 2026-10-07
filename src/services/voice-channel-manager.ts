@@ -74,6 +74,15 @@ export async function resolveManagedCategory(
   return ch as CategoryChannel;
 }
 
+/**
+ * Remove one matching pair of surrounding quotes (e.g. a value supplied as
+ * `LOBBY_CHANNEL_NAME="Lobby"`). Quotes inside the name are never touched.
+ */
+export function stripSurroundingQuotes(value: string): string {
+  const match = /^(["'])(.*)\1$/s.exec(value.trim());
+  return match ? match[2] : value;
+}
+
 export class VoiceChannelManager {
   private static instance: VoiceChannelManager;
   private userChannels: Map<string, VoiceChannel> = new Map();
@@ -248,6 +257,17 @@ export class VoiceChannelManager {
     );
   }
 
+  /**
+   * Channels KoolBot created whose managed-set write failed (issue #1088),
+   * by channel ID. They are treated as managed in the meantime and the write is
+   * retried on each managed-set load, so a transient database error at the
+   * moment of creation cannot leave a channel permanently untracked.
+   */
+  private pendingManagedChannels: Map<
+    string,
+    { guildId: string; kind: ManagedVoiceChannelKind }
+  > = new Map();
+
   /** Persist that KoolBot created (or adopted) a channel, by ID. */
   private async recordManagedChannel(
     guildId: string | undefined,
@@ -255,22 +275,53 @@ export class VoiceChannelManager {
     kind: ManagedVoiceChannelKind = "channel",
     source: ManagedVoiceChannelSource = "created",
   ): Promise<boolean> {
-    if (!this.isDbReady() || !guildId) return false;
-    try {
-      await ManagedVoiceChannel.updateOne(
-        { channelId },
-        { $setOnInsert: { guildId, channelId, kind, source } },
-        { upsert: true },
-      );
-      return true;
-    } catch (error) {
-      logger.error("Error recording managed voice channel:", error);
-      return false;
+    if (!guildId) return false;
+    if (this.isDbReady()) {
+      try {
+        await ManagedVoiceChannel.updateOne(
+          { channelId },
+          { $setOnInsert: { guildId, channelId, kind, source } },
+          { upsert: true },
+        );
+        this.pendingManagedChannels.delete(channelId);
+        return true;
+      } catch (error) {
+        logger.error("Error recording managed voice channel:", error);
+      }
     }
+    // Adopted channels are re-found by the migration, which retries as a whole.
+    if (source === "created") {
+      this.pendingManagedChannels.set(channelId, { guildId, kind });
+      logger.warn(
+        `Could not record voice channel ${channelId} as managed; it is treated as managed and the write will be retried on the next cleanup pass`,
+      );
+    }
+    return false;
+  }
+
+  /**
+   * Retry the managed-set writes that failed at creation time and return the
+   * IDs of this guild's still-existing pending channels. Entries whose channel
+   * is gone are dropped.
+   */
+  private async flushPendingManagedChannels(guild: Guild): Promise<string[]> {
+    const ids: string[] = [];
+    for (const [channelId, pending] of [...this.pendingManagedChannels]) {
+      if (pending.guildId !== guild.id) continue;
+      if (!guild.channels.cache.has(channelId)) {
+        this.pendingManagedChannels.delete(channelId);
+        continue;
+      }
+      // On failure the entry stays pending (and logs again).
+      await this.recordManagedChannel(guild.id, channelId, pending.kind);
+      ids.push(channelId);
+    }
+    return ids;
   }
 
   /** Drop a channel from the managed set once it no longer exists. */
   private async forgetManagedChannel(channelId: string): Promise<void> {
+    this.pendingManagedChannels.delete(channelId);
     if (!this.isDbReady()) return;
     try {
       await ManagedVoiceChannel.deleteOne({ channelId });
@@ -479,6 +530,9 @@ export class VoiceChannelManager {
         }
       }
       for (const record of owned) ids.add(record.channelId);
+      for (const pendingId of await this.flushPendingManagedChannels(guild)) {
+        ids.add(pendingId);
+      }
       for (const userChannel of this.userChannels.values()) {
         ids.add(userChannel.id);
       }
@@ -611,11 +665,11 @@ export class VoiceChannelManager {
    * different code paths agree on what counts as the lobby.
    */
   private async getLobbyChannelName(): Promise<string> {
-    return (
+    const raw =
       (await configService.getString("voicechannels.lobby.name")) ||
       (await configService.getString("voice_channel.lobby_channel_name")) ||
-      (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"))
-    );
+      (await configService.getString("LOBBY_CHANNEL_NAME", "Lobby"));
+    return stripSurroundingQuotes(raw);
   }
 
   /**
@@ -2691,12 +2745,7 @@ export class VoiceChannelManager {
       // Check for offline lobby. A lobby configured by ID that is still
       // carrying a non-online name is the one to restore.
       const lobbyById = await this.getLobbyChannelById(guild);
-      // A lobby selected by ID keeps its configured display name exactly (a
-      // name like "Bob's Lobby" must not be rewritten); the legacy name-based
-      // lookup keeps its long-standing quote stripping.
-      const lobbyChannelName = lobbyById
-        ? configuredLobbyName
-        : configuredLobbyName.replace(/["']/g, "");
+      const lobbyChannelName = configuredLobbyName;
       // Once the ID resolves the name fallback is off (see renameLobbyToOnline).
       const offlineLobby = lobbyById
         ? lobbyById.name !== lobbyChannelName

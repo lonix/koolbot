@@ -20,7 +20,10 @@ jest.mock("../../src/services/voice-channel-tracker.js");
 jest.mock("../../src/services/config-service.js");
 
 // Import after mocks
-import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
+import {
+  VoiceChannelManager,
+  stripSurroundingQuotes,
+} from "../../src/services/voice-channel-manager.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { VoiceChannelOwnership } from "../../src/models/voice-channel-ownership.js";
 import {
@@ -704,6 +707,62 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(lobby.setName).not.toHaveBeenCalled();
     });
 
+    it("health check keeps a name-selected lobby's quotes and creates no duplicate (#1086)", async () => {
+      settings["voicechannels.lobby.name"] = "Bob's Lobby";
+      const lobby = addChannel("lobby-id", "Bob's Lobby");
+      jest.spyOn(manager as any, "getGuild").mockResolvedValue(guild as never);
+
+      await (manager as any).checkLobbyHealth();
+
+      expect(guild.channels.create).not.toHaveBeenCalled();
+      expect(lobby.setName).not.toHaveBeenCalled();
+    });
+
+    it("health check and join detection agree on a name with quotes (#1086)", async () => {
+      settings["voicechannels.lobby.name"] = "Bob's Lobby";
+      const lobby = addChannel("lobby-id", "Bob's Lobby");
+      const spy = jest
+        .spyOn(manager as any, "createUserChannel")
+        .mockResolvedValue(undefined);
+
+      const [oldState, newState] = voiceStateJoin(lobby);
+      await manager.handleVoiceStateUpdate(oldState, newState);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["voicechannels.lobby.name", '"Lobby"'],
+      ["voicechannels.lobby.name", "'Lobby'"],
+      ["voice_channel.lobby_channel_name", '"Lobby"'],
+      ["LOBBY_CHANNEL_NAME", "'Lobby'"],
+    ])(
+      "treats a surrounding-quoted %s value %s as Lobby (#1086)",
+      async (key, value) => {
+        settings["voicechannels.lobby.name"] = "";
+        settings["voice_channel.lobby_channel_name"] = "";
+        settings["LOBBY_CHANNEL_NAME"] = "";
+        settings[key] = value;
+        addChannel("lobby-id", "Lobby");
+        jest
+          .spyOn(manager as any, "getGuild")
+          .mockResolvedValue(guild as never);
+
+        expect(await (manager as any).getLobbyChannelName()).toBe("Lobby");
+        await (manager as any).checkLobbyHealth();
+        expect(guild.channels.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it("stripSurroundingQuotes only removes a matching outer pair", () => {
+      expect(stripSurroundingQuotes(`"Bob's Lobby"`)).toBe("Bob's Lobby");
+      expect(stripSurroundingQuotes(`Bob's Lobby`)).toBe("Bob's Lobby");
+      expect(stripSurroundingQuotes(`"Lobby'`)).toBe(`"Lobby'`);
+      expect(stripSurroundingQuotes(`"`)).toBe(`"`);
+      // Whitespace is a value for string keys: only a quoted value is touched.
+      expect(stripSurroundingQuotes(" Lobby ")).toBe(" Lobby ");
+    });
+
     it("does not fall back to name matches once the lobby ID resolves (#1078 review)", async () => {
       settings["voicechannels.lobby.channel_id"] = "lobby-id";
       const lobby = addChannel("lobby-id", "Lobby"); // already online
@@ -886,6 +945,145 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
 
       expect(foreign.delete).not.toHaveBeenCalled();
       expect(guild.channels.create).toHaveBeenCalled();
+    });
+  });
+  // Issue #1088: a failed managed-row write at creation time must not leave
+  // the channel permanently untracked.
+  describe("failed managed-set write at creation (#1088)", () => {
+    let failWrites: boolean;
+
+    beforeEach(() => {
+      failWrites = true;
+      const stub = ManagedVoiceChannel as unknown as Record<string, jest.Mock>;
+      const realUpdateOne = stub.updateOne.getMockImplementation()!;
+      stub.updateOne = jest
+        .fn<any>()
+        .mockImplementation(
+          async (filter: any, update: any, ...rest: any[]) => {
+            if (failWrites && update.$setOnInsert?.kind !== undefined) {
+              throw new Error("mongo down");
+            }
+            return realUpdateOne(filter, update, ...rest);
+          },
+        );
+      settings["voicechannels.cleanup.managed_only"] = true;
+      markMigrated();
+    });
+
+    /** DB recovers; the next cleanup pass must retry and record the channel. */
+    async function recoverAndCleanUp(channelId: string): Promise<void> {
+      expect(managedStore.has(channelId)).toBe(false);
+      // Occupied, so the pass retries the record rather than deleting it.
+      guildChannels
+        .get(channelId)
+        ?.members.set("someone", { user: { bot: false } });
+      failWrites = false;
+      await manager.cleanupEmptyChannels();
+      expect(managedStore.has(channelId)).toBe(true);
+    }
+
+    it("tracks a dynamic channel and retries the write on the next pass", async () => {
+      addChannel("lobby-id", "Lobby");
+      const created: any = await manager.createDynamicChannel(guild, "user-1");
+      expect(created).not.toBeNull();
+
+      await recoverAndCleanUp(created.id);
+    });
+
+    it("treats the unrecorded channel as managed while the write keeps failing", async () => {
+      addChannel("lobby-id", "Lobby");
+      const created: any = await manager.createDynamicChannel(guild, "user-1");
+      // The owner left: with the row missing it would be "someone else's".
+      manager.getUserChannel("user-1");
+      (manager as any).userChannels.delete("user-1");
+      (manager as any).userChannelByChannelId?.delete?.(created.id);
+
+      await manager.cleanupEmptyChannels();
+
+      expect(created.delete).toHaveBeenCalled();
+      expect((manager as any).pendingManagedChannels.has(created.id)).toBe(
+        false,
+      );
+    });
+
+    it("tracks a waiting room", async () => {
+      addChannel("lobby-id", "Lobby");
+      const main = addChannel("main-id", "🎮 Eve's Room", 1);
+      trackAsManaged("main-id");
+      const waiting: any = await manager.createWaitingRoom(main, "owner-id");
+      expect(waiting).not.toBeNull();
+
+      await recoverAndCleanUp(waiting.id);
+      expect(managedStore.get(waiting.id)?.kind).toBe("waiting_room");
+    });
+
+    it("tracks a member room", async () => {
+      addChannel("lobby-id", "Lobby");
+      const member: any = {
+        id: "user-1",
+        displayName: "Alice",
+        guild,
+        voice: { setChannel: jest.fn<any>().mockResolvedValue(undefined) },
+      };
+
+      await (manager as any).createUserChannel(member);
+
+      const roomId = "created-1";
+      expect(guild.channels.cache.has(roomId)).toBe(true);
+      await recoverAndCleanUp(roomId);
+    });
+
+    it("tracks a lobby created by ensureLobbyChannelExists", async () => {
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      await recoverAndCleanUp("created-1");
+      expect(managedStore.get("created-1")?.kind).toBe("lobby");
+    });
+
+    it("tracks a lobby created by ensureLobbyChannels", async () => {
+      expect(await manager.ensureLobbyChannels(guild)).toBe(true);
+
+      await recoverAndCleanUp("created-1");
+      expect(managedStore.get("created-1")?.kind).toBe("lobby");
+    });
+
+    it("tracks a lobby created by the health check", async () => {
+      jest.spyOn(manager as any, "getGuild").mockResolvedValue(guild as never);
+
+      await (manager as any).checkLobbyHealth();
+
+      expect(guild.channels.create).toHaveBeenCalled();
+      await recoverAndCleanUp("created-1");
+      expect(managedStore.get("created-1")?.kind).toBe("lobby");
+    });
+
+    it("still never deletes a channel KoolBot did not create", async () => {
+      addChannel("lobby-id", "Lobby");
+      const foreign = addChannel("foreign-id", "Permanent Room");
+      const created: any = await manager.createDynamicChannel(guild, "user-1");
+
+      guildChannels
+        .get(created.id)
+        ?.members.set("someone", { user: { bot: false } });
+      failWrites = false;
+      await manager.cleanupEmptyChannels();
+
+      expect(foreign.delete).not.toHaveBeenCalled();
+      expect(managedStore.has("foreign-id")).toBe(false);
+      expect(managedStore.has(created.id)).toBe(true);
+    });
+
+    it("forgets a pending channel that was deleted before the retry", async () => {
+      addChannel("lobby-id", "Lobby");
+      const created: any = await manager.createDynamicChannel(guild, "user-1");
+      guildChannels.delete(created.id);
+      category.children.cache.delete(created.id);
+
+      failWrites = false;
+      await manager.cleanupEmptyChannels();
+
+      expect(managedStore.has(created.id)).toBe(false);
+      expect((manager as any).pendingManagedChannels.size).toBe(0);
     });
   });
 });

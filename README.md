@@ -141,6 +141,7 @@ Look for `WebUI mounted at /admin` to confirm the Web UI is live.
 - **⏰ Reminders** — Personal one-off reminders KoolBot DMs when due
 - **🎫 Support Tickets** — `/ticket open` creates a private help channel for a member and your staff
 - **🎂 Birthdays** — Timezone-aware birthday announcements
+- **👋 Welcome Messages** — Greet new members, pointing them at self-assign roles and the rules (needs the Server Members Intent)
 - **🛡️ Moderation Log** — `/warn`, `/timeout`, `/ban` and a per-member history
 - **🙋 Member Self-Service** — `/me` for birthday, timezone, notifications, Rewind and privacy tools
 - **🤖 Bot Status** — Dynamic status showing bot state and user count
@@ -245,6 +246,7 @@ Web UI's Settings page once the bot is running.
 | **Weekly Digest** | Opt-in weekly DM summarising each user's activity |
 | **Rewind (Year-in-Review)** | End-of-year recap at `/me/rewind` plus a December nudge |
 | **Birthdays** | Timezone-aware birthday announcements and a temporary role |
+| **Welcome Messages** | Greet new members in a channel, with links to self-assign roles and the rules |
 | **Events** | Scheduled events with RSVPs and temporary voice channels |
 | **LFG** | Ad-hoc "looking for group" posts with a live roster and Join buttons |
 | **Reminders** | Personal one-off `/remind` reminders, DM'd when due, with a per-member cap |
