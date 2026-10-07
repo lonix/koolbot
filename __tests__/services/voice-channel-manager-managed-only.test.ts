@@ -635,6 +635,19 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(spy).toHaveBeenCalledTimes(1);
     });
 
+    it("renames the lobby by its legacy name on shutdown and startup (#1078 review)", async () => {
+      settings["voicechannels.lobby.name"] = "";
+      settings["voice_channel.lobby_channel_name"] = "Old Lobby";
+      const lobby = addChannel("lobby-id", "Old Lobby");
+
+      await manager.renameLobbyToOffline(guild);
+      expect(lobby.name).toBe("Lobby (Offline)");
+
+      expect(await manager.renameLobbyToOnline(guild)).toBe(true);
+      expect(lobby.name).toBe("Old Lobby");
+      expect(guild.channels.create).not.toHaveBeenCalled();
+    });
+
     it("never sweeps the lobby, even when renamed (legacy mode)", async () => {
       settings["voicechannels.lobby.channel_id"] = "lobby-id";
       const lobby = addChannel("lobby-id", "Totally Different Name");
@@ -689,6 +702,17 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
 
       expect(lobby.delete).not.toHaveBeenCalled();
       expect(guild.channels.create).not.toHaveBeenCalled();
+    });
+
+    it("force lobby ensure never deletes a foreign channel named exactly like the lobby in managed-only mode (#1078 review)", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      const foreign = addChannel("foreign-id", "Lobby");
+      const foreignOffline = addChannel("foreign-off-id", "🔴 Lobby");
+
+      expect(await manager.ensureLobbyChannels(guild)).toBe(true);
+
+      expect(foreign.delete).not.toHaveBeenCalled();
+      expect(foreignOffline.delete).not.toHaveBeenCalled();
     });
 
     it("force lobby ensure leaves lobby-like foreign channels alone in managed-only mode", async () => {

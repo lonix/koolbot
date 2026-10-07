@@ -1973,10 +1973,7 @@ export class VoiceChannelManager {
    */
   public async renameLobbyToOffline(guild: Guild): Promise<void> {
     try {
-      const lobbyName = await configService.getString(
-        "voicechannels.lobby.name",
-        "Lobby",
-      );
+      const lobbyName = await this.getLobbyChannelName();
       const offlineLobbyName = await configService.getString(
         "voicechannels.lobby.offlinename",
         "🔴 Lobby",
@@ -2020,10 +2017,7 @@ export class VoiceChannelManager {
    */
   public async renameLobbyToOnline(guild: Guild): Promise<boolean> {
     try {
-      const lobbyName = await configService.getString(
-        "voicechannels.lobby.name",
-        "Lobby",
-      );
+      const lobbyName = await this.getLobbyChannelName();
       const offlineLobbyName = await configService.getString(
         "voicechannels.lobby.offlinename",
         "🔴 Lobby",
@@ -2179,10 +2173,7 @@ export class VoiceChannelManager {
    */
   public async ensureLobbyChannelExists(guild: Guild): Promise<boolean> {
     try {
-      const lobbyName = await configService.getString(
-        "voicechannels.lobby.name",
-        "Lobby",
-      );
+      const lobbyName = await this.getLobbyChannelName();
       const offlineLobbyName = await configService.getString(
         "voicechannels.lobby.offlinename",
         "🔴 Lobby",
@@ -2278,10 +2269,7 @@ export class VoiceChannelManager {
    */
   public async ensureLobbyChannels(guild: Guild): Promise<boolean> {
     try {
-      const lobbyName = await configService.getString(
-        "voicechannels.lobby.name",
-        "Lobby",
-      );
+      const lobbyName = await this.getLobbyChannelName();
 
       const category = await resolveManagedCategory(guild);
       if (!category) {
@@ -2309,27 +2297,19 @@ export class VoiceChannelManager {
         }
       }
 
-      const managedOnly = await this.isManagedOnly();
-      const offlineLobbyConfigured = await configService.getString(
-        "voicechannels.lobby.offlinename",
-        "🔴 Lobby",
-      );
+      // Shared/adopted category (#1032): this method deletes every lobby-like
+      // channel and re-creates one, which would destroy a foreign channel that
+      // happens to be named exactly like the lobby. Use the non-destructive
+      // path (find, rename or create, never delete) instead.
+      if (await this.isManagedOnly()) {
+        return this.ensureLobbyChannelExists(guild);
+      }
 
       // Find ALL lobby channels (including duplicates and offline ones).
-      // In managed-only mode (shared category) the loose `includes("Lobby")`
-      // match is too greedy: it would delete other bots' lobby-like channels.
-      // Only the configured lobby (by ID, or exact online/offline name) counts.
       const allLobbyChannels = category.children.cache.filter(
-        (channel): channel is VoiceChannel => {
-          if (channel.type !== ChannelType.GuildVoice) return false;
-          if (managedOnly) {
-            return (
-              channel.name === lobbyName ||
-              channel.name === offlineLobbyConfigured
-            );
-          }
-          return channel.name === lobbyName || channel.name.includes("Lobby");
-        },
+        (channel): channel is VoiceChannel =>
+          channel.type === ChannelType.GuildVoice &&
+          (channel.name === lobbyName || channel.name.includes("Lobby")),
       );
 
       // Check if there's an offline lobby that we can rename back to online
@@ -2645,9 +2625,10 @@ export class VoiceChannelManager {
         return;
       }
 
-      const lobbyChannelName = (
-        await configService.getString("voicechannels.lobby.name", "Lobby")
-      ).replace(/["']/g, "");
+      const lobbyChannelName = (await this.getLobbyChannelName()).replace(
+        /["']/g,
+        "",
+      );
       const offlineLobbyName = await configService.getString(
         "voicechannels.lobby.offlinename",
       );
