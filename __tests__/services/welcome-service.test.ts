@@ -78,6 +78,29 @@ describe("renderWelcomeMessage", () => {
   });
 });
 
+describe("renderWelcomeMessage substitution safety", () => {
+  it("does not re-expand placeholder-like names", () => {
+    expect(
+      renderWelcomeMessage("Hi {username} @ {server}", {
+        ...baseArgs,
+        displayName: "{rules}",
+        guildName: "Pat {user}",
+      }),
+    ).toBe("Hi {rules} @ Pat {user}");
+  });
+
+  it("escapes Markdown in display and server names", () => {
+    const out = renderWelcomeMessage("{username} / {server}", {
+      ...baseArgs,
+      displayName: "[rules](https://example.com)",
+      guildName: "**Big** place",
+    });
+    expect(out).not.toContain("[rules](");
+    expect(out).toContain("\\[rules\\]");
+    expect(out).toContain("\\*\\*Big\\*\\*");
+  });
+});
+
 describe("WelcomeService", () => {
   const send = jest.fn<(opts: unknown) => Promise<void>>();
   const fetchChannel = jest.fn<(id: string) => Promise<unknown>>();

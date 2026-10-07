@@ -1,4 +1,4 @@
-import { GuildMember } from "discord.js";
+import { GuildMember, escapeMarkdown } from "discord.js";
 import { ConfigService } from "./config-service.js";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
@@ -23,6 +23,14 @@ export interface WelcomePlaceholders {
 }
 
 /**
+ * Escape Discord Markdown in a member- or server-controlled name, including
+ * masked-link brackets and mention syntax, which `escapeMarkdown` leaves alone.
+ */
+function escapeName(text: string): string {
+  return escapeMarkdown(text).replace(/[[\]<]/g, "\\$&");
+}
+
+/**
  * Fill the placeholders in a welcome message template. `{user}` is a real
  * mention (`<@id>`); whether it pings is decided by the caller's
  * `allowedMentions`. `{roles}` and `{rules}` resolve to the empty string when
@@ -36,17 +44,20 @@ export function renderWelcomeMessage(
   template: string,
   args: WelcomePlaceholders,
 ): string {
-  const result = template
-    .split("{user}")
-    .join(`<@${args.userId}>`)
-    .split("{username}")
-    .join(args.displayName)
-    .split("{server}")
-    .join(args.guildName)
-    .split("{roles}")
-    .join(args.rolesLink)
-    .split("{rules}")
-    .join(args.rulesLink);
+  // One pass over the template, so substituted values are never re-scanned
+  // for placeholders. Member-controlled names are Markdown-escaped so they
+  // cannot render as bot-authored links or formatting.
+  const values: Record<string, string> = {
+    user: `<@${args.userId}>`,
+    username: escapeName(args.displayName),
+    server: escapeName(args.guildName),
+    roles: args.rolesLink,
+    rules: args.rulesLink,
+  };
+  const result = template.replace(
+    /\{(user|username|server|roles|rules)\}/g,
+    (_match, key: string) => values[key],
+  );
   const blankPlaceholder = !args.rolesLink || !args.rulesLink;
   return blankPlaceholder ? result.replace(/[ \t]{2,}/g, " ").trim() : result;
 }
