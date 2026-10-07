@@ -1197,6 +1197,22 @@ Discord. A **Run review pass now** button runs the due-review job on demand. Eve
 Web UI audit log. A decision on a case someone else already resolved from another tab is refused with a message
 naming the status it found.
 
+**Server scan** (`/admin/adopt`, #1019) is a read-only inventory of the guild: it has no forms and no write
+routes, and never writes to Discord. It lists **roles** (position, colour, cached member count, `managed` flag,
+whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
+whether permissions are synced to the parent, every overwrite as allow/deny, and which feature is bound to the
+channel by a `*.channel_id` / `*.category_id` / `*_channels` setting), **other bots** (integration role and the
+channels where they have overwrites) and **bot readiness**: the bot's guild permissions, its role-hierarchy
+position, and actionable warnings (for example "move the KoolBot role above X") that link to
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md#bot-cant-manage-roles-or-channels). It also shows what Discord already
+handles (Community, rules/system/public-updates channels, Onboarding prompts and the roles they hand out), the
+AFK channel, webhook-fed and followed channels, role-gated categories, the server's channel naming convention
+and native scheduled events. The scan never pages through the member list: role member counts come from the
+cache (a `+` marks a possibly low count unless the GuildMembers intent is on). **Include channel ownership
+hints** (`?sample=1`) additionally samples recent message authors to spot channels one bot posts in; it costs a
+REST call per channel, so it is off by default. The same data is available to code as
+`ServerScanService.scan()`, whose `scanned` member is the `ScannedState` the adoption planner diffs against.
+
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
 `celebrations.channel_id`). When enabled, the bot posts a loud, server-wide

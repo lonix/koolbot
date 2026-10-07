@@ -26,6 +26,8 @@ import {
   settingsMetadata,
   type ConfigSchema,
 } from "../services/config-schema.js";
+import { ServerScanService } from "../services/server-scan-service.js";
+import { renderAdoptPage } from "./adopt-view.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -925,6 +927,40 @@ export function createReadOnlyRouter(
         rows,
       }));
       res.type("text/html").send(renderBootstrapPage({ ...common, groups }));
+    }),
+  );
+
+  // ---------- Server scan (#1019) ----------
+  // Read-only: GET only, no forms, no Discord writes.
+  router.get(
+    "/adopt",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const sampled = req.query.sample === "1";
+      let scan = null;
+      let error: string | undefined;
+      try {
+        scan = await ServerScanService.getInstance(client).scan(
+          common.guildId,
+          {
+            adminUserId: req.webSession?.discordUserId,
+            sampleMessages: sampled,
+          },
+        );
+      } catch (err) {
+        logger.warn("server scan failed", err);
+        error = err instanceof Error ? err.message : String(err);
+      }
+      res.type("text/html").send(
+        renderAdoptPage({
+          csrfToken: common.csrfToken,
+          remainingMs: common.remainingMs,
+          navFeatureStatus: common.navFeatureStatus,
+          scan,
+          error,
+          sampled,
+        }),
+      );
     }),
   );
 
