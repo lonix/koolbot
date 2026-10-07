@@ -5,8 +5,6 @@ import {
   botGateSet,
   botReadOnlySet,
   unionSets,
-  BOT_VOICE_CATEGORY,
-  BOT_VOICE_LOBBY,
   NOTICES_BOT,
   channelFamily,
   gateEveryone,
@@ -111,6 +109,52 @@ export interface FeatureTarget {
   purges?: { enabledKey: string; what: string };
 }
 
+/**
+ * The single table of what each bound feature's manager actually does in its
+ * channel or category, and so what the bot needs there. Read from the code:
+ *
+ * - text channels: post (`send`, embeds), react, read history;
+ * - quotes / notices: also manage the channel and delete others' messages
+ *   (quote-channel-manager.ts, notices-channel-manager.ts);
+ * - reaction-role picker: remove a member's sibling reaction in unique mode
+ *   (`reaction.users.remove`, reaction-role-service.ts) needs ManageMessages;
+ * - voice category: `guild.channels.create` with member overwrites needs
+ *   ManageChannels and ManageRoles, and `member.voice.setChannel` MoveMembers
+ *   (voice-channel-manager.ts);
+ * - voice lobby: `setName` needs ManageChannels, moving joiners MoveMembers;
+ * - event / ticket categories: create channels with overwrites.
+ *
+ * A test fails when a target is missing from this table or does not cover it.
+ */
+const TEXT_NEEDS: readonly PermissionName[] = BOT_POSTS.allow;
+export const MANAGER_NEEDS: Readonly<
+  Record<string, readonly PermissionName[]>
+> = {
+  "quotes.channel_id": NOTICES_BOT.allow,
+  "notices.channel_id": NOTICES_BOT.allow,
+  "reactionroles.message_channel_id": [...TEXT_NEEDS, "ManageMessages"],
+  "voicechannels.category_id": [
+    "ViewChannel",
+    "Connect",
+    "ManageChannels",
+    "ManageRoles",
+    "MoveMembers",
+  ],
+  "voicechannels.lobby.channel_id": [
+    "ViewChannel",
+    "Connect",
+    "ManageChannels",
+    "MoveMembers",
+  ],
+  "events.category_id": BOT_CATEGORY.allow,
+  "tickets.category_id": BOT_CATEGORY.allow,
+};
+
+/** What the bot needs for a feature key (text channels need posting). */
+export function botNeedsFor(key: string): PermissionSet {
+  return { allow: [...(MANAGER_NEEDS[key] ?? TEXT_NEEDS)], deny: [] };
+}
+
 const textTarget = (
   key: string,
   label: string,
@@ -119,7 +163,7 @@ const textTarget = (
   key,
   label,
   kind: "text",
-  botPermissions: BOT_POSTS,
+  botPermissions: botNeedsFor(key),
   ...extra,
 });
 
@@ -130,7 +174,7 @@ const textTarget = (
 export const FEATURE_TARGETS: readonly FeatureTarget[] = [
   textTarget("quotes.channel_id", "Quotes", {
     // quote-channel-manager.ts sets up the same read-only channel as notices.
-    botPermissions: NOTICES_BOT,
+    botPermissions: botNeedsFor("quotes.channel_id"),
     readOnly: true,
     everyone: NOTICES_EVERYONE,
     purges: {
@@ -139,7 +183,7 @@ export const FEATURE_TARGETS: readonly FeatureTarget[] = [
     },
   }),
   textTarget("notices.channel_id", "Notices", {
-    botPermissions: NOTICES_BOT,
+    botPermissions: botNeedsFor("notices.channel_id"),
     readOnly: true,
     everyone: NOTICES_EVERYONE,
     purges: {
@@ -166,17 +210,18 @@ export const FEATURE_TARGETS: readonly FeatureTarget[] = [
   textTarget("core.moderation.channel_id", "Log: moderation"),
   textTarget("core.moderation_review.channel_id", "Log: moderation review"),
   textTarget("core.updates.channel_id", "Log: updates"),
+  textTarget("core.role_groups.channel_id", "Log: role groups"),
   {
     key: "voicechannels.category_id",
     label: "Voice channels category",
     kind: "category",
-    botPermissions: BOT_VOICE_CATEGORY,
+    botPermissions: botNeedsFor("voicechannels.category_id"),
   },
   {
     key: "voicechannels.lobby.channel_id",
     label: "Voice lobby",
     kind: "voice",
-    botPermissions: BOT_VOICE_LOBBY,
+    botPermissions: botNeedsFor("voicechannels.lobby.channel_id"),
   },
   {
     key: "events.category_id",

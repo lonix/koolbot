@@ -134,8 +134,6 @@ async function mount(client: Client = makeClient()): Promise<void> {
 }
 const flashOf = (res: Response) =>
   parseFlashRedirect(res.headers.get("location"));
-const payload = (claims: unknown[]) => JSON.stringify(claims);
-const fresh = () => new Date().toISOString();
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -219,14 +217,24 @@ describe("POST /adopt/claims/preview", () => {
 });
 
 describe("POST /adopt/claims/apply", () => {
-  const claim = { channelId: CH, action: "read-only" };
+  /** Preview the given form, as the browser would, and return its token. */
+  async function preview(
+    form: Record<string, string> = { [`action_${CH}`]: "read-only" },
+  ): Promise<string> {
+    const html = await (
+      await harness.post("/adopt/claims/preview", form)
+    ).text();
+    const m = /name="token" value="([^"]+)"/.exec(html);
+    if (!m) throw new Error("preview rendered no apply form");
+    return m[1];
+  }
 
   it("applies through the engine when the plan id still matches", async () => {
     await mount();
+    const token = await preview();
     const res = await harness.post("/adopt/claims/apply", {
       planId: "plan-1",
-      at: fresh(),
-      payload: payload([claim]),
+      token,
     });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toContain("job=");
@@ -240,74 +248,88 @@ describe("POST /adopt/claims/apply", () => {
     );
   });
 
-  it("re-plans with the preview's own approval stamp", async () => {
+  it("re-plans exactly the previewed claims with the preview's own approval stamp", async () => {
     await mount();
-    const at = fresh();
+    const token = await preview();
+    const previewStamp = mockPlan.mock.calls[0][3];
+    await harness.post("/adopt/claims/apply", { planId: "plan-1", token });
+    const applyCall = mockPlan.mock.calls.at(-1)!;
+    expect(applyCall[3]).toBe(previewStamp);
+    expect(applyCall[2]).toEqual(mockPlan.mock.calls[0][2]);
+  });
+
+  it("carries only a token, so a large plan fits the request body limit", async () => {
+    await mount();
+    const form: Record<string, string> = {};
+    for (let i = 0; i < 400; i += 1) form[`action_${CH}`] = "read-only";
+    const token = await preview(form);
+    expect(token.length).toBeLessThan(100);
+  });
+
+  it("the token can't be used to apply anything but what was previewed", async () => {
+    await mount();
+    const token = await preview({ [`action_${CH}`]: "read-only" });
+    // A client-supplied claim set is ignored: only the stored one is used.
     await harness.post("/adopt/claims/apply", {
       planId: "plan-1",
-      at,
-      payload: payload([claim]),
+      token,
+      payload: JSON.stringify([{ channelId: CAT, action: "gate" }]),
     });
-    expect(mockPlan.mock.calls[0][3]).toBe(at);
+    const claims = mockPlan.mock.calls.at(-1)![2] as Array<{
+      channelId: string;
+    }>;
+    expect(claims.map((c) => c.channelId)).toEqual([CH]);
   });
 
   it("refuses when the server changed since the preview", async () => {
     await mount();
+    const token = await preview();
     const res = await harness.post("/adopt/claims/apply", {
       planId: "stale",
-      at: fresh(),
-      payload: payload([claim]),
+      token,
     });
     expect(flashOf(res).type).toBe("warn");
     expect(mockStartApply).not.toHaveBeenCalled();
   });
 
   it("refuses a plan with blocking problems", async () => {
+    await mount();
+    const token = await preview();
     mockPlan.mockResolvedValue(
       planned({ errors: [{ code: "x", message: "blocked" }] }),
     );
-    await mount();
     const res = await harness.post("/adopt/claims/apply", {
       planId: "plan-1",
-      at: fresh(),
-      payload: payload([claim]),
+      token,
     });
     expect(flashOf(res).type).toBe("err");
     expect(mockStartApply).not.toHaveBeenCalled();
   });
 
   it.each([
-    ["an unreadable payload", { payload: "{nope" }],
-    [
-      "a channel that isn't in the server",
-      { payload: payload([{ channelId: "1".repeat(18), action: "gate" }]) },
-    ],
-    [
-      "an unknown feature key",
-      {
-        payload: payload([
-          { channelId: CH, action: "leave", bindKey: "core.owner" },
-        ]),
-      },
-    ],
-    [
-      "a stale approval stamp",
-      {
-        at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-        payload: payload([claim]),
-      },
-    ],
-    ["a missing stamp", { at: "", payload: payload([claim]) }],
-  ])("refuses %s", async (_label, over) => {
+    ["no token", ""],
+    ["an unknown token", "nope-nope-nope"],
+  ])("refuses %s", async (_label, token) => {
     await mount();
     const res = await harness.post("/adopt/claims/apply", {
       planId: "plan-1",
-      at: fresh(),
-      ...over,
+      token,
     });
     expect(res.status).toBe(303);
-    expect(["err", "warn"]).toContain(flashOf(res).type);
+    expect(flashOf(res).type).toBe("warn");
     expect(mockStartApply).not.toHaveBeenCalled();
+  });
+
+  it("a token is single-use once an apply has started", async () => {
+    await mount();
+    const token = await preview();
+    await harness.post("/adopt/claims/apply", { planId: "plan-1", token });
+    const again = await harness.post("/adopt/claims/apply", {
+      planId: "plan-1",
+      token,
+    });
+    expect(flashOf(again).type).toBe("warn");
+    expect(mockStartApply).toHaveBeenCalledTimes(1);
   });
 
   it("reports an engine that can't start", async () => {
@@ -315,10 +337,10 @@ describe("POST /adopt/claims/apply", () => {
       throw new Error("another apply is running");
     });
     await mount();
+    const token = await preview();
     const res = await harness.post("/adopt/claims/apply", {
       planId: "plan-1",
-      at: fresh(),
-      payload: payload([claim]),
+      token,
     });
     expect(flashOf(res)).toMatchObject({
       type: "err",

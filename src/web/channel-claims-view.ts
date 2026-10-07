@@ -46,8 +46,8 @@ export interface ClaimsPageProps {
   plan: ClaimsPlan | null;
   /** Things ignored while reading the form. */
   problems: string[];
-  /** Approval stamp the preview used; the apply step must reuse it. */
-  approvedAt: string | null;
+  /** Server-side handle on the previewed claims; the apply step sends only this. */
+  previewToken: string | null;
   jobId?: string | null;
   flash?: FlashMessage | null;
 }
@@ -223,8 +223,8 @@ function renderPlan(props: ClaimsPageProps, csrf: string): string {
     plan.errors.length === 0 &&
     plan.plan.operations.length > 0;
   const form =
-    applicable && props.approvedAt
-      ? `<form method="POST" action="/admin/adopt/claims/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first so it can be rolled back.');">${csrf}<input type="hidden" name="planId" value="${escapeHtml(plan.plan.id)}"><input type="hidden" name="at" value="${escapeHtml(props.approvedAt)}"><input type="hidden" name="payload" value="${escapeHtml(JSON.stringify(props.claims))}"><button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
+    applicable && props.previewToken
+      ? `<form method="POST" action="/admin/adopt/claims/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first so it can be rolled back.');">${csrf}<input type="hidden" name="planId" value="${escapeHtml(plan.plan.id)}"><input type="hidden" name="token" value="${escapeHtml(props.previewToken)}"><button type="submit" class="btn btn-primary">Apply plan</button> <span class="muted">A snapshot of everything touched is saved first.</span></form>`
       : "";
   return `${extra}${advice}${renderAdoptionDiff(plan.plan)}${form}`;
 }

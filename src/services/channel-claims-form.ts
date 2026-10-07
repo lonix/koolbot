@@ -7,9 +7,8 @@ import {
 
 /**
  * Parsing for the claims form (#1022). The browser posts flat fields
- * (`action_<channelId>`, `roles_<channelId>`, …); the preview page then carries
- * the parsed claims in one hidden JSON field, which the apply step parses again
- * with the same strict validation. Both inputs are untrusted: ids are checked
+ * (`action_<channelId>`, `roles_<channelId>`, …); the preview keeps the parsed claims
+ * server-side (see `claims-preview-store.ts`). The form is untrusted: ids are checked
  * against the scanned server and feature keys against the fixed registry.
  */
 
@@ -127,42 +126,4 @@ export function claimsFromForm(
     list.length = MAX_CLAIMS;
   }
   return { claims: list, problems };
-}
-
-/** Parse the hidden JSON the preview page carries into the apply step. */
-export function claimsFromPayload(
-  raw: string,
-  knownChannelIds: ReadonlySet<string>,
-): ClaimsInput | null {
-  let data: unknown;
-  try {
-    data = JSON.parse(raw);
-  } catch {
-    return null;
-  }
-  if (!Array.isArray(data) || data.length > MAX_CLAIMS) return null;
-  const claims: ChannelClaim[] = [];
-  for (const item of data) {
-    if (!item || typeof item !== "object") return null;
-    const o = item as Record<string, unknown>;
-    const channelId = asString(o.channelId);
-    const action = asString(o.action);
-    if (!knownChannelIds.has(channelId) || !isAction(action)) return null;
-    const bindKey = asString(o.bindKey);
-    if (bindKey && !featureTarget(bindKey)) return null;
-    const minGroupId = asString(o.minGroupId);
-    claims.push({
-      channelId,
-      action,
-      ...(bindKey ? { bindKey } : {}),
-      roleIds: asList(o.roleIds),
-      ...(minGroupId ? { minGroupId } : {}),
-      allowReactions: o.allowReactions === true,
-      lockReplies: o.lockReplies === true,
-      approveReplace: o.approveReplace === true,
-      voiceManagedOnly: o.voiceManagedOnly === true,
-      usePrefix: o.usePrefix === true,
-    });
-  }
-  return { claims, problems: [] };
 }

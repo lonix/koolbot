@@ -331,13 +331,3 @@ export const VOICE_ROOM_OWNER: PermissionSet = {
   allow: ["ManageChannels", "Connect", "Speak", "ViewChannel"],
   deny: [],
 };
-
-/** The voice category and lobby the bot must be able to use. */
-export const BOT_VOICE_CATEGORY: PermissionSet = {
-  allow: ["ViewChannel", "ManageChannels", "Connect"],
-  deny: [],
-};
-export const BOT_VOICE_LOBBY: PermissionSet = {
-  allow: ["ViewChannel", "Connect"],
-  deny: [],
-};

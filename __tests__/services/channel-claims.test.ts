@@ -2,6 +2,8 @@ import { describe, it, expect } from "@jest/globals";
 import { ChannelType, PermissionsBitField } from "discord.js";
 import {
   FEATURE_TARGETS,
+  MANAGER_NEEDS,
+  botNeedsFor,
   buildClaimsDesiredState,
   featureTarget,
   splitIssues,
@@ -9,10 +11,7 @@ import {
   type ChannelClaim,
   type ClaimContext,
 } from "../../src/services/channel-claims.js";
-import {
-  claimsFromForm,
-  claimsFromPayload,
-} from "../../src/services/channel-claims-form.js";
+import { claimsFromForm } from "../../src/services/channel-claims-form.js";
 import {
   planAdoption,
   type AdoptionPlan,
@@ -930,42 +929,6 @@ describe("form parsing", () => {
       "read-only",
     );
   });
-
-  it("round-trips through the payload, validating ids and keys", () => {
-    const ids = new Set(channels.map((c) => c.id));
-    const claims: ChannelClaim[] = [
-      {
-        channelId: C_LOOSE,
-        action: "read-only",
-        bindKey: "quotes.channel_id",
-        roleIds: [R_MOD],
-        allowReactions: true,
-      },
-    ];
-    const back = claimsFromPayload(JSON.stringify(claims), ids)!;
-    expect(back.claims[0]).toMatchObject(claims[0]);
-    expect(claimsFromPayload("not json", ids)).toBeNull();
-    expect(
-      claimsFromPayload(
-        JSON.stringify([{ channelId: "1".repeat(18), action: "gate" }]),
-        ids,
-      ),
-    ).toBeNull();
-    expect(
-      claimsFromPayload(
-        JSON.stringify([
-          { channelId: C_LOOSE, action: "leave", bindKey: "core.owner" },
-        ]),
-        ids,
-      ),
-    ).toBeNull();
-    expect(
-      claimsFromPayload(
-        JSON.stringify([{ channelId: C_LOOSE, action: "wipe" }]),
-        ids,
-      ),
-    ).toBeNull();
-  });
 });
 
 describe("the live check before a destructive step", () => {
@@ -1354,5 +1317,69 @@ describe("one composed result per channel (third review round)", () => {
     expect(
       plan([{ channelId: C_UNSYNCED, action: "sync" }], s).warnings,
     ).toContain("sync-partial");
+  });
+});
+
+describe("feature targets match what their managers do", () => {
+  const targetKeys = FEATURE_TARGETS.map((f) => f.key);
+
+  it("every core.* log channel in the schema can be bound", () => {
+    const schemaKeys = Object.keys(defaultConfig).filter((k) =>
+      /^core\.[a-z_]+\.channel_id$/.test(k),
+    );
+    expect(schemaKeys.length).toBeGreaterThan(8);
+    for (const key of schemaKeys) expect(targetKeys).toContain(key);
+  });
+
+  it("every target covers its row in the manager table", () => {
+    for (const f of FEATURE_TARGETS) {
+      expect([...f.botPermissions.allow]).toEqual(
+        expect.arrayContaining([...botNeedsFor(f.key).allow]),
+      );
+    }
+  });
+
+  it("every non-text target, and every feature whose manager does more than post, has a table row", () => {
+    for (const f of FEATURE_TARGETS) {
+      if (f.kind !== "text") expect(MANAGER_NEEDS[f.key]).toBeDefined();
+    }
+    for (const key of [
+      "quotes.channel_id",
+      "notices.channel_id",
+      "reactionroles.message_channel_id",
+    ]) {
+      expect(MANAGER_NEEDS[key]).toBeDefined();
+    }
+  });
+
+  it.each([
+    ["reactionroles.message_channel_id", ["ManageMessages", "AddReactions"]],
+    [
+      "voicechannels.category_id",
+      ["ManageChannels", "ManageRoles", "MoveMembers", "Connect"],
+    ],
+    [
+      "voicechannels.lobby.channel_id",
+      ["ManageChannels", "MoveMembers", "Connect"],
+    ],
+    ["quotes.channel_id", ["ManageMessages", "ManageChannels", "EmbedLinks"]],
+    ["notices.channel_id", ["ManageMessages", "ManageChannels", "EmbedLinks"]],
+    ["birthdays.channel_id", ["SendMessages", "EmbedLinks"]],
+  ])("%s needs the calls its manager makes", (key, needed) => {
+    const have = featureTarget(key)!.botPermissions.allow;
+    for (const n of needed) expect([...have]).toContain(n);
+  });
+
+  it("the reaction-role picker plan gives the bot ManageMessages", () => {
+    const r = plan([
+      {
+        channelId: C_LOOSE,
+        action: "leave",
+        bindKey: "reactionroles.message_channel_id",
+      },
+    ]);
+    expect(BigInt(setFor(r.plan, C_LOOSE, BOT)!.allow) & F.ManageMessages).toBe(
+      F.ManageMessages,
+    );
   });
 });

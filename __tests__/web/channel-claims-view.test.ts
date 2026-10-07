@@ -83,7 +83,7 @@ const empty = {
   claims: [] as any[],
   plan: null,
   problems: [] as string[],
-  approvedAt: null,
+  previewToken: null,
 };
 const planOf = (operations: unknown[], extra: Record<string, unknown> = {}) =>
   ({
@@ -152,7 +152,7 @@ describe("renderChannelClaimsPage (#1022)", () => {
         warnings: [{ code: "rebind", message: "careful <b>" }],
       }),
       problems: ["Ignored an unknown action for channel 9."],
-      approvedAt: "2026-10-07T10:00:00.000Z",
+      previewToken: "tok-1",
     });
     expect(html).toMatch(/name="action_14"[^>]*>[^]*?value="gate" selected/);
     expect(html).toMatch(/value="quotes.channel_id" selected/);
@@ -177,12 +177,14 @@ describe("renderChannelClaimsPage (#1022)", () => {
           after: null,
         },
       ]),
-      approvedAt: "2026-10-07T10:00:00.000Z",
+      previewToken: "tok-1",
     });
     expect(html).toContain('action="/admin/adopt/claims/apply"');
     expect(html).toContain('name="planId" value="abc"');
-    expect(html).toContain('name="at" value="2026-10-07T10:00:00.000Z"');
-    expect(html).toContain("&quot;channelId&quot;:&quot;14&quot;");
+    expect(html).toContain('name="token" value="tok-1"');
+    // The claims stay server-side: nothing but the token is carried.
+    expect(html).not.toContain('name="payload"');
+    expect(html).not.toContain("&quot;channelId&quot;");
   });
 
   it("offers no apply button while the plan has problems", () => {
@@ -201,7 +203,7 @@ describe("renderChannelClaimsPage (#1022)", () => {
         ],
         { errors: [{ code: "voice-cleanup-risk", message: "no <x>" }] },
       ),
-      approvedAt: "2026-10-07T10:00:00.000Z",
+      previewToken: "tok-1",
     });
     expect(html).toContain("voice-cleanup-risk");
     expect(html).toContain("no &lt;x&gt;");

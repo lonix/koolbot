@@ -307,7 +307,7 @@ export function adminPages(): A11yPage[] {
         groups: [],
         claims: [],
         problems: [],
-        approvedAt: null,
+        previewToken: null,
         plan: null,
         scan: {
           guildName: "Guild",
