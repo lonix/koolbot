@@ -1311,7 +1311,9 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   or groups post. The rules follow the channel type: a **forum** stops new posts but keeps replies open (tick
   "also stop replies" to lock them), an **announcement** channel behaves like text, a **stage** gates
   `RequestToSpeak`, and a **voice** channel gates `Speak`. A read-only claim never grants `@everyone` anything, so
-  it cannot undo a gate.
+  it cannot undo a gate. Overwrites for other roles and members are kept, so
+  one of them that already allows posting (or, for a gate, viewing) can bypass the claim: the plan names them
+  ("only partly read-only / gated") instead of calling the channel exclusive.
 - **Group-gated** hides the channel from `@everyone` and shows it to the roles you choose, or to "group X and
   above" by rank. Voice and stage channels also lose `Connect`, so visibility and joining agree. Managed roles
   such as Server Booster or a subscription role are valid targets; the role itself is never edited. Roles that
@@ -1325,8 +1327,10 @@ categories and channels. Every row defaults to **Leave alone**; nothing is touch
   announcements, birthdays, welcome, LFG, the `core.*` log channels, reaction-role picker, voice lobby, event and
   ticket categories) and gives the bot the permissions that feature expects. Binding the notices channel applies
   the same read-only permissions the notices channel manager sets. Binding an existing channel reuses it: KoolBot
-  does not create a second lobby or category afterwards, and existing messages, pins and webhooks are never
-  touched.
+  does not create a second lobby or category afterwards. The plan itself never deletes messages, pins or
+  webhooks. The quotes and notices features do, once enabled: their cleanup job removes the latest messages
+  KoolBot didn't post, and quote sync can clear the channel. Binding either channel is therefore **blocked**
+  while its feature is on, and carries a warning while it is off.
 - **Bulk select**: a category row has a "for every channel here left alone" choice that applies one action to
   all of its channels (each row's own choice wins). A sync approval is never carried over by a bulk choice: each
   channel needs its own tick.

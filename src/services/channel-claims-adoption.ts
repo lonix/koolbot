@@ -11,6 +11,7 @@ import {
 } from "./server-adoption-planner.js";
 import {
   buildClaimsDesiredState,
+  staleDestructiveSteps,
   splitIssues,
   type ChannelClaim,
 } from "./channel-claims.js";
@@ -85,11 +86,6 @@ export async function planChannelClaims(
   return { scan, groups, plan, errors, warnings };
 }
 
-const opKey = (op: PlanOperation): string =>
-  op.type === "overwrite.remove"
-    ? `${op.type}:${op.channelId}:${op.overwriteTargetId}`
-    : `${op.type}:${op.id}`;
-
 /**
  * The live-state check the engine requires before it runs destructive steps
  * (it runs once before applying and again before the destructive phase, after
@@ -114,12 +110,7 @@ export function claimsRevalidator(
     const problems = [...fresh.plan.errors, ...fresh.errors].map(
       (e) => e.message,
     );
-    const live = new Set(fresh.plan.operations.map(opKey));
-    for (const op of pending) {
-      if (op.class === "destructive" && !live.has(opKey(op))) {
-        problems.push(`"${op.summary}" no longer matches the live server`);
-      }
-    }
+    problems.push(...staleDestructiveSteps(pending, fresh.plan.operations));
     return problems;
   };
 }

@@ -5,6 +5,7 @@ import {
   buildClaimsDesiredState,
   featureTarget,
   splitIssues,
+  staleDestructiveSteps,
   type ChannelClaim,
   type ClaimContext,
 } from "../../src/services/channel-claims.js";
@@ -964,5 +965,153 @@ describe("form parsing", () => {
         ids,
       ),
     ).toBeNull();
+  });
+});
+
+describe("the live check before a destructive step", () => {
+  const syncPlan = (allow: bigint) => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_CAT)!.overwrites = [
+      ow(GUILD, 0n, F.ViewChannel),
+      ow(R_ADMIN, F.ViewChannel),
+    ];
+    s.channels.find((c) => c.id === C_UNSYNCED)!.overwrites = [
+      ow(R_VIP, allow),
+    ];
+    return plan(
+      [{ channelId: C_UNSYNCED, action: "sync", approveReplace: true }],
+      s,
+    ).plan.operations;
+  };
+
+  it("passes when the overwrite is still what was previewed", () => {
+    expect(
+      staleDestructiveSteps(syncPlan(F.ViewChannel), syncPlan(F.ViewChannel)),
+    ).toEqual([]);
+  });
+
+  it("refuses when someone changed the overwrite's bits in the meantime", () => {
+    const stale = staleDestructiveSteps(
+      syncPlan(F.ViewChannel),
+      syncPlan(F.ViewChannel | F.SendMessages),
+    );
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toMatch(/no longer matches/);
+  });
+
+  it("refuses when the removal is gone altogether", () => {
+    expect(staleDestructiveSteps(syncPlan(F.ViewChannel), [])).toHaveLength(1);
+  });
+});
+
+describe("bypass detection and message deletion", () => {
+  const MEMBER = "100000000000000077";
+
+  it("a gate names roles and members that can still see the channel", () => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_LOOSE)!.overwrites = [
+      ow(R_VIP, F.ViewChannel),
+      ow(MEMBER, F.ViewChannel, 0n, "member"),
+      ow(OTHER_BOT, F.ViewChannel, 0n, "member"),
+    ];
+    const r = buildClaimsDesiredState(
+      [{ channelId: C_LOOSE, action: "gate", roleIds: [R_ADMIN] }],
+      ctxFor(s),
+    );
+    const issue = r.issues.find((i) => i.code === "gate-not-exclusive")!;
+    expect(issue.message).toContain("role-3");
+    expect(issue.message).toContain(MEMBER);
+    // another bot's overwrite is expected to stay and isn't reported
+    expect(issue.message).not.toContain(OTHER_BOT);
+    expect(splitIssues(r.issues).errors).toEqual([]);
+  });
+
+  it("a gate is exclusive when the allowed roles are the only ones", () => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_LOOSE)!.overwrites = [
+      ow(R_VIP, F.ViewChannel),
+    ];
+    const r = buildClaimsDesiredState(
+      [{ channelId: C_LOOSE, action: "gate", roleIds: [R_ADMIN, R_VIP] }],
+      ctxFor(s),
+    );
+    expect(r.issues.map((i) => i.code)).not.toContain("gate-not-exclusive");
+  });
+
+  it("a voice gate also checks Connect", () => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_VOICE)!.overwrites = [
+      ow(MEMBER, F.Connect, 0n, "member"),
+    ];
+    const r = buildClaimsDesiredState(
+      [{ channelId: C_VOICE, action: "gate", roleIds: [R_ADMIN] }],
+      ctxFor(s),
+    );
+    expect(r.issues.map((i) => i.code)).toContain("gate-not-exclusive");
+  });
+
+  it("a read-only claim names overwrites that still allow posting", () => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_LOOSE)!.overwrites = [
+      ow(MEMBER, F.SendMessages, 0n, "member"),
+      ow(R_BOOST, F.CreatePublicThreads),
+    ];
+    const r = buildClaimsDesiredState(
+      [{ channelId: C_LOOSE, action: "read-only" }],
+      ctxFor(s),
+    );
+    const issue = r.issues.find((i) => i.code === "read-only-not-exclusive")!;
+    expect(issue.message).toContain(MEMBER);
+    expect(issue.message).toContain("@role-4");
+    expect(splitIssues(r.issues).errors).toEqual([]);
+  });
+
+  it("a chosen poster is not reported", () => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_LOOSE)!.overwrites = [
+      ow(R_MOD, F.SendMessages),
+    ];
+    const r = buildClaimsDesiredState(
+      [{ channelId: C_LOOSE, action: "read-only", roleIds: [R_MOD] }],
+      ctxFor(s),
+    );
+    expect(r.issues.map((i) => i.code)).not.toContain(
+      "read-only-not-exclusive",
+    );
+  });
+
+  it("binding quotes or notices is blocked while the feature would delete the channel's messages", () => {
+    for (const [key, enabled] of [
+      ["quotes.channel_id", "quotes.enabled"],
+      ["notices.channel_id", "notices.enabled"],
+    ]) {
+      const on = plan(
+        [{ channelId: C_LOOSE, action: "leave", bindKey: key }],
+        fixture({ config: { [enabled]: true } }),
+      );
+      expect(on.errors).toContain("feature-deletes-messages");
+      expect(on.plan.operations.some((o) => o.type === "config.set")).toBe(
+        true,
+      ); // the builder still plans; apply is blocked by the error
+    }
+  });
+
+  it("when the feature is off it binds, with a warning that says what enabling will do", () => {
+    const r = plan([
+      { channelId: C_LOOSE, action: "leave", bindKey: "quotes.channel_id" },
+    ]);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toContain("feature-deletes-messages-later");
+  });
+
+  it("an already-bound channel is not flagged again", () => {
+    const r = plan(
+      [{ channelId: C_LOOSE, action: "leave", bindKey: "quotes.channel_id" }],
+      fixture({
+        config: { "quotes.enabled": true, "quotes.channel_id": C_LOOSE },
+      }),
+    );
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).not.toContain("feature-deletes-messages-later");
   });
 });

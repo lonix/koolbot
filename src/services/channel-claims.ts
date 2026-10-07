@@ -15,6 +15,7 @@ import {
   bitsOf,
   NOTICES_EVERYONE,
   type ChannelFamily,
+  type PermissionName,
   type PermissionSet,
 } from "../utils/channel-permissions.js";
 import { matchesVoiceNamingPattern } from "../utils/voice-naming.js";
@@ -28,6 +29,7 @@ import type {
   DesiredState,
   DestructiveApproval,
   PlanIssue,
+  PlanOperation,
   ScannedState,
 } from "./server-adoption-planner.js";
 
@@ -99,6 +101,12 @@ export interface FeatureTarget {
   readOnly?: boolean;
   /** What `@everyone` is given there, for a feature that locks its channel. */
   everyone?: PermissionSet;
+  /**
+   * The feature's own cleanup job deletes messages in its channel that the bot
+   * did not post, once the feature is enabled. Binding such a channel is
+   * blocked while the feature is on; otherwise the plan says what will happen.
+   */
+  purges?: { enabledKey: string; what: string };
 }
 
 const textTarget = (
@@ -118,11 +126,20 @@ const textTarget = (
  * list are refused, so a tampered form can't write arbitrary settings.
  */
 export const FEATURE_TARGETS: readonly FeatureTarget[] = [
-  textTarget("quotes.channel_id", "Quotes"),
+  textTarget("quotes.channel_id", "Quotes", {
+    purges: {
+      enabledKey: "quotes.enabled",
+      what: "every few minutes the quote channel cleanup deletes the latest messages KoolBot didn't post, and quote sync (quotes.clear_on_sync) clears the whole channel",
+    },
+  }),
   textTarget("notices.channel_id", "Notices", {
     botPermissions: NOTICES_BOT,
     readOnly: true,
     everyone: NOTICES_EVERYONE,
+    purges: {
+      enabledKey: "notices.enabled",
+      what: "every few minutes the notices channel cleanup deletes the latest messages KoolBot didn't post",
+    },
   }),
   textTarget("reactionroles.message_channel_id", "Reaction role picker"),
   textTarget("voicetracking.announcements.channel_id", "Voice stats"),
@@ -364,6 +381,49 @@ export function buildClaimsDesiredState(
   }> = [];
   const boundKeys = new Map<string, string>();
 
+  /**
+   * Overwrites KoolBot deliberately keeps (other roles, members) can allow what
+   * `@everyone` is now denied and so bypass the claim. Say so, naming them,
+   * rather than presenting the channel as exclusive.
+   */
+  const warned = new Set<string>();
+  const bypassCheck = (
+    channel: ChannelState,
+    names: readonly PermissionName[],
+    chosen: readonly string[],
+    code: string,
+    what: string,
+  ): void => {
+    const bits = BigInt(bitsOf(names));
+    const offenders: string[] = [];
+    for (const o of channel.overwrites) {
+      if (
+        o.id === everyoneId ||
+        o.id === scanned.botUserId ||
+        scanned.botRoleIds.includes(o.id) ||
+        otherBots.has(o.id) ||
+        ctx.integrationRoleIds.has(o.id) ||
+        chosen.includes(o.id)
+      )
+        continue;
+      const now = running.get(key(channel.id, o.id));
+      if ((BigInt(now?.allow ?? o.allow) & bits) === 0n) continue;
+      offenders.push(
+        o.type === "role"
+          ? `@${roles.get(o.id)?.name ?? o.id}`
+          : `member ${o.id}`,
+      );
+    }
+    const mark = `${code}:${channel.id}`;
+    if (offenders.length === 0 || warned.has(mark)) return;
+    warned.add(mark);
+    issues.push({
+      code,
+      message: `"${channel.name}" is only partly ${what}: ${offenders.join(", ")} already ${code === "gate-not-exclusive" ? "can see it" : "can post"} through their own overwrites, which are kept. Change those in Discord, or choose "Sync to category", if you want it exclusive.`,
+      targetId: channel.id,
+    });
+  };
+
   // Applies a gate or read-only treatment to one channel.
   const gate = (
     channel: ChannelState,
@@ -374,6 +434,15 @@ export function buildClaimsDesiredState(
     layer(channel, everyoneId, "role", gateEveryone(family));
     for (const id of targets) layer(channel, id, "role", gateMember(family));
     layer(channel, scanned.botUserId, "member", bot);
+    bypassCheck(
+      channel,
+      family === "voice" || family === "stage" || family === "mixed"
+        ? ["ViewChannel", "Connect"]
+        : ["ViewChannel"],
+      targets,
+      "gate-not-exclusive",
+      "gated",
+    );
   };
   const readOnly = (
     channel: ChannelState,
@@ -413,6 +482,13 @@ export function buildClaimsDesiredState(
       }
     }
     layer(channel, scanned.botUserId, "member", bot);
+    bypassCheck(
+      channel,
+      denyPost.deny,
+      posters,
+      "read-only-not-exclusive",
+      "read-only",
+    );
   };
 
   const bindFeature = (
@@ -454,6 +530,22 @@ export function buildClaimsDesiredState(
       return undefined;
     }
     boundKeys.set(feature.key, channel.id);
+    if (feature.purges && scanned.config[feature.key] !== channel.id) {
+      const enabled = isTrue(scanned.config[feature.purges.enabledKey]);
+      if (enabled) {
+        err(
+          "feature-deletes-messages",
+          `${feature.label} is enabled, and ${feature.purges.what}. Binding "${channel.name}" would delete its existing messages outside this plan, and a rollback can't restore them. Use a channel with nothing to keep, or turn ${feature.label} off first and review before enabling it.`,
+          channel.id,
+        );
+      } else {
+        issues.push({
+          code: "feature-deletes-messages-later",
+          message: `Once ${feature.label} is enabled, ${feature.purges.what}. Messages in "${channel.name}" you want to keep should be moved first; nothing is deleted by this plan.`,
+          targetId: channel.id,
+        });
+      }
+    }
     return feature;
   };
 
@@ -763,6 +855,9 @@ function targetKey(o: DesiredOverwrite): string {
 const WARNING_CODES = new Set([
   "rebind",
   "sync-partial",
+  "gate-not-exclusive",
+  "read-only-not-exclusive",
+  "feature-deletes-messages-later",
   "voice-managed-only",
   "voice-handover",
   "no-naming-prefix",
@@ -781,4 +876,28 @@ export function splitIssues(issues: readonly PlanIssue[]): {
     errors: issues.filter(isBlocking),
     warnings: issues.filter((i) => !isBlocking(i)),
   };
+}
+
+/**
+ * Identity of a step including the state it was approved against: a removal is
+ * only "the same" if the overwrite still has the allow/deny bits that were
+ * previewed, so a permission someone changed in the meantime is not deleted.
+ */
+const opKey = (op: PlanOperation): string =>
+  op.type === "overwrite.remove"
+    ? `${op.type}:${op.channelId}:${op.overwriteTargetId}:${String(op.before?.allow)}:${String(op.before?.deny)}`
+    : `${op.type}:${op.id}`;
+
+/**
+ * Pending destructive steps that a fresh plan no longer contains in the same
+ * form. The engine's live-state check refuses to run while this is non-empty.
+ */
+export function staleDestructiveSteps(
+  pending: readonly PlanOperation[],
+  fresh: readonly PlanOperation[],
+): string[] {
+  const live = new Set(fresh.map(opKey));
+  return pending
+    .filter((op) => op.class === "destructive" && !live.has(opKey(op)))
+    .map((op) => `"${op.summary}" no longer matches the live server`);
 }
