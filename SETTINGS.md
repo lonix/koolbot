@@ -851,6 +851,8 @@ deleted. See [COMMANDS.md](COMMANDS.md#ticket).
 
 **Notes:**
 
+- Changing `tickets.staff_role_id` applies to **new** tickets only. Existing ticket channels keep the previous role's
+  access until you delete them or edit their permissions by hand.
 - The bot needs **Manage Channels** and **Manage Roles** to create channels and
   set their private permissions.
 - Tickets are a support record: they are not part of a member's self-service

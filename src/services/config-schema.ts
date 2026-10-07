@@ -1657,7 +1657,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "tickets.staff_role_id": {
     label: "Ticket staff role",
     description:
-      "Role that can see every ticket channel and may claim, close and reopen tickets. Required: tickets are refused while it is empty, because a ticket nobody can see helps nobody.",
+      "Role that can see every ticket channel and may claim, close and reopen tickets. Required: tickets are refused while it is empty, because a ticket nobody can see helps nobody. Changing it only affects new tickets: existing ticket channels keep the previous role's access until they are deleted or their permissions are edited by hand.",
     category: "tickets",
     type: "role",
   },
