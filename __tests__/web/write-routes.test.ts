@@ -939,6 +939,8 @@ describe("createWriteRouter (#850)", () => {
         "POST /reaction-roles/unarchive",
         "POST /role-groups/:id/delete",
         "POST /role-groups/:id/edit",
+        "POST /role-groups/:id/relink",
+        "POST /role-groups/admin-fix/apply",
         "POST /role-groups/apply",
         "POST /role-groups/create",
         "POST /role-groups/reorder",

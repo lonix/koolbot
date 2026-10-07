@@ -44,6 +44,8 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
 }));
 
 const { data, execute } = await import("../../src/commands/config.js");
+const { RoleGroupService } =
+  await import("../../src/services/role-group-service.js");
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -266,6 +268,52 @@ describe("Config Command — execute", () => {
     });
     expect(mockCreateSession).not.toHaveBeenCalled();
     expect(userSend).not.toHaveBeenCalled();
+  });
+
+  describe("admin role group (#1021)", () => {
+    const withGuildMember = (interaction: ChatInputCommandInteraction) => {
+      (interaction as unknown as { guild: unknown }).guild = {
+        members: { fetch: jest.fn().mockResolvedValue({ id: "u1" } as never) },
+      };
+      return interaction;
+    };
+
+    it("lets a member of the admin group in without Administrator", async () => {
+      mockCreateSession.mockResolvedValue({
+        url: "https://example.test/admin/s/tok",
+        expiresAt: new Date(Date.now() + 10 * 60_000),
+        role: "admin",
+      });
+      const spy = jest
+        .spyOn(RoleGroupService.getInstance(), "memberHasCapability")
+        .mockResolvedValue(true);
+      const interaction = withGuildMember(
+        buildInteraction({ permissionsBitfield: "0" }),
+      );
+
+      await execute(interaction);
+
+      expect(spy).toHaveBeenCalledWith({ id: "u1" }, "admin");
+      expect(mockCreateSession).toHaveBeenCalledWith("u1", "g1", "admin");
+      spy.mockRestore();
+    });
+
+    it("still rejects everyone else, and when the groups can't be read", async () => {
+      const spy = jest
+        .spyOn(RoleGroupService.getInstance(), "memberHasCapability")
+        .mockRejectedValue(new Error("db down"));
+      const interaction = withGuildMember(
+        buildInteraction({ permissionsBitfield: "0" }),
+      );
+
+      await execute(interaction);
+
+      expect(editReply).toHaveBeenCalledWith({
+        content: expect.stringContaining("`/me`"),
+      });
+      expect(mockCreateSession).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
   });
 
   it("falls back to ephemeral reply when DM fails", async () => {

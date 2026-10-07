@@ -4,6 +4,7 @@ import {
   PermissionCheckError,
 } from "../../src/services/permissions-service.js";
 import { CommandPermission } from "../../src/models/command-permissions.js";
+import { RoleGroupService } from "../../src/services/role-group-service.js";
 
 // Mock dependencies
 jest.mock("../../src/services/config-service.js");
@@ -451,6 +452,43 @@ describe("PermissionsService", () => {
       await expect(service.isAdministrator("u1", "g1")).rejects.toThrow(
         PermissionCheckError,
       );
+    });
+
+    describe("admin role group (#1021)", () => {
+      it("accepts a member of the admin group who lacks Administrator", async () => {
+        mockClient.guilds.fetch = jest
+          .fn()
+          .mockResolvedValue(guildWithMember(false));
+        const spy = jest
+          .spyOn(RoleGroupService.getInstance(), "memberHasCapability")
+          .mockResolvedValue(true);
+        expect(await service.isAdministrator("u1", "g1")).toBe(true);
+        expect(spy).toHaveBeenCalledWith(expect.anything(), "admin");
+        spy.mockRestore();
+      });
+
+      it("fails closed to the Administrator bit when the groups can't be read", async () => {
+        mockClient.guilds.fetch = jest
+          .fn()
+          .mockResolvedValue(guildWithMember(false));
+        const spy = jest
+          .spyOn(RoleGroupService.getInstance(), "memberHasCapability")
+          .mockRejectedValue(new Error("db down"));
+        expect(await service.isAdministrator("u1", "g1")).toBe(false);
+        spy.mockRestore();
+      });
+
+      it("does not consult the groups when Administrator is held", async () => {
+        mockClient.guilds.fetch = jest
+          .fn()
+          .mockResolvedValue(guildWithMember(true));
+        const spy = jest
+          .spyOn(RoleGroupService.getInstance(), "memberHasCapability")
+          .mockResolvedValue(false);
+        expect(await service.isAdministrator("u1", "g1")).toBe(true);
+        expect(spy).not.toHaveBeenCalled();
+        spy.mockRestore();
+      });
     });
   });
 
