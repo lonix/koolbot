@@ -1497,6 +1497,34 @@ describe("renderEventsPage", () => {
     expect(oneOff).not.toContain('name="scope"');
   });
 
+  it("offers cancel-series on a finished occurrence still awaiting its successor", () => {
+    const row = {
+      id: "e1",
+      title: "Game Night",
+      when: "2026-07-04 20:00 (UTC)",
+      state: "ended",
+      going: 0,
+      maybe: 0,
+      cant: 0,
+      channelId: null,
+      recurrence: "weekly",
+      occurrence: 3,
+    };
+    const waiting = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [{ ...row, awaitingSuccessor: true }],
+    });
+    expect(waiting).toContain('name="scope" value="series"');
+    expect(waiting).not.toContain("Start now");
+    const done = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [{ ...row, awaitingSuccessor: false }],
+    });
+    expect(done).not.toContain('name="scope"');
+  });
+
   it("renders a scheduled event row with RSVP counts and actions", () => {
     const html = renderEventsPage({
       ...EVENTS_COMMON,

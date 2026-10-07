@@ -986,6 +986,56 @@ describe("recurring event lifecycle", () => {
     expect(EventMock.updateOne).not.toHaveBeenCalled();
   });
 
+  it("adopts an existing later occurrence instead of skipping past it", async () => {
+    const { service } = buildService();
+    const later = { _id: "occ-1", occurrenceIndex: 1 };
+    EventMock.findOne = jest.fn(async () => later);
+    const previous = ended();
+    const next = await (service as unknown as Spawner).spawnNextOccurrence(
+      previous,
+      NOW,
+    );
+    expect(next).toBe(later);
+    expect(created).toHaveLength(0);
+    expect(EventMock.findOne).toHaveBeenCalledWith({
+      guildId: "guild-1",
+      seriesId: "occ-0",
+      occurrenceIndex: { $gt: 0 },
+    });
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "occ-0" },
+      { $set: { nextSpawned: true } },
+    );
+    expect(previous.nextSpawned).toBe(true);
+  });
+
+  it("persists seriesCancelled on a successor taken down mid-spawn", async () => {
+    const { service } = buildService();
+    EventMock.findById = jest
+      .fn()
+      .mockResolvedValueOnce({ nextSpawned: false, seriesCancelled: false })
+      .mockResolvedValue({ nextSpawned: false, seriesCancelled: true });
+    (service as unknown as { cancelOne: jest.Mock }).cancelOne = jest.fn(
+      async () => undefined,
+    );
+    await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
+    expect(created[0].seriesCancelled).toBe(true);
+  });
+
+  it("processEvent finishes an interrupted series cancel instead of running the lifecycle", async () => {
+    const { service } = buildService();
+    const open = ended({ state: "scheduled", seriesCancelled: true });
+    const cancelOne = jest.fn(async () => undefined);
+    (service as unknown as { cancelOne: jest.Mock }).cancelOne = cancelOne;
+    await (
+      service as unknown as {
+        processEvent: (...a: unknown[]) => Promise<void>;
+      }
+    ).processEvent(open, {}, NOW, { reminderMs: 0, leadMs: 0, graceMs: 0 });
+    expect(cancelOne).toHaveBeenCalledWith(open);
+    expect(created).toHaveLength(0);
+  });
+
   it("adopts the winner's row when the unique-key insert loses a race", async () => {
     const { service } = buildService();
     const winner = { _id: "occ-1" };
@@ -1161,6 +1211,8 @@ describe("recurring event lifecycle", () => {
     expect(result?.cancelled).toBe(2);
     expect(a.state).toBe("cancelled");
     expect(b.state).toBe("cancelled");
+    expect(a.seriesCancelled).toBe(true);
+    expect(b.seriesCancelled).toBe(true);
     expect(EventMock.updateMany).toHaveBeenCalledWith(
       { guildId: "guild-1", seriesId: "occ-0" },
       { $set: { seriesCancelled: true } },

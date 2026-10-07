@@ -1176,6 +1176,11 @@ export function createReadOnlyRouter(
           channelId: e.channelId,
           recurrence: isRecurring(e) ? recurrenceLabel(e.recurrence) : null,
           occurrence: isRecurring(e) ? e.occurrenceIndex + 1 : null,
+          awaitingSuccessor:
+            isRecurring(e) &&
+            (e.state === "ended" || e.state === "cancelled") &&
+            !e.nextSpawned &&
+            !e.seriesCancelled,
         };
       });
 

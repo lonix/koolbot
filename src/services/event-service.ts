@@ -402,6 +402,16 @@ export class EventService extends ScheduledService {
   ): Promise<void> {
     let changed = false;
 
+    // A series cancel that was interrupted (crash, failed query) leaves
+    // flagged rows still open: finish it instead of running their lifecycle.
+    if (
+      event.seriesCancelled &&
+      (event.state === "scheduled" || event.state === "active")
+    ) {
+      await this.cancelOne(event);
+      return;
+    }
+
     // 1. Reminder (before start, once).
     if (shouldSendReminder(event, now, windows.reminderMs)) {
       await this.postReminder(event);
@@ -495,6 +505,22 @@ export class EventService extends ScheduledService {
       const fresh = await Event.findById(previous._id);
       if (!fresh || fresh.nextSpawned || fresh.seriesCancelled) return null;
 
+      // A successor may already exist (saved, but `nextSpawned` never got
+      // set): adopt it rather than skipping past it and creating another.
+      const later = await Event.findOne({
+        guildId: previous.guildId,
+        seriesId,
+        occurrenceIndex: { $gt: previous.occurrenceIndex },
+      });
+      if (later) {
+        await Event.updateOne(
+          { _id: previous._id },
+          { $set: { nextSpawned: true } },
+        );
+        previous.nextSpawned = true;
+        return later;
+      }
+
       const anchor = previous.seriesStart ?? previous.startTime;
       let index = previous.occurrenceIndex + 1;
       let start = computeOccurrenceStart(
@@ -567,6 +593,9 @@ export class EventService extends ScheduledService {
         // insert; if so, take the successor down again.
         const recheck = await Event.findById(previous._id);
         if (recheck?.seriesCancelled) {
+          // Persist the flag too, so the recovery scan doesn't treat this
+          // as an individually cancelled occurrence and spawn again.
+          next.seriesCancelled = true;
           await this.cancelOne(next);
           return null;
         }
@@ -700,6 +729,8 @@ export class EventService extends ScheduledService {
     });
     let cancelled = 0;
     for (const occurrence of open) {
+      // Rows inserted after the bulk update above are still blocked.
+      occurrence.seriesCancelled = true;
       await this.cancelOne(occurrence);
       cancelled += 1;
     }
