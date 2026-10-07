@@ -211,6 +211,38 @@ describe("WelcomeService", () => {
     expect(send).toHaveBeenCalledTimes(2);
   });
 
+  it("greets once when joins overlap", async () => {
+    let release!: () => void;
+    fetchChannel.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve({ isTextBased: () => true, send });
+        }),
+    );
+    const first = svc().handleMemberJoin(makeMember());
+    const second = svc().handleMemberJoin(makeMember());
+    await Promise.resolve();
+    await Promise.resolve();
+    release();
+    await Promise.all([first, second]);
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a member be greeted later when the first attempt sent nothing", async () => {
+    cfg["welcome.channel_id"] = "";
+    await svc().handleMemberJoin(makeMember());
+    cfg["welcome.channel_id"] = "chan";
+    await svc().handleMemberJoin(makeMember());
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("truncates a message that expands past Discord's limit", async () => {
+    cfg["welcome.message"] = `${"a".repeat(1994)}{user}`;
+    await svc().handleMemberJoin(makeMember({ id: "123456789012345678" }));
+    const { content } = send.mock.calls[0][0] as { content: string };
+    expect(content).toHaveLength(2000);
+  });
+
   describe("warnIfIntentMissing", () => {
     it("warns when enabled without the intent", async () => {
       mockEnv.guildMembersIntent = false;

@@ -4,6 +4,10 @@ import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
+import {
+  DISCORD_MESSAGE_CONTENT_LIMIT,
+  truncateText,
+} from "../utils/discord-limits.js";
 
 /** How long a greeted member is remembered, so a fast leave/rejoin is not greeted twice. */
 export const GREETED_TTL_MS = 5 * 60 * 1000;
@@ -87,61 +91,77 @@ export class WelcomeService {
 
   /** Handle a `guildMemberAdd` event. Never throws. */
   public async handleMemberJoin(member: GuildMember): Promise<void> {
+    if (member.user.bot) return;
+    if (!env.guildId || member.guild.id !== env.guildId) return;
+
+    // Claim the member synchronously, before any await, so overlapping
+    // joins (a fast leave/rejoin) cannot both pass the check.
+    const now = Date.now();
+    for (const [id, at] of this.greeted) {
+      if (now - at >= GREETED_TTL_MS) this.greeted.delete(id);
+    }
+    if (this.greeted.has(member.id)) return;
+    this.greeted.set(member.id, now);
+
+    let sent = false;
     try {
-      const config = ConfigService.getInstance();
-      if (!(await config.getBoolean("welcome.enabled", false))) return;
-      if (member.user.bot) return;
-      if (!env.guildId || member.guild.id !== env.guildId) return;
-
-      const now = Date.now();
-      for (const [id, at] of this.greeted) {
-        if (now - at >= GREETED_TTL_MS) this.greeted.delete(id);
-      }
-      if (this.greeted.has(member.id)) return;
-
-      const channelId = (
-        await config.getString("welcome.channel_id", "")
-      ).trim();
-      if (!channelId) {
-        logger.warn(
-          "welcome.enabled is on but welcome.channel_id is not set; skipping welcome message",
-        );
-        return;
-      }
-      const channel = await member.guild.channels
-        .fetch(channelId)
-        .catch(() => null);
-      if (!channel || !channel.isTextBased() || !("send" in channel)) {
-        logger.warn(
-          `welcome.channel_id ${sanitizeForLog(channelId)} is not a text channel the bot can see; skipping welcome message`,
-        );
-        return;
-      }
-
-      const template = await config.getString(
-        "welcome.message",
-        "👋 Welcome to {server}, {user}!",
+      sent = await this.greet(member);
+    } catch (error) {
+      logger.error(
+        `Failed to send welcome message: ${sanitizeForLog(getErrorMessage(error))}`,
       );
-      const mention = await config.getBoolean("welcome.mention", true);
-      const content = renderWelcomeMessage(template, {
+    } finally {
+      // Nothing went out, so a later join may still be greeted.
+      if (!sent) this.greeted.delete(member.id);
+    }
+  }
+
+  /** Post the welcome message. Returns whether one was sent. */
+  private async greet(member: GuildMember): Promise<boolean> {
+    const config = ConfigService.getInstance();
+    if (!(await config.getBoolean("welcome.enabled", false))) return false;
+
+    const channelId = (await config.getString("welcome.channel_id", "")).trim();
+    if (!channelId) {
+      logger.warn(
+        "welcome.enabled is on but welcome.channel_id is not set; skipping welcome message",
+      );
+      return false;
+    }
+    const channel = await member.guild.channels
+      .fetch(channelId)
+      .catch(() => null);
+    if (!channel || !channel.isTextBased() || !("send" in channel)) {
+      logger.warn(
+        `welcome.channel_id ${sanitizeForLog(channelId)} is not a text channel the bot can see; skipping welcome message`,
+      );
+      return false;
+    }
+
+    const template = await config.getString(
+      "welcome.message",
+      "👋 Welcome to {server}, {user}!",
+    );
+    const mention = await config.getBoolean("welcome.mention", true);
+    // The template is length-limited, but placeholders expand it; bound the
+    // rendered text so Discord does not reject the whole message.
+    const content = truncateText(
+      renderWelcomeMessage(template, {
         userId: member.id,
         displayName: member.displayName,
         guildName: member.guild.name,
         rolesLink: await this.resolveRolesLink(member.guild.id),
         rulesLink: await this.resolveRulesLink(),
-      });
-      if (!content) return;
+      }),
+      DISCORD_MESSAGE_CONTENT_LIMIT,
+    );
+    if (!content) return false;
 
-      this.greeted.set(member.id, now);
-      await channel.send({
-        content,
-        allowedMentions: mention ? { users: [member.id] } : { parse: [] },
-      });
-    } catch (error) {
-      logger.error(
-        `Failed to send welcome message: ${sanitizeForLog(getErrorMessage(error))}`,
-      );
-    }
+    await channel.send({
+      content,
+      allowedMentions: mention ? { users: [member.id] } : { parse: [] },
+    });
+    return true;
   }
 
   /**
