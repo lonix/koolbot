@@ -11,6 +11,7 @@ import {
   type NavFeatureStatus,
 } from "./admin-layout.js";
 import { sanitizeCronExpression } from "../utils/cron.js";
+import { pickCascadeMasterKey } from "./cascade-master.js";
 import { MAX_TIER_TOP_N } from "./leaderboard-tiers.js";
 import {
   categoryMetadata,
@@ -673,24 +674,16 @@ export function settingValueFieldName(key: string): string {
 
 /**
  * Pick the cascade "master" toggle for a settings section: the boolean
- * `.enabled` key with the fewest dotted segments (the top-level feature
- * switch). Sub-feature toggles like `voicetracking.announcements.enabled`
- * are dependents, not masters. Returns null when the section has no
- * `.enabled` boolean to gate on. Shared by the wizard and Settings page so
- * both surfaces grey out the same way (issue #485).
+ * two-segment `<category>.enabled` key (the top-level feature switch).
+ * Sub-feature toggles like `voicetracking.announcements.enabled` are
+ * dependents, never masters, and a section without a top-level switch (such
+ * as `core`) has no cascade at all (#1068). Shared by the wizard and Settings
+ * page, and with the server via `pickCascadeMasterKey`.
  */
 export function findCascadeMasterKey(rows: SettingRow[]): string | null {
-  let master: SettingRow | null = null;
-  for (const r of rows) {
-    if (r.type !== "boolean" || !r.key.endsWith(".enabled")) continue;
-    if (
-      master === null ||
-      r.key.split(".").length < master.key.split(".").length
-    ) {
-      master = r;
-    }
-  }
-  return master?.key ?? null;
+  return pickCascadeMasterKey(
+    rows.map((r) => ({ key: r.key, isBoolean: r.type === "boolean" })),
+  );
 }
 
 /**
@@ -3672,13 +3665,11 @@ export function renderSettingsUnavailableNotice(): string {
  * The feature's top-level master toggle among a card's rows, or null. Only a
  * two-segment `<feature>.enabled` key counts: a card that carries just
  * sub-toggles (e.g. `voicechannels.controlpanel.enabled` without
- * `voicechannels.enabled`) has no master, even though `findCascadeMasterKey` would pick that sub-toggle.
- * `findSectionMasterKey` on the server picks the same key from the submitted
+ * `voicechannels.enabled`) has no master. `findSectionMasterKey` on the server picks the same key from the submitted
  * set, so the cascade the page renders is the one the save applies.
  */
 export function findFeatureMasterKey(rows: SettingRow[]): string | null {
-  const key = findCascadeMasterKey(rows);
-  return key !== null && key.split(".").length === 2 ? key : null;
+  return findCascadeMasterKey(rows);
 }
 
 /**

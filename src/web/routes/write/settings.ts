@@ -397,7 +397,7 @@ export function createSettingsRouter(client: Client): Router {
       }
 
       // Cascading disable (#485): when the section's master `.enabled` toggle
-      // (the shortest boolean `.enabled` key in the section) is unchecked, the
+      // (the boolean `<category>.enabled` key, if the section has one) is unchecked, the
       // dependent controls were greyed out client-side and aren't submitted.
       // Honour that here — write only the master flag and leave the rest
       // untouched, so disabling a feature can't silently clobber its
