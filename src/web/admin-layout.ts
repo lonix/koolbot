@@ -79,6 +79,7 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "moderation.enabled",
   },
   { href: "/admin/bootstrap", label: "Bootstrap", group: "Info" },
+  { href: "/admin/adopt", label: "Server Scan", group: "Info" },
   // Settings — configuration & setup surfaces.
   { href: "/admin/settings", label: "Settings", group: "Settings" },
   { href: "/admin/permissions", label: "Permissions", group: "Settings" },

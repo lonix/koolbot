@@ -300,6 +300,34 @@ Error: An invalid token was provided
      the moderation features (see
      [Moderation log is missing native kicks, bans or timeouts](#moderation-log-is-missing-native-kicks-bans-or-timeouts))
 
+### Bot Can't Manage Roles or Channels
+
+**Symptoms:**
+
+- The Web UI's **Server Scan** page (`/admin/adopt`) shows red blockers or a
+  "role hierarchy" warning
+- Reaction roles, leaderboard roles or the birthday role are not assigned
+- Temporary voice channels are not created, or their permissions are not set
+
+**Solutions:**
+
+1. **Move the KoolBot role up.** Discord only lets a bot manage roles that sit
+   *below* its highest role. In Server Settings → Roles, drag the KoolBot role
+   above every role it should assign or edit. The scan lists the roles that
+   sit above it and flags any a feature uses.
+2. **Grant the missing permissions.** The scan's readiness table shows which of
+   `ViewChannel`, `SendMessages`, `ManageRoles` and `ManageChannels` (required)
+   or `EmbedLinks`, `ReadMessageHistory`, `ManageMessages` and `MoveMembers`
+   (optional) are missing. Add them to the KoolBot role, or to its overwrites
+   on the channel in question.
+3. **Managed roles cannot be edited.** Roles created by an integration or another
+   bot (marked *managed*) can never be assigned or edited by KoolBot; use a
+   normal role instead.
+4. **Counts look low or webhooks are missing?** The scan never lists every
+   member. Without the privileged `GuildMembers` intent, role member counts come
+   from the cache (shown with a `+`); webhook and Onboarding reads need
+   `ManageWebhooks` and the Community feature.
+
 ### Bot logs in but "Used disallowed intents" / login fails
 
 KoolBot always requests Guilds, GuildMessages, GuildVoiceStates,
