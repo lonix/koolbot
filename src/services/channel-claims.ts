@@ -1,6 +1,8 @@
 import {
   BOT_CATEGORY,
   BOT_POSTS,
+  botGateSet,
+  botReadOnlySet,
   BOT_VOICE_CATEGORY,
   BOT_VOICE_LOBBY,
   NOTICES_BOT,
@@ -349,14 +351,7 @@ export function buildClaimsDesiredState(
     readOnlyClaim: boolean,
   ): PermissionSet => {
     if (feature) return feature.botPermissions;
-    if (readOnlyClaim) return BOT_POSTS;
-    return {
-      allow:
-        family === "voice" || family === "stage"
-          ? ["ViewChannel", "Connect"]
-          : ["ViewChannel"],
-      deny: [],
-    };
+    return readOnlyClaim ? botReadOnlySet(family) : botGateSet(family);
   };
 
   const removals: DesiredOverwriteRemoval[] = [];
@@ -501,11 +496,13 @@ export function buildClaimsDesiredState(
 
     if (!alreadyBound && !managedOnly && !claim.voiceManagedOnly) {
       // Legacy cleanup deletes every empty voice channel in this category.
-      const atRisk = voiceChildren.filter((c) => c.voiceMemberCount === 0);
+      // Occupied channels count too: the periodic sweep deletes an unmanaged
+      // channel as soon as it empties.
+      const atRisk = voiceChildren;
       if (atRisk.length > 0) {
         err(
           "voice-cleanup-risk",
-          `Binding "${channel.name}" as the voice category would let KoolBot's cleanup delete these empty voice channels: ${names(atRisk)}. Use a dedicated category, or also turn on managed-only cleanup so only channels KoolBot created are removed.`,
+          `Binding "${channel.name}" as the voice category would let KoolBot's cleanup delete these voice channels once they are empty: ${names(atRisk)}. Use a dedicated category, or also turn on managed-only cleanup so only channels KoolBot created are removed.`,
           channel.id,
         );
       }
@@ -594,8 +591,11 @@ export function buildClaimsDesiredState(
           );
           break;
         }
-        const gateBot = botSetFor(family, feature, false);
-        gate(channel, family, targets, gateBot);
+        // A category carries the union of the voice and text rules, so a
+        // synced voice or stage child gets Connect denied too.
+        const gateFamily = family === "category" ? "mixed" : family;
+        const gateBot = botSetFor(gateFamily, feature, false);
+        gate(channel, gateFamily, targets, gateBot);
         // Discord does not push a category's overwrites to its channels, so
         // the ones synced to it get the identical set. Mirroring it exactly
         // (rather than a per-type variant) keeps them reading as synced.
@@ -604,7 +604,7 @@ export function buildClaimsDesiredState(
             if (child.parentId !== channel.id || claimed.has(child.id))
               continue;
             if (ctx.syncedToParent.get(child.id) !== true) continue;
-            gate(child, "category", targets, gateBot);
+            gate(child, "mixed", targets, gateBot);
           }
         }
         break;
@@ -612,17 +612,17 @@ export function buildClaimsDesiredState(
       case "read-only": {
         const posters = resolveTargets(claim, channel);
         if (!posters) break;
-        // A category carries the text rules itself so the channels synced to
-        // it can mirror it exactly and keep reading as synced.
-        const roFamily = family === "category" ? "text" : family;
-        const roBot = botSetFor(family, feature, true);
+        // A category carries the union of text, voice and stage rules so the
+        // channels synced to it mirror it exactly and keep reading as synced.
+        const roFamily = family === "category" ? "mixed" : family;
+        const roBot = botSetFor(roFamily, feature, true);
         readOnly(channel, roFamily, claim, posters, roBot);
         if (family === "category") {
           for (const child of scanned.channels) {
             if (child.parentId !== channel.id || claimed.has(child.id))
               continue;
             if (ctx.syncedToParent.get(child.id) !== true) continue;
-            readOnly(child, "text", claim, posters, roBot);
+            readOnly(child, "mixed", claim, posters, roBot);
           }
         }
         break;
@@ -640,9 +640,26 @@ export function buildClaimsDesiredState(
           break;
         }
         const parentKeys = new Set(parent.overwrites.map((o) => o.id));
+        let unmatchedProtected = 0;
         for (const o of parent.overwrites) {
-          // Preserve another bot's overwrite on the channel itself.
-          if (otherBots.has(o.id)) continue;
+          // Another bot's overwrite is never copied or replaced; if the
+          // channel doesn't already match it, it can't read as fully synced.
+          if (otherBots.has(o.id) || ctx.integrationRoleIds.has(o.id)) {
+            const mine = channel.overwrites.find((x) => x.id === o.id);
+            if (
+              !mine ||
+              BigInt(mine.allow) !== BigInt(o.allow) ||
+              BigInt(mine.deny) !== BigInt(o.deny)
+            ) {
+              unmatchedProtected += 1;
+            }
+            continue;
+          }
+          // Server Booster and similar roles are valid overwrite targets.
+          const parentRole = roles.get(o.id);
+          if (parentRole?.managed && !scanned.botRoleIds.includes(o.id)) {
+            gateTargetIds.add(o.id);
+          }
           running.set(key(channel.id, o.id), {
             type: o.type,
             allow: o.allow,
@@ -662,11 +679,11 @@ export function buildClaimsDesiredState(
           if (o.type === "member" && !ctx.membersIntent) return false;
           return true;
         });
-        const preserved = own.length - removable.length;
+        const preserved = own.length - removable.length + unmatchedProtected;
         if (preserved > 0) {
           issues.push({
             code: "sync-partial",
-            message: `${preserved} overwrite(s) on "${channel.name}" belong to other bots or can't be told apart from them, so they are kept and the channel won't read as fully synced.`,
+            message: `${preserved} overwrite(s) on "${channel.name}" belong to other bots, differ from the category's, or can't be told apart from them, so they are kept and the channel won't read as fully synced.`,
             targetId: channel.id,
           });
         }

@@ -366,6 +366,29 @@ describe("read-only", () => {
     expect(setFor(r.plan, C_UNSYNCED, GUILD)).toBeUndefined();
   });
 
+  it("a category read-only claim also denies Speak and RequestToSpeak, and the bot keeps them", () => {
+    const r = plan([{ channelId: C_CAT, action: "read-only" }]);
+    const own = setFor(r.plan, C_CAT, GUILD)!;
+    expect(BigInt(own.deny) & F.Speak).toBe(F.Speak);
+    expect(BigInt(own.deny) & F.RequestToSpeak).toBe(F.RequestToSpeak);
+    const child = setFor(r.plan, C_VOICE, GUILD)!;
+    expect([child.allow, child.deny]).toEqual([own.allow, own.deny]);
+    const bot = BigInt(setFor(r.plan, C_VOICE, BOT)!.allow);
+    expect(bot & F.Speak).toBe(F.Speak);
+    expect(bot & F.RequestToSpeak).toBe(F.RequestToSpeak);
+  });
+
+  it("a direct voice or stage read-only claim keeps the bot able to speak", () => {
+    const voice = plan([{ channelId: C_VOICE, action: "read-only" }]);
+    expect(BigInt(setFor(voice.plan, C_VOICE, BOT)!.allow) & F.Speak).toBe(
+      F.Speak,
+    );
+    const stage = plan([{ channelId: C_STAGE, action: "read-only" }]);
+    expect(
+      BigInt(setFor(stage.plan, C_STAGE, BOT)!.allow) & F.RequestToSpeak,
+    ).toBe(F.RequestToSpeak);
+  });
+
   it("bulk: every channel in a category via the form", () => {
     const parsed = claimsFromForm(
       { [`bulk_${C_CAT}`]: "read-only" },
@@ -488,6 +511,17 @@ describe("group-gated", () => {
     );
   });
 
+  it("a category gate carries Connect too, identically on synced voice children", () => {
+    const r = plan([{ channelId: C_CAT, action: "gate", roleIds: [R_ADMIN] }]);
+    const own = setFor(r.plan, C_CAT, GUILD)!;
+    expect(BigInt(own.deny) & F.Connect).toBe(F.Connect);
+    expect(BigInt(own.deny) & F.ViewChannel).toBe(F.ViewChannel);
+    const child = setFor(r.plan, C_VOICE, GUILD)!;
+    expect([child.allow, child.deny]).toEqual([own.allow, own.deny]);
+    const role = setFor(r.plan, C_VOICE, R_ADMIN)!;
+    expect(BigInt(role.allow) & F.Connect).toBe(F.Connect);
+  });
+
   it("gating a category also gates its synced children, never an unsynced one", () => {
     const r = plan([{ channelId: C_CAT, action: "gate", roleIds: [R_ADMIN] }]);
     expect(setFor(r.plan, C_TEXT, GUILD)).toBeDefined();
@@ -557,6 +591,30 @@ describe("sync to category", () => {
       o.type === "overwrite.remove" ? [o.overwriteTargetId] : [],
     );
     expect(removedTargets).not.toContain(OTHER_BOT);
+  });
+
+  it("copies a Server Booster overwrite from the category without tripping the planner", () => {
+    const s = withOwn();
+    s.channels
+      .find((c) => c.id === C_CAT)!
+      .overwrites.push(ow(R_BOOST, F.ViewChannel));
+    const r = plan(
+      [{ channelId: C_UNSYNCED, action: "sync", approveReplace: true }],
+      s,
+    );
+    expect(r.errors).toEqual([]);
+    expect(setFor(r.plan, C_UNSYNCED, R_BOOST)).toBeDefined();
+  });
+
+  it("warns when another bot's category overwrite can't be matched on the channel", () => {
+    const s = withOwn();
+    s.channels
+      .find((c) => c.id === C_CAT)!
+      .overwrites.push(ow(OTHER_BOT, F.ViewChannel, 0n, "member"));
+    s.channels.find((c) => c.id === C_UNSYNCED)!.overwrites = [];
+    const r = plan([{ channelId: C_UNSYNCED, action: "sync" }], s);
+    expect(r.warnings).toContain("sync-partial");
+    expect(setFor(r.plan, C_UNSYNCED, OTHER_BOT)).toBeUndefined();
   });
 
   it("leaves member overwrites alone when the members intent is off", () => {
@@ -748,44 +806,16 @@ describe("voice category claims (#1032)", () => {
     expect(plan([voiceCat()], s).errors).toEqual([]);
   });
 
-  it("an occupied channel is not at risk, and a bound lobby is excluded", () => {
+  it("an occupied channel still counts: it is deleted once it empties", () => {
     const s = fixture();
     s.channels.find((c) => c.id === C_TEMP)!.voiceMemberCount = 2;
-    expect(plan([voiceCat()], s).errors).toEqual([]);
+    expect(plan([voiceCat()], s).errors).toContain("voice-cleanup-risk");
   });
 
-  it("blocks managed-only adoption when another bot's channels follow the voice naming", () => {
+  it("the lobby, by name or by bound id, is never at risk", () => {
     const s = fixture();
-    s.channels.find((c) => c.id === C_TEMP)!.name = "🔊 |  Red team";
-    const risky = plan(
-      [voiceCat({ voiceManagedOnly: true, usePrefix: true })],
-      s,
-    );
-    expect(risky.errors).toContain("voice-adoption-risk");
-    const issue = buildClaimsDesiredState(
-      [voiceCat({ voiceManagedOnly: true, usePrefix: true })],
-      ctxFor(s),
-    ).issues.find((i) => i.code === "voice-adoption-risk")!;
-    expect(issue.message).toContain("Red team");
-    // Without changing the naming the same channel is not a lookalike.
-    expect(plan([voiceCat({ voiceManagedOnly: true })], s).errors).toEqual([]);
-    // Once the first managed-only cleanup has run, nothing is re-adopted.
-    expect(
-      plan([voiceCat({ voiceManagedOnly: true, usePrefix: true })], s, {
-        voiceMigrationDone: true,
-      }).errors,
-    ).toEqual([]);
-  });
-
-  it("checks the stored prefix too when managed-only is already on", () => {
-    const s = fixture({
-      config: {
-        "voicechannels.cleanup.managed_only": true,
-        "voicechannels.channel.prefix": "🎮",
-      },
-    });
-    s.channels.find((c) => c.id === C_TEMP)!.name = "🎮 Someone's room";
-    expect(plan([voiceCat()], s).errors).toContain("voice-adoption-risk");
+    s.channels = s.channels.filter((c) => c.id !== C_TEMP);
+    expect(plan([voiceCat()], s).errors).toEqual([]);
   });
 
   it("binds an existing lobby by id and the naming prefix when asked", () => {

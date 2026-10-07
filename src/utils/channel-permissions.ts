@@ -70,7 +70,18 @@ export function mergeOverwrite(
 
 /** Channel families that differ in what "read-only" or "gated" means. */
 export type ChannelFamily =
-  "text" | "announcement" | "forum" | "stage" | "voice" | "category";
+  | "text"
+  | "announcement"
+  | "forum"
+  | "stage"
+  | "voice"
+  | "category"
+  /**
+   * A category claim's rules: the union of text, voice and stage, so the
+   * category and the channels synced to it carry one identical overwrite that
+   * is correct for whatever type each child is.
+   */
+  | "mixed";
 
 /** Derive the family from a Discord channel type (or, failing that, a kind). */
 export function channelFamily(
@@ -139,6 +150,16 @@ export function readOnlyEveryone(
     case "category":
       // A category itself has no posting rules; its channels carry them.
       break;
+    case "mixed":
+      deny.push(
+        "SendMessages",
+        "SendMessagesInThreads",
+        "CreatePublicThreads",
+        "CreatePrivateThreads",
+        "Speak",
+        "RequestToSpeak",
+      );
+      break;
     default:
       deny.push(
         "SendMessages",
@@ -175,6 +196,18 @@ export function readOnlyPoster(family: ChannelFamily): PermissionSet {
       return { allow: ["Speak"], deny: [] };
     case "category":
       return { allow: [], deny: [] };
+    case "mixed":
+      return {
+        allow: [
+          "SendMessages",
+          "SendMessagesInThreads",
+          "CreatePublicThreads",
+          "AddReactions",
+          "Speak",
+          "RequestToSpeak",
+        ],
+        deny: [],
+      };
     default:
       return {
         allow: [
@@ -186,6 +219,40 @@ export function readOnlyPoster(family: ChannelFamily): PermissionSet {
         deny: [],
       };
   }
+}
+
+/**
+ * What the bot needs in a read-only channel, by type: it must be allowed what
+ * `@everyone` is denied, or the deny would apply to it too.
+ */
+export function botReadOnlySet(family: ChannelFamily): PermissionSet {
+  switch (family) {
+    case "voice":
+      return { allow: ["ViewChannel", "Connect", "Speak"], deny: [] };
+    case "stage":
+      return {
+        allow: ["ViewChannel", "Connect", "Speak", "RequestToSpeak"],
+        deny: [],
+      };
+    case "mixed":
+      return {
+        allow: [...BOT_POSTS.allow, "Connect", "Speak", "RequestToSpeak"],
+        deny: [],
+      };
+    default:
+      return BOT_POSTS;
+  }
+}
+
+/** What the bot needs in a gated channel it must keep using. */
+export function botGateSet(family: ChannelFamily): PermissionSet {
+  return {
+    allow:
+      family === "voice" || family === "stage" || family === "mixed"
+        ? ["ViewChannel", "Connect"]
+        : ["ViewChannel"],
+    deny: [],
+  };
 }
 
 /** What the bot needs to post in a channel it owns. */
@@ -236,7 +303,7 @@ export function gateEveryone(family: ChannelFamily): PermissionSet {
   return {
     allow: [],
     deny:
-      family === "voice" || family === "stage"
+      family === "voice" || family === "stage" || family === "mixed"
         ? ["ViewChannel", "Connect"]
         : ["ViewChannel"],
   };
@@ -246,7 +313,7 @@ export function gateEveryone(family: ChannelFamily): PermissionSet {
 export function gateMember(family: ChannelFamily): PermissionSet {
   return {
     allow:
-      family === "voice" || family === "stage"
+      family === "voice" || family === "stage" || family === "mixed"
         ? ["ViewChannel", "Connect"]
         : ["ViewChannel"],
     deny: [],
