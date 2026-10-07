@@ -10,10 +10,32 @@ on:
   # the Trivy scan sees newly published advisories (#963).
   schedule:
     - cron: '17 4 * * 1'
+  # Opt-in preview images for same-repo PRs carrying the `docker-preview`
+  # label (#1094): adding the label or pushing to a labelled PR builds
+  # ghcr.io/<repo>:pr-<number>; closing the PR deletes its preview tags.
+  # Fork PRs never build — their GITHUB_TOKEN cannot push to GHCR, and this
+  # must NOT move to `pull_request_target` to work around that (it would run
+  # untrusted code with a write token).
+  pull_request:
+    types: [labeled, synchronize, reopened, closed]
 
-# Cancel in-progress runs for the same workflow and ref (except on tags)
+# Cancel in-progress runs for the same workflow and ref (except on tags).
+# A pull_request event that neither builds a preview nor cleans one up (an
+# unrelated label, an unlabelled PR, a fork) gets a group of its own, so it
+# cannot cancel a preview build that is still running for the same PR.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: >-
+    ${{ github.workflow }}-${{ github.ref }}${{
+      github.event_name == 'pull_request' && !(
+        github.event.pull_request.head.repo.full_name == github.repository && (
+          github.event.action == 'closed' ||
+          (github.event.action == 'labeled' && github.event.label.name == 'docker-preview' &&
+            github.event.pull_request.state == 'open') ||
+          ((github.event.action == 'synchronize' || github.event.action == 'reopened') &&
+            contains(github.event.pull_request.labels.*.name, 'docker-preview'))
+        )
+      ) && format('-skip-{0}', github.run_id) || ''
+    }}
   cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
@@ -27,6 +49,19 @@ jobs:
   hadolint:
     name: Lint Dockerfile
     runs-on: ubuntu-latest
+    # On pull_request, only build for a same-repo PR that carries the
+    # `docker-preview` label: when it is added, and on later pushes or a
+    # reopen while it is still there. build-and-push `needs` this job, so it
+    # is skipped whenever this one is.
+    if: >-
+      github.event_name != 'pull_request' || (
+        github.event.pull_request.head.repo.full_name == github.repository && (
+          (github.event.action == 'labeled' && github.event.label.name == 'docker-preview' &&
+            github.event.pull_request.state == 'open') ||
+          ((github.event.action == 'synchronize' || github.event.action == 'reopened') &&
+            contains(github.event.pull_request.labels.*.name, 'docker-preview'))
+        )
+      )
     timeout-minutes: 5
     permissions:
       contents: read
@@ -71,9 +106,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7.0.1
         with:
+          # Previews build the PR head itself rather than the merge ref, so
+          # the image matches the commit its tag names. Empty (the default
+          # ref) for every other event.
+          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
+      # Previews are linux/amd64 only; QEMU is just for the arm64 release leg.
       - name: Set up QEMU
+        if: github.event_name != 'pull_request'
         uses: docker/setup-qemu-action@v4.4.0
 
       - name: Set up Docker Buildx
@@ -94,7 +135,11 @@ jobs:
           # image index. GHCR reads the package description from the index
           # annotation for multi-arch images, so "index" is required for the
           # description to show up on the GitHub Packages page.
-          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+          # Previews are single-platform images with no index, so they only
+          # get manifest-level annotations.
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: ${{ github.event_name == 'pull_request' && 'manifest' || 'manifest,index' }}
+          # Name the PR head commit in preview tags, not the merge commit.
+          DOCKER_METADATA_PR_HEAD_SHA: ${{ github.event_name == 'pull_request' }}
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -102,9 +147,10 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha,format=short
+            type=sha,format=short,enable=${{ github.event_name != 'pull_request' }}
             type=ref,event=branch
             type=ref,event=pr
+            type=sha,format=short,prefix=pr-${{ github.event.pull_request.number }}-sha-,enable=${{ github.event_name == 'pull_request' }}
           labels: |
             org.opencontainers.image.title=koolbot
             org.opencontainers.image.description=A Discord bot with various features
@@ -134,16 +180,19 @@ jobs:
           # build cache could reuse a stale base and a rebuild on main would
           # never pick up the fix.
           pull: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ github.event_name == 'pull_request' && 'linux/amd64' || 'linux/amd64,linux/arm64' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           annotations: ${{ steps.meta.outputs.annotations }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: mode=max
-          sbom: true
+          # Provenance, SBOM, attestation, signing and the Trivy scan are
+          # release concerns; previews skip them to stay fast and cheap.
+          provenance: ${{ github.event_name == 'pull_request' && 'false' || 'mode=max' }}
+          sbom: ${{ github.event_name != 'pull_request' }}
 
       - name: Generate SLSA build provenance attestation
+        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v4.2.2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
@@ -151,9 +200,11 @@ jobs:
           push-to-registry: true
 
       - name: Install cosign
+        if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign published image with cosign (keyless)
+        if: github.event_name != 'pull_request'
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           TAGS: ${{ steps.meta.outputs.tags }}
@@ -164,6 +215,7 @@ jobs:
           done
 
       - name: Run Trivy vulnerability scan
+        if: github.event_name != 'pull_request'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }}
@@ -177,8 +229,63 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy SARIF
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         uses: github/codeql-action/upload-sarif@v4.38.2
         with:
           sarif_file: trivy-results.sarif
           category: trivy
+
+  cleanup-preview:
+    name: Delete PR preview image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Runs on every same-repo PR close, labelled or not, so tags left behind
+    # after the label was removed are still cleaned up. A PR with no preview
+    # simply matches nothing.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      # Deleting a package version also needs the repository to hold the Admin
+      # role on the package (package settings -> Manage Actions access).
+      packages: write
+    steps:
+      - name: Delete pr-<number> image versions
+        uses: actions/github-script@v9.0.0
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        with:
+          script: |
+            const prefix = `pr-${process.env.PR_NUMBER}`;
+            const isPreviewTag = (t) => t === prefix || t.startsWith(`${prefix}-`);
+            const owner = context.repo.owner;
+            const isOrg = context.payload.repository.owner.type === 'Organization';
+            const base = {
+              package_type: 'container',
+              package_name: context.repo.repo.toLowerCase(),
+              ...(isOrg ? { org: owner } : { username: owner }),
+            };
+            const list = isOrg
+              ? github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg
+              : github.rest.packages.getAllPackageVersionsForPackageOwnedByUser;
+            const remove = isOrg
+              ? github.rest.packages.deletePackageVersionForOrg
+              : github.rest.packages.deletePackageVersionForUser;
+
+            const versions = await github.paginate(list, { ...base, state: 'active', per_page: 100 });
+            // Only delete a version whose every tag belongs to this PR's
+            // preview, so an image that also carries a release tag is never
+            // touched.
+            const previews = versions.filter((v) => {
+              const tags = v.metadata?.container?.tags ?? [];
+              return tags.length > 0 && tags.every(isPreviewTag);
+            });
+            if (!previews.length) {
+              core.info(`No ${prefix} preview images to delete.`);
+              return;
+            }
+            for (const v of previews) {
+              core.info(`Deleting ${v.name} [${v.metadata.container.tags.join(', ')}]`);
+              await remove({ ...base, package_version_id: v.id });
+            }
