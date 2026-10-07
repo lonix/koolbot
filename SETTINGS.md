@@ -1781,6 +1781,13 @@ window (staggered at 03:00 / 03:15 server time to avoid contention).
   cleanup (03:15) prunes them. Set to `0` to keep history forever. WebUI
   audit rows are always written, so there is no separate enable toggle.
 
+#### Web UI sign-in link delivery
+
+`core.webui.link_delivery` (default `dm`) controls how `/me` and `/config` hand out
+the single-use sign-in link: `dm` sends a direct message and falls back to an
+ephemeral reply when the member's DMs are closed; `ephemeral` replies in the channel,
+visible only to the invoker (no DM needed). Saved changes apply to the next command.
+
 #### Discord Logging (bot events posted to Discord channels)
 
 `DiscordLogger` can mirror bot events into guild text channels as embeds. Each

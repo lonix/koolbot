@@ -23,6 +23,12 @@ jest.unstable_mockModule("../../src/services/web-session-service.js", () => ({
   WebSessionService: { getInstance: mockGetInstance },
 }));
 
+jest.unstable_mockModule("../../src/services/config-service.js", () => ({
+  ConfigService: {
+    getInstance: () => ({ getString: jest.fn().mockResolvedValue("dm") }),
+  },
+}));
+
 jest.unstable_mockModule("../../src/web/index.js", () => ({
   isWebUIEnabled: mockIsWebUIEnabled,
   validateWebUIEnvVars: mockValidateWebUIEnvVars,
