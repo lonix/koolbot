@@ -4184,6 +4184,34 @@ describe("findCascadeMasterKey", () => {
     ).toBe("voicetracking.enabled");
   });
 
+  it("has no master when every toggle is a three-segment key, as in core (#1068)", () => {
+    expect(
+      findCascadeMasterKey([
+        row("core.cleanup.enabled", "boolean"),
+        row("core.startup.enabled", "boolean"),
+        row("core.errors.enabled", "boolean"),
+      ]),
+    ).toBeNull();
+  });
+
+  it("ignores sub-toggles when the top-level switch is absent (#1068)", () => {
+    expect(
+      findCascadeMasterKey([
+        row("voicechannels.controlpanel.enabled", "boolean"),
+      ]),
+    ).toBeNull();
+  });
+
+  it("ignores a foreign two-segment toggle living in another section (#1076 review)", () => {
+    const aka = { ...row("aka.enabled", "boolean"), category: "namehistory" };
+    const nh = {
+      ...row("namehistory.enabled", "boolean"),
+      category: "namehistory",
+    };
+    expect(findCascadeMasterKey([aka, nh])).toBe("namehistory.enabled");
+    expect(findCascadeMasterKey([aka])).toBeNull();
+  });
+
   it("ignores non-boolean .enabled keys", () => {
     expect(findCascadeMasterKey([row("quotes.enabled", "string")])).toBeNull();
   });

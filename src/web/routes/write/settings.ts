@@ -397,13 +397,13 @@ export function createSettingsRouter(client: Client): Router {
       }
 
       // Cascading disable (#485): when the section's master `.enabled` toggle
-      // (the shortest boolean `.enabled` key in the section) is unchecked, the
+      // (the boolean `<category>.enabled` key, if the section has one) is unchecked, the
       // dependent controls were greyed out client-side and aren't submitted.
       // Honour that here — write only the master flag and leave the rest
       // untouched, so disabling a feature can't silently clobber its
       // sub-settings (an absent — or cleared — number field would otherwise
       // be rejected, an absent string blanked).
-      const masterKey = noCascade ? null : findSectionMasterKey(keys);
+      const masterKey = noCascade ? null : findSectionMasterKey(keys, category);
       const masterOff =
         masterKey !== null &&
         body[settingValueFieldName(masterKey)] !== "true" &&

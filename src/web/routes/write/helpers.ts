@@ -22,6 +22,7 @@ import {
 } from "../../../services/config-schema.js";
 import { truncateFlash, wantsJson } from "../../http-flash.js";
 import { PROTECTED_KEYS } from "../../bootstrap-vars.js";
+import { pickCascadeMasterKey } from "../../cascade-master.js";
 import type { AuthenticatedRequest } from "../../session.js";
 import { resolveEmojiShortcodes } from "../../../utils/emoji-shortcodes.js";
 import { resolveNavFeatureStatus, NAV_ITEMS } from "../../admin-layout.js";
@@ -559,24 +560,29 @@ export function coerceConfigValue(
 }
 
 /**
- * Pick the cascade "master" toggle for a Settings section: the boolean
- * `.enabled` key with the fewest dotted segments among the submitted keys
- * (the top-level feature switch). Mirrors `findCascadeMasterKey` in
- * admin-views so the server skips the same dependents the client greyed out
- * (issue #485). Returns null when the section has no boolean `.enabled` key.
+ * Pick the cascade "master" toggle for a Settings section among the submitted
+ * keys: the boolean two-segment `<category>.enabled` key. Uses the same
+ * `pickCascadeMasterKey` as `findCascadeMasterKey` in admin-views so the
+ * server skips exactly the dependents the client greyed out (#485, #1068).
+ * Returns null when the section has no such key.
  */
-export function findSectionMasterKey(keys: string[]): string | null {
-  let master: string | null = null;
-  for (const key of keys) {
-    if (!key.endsWith(".enabled")) continue;
-    if (typeof defaultConfig[key as keyof typeof defaultConfig] !== "boolean") {
-      continue;
-    }
-    if (master === null || key.split(".").length < master.split(".").length) {
-      master = key;
-    }
-  }
-  return master;
+export function findSectionMasterKey(
+  keys: string[],
+  sectionCategory?: string,
+): string | null {
+  return pickCascadeMasterKey(
+    keys.map((key) => ({
+      key,
+      isBoolean:
+        typeof defaultConfig[key as keyof typeof defaultConfig] === "boolean",
+      // The posted section is the one the client grouped by (the stored row's
+      // category), so prefer it over schema metadata to pick the same master.
+      category:
+        sectionCategory ||
+        settingsMetadata[key as keyof typeof settingsMetadata]?.category ||
+        key.split(".")[0],
+    })),
+  );
 }
 
 export function getCsrfFromReq(req: AuthenticatedRequest): string {

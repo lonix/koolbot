@@ -556,6 +556,27 @@ describe("POST /settings/save-section", () => {
     expect(mockConfigSet.mock.calls[0][1]).toBe(false);
   });
 
+  it("saves every core key when all log toggles are off (#1068)", async () => {
+    // `core` has no `core.enabled` switch; its three-segment toggles are
+    // independent, so none of them may act as a cascade master.
+    const res = await harness.post("/settings/save-section", {
+      category: "core",
+      keys: [
+        "core.cleanup.enabled",
+        "core.startup.enabled",
+        "core.errors.enabled",
+      ],
+    });
+    expect(parseFlashRedirect(res.headers.get("location")).type).toBe("ok");
+    expect(mockConfigSet).toHaveBeenCalledTimes(3);
+    expect(mockConfigSet.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "core.cleanup.enabled",
+      "core.errors.enabled",
+      "core.startup.enabled",
+    ]);
+    expect(mockConfigSet.mock.calls.every((c) => c[1] === false)).toBe(true);
+  });
+
   it("writes every key when the form opted out of the cascade (#705)", async () => {
     const res = await harness.post("/settings/save-section", {
       category: "quotes",

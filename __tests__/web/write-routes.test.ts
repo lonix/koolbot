@@ -567,12 +567,9 @@ describe("findSectionMasterKey", () => {
     expect(findSectionMasterKey(["bogus.feature.enabled"])).toBeNull();
   });
 
-  it("picks a sub-feature toggle when the true master is absent (#705)", () => {
-    // The Voice Channels feature page (#705) submits its `voicechannels.*`
-    // keys WITHOUT `voicechannels.enabled` (the enable notice owns that). The
-    // shortest `.enabled` among the submitted keys is then a sub-feature
-    // toggle, so unchecking it would wrongly cascade-skip the other keys —
-    // which is exactly why that form opts out of the cascade via `no_cascade`.
+  it("has no master when only sub-feature toggles are submitted (#705, #1068)", () => {
+    // The Voice Channels feature page submits its `voicechannels.*` keys
+    // WITHOUT `voicechannels.enabled`; sub-toggles are never masters.
     expect(
       findSectionMasterKey([
         "voicechannels.category_id",
@@ -580,7 +577,42 @@ describe("findSectionMasterKey", () => {
         "voicechannels.controlpanel.enabled",
         "voicechannels.presets.enabled",
       ]),
-    ).toBe("voicechannels.controlpanel.enabled");
+    ).toBeNull();
+  });
+
+  it("has no master for the core section's independent log toggles (#1068)", () => {
+    expect(
+      findSectionMasterKey([
+        "core.cleanup.enabled",
+        "core.startup.enabled",
+        "core.errors.enabled",
+      ]),
+    ).toBeNull();
+  });
+});
+
+describe("findSectionMasterKey foreign toggles (#1076 review)", () => {
+  it("picks namehistory.enabled, not aka.enabled, in the namehistory section", () => {
+    expect(
+      findSectionMasterKey([
+        "aka.enabled",
+        "namehistory.enabled",
+        "namehistory.retention_days",
+      ]),
+    ).toBe("namehistory.enabled");
+  });
+
+  it("uses the posted section category, matching the client's grouping (#1076 review)", () => {
+    // A stored row can sit in a section other than its schema category; the
+    // server must agree with the client about which section the key is in.
+    expect(findSectionMasterKey(["quotes.enabled"], "core")).toBeNull();
+    expect(findSectionMasterKey(["quotes.enabled"], "quotes")).toBe(
+      "quotes.enabled",
+    );
+  });
+
+  it("has no master when only the foreign toggle is present", () => {
+    expect(findSectionMasterKey(["aka.enabled"])).toBeNull();
   });
 });
 
