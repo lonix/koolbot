@@ -1193,6 +1193,16 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(notify).toHaveBeenCalledWith("main-id", member);
     });
 
+    it("skips the legacy startup sweep while the database is unavailable", async () => {
+      const { waiting } = await setupPair(1);
+      manager = newManager();
+      (manager as any).isDbReady.mockReturnValue(false);
+
+      await manager.initialize(GUILD_ID);
+
+      expect(waiting.delete).not.toHaveBeenCalled();
+    });
+
     it("aborts initialization without sweeping when the waiting-room read fails", async () => {
       const { waiting } = await setupPair(1);
       manager = newManager();

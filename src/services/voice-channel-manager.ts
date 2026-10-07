@@ -1064,7 +1064,16 @@ export class VoiceChannelManager {
           offlineLobbyName,
         );
       }
-      for (const channel of managedOnly
+      // Without the database the waiting-room links cannot be restored, so a
+      // legacy sweep could delete a live waiting room (#1085). Skip it; the
+      // periodic cleanup catches up once Mongo is back.
+      const skipLegacySweep = !managedOnly && !this.isDbReady();
+      if (skipLegacySweep) {
+        logger.warn(
+          "Database not ready; skipping startup empty-channel sweep so waiting rooms are not deleted",
+        );
+      }
+      for (const channel of managedOnly || skipLegacySweep
         ? []
         : category.children.cache.values()) {
         if (
