@@ -26,10 +26,14 @@ jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
 const {
   gateBits,
   planRulesGate,
+  countLockedOut,
+  linkCreatedRulesRole,
+  RULES_ROLE_REF,
   rulesPlanIsApplicable,
   DEFAULT_RULES_ROLE_NAME,
 } = await import("../../src/services/rules-adoption.js");
-const { parseRulesOptions } = await import("../../src/web/rules-page.js");
+const { parseRulesOptions, gateableChannels } =
+  await import("../../src/web/rules-page.js");
 
 const VIEW = PermissionFlagsBits.ViewChannel;
 
@@ -69,17 +73,30 @@ describe("parseRulesOptions", () => {
   });
 });
 
-function fakeGuild(memberRoleIds: Record<string, string[]>) {
+interface FakeRole {
+  id: string;
+  name: string;
+  color: number;
+  permissions: { bitfield: bigint };
+  position: number;
+  managed: boolean;
+}
+
+function fakeGuild(
+  memberRoleIds: Record<string, string[]>,
+  extraRoles: FakeRole[] = [],
+) {
   const everyone = {
     id: "g1",
     name: "@everyone",
     color: 0,
-    permissions: { bitfield: 0n },
+    permissions: { bitfield: VIEW },
     position: 0,
     managed: false,
   };
   const roles = [
     everyone,
+    ...extraRoles,
     {
       id: "100",
       name: "Bot",
@@ -188,6 +205,66 @@ describe("planRulesGate", () => {
     expect(p.preview.lockedOut).toBe(2);
   });
 
+  const role = (over: Partial<FakeRole>): FakeRole => ({
+    id: "200",
+    name: "Accepted",
+    color: 0,
+    permissions: { bitfield: 0n },
+    position: 2,
+    managed: false,
+    ...over,
+  });
+  const gateOnly = {
+    createRole: false,
+    grantExisting: false,
+    gateChannelIds: ["22222"],
+  };
+
+  it("blocks creating a role when one with that name already exists", async () => {
+    const guild = fakeGuild({ admin: [], a: [] }, [
+      role({ id: "300", name: "rules ACCEPTED" }),
+    ]);
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: true,
+      gateChannelIds: ["22222"],
+    });
+    expect(p.extraErrors.map((e) => e.code)).toContain("role-name-taken");
+    expect(p.plan.operations).toHaveLength(0);
+    expect(rulesPlanIsApplicable(p)).toBe(false);
+  });
+
+  it("refuses a configured role the Accept handler would refuse", async () => {
+    for (const [r, code] of [
+      [role({ managed: true }), "role-managed"],
+      [role({ position: 10 }), "role-too-high"],
+    ] as const) {
+      mockGetString.mockImplementation(async (k) =>
+        k === "rules.role_id" ? "200" : "",
+      );
+      const guild = fakeGuild({ admin: [], a: [] }, [r]);
+      const p = await planRulesGate(guild as never, "admin", gateOnly);
+      expect(p.extraErrors.map((e) => e.code)).toContain(code);
+      expect(rulesPlanIsApplicable(p)).toBe(false);
+    }
+  });
+
+  it("orders grants before the gating overwrites", async () => {
+    mockGetString.mockImplementation(async (k) =>
+      k === "rules.role_id" ? "200" : "",
+    );
+    const guild = fakeGuild({ admin: [], a: [], b: [] }, [role({})]);
+    const p = await planRulesGate(guild as never, "admin", {
+      ...gateOnly,
+      grantExisting: true,
+    });
+    expect(p.plan.operations.map((o) => o.type)).toEqual([
+      "member.role.add",
+      "overwrite.set",
+      "overwrite.set",
+    ]);
+  });
+
   it("refuses to gate the rules channel itself", async () => {
     const guild = fakeGuild({ admin: [] });
     const p = await planRulesGate(guild as never, "admin", {
@@ -207,5 +284,132 @@ describe("planRulesGate", () => {
       gateChannelIds: [],
     });
     expect(p.extraErrors.map((e) => e.code)).toContain("no-role");
+  });
+});
+
+describe("countLockedOut", () => {
+  const roles = [
+    { id: "g1", permissions: String(VIEW) },
+    { id: "acc", permissions: "0" },
+    { id: "vip", permissions: "0" },
+    { id: "admin", permissions: String(PermissionFlagsBits.Administrator) },
+  ];
+  const base = {
+    roles,
+    everyoneId: "g1",
+    ownerId: "owner",
+    roleId: "acc",
+    grantExisting: false,
+    gateChannelIds: ["c1"],
+  };
+  const viewAllow = {
+    id: "vip",
+    type: "role" as const,
+    allow: String(VIEW),
+    deny: "0",
+  };
+
+  it("counts unique members who lose sight, ignoring holders, admins and others who can't see it anyway", () => {
+    const hidden = {
+      id: "g1",
+      type: "role" as const,
+      allow: "0",
+      deny: String(VIEW),
+    };
+    const n = countLockedOut({
+      ...base,
+      memberRoles: {
+        plain: [],
+        holder: ["acc"],
+        admin: ["admin"],
+        // Admin and holder at once: counted by neither list twice.
+        both: ["admin", "acc"],
+        // Sees it only through an allow overwrite for vip, which the gate keeps.
+        vip: ["vip"],
+      },
+      channels: [{ id: "c1", overwrites: [viewAllow] }],
+    });
+    // plain loses it; vip keeps it via the overwrite allow.
+    expect(n).toBe(1);
+    // Already hidden from everyone: nobody loses anything.
+    expect(
+      countLockedOut({
+        ...base,
+        memberRoles: { plain: [] },
+        channels: [{ id: "c1", overwrites: [hidden] }],
+      }),
+    ).toBe(0);
+  });
+
+  it("respects member overwrites and the grant", () => {
+    const memberDeny = {
+      id: "u1",
+      type: "member" as const,
+      allow: "0",
+      deny: String(VIEW),
+    };
+    const channels = [{ id: "c1", overwrites: [memberDeny] }];
+    const memberRoles = { u1: [], u2: [] };
+    // u1 never saw the channel; only u2 loses it.
+    expect(countLockedOut({ ...base, memberRoles, channels })).toBe(1);
+    expect(
+      countLockedOut({ ...base, memberRoles, channels, grantExisting: true }),
+    ).toBe(0);
+  });
+});
+
+describe("linkCreatedRulesRole", () => {
+  it("stores only the exact role the apply created, when none is set", async () => {
+    const set = jest.fn();
+    mockGetString.mockResolvedValue("");
+    const { ConfigService } =
+      await import("../../src/services/config-service.js");
+    (ConfigService.getInstance as jest.Mock).mockReturnValue({
+      getString: mockGetString,
+      set,
+    });
+    const { AdoptionSnapshot } =
+      await import("../../src/models/adoption-snapshot.js");
+    const lean = jest.fn();
+    (AdoptionSnapshot as unknown as { findById: jest.Mock }).findById = jest
+      .fn()
+      .mockReturnValue({ lean });
+    lean.mockResolvedValueOnce({
+      createdRoles: [{ ref: "new:other", roleId: "9", name: "Rules accepted" }],
+    });
+    expect(await linkCreatedRulesRole("snap")).toBe(false);
+    lean.mockResolvedValueOnce({
+      createdRoles: [
+        { ref: RULES_ROLE_REF, roleId: "42", name: "Rules accepted" },
+      ],
+    });
+    expect(await linkCreatedRulesRole("snap")).toBe(true);
+    expect(set).toHaveBeenCalledWith(
+      "rules.role_id",
+      "42",
+      expect.any(String),
+      "rules",
+    );
+  });
+});
+
+describe("gateableChannels", () => {
+  it("drops threads and non-text/voice channels", () => {
+    const ch = (id: string, thread: boolean, text: boolean) =>
+      ({
+        id,
+        name: id,
+        isThread: () => thread,
+        isTextBased: () => text,
+        isVoiceBased: () => false,
+      }) as never;
+    expect(
+      gateableChannels([
+        ch("b", false, true),
+        ch("t", true, true),
+        ch("cat", false, false),
+        null,
+      ]),
+    ).toEqual([{ id: "b", name: "b" }]);
   });
 });

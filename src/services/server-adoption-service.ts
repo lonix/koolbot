@@ -195,6 +195,11 @@ export interface ApplyOptions {
   memberPageSize?: number;
   onProgress?: (progress: ApplyProgress) => void;
   /**
+   * `startApply` only: called once the background apply has produced a
+   * result (applied or partial). Errors thrown here are logged, not raised.
+   */
+  onFinished?: (result: ApplyResult) => Promise<void> | void;
+  /**
    * Extra live-state safety check run before a resume claims its snapshot.
    * Receives the operations that are still pending; return reasons to refuse.
    * The scanner that knows feature bindings supplies this.
@@ -351,7 +356,12 @@ export class ServerAdoptionService {
         options.onProgress?.(progress);
       },
     })
-      .then((result) => {
+      .then(async (result) => {
+        try {
+          await options.onFinished?.(result);
+        } catch (error) {
+          logger.warn("Server adoption onFinished hook failed:", error);
+        }
         job.result = result;
         job.status = "done";
         job.finishedAt = Date.now();
@@ -550,8 +560,13 @@ export class ServerAdoptionService {
             options.onProgress?.({ ...progress });
             continue;
           }
-          // Destructive steps only run when every earlier step succeeded.
-          if (isDestructive(op) && earlierFailure) {
+          // Destructive steps (and gates ordered after their grants) only run
+          // when every earlier step succeeded.
+          if (
+            (isDestructive(op) ||
+              (op.type === "overwrite.set" && op.afterGrants)) &&
+            earlierFailure
+          ) {
             record.status = "skipped";
             record.error = "Skipped: an earlier operation failed.";
             progress.skipped++;

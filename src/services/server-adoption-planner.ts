@@ -162,6 +162,13 @@ export interface PlanOptions {
    * `adminUserId`.
    */
   approverId?: string;
+  /**
+   * Run member role grants before any channel overwrite, and skip those
+   * overwrites if an earlier step failed. For gates that hide channels from
+   * members who don't hold the granted role: nobody may be locked out by a
+   * half-finished rollout (#1024).
+   */
+  grantsBeforeOverwrites?: boolean;
 }
 
 interface OpBase {
@@ -171,6 +178,8 @@ interface OpBase {
   targetId: string | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
+  /** Set by `grantsBeforeOverwrites`: only runs when every earlier step succeeded. */
+  afterGrants?: boolean;
 }
 
 export interface RoleCreateOp extends OpBase {
@@ -1105,12 +1114,24 @@ export function planAdoption(
     if (op.type === "overwrite.set") {
       return channelsById.get(op.channelId)?.kind === "category" ? 2 : 3;
     }
+    if (op.type === "member.role.add" && options.grantsBeforeOverwrites) {
+      return 1.5;
+    }
     return PHASE_ORDER[op.type];
   };
+  const gateAfterGrants =
+    !!options.grantsBeforeOverwrites &&
+    ops.some((op) => op.type === "member.role.add");
   const ordered = ops
     .map((op, index) => ({ op, index }))
     .sort((a, b) => phaseOf(a.op) - phaseOf(b.op) || a.index - b.index)
-    .map(({ op }, i) => ({ ...op, id: `op-${i + 1}` }) as PlanOperation);
+    .map(({ op }, i) => {
+      const next = { ...op, id: `op-${i + 1}` } as PlanOperation;
+      if (gateAfterGrants && next.type === "overwrite.set") {
+        next.afterGrants = true;
+      }
+      return next;
+    });
 
   // ---- the bot must hold the permissions Discord will demand ---------------
   const needsManageRoles = ordered.some(

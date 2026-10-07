@@ -1,10 +1,9 @@
-import type { Client } from "discord.js";
+import type { Client, GuildBasedChannel } from "discord.js";
 import { env } from "../config/env.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "../services/config-service.js";
 import { RulesAcceptance } from "../models/rules-acceptance.js";
 import {
-  linkCreatedRulesRole,
   planRulesGate,
   rulesPlanIsApplicable,
   DEFAULT_RULES_ROLE_NAME,
@@ -59,13 +58,25 @@ export interface RulesPageData {
   unavailable: string | null;
 }
 
+/** Channels offered as gate targets: threads have no overwrites of their own. */
+export function gateableChannels(
+  channels: Array<GuildBasedChannel | null | undefined>,
+): Array<{ id: string; name: string }> {
+  return channels
+    .filter(
+      (c): c is GuildBasedChannel =>
+        !!c && !c.isThread() && (c.isTextBased() || c.isVoiceBased()),
+    )
+    .map((c) => ({ id: c.id, name: c.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export async function loadRulesPage(
   client: Client,
   guildId: string,
   adminUserId: string,
   options: RulesPlanOptions | null,
 ): Promise<RulesPageData> {
-  await linkCreatedRulesRole(guildId);
   const config = ConfigService.getInstance();
   const data: RulesPageData = {
     enabled: await config.getBoolean("rules.enabled", false),
@@ -88,10 +99,7 @@ export async function loadRulesPage(
       data.roleName = data.plan.roleName;
     }
     const channels = await guild.channels.fetch();
-    data.channels = [...channels.values()]
-      .filter((c) => c && (c.isTextBased() || c.isVoiceBased()))
-      .map((c) => ({ id: c!.id, name: c!.name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    data.channels = gateableChannels([...channels.values()]);
     if (!data.roleName && data.roleId) {
       data.roleName = (await guild.roles.fetch(data.roleId))?.name ?? null;
     }

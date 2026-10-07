@@ -6,13 +6,16 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
+import { roleProblem, ROLE_PROBLEM_TEXT } from "./rules-service.js";
 import { AdoptionSnapshot } from "../models/adoption-snapshot.js";
 import {
+  effectivePermissions,
   planAdoption,
   type AdoptionPlan,
   type ChannelKind,
   type ChannelState,
   type DesiredState,
+  type OverwriteState,
   type PlanIssue,
   type ScannedState,
 } from "./server-adoption-planner.js";
@@ -48,9 +51,10 @@ export interface RulesPreview {
   /** Members who already hold the acceptance role. */
   holders: number | null;
   /**
-   * Members who would lose sight of the gated channels once applied: those
-   * without the role who aren't being granted it. Server owner and members
-   * with Administrator are excluded; they still see everything.
+   * Unique members who can see at least one gated channel now and could not
+   * after the rollout (effective View Channel, allowed -> denied), counting
+   * role permissions, other roles' allows and member overwrites. Owner and
+   * Administrators never lose sight. Based on the overwrites as scanned.
    */
   lockedOut: number | null;
 }
@@ -95,6 +99,82 @@ export function gateBits(
     : { allow: (allow | VIEW).toString(), deny: (deny & ~VIEW).toString() };
 }
 
+/** Pure: effective View Channel for a member in one channel. */
+function canView(
+  userId: string,
+  roleIds: string[],
+  ownerId: string,
+  everyoneId: string,
+  rolePermissions: Map<string, bigint>,
+  overwrites: OverwriteState[],
+): boolean {
+  return (
+    (effectivePermissions({
+      userId,
+      roleIds,
+      ownerId,
+      everyoneId,
+      rolePermissions,
+      overwrites,
+    }) &
+      VIEW) ===
+    VIEW
+  );
+}
+
+/**
+ * Pure: unique members who see a gated channel today and would not after the
+ * gate (and the optional grant) are applied.
+ */
+export function countLockedOut(input: {
+  memberRoles: Record<string, string[]>;
+  roles: Array<{ id: string; permissions: string }>;
+  channels: Array<{ id: string; overwrites: OverwriteState[] }>;
+  gateChannelIds: string[];
+  everyoneId: string;
+  ownerId: string;
+  /** The acceptance role (a placeholder id when it is about to be created). */
+  roleId: string;
+  grantExisting: boolean;
+}): number {
+  const rolePermissions = new Map<string, bigint>(
+    input.roles.map((r) => [r.id, BigInt(r.permissions)]),
+  );
+  if (!rolePermissions.has(input.roleId)) rolePermissions.set(input.roleId, 0n);
+  const gated = input.channels.filter((c) =>
+    input.gateChannelIds.includes(c.id),
+  );
+  let locked = 0;
+  for (const [userId, roleIds] of Object.entries(input.memberRoles)) {
+    const afterRoles =
+      input.grantExisting && !roleIds.includes(input.roleId)
+        ? [...roleIds, input.roleId]
+        : roleIds;
+    const lost = gated.some((c) => {
+      const args = [input.ownerId, input.everyoneId, rolePermissions] as const;
+      if (!canView(userId, roleIds, ...args, c.overwrites)) return false;
+      const everyone = gateBits(
+        c.overwrites.find((o) => o.id === input.everyoneId),
+        "everyone",
+      );
+      const holder = gateBits(
+        c.overwrites.find((o) => o.id === input.roleId),
+        "role",
+      );
+      const next = c.overwrites.filter(
+        (o) => o.id !== input.everyoneId && o.id !== input.roleId,
+      );
+      next.push(
+        { id: input.everyoneId, type: "role", ...everyone },
+        { id: input.roleId, type: "role", ...holder },
+      );
+      return !canView(userId, afterRoles, ...args, next);
+    });
+    if (lost) locked += 1;
+  }
+  return locked;
+}
+
 export async function planRulesGate(
   guild: Guild,
   adminUserId: string,
@@ -117,7 +197,6 @@ export async function planRulesGate(
   let membersUnavailable = false;
   const memberRoles: Record<string, string[]> = {};
   const otherBotIds: string[] = [];
-  let adminLike = 0;
   let total: number | null = null;
   try {
     const members = await guild.members.fetch();
@@ -129,11 +208,6 @@ export async function planRulesGate(
       }
       total += 1;
       memberRoles[m.id] = [...m.roles.cache.keys()];
-      if (
-        m.id === guild.ownerId ||
-        m.permissions.has(PermissionFlagsBits.Administrator)
-      )
-        adminLike += 1;
     }
   } catch (error) {
     membersUnavailable = true;
@@ -195,14 +269,38 @@ export async function planRulesGate(
   const existingRole = roleId
     ? scanned.roles.find((r) => r.id === roleId)
     : null;
-  if (roleId && !existingRole) {
+  if (roleId) {
+    // The same rules the Accept handler applies, so a plan that can never
+    // work (managed role, at/above the bot) is refused up front.
+    const problem = roleProblem(
+      existingRole,
+      guild.id,
+      scanned.botHighestRolePosition,
+      me.permissions.has(PermissionFlagsBits.ManageRoles),
+    );
+    if (problem) {
+      extraErrors.push({
+        code: problem,
+        message: ROLE_PROBLEM_TEXT[problem],
+        targetId: roleId,
+      });
+    }
+  }
+  const nameTaken =
+    !roleId &&
+    options.createRole &&
+    scanned.roles.some(
+      (r) =>
+        r.id !== guild.id &&
+        r.name.trim().toLowerCase() === DEFAULT_RULES_ROLE_NAME.toLowerCase(),
+    );
+  if (nameTaken) {
     extraErrors.push({
-      code: "role-missing",
-      message: "The configured acceptance role no longer exists.",
-      targetId: roleId,
+      code: "role-name-taken",
+      message: `A role named "${DEFAULT_RULES_ROLE_NAME}" already exists. Select it as the acceptance role in Settings instead of creating a new one.`,
     });
   }
-  const creating = !roleId && options.createRole;
+  const creating = !roleId && options.createRole && !nameTaken;
   const needsRole = options.grantExisting || options.gateChannelIds.length > 0;
   if (needsRole && !roleId && !creating) {
     extraErrors.push({
@@ -266,7 +364,10 @@ export async function planRulesGate(
     }
   }
 
-  const plan = planAdoption(scanned, desired, { approverId: adminUserId });
+  const plan = planAdoption(scanned, desired, {
+    approverId: adminUserId,
+    grantsBeforeOverwrites: true,
+  });
 
   const holders =
     roleId && total !== null
@@ -275,9 +376,16 @@ export async function planRulesGate(
   const lockedOut =
     total === null || options.gateChannelIds.length === 0
       ? null
-      : options.grantExisting
-        ? 0
-        : Math.max(0, total - (holders ?? 0) - adminLike);
+      : countLockedOut({
+          memberRoles,
+          roles: scanned.roles,
+          channels,
+          gateChannelIds: options.gateChannelIds,
+          everyoneId: guild.id,
+          ownerId: guild.ownerId,
+          roleId: roleId ?? "new:rules",
+          grantExisting: options.grantExisting && !membersUnavailable,
+        });
 
   return {
     plan,
@@ -303,39 +411,34 @@ export function rulesPlanIsApplicable(p: RulesPlan): boolean {
   );
 }
 
+/** The ref the planner gives the role it creates (`new:<lowercase name>`). */
+export const RULES_ROLE_REF = `new:${DEFAULT_RULES_ROLE_NAME.toLowerCase()}`;
+
 /**
- * If an applied plan created the acceptance role and `rules.role_id` is still
- * empty, store the new role's id. Idempotent and safe to call on every page
- * load; it also covers the admin closing the tab mid-apply.
+ * After an apply finished, store the acceptance role that exact apply created
+ * as `rules.role_id` (only while it is still empty). Called from the
+ * CSRF-protected apply route's completion hook, never from page rendering.
  */
-export async function linkCreatedRulesRole(guildId: string): Promise<boolean> {
+export async function linkCreatedRulesRole(
+  snapshotId: string,
+): Promise<boolean> {
   const config = ConfigService.getInstance();
   if ((await config.getString("rules.role_id", "")).trim()) return false;
   try {
-    const snapshots = await AdoptionSnapshot.find({
-      guildId,
-      status: { $in: ["applied", "partial"] },
-    })
-      .sort({ createdAt: -1 })
-      .limit(20)
-      .lean();
-    const key = DEFAULT_RULES_ROLE_NAME.toLowerCase();
-    for (const snap of snapshots) {
-      const created = (
-        snap.createdRoles as Array<{ roleId: string; name: string }>
-      ).find((r) => r.name.trim().toLowerCase() === key);
-      if (created) {
-        await config.set(
-          "rules.role_id",
-          created.roleId,
-          "Role granted when a member presses Accept.",
-          "rules",
-        );
-        return true;
-      }
-    }
+    const snap = await AdoptionSnapshot.findById(snapshotId).lean();
+    const created = (
+      (snap?.createdRoles ?? []) as Array<{ ref: string; roleId: string }>
+    ).find((r) => r.ref === RULES_ROLE_REF);
+    if (!created) return false;
+    await config.set(
+      "rules.role_id",
+      created.roleId,
+      "Role granted when a member presses Accept.",
+      "rules",
+    );
+    return true;
   } catch (error) {
     logger.warn("rules: linking the created role failed", error);
+    return false;
   }
-  return false;
 }

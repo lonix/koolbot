@@ -1695,3 +1695,62 @@ describe("review hardening, round sixteen", () => {
     );
   });
 });
+
+describe("grants before gating overwrites", () => {
+  const desired = {
+    memberGrants: [{ role: { id: "member" }, memberIds: ["m1", "m2"] }],
+    overwrites: [
+      { channelId: "chat", target: { id: "g1" }, allow: "0", deny: VIEW },
+      { channelId: "chat", target: { id: "staff" }, allow: VIEW, deny: "0" },
+    ],
+  };
+
+  it("orders grants first only when asked, and tags the gating overwrites", () => {
+    const def = planAdoption(scanned(), desired);
+    expect(def.operations.map((o) => o.type)).toEqual([
+      "overwrite.set",
+      "overwrite.set",
+      "member.role.add",
+    ]);
+    const gated = planAdoption(scanned(), desired, {
+      grantsBeforeOverwrites: true,
+    });
+    expect(gated.operations.map((o) => o.type)).toEqual([
+      "member.role.add",
+      "overwrite.set",
+      "overwrite.set",
+    ]);
+    expect(gated.operations[1]).toMatchObject({ afterGrants: true });
+    expect(gated.operations[2]).toMatchObject({ afterGrants: true });
+  });
+
+  it("skips the gate when a grant failed, and applies it on resume", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), desired, {
+      grantsBeforeOverwrites: true,
+    });
+    h.failMembers.add("m2");
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    expect(first.skipped).toEqual(["op-2", "op-3"]);
+
+    h.failMembers.clear();
+    const second = await h.service.apply(p, {
+      ...opts,
+      resumeSnapshotId: first.snapshotId,
+    });
+    expect(second.status).toBe("applied");
+    expect(second.applied).toEqual(expect.arrayContaining(["op-2", "op-3"]));
+  });
+
+  it("calls onFinished with the result of a background apply", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    const onFinished = jest.fn<(r: unknown) => void>();
+    h.service.startApply(p, { ...opts, onFinished });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(onFinished).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "applied" }),
+    );
+  });
+});
