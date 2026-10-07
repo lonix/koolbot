@@ -94,6 +94,15 @@ const kindOf = (c: GuildBasedChannel): ChannelKind => {
   return "other";
 };
 
+/** Channel types the rules form offers as gate targets. */
+const GATEABLE_TYPES: ReadonlySet<ChannelType> = new Set([
+  ChannelType.GuildText,
+  ChannelType.GuildAnnouncement,
+  ChannelType.GuildVoice,
+  ChannelType.GuildStageVoice,
+  ChannelType.GuildForum,
+]);
+
 /** Pure: the overwrite bits that gate (or ungate) ViewChannel for a target. */
 export function gateBits(
   existing: { allow: string; deny: string } | undefined,
@@ -454,6 +463,23 @@ export async function planRulesGate(
         extraErrors.push({
           code: "unknown-channel",
           message: `Channel ${channelId} was not found.`,
+          targetId: channelId,
+        });
+        continue;
+      }
+      // Categories (and any type the form doesn't offer) are never targets:
+      // Discord propagates a category's overwrites to synced children, which
+      // could hide the rules channel itself. Children are chosen one by one.
+      if (
+        channel.rawType === undefined ||
+        !GATEABLE_TYPES.has(channel.rawType)
+      ) {
+        extraErrors.push({
+          code: "gate-unsupported-channel",
+          message:
+            channel.kind === "category"
+              ? `"${channel.name}" is a category. Select its channels individually instead; gating a category would also change channels synced to it, such as the rules channel.`
+              : `"${channel.name}" is not a text, voice, announcement or forum channel and can't be gated.`,
           targetId: channelId,
         });
         continue;

@@ -136,11 +136,11 @@ function fakeGuild(
     Object.entries(memberRoleIds).map(([id, r]) => [id, member(id, r)]),
   );
   members.set("bot", me);
-  const channel = (id: string) => ({
+  const channel = (id: string, type = 0, parentId: string | null = null) => ({
     id,
     name: `chan-${id}`,
-    type: 0,
-    parentId: null,
+    type,
+    parentId,
     rawPosition: 0,
     topic: null,
     permissionOverwrites: { cache: new Map() },
@@ -154,9 +154,12 @@ function fakeGuild(
     channels: {
       fetch: async () =>
         new Map([
-          ["11111", channel("11111")],
+          // The rules channel is synced to the category "44444".
+          ["11111", channel("11111", 0, "44444")],
           ["22222", channel("22222")],
           ["33333", channel("33333")],
+          ["44444", channel("44444", 4)],
+          ["55555", channel("55555", 16)],
         ]),
     },
     members: {
@@ -479,6 +482,62 @@ describe("planRulesGate", () => {
     });
     expect(p.extraErrors.map((e) => e.code)).toContain("gate-rules-channel");
     expect(rulesPlanIsApplicable(p)).toBe(false);
+  });
+
+  it("rejects a category as a gate target", async () => {
+    const guild = fakeGuild({ admin: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: false,
+      gateChannelIds: ["44444"],
+    });
+    expect(p.extraErrors.map((e) => e.code)).toContain(
+      "gate-unsupported-channel",
+    );
+    expect(rulesPlanIsApplicable(p)).toBe(false);
+    expect(
+      p.plan.operations.filter((o) => o.type === "overwrite.set"),
+    ).toHaveLength(0);
+  });
+
+  it("blocks a hand-edited request naming the rules channel's parent category", async () => {
+    const guild = fakeGuild({ admin: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: false,
+      gateChannelIds: ["22222", "44444"],
+    });
+    const err = p.extraErrors.find((e) => e.targetId === "44444");
+    expect(err?.code).toBe("gate-unsupported-channel");
+    expect(err?.message).toMatch(/category/);
+    expect(rulesPlanIsApplicable(p)).toBe(false);
+  });
+
+  it("rejects channel types the form doesn't offer", async () => {
+    const guild = fakeGuild({ admin: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: false,
+      gateChannelIds: ["55555"],
+    });
+    expect(p.extraErrors.map((e) => e.code)).toContain(
+      "gate-unsupported-channel",
+    );
+  });
+
+  it("still gates normal text channels", async () => {
+    const guild = fakeGuild({ admin: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: false,
+      gateChannelIds: ["22222"],
+    });
+    expect(
+      p.extraErrors.filter((e) => e.code === "gate-unsupported-channel"),
+    ).toHaveLength(0);
+    expect(
+      p.plan.operations.filter((o) => o.type === "overwrite.set").length,
+    ).toBeGreaterThan(0);
   });
 
   it("asks for a role before granting or gating", async () => {

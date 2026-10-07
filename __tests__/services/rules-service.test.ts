@@ -264,6 +264,45 @@ describe("handleAcceptButton", () => {
     });
   });
 
+  it("serialises overlapping clicks so a failed write can't revoke another click's role", async () => {
+    // Stateful role, with a tick of latency on every Discord/Mongo call.
+    const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
+    add.mockImplementation(async () => {
+      await tick();
+      hasRole = true;
+    });
+    remove.mockImplementation(async () => {
+      await tick();
+      hasRole = false;
+    });
+    mockUpdateOne
+      .mockImplementationOnce(async () => {
+        await tick();
+        throw new Error("mongo blip");
+      })
+      .mockImplementation(async () => {
+        await tick();
+        return {};
+      });
+    const svc = service();
+    const first = interaction();
+    const second = interaction();
+    await Promise.all([
+      svc.handleAcceptButton(first),
+      svc.handleAcceptButton(second),
+    ]);
+    // The failed click took back only its own grant; the second click then
+    // saw no role, granted it and recorded it.
+    expect(first.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("try again"),
+    });
+    expect(second.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("Welcome"),
+    });
+    expect(hasRole).toBe(true);
+    expect(mockUpdateOne).toHaveBeenCalledTimes(2);
+  });
+
   it("never throws and tells the member when Discord rejects the grant", async () => {
     add.mockRejectedValue(new Error("Missing Permissions"));
     const i = interaction();

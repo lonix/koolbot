@@ -12,6 +12,7 @@ import {
 import { ConfigService } from "./config-service.js";
 import { RulesAcceptance } from "../models/rules-acceptance.js";
 import { env } from "../config/env.js";
+import { createKeyedLock } from "../utils/keyed-lock.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { getErrorMessage } from "../utils/error-guards.js";
@@ -133,6 +134,8 @@ export interface RulesPostResult {
  */
 export class RulesService {
   private static instance: RulesService | undefined;
+
+  private readonly acceptLock = createKeyedLock();
 
   private constructor(private readonly client: Client) {}
 
@@ -296,46 +299,54 @@ export class RulesService {
         );
         return;
       }
-      const member = await guild.members.fetch(interaction.user.id);
-      const already = member.roles.cache.has(role.id);
-      if (!already) {
-        await member.roles.add(role, "Accepted the server rules");
-      }
-      // An existing holder who never clicked still gets a record, so the
-      // accepted-at data is complete; "adopted" keeps it honest.
-      try {
-        await RulesAcceptance.updateOne(
-          { userId: member.id, guildId: guild.id },
-          {
-            $setOnInsert: {
-              acceptedAt: new Date(),
-              source: already ? "adopted" : "button",
-            },
-          },
-          { upsert: true },
-        );
-      } catch (error) {
-        logger.error(
-          `Couldn't record the rules acceptance: ${sanitizeForLog(getErrorMessage(error))}`,
-        );
-        // Only undo a role this attempt added, so the member isn't left with
-        // access and no accepted-at record. A pre-existing holder keeps theirs.
-        if (!already) {
-          await member.roles
-            .remove(role, "Rules acceptance could not be recorded")
-            .catch((removeError: unknown) => {
-              logger.error(
-                `Couldn't take back role ${role.id} from ${member.id}: ${sanitizeForLog(getErrorMessage(removeError))}`,
-              );
-            });
-        }
-        await reply("Something went wrong. Please try again in a moment.");
-        return;
-      }
-      await reply(
-        already
-          ? "You have already accepted the rules. Thank you!"
-          : "Thanks for accepting the rules. Welcome in!",
+      // One click at a time per member: otherwise two overlapping clicks can
+      // both see "no role yet", and a failed write in one would take back the
+      // role the other one's successful acceptance depends on.
+      await this.acceptLock.run(
+        `${guild.id}:${interaction.user.id}`,
+        async () => {
+          const member = await guild.members.fetch(interaction.user.id);
+          const already = member.roles.cache.has(role.id);
+          if (!already) {
+            await member.roles.add(role, "Accepted the server rules");
+          }
+          // An existing holder who never clicked still gets a record, so the
+          // accepted-at data is complete; "adopted" keeps it honest.
+          try {
+            await RulesAcceptance.updateOne(
+              { userId: member.id, guildId: guild.id },
+              {
+                $setOnInsert: {
+                  acceptedAt: new Date(),
+                  source: already ? "adopted" : "button",
+                },
+              },
+              { upsert: true },
+            );
+          } catch (error) {
+            logger.error(
+              `Couldn't record the rules acceptance: ${sanitizeForLog(getErrorMessage(error))}`,
+            );
+            // Only undo a role this attempt added, so the member isn't left with
+            // access and no accepted-at record. A pre-existing holder keeps theirs.
+            if (!already) {
+              await member.roles
+                .remove(role, "Rules acceptance could not be recorded")
+                .catch((removeError: unknown) => {
+                  logger.error(
+                    `Couldn't take back role ${role.id} from ${member.id}: ${sanitizeForLog(getErrorMessage(removeError))}`,
+                  );
+                });
+            }
+            await reply("Something went wrong. Please try again in a moment.");
+            return;
+          }
+          await reply(
+            already
+              ? "You have already accepted the rules. Thank you!"
+              : "Thanks for accepting the rules. Welcome in!",
+          );
+        },
       );
     } catch (error) {
       logger.error(
