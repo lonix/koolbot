@@ -1,13 +1,16 @@
 import type { Client } from "discord.js";
 import logger from "../utils/logger.js";
+import { ConfigService } from "../services/config-service.js";
 import { RoleGroupService } from "../services/role-group-service.js";
 import {
   linkCreatedRoles,
+  planAdminFix,
   planRoleGroups,
   type GroupPlan,
 } from "../services/role-group-adoption.js";
 import { roleLockReason } from "../services/role-group-plan.js";
 import type {
+  AdminFixPageProps,
   RoleGroupRoleOption,
   RoleGroupRow,
   RoleGroupsPageProps,
@@ -22,6 +25,10 @@ type PageData = Pick<
   | "planUnavailable"
   | "botScanUnavailable"
   | "botsMissing"
+  | "adminReport"
+  | "membersUnavailable"
+  | "roleNames"
+  | "globalPolicy"
 >;
 
 /**
@@ -36,6 +43,9 @@ export async function loadRoleGroupsPage(
 ): Promise<PageData> {
   await linkCreatedRoles(guildId);
   const service = RoleGroupService.getInstance();
+  const globalPolicy = await ConfigService.getInstance()
+    .getString("adoption.role_groups.sync_policy", "flag")
+    .catch(() => "flag");
   let built: GroupPlan | null = null;
   let unavailable: string | null = null;
   try {
@@ -56,6 +66,7 @@ export async function loadRoleGroupsPage(
         roleMissing: false,
         memberCount: null,
         roleLock: null,
+        drift: [],
       })),
       roleOptions: [],
       plan: null,
@@ -63,6 +74,10 @@ export async function loadRoleGroupsPage(
       planUnavailable: unavailable,
       botScanUnavailable: false,
       botsMissing: 0,
+      adminReport: null,
+      membersUnavailable: false,
+      roleNames: {},
+      globalPolicy,
     };
   }
 
@@ -87,6 +102,7 @@ export async function loadRoleGroupsPage(
         ? (built.scan.memberCounts.get(g.roleId) ?? null)
         : null,
       roleLock: g.roleId && role && !g.gateOnly ? lockOf(g.roleId) : null,
+      drift: built.drift.filter((d) => d.groupId === g.id),
     };
   });
   const roleOptions: RoleGroupRoleOption[] = scanned.roles
@@ -119,5 +135,50 @@ export async function loadRoleGroupsPage(
     planUnavailable: null,
     botScanUnavailable: built.botScanUnavailable,
     botsMissing,
+    adminReport: built.adminReport,
+    membersUnavailable: built.membersUnavailable,
+    roleNames: Object.fromEntries(scanned.roles.map((r) => [r.id, r.name])),
+    globalPolicy,
+  };
+}
+
+/**
+ * Plan for the "administrators outside the admin group" fix (#1021), plus the
+ * members who would lose Administrator without being moved. Throws when the
+ * server can't be read; the route shows that as an error.
+ */
+export async function loadAdminFixPreview(
+  client: Client,
+  guildId: string,
+  adminUserId: string,
+  moveIds: string[],
+  dropIds: string[],
+): Promise<
+  Pick<
+    AdminFixPageProps,
+    "plan" | "extraErrors" | "moveIds" | "dropIds" | "losing"
+  >
+> {
+  const guild = await client.guilds.fetch(guildId);
+  const built = await planAdminFix(guild, adminUserId, {
+    moveMemberIds: moveIds,
+    dropRoleIds: dropIds,
+  });
+  const dropped = new Set(dropIds);
+  const moved = new Set(moveIds);
+  const losing = (built.report?.humans ?? [])
+    .filter(
+      (h) =>
+        !moved.has(h.id) &&
+        h.viaRoleIds.length > 0 &&
+        h.viaRoleIds.every((r) => dropped.has(r)),
+    )
+    .map((h) => h.name);
+  return {
+    plan: built.plan,
+    extraErrors: built.extraErrors,
+    moveIds,
+    dropIds,
+    losing,
   };
 }

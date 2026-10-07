@@ -10,7 +10,15 @@ import {
   formatColour,
   PERMISSION_PRESETS,
 } from "../services/role-group-plan.js";
-import { ROLE_GROUP_CAPABILITIES } from "../models/role-group.js";
+import {
+  ROLE_GROUP_CAPABILITIES,
+  ROLE_GROUP_SYNC_POLICIES,
+} from "../models/role-group.js";
+import {
+  resolvePolicy,
+  type AdminReport,
+  type DriftItem,
+} from "../services/role-group-sync.js";
 import type { RoleGroupView } from "../services/role-group-service.js";
 import type {
   AdoptionPlan,
@@ -37,6 +45,8 @@ export interface RoleGroupRow extends RoleGroupView {
   roleMissing: boolean;
   memberCount: number | null;
   roleLock: RoleLock | null;
+  /** Differences from the Discord role (#1021). */
+  drift: DriftItem[];
 }
 
 export interface RoleGroupRoleOption {
@@ -61,6 +71,14 @@ export interface RoleGroupsPageProps {
   botScanUnavailable: boolean;
   /** Bots in the guild that do not hold a bot group's role. */
   botsMissing: number;
+  /** Administrators outside the admin group; `null` = report skipped (#1021). */
+  adminReport: AdminReport | null;
+  /** An admin group exists but the member list couldn't be read. */
+  membersUnavailable: boolean;
+  /** Role id to name, for the administrator report. */
+  roleNames: Record<string, string>;
+  /** `adoption.role_groups.sync_policy`. */
+  globalPolicy: string;
   /** Id of a running/finished apply the page should report on. */
   jobId?: string | null;
   flash?: FlashMessage | null;
@@ -102,7 +120,46 @@ const PRESET_SCRIPT =
   "f.querySelectorAll('input[name=capability]').forEach(function(c){if(!c.disabled)c.checked=caps.indexOf(c.value)>=0});" +
   "var sw=f.querySelector('input[name=editPermissions]');if(sw)sw.checked=true})})})();";
 
+const POLICY_LABELS: Record<string, string> = {
+  flag: "Flag only",
+  adopt: "Adopt (group follows Discord)",
+  enforce: "Enforce (re-apply the group)",
+};
+
+function driftCell(g: RoleGroupRow): string {
+  if (g.drift.length === 0) return "";
+  return `<ul class="drift">${g.drift
+    .map(
+      (d) =>
+        `<li><span class="tag tag-warn">${escapeHtml(d.kind)}</span> ${escapeHtml(d.detail)}</li>`,
+    )
+    .join("")}</ul>`;
+}
+
+function relinkForm(
+  g: RoleGroupRow,
+  csrf: string,
+  options: RoleGroupRoleOption[],
+): string {
+  const choices = options
+    .filter((r) => r.lock === null && !r.taken)
+    .map(
+      (r) =>
+        `<option value="${escapeHtml(r.id)}">@${escapeHtml(r.name)}</option>`,
+    )
+    .join("");
+  const recreate = g.gateOnly
+    ? ""
+    : `<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="inline-form">${csrf}<input type="hidden" name="mode" value="recreate"><button type="submit" class="btn">Create a new role</button></form>`;
+  return `<div class="notice warn" role="status"><strong>Unlinked:</strong> the Discord role${g.lostRoleId ? ` <span class="mono">${escapeHtml(g.lostRoleId)}</span>` : ""} was deleted. KoolBot does not recreate it on its own.
+${recreate}
+<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="inline-form">${csrf}<input type="hidden" name="mode" value="link"><label>Link another role <select name="roleId" required><option value="">Choose…</option>${choices}</select></label> <button type="submit" class="btn">Link</button></form></div>`;
+}
+
 function roleCell(g: RoleGroupRow): string {
+  if (g.unlinked) {
+    return `<span class="tag tag-warn">unlinked: role deleted</span>`;
+  }
   if (g.roleId === null) {
     return `<span class="tag tag-info">new role — created on apply</span>`;
   }
@@ -117,7 +174,7 @@ function roleCell(g: RoleGroupRow): string {
   return `${name} <span class="mono muted">${escapeHtml(g.roleId)}</span> ${badges}`;
 }
 
-function editForm(g: RoleGroupRow, csrf: string): string {
+function editForm(g: RoleGroupRow, csrf: string, globalPolicy: string): string {
   const locked = g.gateOnly || g.roleLock !== null;
   return `<details><summary>Edit</summary>
 <form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/edit" class="stack">
@@ -134,6 +191,10 @@ ${
 ${permissionChecks(g.permissions)}</fieldset>
 <label>Colour <input type="text" name="colour" value="${escapeHtml(formatColour(g.colour))}" placeholder="#RRGGBB (empty = leave as is)" maxlength="7"></label>`
 }
+<label>When its Discord role changes <select name="syncPolicy"><option value=""${g.syncPolicy === null ? " selected" : ""}>Use the global setting (${escapeHtml(POLICY_LABELS[resolvePolicy({ syncPolicy: null }, globalPolicy)] ?? globalPolicy)})</option>${ROLE_GROUP_SYNC_POLICIES.map(
+    (p) =>
+      `<option value="${p}"${g.syncPolicy === p ? " selected" : ""}>${escapeHtml(POLICY_LABELS[p])}</option>`,
+  ).join("")}</select></label>
 <button type="submit" class="btn btn-primary">Save group</button>
 </form></details>`;
 }
@@ -176,11 +237,11 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
       return `<tr>
 <td>${i + 1}</td>
 <td><strong>${escapeHtml(g.name)}</strong></td>
-<td>${roleCell(g)}</td>
+<td>${roleCell(g)}${driftCell(g)}${g.unlinked ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
 <td>${g.memberCount === null ? `<span class="muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>
 <td>${move("up", i === 0)} ${move("down", i === last)}</td>
-<td>${editForm(g, csrf)} ${deleteForm(g, csrf)}</td>
+<td>${editForm(g, csrf, props.globalPolicy)} ${deleteForm(g, csrf)}</td>
 </tr>`;
     })
     .join("");
@@ -246,12 +307,116 @@ function renderPlan(props: RoleGroupsPageProps, csrf: string): string {
   return `${extra}${bots}${renderAdoptionDiff(props.plan)}${form}`;
 }
 
+function renderAdminSync(props: RoleGroupsPageProps): string {
+  if (props.membersUnavailable) {
+    return `<div class="notice warn" role="status">Administrators can't be checked: the Server Members intent is off, so the member list is unavailable.</div>`;
+  }
+  const report = props.adminReport;
+  if (!report) {
+    return `<p class="muted">No admin group with a role is defined, so there is nothing to sync. The server owner counts as admin for web sign-in on their own, and nobody is flagged.</p>`;
+  }
+  const roleName = (id: string): string =>
+    escapeHtml(props.roleNames[id] ?? id);
+  const bots = report.bots.length
+    ? `<h3>Bots with Administrator (${report.bots.length})</h3>
+<p class="muted">Bots are never counted as out-of-group administrators and are never touched. Consider reducing each to the permissions it actually needs.</p>
+<ul>${report.bots
+        .map(
+          (b) =>
+            `<li>${escapeHtml(b.name)}${b.self ? " (KoolBot)" : ""} <span class="muted">via ${b.viaRoleIds.map(roleName).join(", ")}</span></li>`,
+        )
+        .join("")}</ul>`
+    : "";
+  if (report.humans.length === 0) {
+    return `<p class="muted">Everyone with Administrator is in the admin group (or is the server owner).</p>${bots}`;
+  }
+  const viaRoles = [...new Set(report.humans.flatMap((h) => h.viaRoleIds))];
+  return `<p>${report.humans.length} member(s) hold Administrator through a role outside the admin group. Choose what to do, then review the plan: nothing is selected for you.</p>
+<form method="GET" action="/admin/role-groups/admin-fix" class="stack">
+<fieldset><legend>Move into the admin group (adds the admin role; removes nothing)</legend>${report.humans
+    .map(
+      (h) =>
+        `<label class="check"><input type="checkbox" name="move" value="${escapeHtml(h.id)}"> ${escapeHtml(h.name)} <span class="muted">via ${h.viaRoleIds.map(roleName).join(", ")}</span></label>`,
+    )
+    .join(" ")}</fieldset>
+<fieldset><legend>Or drop Administrator from the other role (edits the role for everyone in it)</legend>${viaRoles
+    .map(
+      (id) =>
+        `<label class="check"><input type="checkbox" name="drop" value="${escapeHtml(id)}"> @${roleName(id)}</label>`,
+    )
+    .join(" ")}
+<p class="muted">Integration-managed roles and KoolBot's own role can't be edited. You can't drop a role if that would remove your own Administrator access.</p></fieldset>
+<button type="submit" class="btn">Preview the plan</button>
+</form>${bots}`;
+}
+
+export interface AdminFixPageProps {
+  csrfToken: string;
+  remainingMs: number;
+  navFeatureStatus?: NavFeatureStatus;
+  plan: AdoptionPlan;
+  extraErrors: PlanIssue[];
+  moveIds: string[];
+  dropIds: string[];
+  /** Names of members who would lose Administrator and were not moved. */
+  losing: string[];
+}
+
+/** Preview of an out-of-group administrator fix (#1021), applied by POST. */
+export function renderAdminFixPage(props: AdminFixPageProps): string {
+  const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+  const errors = props.extraErrors.length
+    ? `<div class="card adoption-issues blockers"><h3>Needs attention (${props.extraErrors.length})</h3><ul>${props.extraErrors
+        .map(
+          (i) =>
+            `<li><span class="tag tag-off">${escapeHtml(i.code)}</span> ${escapeHtml(i.message)}</li>`,
+        )
+        .join("")}</ul></div>`
+    : "";
+  const losing = props.losing.length
+    ? `<div class="notice warn" role="status">${props.losing.length} member(s) lose Administrator and are not moved into the admin group: ${props.losing.map(escapeHtml).join(", ")}.</div>`
+    : "";
+  const applicable =
+    props.plan.errors.length === 0 &&
+    props.extraErrors.length === 0 &&
+    props.plan.operations.length > 0;
+  const hidden = [
+    ...props.moveIds.map(
+      (id) => `<input type="hidden" name="move" value="${escapeHtml(id)}">`,
+    ),
+    ...props.dropIds.map(
+      (id) => `<input type="hidden" name="drop" value="${escapeHtml(id)}">`,
+    ),
+  ].join("");
+  const form = applicable
+    ? `<form method="POST" action="/admin/role-groups/admin-fix/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first so it can be rolled back.');">${csrf}${hidden}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <a class="btn" href="/admin/role-groups">Back</a></form>`
+    : `<a class="btn" href="/admin/role-groups">Back</a>`;
+  const body = `
+<h1>Administrators outside the admin group</h1>
+<p class="subtitle">Review what would change in Discord. Nothing is written until you apply, and a snapshot is saved first.</p>
+${errors}${losing}${renderAdoptionDiff(props.plan)}${form}`;
+  return renderAdminPage({
+    title: "Role Groups",
+    active: "/admin/role-groups",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
 const JOB_SCRIPT = (jobId: string): string =>
   `(function(){var id=${JSON.stringify(jobId)};var el=document.getElementById('rg-job');` +
   "function tick(){fetch('/admin/role-groups/job/'+encodeURIComponent(id),{credentials:'same-origin'})" +
   ".then(function(r){return r.json()}).then(function(j){" +
   "el.textContent=j.text;if(j.status==='running'){setTimeout(tick,1500)}else{setTimeout(function(){location.href='/admin/role-groups'},1500)}})" +
   ".catch(function(){el.textContent='Lost contact with the bot; reload to see the result.'})}tick()})();";
+
+function renderDriftSummary(props: RoleGroupsPageProps): string {
+  const drifted = props.groups.filter((g) => g.drift.length > 0 || g.unlinked);
+  if (drifted.length === 0) return "";
+  return `<div class="notice warn" role="status"><strong>${drifted.length} group(s) differ from Discord.</strong> Sync policy: ${escapeHtml(POLICY_LABELS[props.globalPolicy] ?? props.globalPolicy)}. Changes made in Discord are shown per group below; fix them by applying the plan, or set a group's policy to adopt or enforce.</div>`;
+}
 
 export function renderRoleGroupsPage(props: RoleGroupsPageProps): string {
   const csrf = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
@@ -267,10 +432,16 @@ ${job}
   <h2>Groups</h2>
   ${renderGroups(props, csrf)}
 </div>
+${renderDriftSummary(props)}
 <div class="card">
   <h2>Plan</h2>
   <p class="muted">Saving a group only records what you want. This is what applying would change in Discord: nothing is written until you apply, and every apply is snapshotted.</p>
   ${renderPlan(props, csrf)}
+</div>
+<div class="card">
+  <h2>Administrators and the admin group</h2>
+  <p class="muted">The group flagged <code>admin</code> carries Discord's Administrator permission. Applying the plan adds it to that role if it is missing. Web sign-in accepts either the admin group or Administrator.</p>
+  ${renderAdminSync(props)}
 </div>
 <div class="card">
   <h2>Add a group</h2>

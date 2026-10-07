@@ -1,5 +1,6 @@
 import { describe, it, expect } from "@jest/globals";
 import {
+  renderAdminFixPage,
   renderRoleGroupsPage,
   type RoleGroupRow,
   type RoleGroupsPageProps,
@@ -18,9 +19,15 @@ const row = (over: Partial<RoleGroupRow> = {}): RoleGroupRow => ({
   gateOnly: false,
   createdAt: new Date(),
   roleName: "Moderator",
+  unlinked: false,
+  lostRoleId: null,
+  recreateRequestedAt: null,
+  syncPolicy: null,
+  driftSignature: null,
   roleMissing: false,
   memberCount: 3,
   roleLock: null,
+  drift: [],
   ...over,
 });
 
@@ -51,6 +58,10 @@ const props = (
   extraErrors: [],
   botScanUnavailable: false,
   botsMissing: 0,
+  adminReport: null,
+  membersUnavailable: false,
+  roleNames: {},
+  globalPolicy: "flag",
   ...over,
 });
 
@@ -188,5 +199,177 @@ describe("renderRoleGroupsPage", () => {
     );
     expect(job).toContain('id="rg-job"');
     expect(job).toContain("11111111-1111-1111-1111-111111111111");
+  });
+});
+
+describe("sync with Discord (#1021)", () => {
+  it("shows drift badges per group and a summary notice", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        groups: [
+          row({
+            drift: [
+              {
+                groupId: "g1",
+                groupName: "Mods",
+                kind: "permissions",
+                detail: "Permissions in Discord differ <b>.",
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(html).toContain("1 group(s) differ from Discord");
+    expect(html).toContain("permissions");
+    expect(html).toContain("differ &lt;b&gt;");
+    expect(html).not.toContain("differ <b>");
+  });
+
+  it("is quiet when nothing drifted", () => {
+    expect(renderRoleGroupsPage(props())).not.toContain("differ from Discord");
+  });
+
+  it("shows an unlinked group with re-link choices, and no silent recreate", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        groups: [
+          row({
+            roleId: null,
+            roleName: null,
+            unlinked: true,
+            lostRoleId: "r-old",
+            memberCount: null,
+          }),
+        ],
+        roleOptions: [
+          { id: "r5", name: "Free", memberCount: 1, lock: null, taken: false },
+          { id: "r6", name: "Taken", memberCount: 1, lock: null, taken: true },
+          {
+            id: "r7",
+            name: "Top",
+            memberCount: 1,
+            lock: "hierarchy",
+            taken: false,
+          },
+        ],
+      }),
+    );
+    expect(html).toContain("unlinked: role deleted");
+    expect(html).toContain("r-old");
+    expect(html).toContain("does not recreate it on its own");
+    expect(html).toContain('name="mode" value="recreate"');
+    expect(html).toContain('<option value="r5">@Free</option>');
+    expect(html).not.toContain('<option value="r6">');
+    expect(html).not.toContain('<option value="r7">');
+    expect(html).not.toContain("created on apply");
+  });
+
+  it("offers no recreate for an unlinked gate-only group", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        groups: [row({ roleId: null, unlinked: true, gateOnly: true })],
+      }),
+    );
+    expect(html).not.toContain('value="recreate"');
+    expect(html).toContain('value="link"');
+  });
+
+  it("lets a group pick its sync policy, defaulting to the global one", () => {
+    const html = renderRoleGroupsPage(
+      props({
+        groups: [row({ syncPolicy: "adopt" })],
+        globalPolicy: "enforce",
+      }),
+    );
+    expect(html).toContain('name="syncPolicy"');
+    expect(html).toContain("Use the global setting (Enforce");
+    expect(html).toMatch(/<option value="adopt" selected>/);
+  });
+
+  describe("administrators and the admin group", () => {
+    const report = {
+      humans: [{ id: "u1", name: "Bob <b>", viaRoleIds: ["legacy"] }],
+      bots: [
+        { id: "kool", name: "KoolBot", viaRoleIds: ["bots"], self: true },
+        { id: "b2", name: "Music", viaRoleIds: ["bots"] },
+      ],
+    };
+
+    it("skips the report without an admin group and says why", () => {
+      const html = renderRoleGroupsPage(props());
+      expect(html).toContain("nothing to sync");
+      expect(html).not.toContain("admin-fix");
+    });
+
+    it("says so when the member list is unavailable", () => {
+      const html = renderRoleGroupsPage(props({ membersUnavailable: true }));
+      expect(html).toContain("Server Members intent is off");
+    });
+
+    it("lists out-of-group humans unchecked, and bots apart", () => {
+      const html = renderRoleGroupsPage(
+        props({
+          adminReport: report,
+          roleNames: { legacy: "Old admins", bots: "Bots" },
+        }),
+      );
+      expect(html).toContain('action="/admin/role-groups/admin-fix"');
+      expect(html).toContain('name="move" value="u1"');
+      expect(html).toContain('name="drop" value="legacy"');
+      expect(html).toContain("Bob &lt;b&gt;");
+      expect(html).not.toMatch(/name="(move|drop)"[^>]*checked/);
+      expect(html).toContain("Bots with Administrator (2)");
+      expect(html).toContain("(KoolBot)");
+      expect(html).not.toContain('name="move" value="kool"');
+      expect(html).not.toContain('name="drop" value="bots"');
+    });
+
+    it("confirms when everyone is in the group", () => {
+      const html = renderRoleGroupsPage(
+        props({ adminReport: { humans: [], bots: [] } }),
+      );
+      expect(html).toContain(
+        "Everyone with Administrator is in the admin group",
+      );
+    });
+  });
+});
+
+describe("renderAdminFixPage", () => {
+  const p = (over = {}) => ({
+    csrfToken: "tok",
+    remainingMs: 1000,
+    plan: plan() as NonNullable<RoleGroupsPageProps["plan"]>,
+    extraErrors: [],
+    moveIds: ["u1"],
+    dropIds: ["legacy"],
+    losing: [],
+    ...over,
+  });
+
+  it("previews the plan and offers apply with the choices carried over", () => {
+    const html = renderAdminFixPage(p());
+    expect(html).toContain('action="/admin/role-groups/admin-fix/apply"');
+    expect(html).toContain('name="planId" value="plan-1"');
+    expect(html).toContain('name="move" value="u1"');
+    expect(html).toContain('name="drop" value="legacy"');
+    expect(html).toContain('name="_csrf" value="tok"');
+  });
+
+  it("offers no apply when there are blocking problems", () => {
+    const html = renderAdminFixPage(
+      p({
+        extraErrors: [{ code: "admin-lockout", message: "Your own access" }],
+      }),
+    );
+    expect(html).toContain("Your own access");
+    expect(html).not.toContain("admin-fix/apply");
+  });
+
+  it("names members who would lose Administrator", () => {
+    const html = renderAdminFixPage(p({ losing: ["Bob <b>"] }));
+    expect(html).toContain("1 member(s) lose Administrator");
+    expect(html).toContain("Bob &lt;b&gt;");
   });
 });

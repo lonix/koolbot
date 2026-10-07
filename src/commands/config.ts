@@ -4,7 +4,7 @@ import {
   PermissionFlagsBits,
 } from "discord.js";
 import {
-  invokerIsAdmin,
+  invokerIsAdminOrGroup,
   runWebSignin,
 } from "../services/web-signin-launcher.js";
 
@@ -38,8 +38,8 @@ export async function execute(
         `This link is single-use and expires in about ${ttlMinutes} minute(s). ` +
         `If you did not run \`/config\`, ignore this message.`,
     },
-    () =>
-      invokerIsAdmin(interaction.member)
+    async () =>
+      (await invokerIsAdminOrGroup(interaction))
         ? null
         : "`/config` is for administrators. Use `/me` to open your personal settings.",
   );

@@ -4,6 +4,7 @@ import {
   ICommandPermission,
 } from "../models/command-permissions.js";
 import { ConfigService } from "./config-service.js";
+import { RoleGroupService } from "./role-group-service.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
 
@@ -255,7 +256,15 @@ export class PermissionsService {
       // Bypass the member cache: without the GuildMembers intent it is not
       // refreshed when roles change, so a demoted admin could keep passing.
       const member = await guild.members.fetch({ user: userId, force: true });
-      const value = member.permissions.has("Administrator");
+      // The `admin` role group counts as well (#1021): with sync on it
+      // carries Administrator, so the two agree; with sync off a member of
+      // the group still gets in. The group check fails closed to the
+      // Administrator bit alone if the groups can't be read.
+      const value =
+        member.permissions.has("Administrator") ||
+        (await RoleGroupService.getInstance()
+          .memberHasCapability(member, "admin")
+          .catch(() => false));
       // Short TTL so each page load does not cost a REST call, while a
       // demotion still takes effect within seconds.
       this.adminCheckCache.set(cacheKey, {

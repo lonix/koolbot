@@ -1122,6 +1122,42 @@ every feature keeps its current behaviour.
   explicit approval (the form shows its member count), and is refused while a feature such as
   Leaderboard Roles or Reaction Roles still uses the role.
 
+- **Staying in sync with Discord (#1021).** People can still rename, re-permission, move or delete
+  a group's role in Discord. KoolBot notices (role edit and delete events, plus a periodic
+  reconcile that catches changes made while the bot was offline) and shows the **drift** on each
+  group: *permissions* (only where the group sets a permission set), *name* (the role no longer
+  carries the name it was linked or created with), *position* (relative order against rank, so
+  adding an unrelated role never counts), and *deleted*. What happens next is the **sync policy**:
+  `adoption.role_groups.sync_policy`, overridable per group on its edit form.
+  - **Flag only** (default): show it and post it to the `core.role_groups.*` log channel, once per
+    change. Nothing else happens; applying the plan restores the definition when you want it.
+  - **Adopt**: the group follows Discord (permissions, tracked name, rank order). Database only.
+  - **Enforce**: the definition is re-applied through the adoption engine, so it is planned,
+    snapshotted and audited like a manual apply. It restores what you defined and never widens
+    access by itself. If an enforce plan can't be applied (a locked role, the bot can't grant a
+    permission) or fails, that group drops back to flag-only and stays there, so nothing retries
+    in a loop.
+  - Sync pauses while an adoption apply or rollback is running, so the engine's own edits are
+    never mistaken for drift. Turn the periodic job off or change its schedule with
+    `adoption.role_groups.reconcile_enabled` / `reconcile_cron`.
+- **A deleted role unlinks its group.** The group keeps its definition, is marked *unlinked*, and an
+  alert is logged. It is never silently recreated: on the page you choose **Create a new role** (the
+  next plan creates it) or **Link another role**. Only the *enforce* policy recreates it on its own,
+  and never for a gate-only group.
+- **Admin group and Administrator.** The group flagged `admin` carries Discord's Administrator
+  permission: the plan adds it to the role when missing (previewed like any change). The
+  **Administrators and the admin group** card lists members who hold Administrator through *another*
+  role. Pick members to **move into the admin group** (adds the role, removes nothing) and/or roles
+  to **drop Administrator from**; nothing is pre-selected, and you review a plan before applying it.
+  Managed roles and KoolBot's own role are never edited, and a drop that would remove your own
+  Administrator access is blocked. Bots (KoolBot included) are never counted as out-of-group
+  administrators; they're listed apart as "Bots with Administrator" so you can reduce them to the
+  permissions they need. With no admin group the report is skipped (the server owner counts as admin
+  on their own), and without the Server Members intent the card says the member list is unavailable.
+- **Web sign-in accepts either.** An admin session (and `/config`) is allowed for members with the
+  Administrator permission *or* in the admin group, and always for the server owner. If the groups
+  can't be read it falls back to the Administrator permission alone.
+
 Every write is audited. There is no slash command for this page: role groups are admin
 configuration and live in the Web UI only.
 

@@ -44,6 +44,7 @@ jest.unstable_mockModule("../../src/models/role-group.js", () => ({
       ) => {
         const doc = store.find((d) => matches(d, f));
         if (doc) Object.assign(doc, u.$set);
+        return { modifiedCount: doc ? 1 : 0 };
       },
     ),
     deleteOne: jest.fn(async (f: Record<string, unknown>) => {
@@ -304,6 +305,90 @@ describe("writes", () => {
   });
 });
 
+describe("sync with Discord (#1021)", () => {
+  it("marks a group unlinked when its role is gone, once", async () => {
+    const g = await svc.create(G, {
+      name: "Mods",
+      roleId: "r1",
+      roleName: "M",
+    });
+    if (!g.ok) throw new Error("setup");
+    expect(await svc.markUnlinked(G, g.group.id, "wrong")).toBe(false);
+    expect(await svc.markUnlinked(G, g.group.id, "r1")).toBe(true);
+    expect(await svc.get(G, g.group.id)).toMatchObject({
+      roleId: null,
+      unlinked: true,
+      lostRoleId: "r1",
+    });
+    expect(await svc.markUnlinked(G, g.group.id, "r1")).toBe(false);
+  });
+
+  it("asks for a new role only for an unlinked, editable group", async () => {
+    const a = await svc.create(G, { name: "A", roleId: "r1" });
+    const b = await svc.create(G, { name: "B", roleId: "r2", gateOnly: true });
+    if (!a.ok || !b.ok) throw new Error("setup");
+    expect(await svc.requestRecreate(G, a.group.id)).toBe(false);
+    await svc.markUnlinked(G, a.group.id, "r1");
+    await svc.markUnlinked(G, b.group.id, "r2");
+    expect(await svc.requestRecreate(G, b.group.id)).toBe(false);
+    expect(await svc.requestRecreate(G, a.group.id)).toBe(true);
+    const after = await svc.get(G, a.group.id);
+    expect(after).toMatchObject({ unlinked: false, roleId: null });
+    expect(after?.recreateRequestedAt).toBeInstanceOf(Date);
+  });
+
+  it("re-links an unlinked group to another role, but not one that is taken", async () => {
+    const a = await svc.create(G, { name: "A", roleId: "r1" });
+    await svc.create(G, { name: "B", roleId: "r2" });
+    if (!a.ok) throw new Error("setup");
+    expect((await svc.relinkTo(G, a.group.id, "r9", "N")).ok).toBe(false);
+    await svc.markUnlinked(G, a.group.id, "r1");
+    expect((await svc.relinkTo(G, a.group.id, "r2", "N")).ok).toBe(false);
+    const ok = await svc.relinkTo(G, a.group.id, "r9", "Nine");
+    expect(ok.ok && ok.group).toMatchObject({
+      roleId: "r9",
+      roleName: "Nine",
+      unlinked: false,
+      lostRoleId: null,
+      createdByKoolbot: false,
+    });
+  });
+
+  it("linking a created role clears the unlinked state and tracks its name", async () => {
+    const g = await svc.create(G, { name: "New" });
+    if (!g.ok) throw new Error("setup");
+    await svc.linkRole(G, g.group.id, "r42", true, "New");
+    expect(await svc.get(G, g.group.id)).toMatchObject({
+      roleId: "r42",
+      roleName: "New",
+      unlinked: false,
+    });
+  });
+
+  it("applies adopted values, a per-group policy and the drift signature", async () => {
+    const g = await svc.create(G, {
+      name: "A",
+      roleId: "r1",
+      permissions: "1",
+    });
+    if (!g.ok) throw new Error("setup");
+    await svc.applyAdopted(G, [
+      { groupId: g.group.id, set: { permissions: "4", rank: 7 } },
+    ]);
+    await svc.setSyncPolicy(G, g.group.id, "adopt");
+    await svc.setDriftSignature(G, g.group.id, "sig");
+    expect(await svc.get(G, g.group.id)).toMatchObject({
+      permissions: "4",
+      rank: 7,
+      syncPolicy: "adopt",
+      driftSignature: "sig",
+    });
+    await svc.setSyncPolicy(G, g.group.id, null);
+    expect((await svc.get(G, g.group.id))?.syncPolicy).toBeNull();
+    await svc.applyAdopted(G, []);
+  });
+});
+
 describe("scanGuildRoles", () => {
   const roleObj = (id: string, position: number, managed = false) => ({
     id,
@@ -315,6 +400,7 @@ describe("scanGuildRoles", () => {
   });
   const memberObj = (id: string, bot: boolean, roleIds: string[]) => ({
     id,
+    displayName: id,
     user: { bot },
     roles: { cache: new Map(roleIds.map((r) => [r, {}])) },
   });
@@ -387,6 +473,30 @@ describe("scanGuildRoles", () => {
     expect(botIds).toEqual(["b1"]);
     expect(scanned.otherBotIds).toEqual(["b1"]);
     expect(scanned.memberRoles).toEqual({ b1: ["r1"] });
+  });
+
+  it("lists every member's roles when members are needed (#1021)", async () => {
+    const scan = await scanGuildRoles(makeGuild(), "admin", [], false, true);
+    expect(scan.members).toEqual([
+      { id: "kool", name: "kool", bot: true, roleIds: ["rBot"] },
+      { id: "b1", name: "b1", bot: true, roleIds: ["r1"] },
+      { id: "h1", name: "h1", bot: false, roleIds: [] },
+    ]);
+    expect(scan.scanned.memberRoles).toMatchObject({ h1: [], b1: ["r1"] });
+    expect(scan.botIds).toEqual(["b1"]);
+    const none = await scanGuildRoles(makeGuild(), "admin", [], false);
+    expect(none.members).toBeNull();
+  });
+
+  it("reports no member list when it can't be read", async () => {
+    const scan = await scanGuildRoles(
+      makeGuild({ membersFail: true }),
+      "admin",
+      [],
+      false,
+      true,
+    );
+    expect(scan.members).toBeNull();
   });
 
   it("degrades when members or counts can't be read", async () => {

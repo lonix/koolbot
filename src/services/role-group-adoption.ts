@@ -4,9 +4,18 @@ import { AdoptionSnapshot } from "../models/adoption-snapshot.js";
 import {
   planAdoption,
   type AdoptionPlan,
+  type DesiredState,
   type PlanIssue,
 } from "./server-adoption-planner.js";
 import { buildDesiredState } from "./role-group-plan.js";
+import {
+  buildAdminFixDesired,
+  detectDrift,
+  findOutOfGroupAdministrators,
+  type AdminFixChoice,
+  type AdminReport,
+  type DriftItem,
+} from "./role-group-sync.js";
 import {
   RoleGroupService,
   scanGuildRoles,
@@ -32,6 +41,12 @@ export interface GroupPlan {
   extraErrors: PlanIssue[];
   /** Bot enumeration needs the GuildMembers intent; set when it was unavailable. */
   botScanUnavailable: boolean;
+  /** Differences between the groups and their roles (#1021). */
+  drift: DriftItem[];
+  /** Administrators outside the admin group; `null` = skipped (no admin group). */
+  adminReport: AdminReport | null;
+  /** An admin group exists but the member list couldn't be read. */
+  membersUnavailable: boolean;
 }
 
 export function planIsApplicable(p: GroupPlan): boolean {
@@ -45,8 +60,20 @@ export async function planRoleGroups(
 ): Promise<GroupPlan> {
   const groups = await RoleGroupService.getInstance().list(guild.id);
   const needBots = groups.some((g) => g.capabilities.includes("bot"));
-  const scan = await scanGuildRoles(guild, adminUserId, groups, needBots);
-  const { desired, issues } = buildDesiredState(groups, scan.scanned);
+  const adminRoleIds = adminGroupRoleIds(groups);
+  const needMembers = adminRoleIds.length > 0;
+  const scan = await scanGuildRoles(
+    guild,
+    adminUserId,
+    groups,
+    needBots,
+    needMembers,
+  );
+  // The plan makes the admin group's role carry Administrator (#1021); it is
+  // previewed and applied like any other change, never done on its own.
+  const { desired, issues } = buildDesiredState(groups, scan.scanned, {
+    ensureAdministrator: true,
+  });
   const plan = planAdoption(scan.scanned, desired, {
     approverId: adminUserId,
   });
@@ -56,7 +83,85 @@ export async function planRoleGroups(
     plan,
     extraErrors: issues,
     botScanUnavailable: needBots && scan.botIds === null,
+    drift: detectDrift(groups, scan.scanned.roles, guild.id),
+    adminReport:
+      needMembers && scan.members
+        ? findOutOfGroupAdministrators({
+            members: scan.members,
+            roles: scan.scanned.roles,
+            adminGroupRoleIds: adminRoleIds,
+            guildId: guild.id,
+            ownerId: scan.scanned.ownerId,
+            botUserId: scan.scanned.botUserId,
+          })
+        : null,
+    membersUnavailable: needMembers && scan.members === null,
   };
+}
+
+/** Role ids behind the groups that carry the `admin` capability. */
+export function adminGroupRoleIds(groups: readonly RoleGroupView[]): string[] {
+  return groups.flatMap((g) =>
+    g.capabilities.includes("admin") && g.roleId && !g.unlinked && !g.gateOnly
+      ? [g.roleId]
+      : [],
+  );
+}
+
+/**
+ * Plan resolving out-of-group administrators (#1021): add the chosen humans
+ * to the admin group's role (additive), and/or drop `Administrator` from the
+ * chosen other roles (an edit, snapshotted). Nothing is pre-selected by the
+ * UI, and unsafe choices (managed or KoolBot's own roles, or one that would
+ * lock the invoking admin out) come back as errors.
+ */
+export async function planAdminFix(
+  guild: Guild,
+  adminUserId: string,
+  choice: AdminFixChoice,
+): Promise<{
+  plan: AdoptionPlan;
+  extraErrors: PlanIssue[];
+  report: AdminReport | null;
+}> {
+  const groups = await RoleGroupService.getInstance().list(guild.id);
+  const adminRoles = adminGroupRoleIds(groups);
+  const scan = await scanGuildRoles(guild, adminUserId, groups, false, true);
+  const report =
+    scan.members && adminRoles.length > 0
+      ? findOutOfGroupAdministrators({
+          members: scan.members,
+          roles: scan.scanned.roles,
+          adminGroupRoleIds: adminRoles,
+          guildId: guild.id,
+          ownerId: scan.scanned.ownerId,
+          botUserId: scan.scanned.botUserId,
+        })
+      : null;
+  const extraErrors: PlanIssue[] = [];
+  let desired: DesiredState = {};
+  if (!report) {
+    extraErrors.push({
+      code: "no-report",
+      message:
+        adminRoles.length === 0
+          ? "There is no admin group with a role, so there is nothing to sync."
+          : "The member list couldn't be read (the Server Members intent is off).",
+    });
+  } else {
+    const built = buildAdminFixDesired(
+      choice,
+      report,
+      adminRoles[0],
+      scan.scanned,
+    );
+    desired = built.desired;
+    extraErrors.push(...built.issues);
+  }
+  const plan = planAdoption(scan.scanned, desired, {
+    approverId: adminUserId,
+  });
+  return { plan, extraErrors, report };
 }
 
 /**
@@ -124,7 +229,7 @@ export async function planRoleDeletion(
 export async function linkCreatedRoles(guildId: string): Promise<number> {
   const service = RoleGroupService.getInstance();
   const pending = (await service.list(guildId)).filter(
-    (g) => g.roleId === null && !g.gateOnly,
+    (g) => g.roleId === null && !g.gateOnly && !g.unlinked,
   );
   if (pending.length === 0) return 0;
   let linked = 0;
@@ -139,11 +244,29 @@ export async function linkCreatedRoles(guildId: string): Promise<number> {
     for (const group of pending) {
       const key = group.name.trim().toLowerCase();
       for (const snap of snapshots) {
+        // A role created before a recreate was requested can't be the one
+        // that was asked for (it is the one that was deleted, #1021).
+        if (
+          group.recreateRequestedAt &&
+          new Date(snap.createdAt as Date) < group.recreateRequestedAt
+        ) {
+          continue;
+        }
         const created = (
           snap.createdRoles as Array<{ roleId: string; name: string }>
-        ).find((r) => r.name.trim().toLowerCase() === key);
+        ).find(
+          (r) =>
+            r.name.trim().toLowerCase() === key &&
+            r.roleId !== group.lostRoleId,
+        );
         if (created) {
-          await service.linkRole(guildId, group.id, created.roleId, true);
+          await service.linkRole(
+            guildId,
+            group.id,
+            created.roleId,
+            true,
+            created.name,
+          );
           linked += 1;
           break;
         }

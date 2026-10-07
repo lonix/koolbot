@@ -225,7 +225,8 @@ export function createSessionMiddleware(
       // Revalidate against the command that issued the session (#1016):
       // `/config` for admin sessions, `/me` for user sessions. A user
       // session must not inherit an admin-only role gate on `/config`.
-      // Admin sessions additionally require the live Administrator bit:
+      // Admin sessions additionally require the live Administrator bit, or
+      // membership of the `admin` role group (#1021; the owner always counts):
       // `/config` is admin-only, but `checkCommandPermission` is default-open
       // for a non-admin when no role gate is configured, so a session issued
       // before Administrator was removed would otherwise stay valid.

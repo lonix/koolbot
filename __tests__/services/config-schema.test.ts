@@ -562,6 +562,14 @@ describe("Config Schema", () => {
       // a cross-cutting operator-visibility feature, on by default so fresh
       // installs get historical command analytics out of the box.
       "monitoring.metrics_persistence.enabled": true,
+      // Role group sync (#1021) — periodic comparison of role groups with
+      // their Discord roles. Groups are opt-in (none exist by default), so
+      // this does nothing on a fresh install; the policy defaults to
+      // flag-only, which never writes to Discord.
+      "adoption.role_groups.reconcile_enabled": true,
+      // Role group drift log (#1021) — same opt-in posture as the other
+      // log categories.
+      "core.role_groups.enabled": false,
     };
 
     // Parent feature each rule-2 (default-true) sub-feature is gated by.

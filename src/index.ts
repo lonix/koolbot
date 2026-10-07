@@ -39,6 +39,7 @@ import { VersionCheckService } from "./services/version-check-service.js";
 import { ModerationLogCleanupService } from "./services/moderation-log-cleanup.js";
 import { NameHistoryCleanupService } from "./services/name-history-cleanup.js";
 import { AdoptionSnapshotCleanupService } from "./services/adoption-snapshot-cleanup.js";
+import { RoleGroupSyncService } from "./services/role-group-sync-service.js";
 import { NameHistoryService } from "./services/name-history-service.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
@@ -519,6 +520,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         moderationCaseReviewService.destroy();
         nameHistoryCleanup?.destroy();
         adoptionSnapshotCleanup?.destroy();
+        RoleGroupSyncService.getInstance(client).destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
         pollParticipationTracker.destroy();
@@ -802,6 +804,15 @@ async function initializeServices(): Promise<void> {
     adoptionSnapshotCleanup =
       AdoptionSnapshotCleanupService.getInstance(client);
     await adoptionSnapshotCleanup.start();
+
+    // Role group sync (#1021): periodic reconcile against Discord. Role
+    // edit/delete events (below) feed the same service. Gates on
+    // `adoption.role_groups.reconcile_enabled`.
+    const roleGroupSync = RoleGroupSyncService.getInstance(client);
+    await roleGroupSync.start();
+    void roleGroupSync.runNow().catch((error: unknown) => {
+      logger.error("Initial role group reconcile failed:", error);
+    });
     if (
       await ConfigService.getInstance()
         .getBoolean("namehistory.enabled", false)
@@ -1162,6 +1173,25 @@ client.on(Events.GuildRoleDelete, async (role) => {
     await reactionRoleService.handleRoleDelete(role);
   } catch (error) {
     logger.error("Error handling roleDelete:", error);
+  }
+  // Role group drift (#1021): its own try so one failing handler can't skip
+  // the other. Only a role behind a group schedules a (debounced) reconcile.
+  try {
+    await RoleGroupSyncService.getInstance(client).handleRoleDelete(role);
+  } catch (error) {
+    logger.error("Error handling roleDelete for role group sync:", error);
+  }
+});
+
+client.on(Events.GuildRoleUpdate, async (oldRole, newRole) => {
+  recordDiscordEvent("roleUpdate");
+  try {
+    await RoleGroupSyncService.getInstance(client).handleRoleUpdate(
+      oldRole,
+      newRole,
+    );
+  } catch (error) {
+    logger.error("Error handling roleUpdate:", error);
   }
 });
 
