@@ -566,14 +566,20 @@ export function coerceConfigValue(
  * server skips exactly the dependents the client greyed out (#485, #1068).
  * Returns null when the section has no such key.
  */
-export function findSectionMasterKey(keys: string[]): string | null {
+export function findSectionMasterKey(
+  keys: string[],
+  sectionCategory?: string,
+): string | null {
   return pickCascadeMasterKey(
     keys.map((key) => ({
       key,
       isBoolean:
         typeof defaultConfig[key as keyof typeof defaultConfig] === "boolean",
+      // The posted section is the one the client grouped by (the stored row's
+      // category), so prefer it over schema metadata to pick the same master.
       category:
-        settingsMetadata[key as keyof typeof settingsMetadata]?.category ??
+        sectionCategory ||
+        settingsMetadata[key as keyof typeof settingsMetadata]?.category ||
         key.split(".")[0],
     })),
   );

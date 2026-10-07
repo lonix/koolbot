@@ -602,6 +602,15 @@ describe("findSectionMasterKey foreign toggles (#1076 review)", () => {
     ).toBe("namehistory.enabled");
   });
 
+  it("uses the posted section category, matching the client's grouping (#1076 review)", () => {
+    // A stored row can sit in a section other than its schema category; the
+    // server must agree with the client about which section the key is in.
+    expect(findSectionMasterKey(["quotes.enabled"], "core")).toBeNull();
+    expect(findSectionMasterKey(["quotes.enabled"], "quotes")).toBe(
+      "quotes.enabled",
+    );
+  });
+
   it("has no master when only the foreign toggle is present", () => {
     expect(findSectionMasterKey(["aka.enabled"])).toBeNull();
   });

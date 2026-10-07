@@ -403,7 +403,7 @@ export function createSettingsRouter(client: Client): Router {
       // untouched, so disabling a feature can't silently clobber its
       // sub-settings (an absent — or cleared — number field would otherwise
       // be rejected, an absent string blanked).
-      const masterKey = noCascade ? null : findSectionMasterKey(keys);
+      const masterKey = noCascade ? null : findSectionMasterKey(keys, category);
       const masterOff =
         masterKey !== null &&
         body[settingValueFieldName(masterKey)] !== "true" &&
