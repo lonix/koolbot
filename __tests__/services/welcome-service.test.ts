@@ -89,6 +89,14 @@ describe("renderWelcomeMessage substitution safety", () => {
     ).toBe("Hi {rules} @ Pat {user}");
   });
 
+  it("escapes backslashes without double-escaping", () => {
+    const out = renderWelcomeMessage("{username}", {
+      ...baseArgs,
+      displayName: "a\\*b\\[c",
+    });
+    expect(out).toBe("a\\\\\\*b\\\\\\[c");
+  });
+
   it("escapes Markdown in display and server names", () => {
     const out = renderWelcomeMessage("{username} / {server}", {
       ...baseArgs,

@@ -27,7 +27,9 @@ export interface WelcomePlaceholders {
  * masked-link brackets and mention syntax, which `escapeMarkdown` leaves alone.
  */
 function escapeName(text: string): string {
-  return escapeMarkdown(text).replace(/[[\]<]/g, "\\$&");
+  // Backslash, link brackets and mention syntax first; the library pass must
+  // not re-escape the backslashes added here.
+  return escapeMarkdown(text.replace(/[\\[\]<]/g, "\\$&"), { escape: false });
 }
 
 /**
