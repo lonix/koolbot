@@ -63,6 +63,7 @@ export const COMMAND_CONFIGS: readonly CommandConfig[] = [
   { name: "event", configKey: "events.enabled", file: "event" },
   { name: "lfg", configKey: "lfg.enabled", file: "lfg" },
   { name: "remind", configKey: "reminders.enabled", file: "remind" },
+  { name: "ticket", configKey: "tickets.enabled", file: "ticket" },
   { name: "warn", configKey: "moderation.enabled", file: "warn" },
   { name: "timeout", configKey: "moderation.enabled", file: "timeout" },
   { name: "ban", configKey: "moderation.enabled", file: "ban" },

@@ -783,13 +783,14 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
 | **Command Metrics**   | (new — per-command usage dashboard) + editable `monitoring.*` settings                              |
 | **Moderation**        | `/modlog` (server-wide; surfaces `/warn` entries) + editable `moderation.*` / log-channel settings  |
+| **Tickets**           | (new — `/ticket` overview: claim / close / reopen) + editable `tickets.*` settings                  |
 | **Bootstrap**         | (new — read-only env diagnostics)                                                                   |
 
 The sidebar groups the pages under three headings, in this order: **Info**
 (Dashboard, Bot Status, Database, Command Audit, Command Metrics, Moderation,
 Bootstrap), **Settings** (Settings, Permissions, Setup Wizard) and **Features**
 (Announcements, Birthdays, Events, Polls, Reaction Roles, Notices, Quotes, Voice
-Channels, Weekly Digest, Leaderboard Roles, Voice Analytics). Feature pages that
+Channels, Weekly Digest, Leaderboard Roles, Tickets, Voice Analytics). Feature pages that
 are switched off sort to the bottom of their group.
 
 The **Dashboard** has a **Version** card (#1029) that shows the running version
@@ -819,7 +820,7 @@ minute). The result is cached, so no page waits on GitHub. A failed check
 
 Feature pages (Announcements, Birthdays, Events, Polls, Reaction Roles,
 Notices, Quotes, Voice Channels, Weekly Digest, Leaderboard Roles, Moderation,
-Voice Analytics) are gated by their `<feature>.enabled` config key
+Tickets, Voice Analytics) are gated by their `<feature>.enabled` config key
 (`voicetracking.enabled` for Voice Analytics). When a feature is **off**, its sidebar link is
 still shown — greyed with an "off" badge — rather than hidden, so the page stays
 discoverable (#610);
@@ -981,7 +982,7 @@ because Rewind is a graceful aggregator that declares no `dependsOn`.
 The **Setup Wizard** (`/admin/wizard`) walks through the features you pick,
 one step each: voice channels, voice tracking, quotes, achievements, reaction
 roles, announcements, notices, polls, LFG, name history, moderation, events,
-weekly digest, birthdays, reminders and leaderboard roles. It renders each
+weekly digest, birthdays, reminders, tickets and leaderboard roles. It renders each
 step's fields through the
 same shared control renderer the Settings page uses (#702), so a channel /
 role / category key gets a real picker dropdown instead of a raw-ID text box,

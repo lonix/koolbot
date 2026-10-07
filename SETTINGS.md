@@ -44,6 +44,7 @@ Complete configuration reference for all KoolBot settings.
 - [Events](#-events)
 - [LFG (Looking for Group)](#-lfg-looking-for-group)
 - [Reminders](#-reminders)
+- [Tickets](#-tickets)
 - [Privacy & Data Export](#-privacy--data-export)
 - [Moderation](#-moderation)
 - [Reaction Roles](#-reaction-roles)
@@ -829,6 +830,32 @@ beyond the on/off switch and the per-member cap.
 - `0 0 * * 1` — Every Monday at midnight
 - `0 12 * * *` — Every day at noon
 - `*/30 * * * *` — Every 30 minutes
+
+---
+
+## 🎫 Tickets
+
+Member support tickets (#1004). `/ticket open` creates a private text channel
+that only the member and your **staff role** can see; staff claim and close it
+from Discord (`/ticket claim`, `/ticket close`) or the **`/admin/tickets`** Web
+UI page, which also lists open, claimed and closed tickets and can reopen one.
+Closing archives the channel (renamed `closed-…`, locked) — it is never
+deleted. See [COMMANDS.md](COMMANDS.md#ticket).
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `tickets.enabled` | `false` | Master switch — enables `/ticket` and the `/admin/tickets` page |
+| `tickets.staff_role_id` | `""` | Role that sees every ticket and may claim, close and reopen. **Required**: opening a ticket is refused while it is empty |
+| `tickets.category_id` | `""` | Category new ticket channels are created under. Empty creates them at the top level |
+| `tickets.transcript_on_close` | `true` | Post a plain-text message log into the channel when a ticket closes |
+
+**Notes:**
+
+- The bot needs **Manage Channels** and **Manage Roles** to create channels and
+  set their private permissions.
+- Tickets are a support record: they are not part of a member's self-service
+  data export or reset (the same stance as the moderation log), and a transcript
+  lives only in the ticket channel on your own server.
 
 ---
 
@@ -1623,6 +1650,13 @@ leave the graph in a broken state.
 
 - `reminders.enabled` (bool, default: false)
 - `reminders.max_pending` (number, default: 10)
+
+#### Tickets
+
+- `tickets.enabled` (bool, default: false)
+- `tickets.category_id` (category, default: "")
+- `tickets.staff_role_id` (role, default: "")
+- `tickets.transcript_on_close` (bool, default: true)
 
 #### Privacy & Data Export
 

@@ -139,6 +139,7 @@ Look for `WebUI mounted at /admin` to confirm the Web UI is live.
 - **🎪 Events** — Scheduled events with RSVPs and temporary voice channels
 - **🎮 Looking for Group** — Ad-hoc `/lfg` posts with a live roster
 - **⏰ Reminders** — Personal one-off reminders KoolBot DMs when due
+- **🎫 Support Tickets** — `/ticket open` creates a private help channel for a member and your staff
 - **🎂 Birthdays** — Timezone-aware birthday announcements
 - **🛡️ Moderation Log** — `/warn`, `/timeout`, `/ban` and a per-member history
 - **🙋 Member Self-Service** — `/me` for birthday, timezone, notifications, Rewind and privacy tools
@@ -164,6 +165,7 @@ commands always registered, and `/me` follows the Web UI):
 - `/event` — Browse server events (`list`); administrators schedule them with `create`, `cancel` and `start` (`events.enabled`)
 - `/lfg` — Post a "looking for group" call for a game right now (`lfg.enabled`)
 - `/remind` — Set personal one-off reminders KoolBot DMs when due (`reminders.enabled`)
+- `/ticket` — Open a private support ticket with staff; close it when done (`tickets.enabled`)
 - `/warn` — Record a moderation warning (`moderation.enabled`)
 - `/timeout` — Time a member out for any duration up to 28 days (`moderation.enabled`)
 - `/ban` — Ban a member and record it (`moderation.enabled`)
@@ -245,6 +247,7 @@ Web UI's Settings page once the bot is running.
 | **Events** | Scheduled events with RSVPs and temporary voice channels |
 | **LFG** | Ad-hoc "looking for group" posts with a live roster and Join buttons |
 | **Reminders** | Personal one-off `/remind` reminders, DM'd when due, with a per-member cap |
+| **Tickets** | Private support-ticket channels per member, staff claim/close, optional transcripts |
 | **Privacy** | Self-service data export: what KoolBot stores about a member, downloadable at `/me/privacy` |
 | **Reaction Roles** | Self-assignable role categories |
 | **Notices** | Server rules / game-server info / help posts |

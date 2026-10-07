@@ -5225,3 +5225,52 @@ describe("renderLeaderboardRolesPage (#985)", () => {
     expect(render({ tiers: [] })).toContain("No tiers configured yet");
   });
 });
+
+describe("renderTicketsPage (#1004)", () => {
+  const base = {
+    csrfToken: "tok",
+    remainingMs: 1000,
+    guildId: "g1",
+    enabled: true,
+    statusFilter: "",
+    statusOptions: ["open", "claimed", "closed"] as const,
+    total: 2,
+    page: 1,
+    pageSize: 50,
+  };
+  const row = (id: string, status: "open" | "claimed" | "closed") => ({
+    id,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    authorId: "u1",
+    authorLabel: "<b>Ola</b>",
+    channelId: "c1",
+    subject: "help <script>",
+    status,
+    claimedByLabel: null,
+    closedByLabel: null,
+    closedAt: null,
+  });
+
+  it("offers claim + close on an open ticket and reopen on a closed one", async () => {
+    const { renderTicketsPage } = await import("../../src/web/admin-views.js");
+    const html = renderTicketsPage({
+      ...base,
+      rows: [row("a".repeat(24), "open"), row("b".repeat(24), "closed")],
+    } as never);
+    expect(html).toContain(`/admin/tickets/${"a".repeat(24)}/claim`);
+    expect(html).toContain(`/admin/tickets/${"a".repeat(24)}/close`);
+    expect(html).toContain(`/admin/tickets/${"b".repeat(24)}/reopen`);
+    expect(html).not.toContain(`/admin/tickets/${"b".repeat(24)}/claim`);
+  });
+
+  it("escapes member-supplied text", async () => {
+    const { renderTicketsPage } = await import("../../src/web/admin-views.js");
+    const html = renderTicketsPage({
+      ...base,
+      rows: [row("a".repeat(24), "open")],
+    } as never);
+    expect(html).toContain("help &lt;script&gt;");
+    expect(html).toContain("&lt;b&gt;Ola&lt;/b&gt;");
+    expect(html).not.toContain("<b>Ola</b>");
+  });
+});

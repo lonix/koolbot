@@ -38,6 +38,7 @@ export const CONFIG_CATEGORIES = [
   "reactiontracking",
   "reminders",
   "rewind",
+  "tickets",
   "voicechannels",
   "voicetracking",
   "wizard", // Kept for backward compatibility; key removed but legacy rows may exist

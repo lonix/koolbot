@@ -122,6 +122,10 @@ export interface ConfigSchema {
   "lfg.voice_channel.enabled": boolean; // Attach a dynamic voice channel to each post
   "reminders.enabled": boolean;
   "reminders.max_pending": number; // Per-member cap on undelivered reminders
+  "tickets.enabled": boolean;
+  "tickets.category_id": string; // Category private ticket channels are created under
+  "tickets.staff_role_id": string; // Role that sees and handles every ticket
+  "tickets.transcript_on_close": boolean; // Attach a plain-text message log when a ticket closes
 
   // Self-service data export (#719)
   "privacy.enabled": boolean; // Gates the /me/privacy page and its export route
@@ -380,6 +384,10 @@ export const defaultConfig: ConfigSchema = {
   "lfg.voice_channel.enabled": true, // Still gated on voicechannels.enabled
   "reminders.enabled": false,
   "reminders.max_pending": 10,
+  "tickets.enabled": false,
+  "tickets.category_id": "",
+  "tickets.staff_role_id": "",
+  "tickets.transcript_on_close": true,
 
   // Self-service data export defaults (#719). Master gate off, rule 1 —
   // the /me/privacy page renders the standard "off" banner and the export
@@ -949,6 +957,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Reminders",
     description:
       "Personal one-off reminders members set for themselves with /remind. KoolBot DMs the reminder when it's due, falling back to the channel it was set in if the member's DMs are closed. Member self-service — the only admin control is the on/off switch and the per-member cap.",
+  },
+  tickets: {
+    title: "Tickets",
+    description:
+      "Member support tickets: /ticket open creates a private channel visible only to the member and your staff role, staff claim and close it from Discord or the /admin/tickets page, and closed tickets are archived with an optional transcript.",
   },
   privacy: {
     title: "Privacy",
@@ -1625,6 +1638,34 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     description:
       "Enable personal reminders and the /remind command. Members schedule their own one-off reminders; KoolBot DMs them when due and falls back to the channel the reminder was set in if DMs are closed.",
     category: "reminders",
+    type: "boolean",
+  },
+  "tickets.enabled": {
+    label: "Tickets enabled",
+    description:
+      "Enable member support tickets: the /ticket command opens a private channel only the member and your staff role can see, and the /admin/tickets page lists open and closed tickets. Also set the staff role; opening a ticket is refused until it is.",
+    category: "tickets",
+    type: "boolean",
+  },
+  "tickets.category_id": {
+    label: "Ticket channel category",
+    description:
+      "Discord category new ticket channels are created under. Leave empty to create them at the top level of the server.",
+    category: "tickets",
+    type: "category",
+  },
+  "tickets.staff_role_id": {
+    label: "Ticket staff role",
+    description:
+      "Role that can see every ticket channel and may claim, close and reopen tickets. Required: tickets are refused while it is empty, because a ticket nobody can see helps nobody.",
+    category: "tickets",
+    type: "role",
+  },
+  "tickets.transcript_on_close": {
+    label: "Save transcript on close",
+    description:
+      "When a ticket closes, post a plain-text log of its messages into the (now locked) ticket channel so staff can download it. The channel is archived, not deleted.",
+    category: "tickets",
     type: "boolean",
   },
   "reminders.max_pending": {

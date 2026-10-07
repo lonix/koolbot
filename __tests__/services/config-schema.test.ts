@@ -491,6 +491,7 @@ describe("Config Schema", () => {
       "aka.enabled": false,
       "namehistory.enabled": false,
       "reminders.enabled": false,
+      "tickets.enabled": false,
       "privacy.enabled": false,
 
       // ─── Sub-features that default off (auxiliary opt-ins) ──────────
