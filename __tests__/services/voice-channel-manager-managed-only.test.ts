@@ -39,6 +39,7 @@ type Row = {
   channelId: string;
   kind?: string;
   source?: string;
+  mainChannelId?: string;
 };
 
 /**
@@ -272,11 +273,14 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(permanent.delete).toHaveBeenCalled();
       expect(lobby.delete).not.toHaveBeenCalled();
       expect(occupied.delete).not.toHaveBeenCalled();
-      // The managed-set loader (projected find) and the migration are never
-      // consulted for the legacy sweep.
+      // The managed-set loader (projected find, no `kind` filter) and the
+      // migration are never consulted for the legacy sweep. The waiting-room
+      // restore (#1085) is a `kind`-filtered read and is expected.
       const stub = ManagedVoiceChannel as unknown as { find: jest.Mock };
       expect(
-        stub.find.mock.calls.filter((call) => call[1] !== undefined),
+        stub.find.mock.calls.filter(
+          (call) => call[1] !== undefined && call[0]?.kind === undefined,
+        ),
       ).toHaveLength(0);
       expect(ManagedVoiceMigration.findOne).not.toHaveBeenCalled();
     });
@@ -1084,6 +1088,109 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
 
       expect(managedStore.has(created.id)).toBe(false);
       expect((manager as any).pendingManagedChannels.size).toBe(0);
+    });
+  });
+
+  describe("waiting rooms survive a restart (issue #1085)", () => {
+    async function setupPair(
+      mainMembers: number,
+    ): Promise<{ main: any; waiting: any }> {
+      addChannel("lobby-id", "Lobby");
+      const main = addChannel("main-id", "🎮 Eve's Room", mainMembers);
+      trackAsManaged("main-id");
+      const waiting: any = await manager.createWaitingRoom(main, "owner-id");
+      expect(waiting).not.toBeNull();
+      return { main, waiting };
+    }
+
+    it("persists the main channel ID on the waiting-room row", async () => {
+      const { waiting } = await setupPair(1);
+      expect(managedStore.get(waiting.id)).toEqual(
+        expect.objectContaining({
+          kind: "waiting_room",
+          mainChannelId: "main-id",
+        }),
+      );
+    });
+
+    for (const managedOnly of [false, true]) {
+      const mode = managedOnly ? "managed-only" : "legacy";
+
+      it(`keeps an empty waiting room whose main channel is occupied (${mode})`, async () => {
+        settings["voicechannels.cleanup.managed_only"] = managedOnly;
+        markMigrated();
+        const { waiting } = await setupPair(1);
+
+        manager = newManager(); // restart
+        expect(manager.getWaitingRoom("main-id")).toBeUndefined();
+        await manager.initialize(GUILD_ID);
+
+        expect(waiting.delete).not.toHaveBeenCalled();
+        expect(managedStore.has(waiting.id)).toBe(true);
+        expect(manager.getWaitingRoom("main-id")).toBe(waiting.id);
+        expect(manager.getMainChannelForWaitingRoom(waiting.id)).toBe(
+          "main-id",
+        );
+      });
+
+      it(`removes a waiting room whose main channel is gone (${mode})`, async () => {
+        settings["voicechannels.cleanup.managed_only"] = managedOnly;
+        markMigrated();
+        const { main, waiting } = await setupPair(1);
+        guildChannels.delete(main.id);
+        category.children.cache.delete(main.id);
+
+        manager = newManager();
+        await manager.initialize(GUILD_ID);
+
+        expect(waiting.delete).toHaveBeenCalled();
+        expect(
+          manager.getMainChannelForWaitingRoom(waiting.id),
+        ).toBeUndefined();
+        expect(managedStore.has(waiting.id)).toBe(false);
+      });
+    }
+
+    it("treats rows without mainChannelId as before (empty waiting room swept)", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      markMigrated();
+      addChannel("lobby-id", "Lobby");
+      addChannel("main-id", "🎮 Eve's Room", 1);
+      const legacy = addChannel("wr-id", "⏳ Eve's Room Waiting");
+      managedStore.set("wr-id", {
+        guildId: GUILD_ID,
+        channelId: "wr-id",
+        kind: "waiting_room",
+        source: "created",
+      });
+
+      await manager.initialize(GUILD_ID);
+
+      expect(legacy.delete).toHaveBeenCalled();
+      expect(manager.getMainChannelForWaitingRoom("wr-id")).toBeUndefined();
+    });
+
+    it("restored waiting room notifies the owner on join", async () => {
+      const { waiting } = await setupPair(1);
+      manager = newManager();
+      waiting.members.set("w-1", { user: { bot: false } });
+      await manager.initialize(GUILD_ID);
+
+      expect(manager.getMainChannelForWaitingRoom(waiting.id)).toBe("main-id");
+    });
+
+    it("prunes the row when the waiting room itself no longer exists", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      markMigrated();
+      const { waiting } = await setupPair(1);
+      guildChannels.delete(waiting.id);
+      category.children.cache.delete(waiting.id);
+
+      manager = newManager();
+      await manager.initialize(GUILD_ID);
+
+      expect(managedStore.has(waiting.id)).toBe(false);
+      expect(manager.getWaitingRoom("main-id")).toBeUndefined();
     });
   });
 });

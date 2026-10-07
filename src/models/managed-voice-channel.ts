@@ -24,6 +24,11 @@ export interface IManagedVoiceChannel extends Document {
   channelId: string;
   kind: ManagedVoiceChannelKind;
   source: ManagedVoiceChannelSource;
+  /**
+   * For `kind: "waiting_room"` rows: the main channel the waiting room belongs
+   * to. Absent on rows written before #1085 (treated as "no relationship").
+   */
+  mainChannelId?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -42,6 +47,7 @@ const ManagedVoiceChannelSchema = new Schema(
       enum: ["created", "adopted"],
       default: "created",
     },
+    mainChannelId: { type: String },
   },
   { timestamps: true },
 );

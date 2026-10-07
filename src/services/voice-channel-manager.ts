@@ -265,7 +265,7 @@ export class VoiceChannelManager {
    */
   private pendingManagedChannels: Map<
     string,
-    { guildId: string; kind: ManagedVoiceChannelKind }
+    { guildId: string; kind: ManagedVoiceChannelKind; mainChannelId?: string }
   > = new Map();
 
   /** Persist that KoolBot created (or adopted) a channel, by ID. */
@@ -274,13 +274,22 @@ export class VoiceChannelManager {
     channelId: string,
     kind: ManagedVoiceChannelKind = "channel",
     source: ManagedVoiceChannelSource = "created",
+    mainChannelId?: string,
   ): Promise<boolean> {
     if (!guildId) return false;
     if (this.isDbReady()) {
       try {
         await ManagedVoiceChannel.updateOne(
           { channelId },
-          { $setOnInsert: { guildId, channelId, kind, source } },
+          {
+            $setOnInsert: {
+              guildId,
+              channelId,
+              kind,
+              source,
+              ...(mainChannelId ? { mainChannelId } : {}),
+            },
+          },
           { upsert: true },
         );
         this.pendingManagedChannels.delete(channelId);
@@ -291,7 +300,11 @@ export class VoiceChannelManager {
     }
     // Adopted channels are re-found by the migration, which retries as a whole.
     if (source === "created") {
-      this.pendingManagedChannels.set(channelId, { guildId, kind });
+      this.pendingManagedChannels.set(channelId, {
+        guildId,
+        kind,
+        mainChannelId,
+      });
       logger.warn(
         `Could not record voice channel ${channelId} as managed; it is treated as managed and the write will be retried on the next cleanup pass`,
       );
@@ -313,7 +326,13 @@ export class VoiceChannelManager {
         continue;
       }
       // On failure the entry stays pending (and logs again).
-      await this.recordManagedChannel(guild.id, channelId, pending.kind);
+      await this.recordManagedChannel(
+        guild.id,
+        channelId,
+        pending.kind,
+        "created",
+        pending.mainChannelId,
+      );
       ids.push(channelId);
     }
     return ids;
@@ -568,6 +587,7 @@ export class VoiceChannelManager {
         channel.type !== ChannelType.GuildVoice ||
         !managedIds.has(channel.id) ||
         channel.members.size !== 0 ||
+        this.isLiveWaitingRoom(guild, channel.id) ||
         channel.id === lobbyId ||
         channel.name === lobbyName ||
         channel.name === offlineLobbyName
@@ -587,6 +607,83 @@ export class VoiceChannelManager {
         );
       }
     }
+  }
+
+  /**
+   * Rebuild the main-channel <-> waiting-room links from persisted rows (#1085).
+   * Only pairs where both channels still exist are restored; rows written
+   * before #1085 have no `mainChannelId` and are left alone. Must run before
+   * any startup sweep so a live waiting room is recognised as such.
+   */
+  private async restoreWaitingRooms(guild: Guild): Promise<void> {
+    if (!this.isDbReady()) return;
+    try {
+      const rows = await ManagedVoiceChannel.find(
+        {
+          guildId: guild.id,
+          kind: "waiting_room",
+          mainChannelId: { $exists: true, $ne: null },
+        },
+        { channelId: 1, mainChannelId: 1 },
+      );
+      for (const row of rows) {
+        if (!row.mainChannelId) continue;
+        if (
+          guild.channels.cache.has(row.channelId) &&
+          guild.channels.cache.has(row.mainChannelId)
+        ) {
+          this.waitingRooms.set(row.mainChannelId, row.channelId);
+          this.waitingRoomToMain.set(row.channelId, row.mainChannelId);
+        }
+      }
+    } catch (error) {
+      logger.error("Error restoring waiting rooms:", error);
+    }
+  }
+
+  /**
+   * After the startup sweep: drop waiting-room links and rows whose channels
+   * no longer exist (#1085).
+   */
+  private async pruneStaleWaitingRooms(guild: Guild): Promise<void> {
+    for (const [waitingRoomId, mainId] of [...this.waitingRoomToMain]) {
+      if (
+        !guild.channels.cache.has(waitingRoomId) ||
+        !guild.channels.cache.has(mainId)
+      ) {
+        this.waitingRoomToMain.delete(waitingRoomId);
+        this.waitingRooms.delete(mainId);
+      }
+    }
+    if (!this.isDbReady()) return;
+    try {
+      const rows = await ManagedVoiceChannel.find(
+        { guildId: guild.id, kind: "waiting_room" },
+        { channelId: 1, kind: 1 },
+      );
+      for (const row of rows) {
+        if (
+          row.kind === "waiting_room" &&
+          !guild.channels.cache.has(row.channelId)
+        ) {
+          await this.forgetManagedChannel(row.channelId);
+        }
+      }
+    } catch (error) {
+      logger.error("Error pruning stale waiting room records:", error);
+    }
+  }
+
+  /** A restored waiting room whose main channel still has members. */
+  private isLiveWaitingRoom(guild: Guild, channelId: string): boolean {
+    const mainId = this.waitingRoomToMain.get(channelId);
+    if (!mainId) return false;
+    const main = guild.channels.cache.get(mainId);
+    return (
+      !!main &&
+      main.type === ChannelType.GuildVoice &&
+      (main as VoiceChannel).members.size > 0
+    );
   }
 
   /**
@@ -790,7 +887,13 @@ export class VoiceChannelManager {
 
       this.waitingRooms.set(channel.id, waitingRoom.id);
       this.waitingRoomToMain.set(waitingRoom.id, channel.id);
-      await this.recordManagedChannel(guild.id, waitingRoom.id, "waiting_room");
+      await this.recordManagedChannel(
+        guild.id,
+        waitingRoom.id,
+        "waiting_room",
+        "created",
+        channel.id,
+      );
 
       logger.info(
         `Created waiting room ${waitingRoom.name} for channel ${channel.name}`,
@@ -939,6 +1042,8 @@ export class VoiceChannelManager {
       // With voicechannels.cleanup.managed_only on (shared/adopted category),
       // only channels KoolBot created are eligible (#1032).
       const managedOnly = await this.isManagedOnly();
+      // Restore waiting-room links first so a live waiting room is not swept (#1085).
+      await this.restoreWaitingRooms(guild);
       if (managedOnly) {
         await this.sweepManagedOnlyAtStartup(
           guild,
@@ -954,6 +1059,7 @@ export class VoiceChannelManager {
         if (
           channel.type === ChannelType.GuildVoice &&
           channel.members.size === 0 &&
+          !this.isLiveWaitingRoom(guild, channel.id) &&
           channel.id !== lobbyChannelId &&
           channel.name !== lobbyChannelName &&
           channel.name !== offlineLobbyName
@@ -976,6 +1082,7 @@ export class VoiceChannelManager {
       // sweep above so only channels that survive (i.e. still have members) are
       // re-adopted, and rows for channels deleted during downtime are pruned.
       await this.restoreOwnership(guild);
+      await this.pruneStaleWaitingRooms(guild);
 
       logger.info("Voice channel manager initialization completed");
     } catch (error) {
