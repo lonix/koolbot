@@ -542,6 +542,30 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Admin audit trail — and the purge itself writes a row here, so erasing it would erase the record of the reset.",
   },
   {
+    source: "src/models/adoption-snapshot.ts",
+    collection: "adoption-snapshot",
+    field: "appliedBy",
+    exportable: false,
+    guildScoped: true,
+    note: "Admin audit trail of a server-adoption apply, not member data. It records which admin applied a plan.",
+    onDelete: "retain",
+    subject: "mention",
+    deleteNote:
+      "Names the admin inside a server-change record; the snapshot is the rollback safety net and ages out on its own retention.",
+  },
+  {
+    source: "src/models/adoption-snapshot.ts",
+    collection: "adoption-snapshot",
+    field: "rolledBackBy",
+    exportable: false,
+    guildScoped: true,
+    note: "Admin audit trail of a server-adoption rollback, not member data. It records which admin rolled a plan back.",
+    onDelete: "retain",
+    subject: "mention",
+    deleteNote:
+      "Names the admin inside a server-change record; the snapshot is the rollback safety net and ages out on its own retention.",
+  },
+  {
     source: "src/models/web-session.ts",
     collection: "web-session",
     field: "discordUserId",

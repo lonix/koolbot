@@ -1780,6 +1780,10 @@ window (staggered at 03:00 / 03:15 server time to avoid contention).
   audit-log rows (one per state-changing WebUI request) before the daily
   cleanup (03:15) prunes them. Set to `0` to keep history forever. WebUI
   audit rows are always written, so there is no separate enable toggle.
+- `adoption.snapshot.retention_days` (number, default: 90) — days to keep a
+  server-adoption snapshot (the saved prior state used to roll a change back)
+  before the daily cleanup (04:00) prunes it. Set to `0` to keep snapshots
+  forever. A snapshot that is still being applied is never pruned.
 
 #### Discord Logging (bot events posted to Discord channels)
 
