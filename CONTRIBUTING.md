@@ -600,7 +600,9 @@ Push` workflow then builds the PR head and pushes:
 - `ghcr.io/lonix/koolbot:pr-<number>-sha-<short-sha>` - one per commit
 
 Every new push to the PR rebuilds the image while the label is on. Remove the
-label to stop further builds. Preview images are `linux/amd64` only and skip the
+label to stop further builds. When a build finishes, the workflow posts a comment
+on the PR with the commit, the digest and the `docker pull` commands for both
+tags, and updates that same comment on every rebuild. Preview images are `linux/amd64` only and skip the
 release-only steps (Trivy scan, cosign signing, provenance and SBOM). PRs from
 forks never get a preview, because their workflow token cannot push to GHCR.
 
@@ -620,7 +622,7 @@ or database: unreleased code may run migrations or cleanup jobs on whatever
 data it can reach.
 
 When the PR is closed or merged, the workflow deletes its `pr-<number>` images
-from GHCR. For that delete to succeed, the repository needs the **Admin** role
+from GHCR and marks the preview comment as removed. For that delete to succeed, the repository needs the **Admin** role
 on the package (package settings → Manage Actions access). Without it, the
 cleanup job fails and the tags can be deleted by hand from the package page.
 
