@@ -8,6 +8,7 @@ import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 import { ConfigService } from "./config-service.js";
 import { WebSessionService } from "./web-session-service.js";
+import { RoleGroupService } from "./role-group-service.js";
 import type { WebSessionRole } from "../models/web-session.js";
 import { isWebUIEnabled, validateWebUIEnvVars } from "../web/index.js";
 
@@ -52,11 +53,36 @@ export function invokerIsAdmin(
   }
 }
 
+/**
+ * Administrator permission *or* membership of the `admin` role group (#1021);
+ * the guild owner always counts. Fails closed to `invokerIsAdmin` when the
+ * groups can't be read.
+ */
+export async function invokerIsAdminOrGroup(
+  interaction: ChatInputCommandInteraction,
+): Promise<boolean> {
+  if (invokerIsAdmin(interaction.member)) return true;
+  try {
+    const member =
+      interaction.member instanceof GuildMember
+        ? interaction.member
+        : await interaction.guild?.members.fetch(interaction.user.id);
+    if (!member) return false;
+    return await RoleGroupService.getInstance().memberHasCapability(
+      member,
+      "admin",
+    );
+  } catch (error) {
+    logger.warn("web signin: admin group check failed", error);
+    return false;
+  }
+}
+
 export async function runWebSignin(
   interaction: ChatInputCommandInteraction,
   options: WebSigninOptions,
   /** Optional guard run after the defer; return a message to reject with. */
-  guard?: () => string | null,
+  guard?: () => string | null | Promise<string | null>,
 ): Promise<void> {
   const { commandName, role } = options;
   const userId = interaction.user.id;
@@ -69,7 +95,7 @@ export async function runWebSignin(
   // Discord's 3-second interaction-ack deadline (#842).
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-  const rejection = guard?.() ?? null;
+  const rejection = (await guard?.()) ?? null;
   if (rejection) {
     logger.info(`/${commandName} rejected for user=${userId}: not permitted`);
     await interaction.editReply({ content: rejection });

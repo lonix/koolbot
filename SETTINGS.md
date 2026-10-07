@@ -1867,6 +1867,17 @@ window (staggered at 03:00 / 03:15 server time to avoid contention).
   server-adoption snapshot (the saved prior state used to roll a change back)
   before the daily cleanup (04:00) prunes it. Set to `0` to keep snapshots
   forever. A snapshot that is still being applied is never pruned.
+- `adoption.role_groups.sync_policy` (string, default: `flag`) — what happens
+  when a role group and its Discord role drift apart: `flag` only shows and logs
+  the drift, `adopt` makes the group follow the Discord change, `enforce`
+  re-applies the group through the adoption engine (snapshotted). A group can
+  override it on its own edit form. A deleted role is only recreated under
+  `enforce`.
+- `adoption.role_groups.reconcile_enabled` (bool, default: true) — periodically
+  compare role groups with their Discord roles, to catch changes made while the
+  bot was offline.
+- `adoption.role_groups.reconcile_cron` (cron, default: `*/30 * * * *`) —
+  schedule for that reconcile.
 
 #### Web UI sign-in link delivery
 
@@ -1893,6 +1904,7 @@ apply to the next log message — no restart is needed.
 | `core.moderation.enabled` / `core.moderation.channel_id`               | bool / channel | `false` / `""` | Recorded moderation actions plus the member's prior history (needs `moderation.enabled`)                  |
 | `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that came due for review (needs `moderation.cases.enabled`)             |
 | `core.updates.enabled` / `core.updates.channel_id`                     | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
+| `core.role_groups.enabled` / `core.role_groups.channel_id`             | bool / channel | `false` / `""` | Role group drift (a role edited or deleted in Discord) and what the sync did about it                     |
 
 Point every category at one channel for a single consolidated log, or split
 them (e.g. `#bot-status` for startup, `#admin-alerts` for errors).

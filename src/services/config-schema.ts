@@ -224,6 +224,13 @@ export interface ConfigSchema {
 
   // Server adoption snapshots (#1018)
   "adoption.snapshot.retention_days": number; // 0 = keep snapshots forever
+
+  // Role group sync with Discord (#1021)
+  "adoption.role_groups.sync_policy": string; // flag | adopt | enforce
+  "adoption.role_groups.reconcile_enabled": boolean;
+  "adoption.role_groups.reconcile_cron": string;
+  "core.role_groups.enabled": boolean;
+  "core.role_groups.channel_id": string;
 }
 
 /**
@@ -553,6 +560,14 @@ export const defaultConfig: ConfigSchema = {
   // Server adoption (#1018). Snapshots are the rollback safety net, so the
   // default keeps them for a quarter; 0 keeps them forever.
   "adoption.snapshot.retention_days": 90,
+
+  // Role group sync (#1021). Flag-only is the non-destructive default:
+  // drift is shown and logged, nothing is changed on its own.
+  "adoption.role_groups.sync_policy": "flag",
+  "adoption.role_groups.reconcile_enabled": true,
+  "adoption.role_groups.reconcile_cron": "*/30 * * * *",
+  "core.role_groups.enabled": false,
+  "core.role_groups.channel_id": "",
 };
 
 /**
@@ -2248,6 +2263,46 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "adoption",
     type: "number",
     min: RETENTION_MIN,
+  },
+  "adoption.role_groups.sync_policy": {
+    label: "Role group sync policy",
+    description:
+      "What happens when a role group and its Discord role drift apart (permissions, name, order, or the role was deleted). 'flag' only shows the drift on the Role Groups page and logs it. 'adopt' makes the group follow the Discord change. 'enforce' re-applies the group through the adoption engine (snapshotted, never widens access on its own); a deleted role is recreated only under 'enforce'. A group can override this on its own edit form.",
+    category: "adoption",
+    type: "string",
+    options: [
+      { value: "flag", label: "Flag only (default)" },
+      { value: "adopt", label: "Adopt: the group follows Discord" },
+      { value: "enforce", label: "Enforce: re-apply the group" },
+    ],
+  },
+  "adoption.role_groups.reconcile_enabled": {
+    label: "Reconcile role groups on a schedule",
+    description:
+      "Periodically compare role groups with their Discord roles, to catch changes made while the bot was offline. Role edits and deletions in Discord are also checked as they happen.",
+    category: "adoption",
+    type: "boolean",
+  },
+  "adoption.role_groups.reconcile_cron": {
+    label: "Role group reconcile schedule (cron)",
+    description:
+      "Cron schedule for the periodic role group reconcile. Default: every 30 minutes.",
+    category: "adoption",
+    type: "cron",
+  },
+  "core.role_groups.enabled": {
+    label: "Role group drift log to Discord",
+    description:
+      "Post role group drift (a role edited or deleted in Discord) and what the sync did about it as embeds to the role group log channel.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.role_groups.channel_id": {
+    label: "Role group drift log channel",
+    description:
+      "Text channel that receives role group drift log embeds. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
   },
   "namehistory.retention_days": {
     label: "Name history retention (days)",

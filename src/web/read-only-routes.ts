@@ -5,8 +5,11 @@
  * no writes.
  */
 
-import { loadRoleGroupsPage } from "./role-groups-page.js";
-import { renderRoleGroupsPage } from "./role-groups-views.js";
+import { loadAdminFixPreview, loadRoleGroupsPage } from "./role-groups-page.js";
+import {
+  renderAdminFixPage,
+  renderRoleGroupsPage,
+} from "./role-groups-views.js";
 import {
   Router,
   type NextFunction,
@@ -2159,6 +2162,29 @@ export function createReadOnlyRouter(
           flash: readFlash(req),
         }),
       );
+    }),
+  );
+
+  // Preview of the out-of-group administrator fix (#1021); applied by POST.
+  router.get(
+    "/role-groups/admin-fix",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const session = req.webSession;
+      if (!session) throw new Error("requireSession middleware must run first");
+      const ids = (raw: unknown): string[] =>
+        (Array.isArray(raw) ? raw : raw === undefined ? [] : [raw])
+          .map(String)
+          .filter((v) => /^\d{1,25}$/.test(v));
+      const data = await loadAdminFixPreview(
+        client,
+        common.guildId,
+        session.discordUserId,
+        ids(req.query.move),
+        ids(req.query.drop),
+        req.query.grant === "1",
+      );
+      res.type("text/html").send(renderAdminFixPage({ ...common, ...data }));
     }),
   );
 
