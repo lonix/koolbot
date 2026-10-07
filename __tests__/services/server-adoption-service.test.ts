@@ -1817,6 +1817,7 @@ describe("grants before gating overwrites", () => {
       h.calls.indexOf("audit:adoption.rollback.role.create:success"),
     );
   });
+});
 
 describe("a channel-claims sync plan through the real engine (#1022)", () => {
   const sync = async () => {
