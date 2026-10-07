@@ -165,6 +165,7 @@ export interface ConfigSchema {
   // Discord-channel logging categories consumed by DiscordLogger (#844).
   // Each `core.<type>.enabled` toggle pairs with a `core.<type>.channel_id`
   // that names the text channel the embeds are posted to.
+  "core.webui.link_delivery": string; // How /me and /config deliver the sign-in link: dm | ephemeral
   "core.startup.enabled": boolean;
   "core.startup.channel_id": string;
   "core.errors.enabled": boolean;
@@ -461,6 +462,7 @@ export const defaultConfig: ConfigSchema = {
   // Discord-channel logging categories (#844). Off by default: posting
   // bot lifecycle/error/cron embeds into a guild channel is an operator
   // opt-in, and each category needs a channel id before it does anything.
+  "core.webui.link_delivery": "dm",
   "core.startup.enabled": false,
   "core.startup.channel_id": "",
   "core.errors.enabled": false,
@@ -1896,6 +1898,17 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   // Discord-channel logging categories (#844). Consumed by DiscordLogger,
   // which routes each `logToChannel(<type>)` call to `core.<type>.channel_id`
   // when `core.<type>.enabled` is on.
+  "core.webui.link_delivery": {
+    label: "Web UI sign-in link delivery",
+    description:
+      "How /me and /config hand out the single-use Web UI sign-in link. 'dm' sends it as a direct message (falls back to an ephemeral reply when the member's DMs are closed). 'ephemeral' replies in the channel, visible only to the invoker — useful when members keep DMs closed.",
+    category: "core",
+    type: "string",
+    options: [
+      { value: "dm", label: "Direct message (ephemeral fallback)" },
+      { value: "ephemeral", label: "Ephemeral reply" },
+    ],
+  },
   "core.startup.enabled": {
     label: "Startup log to Discord",
     description:

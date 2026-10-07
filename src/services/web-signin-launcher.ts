@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
+import { ConfigService } from "./config-service.js";
 import { WebSessionService } from "./web-session-service.js";
 import type { WebSessionRole } from "../models/web-session.js";
 import { isWebUIEnabled, validateWebUIEnvVars } from "../web/index.js";
@@ -13,8 +14,8 @@ import { isWebUIEnabled, validateWebUIEnvVars } from "../web/index.js";
 /**
  * Shared flow behind `/config` (admin) and `/me` (member): defer, run the
  * Web UI enabled/valid-config checks, issue a single-use sign-in session for
- * a role the caller picked, and DM the link (ephemeral fallback when DMs are
- * closed). Each command only chooses the role and the DM wording.
+ * a role the caller picked, and deliver the link per `core.webui.link_delivery` (DM by default, ephemeral
+ * fallback when DMs are closed). Each command only chooses the role and the DM wording.
  */
 export interface WebSigninOptions {
   /** Command name for log lines, without the slash. */
@@ -118,6 +119,18 @@ export async function runWebSignin(
       Math.round((session.expiresAt.getTime() - Date.now()) / 60_000),
     );
     const dmBody = options.buildDmBody(session.url, ttlMinutes);
+
+    const delivery = await ConfigService.getInstance().getString(
+      "core.webui.link_delivery",
+      "dm",
+    );
+    if (delivery === "ephemeral") {
+      logger.info(
+        `/${commandName}: sign-in link sent ephemerally to user=${userId} (expires ${session.expiresAt.toISOString()})`,
+      );
+      await interaction.editReply({ content: dmBody });
+      return;
+    }
 
     try {
       await interaction.user.send(dmBody);
