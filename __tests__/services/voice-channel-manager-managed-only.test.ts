@@ -759,6 +759,8 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(stripSurroundingQuotes(`Bob's Lobby`)).toBe("Bob's Lobby");
       expect(stripSurroundingQuotes(`"Lobby'`)).toBe(`"Lobby'`);
       expect(stripSurroundingQuotes(`"`)).toBe(`"`);
+      // Whitespace is a value for string keys: only a quoted value is touched.
+      expect(stripSurroundingQuotes(" Lobby ")).toBe(" Lobby ");
     });
 
     it("does not fall back to name matches once the lobby ID resolves (#1078 review)", async () => {

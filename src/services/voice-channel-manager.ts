@@ -79,9 +79,8 @@ export async function resolveManagedCategory(
  * `LOBBY_CHANNEL_NAME="Lobby"`). Quotes inside the name are never touched.
  */
 export function stripSurroundingQuotes(value: string): string {
-  const trimmed = value.trim();
-  const match = /^(["'])(.*)\1$/s.exec(trimmed);
-  return match ? match[2] : trimmed;
+  const match = /^(["'])(.*)\1$/s.exec(value.trim());
+  return match ? match[2] : value;
 }
 
 export class VoiceChannelManager {
