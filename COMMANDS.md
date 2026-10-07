@@ -915,7 +915,8 @@ available whenever the Web UI is. The derivation lives in
 /me
 ```
 
-Behaviour (DM first, ephemeral fallback when DMs are closed; the same
+Behaviour (DM first by default, ephemeral fallback when DMs are closed — or an ephemeral
+reply from the start when `core.webui.link_delivery` is `ephemeral`; the same
 Web UI enabled/valid-config checks as `/config`) is otherwise identical to
 [`/config`](#config).
 
@@ -982,6 +983,9 @@ No subcommands, no parameters.
      session row stays valid in MongoDB until idle/TTL, so closing the
      tab is **not** equivalent to signing out. Click Finish if you want
      a hard end.
+
+Delivery is controlled by `core.webui.link_delivery` (`dm` default, or `ephemeral` to reply
+in the channel, visible only to you).
 
 **Example responses:**
 
