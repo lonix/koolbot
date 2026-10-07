@@ -1412,3 +1412,35 @@ describe("review hardening, round nine", () => {
     ]);
   });
 });
+
+describe("review hardening, round ten", () => {
+  it("records a grant whose first attempt landed but timed out and was retried as a no-op", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a"] }],
+    });
+    // Confirmed absent beforehand, then the (retried) add reports "already held".
+    h.deps.gateway.memberHasRole = async () => false;
+    h.deps.gateway.addMemberRole = async () => false;
+    const r = await new ServerAdoptionService(h.deps).apply(p, opts);
+    expect(r.status).toBe("applied");
+    expect(h.records.get(r.snapshotId)!.memberProgress["op-1"].granted).toEqual(
+      ["a"],
+    );
+  });
+
+  it("does not claim a member whose pre-check failed unless the add changed something", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a", "b"] }],
+    });
+    h.deps.gateway.memberHasRole = async () => {
+      throw new Error("lookup failed");
+    };
+    h.deps.gateway.addMemberRole = async (m) => m === "b"; // a already held it
+    const r = await new ServerAdoptionService(h.deps).apply(p, opts);
+    expect(h.records.get(r.snapshotId)!.memberProgress["op-1"].granted).toEqual(
+      ["b"],
+    );
+  });
+});

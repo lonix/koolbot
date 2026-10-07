@@ -1016,12 +1016,23 @@ export class ServerAdoptionService {
       // yet; a crash then leaves exactly the members we may have granted.
       const toGrant: string[] = [];
       for (const memberId of page) {
+        // null = the check itself failed: absence is unknown, so the member
+        // is still attempted but not claimed unless the add changes something.
         const holds = await callApi(
           () => gateway.memberHasRole(memberId, roleId),
           `check role on ${memberId}`,
-        ).catch(() => false);
-        if (!holds) toGrant.push(memberId);
-        else if (maybeOurs.has(memberId) && !state.granted.includes(memberId)) {
+        ).catch(() => null);
+        if (holds === false) {
+          // Confirmed absent before our attempt: if they hold the role after
+          // it (even when a retried call saw it already added), it was us.
+          maybeOurs.add(memberId);
+          toGrant.push(memberId);
+        } else if (holds === null) {
+          toGrant.push(memberId);
+        } else if (
+          maybeOurs.has(memberId) &&
+          !state.granted.includes(memberId)
+        ) {
           // Granted by the run that died before it could record the grant.
           state.granted.push(memberId);
         }
