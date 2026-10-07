@@ -610,13 +610,29 @@ export class VoiceChannelManager {
   }
 
   /**
-   * Rebuild the main-channel <-> waiting-room links from persisted rows (#1085).
-   * Only pairs where both channels still exist are restored; rows written
-   * before #1085 have no `mainChannelId` and are left alone. Must run before
-   * any startup sweep so a live waiting room is recognised as such.
+   * True once the waiting-room links have been rebuilt from persistence. Stays
+   * false until a restore succeeds, so every deleting pass retries it (#1085).
    */
-  private async restoreWaitingRooms(guild: Guild): Promise<void> {
-    if (!this.isDbReady()) return;
+  private waitingRoomLinksRestored = false;
+
+  /**
+   * Idempotent gate for every pass that may delete channels (startup sweeps and
+   * periodic cleanup, both modes): rebuild the main-channel <-> waiting-room
+   * links from persisted rows. Only pairs where both channels still exist are
+   * restored; rows written before #1085 have no `mainChannelId` and are left
+   * alone. Returns false when the links could not be restored (database not
+   * ready or read error); the caller must then skip its deleting step, since a
+   * waiting room with unknown links could be swept while its main channel is
+   * occupied, and retry on the next pass.
+   */
+  private async ensureWaitingRoomLinks(guild: Guild): Promise<boolean> {
+    if (this.waitingRoomLinksRestored) return true;
+    if (!this.isDbReady()) {
+      logger.warn(
+        "Database not ready; waiting-room links not restored, skipping channel deletion this pass",
+      );
+      return false;
+    }
     try {
       const rows = await ManagedVoiceChannel.find(
         {
@@ -636,11 +652,14 @@ export class VoiceChannelManager {
           this.waitingRoomToMain.set(row.channelId, row.mainChannelId);
         }
       }
+      this.waitingRoomLinksRestored = true;
+      return true;
     } catch (error) {
-      // Fail closed: continuing into the startup sweep with empty links could
-      // delete a live waiting room. The caller (initialize) aborts instead.
-      logger.error("Error restoring waiting rooms:", error);
-      throw error;
+      logger.error(
+        "Error restoring waiting rooms; skipping channel deletion this pass:",
+        error,
+      );
+      return false;
     }
   }
 
@@ -1053,9 +1072,11 @@ export class VoiceChannelManager {
       // With voicechannels.cleanup.managed_only on (shared/adopted category),
       // only channels KoolBot created are eligible (#1032).
       const managedOnly = await this.isManagedOnly();
-      // Restore waiting-room links first so a live waiting room is not swept (#1085).
-      await this.restoreWaitingRooms(guild);
-      if (managedOnly) {
+      // Restore waiting-room links first so a live waiting room is not swept
+      // (#1085). If that is not possible, skip the sweeps; periodic cleanup
+      // retries the restore.
+      const linksRestored = await this.ensureWaitingRoomLinks(guild);
+      if (managedOnly && linksRestored) {
         await this.sweepManagedOnlyAtStartup(
           guild,
           category,
@@ -1064,16 +1085,7 @@ export class VoiceChannelManager {
           offlineLobbyName,
         );
       }
-      // Without the database the waiting-room links cannot be restored, so a
-      // legacy sweep could delete a live waiting room (#1085). Skip it; the
-      // periodic cleanup catches up once Mongo is back.
-      const skipLegacySweep = !managedOnly && !this.isDbReady();
-      if (skipLegacySweep) {
-        logger.warn(
-          "Database not ready; skipping startup empty-channel sweep so waiting rooms are not deleted",
-        );
-      }
-      for (const channel of managedOnly || skipLegacySweep
+      for (const channel of managedOnly || !linksRestored
         ? []
         : category.children.cache.values()) {
         if (
@@ -1102,7 +1114,7 @@ export class VoiceChannelManager {
       // sweep above so only channels that survive (i.e. still have members) are
       // re-adopted, and rows for channels deleted during downtime are pruned.
       await this.restoreOwnership(guild);
-      await this.pruneStaleWaitingRooms(guild);
+      if (linksRestored) await this.pruneStaleWaitingRooms(guild);
 
       logger.info("Voice channel manager initialization completed");
     } catch (error) {
@@ -2673,6 +2685,9 @@ export class VoiceChannelManager {
         return false;
       }
 
+      // Never delete before the waiting-room links are known (#1085).
+      if (!(await this.ensureWaitingRoomLinks(guild))) return false;
+
       // Get all channels in the category
       const allChannels = category.children.cache.filter(
         (channel): channel is VoiceChannel =>
@@ -3301,5 +3316,6 @@ export class VoiceChannelManager {
     this.liveChannels.clear();
     this.waitingRooms.clear();
     this.waitingRoomToMain.clear();
+    this.waitingRoomLinksRestored = false;
   }
 }

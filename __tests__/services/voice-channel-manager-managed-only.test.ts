@@ -1193,14 +1193,39 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(notify).toHaveBeenCalledWith("main-id", member);
     });
 
-    it("skips the legacy startup sweep while the database is unavailable", async () => {
+    it("skips startup and periodic deletion during an outage, then restores links and keeps the waiting room once the DB recovers", async () => {
       const { waiting } = await setupPair(1);
       manager = newManager();
-      (manager as any).isDbReady.mockReturnValue(false);
+      const dbReady = (manager as any).isDbReady as jest.Mock;
+      dbReady.mockReturnValue(false);
 
       await manager.initialize(GUILD_ID);
+      await manager.cleanupEmptyChannels();
+      expect(waiting.delete).not.toHaveBeenCalled();
+
+      dbReady.mockReturnValue(true);
+      await manager.cleanupEmptyChannels();
 
       expect(waiting.delete).not.toHaveBeenCalled();
+      expect(manager.getMainChannelForWaitingRoom(waiting.id)).toBe("main-id");
+    });
+
+    it("periodic cleanup after a failed restore read keeps the waiting room and retries", async () => {
+      const { waiting } = await setupPair(1);
+      manager = newManager();
+      const stub = ManagedVoiceChannel as unknown as { find: jest.Mock };
+      const realFind = stub.find.getMockImplementation()!;
+      stub.find.mockImplementationOnce(async () => {
+        throw new Error("mongo down");
+      });
+
+      await manager.initialize(GUILD_ID);
+      expect(waiting.delete).not.toHaveBeenCalled();
+
+      stub.find.mockImplementation(realFind);
+      await manager.cleanupEmptyChannels();
+      expect(waiting.delete).not.toHaveBeenCalled();
+      expect(manager.getWaitingRoom("main-id")).toBe(waiting.id);
     });
 
     it("aborts initialization without sweeping when the waiting-room read fails", async () => {
