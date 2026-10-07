@@ -6,12 +6,16 @@ import {
   GuildMember,
   MessageFlags,
 } from "discord.js";
+import type { EventRecurrence } from "../models/event.js";
 import { ConfigService } from "../services/config-service.js";
 import {
   EventService,
   parseEventDateTime,
   formatEventWhen,
   countRsvps,
+  isRecurring,
+  recurrenceLabel,
+  RecurrenceDisabledError,
 } from "../services/event-service.js";
 import { isValidTimezone, resolveTimezone } from "../utils/timezone.js";
 import logger from "../utils/logger.js";
@@ -63,6 +67,16 @@ export const data = new SlashCommandBuilder()
         o
           .setName("timezone")
           .setDescription("IANA timezone (e.g. Europe/London)"),
+      )
+      .addStringOption((o) =>
+        o
+          .setName("repeat")
+          .setDescription("Repeat at the same time (default: one-off)")
+          .addChoices(
+            { name: "Weekly", value: "weekly" },
+            { name: "Every 2 weeks", value: "biweekly" },
+            { name: "Monthly", value: "monthly" },
+          ),
       ),
   )
   .addSubcommand((sub) =>
@@ -77,6 +91,15 @@ export const data = new SlashCommandBuilder()
           .setName("id")
           .setDescription("Event ID (from /event list)")
           .setRequired(true),
+      )
+      .addStringOption((o) =>
+        o
+          .setName("scope")
+          .setDescription("Recurring events: just this date, or the series")
+          .addChoices(
+            { name: "This occurrence only", value: "occurrence" },
+            { name: "The whole series", value: "series" },
+          ),
       ),
   )
   .addSubcommand((sub) =>
@@ -174,6 +197,8 @@ async function handleCreate(
     interaction.options.getString("description")?.trim() ?? "";
   const durationOpt = interaction.options.getInteger("duration");
   const tzOpt = interaction.options.getString("timezone")?.trim();
+  const repeat = (interaction.options.getString("repeat") ??
+    "none") as EventRecurrence;
 
   const configuredTz = await config.getString("events.timezone", "");
   const timezone = tzOpt || configuredTz;
@@ -205,19 +230,33 @@ async function handleCreate(
   const durationMinutes = durationOpt ?? defaultDuration;
 
   const service = EventService.getInstance(interaction.client);
-  const event = await service.createEvent({
-    guildId: interaction.guildId as string,
-    title,
-    description,
-    startTime,
-    timezone: resolveTimezone(timezone),
-    durationMinutes,
-    createdBy: interaction.user.id,
-  });
+  let event;
+  try {
+    event = await service.createEvent({
+      guildId: interaction.guildId as string,
+      title,
+      description,
+      startTime,
+      timezone: resolveTimezone(timezone),
+      durationMinutes,
+      recurrence: repeat,
+      createdBy: interaction.user.id,
+    });
+  } catch (error) {
+    if (error instanceof RecurrenceDisabledError) {
+      await interaction.editReply(
+        "❌ Recurring events are turned off (`events.recurrence_enabled`).",
+      );
+      return;
+    }
+    throw error;
+  }
 
+  const repeats =
+    repeat !== "none" ? ` · repeats ${recurrenceLabel(repeat)}` : "";
   await interaction.editReply(
     `✅ Created event **${title}** for ${formatEventWhen(event)}.\n` +
-      `ID: \`${event._id}\` · duration: ${durationMinutes} min`,
+      `ID: \`${event._id}\` · duration: ${durationMinutes} min${repeats}`,
   );
 }
 
@@ -247,7 +286,9 @@ async function handleList(
     embed.addFields({
       name: e.title,
       value:
-        `${formatEventWhen(e)} · ${e.state}\n` +
+        `${formatEventWhen(e)} · ${e.state}` +
+        (isRecurring(e) ? ` · 🔁 ${recurrenceLabel(e.recurrence)}` : "") +
+        "\n" +
         `✅ ${counts.going} · 🤔 ${counts.maybe} · 🚫 ${counts.cant}\n` +
         `ID: \`${e._id}\``,
       inline: false,
@@ -262,13 +303,36 @@ async function handleCancel(
 ): Promise<void> {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const id = interaction.options.getString("id", true).trim();
+  const scope = interaction.options.getString("scope") ?? "occurrence";
   const service = EventService.getInstance(interaction.client);
+
+  if (scope === "series") {
+    const result = await service.cancelSeries(
+      id,
+      interaction.guildId as string,
+    );
+    if (!result) {
+      await interaction.editReply(`❌ Event \`${id}\` not found.`);
+      return;
+    }
+    await interaction.editReply(
+      isRecurring(result.event)
+        ? `✅ Cancelled the **${result.event.title}** series (${result.cancelled} upcoming occurrence(s)).`
+        : `✅ Cancelled **${result.event.title}**.`,
+    );
+    return;
+  }
+
   const event = await service.cancelEvent(id, interaction.guildId as string);
   if (!event) {
     await interaction.editReply(`❌ Event \`${id}\` not found.`);
     return;
   }
-  await interaction.editReply(`✅ Cancelled **${event.title}**.`);
+  await interaction.editReply(
+    isRecurring(event)
+      ? `✅ Cancelled this occurrence of **${event.title}**; the series continues. Use \`scope:series\` to stop it.`
+      : `✅ Cancelled **${event.title}**.`,
+  );
 }
 
 async function handleStart(

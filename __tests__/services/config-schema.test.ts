@@ -530,6 +530,9 @@ describe("Config Schema", () => {
       // channel itself is created and swept by voice channel management,
       // so this is inert until that feature is on too.
       "lfg.voice_channel.enabled": true,
+      // Recurring events (#744) only act on events an admin creates under
+      // `events.enabled`, so this is inert until that feature is on.
+      "events.recurrence_enabled": true,
 
       // ─── Core infrastructure (always on; not feature-gated) ─────────
       // Audit logging is a cross-cutting operator-visibility feature
@@ -575,6 +578,7 @@ describe("Config Schema", () => {
       "notices.header_enabled": "notices.enabled",
       "notices.header_pin_enabled": "notices.enabled",
       "lfg.voice_channel.enabled": "lfg.enabled",
+      "events.recurrence_enabled": "events.enabled",
     };
 
     it("audits every `*enabled` key in defaultConfig (no drift)", () => {

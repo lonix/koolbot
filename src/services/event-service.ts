@@ -12,11 +12,12 @@ import {
   VoiceChannel,
 } from "discord.js";
 import { isValidObjectId } from "mongoose";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import { ScheduledService } from "./scheduled-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import {
   Event,
+  type EventRecurrence,
   type EventState,
   type IEvent,
   type RsvpStatus,
@@ -87,6 +88,10 @@ export interface RsvpCounts {
   cant: number;
 }
 
+/** How many skipped cadence steps one spawn will search through (bot offline
+ * for years, or a monthly series misconfigured) before giving up. */
+const MAX_OCCURRENCE_SKIP = 520;
+
 export interface CreateEventInput {
   guildId: string;
   title: string;
@@ -95,7 +100,17 @@ export interface CreateEventInput {
   timezone: string;
   durationMinutes: number;
   categoryId?: string;
+  /** Repeat cadence; omitted/`none` creates a one-off event (#744). */
+  recurrence?: EventRecurrence;
   createdBy: string;
+}
+
+/** Raised when a recurring event is requested while recurrence is off. */
+export class RecurrenceDisabledError extends Error {
+  constructor() {
+    super("Recurring events are disabled (events.recurrence_enabled).");
+    this.name = "RecurrenceDisabledError";
+  }
 }
 
 // ---------------------------------------------------------------
@@ -205,6 +220,66 @@ export function formatEventWhen(event: {
   return `${formatInTimeZone(event.startTime, zone, "yyyy-MM-dd HH:mm")} (${zone})`;
 }
 
+/** Whether an event row belongs to a repeating series. */
+export function isRecurring(event: {
+  recurrence?: EventRecurrence | null;
+  seriesId?: string | null;
+}): boolean {
+  return !!event.recurrence && event.recurrence !== "none" && !!event.seriesId;
+}
+
+/** Short human label for a cadence, e.g. `every 2 weeks`. */
+export function recurrenceLabel(recurrence: EventRecurrence): string {
+  switch (recurrence) {
+    case "weekly":
+      return "weekly";
+    case "biweekly":
+      return "every 2 weeks";
+    case "monthly":
+      return "monthly";
+    default:
+      return "one-off";
+  }
+}
+
+/**
+ * Start instant of occurrence `index` of a series anchored at `seriesStart`.
+ *
+ * Computed from the anchor's wall-clock date and time in `timezone` (not by
+ * adding fixed milliseconds), so "Friday 20:00" stays at 20:00 across a DST
+ * change. Monthly steps keep the anchor's day-of-month, clamped to the last
+ * day of shorter months, and return to it afterwards (Jan 31 → Feb 28 →
+ * Mar 31). A wall-clock time that does not exist on the target day (a DST
+ * gap) rolls forward rather than dropping the occurrence.
+ */
+export function computeOccurrenceStart(
+  seriesStart: Date,
+  recurrence: EventRecurrence,
+  index: number,
+  timezone: string,
+): Date {
+  if (recurrence === "none" || index <= 0) return new Date(seriesStart);
+  const zone = resolveTimezone(timezone);
+  const [y, m, d] = formatInTimeZone(seriesStart, zone, "yyyy-MM-dd")
+    .split("-")
+    .map(Number);
+  const time = formatInTimeZone(seriesStart, zone, "HH:mm:ss");
+
+  let target: Date;
+  if (recurrence === "monthly") {
+    const monthIndex = m - 1 + index;
+    const year = y + Math.floor(monthIndex / 12);
+    const month = ((monthIndex % 12) + 12) % 12;
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    target = new Date(Date.UTC(year, month, Math.min(d, lastDay)));
+  } else {
+    const stepDays = recurrence === "weekly" ? 7 : 14;
+    target = new Date(Date.UTC(y, m - 1, d + stepDays * index));
+  }
+  const date = target.toISOString().slice(0, 10);
+  return fromZonedTime(`${date}T${time}`, zone);
+}
+
 function accentColor(state: IEvent["state"]): number {
   switch (state) {
     case "active":
@@ -281,6 +356,9 @@ export class EventService extends ScheduledService {
       $or: [
         { state: { $in: ["scheduled", "active"] } },
         { state: "ended", channelId: { $ne: null } },
+        // Ended recurring occurrences whose successor has not been spawned
+        // yet (e.g. the bot restarted between ending and spawning, #744).
+        { state: "ended", recurrence: { $ne: "none" }, nextSpawned: false },
       ],
     });
 
@@ -356,6 +434,125 @@ export class EventService extends ScheduledService {
       await event.save();
       await this.logLifecycle(event);
     }
+
+    // 5. A finished occurrence hands over to the next one in its series.
+    if (event.state === "ended" && isRecurring(event) && !event.nextSpawned) {
+      await this.spawnNextOccurrence(event, now);
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Recurrence (#744)
+  // ---------------------------------------------------------------
+
+  public async isRecurrenceEnabled(): Promise<boolean> {
+    return this.configService.getBoolean("events.recurrence_enabled", true);
+  }
+
+  /**
+   * Create the occurrence after `previous`, exactly once.
+   *
+   * `nextSpawned` is flipped with an atomic compare-and-set before anything
+   * is created, so overlapping callers (the scan, a cancel-this-occurrence,
+   * another replica) cannot both spawn a successor; the loser sees `null`
+   * and stands down. If creation then fails the flag is released so the next
+   * scan retries. The series' schedule comes from its anchor
+   * (`computeOccurrenceStart`); cadence steps already in the past — the bot
+   * was down, or the series was paused — are skipped, not back-filled.
+   */
+  private async spawnNextOccurrence(
+    previous: IEvent,
+    now: Date,
+  ): Promise<IEvent | null> {
+    if (!isRecurring(previous) || !previous.seriesId) return null;
+    if (!(await this.isRecurrenceEnabled())) return null;
+
+    const claimed = await Event.findOneAndUpdate(
+      { _id: previous._id, nextSpawned: false },
+      { $set: { nextSpawned: true } },
+    );
+    if (!claimed) return null;
+    previous.nextSpawned = true;
+
+    try {
+      const anchor = previous.seriesStart ?? previous.startTime;
+      let index = previous.occurrenceIndex + 1;
+      let start = computeOccurrenceStart(
+        anchor,
+        previous.recurrence,
+        index,
+        previous.timezone,
+      );
+      for (
+        let skipped = 0;
+        start.getTime() <= now.getTime() && skipped < MAX_OCCURRENCE_SKIP;
+        skipped++
+      ) {
+        index += 1;
+        start = computeOccurrenceStart(
+          anchor,
+          previous.recurrence,
+          index,
+          previous.timezone,
+        );
+      }
+      if (start.getTime() <= now.getTime()) {
+        throw new Error("no future occurrence within the search window");
+      }
+
+      const existing = await Event.findOne({
+        guildId: previous.guildId,
+        seriesId: previous.seriesId,
+        occurrenceIndex: index,
+      });
+      if (existing) return existing;
+
+      const next = new Event({
+        guildId: previous.guildId,
+        title: previous.title,
+        description: previous.description,
+        startTime: start,
+        timezone: previous.timezone,
+        durationMinutes: previous.durationMinutes,
+        categoryId: previous.categoryId,
+        state: "scheduled",
+        reminderSent: false,
+        rsvps: [],
+        recurrence: previous.recurrence,
+        seriesId: previous.seriesId,
+        occurrenceIndex: index,
+        seriesStart: anchor,
+        nextSpawned: false,
+        createdBy: previous.createdBy,
+      });
+      await next.save();
+      await this.postAnnouncement(next).catch((error) =>
+        logger.error("Failed to post event announcement:", error),
+      );
+      logger.info(
+        `Spawned occurrence ${index} of event series ${sanitizeForLog(previous.seriesId)}`,
+      );
+      return next;
+    } catch (error) {
+      logger.error(
+        `Failed to spawn the next occurrence of series ${sanitizeForLog(previous.seriesId)}:`,
+        error,
+      );
+      previous.nextSpawned = false;
+      await Event.updateOne(
+        { _id: previous._id },
+        { $set: { nextSpawned: false } },
+      ).catch(() => undefined);
+      return null;
+    }
+  }
+
+  /** Every occurrence of a series, oldest first. */
+  public async listSeries(
+    guildId: string,
+    seriesId: string,
+  ): Promise<IEvent[]> {
+    return Event.find({ guildId, seriesId }).sort({ occurrenceIndex: 1 });
   }
 
   // ---------------------------------------------------------------
@@ -363,6 +560,10 @@ export class EventService extends ScheduledService {
   // ---------------------------------------------------------------
 
   public async createEvent(input: CreateEventInput): Promise<IEvent> {
+    const recurrence = input.recurrence ?? "none";
+    if (recurrence !== "none" && !(await this.isRecurrenceEnabled())) {
+      throw new RecurrenceDisabledError();
+    }
     const event = new Event({
       guildId: input.guildId,
       title: input.title,
@@ -374,8 +575,15 @@ export class EventService extends ScheduledService {
       state: "scheduled",
       reminderSent: false,
       rsvps: [],
+      recurrence,
       createdBy: input.createdBy,
     });
+    if (recurrence !== "none") {
+      // The first occurrence's id doubles as the series id.
+      event.seriesId = String(event._id);
+      event.occurrenceIndex = 0;
+      event.seriesStart = input.startTime;
+    }
     await event.save();
     await this.postAnnouncement(event).catch((error) =>
       logger.error("Failed to post event announcement:", error),
@@ -392,7 +600,14 @@ export class EventService extends ScheduledService {
     return Event.findById(eventId).catch(() => null);
   }
 
-  /** Cancel an event: mark cancelled and tear down any live channel. */
+  /**
+   * Cancel one event: mark cancelled and tear down any live channel.
+   *
+   * For a recurring event this cancels just this occurrence; the series
+   * carries on, so the following occurrence is created straight away (it
+   * would otherwise only appear once this one ended, which it now never
+   * will). Use {@link cancelSeries} to stop the whole series.
+   */
   public async cancelEvent(
     eventId: string,
     guildId?: string,
@@ -402,6 +617,56 @@ export class EventService extends ScheduledService {
     if (guildId && event.guildId !== guildId) return null;
     if (event.state === "cancelled") return event;
 
+    await this.cancelOne(event);
+    if (isRecurring(event) && !event.nextSpawned) {
+      await this.spawnNextOccurrence(event, new Date());
+    }
+    return event;
+  }
+
+  /**
+   * Cancel every unfinished occurrence of the series `eventId` belongs to and
+   * stop it spawning more. Returns the addressed event plus how many
+   * occurrences were cancelled, or null when it is missing / another guild's.
+   * A one-off event is just cancelled (count 1).
+   */
+  public async cancelSeries(
+    eventId: string,
+    guildId?: string,
+  ): Promise<{ event: IEvent; cancelled: number } | null> {
+    const event = await this.getEvent(eventId);
+    if (!event) return null;
+    if (guildId && event.guildId !== guildId) return null;
+    if (!isRecurring(event) || !event.seriesId) {
+      const wasLive = event.state !== "cancelled";
+      await this.cancelOne(event);
+      return { event, cancelled: wasLive ? 1 : 0 };
+    }
+
+    // Block spawning first, so an occurrence ending mid-cancel cannot
+    // resurrect the series.
+    await Event.updateMany(
+      { guildId: event.guildId, seriesId: event.seriesId },
+      { $set: { nextSpawned: true } },
+    );
+    const open = await Event.find({
+      guildId: event.guildId,
+      seriesId: event.seriesId,
+      state: { $in: ["scheduled", "active"] },
+    });
+    let cancelled = 0;
+    for (const occurrence of open) {
+      await this.cancelOne(occurrence);
+      cancelled += 1;
+    }
+    logger.info(
+      `Cancelled event series ${sanitizeForLog(event.seriesId)} (${cancelled} occurrence(s))`,
+    );
+    const fresh = (await this.getEvent(eventId)) ?? event;
+    return { event: fresh, cancelled };
+  }
+
+  private async cancelOne(event: IEvent): Promise<void> {
     if (event.channelId) {
       const guild = await this.client.guilds
         .fetch(event.guildId)
@@ -413,7 +678,6 @@ export class EventService extends ScheduledService {
     await event.save();
     await this.updateAnnouncement(event);
     logger.info(`Cancelled event ${sanitizeForLog(String(event._id))}`);
-    return event;
   }
 
   /** Force the temp channel to spin up now, ahead of its scheduled lead. */
@@ -639,6 +903,11 @@ export class EventService extends ScheduledService {
 
     if (event.description) {
       embed.setDescription(event.description);
+    }
+    if (isRecurring(event)) {
+      embed.setFooter({
+        text: `🔁 Repeats ${recurrenceLabel(event.recurrence)}`,
+      });
     }
     if (event.channelId && !finished) {
       embed.addFields({

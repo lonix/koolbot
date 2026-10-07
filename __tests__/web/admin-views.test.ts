@@ -1455,6 +1455,48 @@ describe("renderEventsPage", () => {
     expect(html).toContain("Events are disabled");
   });
 
+  it("offers a repeat selector on the create form", () => {
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [],
+    });
+    expect(html).toContain('name="recurrence"');
+    for (const value of ["none", "weekly", "biweekly", "monthly"]) {
+      expect(html).toContain(`<option value="${value}"`);
+    }
+  });
+
+  it("flags series occurrences and offers cancel-series", () => {
+    const row = {
+      id: "e1",
+      title: "Game Night",
+      when: "2026-07-04 20:00 (UTC)",
+      state: "scheduled",
+      going: 0,
+      maybe: 0,
+      cant: 0,
+      channelId: null,
+    };
+    const html = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [{ ...row, recurrence: "weekly", occurrence: 3 }],
+    });
+    expect(html).toContain("Part of a recurring series");
+    expect(html).toContain("weekly · #3");
+    expect(html).toContain('name="scope" value="series"');
+    expect(html).toContain("Cancel occurrence");
+
+    const oneOff = renderEventsPage({
+      ...EVENTS_COMMON,
+      enabled: true,
+      rows: [row],
+    });
+    expect(oneOff).not.toContain("Part of a recurring series");
+    expect(oneOff).not.toContain('name="scope"');
+  });
+
   it("renders a scheduled event row with RSVP counts and actions", () => {
     const html = renderEventsPage({
       ...EVENTS_COMMON,

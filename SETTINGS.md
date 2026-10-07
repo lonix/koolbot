@@ -713,6 +713,7 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
 | `events.create_lead_minutes`      | `15`    | How long before start the temporary voice channel is created                                                                      |
 | `events.default_duration_minutes` | `120`   | Duration applied to an event when the organiser doesn't specify one                                                               |
 | `events.channel_grace_minutes`    | `15`    | How long after an event ends the bot waits before deleting its (now empty) channel                                                |
+| `events.recurrence_enabled`       | `true`  | Allow recurring events (weekly / biweekly / monthly). Off = one-off only                                                          |
 
 **Notes:**
 
@@ -726,7 +727,18 @@ command (see [COMMANDS.md](COMMANDS.md#event)).
   tracking is enabled, time spent in it is tracked like any other channel.
 - Only administrators can create, cancel, or start events; `/event list`
   is open to everyone. A configurable creator role is a possible future
-  enhancement. Recurring events are not yet supported.
+  enhancement.
+- **Recurring events** (weekly / every 2 weeks / monthly, same wall-clock
+  time) are a _series_ of ordinary event rows sharing a `seriesId`. Future
+  occurrences are not pre-created: when an occurrence ends, the scan spawns
+  the next one with a fresh RSVP message and temporary channel. The cadence
+  is anchored to the first occurrence's date and time in its timezone, so it
+  survives DST changes and monthly series on the 29th–31st return to their
+  day after a short month. Occurrences missed while the bot was offline are
+  skipped, not back-filled. Cancelling one occurrence skips just that date;
+  cancelling the series stops it. Turn the whole thing off with
+  `events.recurrence_enabled`. Anything fancier than a fixed cadence (RRULE
+  patterns, "2nd Tuesday", holiday exceptions) is not supported.
 
 ---
 
@@ -1671,6 +1683,7 @@ leave the graph in a broken state.
 - `events.create_lead_minutes` (number, default: 15)
 - `events.default_duration_minutes` (number, default: 120)
 - `events.channel_grace_minutes` (number, default: 15)
+- `events.recurrence_enabled` (bool, default: true)
 
 #### LFG (Looking for Group)
 
