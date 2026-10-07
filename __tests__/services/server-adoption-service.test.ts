@@ -125,6 +125,7 @@ function harness() {
     roles: new Map<string, unknown>(),
     channels: new Map<string, unknown>(),
   };
+  const alreadyHolds = new Set<string>();
   let configIssues: string[] = [];
   let n = 0;
   const run = (label: string) => {
@@ -159,6 +160,7 @@ function harness() {
       addMemberRole: async (m, r) => {
         run(`addMember:${m}:${r}`);
         if (failMembers.has(m)) throw new Error("no");
+        return !alreadyHolds.has(m);
       },
       readRole: async (id) =>
         (live.roles.get(id) ??
@@ -187,6 +189,12 @@ function harness() {
       update: async (id, patch) => {
         Object.assign(records.get(id)!, clone(patch));
       },
+      claim: async (id, from, to) => {
+        const rec = records.get(id);
+        if (!rec || !from.includes(rec.status)) return false;
+        rec.status = to;
+        return true;
+      },
     },
     config: {
       set: async (k, v) => {
@@ -212,6 +220,7 @@ function harness() {
     records,
     failOn,
     failMembers,
+    alreadyHolds,
     live,
     setConfigIssues: (v: string[]): void => {
       configIssues = v;
@@ -584,5 +593,139 @@ describe("review hardening", () => {
     );
     expect(writes[0]).toBe("createRole:Member");
     expect(writes).toContain("setOverwrite:chat:role-1");
+  });
+});
+
+describe("review hardening, round two", () => {
+  it("rejects plans and snapshots from another server", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    const other = { ...actor, guildId: "g2" } as never;
+    await expect(h.service.apply(p, { ...opts, actor: other })).rejects.toThrow(
+      /different server/,
+    );
+    const applied = await h.service.apply(p, opts);
+    await expect(
+      h.service.rollback(applied.snapshotId, { actor: other }),
+    ).rejects.toThrow(/different server/);
+    await expect(
+      h.service.apply(p, {
+        ...opts,
+        actor: other,
+        resumeSnapshotId: applied.snapshotId,
+      }),
+    ).rejects.toThrow(/different server/);
+  });
+
+  it("marks a resumed snapshot as applying and blocks a concurrent rollback", async () => {
+    const h = harness();
+    h.failOn.add("config:adoption.snapshot.retention_days=30");
+    const p = planAdoption(scanned(), {
+      config: { "adoption.snapshot.retention_days": 30 },
+    });
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    h.failOn.clear();
+    let statusDuringResume = "";
+    h.deps.config.set = async () => {
+      statusDuringResume = h.records.get(first.snapshotId)!.status;
+      await expect(
+        h.service.rollback(first.snapshotId, { actor }),
+      ).rejects.toThrow(/still being applied/);
+    };
+    await h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId });
+    expect(statusDuringResume).toBe("applying");
+    await expect(
+      h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId }),
+    ).rejects.toThrow(/cannot be resumed/);
+  });
+
+  it("holds the snapshot in rolling_back during a rollback and restores status on failure", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      roles: [{ id: "member", name: "Member", color: 2 }],
+    });
+    const applied = await h.service.apply(p, opts);
+    let during = "";
+    h.deps.gateway.editRole = async () => {
+      during = h.records.get(applied.snapshotId)!.status;
+      throw new Error("nope");
+    };
+    await h.service.rollback(applied.snapshotId, { actor });
+    expect(during).toBe("rolling_back");
+    expect(h.records.get(applied.snapshotId)!.status).toBe("applied");
+  });
+
+  it("will not delete a channel that has members connected at delete time", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      deletions: [{ kind: "channel", id: "chat" }],
+      approvals: [approval("channel.delete", "chat")],
+    });
+    const base = scanned().channels[1];
+    h.deps.gateway.readChannel = async () => ({ ...base, voiceMemberCount: 0 });
+    let reads = 0;
+    h.deps.gateway.readChannel = async () => ({
+      ...base,
+      voiceMemberCount: ++reads > 1 ? 2 : 0, // joins after planning
+    });
+    const r = await new ServerAdoptionService(h.deps).apply(p, opts);
+    expect(r.failed[0].error).toMatch(/members connected/);
+    expect(h.calls.some((c) => c.startsWith("deleteChannel"))).toBe(false);
+  });
+
+  it("recreates a deleted category before the channel inside it", async () => {
+    const h = harness();
+    const p = planAdoption(
+      scanned({
+        channels: [
+          scanned().channels[0],
+          { ...scanned().channels[1], parentId: "old-cat" },
+        ],
+      }),
+      {
+        deletions: [
+          { kind: "channel", id: "old-cat" },
+          { kind: "channel", id: "chat" },
+        ],
+        approvals: [
+          approval("channel.delete", "old-cat"),
+          approval("channel.delete", "chat"),
+        ],
+      },
+    );
+    h.live.channels.set(
+      "old-cat",
+      p.baseline.channels.find((c) => c.id === "old-cat"),
+    );
+    h.live.channels.set(
+      "chat",
+      p.baseline.channels.find((c) => c.id === "chat"),
+    );
+    const applied = await h.service.apply(p, opts);
+    expect(applied.status).toBe("applied");
+    h.calls.length = 0;
+    await h.service.rollback(applied.snapshotId, { actor });
+    const created = h.calls.filter((c) => c.startsWith("recreateChannel"));
+    expect(created).toEqual(["recreateChannel:Old", "recreateChannel:chat"]);
+  });
+
+  it("revokes grants from a member operation that failed part-way, and only real grants", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a", "b", "c"] }],
+    });
+    h.failMembers.add("c");
+    h.alreadyHolds.add("b"); // gained the role after the scan
+    const applied = await h.service.apply(p, opts);
+    expect(applied.status).toBe("partial");
+    expect(
+      h.records.get(applied.snapshotId)!.memberProgress["op-1"].granted,
+    ).toEqual(["a"]);
+    h.calls.length = 0;
+    await h.service.rollback(applied.snapshotId, { actor });
+    expect(h.calls.filter((c) => c.startsWith("removeMember"))).toEqual([
+      "removeMember:a:member",
+    ]);
   });
 });

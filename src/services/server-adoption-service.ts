@@ -65,7 +65,8 @@ export interface AdoptionGateway {
   removeOverwrite(channelId: string, targetId: string): Promise<void>;
   deleteChannel(channelId: string): Promise<void>;
   recreateChannel(channel: ChannelState): Promise<string>;
-  addMemberRole(memberId: string, roleId: string): Promise<void>;
+  /** Resolves true only when the role was actually added. */
+  addMemberRole(memberId: string, roleId: string): Promise<boolean>;
   removeMemberRole(memberId: string, roleId: string): Promise<void>;
   /** Live state, read just before the first write. Null when gone. */
   readRole(roleId: string): Promise<RoleState | null>;
@@ -102,6 +103,12 @@ export interface AdoptionStore {
     id: string,
     patch: Partial<Omit<AdoptionSnapshotRecord, "id">>,
   ): Promise<void>;
+  /** Atomically move a snapshot between statuses; false if it was not in `from`. */
+  claim(
+    id: string,
+    from: AdoptionSnapshotStatus[],
+    to: AdoptionSnapshotStatus,
+  ): Promise<boolean>;
 }
 
 export interface AdoptionConfigWriter {
@@ -271,6 +278,9 @@ export class ServerAdoptionService {
     options: ApplyOptions,
   ): Promise<ApplyResult> {
     this.assertApplicable(plan);
+    if (plan.guildId !== options.actor.guildId) {
+      throw new AdoptionPlanError("Plan belongs to a different server.");
+    }
     const { store } = this.deps;
     const batchSize = Math.max(1, options.batchSize ?? 5);
     const batchDelayMs = options.batchDelayMs ?? 1000;
@@ -282,8 +292,14 @@ export class ServerAdoptionService {
         throw new AdoptionPlanError("Snapshot to resume not found.");
       if (existing.planId !== plan.id)
         throw new AdoptionPlanError("Snapshot belongs to a different plan.");
-      if (existing.status === "rolled_back")
-        throw new AdoptionPlanError("Snapshot was already rolled back.");
+      if (existing.guildId !== options.actor.guildId)
+        throw new AdoptionPlanError("Snapshot belongs to a different server.");
+      // Claim atomically so a rollback or a second resume cannot race us.
+      if (!(await store.claim(existing.id, ["partial"], "applying"))) {
+        throw new AdoptionPlanError(
+          `Snapshot is ${existing.status} and cannot be resumed.`,
+        );
+      }
       snapshot = existing;
     } else {
       await this.assertBaselineCurrent(plan);
@@ -338,61 +354,72 @@ export class ServerAdoptionService {
       });
 
     const ops = plan.operations;
-    for (let start = 0; start < ops.length; start += batchSize) {
-      const batch = ops.slice(start, start + batchSize);
-      for (const op of batch) {
-        const record = records.get(op.id)!;
-        if (record.status === "applied") {
-          progress.completed++;
-          continue;
-        }
-        progress.current = op.summary;
-        // Destructive steps only run when every earlier step succeeded.
-        if (isDestructive(op) && earlierFailure) {
-          record.status = "skipped";
-          record.error = "Skipped: an earlier operation failed.";
-          progress.skipped++;
-          await this.auditOp(
-            options.actor,
-            plan,
-            snapshot.id,
-            op,
-            "failure",
-            record.error,
-          );
+    try {
+      for (let start = 0; start < ops.length; start += batchSize) {
+        const batch = ops.slice(start, start + batchSize);
+        for (const op of batch) {
+          const record = records.get(op.id)!;
+          if (record.status === "applied") {
+            progress.completed++;
+            continue;
+          }
+          progress.current = op.summary;
+          // Destructive steps only run when every earlier step succeeded.
+          if (isDestructive(op) && earlierFailure) {
+            record.status = "skipped";
+            record.error = "Skipped: an earlier operation failed.";
+            progress.skipped++;
+            await this.auditOp(
+              options.actor,
+              plan,
+              snapshot.id,
+              op,
+              "failure",
+              record.error,
+            );
+            await persist();
+            options.onProgress?.({ ...progress });
+            continue;
+          }
+          try {
+            record.resultId = await this.execute(
+              op,
+              snapshot,
+              options,
+              persist,
+            );
+            record.status = "applied";
+            record.error = null;
+            record.at = new Date();
+            progress.completed++;
+            await this.auditOp(options.actor, plan, snapshot.id, op, "success");
+          } catch (error) {
+            earlierFailure = true;
+            record.status = "failed";
+            record.error = getErrorMessage(error);
+            record.at = new Date();
+            progress.failed++;
+            logger.error(`Adoption operation ${op.id} failed:`, error);
+            await this.auditOp(
+              options.actor,
+              plan,
+              snapshot.id,
+              op,
+              "failure",
+              record.error,
+            );
+          }
           await persist();
           options.onProgress?.({ ...progress });
-          continue;
         }
-        try {
-          record.resultId = await this.execute(op, snapshot, options, persist);
-          record.status = "applied";
-          record.error = null;
-          record.at = new Date();
-          progress.completed++;
-          await this.auditOp(options.actor, plan, snapshot.id, op, "success");
-        } catch (error) {
-          earlierFailure = true;
-          record.status = "failed";
-          record.error = getErrorMessage(error);
-          record.at = new Date();
-          progress.failed++;
-          logger.error(`Adoption operation ${op.id} failed:`, error);
-          await this.auditOp(
-            options.actor,
-            plan,
-            snapshot.id,
-            op,
-            "failure",
-            record.error,
-          );
+        if (batchDelayMs > 0 && start + batchSize < ops.length) {
+          await this.deps.sleep(batchDelayMs);
         }
-        await persist();
-        options.onProgress?.({ ...progress });
       }
-      if (batchDelayMs > 0 && start + batchSize < ops.length) {
-        await this.deps.sleep(batchDelayMs);
-      }
+    } catch (error) {
+      // Never leave a snapshot stuck in "applying" after an unexpected error.
+      await store.update(snapshot.id, { status: "partial" });
+      throw error;
     }
 
     const all = [...records.values()];
@@ -529,12 +556,20 @@ export class ServerAdoptionService {
           `remove overwrite on ${op.channelId}`,
         );
         return op.channelId;
-      case "channel.delete":
+      case "channel.delete": {
+        const live = await callApi(
+          () => gateway.readChannel(op.channelId),
+          `read channel ${op.channelId}`,
+        );
+        if (live && live.voiceMemberCount > 0) {
+          throw new Error("Channel has members connected; not deleting it.");
+        }
         await callApi(
           () => gateway.deleteChannel(op.channelId),
           `delete channel ${op.channelId}`,
         );
         return op.channelId;
+      }
       case "role.delete":
         await callApi(
           () => gateway.deleteRole(op.roleId),
@@ -566,11 +601,13 @@ export class ServerAdoptionService {
     });
     const grant = async (memberId: string): Promise<void> => {
       try {
-        await callApi(
+        const changed = await callApi(
           () => gateway.addMemberRole(memberId, roleId),
           `grant role to ${memberId}`,
         );
-        state.granted.push(memberId);
+        // Only record grants that actually changed something, so a rollback
+        // never removes a role the member already held.
+        if (changed) state.granted.push(memberId);
       } catch {
         state.failed.push(memberId);
       }
@@ -632,15 +669,27 @@ export class ServerAdoptionService {
     if (!snapshot) throw new AdoptionPlanError("Snapshot not found.");
     if (snapshot.status === "rolled_back")
       throw new AdoptionPlanError("Snapshot was already rolled back.");
-    if (snapshot.status === "applying")
+    if (snapshot.guildId !== options.actor.guildId)
+      throw new AdoptionPlanError("Snapshot belongs to a different server.");
+    const priorStatus = snapshot.status;
+    if (
+      !(await store.claim(snapshotId, ["applied", "partial"], "rolling_back"))
+    ) {
       throw new AdoptionPlanError(
-        "Snapshot is still being applied; wait for it to finish (or resume it) before rolling back.",
+        "Snapshot is still being applied or rolled back; wait for it to finish before rolling back.",
       );
+    }
 
     const { plan, baseline } = snapshot;
+    // A member operation that failed part-way still has persisted grants
+    // that must be revoked, so it counts as reversible too.
     const applied = new Set(
       snapshot.operations
-        .filter((r) => r.status === "applied")
+        .filter(
+          (r) =>
+            r.status === "applied" ||
+            (snapshot.memberProgress[r.opId]?.granted.length ?? 0) > 0,
+        )
         .map((r) => r.opId),
     );
     const done = new Set(snapshot.rolledBackOps);
@@ -822,8 +871,15 @@ export class ServerAdoptionService {
     // Deleted roles come back first so overwrites that name them can be
     // rewritten to the new role ids; everything else unwinds in reverse.
     const reversed = [...plan.operations].reverse();
+    const isCategoryDelete = (op: PlanOperation): boolean =>
+      op.type === "channel.delete" &&
+      baseline.channels.find((c) => c.id === op.channelId)?.kind === "category";
     for (const op of reversed) if (op.type === "role.delete") await run(op);
-    for (const op of reversed) if (op.type !== "role.delete") await run(op);
+    // Categories before the channels that sit inside them.
+    for (const op of reversed) if (isCategoryDelete(op)) await run(op);
+    for (const op of reversed) {
+      if (op.type !== "role.delete" && !isCategoryDelete(op)) await run(op);
+    }
 
     // A deleted role took its overwrites on surviving channels with it.
     const deletedChannels = new Set(
@@ -861,6 +917,9 @@ export class ServerAdoptionService {
         status: "rolled_back",
         rolledBackBy: options.actor.discordUserId,
       });
+    } else {
+      // Back to its prior status so the rollback can be retried.
+      await store.update(snapshotId, { status: priorStatus });
     }
     try {
       await this.deps.config.reload();
@@ -930,6 +989,17 @@ export class MongoAdoptionStore implements AdoptionStore {
       memberProgress: doc.memberProgress ?? {},
       rolledBackBy: doc.rolledBackBy ?? null,
     };
+  }
+  public async claim(
+    id: string,
+    from: AdoptionSnapshotStatus[],
+    to: AdoptionSnapshotStatus,
+  ): Promise<boolean> {
+    const result = await AdoptionSnapshot.updateOne(
+      { _id: id, status: { $in: from } },
+      { $set: { status: to } },
+    );
+    return result.modifiedCount === 1;
   }
   public async update(
     id: string,
@@ -1032,11 +1102,15 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
     return {
       id: channel.id,
       name: channel.name,
-      kind: "other",
+      kind: channel.isVoiceBased()
+        ? "voice"
+        : channel.type === ChannelType.GuildCategory
+          ? "category"
+          : "text",
       parentId: channel.parentId,
       position: channel.position,
       topic: null,
-      voiceMemberCount: 0,
+      voiceMemberCount: channel.isVoiceBased() ? channel.members.size : 0,
       overwrites: channel.permissionOverwrites.cache.map((o) => ({
         id: o.id,
         type: o.type === 0 ? "role" : "member",
@@ -1082,9 +1156,14 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
     } as GuildChannelCreateOptions);
     return created.id;
   }
-  public async addMemberRole(memberId: string, roleId: string): Promise<void> {
+  public async addMemberRole(
+    memberId: string,
+    roleId: string,
+  ): Promise<boolean> {
     const member = await this.guild.members.fetch(memberId);
+    if (member.roles.cache.has(roleId)) return false;
     await member.roles.add(roleId, "KoolBot server adoption");
+    return true;
   }
   public async removeMemberRole(
     memberId: string,

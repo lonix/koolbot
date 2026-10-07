@@ -11,7 +11,7 @@ import mongoose, { Document, Schema } from "mongoose";
  * `server-adoption-planner.ts`.
  */
 export type AdoptionSnapshotStatus =
-  "applying" | "applied" | "partial" | "rolled_back";
+  "applying" | "rolling_back" | "applied" | "partial" | "rolled_back";
 
 export type AdoptionOperationStatus =
   "pending" | "applied" | "failed" | "skipped";
@@ -60,7 +60,7 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
     appliedBy: { type: String, required: true },
     status: {
       type: String,
-      enum: ["applying", "applied", "partial", "rolled_back"],
+      enum: ["applying", "rolling_back", "applied", "partial", "rolled_back"],
       required: true,
       default: "applying",
     },

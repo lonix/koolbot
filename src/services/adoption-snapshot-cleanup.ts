@@ -13,7 +13,7 @@ export interface AdoptionSnapshotCleanupSummary {
 /**
  * Daily prune of server-adoption snapshots older than
  * `adoption.snapshot.retention_days` (#1018). `0` (or negative) keeps them
- * forever. A snapshot that is still being applied is never pruned.
+ * forever. A snapshot that is being applied or rolled back is never pruned.
  *
  * Snapshots exist whether or not any adoption feature is in use, so the job
  * has no enable gate of its own: retention alone governs it.
@@ -73,7 +73,7 @@ export class AdoptionSnapshotCleanupService extends ScheduledService<AdoptionSna
     try {
       const result = await AdoptionSnapshot.deleteMany({
         createdAt: { $lt: cutoff },
-        status: { $ne: "applying" },
+        status: { $nin: ["applying", "rolling_back"] },
       });
       const deleted = result.deletedCount ?? 0;
       if (deleted > 0) {

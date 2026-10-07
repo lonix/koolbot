@@ -242,7 +242,16 @@ describe("planAdoption: safety rules", () => {
   it("blocks granting permissions the bot does not hold", () => {
     const limited = scan({
       roles: scan().roles.map((r) =>
-        r.id === "botrole" ? { ...r, permissions: VIEW } : r,
+        r.id === "botrole"
+          ? {
+              ...r,
+              permissions: (
+                F.ViewChannel |
+                F.ManageRoles |
+                F.ManageChannels
+              ).toString(),
+            }
+          : r,
       ),
     });
     const plan = planAdoption(limited, {
@@ -296,7 +305,16 @@ describe("planAdoption: safety rules", () => {
   it("blocks locking the bot out of a channel a feature needs", () => {
     const state = scan({
       roles: scan().roles.map((r) =>
-        r.id === "botrole" ? { ...r, permissions: VIEW } : r,
+        r.id === "botrole"
+          ? {
+              ...r,
+              permissions: (
+                F.ViewChannel |
+                F.ManageRoles |
+                F.ManageChannels
+              ).toString(),
+            }
+          : r,
       ),
     });
     const plan = planAdoption(state, {
@@ -598,5 +616,38 @@ describe("planAdoption: review hardening", () => {
     });
     expect(plan.errors).toEqual([]);
     expect(plan.baseline.channels.map((c) => c.id)).toEqual(["chat"]);
+  });
+});
+
+describe("planAdoption: bot management permissions", () => {
+  const limited = (perms: bigint) =>
+    scan({
+      roles: scan().roles.map((r) =>
+        r.id === "botrole" ? { ...r, permissions: perms.toString() } : r,
+      ),
+    });
+
+  it("requires Manage Roles for role and member operations", () => {
+    const plan = planAdoption(limited(F.ManageChannels), {
+      roles: [{ name: "New" }],
+    });
+    expect(codes(plan)).toEqual(["bot-lacks-permission"]);
+    expect(plan.errors[0].message).toMatch(/Manage Roles/);
+    expect(
+      codes(planAdoption(limited(F.ManageRoles), { roles: [{ name: "New" }] })),
+    ).toEqual([]);
+  });
+
+  it("requires Manage Channels for overwrite and channel operations", () => {
+    const desired: DesiredState = {
+      overwrites: [
+        { channelId: "chat", target: { id: "member" }, allow: VIEW, deny: "0" },
+      ],
+    };
+    const plan = planAdoption(limited(F.ManageRoles | F.ViewChannel), desired);
+    expect(plan.errors.map((e) => e.message).join()).toMatch(/Manage Channels/);
+    expect(
+      codes(planAdoption(limited(F.ManageChannels | F.ViewChannel), desired)),
+    ).toEqual([]);
   });
 });

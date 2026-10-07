@@ -65,7 +65,7 @@ describe("AdoptionSnapshotCleanupService", () => {
       createdAt: { $lt: Date };
       status: unknown;
     };
-    expect(filter.status).toEqual({ $ne: "applying" });
+    expect(filter.status).toEqual({ $nin: ["applying", "rolling_back"] });
     const ageDays = (Date.now() - filter.createdAt.$lt.getTime()) / 86_400_000;
     expect(Math.round(ageDays)).toBe(30);
   });

@@ -271,7 +271,8 @@ export const PHASE_ORDER: Record<PlanOperation["type"], number> = {
   "role.delete": 6,
 };
 
-const { ViewChannel, Administrator } = PermissionsBitField.Flags;
+const { ViewChannel, Administrator, ManageRoles, ManageChannels } =
+  PermissionsBitField.Flags;
 const ALL_PERMISSIONS = PermissionsBitField.All;
 
 /** Readable names for a permission bitfield, for the diff view. */
@@ -893,6 +894,33 @@ export function planAdoption(
     .map((op, index) => ({ op, index }))
     .sort((a, b) => phaseOf(a.op) - phaseOf(b.op) || a.index - b.index)
     .map(({ op }, i) => ({ ...op, id: `op-${i + 1}` }) as PlanOperation);
+
+  // ---- the bot must hold the permissions Discord will demand ---------------
+  const needsManageRoles = ordered.some(
+    (o) =>
+      o.type === "role.create" ||
+      o.type === "role.edit" ||
+      o.type === "role.delete" ||
+      o.type === "member.role.add",
+  );
+  const needsManageChannels = ordered.some(
+    (o) =>
+      o.type === "overwrite.set" ||
+      o.type === "overwrite.remove" ||
+      o.type === "channel.delete",
+  );
+  if (needsManageRoles && (botBase & ManageRoles) !== ManageRoles) {
+    err(
+      "bot-lacks-permission",
+      "The bot needs the Manage Roles permission for these changes.",
+    );
+  }
+  if (needsManageChannels && (botBase & ManageChannels) !== ManageChannels) {
+    err(
+      "bot-lacks-permission",
+      "The bot needs the Manage Channels permission for these changes.",
+    );
+  }
 
   // ---- admin / bot access (simulated after-state) ----------------------
   if (ordered.length > 0) {
