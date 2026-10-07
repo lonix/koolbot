@@ -3609,6 +3609,13 @@ export interface VoiceChannelsProps extends CommonProps {
   settingsUnavailable?: boolean;
   /** Category options backing the `voicechannels.category_id` picker. */
   categoryChannels: ChannelOption[];
+  /** Voice channel options backing the `voicechannels.lobby.channel_id` picker. */
+  voiceChannels?: ChannelOption[];
+  /**
+   * `voicechannels.cleanup.managed_only`: cleanup deletes only channels
+   * KoolBot created, so the page words the cleanup actions accordingly.
+   */
+  managedOnly?: boolean;
   flash?: FlashMessage | null;
 }
 
@@ -3836,6 +3843,7 @@ ${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Voice Channels",
     <dt>Feature</dt><dd>${tagOnOff(props.enabled, "enabled", "disabled")}</dd>
     <dt>Control panel</dt><dd>${tagOnOff(props.controlPanelEnabled, "enabled", "disabled")}</dd>
     <dt>Category</dt><dd class="mono">${escapeHtml(props.categoryName)}</dd>
+    <dt>Cleanup scope</dt><dd>${props.managedOnly ? "Only channels KoolBot created" : "Every empty voice channel in the category"}</dd>
     <dt>Lobby (online)</dt><dd class="mono">${escapeHtml(props.lobbyName)}</dd>
     <dt>Lobby (offline)</dt><dd class="mono">${escapeHtml(props.offlineLobbyName)}</dd>
     <dt>Channel prefix</dt><dd class="mono">${escapeHtml(props.prefix)}</dd>
@@ -3848,17 +3856,20 @@ ${renderFeatureSettingsCard({
     "Change voice-channel settings here without leaving the page. Saved through the shared settings route.",
   category: "voicechannels",
   settingRows: props.settingRows,
-  pickers: { categoryChannels: props.categoryChannels },
+  pickers: {
+    categoryChannels: props.categoryChannels,
+    voiceChannels: props.voiceChannels ?? [],
+  },
   returnTo: "/admin/voice-channels",
   csrfToken: props.csrfToken,
   unavailable: props.settingsUnavailable,
 })}
 <div class="card">
   <h2>Cleanup actions</h2>
-  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty. An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it.');">
+  <form method="POST" action="/admin/voice-channels/force-reload" class="inline-form" onsubmit="return confirm('${props.managedOnly ? "Force cleanup of empty channels KoolBot created in the category (channels it did not create are never touched) and ensure the lobby exists? Occupied channels are left alone until they empty." : "Force cleanup of all empty unmanaged channels in the category and ensure the lobby exists? Occupied unmanaged channels are left alone until they empty."} An offline lobby is renamed back online; otherwise the lobby is deleted and re-created, which disconnects anyone currently in it.');">
     ${csrfInput}
     <button type="submit" class="btn btn-danger"${reloadDisabled ? " disabled" : ""}>Force VC cleanup</button>
-    <span class="muted">Removes all empty unmanaged channels in the category (unmanaged channels with members in them are kept until they empty), then ensures the lobby exists: an offline lobby is renamed back online, otherwise the lobby is deleted and re-created, which disconnects anyone currently in it.</span>
+    <span class="muted">${props.managedOnly ? "Removes empty channels KoolBot created in the category (channels it did not create are never touched, and occupied ones are kept until they empty)" : "Removes all empty unmanaged channels in the category (unmanaged channels with members in them are kept until they empty)"}, then ensures the lobby exists: an offline lobby is renamed back online, otherwise the lobby is deleted and re-created, which disconnects anyone currently in it.</span>
   </form>
   ${reloadHint ? `<p class="muted">${reloadHint}</p>` : ""}
 </div>

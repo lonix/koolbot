@@ -18,9 +18,16 @@ import {
 import { randomInt } from "node:crypto";
 import mongoose from "mongoose";
 import logger from "../utils/logger.js";
+import { sanitizeForLog } from "../utils/log-sanitize.js";
 import { VoiceChannelTracker } from "../services/voice-channel-tracker.js";
 import { ConfigService } from "./config-service.js";
 import { VoiceChannelOwnership } from "../models/voice-channel-ownership.js";
+import {
+  ManagedVoiceChannel,
+  ManagedVoiceMigration,
+  type ManagedVoiceChannelKind,
+  type ManagedVoiceChannelSource,
+} from "../models/managed-voice-channel.js";
 import { createKeyedLock } from "../utils/keyed-lock.js";
 
 const configService = ConfigService.getInstance();
@@ -215,6 +222,274 @@ export class VoiceChannelManager {
       await VoiceChannelOwnership.deleteOne({ channelId });
     } catch (error) {
       logger.error("Error removing voice channel ownership record:", error);
+    }
+    // The channel is gone, so it is no longer in the managed set either.
+    await this.forgetManagedChannel(channelId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Managed-only cleanup (issue #1032)
+  //
+  // `voicechannels.cleanup.managed_only` is an admin toggle for servers where
+  // `voicechannels.category_id` points at an existing, shared category. With it
+  // on, startup and periodic cleanup delete only channels whose ID KoolBot
+  // recorded as its own (ManagedVoiceChannel + ownership rows). With it off the
+  // legacy behaviour is unchanged. Recording happens either way, so switching
+  // the toggle on later starts from an accurate set.
+  // ---------------------------------------------------------------------------
+
+  /** Guilds whose naming-pattern migration is known to be done (cache of the DB marker). */
+  private managedMigrationDone: Set<string> = new Set();
+
+  private async isManagedOnly(): Promise<boolean> {
+    return configService.getBoolean(
+      "voicechannels.cleanup.managed_only",
+      false,
+    );
+  }
+
+  /** Persist that KoolBot created (or adopted) a channel, by ID. */
+  private async recordManagedChannel(
+    guildId: string | undefined,
+    channelId: string,
+    kind: ManagedVoiceChannelKind = "channel",
+    source: ManagedVoiceChannelSource = "created",
+  ): Promise<void> {
+    if (!this.isDbReady() || !guildId) return;
+    try {
+      await ManagedVoiceChannel.updateOne(
+        { channelId },
+        { $setOnInsert: { guildId, channelId, kind, source } },
+        { upsert: true },
+      );
+    } catch (error) {
+      logger.error("Error recording managed voice channel:", error);
+    }
+  }
+
+  /** Drop a channel from the managed set once it no longer exists. */
+  private async forgetManagedChannel(channelId: string): Promise<void> {
+    if (!this.isDbReady()) return;
+    try {
+      await ManagedVoiceChannel.deleteOne({ channelId });
+    } catch (error) {
+      logger.error("Error removing managed voice channel record:", error);
+    }
+  }
+
+  /**
+   * The configured lobby channel ID (`voicechannels.lobby.channel_id`), but
+   * only when it still resolves to a voice channel in the guild. Null means
+   * "identify the lobby by name", the backward-compatible fallback.
+   */
+  private async resolveLobbyChannelId(
+    guild: Guild | null | undefined,
+  ): Promise<string | null> {
+    const id = (
+      await configService.getString("voicechannels.lobby.channel_id", "")
+    ).trim();
+    if (!id || !guild?.channels?.cache) return null;
+    const channel = guild.channels.cache.get(id);
+    return channel && channel.type === ChannelType.GuildVoice ? id : null;
+  }
+
+  /** The lobby channel when it is configured by ID and still exists. */
+  private async getLobbyChannelById(
+    guild: Guild,
+  ): Promise<VoiceChannel | null> {
+    const id = await this.resolveLobbyChannelId(guild);
+    return id ? (guild.channels.cache.get(id) as VoiceChannel) : null;
+  }
+
+  /**
+   * Is this the lobby members join to spawn a channel? By ID when the ID is
+   * configured and resolves, otherwise by the (legacy-aware) lobby name.
+   */
+  private async isLobbyChannel(channel: {
+    id: string;
+    name: string;
+    guild?: Guild;
+  }): Promise<boolean> {
+    const lobbyId = await this.resolveLobbyChannelId(channel.guild);
+    if (lobbyId) return channel.id === lobbyId;
+    return channel.name === (await this.getLobbyChannelName());
+  }
+
+  /** Does a channel name look like one KoolBot would have generated? */
+  private matchesNamingPattern(
+    name: string,
+    prefix: string,
+    suffix: string,
+  ): boolean {
+    if (!prefix && !suffix) return false;
+    if (prefix && !name.startsWith(prefix)) return false;
+    if (suffix && !name.includes(suffix)) return false;
+    return true;
+  }
+
+  /**
+   * One-time migration for installs that predate ID tracking: the first time
+   * managed-only cleanup runs for a guild, treat voice channels in the managed
+   * category that match the KoolBot prefix/suffix naming pattern as
+   * KoolBot-created, and log what was adopted. Idempotent and marker-guarded so
+   * it never repeats (and never re-adopts a foreign channel later).
+   */
+  private async ensureManagedMigration(
+    guild: Guild,
+    category: CategoryChannel,
+  ): Promise<void> {
+    if (this.managedMigrationDone.has(guild.id)) return;
+
+    const existing = await ManagedVoiceMigration.findOne({ guildId: guild.id });
+    if (existing) {
+      this.managedMigrationDone.add(guild.id);
+      return;
+    }
+
+    const prefix = await configService.getString(
+      "voicechannels.channel.prefix",
+      "🎮",
+    );
+    const suffix = await configService.getString(
+      "voicechannels.channel.suffix",
+      "",
+    );
+    const lobbyId = await this.resolveLobbyChannelId(guild);
+    const lobbyName = await this.getLobbyChannelName();
+    const offlineName = await configService.getString(
+      "voicechannels.lobby.offlinename",
+      "",
+    );
+
+    const adopted: string[] = [];
+    for (const channel of category.children.cache.values()) {
+      if (channel.type !== ChannelType.GuildVoice) continue;
+      if (
+        channel.id === lobbyId ||
+        channel.name === lobbyName ||
+        channel.name === offlineName
+      ) {
+        continue;
+      }
+      if (!this.matchesNamingPattern(channel.name, prefix, suffix)) continue;
+      await this.recordManagedChannel(
+        guild.id,
+        channel.id,
+        "channel",
+        "adopted",
+      );
+      adopted.push(`${sanitizeForLog(channel.name)} (${channel.id})`);
+    }
+
+    await ManagedVoiceMigration.updateOne(
+      { guildId: guild.id },
+      {
+        $setOnInsert: {
+          guildId: guild.id,
+          adoptedCount: adopted.length,
+          migratedAt: new Date(),
+        },
+      },
+      { upsert: true },
+    );
+    this.managedMigrationDone.add(guild.id);
+    logger.info(
+      `Managed-only voice cleanup: adopted ${adopted.length} existing channel(s) matching the KoolBot naming pattern` +
+        (adopted.length > 0 ? `: ${adopted.join(", ")}` : ""),
+    );
+  }
+
+  /**
+   * IDs of the channels KoolBot created, for managed-only cleanup: the
+   * persisted managed set, persisted ownership rows (which survive renames),
+   * and in-memory ownership/custom-name/waiting-room tracking. Runs the
+   * one-time migration first. Returns null when the set cannot be determined
+   * (database unavailable or a read failed): the caller must then skip
+   * deleting anything rather than guess.
+   */
+  private async loadManagedChannelIds(
+    guild: Guild,
+    category: CategoryChannel,
+  ): Promise<Set<string> | null> {
+    if (!this.isDbReady()) {
+      logger.warn(
+        "Database not ready; skipping managed-only voice channel cleanup",
+      );
+      return null;
+    }
+    try {
+      await this.ensureManagedMigration(guild, category);
+
+      const ids = new Set<string>();
+      const [managed, owned] = await Promise.all([
+        ManagedVoiceChannel.find({ guildId: guild.id }, { channelId: 1 }),
+        VoiceChannelOwnership.find(
+          { guildId: guild.id },
+          { channelId: 1, ownerId: 1 },
+        ),
+      ]);
+      for (const record of managed) {
+        if (guild.channels.cache.has(record.channelId)) {
+          ids.add(record.channelId);
+        } else {
+          // Deleted outside the bot: drop the stale row.
+          await this.forgetManagedChannel(record.channelId);
+        }
+      }
+      for (const record of owned) ids.add(record.channelId);
+      for (const userChannel of this.userChannels.values()) {
+        ids.add(userChannel.id);
+      }
+      for (const channelId of this.customChannelNames.keys())
+        ids.add(channelId);
+      for (const waitingRoomId of this.waitingRoomToMain.keys()) {
+        ids.add(waitingRoomId);
+      }
+      return ids;
+    } catch (error) {
+      logger.error("Error loading managed voice channel set:", error);
+      return null;
+    }
+  }
+
+  /**
+   * Startup sweep for managed-only mode: delete empty channels KoolBot
+   * created, and nothing else. Foreign empty channels (another bot's
+   * join-to-create channel, permanent rooms) are never touched.
+   */
+  private async sweepManagedOnlyAtStartup(
+    guild: Guild,
+    category: CategoryChannel,
+    lobbyId: string | null,
+    lobbyName: string,
+    offlineLobbyName: string,
+  ): Promise<void> {
+    const managedIds = await this.loadManagedChannelIds(guild, category);
+    if (!managedIds) return;
+
+    for (const channel of category.children.cache.values()) {
+      if (
+        channel.type !== ChannelType.GuildVoice ||
+        !managedIds.has(channel.id) ||
+        channel.members.size !== 0 ||
+        channel.id === lobbyId ||
+        channel.name === lobbyName ||
+        channel.name === offlineLobbyName
+      ) {
+        continue;
+      }
+      try {
+        await channel.delete();
+        await this.removeOwnershipRecord(channel.id);
+        logger.info(
+          `Cleaned up empty managed channel ${channel.name} during initialization`,
+        );
+      } catch (error) {
+        logger.error(
+          `Error cleaning up channel ${channel.name} during initialization:`,
+          error,
+        );
+      }
     }
   }
 
@@ -419,6 +694,7 @@ export class VoiceChannelManager {
 
       this.waitingRooms.set(channel.id, waitingRoom.id);
       this.waitingRoomToMain.set(waitingRoom.id, channel.id);
+      await this.recordManagedChannel(guild.id, waitingRoom.id, "waiting_room");
 
       logger.info(
         `Created waiting room ${waitingRoom.name} for channel ${channel.name}`,
@@ -461,6 +737,7 @@ export class VoiceChannelManager {
 
         await waitingRoom.delete("Waiting room removed by owner");
       }
+      await this.forgetManagedChannel(waitingRoomId);
 
       this.waitingRooms.delete(channelId);
       this.waitingRoomToMain.delete(waitingRoomId);
@@ -560,11 +837,28 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Clean up any empty channels in the category, except the lobby channels
-      for (const channel of category.children.cache.values()) {
+      const lobbyChannelId = await this.resolveLobbyChannelId(guild);
+
+      // Clean up any empty channels in the category, except the lobby channels.
+      // With voicechannels.cleanup.managed_only on (shared/adopted category),
+      // only channels KoolBot created are eligible (#1032).
+      const managedOnly = await this.isManagedOnly();
+      if (managedOnly) {
+        await this.sweepManagedOnlyAtStartup(
+          guild,
+          category,
+          lobbyChannelId,
+          lobbyChannelName,
+          offlineLobbyName,
+        );
+      }
+      for (const channel of managedOnly
+        ? []
+        : category.children.cache.values()) {
         if (
           channel.type === ChannelType.GuildVoice &&
           channel.members.size === 0 &&
+          channel.id !== lobbyChannelId &&
           channel.name !== lobbyChannelName &&
           channel.name !== offlineLobbyName
         ) {
@@ -908,7 +1202,7 @@ export class VoiceChannelManager {
         logger.info(
           `User joined channel. Lobby name: "${lobbyChannelName}", Channel name: "${newChannel.name}"`,
         );
-        if (newChannel.name === lobbyChannelName) {
+        if (await this.isLobbyChannel(newChannel)) {
           logger.info(
             `Creating channel for ${member.displayName} who joined the lobby`,
           );
@@ -952,9 +1246,8 @@ export class VoiceChannelManager {
           await this.sendLiveDisclaimer(newChannel as VoiceChannel, member);
         }
 
-        const lobbyChannelName = await this.getLobbyChannelName();
         // If user is moving to the Lobby, create a new channel
-        if (newChannel.name === lobbyChannelName) {
+        if (await this.isLobbyChannel(newChannel)) {
           // Clean up the old channel if it was a personal channel
           if (this.userChannels.has(member.id)) {
             const oldUserChannel = this.userChannels.get(member.id);
@@ -1143,6 +1436,7 @@ export class VoiceChannelManager {
 
       this.userChannels.set(member.id, channel);
       await this.persistOwnership(member.guild?.id, channel.id, member.id);
+      await this.recordManagedChannel(member.guild?.id, channel.id);
       logger.info(
         `Created voice channel ${channelName} for ${member.displayName}`,
       );
@@ -1423,6 +1717,7 @@ export class VoiceChannelManager {
         try {
           const waitingRoom = this.client.channels.cache.get(waitingRoomId);
           if (waitingRoom) await waitingRoom.delete();
+          await this.forgetManagedChannel(waitingRoomId);
         } catch {
           // Ignore errors cleaning up waiting room
         }
@@ -1475,6 +1770,7 @@ export class VoiceChannelManager {
         const waitingRoom = this.client.channels.cache.get(waitingRoomId);
         if (waitingRoom)
           await waitingRoom.delete("Bot cleanup - parent channel removed");
+        await this.forgetManagedChannel(waitingRoomId);
       } catch {
         // Ignore errors cleaning up waiting room
       }
@@ -1489,13 +1785,8 @@ export class VoiceChannelManager {
     channel: VoiceChannel,
   ): Promise<void> {
     try {
-      const lobbyName = await configService.getString(
-        "voicechannels.lobby.name",
-        "Lobby",
-      );
-
       // Check if this is the online lobby channel (not offline)
-      if (channel.name === lobbyName) {
+      if (await this.isLobbyChannel(channel)) {
         logger.info(
           `User ${member.user.username} joined lobby channel: ${channel.name}`,
         );
@@ -1628,6 +1919,7 @@ export class VoiceChannelManager {
       // Store ownership
       this.userChannels.set(userId, newChannel);
       await this.persistOwnership(guild.id, newChannel.id, userId);
+      await this.recordManagedChannel(guild.id, newChannel.id);
 
       // Auto-apply the user's default preset (if presets are enabled)
       const presetsEnabled = await configService.getBoolean(
@@ -1685,11 +1977,14 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Find the lobby channel
-      const lobbyChannel = category.children.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice && channel.name === lobbyName,
-      );
+      // Find the lobby channel: by ID when configured, else by name
+      const lobbyChannel =
+        (await this.getLobbyChannelById(guild)) ??
+        category.children.cache.find(
+          (channel): channel is VoiceChannel =>
+            channel.type === ChannelType.GuildVoice &&
+            channel.name === lobbyName,
+        );
 
       if (lobbyChannel) {
         await lobbyChannel.setName(offlineLobbyName, "Bot shutting down");
@@ -1731,12 +2026,17 @@ export class VoiceChannelManager {
         return false;
       }
 
-      // Find the offline lobby channel
-      const offlineLobbyChannel = category.children.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          channel.name === offlineLobbyName,
-      );
+      // Find the offline lobby channel. When the lobby is configured by ID,
+      // that channel is the lobby whatever it is currently called: if it is
+      // not already carrying the online name, it is the one to bring online.
+      const lobbyById = await this.getLobbyChannelById(guild);
+      const offlineLobbyChannel =
+        (lobbyById && lobbyById.name !== lobbyName ? lobbyById : undefined) ??
+        category.children.cache.find(
+          (channel): channel is VoiceChannel =>
+            channel.type === ChannelType.GuildVoice &&
+            channel.name === offlineLobbyName,
+        );
 
       if (offlineLobbyChannel) {
         // Anyone sitting in the offline lobby was talking together while the
@@ -1883,23 +2183,30 @@ export class VoiceChannelManager {
         return false;
       }
 
-      // First, try to find an existing online lobby
-      const existingLobby = category.children.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice && channel.name === lobbyName,
-      );
+      // First, try to find an existing online lobby (by ID when configured)
+      const lobbyById = await this.getLobbyChannelById(guild);
+      const existingLobby =
+        (lobbyById && lobbyById.name === lobbyName ? lobbyById : undefined) ??
+        category.children.cache.find(
+          (channel): channel is VoiceChannel =>
+            channel.type === ChannelType.GuildVoice &&
+            channel.name === lobbyName,
+        );
 
       if (existingLobby) {
         logger.debug(`Lobby channel already exists: ${existingLobby.name}`);
         return true; // We're good, lobby already exists
       }
 
-      // Check if there's an offline lobby we can rename
-      const offlineLobbyChannel = category.children.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          channel.name === offlineLobbyName,
-      );
+      // Check if there's an offline lobby we can rename. The channel
+      // configured by ID is the lobby whatever its current name.
+      const offlineLobbyChannel =
+        lobbyById ??
+        category.children.cache.find(
+          (channel): channel is VoiceChannel =>
+            channel.type === ChannelType.GuildVoice &&
+            channel.name === offlineLobbyName,
+        );
 
       if (offlineLobbyChannel) {
         // Rename the offline lobby back to online
@@ -1914,6 +2221,8 @@ export class VoiceChannelManager {
           return true; // We're done
         } catch (error) {
           logger.error(`Failed to rename offline lobby channel:`, error);
+          // A lobby configured by ID must not be duplicated by a fresh one.
+          if (lobbyById) return false;
           // Fall through to creation if renaming fails
         }
       }
@@ -1932,6 +2241,7 @@ export class VoiceChannelManager {
           ],
         });
         logger.info(`Created new lobby channel: ${newLobby.name}`);
+        await this.recordManagedChannel(guild.id, newLobby.id, "lobby");
         return true;
       } catch (error) {
         logger.error(`Failed to create lobby channel:`, error);
@@ -1968,11 +2278,45 @@ export class VoiceChannelManager {
         return false;
       }
 
-      // Find ALL lobby channels (including duplicates and offline ones)
+      // A lobby configured by ID is kept (and renamed online if needed), never
+      // deleted and re-created: that would change its ID and orphan the config.
+      const lobbyById = await this.getLobbyChannelById(guild);
+      if (lobbyById) {
+        if (lobbyById.name === lobbyName) return true;
+        try {
+          await lobbyById.setName(
+            lobbyName,
+            "Bot starting up - renaming offline lobby",
+          );
+          logger.info(`Renamed lobby channel back to online: ${lobbyName}`);
+          return true;
+        } catch (error) {
+          logger.error(`Failed to rename lobby channel:`, error);
+          return false;
+        }
+      }
+
+      const managedOnly = await this.isManagedOnly();
+      const offlineLobbyConfigured = await configService.getString(
+        "voicechannels.lobby.offlinename",
+        "🔴 Lobby",
+      );
+
+      // Find ALL lobby channels (including duplicates and offline ones).
+      // In managed-only mode (shared category) the loose `includes("Lobby")`
+      // match is too greedy: it would delete other bots' lobby-like channels.
+      // Only the configured lobby (by ID, or exact online/offline name) counts.
       const allLobbyChannels = category.children.cache.filter(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          (channel.name === lobbyName || channel.name.includes("Lobby")),
+        (channel): channel is VoiceChannel => {
+          if (channel.type !== ChannelType.GuildVoice) return false;
+          if (managedOnly) {
+            return (
+              channel.name === lobbyName ||
+              channel.name === offlineLobbyConfigured
+            );
+          }
+          return channel.name === lobbyName || channel.name.includes("Lobby");
+        },
       );
 
       // Check if there's an offline lobby that we can rename back to online
@@ -2027,6 +2371,7 @@ export class VoiceChannelManager {
           ],
         });
         logger.info(`Created lobby channel: ${newLobby.name}`);
+        await this.recordManagedChannel(guild.id, newLobby.id, "lobby");
         return true;
       } catch (error) {
         logger.error(`Failed to create lobby channel:`, error);
@@ -2117,6 +2462,21 @@ export class VoiceChannelManager {
           channel.type === ChannelType.GuildVoice,
       );
 
+      // Shared/adopted-category mode (#1032): only channels KoolBot created
+      // may be deleted. If that set cannot be determined, delete nothing.
+      const managedOnly = await this.isManagedOnly();
+      const lobbyChannelId = await this.resolveLobbyChannelId(guild);
+      let persistedManagedIds: Set<string> | null = null;
+      if (managedOnly) {
+        persistedManagedIds = await this.loadManagedChannelIds(guild, category);
+        if (!persistedManagedIds) {
+          logger.warn(
+            "Skipping periodic voice channel cleanup: managed-only mode is on but the set of KoolBot-created channels could not be loaded",
+          );
+          return false;
+        }
+      }
+
       // Get managed channel names (lobby names + any channels with our prefix)
       const channelPrefix = await configService.getString(
         "voicechannels.channel.prefix",
@@ -2133,10 +2493,13 @@ export class VoiceChannelManager {
       // the online name instead. See issue #843.
       const managedChannelNames = new Set([lobbyChannelName, offlineLobbyName]);
 
-      // Add any channels that start with our prefix
-      for (const channel of allChannels.values()) {
-        if (channel.name.startsWith(channelPrefix)) {
-          managedChannelNames.add(channel.name);
+      // Add any channels that start with our prefix. Not in managed-only
+      // mode: a foreign channel that merely looks like ours is not ours.
+      if (!managedOnly) {
+        for (const channel of allChannels.values()) {
+          if (channel.name.startsWith(channelPrefix)) {
+            managedChannelNames.add(channel.name);
+          }
         }
       }
 
@@ -2151,7 +2514,7 @@ export class VoiceChannelManager {
       // matches cleanupEmptyChannel()'s definition of "managed": if the
       // ownership entry is ever missing while customChannelNames still holds
       // the channel, it must not be misclassified as unmanaged and deleted.
-      const managedChannelIds = new Set<string>();
+      const managedChannelIds = new Set<string>(persistedManagedIds ?? []);
       for (const userChannel of this.userChannels.values()) {
         managedChannelIds.add(userChannel.id);
       }
@@ -2161,13 +2524,15 @@ export class VoiceChannelManager {
         }
       }
 
-      // Clean up channels the bot doesn't manage
-      for (const channel of allChannels.values()) {
+      // Clean up channels the bot doesn't manage. Skipped entirely in
+      // managed-only mode: unmanaged channels are never touched there.
+      for (const channel of managedOnly ? [] : allChannels.values()) {
         try {
           // Skip if it's a managed channel (by name pattern or owned channel ID)
           if (
             managedChannelNames.has(channel.name) ||
-            managedChannelIds.has(channel.id)
+            managedChannelIds.has(channel.id) ||
+            channel.id === lobbyChannelId
           ) {
             logger.debug(`Skipping managed channel: ${channel.name}`);
             continue;
@@ -2206,8 +2571,10 @@ export class VoiceChannelManager {
         (channel) =>
           (managedChannelNames.has(channel.name) ||
             managedChannelIds.has(channel.id)) &&
+          channel.id !== lobbyChannelId &&
           channel.name !== lobbyChannelName &&
           channel.name !== offlineLobbyName &&
+          !this.waitingRoomToMain.has(channel.id) &&
           channel.members.size === 0,
       );
 
@@ -2287,14 +2654,47 @@ export class VoiceChannelManager {
         return;
       }
 
-      // Check for offline lobby
-      const offlineLobby = category.children.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          channel.name === offlineLobbyName,
-      );
+      // Check for offline lobby. A lobby configured by ID that is still
+      // carrying a non-online name is the one to restore.
+      const lobbyById = await this.getLobbyChannelById(guild);
+      const offlineLobby =
+        (lobbyById && lobbyById.name !== lobbyChannelName
+          ? lobbyById
+          : undefined) ??
+        category.children.cache.find(
+          (channel): channel is VoiceChannel =>
+            channel.type === ChannelType.GuildVoice &&
+            channel.name === offlineLobbyName,
+        );
 
-      if (offlineLobby) {
+      if (offlineLobby && lobbyById && offlineLobby.id === lobbyById.id) {
+        // Never delete the channel the lobby ID points at: bring it online.
+        logger.warn(
+          "Lobby is carrying a non-online name, attempting to restore it...",
+        );
+        const emptied = await this.moveOfflineLobbyMembersToSharedChannel(
+          guild,
+          offlineLobby,
+        );
+        if (!emptied) {
+          logger.warn(
+            "Lobby still has members after the move; leaving it in place rather than disconnecting them",
+          );
+        } else {
+          try {
+            await offlineLobby.setName(
+              lobbyChannelName,
+              "Health check - restoring lobby",
+            );
+            logger.info("Restored lobby channel name during health check");
+          } catch (error) {
+            logger.error(
+              "Error restoring lobby name during health check:",
+              error,
+            );
+          }
+        }
+      } else if (offlineLobby) {
         logger.warn(
           "Offline lobby detected, attempting to restore normal lobby...",
         );
@@ -2329,22 +2729,27 @@ export class VoiceChannelManager {
       }
 
       // Ensure normal lobby exists
-      const lobbyChannel = category.children.cache.find(
-        (channel): channel is VoiceChannel =>
-          channel.type === ChannelType.GuildVoice &&
-          channel.name === lobbyChannelName,
-      );
+      const lobbyChannel =
+        (await this.getLobbyChannelById(guild)) ??
+        category.children.cache.find(
+          (channel): channel is VoiceChannel =>
+            channel.type === ChannelType.GuildVoice &&
+            channel.name === lobbyChannelName,
+        );
 
       if (!lobbyChannel) {
         logger.warn("Normal lobby not found, creating it...");
         try {
-          await guild.channels.create({
+          const created = await guild.channels.create({
             name: lobbyChannelName,
             type: ChannelType.GuildVoice,
             parent: category,
             position: 0,
           });
           logger.info("Created normal lobby channel during health check");
+          if (created?.id) {
+            await this.recordManagedChannel(guild.id, created.id, "lobby");
+          }
         } catch (error) {
           logger.error(
             "Error creating normal lobby channel during health check:",

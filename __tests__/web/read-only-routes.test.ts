@@ -238,6 +238,8 @@ describe("buildSettingRows (#705)", () => {
     expect([...VOICE_CHANNELS_SETTING_KEYS]).toEqual([
       "voicechannels.enabled",
       "voicechannels.category_id",
+      "voicechannels.cleanup.managed_only",
+      "voicechannels.lobby.channel_id",
       "voicechannels.lobby.name",
       "voicechannels.lobby.offlinename",
       "voicechannels.channel.prefix",

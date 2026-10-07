@@ -154,6 +154,8 @@ function describeType(value: unknown): string {
 export const VOICE_CHANNELS_SETTING_KEYS = [
   "voicechannels.enabled",
   "voicechannels.category_id",
+  "voicechannels.cleanup.managed_only",
+  "voicechannels.lobby.channel_id",
   "voicechannels.lobby.name",
   "voicechannels.lobby.offlinename",
   "voicechannels.channel.prefix",
@@ -1830,6 +1832,8 @@ export function createReadOnlyRouter(
         lobbyName,
         offlineLobbyName,
         prefix,
+        managedOnly,
+        lobbyChannelId,
         stored,
       ] = await Promise.all([
         config.getBoolean("voicechannels.enabled", false),
@@ -1837,6 +1841,8 @@ export function createReadOnlyRouter(
         config.getString("voicechannels.lobby.name", "Lobby"),
         config.getString("voicechannels.lobby.offlinename", "Offline Lobby"),
         config.getString("voicechannels.channel.prefix", "🎮"),
+        config.getBoolean("voicechannels.cleanup.managed_only", false),
+        config.getString("voicechannels.lobby.channel_id", ""),
         // `null` (not `[]`) on failure: an empty snapshot would render the
         // schema defaults as if they were stored, and saving the card would
         // then overwrite the real values with them.
@@ -1864,6 +1870,8 @@ export function createReadOnlyRouter(
       // managed-channel table below, so the page fetches the guild/channels
       // once rather than paying for a second round-trip.
       const categoryChannels: ChannelOption[] = [];
+      // Voice channel options for the `voicechannels.lobby.channel_id` picker.
+      const voiceChannels: ChannelOption[] = [];
       const channels: Array<{
         name: string;
         isLobby: boolean;
@@ -1879,9 +1887,12 @@ export function createReadOnlyRouter(
         for (const ch of guild.channels.cache.values()) {
           if (ch?.type === ChannelType.GuildCategory) {
             categoryChannels.push({ id: ch.id, name: ch.name ?? ch.id });
+          } else if (ch?.type === ChannelType.GuildVoice) {
+            voiceChannels.push({ id: ch.id, name: ch.name ?? ch.id });
           }
         }
         categoryChannels.sort((a, b) => a.name.localeCompare(b.name));
+        voiceChannels.sort((a, b) => a.name.localeCompare(b.name));
         const category = await resolveManagedCategory(guild);
 
         if (category) {
@@ -1897,7 +1908,10 @@ export function createReadOnlyRouter(
             if (memberCount === 0) totalEmpty += 1;
             channels.push({
               name: ch.name,
-              isLobby: ch.name === lobbyName || ch.name === offlineLobbyName,
+              isLobby:
+                (lobbyChannelId !== "" && ch.id === lobbyChannelId) ||
+                ch.name === lobbyName ||
+                ch.name === offlineLobbyName,
               isLive: manager.isLive(ch.id),
               memberCount,
               customName: manager.getCustomChannelName(ch.id) ?? null,
@@ -1925,6 +1939,8 @@ export function createReadOnlyRouter(
           settingRows,
           settingsUnavailable: stored === null,
           categoryChannels,
+          voiceChannels,
+          managedOnly,
           flash: readFlash(req),
         }),
       );
