@@ -1100,15 +1100,43 @@ export class EventService extends ScheduledService {
     // channel): the creator and the scan's retry can both be sending at once,
     // and a plain save would leave the loser's post untracked and never
     // updated. The loser deletes its post and adopts the winner's ids.
-    const claimed = await Event.findOneAndUpdate(
-      { _id: event._id, announcementMessageId: null },
-      {
-        $set: {
-          announcementChannelId: channelId,
-          announcementMessageId: message.id,
+    // Only an open, non-cancelled row may take the post: if a cancel landed
+    // while the send was pending (it skipped the edit because the ids were
+    // still null), the claim fails and the stale post is removed below.
+    let claimed: IEvent | null;
+    try {
+      claimed = await Event.findOneAndUpdate(
+        {
+          _id: event._id,
+          announcementMessageId: null,
+          state: { $in: ["scheduled", "active"] },
+          seriesCancelled: { $ne: true },
         },
-      },
-    );
+        {
+          $set: {
+            announcementChannelId: channelId,
+            announcementMessageId: message.id,
+          },
+        },
+      );
+    } catch (error) {
+      // The write may or may not have applied. Reconcile against the stored
+      // id before touching the post: keep it if it is ours, drop it if the
+      // row has none (the scan reposts), and leave it alone when the outcome
+      // cannot be determined, rather than orphan or double-post.
+      logger.error("Failed to claim event announcement:", error);
+      const stored = await Event.findById(event._id).catch(() => undefined);
+      if (stored === undefined) return;
+      if (stored?.announcementMessageId === message.id) {
+        event.announcementChannelId = channelId;
+        event.announcementMessageId = message.id;
+        return;
+      }
+      if (!stored?.announcementMessageId) {
+        await message.delete().catch(() => undefined);
+      }
+      return;
+    }
     if (!claimed) {
       await message.delete().catch(() => undefined);
       const fresh = await Event.findById(event._id).catch(() => null);

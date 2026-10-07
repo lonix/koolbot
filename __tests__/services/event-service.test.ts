@@ -1082,7 +1082,7 @@ describe("recurring event lifecycle", () => {
       const { service, message, event } = setup();
       await realPost(service, event);
       expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
-        { _id: "occ-0", announcementMessageId: null },
+        expect.objectContaining({ _id: "occ-0", announcementMessageId: null }),
         {
           $set: {
             announcementChannelId: "chan-1",
@@ -1091,6 +1091,56 @@ describe("recurring event lifecycle", () => {
         },
       );
       expect(event.announcementMessageId).toBe("msg-mine");
+      expect(message.delete).not.toHaveBeenCalled();
+    });
+
+    it("only lets an open, non-cancelled row take the post", async () => {
+      const { service, event } = setup();
+      await realPost(service, event);
+      expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          state: { $in: ["scheduled", "active"] },
+          seriesCancelled: { $ne: true },
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("deletes the post when the claim write rejects and the row has no id", async () => {
+      const { service, message, event } = setup();
+      EventMock.findOneAndUpdate = jest.fn(async () => {
+        throw new Error("db down");
+      });
+      EventMock.findById = jest.fn(async () => ({
+        announcementMessageId: null,
+      }));
+      await realPost(service, event);
+      expect(message.delete).toHaveBeenCalled();
+    });
+
+    it("keeps the post when a rejected claim had in fact applied", async () => {
+      const { service, message, event } = setup();
+      EventMock.findOneAndUpdate = jest.fn(async () => {
+        throw new Error("ack lost");
+      });
+      EventMock.findById = jest.fn(async () => ({
+        announcementChannelId: "chan-1",
+        announcementMessageId: "msg-mine",
+      }));
+      await realPost(service, event);
+      expect(message.delete).not.toHaveBeenCalled();
+      expect(event.announcementMessageId).toBe("msg-mine");
+    });
+
+    it("leaves the post alone when the outcome of a rejected claim can't be read", async () => {
+      const { service, message, event } = setup();
+      EventMock.findOneAndUpdate = jest.fn(async () => {
+        throw new Error("db down");
+      });
+      EventMock.findById = jest.fn(async () => {
+        throw new Error("db down");
+      });
+      await realPost(service, event);
       expect(message.delete).not.toHaveBeenCalled();
     });
 
