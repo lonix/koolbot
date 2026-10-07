@@ -27,6 +27,7 @@ import {
   type AdminHarness,
 } from "./admin-harness.js";
 import { PROTECTED_KEYS } from "../../src/web/bootstrap-vars.js";
+import { settingsMetadata } from "../../src/services/config-schema.js";
 
 const mockRecordAudit = jest.fn(async () => undefined);
 const mockConfigGet = jest.fn<(key: string) => Promise<unknown>>();
@@ -1238,6 +1239,32 @@ describe("POST /settings/save-section", () => {
     expect(parseFlashRedirect(body.reload ?? null).path).toBe(
       "/admin/voice-channels",
     );
+  });
+
+  it("reloads the page for any key whose metadata sets reloadOnSave (#1090)", async () => {
+    const meta = settingsMetadata["polls.cooldown_days"];
+    const form = {
+      category: "polls",
+      redirect: "/admin/polls",
+      keys: ["polls.cooldown_days"],
+      "value_polls.cooldown_days": "14",
+    };
+    const plain = await harness.post("/settings/save-section", form, {
+      json: true,
+    });
+    expect(
+      ((await plain.json()) as { reload?: string }).reload,
+    ).toBeUndefined();
+    meta.reloadOnSave = true;
+    try {
+      const res = await harness.post("/settings/save-section", form, {
+        json: true,
+      });
+      const out = (await res.json()) as { reload?: string };
+      expect(parseFlashRedirect(out.reload ?? null).path).toBe("/admin/polls");
+    } finally {
+      delete meta.reloadOnSave;
+    }
   });
 
   it("keeps the in-place flash when the enable flag is unchanged", async () => {
