@@ -29,6 +29,9 @@ interface UserNavItem {
    * reachable so members can pre-set their choice before an admin flips the
    * feature on — the same "let users pre-set" intent the birthday page has
    * always followed.
+   *
+   * Exception: `"privacy"` is hidden outright while disabled (#1066) — it
+   * has nothing to pre-set, and `/me/privacy` returns 404 in that state.
    */
   feature?: "rewind" | "voice" | "birthday" | "privacy";
   /**
@@ -133,9 +136,8 @@ export interface UserPageOptions {
   birthdayEnabled?: boolean;
   /**
    * Enabled-state of the feature-gated Privacy / data-export page (#719).
-   * When `false`, the Privacy nav link is greyed with an "off" badge and the
-   * page itself renders the shared disabled banner instead of the download
-   * button — there is nothing to pre-set on a read-only surface.
+   * When `false`, the Privacy nav link and overview card are not rendered
+   * and `/me/privacy` + `/me/privacy/export` return 404 (#1066).
    */
   privacyEnabled?: boolean;
 }
@@ -376,29 +378,34 @@ export function renderUserPage(opts: UserPageOptions): string {
 }
 
 function renderPageNav(active: string, flags: UserFeatureFlags): string {
-  // Every item always renders (#709): a feature-gated page whose feature is
-  // off is greyed with an "off" badge rather than hidden, so it stays
-  // discoverable and its choice stays pre-settable. `undefined` flags are
-  // treated as enabled so non-gating callers/tests render plain links.
-  const items = USER_NAV_ITEMS.map((item) => {
-    const isActive =
-      item.href === active ||
-      (item.href === "/me/" && (active === "/me" || active === "/me/"));
-    const disabled = isNavItemDisabled(item, flags);
-    const classes = [isActive ? "active" : "", disabled ? "nav-disabled" : ""]
-      .filter(Boolean)
-      .join(" ");
-    const cls = classes ? ` class="${classes}"` : "";
-    const current = isActive ? ' aria-current="page"' : "";
-    // Read-only pages (Rewind) have no choice to save, so don't claim one.
-    const title = disabled
-      ? item.presettable
-        ? ' title="Your server admin hasn\'t enabled this yet — your choice is still saved"'
-        : ' title="Your server admin hasn\'t enabled this yet"'
-      : "";
-    const badge = disabled ? '<span class="nav-badge">off</span>' : "";
-    return `<a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a>`;
-  }).join("");
+  // A feature-gated page whose feature is off is greyed with an "off" badge
+  // rather than hidden (#709), so it stays discoverable and its choice stays
+  // pre-settable. The one exception is Privacy (#1066): it is read-only, so
+  // it is dropped entirely while off. `undefined` flags are treated as
+  // enabled so non-gating callers/tests render plain links.
+  const items = USER_NAV_ITEMS.filter(
+    (item) => !(item.feature === "privacy" && flags.privacyEnabled === false),
+  )
+    .map((item) => {
+      const isActive =
+        item.href === active ||
+        (item.href === "/me/" && (active === "/me" || active === "/me/"));
+      const disabled = isNavItemDisabled(item, flags);
+      const classes = [isActive ? "active" : "", disabled ? "nav-disabled" : ""]
+        .filter(Boolean)
+        .join(" ");
+      const cls = classes ? ` class="${classes}"` : "";
+      const current = isActive ? ' aria-current="page"' : "";
+      // Read-only pages (Rewind) have no choice to save, so don't claim one.
+      const title = disabled
+        ? item.presettable
+          ? ' title="Your server admin hasn\'t enabled this yet — your choice is still saved"'
+          : ' title="Your server admin hasn\'t enabled this yet"'
+        : "";
+      const badge = disabled ? '<span class="nav-badge">off</span>' : "";
+      return `<a href="${escapeHtml(item.href)}"${cls}${current}${title}>${escapeHtml(item.label)}${badge}</a>`;
+    })
+    .join("");
   // Named so it stays distinguishable from a page body's own nav (the
   // Rewind year picker) — axe `landmark-unique`, #856.
   return `<nav class="page-nav" aria-label="My preferences sections">${items}</nav>`;
@@ -461,7 +468,7 @@ export function renderUserIndexBody(opts: {
   // its card is shown tagged "off" (#709), mirroring `rewindEnabled`.
   birthdayEnabled?: boolean;
   // Whether the feature-gated Privacy page is enabled (#719). When false, its
-  // card is shown tagged "off" (#709), mirroring `rewindEnabled`.
+  // card is not rendered at all (#1066).
   privacyEnabled?: boolean;
   // The member's poll-participation summary (#655), or null/undefined when
   // poll-participation capture is off or the member has never voted. When
@@ -510,12 +517,17 @@ export function renderUserIndexBody(opts: {
     "Your personal year-in-review of voice activity, top voice companions, peak day, and badges earned.",
     opts.rewindEnabled !== false,
   );
-  const privacyCard = featureCard(
-    "/me/privacy",
-    "Privacy",
-    "See what Koolbot stores about you — and download all of it as a single JSON file.",
-    opts.privacyEnabled !== false,
-  );
+  // Unlike the cards above, Privacy is omitted while off (#1066): its page
+  // 404s, so a link would be a dead end.
+  const privacyCard =
+    opts.privacyEnabled === false
+      ? ""
+      : featureCard(
+          "/me/privacy",
+          "Privacy",
+          "See what Koolbot stores about you — and download all of it as a single JSON file.",
+          true,
+        );
   // Read-only poll-participation summary (#655). Only rendered when the
   // route supplies a summary (capture on + the member has a tracking row).
   const poll = opts.pollParticipation;

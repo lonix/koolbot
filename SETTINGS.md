@@ -878,6 +878,9 @@ Web UI only — there is no slash command for either.
 
 **Notes:**
 
+- **When `privacy.enabled` is off** the Privacy section is hidden from `/me`
+  (nav entry and Overview card) and `/me/privacy` and `/me/privacy/export`
+  return 404. It returns on the next request after the setting is saved.
 - **What's in it** is an explicit allowlist in `src/services/user-data-registry.ts`:
   voice history, message/reaction activity, poll participation, achievements,
   birthday, timezone and notification opt-ins, voice presets, Rewind
