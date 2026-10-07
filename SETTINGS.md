@@ -356,17 +356,45 @@ Schedule CRUD and question CRUD live on the Polls page.
 
 Dynamic voice channel creation and management.
 
-| Setting                              | Default           | Description                                                                                                                                                                                        |
-| ------------------------------------ | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `voicechannels.enabled`              | `false`           | Enable dynamic voice channel management                                                                                                                                                            |
-| `voicechannels.category_id`          | `""`              | Discord category ID for managed channels (pick from the dropdown in /admin/settings)                                                                                                               |
-| `voicechannels.lobby.name`           | `"Lobby"`         | Lobby channel name when bot is online                                                                                                                                                              |
-| `voicechannels.lobby.offlinename`    | `"Offline Lobby"` | Lobby channel name when bot is offline                                                                                                                                                             |
-| `voicechannels.channel.prefix`       | `"🎮"`            | Prefix for user-created channels                                                                                                                                                                   |
-| `voicechannels.channel.suffix`       | `""`              | Suffix for user-created channels                                                                                                                                                                   |
-| `voicechannels.controlpanel.enabled` | `true`            | Show interactive control panel in channel text chat                                                                                                                                                |
-| `voicechannels.presets.enabled`      | `false`           | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page |
-| `voicechannels.presets.max_per_user` | `3`               | Maximum number of presets a single user can save                                                                                                                                                   |
+| Setting                              | Default           | Description                                                                                                                                                                                                         |
+| ------------------------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `voicechannels.enabled`              | `false`           | Enable dynamic voice channel management                                                                                                                                                                             |
+| `voicechannels.category_id`          | `""`              | Discord category ID for managed channels (pick from the dropdown in /admin/settings)                                                                                                                                |
+| `voicechannels.cleanup.managed_only` | `false`           | Only clean up channels KoolBot created (tracked by ID). Turn on when `voicechannels.category_id` is a shared, existing category; off keeps the legacy sweep of every empty voice channel in the category. See below |
+| `voicechannels.lobby.channel_id`     | `""`              | Lobby voice channel ID (pick from the dropdown in /admin/voice-channels). Empty = find the lobby by `voicechannels.lobby.name`                                                                                      |
+| `voicechannels.lobby.name`           | `"Lobby"`         | Lobby channel name when bot is online                                                                                                                                                                               |
+| `voicechannels.lobby.offlinename`    | `"Offline Lobby"` | Lobby channel name when bot is offline                                                                                                                                                                              |
+| `voicechannels.channel.prefix`       | `"🎮"`            | Prefix for user-created channels                                                                                                                                                                                    |
+| `voicechannels.channel.suffix`       | `""`              | Suffix for user-created channels                                                                                                                                                                                    |
+| `voicechannels.controlpanel.enabled` | `true`            | Show interactive control panel in channel text chat                                                                                                                                                                 |
+| `voicechannels.presets.enabled`      | `false`           | Enable per-user voice preferences: a channel name pattern plus saved presets (channel name, user limit, bitrate), managed from the control panel's **Presets** button and the `/me/voice` web page                  |
+| `voicechannels.presets.max_per_user` | `3`               | Maximum number of presets a single user can save                                                                                                                                                                    |
+
+### Cleaning up only channels KoolBot created
+
+By default KoolBot treats `voicechannels.category_id` as its own: on startup and
+every few minutes it deletes every **empty** voice channel in that category,
+except the lobby. That is right for a category KoolBot created, and wrong for an
+existing category that other bots or permanent voice rooms share (server
+adoption, or picking an existing category in Settings).
+
+Turn on `voicechannels.cleanup.managed_only` (Web UI: **Voice Channels** page,
+or Settings) for the shared case. Then:
+
+- KoolBot records the ID of every channel it creates (rooms, waiting rooms, the
+  lobby) in the database, so the set survives restarts.
+- Startup and periodic cleanup delete only empty channels in that set. A foreign
+  empty channel in the category is never touched.
+- The first time the toggle is on, existing channels in the category whose name
+  matches `voicechannels.channel.prefix` / `voicechannels.channel.suffix` are
+  adopted as KoolBot-created (so rooms from before the upgrade are not
+  orphaned). What was adopted is logged. This runs once per server.
+- If the database is unavailable, cleanup is skipped rather than guessing.
+
+Set `voicechannels.lobby.channel_id` to identify the lobby by ID. It survives a
+rename (including the offline name) and cannot be confused with another
+channel; when empty, or when the channel no longer exists, the lobby is found
+by `voicechannels.lobby.name` (and the legacy keys) as before.
 
 ### Manual cleanup
 
@@ -842,12 +870,12 @@ UI page, which also lists open, claimed and closed tickets and can reopen one.
 Closing archives the channel (renamed `closed-…`, locked) — it is never
 deleted. See [COMMANDS.md](COMMANDS.md#ticket).
 
-| Setting | Default | Description |
-| --- | --- | --- |
-| `tickets.enabled` | `false` | Master switch — enables `/ticket` and the `/admin/tickets` page |
-| `tickets.staff_role_id` | `""` | Role that sees every ticket and may claim, close and reopen. **Required**: opening a ticket is refused while it is empty |
-| `tickets.category_id` | `""` | Category new ticket channels are created under. Empty creates them at the top level |
-| `tickets.transcript_on_close` | `true` | Post a plain-text message log into the channel when a ticket closes |
+| Setting                       | Default | Description                                                                                                              |
+| ----------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `tickets.enabled`             | `false` | Master switch — enables `/ticket` and the `/admin/tickets` page                                                          |
+| `tickets.staff_role_id`       | `""`    | Role that sees every ticket and may claim, close and reopen. **Required**: opening a ticket is refused while it is empty |
+| `tickets.category_id`         | `""`    | Category new ticket channels are created under. Empty creates them at the top level                                      |
+| `tickets.transcript_on_close` | `true`  | Post a plain-text message log into the channel when a ticket closes                                                      |
 
 **Notes:**
 
@@ -1595,6 +1623,8 @@ leave the graph in a broken state.
 
 - `voicechannels.enabled` (bool, default: false)
 - `voicechannels.category_id` (category, default: "")
+- `voicechannels.cleanup.managed_only` (bool, default: false)
+- `voicechannels.lobby.channel_id` (channel, default: "")
 - `voicechannels.lobby.name` (string, default: "Lobby")
 - `voicechannels.lobby.offlinename` (string, default: "Offline Lobby")
 - `voicechannels.channel.prefix` (string, default: "🎮")

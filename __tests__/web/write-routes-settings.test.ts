@@ -1218,6 +1218,28 @@ describe("POST /settings/save-section", () => {
     expect(flash.msg).toBe("Saved 2 settings in polls.");
   });
 
+  it("reloads the voice page when the managed-only cleanup toggle is saved (#1078 review)", async () => {
+    // The Force cleanup confirmation is rendered from this value; a stale
+    // dialog would promise foreign channels are safe while the legacy sweep
+    // runs. Saved on a feature page, so the AJAX save must reload it.
+    const res = await harness.post(
+      "/settings/save-section",
+      {
+        category: "voicechannels",
+        redirect: "/admin/voice-channels",
+        no_cascade: "1",
+        keys: ["voicechannels.cleanup.managed_only"],
+        "value_voicechannels.cleanup.managed_only": "true",
+      },
+      { json: true },
+    );
+    const body = (await res.json()) as { type: string; reload?: string };
+    expect(body.type).toBe("ok");
+    expect(parseFlashRedirect(body.reload ?? null).path).toBe(
+      "/admin/voice-channels",
+    );
+  });
+
   it("keeps the in-place flash when the enable flag is unchanged", async () => {
     mockConfigGet.mockImplementation(async (key) =>
       key === "polls.enabled" ? true : null,

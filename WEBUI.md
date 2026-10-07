@@ -877,7 +877,10 @@ The **Voice Channels** page's card (#979) edits every `voicechannels.*` key: the
 enable flag, the category (a category picker), the lobby names, the channel
 prefix and suffix, the control panel and the per-user preset limit. Next to it,
 **Force VC cleanup** removes empty unmanaged channels in the category and makes
-sure the lobby exists.
+sure the lobby exists. Turn on **Only clean up channels KoolBot created**
+(`voicechannels.cleanup.managed_only`, #1032) when the category is an existing,
+shared one: startup, periodic and forced cleanup then delete only empty channels
+KoolBot created itself, and the card also lets you pick the lobby channel by ID.
 
 The **Reaction Roles** page offers two ways to add a mapping (#813). *Create a
 reaction role* mints a brand-new Discord role and posts a picker message; the
