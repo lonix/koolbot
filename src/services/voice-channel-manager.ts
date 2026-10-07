@@ -254,16 +254,18 @@ export class VoiceChannelManager {
     channelId: string,
     kind: ManagedVoiceChannelKind = "channel",
     source: ManagedVoiceChannelSource = "created",
-  ): Promise<void> {
-    if (!this.isDbReady() || !guildId) return;
+  ): Promise<boolean> {
+    if (!this.isDbReady() || !guildId) return false;
     try {
       await ManagedVoiceChannel.updateOne(
         { channelId },
         { $setOnInsert: { guildId, channelId, kind, source } },
         { upsert: true },
       );
+      return true;
     } catch (error) {
       logger.error("Error recording managed voice channel:", error);
+      return false;
     }
   }
 
@@ -385,12 +387,21 @@ export class VoiceChannelManager {
         continue;
       }
       if (!this.matchesNamingPattern(channel.name, prefix, suffix)) continue;
-      await this.recordManagedChannel(
-        guild.id,
-        channel.id,
-        "channel",
-        "adopted",
-      );
+      // A failed upsert must not be papered over by the permanent marker below:
+      // throw so the migration retries on the next attempt (and, meanwhile,
+      // nothing is deleted because the managed set cannot be loaded).
+      if (
+        !(await this.recordManagedChannel(
+          guild.id,
+          channel.id,
+          "channel",
+          "adopted",
+        ))
+      ) {
+        throw new Error(
+          `Could not record adopted voice channel ${channel.id}; migration will retry`,
+        );
+      }
       adopted.push(`${sanitizeForLog(channel.name)} (${channel.id})`);
     }
 
@@ -410,6 +421,16 @@ export class VoiceChannelManager {
       `Managed-only voice cleanup: adopted ${adopted.length} existing channel(s) matching the KoolBot naming pattern` +
         (adopted.length > 0 ? `: ${adopted.join(", ")}` : ""),
     );
+  }
+
+  /** Is this channel in the set of channels KoolBot created (managed-only)? */
+  private async isTrackedManagedChannel(
+    guild: Guild,
+    category: CategoryChannel,
+    channelId: string,
+  ): Promise<boolean> {
+    const ids = await this.loadManagedChannelIds(guild, category);
+    return ids?.has(channelId) ?? false;
   }
 
   /**
@@ -2688,6 +2709,17 @@ export class VoiceChannelManager {
             );
           }
         }
+      } else if (
+        offlineLobby &&
+        (await this.isManagedOnly()) &&
+        !(await this.isTrackedManagedChannel(guild, category, offlineLobby.id))
+      ) {
+        // Shared category (#1032): a channel that merely carries the offline
+        // lobby's name is not ours to delete. Leave it; the check below
+        // creates the online lobby if one is missing.
+        logger.warn(
+          "A channel matches the offline lobby name but KoolBot did not create it; leaving it alone (managed-only mode)",
+        );
       } else if (offlineLobby) {
         logger.warn(
           "Offline lobby detected, attempting to restore normal lobby...",

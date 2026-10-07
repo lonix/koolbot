@@ -2016,12 +2016,18 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
     );
     expect(html).toContain("Only channels KoolBot created");
     expect(html).toContain("channels it did not create are never touched");
+    // The managed-only force path never deletes and re-creates the lobby, so
+    // it must not warn that it does (#1078 review).
+    expect(html).toContain("An existing lobby is kept");
+    expect(html).not.toContain("re-created");
   });
 
   it("describes the legacy cleanup scope while managed-only is off", () => {
     const html = render(vcRows());
     expect(html).toContain("Every empty voice channel in the category");
     expect(html).toContain("Force cleanup of all empty unmanaged channels");
+    // Legacy mode still deletes and re-creates a non-offline lobby.
+    expect(html).toContain("re-created, which disconnects anyone");
   });
 
   it("offers voice channels in the lobby channel picker", () => {

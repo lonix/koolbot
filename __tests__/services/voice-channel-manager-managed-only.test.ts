@@ -498,6 +498,29 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(migrationStore.get(GUILD_ID)?.adoptedCount).toBe(1);
     });
 
+    it("does not write the migration marker when a channel upsert fails, and retries later (#1078 review)", async () => {
+      addChannel("lobby-id", "Lobby");
+      const legacy = addChannel("legacy-id", "🎮 Hana's Room", 1);
+      const stub = ManagedVoiceChannel as unknown as { updateOne: jest.Mock };
+      const realUpdateOne = stub.updateOne.getMockImplementation()!;
+      stub.updateOne.mockImplementationOnce(async () => {
+        throw new Error("transient mongo error");
+      });
+
+      await manager.cleanupEmptyChannels();
+
+      // Nothing deleted, no marker: the migration did not silently complete.
+      expect(legacy.delete).not.toHaveBeenCalled();
+      expect(migrationStore.has(GUILD_ID)).toBe(false);
+      expect(managedStore.has("legacy-id")).toBe(false);
+
+      // The next attempt succeeds and adopts the channel.
+      stub.updateOne.mockImplementation(realUpdateOne);
+      await manager.cleanupEmptyChannels();
+      expect(migrationStore.has(GUILD_ID)).toBe(true);
+      expect(managedStore.get("legacy-id")?.source).toBe("adopted");
+    });
+
     it("marks adopted rows as adopted, not created", async () => {
       addChannel("lobby-id", "Lobby");
       addChannel("legacy-id", "🎮 Gina's Room", 1); // occupied: kept, row stays
@@ -713,6 +736,34 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
 
       expect(foreign.delete).not.toHaveBeenCalled();
       expect(foreignOffline.delete).not.toHaveBeenCalled();
+    });
+
+    it("health check never deletes an untracked channel named like the offline lobby in managed-only mode (#1078 review)", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      markMigrated();
+      addChannel("lobby-id", "Lobby");
+      const foreignOffline = addChannel("foreign-off-id", "Lobby (Offline)");
+      jest.spyOn(manager as any, "getGuild").mockResolvedValue(guild as never);
+
+      await (manager as any).checkLobbyHealth();
+
+      expect(foreignOffline.delete).not.toHaveBeenCalled();
+    });
+
+    it("health check still removes a tracked offline-named lobby copy in managed-only mode", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      markMigrated();
+      addChannel("lobby-id", "Lobby");
+      const ours = addChannel("ours-off-id", "Lobby (Offline)");
+      trackAsManaged("ours-off-id");
+      jest.spyOn(manager as any, "getGuild").mockResolvedValue(guild as never);
+      jest
+        .spyOn(manager as any, "moveOfflineLobbyMembersToSharedChannel")
+        .mockResolvedValue(true as never);
+
+      await (manager as any).checkLobbyHealth();
+
+      expect(ours.delete).toHaveBeenCalled();
     });
 
     it("force lobby ensure leaves lobby-like foreign channels alone in managed-only mode", async () => {
