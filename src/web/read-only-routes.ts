@@ -70,6 +70,12 @@ import {
 import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { ModerationService } from "../services/moderation-service.js";
+import { ModerationCaseService } from "../services/moderation-case-service.js";
+import { SYSTEM_ACTOR } from "../models/moderation-case.js";
+import {
+  buildCaseGroups,
+  loadModerationCaseData,
+} from "./moderation-case-groups.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 import { TICKET_STATUSES, type TicketStatus } from "../models/ticket.js";
 import { TicketChannelManager } from "../services/ticket-channel-manager.js";
@@ -250,6 +256,13 @@ export const MODERATION_SETTING_KEYS = [
   "moderation.retention_days",
   "core.moderation.enabled",
   "core.moderation.channel_id",
+  "moderation.cases.enabled",
+  "moderation.cases.review_cron",
+  "moderation.cases.default_review_days",
+  "moderation.cases.retention_days",
+  "moderation.cases.history_grace_days",
+  "core.moderation_review.enabled",
+  "core.moderation_review.channel_id",
 ] as const;
 
 /**
@@ -2331,6 +2344,15 @@ export function createReadOnlyRouter(
           ])
         : [0, []];
 
+      const caseData = await loadModerationCaseData({
+        caseService: ModerationCaseService.getInstance(client),
+        moderationService,
+        guildId: common.guildId,
+        enabled,
+        entryIds: docs.map((d) => d._id as mongoose.Types.ObjectId),
+      });
+      const { casesEnabled, queue, queueCases, casesByEntry } = caseData;
+
       // Resolve user + moderator labels to display names. Look in the member
       // cache first and batch the misses into a single `fetch({ user: [...] })`
       // request rather than one awaited fetch per id — a page of 50 rows can
@@ -2341,6 +2363,16 @@ export function createReadOnlyRouter(
       for (const d of docs) {
         idsOnPage.add(d.userId);
         if (d.moderatorId) idsOnPage.add(d.moderatorId);
+      }
+      for (const c of queueCases) {
+        idsOnPage.add(c.userId);
+        idsOnPage.add(c.openedByUserId);
+        if (c.originModeratorId) idsOnPage.add(c.originModeratorId);
+        // The review job records itself as "system", which is not a
+        // snowflake and would invalidate the whole batched member fetch.
+        for (const e of c.events) {
+          if (e.byUserId !== SYSTEM_ACTOR) idsOnPage.add(e.byUserId);
+        }
       }
       const labels = new Map<string, string>();
       if (idsOnPage.size > 0) {
@@ -2370,7 +2402,12 @@ export function createReadOnlyRouter(
         }
       }
 
+      const labelOf = (id: string | null): string =>
+        id ? (labels.get(id) ?? id) : "Unknown";
       const rows: ModerationRow[] = docs.map((d) => ({
+        entryId: String(d._id),
+        caseNumber: casesByEntry.get(String(d._id))?.caseNumber ?? null,
+        caseStatus: casesByEntry.get(String(d._id))?.status ?? null,
         createdAt:
           d.createdAt instanceof Date
             ? d.createdAt.toISOString()
@@ -2405,6 +2442,16 @@ export function createReadOnlyRouter(
           total,
           page,
           pageSize,
+          casesEnabled,
+          defaultReviewDays: caseData.defaultReviewDays,
+          caseGroups: queue
+            ? buildCaseGroups(
+                queue,
+                caseData.originEntries,
+                caseData.queueHistory,
+                labelOf,
+              )
+            : null,
           settingRows: moderationSettings.settingRows,
           pickers: moderationSettings.pickers,
           dependencyState: moderationSettings.dependencyState,

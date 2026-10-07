@@ -6,7 +6,9 @@ import {
   MessageFlags,
 } from "discord.js";
 import { ModerationService } from "../services/moderation-service.js";
-import { actionLabel } from "../utils/moderation-format.js";
+import { ModerationCaseService } from "../services/moderation-case-service.js";
+import { actionLabel, formatCaseLine } from "../utils/moderation-format.js";
+import type { Types } from "mongoose";
 import logger from "../utils/logger.js";
 import { safeReply } from "../utils/safe-reply.js";
 import {
@@ -96,6 +98,19 @@ export async function execute(
       { limit: PAGE_SIZE, skip },
     );
 
+    // Case state (#908) rides the same page: one extra query keyed on the
+    // page's entry ids, and only while the case lifecycle is switched on. A
+    // failure here costs the case lines, never the history itself.
+    const caseService = ModerationCaseService.getInstance(interaction.client);
+    const casesByEntry = (await caseService.isEnabled().catch(() => false))
+      ? await caseService
+          .getCasesForEntries(
+            interaction.guildId,
+            entries.map((e) => e._id as Types.ObjectId),
+          )
+          .catch(() => new Map())
+      : new Map();
+
     const lines = entries.map((entry) => {
       const when = `<t:${Math.floor(entry.createdAt.getTime() / 1000)}:f>`;
       const moderator = entry.moderatorId
@@ -104,7 +119,9 @@ export async function execute(
       const reason = entry.reason
         ? `\n> ${truncateText(entry.reason, MAX_REASON_DISPLAY_LENGTH)}`
         : "";
-      return `**${actionLabel(entry.action)}** · ${when} · by ${moderator}${reason}`;
+      const linkedCase = casesByEntry.get(String(entry._id));
+      const caseLine = linkedCase ? `\n${formatCaseLine(linkedCase)}` : "";
+      return `**${actionLabel(entry.action)}** · ${when} · by ${moderator}${reason}${caseLine}`;
     });
 
     // The per-reason cap above keeps a full page under the limit; this clamp

@@ -44,6 +44,8 @@ export interface CommandActionInput extends WarnInput {
 export interface ModerationHistoryQuery {
   limit: number;
   skip: number;
+  /** Only rows created strictly before this instant (a case's origin, #908). */
+  before?: Date;
 }
 
 export interface RecentQuery extends ModerationHistoryQuery {
@@ -290,7 +292,9 @@ export class ModerationService {
     userId: string,
     query: ModerationHistoryQuery,
   ): Promise<IModerationLog[]> {
-    return ModerationLog.find({ guildId, userId })
+    const filter: Record<string, unknown> = { guildId, userId };
+    if (query.before) filter.createdAt = { $lt: query.before };
+    return ModerationLog.find(filter)
       .sort({ createdAt: -1 })
       .skip(query.skip)
       .limit(query.limit)

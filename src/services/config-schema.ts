@@ -176,6 +176,9 @@ export interface ConfigSchema {
   "core.cron.channel_id": string;
   "core.moderation.enabled": boolean;
   "core.moderation.channel_id": string;
+  // Case review-due notice (#908): same category machinery as above.
+  "core.moderation_review.enabled": boolean;
+  "core.moderation_review.channel_id": string;
   // Update-available note (#1029): a DiscordLogger category like the above.
   "core.updates.enabled": boolean;
   "core.updates.channel_id": string;
@@ -197,6 +200,12 @@ export interface ConfigSchema {
   // Moderation log (issue #728)
   "moderation.enabled": boolean;
   "moderation.retention_days": number; // 0 = keep history forever (issue #742)
+  // Case lifecycle on top of the log (issue #908)
+  "moderation.cases.enabled": boolean;
+  "moderation.cases.review_cron": string; // Cron schedule for the due-review job
+  "moderation.cases.default_review_days": number; // Pre-filled review window
+  "moderation.cases.retention_days": number; // Resolved cases; 0 = keep forever
+  "moderation.cases.history_grace_days": number; // 0 = protect forever
 
   // Name history + /aka (issue #1038)
   "aka.enabled": boolean;
@@ -464,6 +473,9 @@ export const defaultConfig: ConfigSchema = {
   // until an operator names a mod-log channel to post them to.
   "core.moderation.enabled": false,
   "core.moderation.channel_id": "",
+  // Case review-due notice (#908): off until an operator names a channel.
+  "core.moderation_review.enabled": false,
+  "core.moderation_review.channel_id": "",
   // One-time "update available" note (#1029). Off like every other log
   // category: posting into a guild channel is an operator opt-in.
   "core.updates.enabled": false,
@@ -494,6 +506,17 @@ export const defaultConfig: ConfigSchema = {
   // 0 disables pruning entirely for operators who want the log kept forever.
   "moderation.enabled": false,
   "moderation.retention_days": 365,
+
+  // Case lifecycle (#908). Gate off (rule 1): an upgrade changes nothing
+  // until an operator opts in. The review job nudges at 09:00 by default.
+  // Resolved cases are kept forever (0) because a decision record is the
+  // point; a case protects its member's log history from pruning for a year
+  // after it resolves (0 = for as long as the case exists).
+  "moderation.cases.enabled": false,
+  "moderation.cases.review_cron": "0 9 * * *",
+  "moderation.cases.default_review_days": 90,
+  "moderation.cases.retention_days": 0,
+  "moderation.cases.history_grace_days": 365,
 
   // Name history (#1038). Both gates off (rule 1). `namehistory.enabled`
   // records names even while the command is off, so history can build up
@@ -1948,6 +1971,20 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "core",
     type: "channel",
   },
+  "core.moderation_review.enabled": {
+    label: "Case review notices to Discord",
+    description:
+      "Post one summary embed to the review channel whenever moderation cases come due for review. Requires moderation.cases.enabled.",
+    category: "core",
+    type: "boolean",
+  },
+  "core.moderation_review.channel_id": {
+    label: "Case review channel",
+    description:
+      "Text channel that receives the due-for-review summary. Nothing is posted while this is empty.",
+    category: "core",
+    type: "channel",
+  },
   "core.updates.enabled": {
     label: "Update notes to Discord",
     description:
@@ -2025,6 +2062,44 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     label: "Moderation log retention (days)",
     description:
       "Days to keep moderation-log rows before the daily cleanup job prunes them. Set to 0 to keep moderation history forever.",
+    category: "moderation",
+    type: "number",
+    min: RETENTION_MIN,
+  },
+  "moderation.cases.enabled": {
+    label: "Moderation cases enabled",
+    description:
+      "Let staff open a case against a kick or ban with an optional review date, then record the outcome (uphold, extend, make permanent, readmit) from the Moderation page. Requires moderation.enabled. Cases and the log history behind them are exempt from retention pruning.",
+    category: "moderation",
+    type: "boolean",
+  },
+  "moderation.cases.review_cron": {
+    label: "Case review schedule (cron)",
+    description:
+      "When the job runs that moves cases whose review date has passed into the review queue and posts the due-for-review notice.",
+    category: "moderation",
+    type: "cron",
+  },
+  "moderation.cases.default_review_days": {
+    label: "Default review window (days)",
+    description:
+      "Days from now pre-filled as the review date when staff open a case.",
+    category: "moderation",
+    type: "number",
+    min: 1,
+  },
+  "moderation.cases.retention_days": {
+    label: "Resolved case retention (days)",
+    description:
+      "Days to keep a resolved case, counted from its last decision rather than from when it was opened. Set to 0 to keep resolved cases forever. Open cases are never pruned. A resolved case is never removed sooner than the history protection window below, since it is what carries that protection.",
+    category: "moderation",
+    type: "number",
+    min: RETENTION_MIN,
+  },
+  "moderation.cases.history_grace_days": {
+    label: "Case history protection (days)",
+    description:
+      "How long after a case resolves its member's moderation-log history stays exempt from retention pruning, so a later problem can still be read against it. Members with an open case are always protected. Set to 0 to protect them for as long as the case exists.",
     category: "moderation",
     type: "number",
     min: RETENTION_MIN,

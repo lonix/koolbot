@@ -879,6 +879,11 @@ newest first, paginated 10 per page. The reply is ephemeral.
 Reasons longer than 300 characters are shortened in this view so a full page always fits in
 Discord's embed; the full reason is kept and shown in the Web UI moderation log.
 
+When the case lifecycle is on (`moderation.cases.enabled`), a kick or ban that has a case shows one more
+line with its state, for example `Case #14 — under review, due 12 Mar 2026` or
+`Case #9 — readmitted 4 Feb 2026 by @staff`. Cases are opened and decided on the Web UI moderation page,
+not from Discord.
+
 ---
 
 ## 🔧 Web UI launcher

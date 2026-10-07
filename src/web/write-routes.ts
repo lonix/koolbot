@@ -32,6 +32,7 @@ import { createDigestRouter } from "./routes/write/digest.js";
 import { createLeaderboardRolesRouter } from "./routes/write/leaderboard-roles.js";
 import { createBotStatusRouter } from "./routes/write/bot-status.js";
 import { createTicketsRouter } from "./routes/write/tickets.js";
+import { createModerationRouter } from "./routes/write/moderation.js";
 import { createVersionCheckRouter } from "./routes/write/version-check.js";
 
 export * from "./routes/write/helpers.js";
@@ -64,6 +65,7 @@ export function createWriteRouter(
   router.use(createLeaderboardRolesRouter(client));
   router.use(createBotStatusRouter(client));
   router.use(createTicketsRouter(client));
+  router.use(createModerationRouter(client));
   router.use(createVersionCheckRouter(client));
 
   return router;

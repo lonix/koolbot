@@ -113,3 +113,46 @@ export function formatHistorySummary(
 
   return `${parts.join(", ")}${recent}`;
 }
+
+/** The fields of a moderation case the `/modlog` line reads. */
+export interface CaseLineSource {
+  caseNumber: number;
+  status: "open" | "under_review" | "upheld" | "lifted" | "expired";
+  reviewAt: Date | null;
+  events: ReadonlyArray<{ at: Date; byUserId: string }>;
+}
+
+const discordDate = (date: Date): string =>
+  `<t:${Math.floor(date.getTime() / 1000)}:D>`;
+
+/**
+ * One-line case state shown under a kick/ban in `/modlog` (#908), e.g.
+ * `Case #14 — under review, due <t:…:D>` or
+ * `Case #9 — readmitted <t:…:D> by <@123>`. Terminal cases name who made the
+ * final call, because "who let them back in?" is what the line is for.
+ */
+export function formatCaseLine(c: CaseLineSource): string {
+  const head = `Case #${c.caseNumber} —`;
+  const last = c.events[c.events.length - 1];
+  const decided = last
+    ? ` ${discordDate(last.at)} by ${last.byUserId === "system" ? "KoolBot" : `<@${last.byUserId}>`}`
+    : "";
+  switch (c.status) {
+    case "open":
+      return c.reviewAt
+        ? `${head} open, review ${discordDate(c.reviewAt)}`
+        : `${head} open, no review date`;
+    case "under_review":
+      return c.reviewAt
+        ? `${head} under review, due ${discordDate(c.reviewAt)}`
+        : `${head} under review`;
+    case "upheld":
+      return `${head} made permanent${decided}`;
+    case "lifted":
+      return `${head} readmitted${decided}`;
+    case "expired":
+      return `${head} expired`;
+    default:
+      return `${head} ${String(c.status)}`;
+  }
+}

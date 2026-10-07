@@ -181,6 +181,7 @@ describe("user-data registry / schema drift", () => {
     // trails — out of a self-service endpoint.
     const mustExclude = [
       "src/models/moderation-log.ts",
+      "src/models/moderation-case.ts",
       "src/models/discord-command-audit-log.ts",
       "src/models/web-audit-log.ts",
       "src/models/web-session.ts",
@@ -197,6 +198,7 @@ describe("user-data registry / schema drift", () => {
     // session infrastructure — from a self-service endpoint.
     const mustRetain = [
       "src/models/moderation-log.ts",
+      "src/models/moderation-case.ts",
       "src/models/discord-command-audit-log.ts",
       "src/models/web-audit-log.ts",
       "src/models/web-session.ts",
