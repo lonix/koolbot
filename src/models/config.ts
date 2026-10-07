@@ -13,6 +13,7 @@ import mongoose, { Document, Schema } from "mongoose";
  */
 export const CONFIG_CATEGORIES = [
   "achievements",
+  "adoption",
   "amikool", // Kept for backward compatibility; key removed but legacy rows may exist
   "announcements",
   "birthdays",

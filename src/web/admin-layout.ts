@@ -79,9 +79,11 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "moderation.enabled",
   },
   { href: "/admin/bootstrap", label: "Bootstrap", group: "Info" },
+  { href: "/admin/adopt", label: "Server Scan", group: "Info" },
   // Settings — configuration & setup surfaces.
   { href: "/admin/settings", label: "Settings", group: "Settings" },
   { href: "/admin/permissions", label: "Permissions", group: "Settings" },
+  { href: "/admin/role-groups", label: "Role Groups", group: "Settings" },
   { href: "/admin/wizard", label: "Setup Wizard", group: "Settings" },
   // Features — feature-gated pages. A page whose feature is off is greyed
   // with an "off" badge and sorted last, never hidden (#610, #706).

@@ -10,6 +10,7 @@ import { Router } from "express";
 import { Client } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { VoiceChannelManager } from "../../../services/voice-channel-manager.js";
+import { ConfigService } from "../../../services/config-service.js";
 import { recordAudit } from "../../audit.js";
 import {
   flashRedirect,
@@ -34,6 +35,10 @@ export function createVoiceChannelsRouter(client: Client): Router {
         // disabled or misconfigured, e.g. the lobby cannot be brought online
         // (#843); tell the admin rather than claim channels were removed.
         const swept = await manager.cleanupEmptyChannels();
+        const managedOnly = await ConfigService.getInstance().getBoolean(
+          "voicechannels.cleanup.managed_only",
+          false,
+        );
         const guild = await client.guilds.fetch(session.guildId);
         const lobbyEnsured = await manager.ensureLobbyChannels(guild);
         // cleanupEmptyChannels() returns false both when it never ran and
@@ -55,7 +60,9 @@ export function createVoiceChannelsRouter(client: Client): Router {
           skipped.length === 0
             ? {
                 type: "ok",
-                text: "Force cleanup complete. Empty unmanaged channels removed (occupied ones are kept until they empty) and the lobby ensured.",
+                text: managedOnly
+                  ? "Force cleanup complete. Empty channels KoolBot created were removed (channels it did not create are never touched) and the lobby ensured."
+                  : "Force cleanup complete. Empty unmanaged channels removed (occupied ones are kept until they empty) and the lobby ensured.",
               }
             : {
                 type: "warn",

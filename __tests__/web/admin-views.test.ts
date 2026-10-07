@@ -2005,6 +2005,8 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
   const VC_KEYS = [
     "voicechannels.enabled",
     "voicechannels.category_id",
+    "voicechannels.cleanup.managed_only",
+    "voicechannels.lobby.channel_id",
     "voicechannels.lobby.name",
     "voicechannels.lobby.offlinename",
     "voicechannels.channel.prefix",
@@ -2026,11 +2028,18 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
       description: settingsMetadata[key].description,
       category: "voicechannels",
       min: settingsMetadata[key].min,
+      channelKind: settingsMetadata[key].channelKind,
     }));
-  const render = (settingRows: SettingRow[], enabled = true) =>
+  const render = (
+    settingRows: SettingRow[],
+    enabled = true,
+    managedOnly = false,
+  ) =>
     renderVoiceChannelsPage({
       ...COMMON,
       enabled,
+      managedOnly,
+      voiceChannels: [{ id: "vc-1", name: "Hangout" }],
       controlPanelEnabled: true,
       categoryName: "Voice",
       lobbyName: "Lobby",
@@ -2055,6 +2064,46 @@ describe("renderVoiceChannelsPage settings card (#979)", () => {
     expect(html).toContain(
       '<option value="cat-1" selected>#Voice Channels</option>',
     );
+  });
+
+  it("explains the managed-only toggle (#1032): off by default, with guidance on when to use it", () => {
+    const html = render(vcRows());
+    expect(html).toMatch(
+      /name="value_voicechannels\.cleanup\.managed_only"(?![^>]*checked)/,
+    );
+    expect(html).toContain("existing, shared category");
+    expect(html).toContain("never any other empty voice channel");
+  });
+
+  it("renders the managed-only toggle checked when on, and words the cleanup actions to match", () => {
+    const html = render(
+      vcRows({ "voicechannels.cleanup.managed_only": true }),
+      true,
+      true,
+    );
+    expect(html).toMatch(
+      /name="value_voicechannels\.cleanup\.managed_only"[^>]*checked/,
+    );
+    expect(html).toContain("Only channels KoolBot created");
+    expect(html).toContain("channels it did not create are never touched");
+    // The managed-only force path never deletes and re-creates the lobby, so
+    // it must not warn that it does (#1078 review).
+    expect(html).toContain("An existing lobby is kept");
+    expect(html).not.toContain("re-created");
+  });
+
+  it("describes the legacy cleanup scope while managed-only is off", () => {
+    const html = render(vcRows());
+    expect(html).toContain("Every empty voice channel in the category");
+    expect(html).toContain("Force cleanup of all empty unmanaged channels");
+    // Legacy mode still deletes and re-creates a non-offline lobby.
+    expect(html).toContain("re-created, which disconnects anyone");
+  });
+
+  it("offers voice channels in the lobby channel picker", () => {
+    const html = render(vcRows({ "voicechannels.lobby.channel_id": "vc-1" }));
+    expect(html).toContain('<option value="vc-1" selected>');
+    expect(html).toContain("Hangout");
   });
 
   it("renders presets.max_per_user as a number input with its current value", () => {

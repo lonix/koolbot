@@ -2,10 +2,12 @@ export interface ConfigSchema {
   // Voice Channel Management
   "voicechannels.enabled": boolean;
   "voicechannels.category_id": string;
+  "voicechannels.lobby.channel_id": string;
   "voicechannels.lobby.name": string;
   "voicechannels.lobby.offlinename": string;
   "voicechannels.channel.prefix": string;
   "voicechannels.channel.suffix": string;
+  "voicechannels.cleanup.managed_only": boolean;
   "voicechannels.controlpanel.enabled": boolean;
   "voicechannels.presets.enabled": boolean;
   "voicechannels.presets.max_per_user": number;
@@ -213,6 +215,9 @@ export interface ConfigSchema {
   "aka.enabled": boolean;
   "namehistory.enabled": boolean;
   "namehistory.retention_days": number; // 0 = keep forever
+
+  // Server adoption snapshots (#1018)
+  "adoption.snapshot.retention_days": number; // 0 = keep snapshots forever
 }
 
 /**
@@ -249,10 +254,12 @@ export const defaultConfig: ConfigSchema = {
   // Voice Channel Management
   "voicechannels.enabled": false,
   "voicechannels.category_id": "",
+  "voicechannels.lobby.channel_id": "",
   "voicechannels.lobby.name": "Lobby",
   "voicechannels.lobby.offlinename": "Offline Lobby",
   "voicechannels.channel.prefix": "🎮",
   "voicechannels.channel.suffix": "",
+  "voicechannels.cleanup.managed_only": false,
   "voicechannels.controlpanel.enabled": true,
   "voicechannels.presets.enabled": false,
   "voicechannels.presets.max_per_user": 3,
@@ -528,6 +535,10 @@ export const defaultConfig: ConfigSchema = {
   "aka.enabled": false,
   "namehistory.enabled": false,
   "namehistory.retention_days": 365,
+
+  // Server adoption (#1018). Snapshots are the rollback safety net, so the
+  // default keeps them for a quarter; 0 keeps them forever.
+  "adoption.snapshot.retention_days": 90,
 };
 
 /**
@@ -922,6 +933,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     description:
       "Per-user counts of reactions given and received, stored as lifetime + per-year totals. Data-capture foundation for a future Rewind stat; surfacing lives in a follow-up.",
   },
+  adoption: {
+    title: "Server Adoption",
+    description:
+      "Taking over roles, categories and channel permissions on an existing server. Every change is planned first, snapshotted, and can be rolled back.",
+  },
   namehistory: {
     title: "Name History",
     description:
@@ -1046,10 +1062,18 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
     category: "voicechannels",
     type: "category",
   },
+  "voicechannels.lobby.channel_id": {
+    label: "Lobby channel",
+    description:
+      "The voice channel members join to spawn a personal channel, identified by ID. Optional: when empty, or when the channel no longer exists, the lobby is found by its display name instead. Set this when the managed category is shared, so a differently named or renamed channel is never mistaken for the lobby (and the lobby is never mistaken for another channel).",
+    category: "voicechannels",
+    type: "channel",
+    channelKind: "voice",
+  },
   "voicechannels.lobby.name": {
     label: "Lobby channel display name",
     description:
-      "Display name of the lobby channel users join to spawn a personal channel. Cosmetic; the bot sets this on the managed channel rather than looking it up by name. Emoji shortcodes like :green_circle: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
+      "Display name of the lobby channel users join to spawn a personal channel. Used to find the lobby when no lobby channel is selected above. Emoji shortcodes like :green_circle: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
   },
@@ -1073,6 +1097,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Suffix appended to dynamically created voice channel names. Emoji shortcodes like :sparkles: are converted to the emoji on save (custom server emoji aren't supported in channel names).",
     category: "voicechannels",
     type: "string",
+  },
+  "voicechannels.cleanup.managed_only": {
+    label: "Only clean up channels KoolBot created",
+    description:
+      "Turn this on when the managed category above is an existing, shared category (for example one that already holds another bot's join-to-create channel or permanent voice rooms). Startup and periodic cleanup then delete only empty channels KoolBot created itself, tracked by ID, and never any other empty voice channel in the category. The first time it is on, existing channels in the category that match the KoolBot name prefix/suffix are adopted as KoolBot-created. Leave it off for a category that KoolBot owns exclusively: then every empty voice channel in it, except the lobby, is cleaned up.",
+    category: "voicechannels",
+    type: "boolean",
   },
   "voicechannels.controlpanel.enabled": {
     label: "In-channel control panel enabled",
@@ -2139,6 +2170,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Record usernames, display names and (with the GuildMembers intent) server nicknames as the bot sees them. Recording works even while /aka is off. History starts from when this is turned on.",
     category: "namehistory",
     type: "boolean",
+  },
+  "adoption.snapshot.retention_days": {
+    label: "Adoption snapshot retention (days)",
+    description:
+      "Days to keep a server-adoption snapshot (the saved prior state used to roll a change back) before the daily cleanup job prunes it. Set to 0 to keep snapshots forever.",
+    category: "adoption",
+    type: "number",
+    min: RETENTION_MIN,
   },
   "namehistory.retention_days": {
     label: "Name history retention (days)",
