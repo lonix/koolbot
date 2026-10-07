@@ -566,6 +566,30 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Names the admin inside a server-change record; the snapshot is the rollback safety net and ages out on its own retention.",
   },
   {
+    source: "src/models/adoption-snapshot.ts",
+    collection: "adoption-snapshot",
+    field: "plan",
+    exportable: false,
+    guildScoped: true,
+    note: "Embedded plan: member ids in role grants and overwrites, and the approving admin. Needed verbatim to resume or roll back; admin tooling, not member data.",
+    onDelete: "expires",
+    subject: "mention",
+    deleteNote:
+      "Member ids appear only as targets inside an admin's server-change plan; the snapshot is deleted whole by adoption.snapshot.retention_days.",
+  },
+  {
+    source: "src/models/adoption-snapshot.ts",
+    collection: "adoption-snapshot",
+    field: "memberProgress",
+    exportable: false,
+    guildScoped: true,
+    note: "Member ids that a bulk role grant reached or failed on, kept so a rollback can revoke exactly those grants. Admin tooling, not member data.",
+    onDelete: "expires",
+    subject: "mention",
+    deleteNote:
+      "Needed to revoke a bulk grant on rollback; removed with the whole snapshot by adoption.snapshot.retention_days.",
+  },
+  {
     source: "src/models/web-session.ts",
     collection: "web-session",
     field: "discordUserId",

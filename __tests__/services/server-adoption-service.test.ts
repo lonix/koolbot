@@ -121,6 +121,11 @@ function harness() {
   const records = new Map<string, Record_>();
   const failOn = new Set<string>();
   const failMembers = new Set<string>();
+  const live = {
+    roles: new Map<string, unknown>(),
+    channels: new Map<string, unknown>(),
+  };
+  let configIssues: string[] = [];
   let n = 0;
   const run = (label: string) => {
     calls.push(label);
@@ -155,6 +160,14 @@ function harness() {
         run(`addMember:${m}:${r}`);
         if (failMembers.has(m)) throw new Error("no");
       },
+      readRole: async (id) =>
+        (live.roles.get(id) ??
+          scanned().roles.find((r) => r.id === id) ??
+          null) as never,
+      readChannel: async (id) =>
+        (live.channels.get(id) ??
+          scanned().channels.find((c) => c.id === id) ??
+          null) as never,
       removeMemberRole: async (m, r) => {
         run(`removeMember:${m}:${r}`);
       },
@@ -179,6 +192,10 @@ function harness() {
       set: async (k, v) => {
         run(`config:${k}=${v}`);
       },
+      delete: async (k) => {
+        run(`configDelete:${k}`);
+      },
+      validate: async () => configIssues,
       reload: async () => {
         calls.push("reload");
       },
@@ -195,6 +212,10 @@ function harness() {
     records,
     failOn,
     failMembers,
+    live,
+    setConfigIssues: (v: string[]): void => {
+      configIssues = v;
+    },
     service: new ServerAdoptionService(deps),
   };
 }
@@ -456,5 +477,112 @@ describe("ServerAdoptionService.rollback", () => {
     const r = await h.service.rollback(applied.snapshotId, { actor });
     expect(r.failed).toHaveLength(1);
     expect(h.records.get(applied.snapshotId)!.status).toBe("applied");
+  });
+});
+
+describe("review hardening", () => {
+  it("refuses to apply when a touched role or channel changed since planning", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      roles: [{ id: "member", name: "Member", color: 2 }],
+    });
+    h.live.roles.set("member", { ...scanned().roles[3], color: 99 });
+    await expect(h.service.apply(p, opts)).rejects.toThrow(
+      /Changed since the plan/,
+    );
+    expect(h.calls).not.toContain("snapshot.create");
+
+    const q = planAdoption(scanned(), {
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+    h.live.channels.set("old-cat", {
+      ...scanned().channels[0],
+      overwrites: [],
+    });
+    await expect(h.service.apply(q, opts)).rejects.toThrow(/channel "Old"/);
+  });
+
+  it("validates the whole config batch before any write", async () => {
+    const h = harness();
+    h.setConfigIssues(["quotes.enabled needs voicechannels.enabled"]);
+    const p = planAdoption(scanned(), {
+      roles: [{ name: "New" }],
+      config: { "adoption.snapshot.retention_days": 30 },
+    });
+    await expect(h.service.apply(p, opts)).rejects.toThrow(/dependencies/);
+    expect(h.calls.filter((c) => c.startsWith("createRole"))).toEqual([]);
+  });
+
+  it("refuses to roll back a snapshot that is still applying", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    const applied = await h.service.apply(p, opts);
+    h.records.get(applied.snapshotId)!.status = "applying";
+    await expect(
+      h.service.rollback(applied.snapshotId, { actor }),
+    ).rejects.toThrow(/still being applied/);
+  });
+
+  it("removes the override when the setting had no stored value", async () => {
+    const h = harness();
+    const p = planAdoption(scanned({ config: {} }), {
+      config: { "adoption.snapshot.retention_days": 30 },
+    });
+    const applied = await h.service.apply(p, opts);
+    h.calls.length = 0;
+    await h.service.rollback(applied.snapshotId, { actor });
+    expect(h.calls).toContain("configDelete:adoption.snapshot.retention_days");
+  });
+
+  it("a retried rollback skips reversals that already succeeded", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      roles: [{ id: "member", name: "Member", color: 2 }],
+      config: { "adoption.snapshot.retention_days": 30 },
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+    const applied = await h.service.apply(p, opts);
+    h.calls.length = 0;
+    h.failOn.add("editRole:member:color");
+    const first = await h.service.rollback(applied.snapshotId, { actor });
+    expect(first.failed).toHaveLength(1);
+    expect(h.calls.filter((c) => c.startsWith("recreateChannel"))).toHaveLength(
+      1,
+    );
+
+    h.failOn.clear();
+    h.calls.length = 0;
+    const second = await h.service.rollback(applied.snapshotId, { actor });
+    expect(second.failed).toEqual([]);
+    expect(h.calls.filter((c) => c.startsWith("recreateChannel"))).toEqual([]);
+    expect(h.calls.filter((c) => c.startsWith("editRole"))).toHaveLength(1);
+    expect(h.records.get(applied.snapshotId)!.status).toBe("rolled_back");
+  });
+
+  it("restores a deleted role first and puts its overwrites back on the new role", async () => {
+    const h = harness();
+    const state = scanned({
+      channels: [
+        {
+          ...scanned().channels[1],
+          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+        },
+      ],
+    });
+    const p = planAdoption(state, {
+      deletions: [{ kind: "role", id: "member" }],
+      approvals: [approval("role.delete", "member")],
+    });
+    h.live.channels.set("chat", state.channels[0]);
+    const applied = await h.service.apply(p, opts);
+    h.calls.length = 0;
+    await h.service.rollback(applied.snapshotId, { actor });
+    const writes = h.calls.filter(
+      (c) => !c.startsWith("audit:") && c !== "reload",
+    );
+    expect(writes[0]).toBe("createRole:Member");
+    expect(writes).toContain("setOverwrite:chat:role-1");
   });
 });

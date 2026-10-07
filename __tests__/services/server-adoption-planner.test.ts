@@ -551,3 +551,52 @@ describe("planAdoption: destructive operations", () => {
     ]);
   });
 });
+
+describe("planAdoption: review hardening", () => {
+  it("only accepts approvals made by the applying admin", () => {
+    const state = scan({ channels: [channel({ id: "old" })] });
+    const desired: DesiredState = {
+      deletions: [{ kind: "channel", id: "old" }],
+      approvals: [
+        { ...approval("channel.delete", "old"), approvedBy: "someone-else" },
+      ],
+    };
+    expect(codes(planAdoption(state, desired))).toEqual(["approval-required"]);
+    expect(
+      codes(planAdoption(state, desired, { approverId: "someone-else" })),
+    ).toEqual([]);
+  });
+
+  it("rejects member grants to unknown, managed or above-bot roles", () => {
+    const plan = planAdoption(scan(), {
+      memberGrants: [
+        { role: { id: "ghost" }, memberIds: ["a"] },
+        { role: { id: "integ" }, memberIds: ["a"] },
+        { role: { id: "high" }, memberIds: ["a"] },
+      ],
+    });
+    expect(codes(plan)).toEqual([
+      "unknown-role",
+      "role-protected",
+      "role-protected",
+    ]);
+  });
+
+  it("snapshots channels whose overwrites a deleted role takes with it", () => {
+    const state = scan({
+      channels: [
+        channel({
+          id: "chat",
+          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+        }),
+        channel({ id: "other" }),
+      ],
+    });
+    const plan = planAdoption(state, {
+      deletions: [{ kind: "role", id: "member" }],
+      approvals: [approval("role.delete", "member")],
+    });
+    expect(plan.errors).toEqual([]);
+    expect(plan.baseline.channels.map((c) => c.id)).toEqual(["chat"]);
+  });
+});

@@ -39,6 +39,10 @@ export interface IAdoptionSnapshot extends Document {
   /** Channels recreated by a rollback of a destructive step: old id → new id. */
   restoredChannels: Array<{ oldId: string; newId: string }>;
   /** Member-operation progress, keyed by opId. */
+  /** Roles recreated by a rollback of a delete: old id → new id. */
+  restoredRoles: Array<{ oldId: string; newId: string }>;
+  /** Operations whose rollback already succeeded (retry skips them). */
+  rolledBackOps: string[];
   memberProgress: Record<
     string,
     { done: number; failed: string[]; granted: string[] }
@@ -65,6 +69,8 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
     operations: { type: Schema.Types.Mixed, default: [] },
     createdRoles: { type: Schema.Types.Mixed, default: [] },
     restoredChannels: { type: Schema.Types.Mixed, default: [] },
+    restoredRoles: { type: Schema.Types.Mixed, default: [] },
+    rolledBackOps: { type: Schema.Types.Mixed, default: [] },
     memberProgress: { type: Schema.Types.Mixed, default: {} },
     rolledBackBy: { type: String, default: null },
     rolledBackAt: { type: Date, default: null },

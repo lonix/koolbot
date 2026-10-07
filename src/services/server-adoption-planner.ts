@@ -155,6 +155,12 @@ export interface DesiredState {
 export interface PlanOptions {
   /** Allow touching overwrites that belong to other bots. Default false. */
   allowOtherBotOverwrites?: boolean;
+  /**
+   * The authenticated admin applying the plan. A destructive approval only
+   * counts when `approvedBy` is this user; defaults to the scanned
+   * `adminUserId`.
+   */
+  approverId?: string;
 }
 
 interface OpBase {
@@ -418,13 +424,13 @@ function approvalFor(
   desired: DesiredState,
   kind: ApprovalKind,
   targetId: string,
+  approverId: string,
 ): DestructiveApproval | undefined {
   return (desired.approvals ?? []).find(
     (a) =>
       a.kind === kind &&
       a.targetId === targetId &&
-      typeof a.approvedBy === "string" &&
-      a.approvedBy.length > 0 &&
+      a.approvedBy === approverId &&
       !Number.isNaN(Date.parse(a.approvedAt)),
   );
 }
@@ -491,7 +497,8 @@ export function planAdoption(
   ): { id: string; existing: RoleState | null } | null => {
     if ("id" in ref) {
       const role = rolesById.get(ref.id);
-      return { id: ref.id, existing: role ?? null };
+      if (role) return { id: ref.id, existing: role };
+      return creating.has(ref.id) ? { id: ref.id, existing: null } : null;
     }
     const found = rolesByName.get(ref.roleName.trim().toLowerCase());
     if (found) return { id: found.id, existing: found };
@@ -671,6 +678,13 @@ export function planAdoption(
       );
       continue;
     }
+    if (resolved.existing) {
+      const problem = roleLimitProblem(resolved.existing, "grant");
+      if (problem) {
+        err("role-protected", problem, resolved.id);
+        continue;
+      }
+    }
     const holders = scanned.memberRoles;
     const missing = grant.memberIds.filter(
       (id) => !holders || !(holders[id] ?? []).includes(resolved.id),
@@ -722,7 +736,12 @@ export function planAdoption(
   ): { ok: boolean; approval?: DestructiveApproval } => {
     if (createdByUs.has(targetId.split(":").pop() ?? targetId))
       return { ok: true };
-    const approval = approvalFor(desired, kind, targetId);
+    const approval = approvalFor(
+      desired,
+      kind,
+      targetId,
+      options.approverId ?? scanned.adminUserId,
+    );
     if (!approval) {
       err(
         "approval-required",
@@ -809,6 +828,12 @@ export function planAdoption(
       );
       if (!gate.ok) continue;
       touchedRoles.add(role.id);
+      // Deleting a role also deletes its channel overwrites; snapshot them so
+      // a rollback can put them back on the recreated role.
+      for (const c of scanned.channels) {
+        if (c.overwrites.some((o) => o.id === role.id))
+          touchedChannels.add(c.id);
+      }
       ops.push({
         id: "",
         type: "role.delete",
