@@ -930,3 +930,22 @@ describe("planAdoption: role identity", () => {
     expect(plan.operations).toEqual([]);
   });
 });
+
+describe("planAdoption: duplicate creates and grant baselines", () => {
+  it("rejects two new roles whose names normalise to the same ref", () => {
+    const plan = planAdoption(scan(), {
+      roles: [{ name: "Newcomers" }, { name: " newcomers " }],
+    });
+    expect(codes(plan)).toEqual(["duplicate-role"]);
+    expect(
+      plan.operations.filter((o) => o.type === "role.create"),
+    ).toHaveLength(1);
+  });
+
+  it("snapshots an existing role that is only granted to members", () => {
+    const plan = planAdoption(scan(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a"] }],
+    });
+    expect(plan.baseline.roles.map((r) => r.id)).toEqual(["member"]);
+  });
+});

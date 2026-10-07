@@ -1271,3 +1271,34 @@ describe("review hardening, round six", () => {
     expect(seen[0].getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
 });
+
+describe("review hardening, round eight", () => {
+  it("refuses a resume when the role being granted gained permissions meanwhile", async () => {
+    const h = harness();
+    h.failMembers.add("a");
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a"] }],
+    });
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    h.failMembers.clear();
+    h.live.roles.set("member", {
+      ...scanned().roles[3],
+      permissions: PermissionsBitField.Flags.Administrator.toString(),
+    });
+    await expect(
+      h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId }),
+    ).rejects.toThrow(/changed since it was planned/);
+  });
+
+  it("refuses a fresh apply when the role being granted changed since planning", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a"] }],
+    });
+    h.live.roles.set("member", { ...scanned().roles[3], position: 9 });
+    await expect(h.service.apply(p, opts)).rejects.toThrow(
+      /Changed since the plan/,
+    );
+  });
+});

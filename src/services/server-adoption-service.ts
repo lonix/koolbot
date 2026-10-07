@@ -704,12 +704,31 @@ export class ServerAdoptionService {
     const pending = plan.operations.filter((op) => !done.has(op.id));
     const problems: string[] = [];
     for (const op of pending) {
-      if (op.type !== "role.edit" && op.type !== "role.delete") continue;
+      if (
+        op.type !== "role.edit" &&
+        op.type !== "role.delete" &&
+        !(op.type === "member.role.add" && !op.roleId.startsWith("new:"))
+      ) {
+        continue;
+      }
       const live = await callApi(
         () => gateway.readRole(op.roleId),
         `read role ${op.roleId}`,
       );
       if (live?.managed) problems.push(`role "${live.name}" is now managed`);
+      if (op.type === "member.role.add") {
+        // The role about to be granted must still be what was planned.
+        const planned = plan.baseline.roles.find((r) => r.id === op.roleId);
+        if (!live) {
+          problems.push(`role ${op.roleId} no longer exists`);
+        } else if (
+          planned &&
+          (BigInt(live.permissions) !== BigInt(planned.permissions) ||
+            live.position !== planned.position)
+        ) {
+          problems.push(`role "${live.name}" changed since it was planned`);
+        }
+      }
       if (!live && op.type === "role.edit") {
         problems.push(`role ${op.roleId} no longer exists`);
       }
@@ -1694,8 +1713,12 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
     memberId: string,
     roleId: string,
   ): Promise<boolean> {
-    const member = await this.guild.members.fetch(memberId);
-    if (member.roles.cache.has(roleId)) return false;
+    // A member who left after the scan has nothing to grant; do not let them
+    // leave the whole bulk operation permanently partial.
+    const member = await this.guild.members
+      .fetch(memberId)
+      .catch(ignoreUnknown(RESTJSONErrorCodes.UnknownMember));
+    if (!member || member.roles.cache.has(roleId)) return false;
     await member.roles.add(roleId, "KoolBot server adoption");
     return true;
   }

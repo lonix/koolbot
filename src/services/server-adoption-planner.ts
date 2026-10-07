@@ -610,6 +610,13 @@ export function planAdoption(
           `The bot cannot grant permissions it does not hold (role "${want.name}").`,
         );
       const ref = refFor(want.name);
+      if (creating.has(ref)) {
+        err(
+          "duplicate-role",
+          `The plan creates "${want.name}" more than once.`,
+        );
+        continue;
+      }
       creating.add(ref);
       ops.push({
         id: "",
@@ -815,6 +822,8 @@ export function planAdoption(
         err("role-protected", problem, resolved.id);
         continue;
       }
+      // Snapshot it, so apply notices if the role gained power since planning.
+      touchedRoles.add(resolved.existing.id);
     }
     const holders = scanned.memberRoles;
     const missing = grant.memberIds.filter(
