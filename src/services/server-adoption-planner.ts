@@ -170,6 +170,14 @@ export interface PlanOptions {
    * half-finished rollout (#1024).
    */
   grantsBeforeOverwrites?: boolean;
+  /**
+   * Managed roles that may be named as the target of a channel overwrite even
+   * though the role itself is never edited: gating a channel to Server
+   * Boosters or a subscription role (#1022). The caller must only list roles
+   * that do not belong to a bot integration. Unlike `allowOtherBotOverwrites`
+   * this opens nothing else: other bots' existing overwrites stay protected.
+   */
+  gateTargetIds?: string[];
 }
 
 interface OpBase {
@@ -288,7 +296,7 @@ export const PHASE_ORDER: Record<PlanOperation["type"], number> = {
   "role.delete": 6,
 };
 
-const { ViewChannel, Administrator, ManageRoles, ManageChannels } =
+const { ViewChannel, Connect, Administrator, ManageRoles, ManageChannels } =
   PermissionsBitField.Flags;
 const ALL_PERMISSIONS = PermissionsBitField.All;
 
@@ -542,8 +550,10 @@ export function planAdoption(
   const warn = (code: string, message: string, targetId?: string): number =>
     warnings.push({ code, message, targetId });
 
+  const gateTargets = new Set(options.gateTargetIds ?? []);
   const isOtherBotTarget = (id: string): boolean => {
     if (otherBots.has(id)) return true;
+    if (gateTargets.has(id)) return false;
     const role = rolesById.get(id);
     return !!role && role.managed && !botRoleSet.has(id);
   };
@@ -1255,19 +1265,28 @@ export function planAdoption(
 
     for (const channel of scanned.channels) {
       if (!after.channels.has(channel.id)) continue; // deleted
-      const a = check(
-        scanned.adminUserId,
-        scanned.adminRoleIds,
-        adminRoles,
-        channel.id,
-        ViewChannel,
-      );
-      if (a.had && !a.has)
-        err(
-          "admin-access-lost",
-          `This change would remove your own access to "${channel.name}".`,
+      // Seeing a voice or stage channel is not enough to use it, and joining
+      // one is not enough to see it: each permission the admin held must
+      // survive, checked on its own.
+      for (const perm of channel.kind === "voice"
+        ? [ViewChannel, Connect]
+        : [ViewChannel]) {
+        const a = check(
+          scanned.adminUserId,
+          scanned.adminRoleIds,
+          adminRoles,
           channel.id,
+          perm,
         );
+        if (a.had && !a.has) {
+          err(
+            "admin-access-lost",
+            `This change would remove your own access to "${channel.name}".`,
+            channel.id,
+          );
+          break;
+        }
+      }
     }
     // An admin who held Administrator and no longer would is locked out wholesale.
     const adminBefore = effectivePermissions({

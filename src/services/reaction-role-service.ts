@@ -1,4 +1,10 @@
 import {
+  BOT_CATEGORY,
+  GATED_CATEGORY_EVERYONE,
+  GATED_CATEGORY_ROLE,
+  toOverwriteOptions,
+} from "../utils/channel-permissions.js";
+import {
   Client,
   TextChannel,
   EmbedBuilder,
@@ -1174,22 +1180,23 @@ export class ReactionRoleService {
         logger.info(`Created category: ${category.name} (${category.id})`);
 
         // Set category permissions - only role members can view
-        await category.permissionOverwrites.edit(guild.roles.everyone, {
-          ViewChannel: false,
-        });
+        await category.permissionOverwrites.edit(
+          guild.roles.everyone,
+          toOverwriteOptions(GATED_CATEGORY_EVERYONE),
+        );
 
-        await category.permissionOverwrites.edit(role, {
-          ViewChannel: true,
-        });
+        await category.permissionOverwrites.edit(
+          role,
+          toOverwriteOptions(GATED_CATEGORY_ROLE),
+        );
 
         // Ensure the bot can always manage this category and its channels
         const botMember = guild.members.me;
         if (botMember) {
-          await category.permissionOverwrites.edit(botMember, {
-            ViewChannel: true,
-            ManageChannels: true,
-            ManageRoles: true,
-          });
+          await category.permissionOverwrites.edit(
+            botMember,
+            toOverwriteOptions(BOT_CATEGORY),
+          );
         } else {
           logger.warn(
             `Unable to set category permissions for bot user in guild ${guild.id} - guild.members.me is null`,
@@ -1816,19 +1823,22 @@ export class ReactionRoleService {
         type: ChannelType.GuildCategory,
         reason: `Category for reaction role group: ${groupName}`,
       })) as CategoryChannel;
-      await category.permissionOverwrites.edit(guild.roles.everyone, {
-        ViewChannel: false,
-      });
+      await category.permissionOverwrites.edit(
+        guild.roles.everyone,
+        toOverwriteOptions(GATED_CATEGORY_EVERYONE),
+      );
       for (const role of createdRoles) {
-        await category.permissionOverwrites.edit(role, { ViewChannel: true });
+        await category.permissionOverwrites.edit(
+          role,
+          toOverwriteOptions(GATED_CATEGORY_ROLE),
+        );
       }
       const botMember = guild.members.me;
       if (botMember) {
-        await category.permissionOverwrites.edit(botMember, {
-          ViewChannel: true,
-          ManageChannels: true,
-          ManageRoles: true,
-        });
+        await category.permissionOverwrites.edit(
+          botMember,
+          toOverwriteOptions(BOT_CATEGORY),
+        );
       } else {
         logger.warn(
           `Unable to set category permissions for bot user in guild ${guild.id} - guild.members.me is null`,

@@ -1,4 +1,9 @@
 import {
+  NOTICES_BOT,
+  NOTICES_EVERYONE,
+  toOverwriteOptions,
+} from "../utils/channel-permissions.js";
+import {
   Client,
   TextChannel,
   EmbedBuilder,
@@ -218,25 +223,16 @@ export class QuoteChannelManager {
       }
 
       // Set permissions to prevent everyone from sending messages
-      await channel.permissionOverwrites.edit(guild.roles.everyone, {
-        SendMessages: false,
-        SendMessagesInThreads: false,
-        CreatePublicThreads: false,
-        CreatePrivateThreads: false,
-        AddReactions: true, // Allow reactions
-        ViewChannel: true,
-        ReadMessageHistory: true,
-      });
+      await channel.permissionOverwrites.edit(
+        guild.roles.everyone,
+        toOverwriteOptions(NOTICES_EVERYONE),
+      );
 
       // Ensure bot can send messages and manage the channel
-      await channel.permissionOverwrites.edit(botMember, {
-        SendMessages: true,
-        ManageMessages: true,
-        ManageChannels: true,
-        AddReactions: true,
-        ViewChannel: true,
-        ReadMessageHistory: true,
-      });
+      await channel.permissionOverwrites.edit(
+        botMember,
+        toOverwriteOptions(NOTICES_BOT),
+      );
 
       logger.info(`Set strict permissions on quote channel: ${channel.name}`);
     } catch (error) {
