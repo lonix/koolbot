@@ -5,6 +5,7 @@ import {
   detectDrift,
   driftSignature,
   findOutOfGroupAdministrators,
+  moveKeepsAdministrator,
   resolvePolicy,
   roleNamesToTrack,
   type ScannedMember,
@@ -484,6 +485,67 @@ describe("buildAdminFixDesired", () => {
       state,
     );
     expect(issues).toEqual([]);
+  });
+
+  it("never drops Administrator from a role a bot holds it through", () => {
+    const shared = {
+      humans: [{ id: "u1", name: "u1", viaRoleIds: ["legacy"] }],
+      bots: [{ id: "b1", name: "Music", viaRoleIds: ["legacy"] }],
+    };
+    const { desired, issues } = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: ["legacy"] },
+      shared,
+      ["admins"],
+      scanned(),
+    );
+    expect(issues[0]).toMatchObject({ code: "bot-role" });
+    expect(issues[0].message).toContain("Music");
+    expect(desired.roles).toBeUndefined();
+  });
+
+  it("blocks a drop while another group defines Administrator for that role", () => {
+    const definer = group({
+      id: "vip",
+      name: "Legacy admins",
+      roleId: "legacy",
+      permissions: "8200",
+    });
+    const blocked = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: ["legacy"] },
+      report,
+      ["admins"],
+      scanned(),
+      [definer],
+    );
+    expect(blocked.issues[0]).toMatchObject({
+      code: "group-defines-administrator",
+    });
+    expect(blocked.desired.roles).toBeUndefined();
+    // Once the group's definition omits it (or there is none), the drop is fine.
+    for (const g of [
+      group({ id: "vip", roleId: "legacy", permissions: "8192" }),
+      group({ id: "vip", roleId: "legacy", permissions: null }),
+    ]) {
+      const ok = buildAdminFixDesired(
+        { moveMemberIds: [], dropRoleIds: ["legacy"] },
+        report,
+        ["admins"],
+        scanned(),
+        [g],
+      );
+      expect(ok.issues).toEqual([]);
+    }
+  });
+
+  it("only counts a move as keeping Administrator when the role has it or is granted it", () => {
+    const withBit = [role("admins", 9, { permissions: ADMIN })];
+    const without = [role("admins", 9, { permissions: "0" })];
+    expect(moveKeepsAdministrator({}, ["admins"], withBit)).toBe(true);
+    expect(moveKeepsAdministrator({}, ["admins"], without)).toBe(false);
+    expect(
+      moveKeepsAdministrator({ grantAdministrator: true }, ["admins"], without),
+    ).toBe(true);
+    expect(moveKeepsAdministrator({}, [], withBit)).toBe(false);
   });
 
   it("won't drop Administrator from the admin group's own role", () => {

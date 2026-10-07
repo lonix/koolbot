@@ -13,6 +13,7 @@ import {
   buildAdminFixDesired,
   detectDrift,
   findOutOfGroupAdministrators,
+  moveKeepsAdministrator,
   roleNamesToTrack,
   type AdminFixChoice,
   type AdminReport,
@@ -146,6 +147,8 @@ export async function planAdminFix(
   plan: AdoptionPlan;
   extraErrors: PlanIssue[];
   report: AdminReport | null;
+  /** Members moved into the admin group keep Administrator after the plan. */
+  moveKeepsAdmin: boolean;
 }> {
   const groups = await RoleGroupService.getInstance().list(guild.id);
   const adminRoles = adminGroupRoleIds(groups);
@@ -183,6 +186,7 @@ export async function planAdminFix(
       report ?? { humans: [], bots: [] },
       adminRoles,
       scan.scanned,
+      groups,
     );
     desired = built.desired;
     extraErrors.push(...built.issues);
@@ -190,7 +194,16 @@ export async function planAdminFix(
   const plan = planAdoption(scan.scanned, desired, {
     approverId: adminUserId,
   });
-  return { plan, extraErrors, report };
+  return {
+    plan,
+    extraErrors,
+    report,
+    moveKeepsAdmin: moveKeepsAdministrator(
+      choice,
+      adminRoles,
+      scan.scanned.roles,
+    ),
+  };
 }
 
 /**

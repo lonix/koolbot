@@ -1155,7 +1155,8 @@ every feature keeps its current behaviour.
   must hold Administrator to grant it). The same card lists members who hold Administrator through
   *another* role. Pick members to **move into the admin group** (adds the role, removes nothing)
   and/or roles to **drop Administrator from**; nothing is pre-selected, and you review a plan before
-  applying it. Managed roles, KoolBot's own role and the admin group's own role are never edited, and
+  applying it. Managed roles, KoolBot's own role, the admin group's own role, any role a bot holds
+  Administrator through, and any role whose own group defines Administrator are never dropped, and
   a drop that would remove your own Administrator access is blocked. Bots (KoolBot included) are never
   counted as out-of-group administrators; they're listed apart as "Bots with Administrator" so you
   can reduce them to the permissions they need. With no admin group the report is skipped (the server

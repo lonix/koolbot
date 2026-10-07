@@ -324,11 +324,27 @@ export interface AdminFixChoice {
  * - KoolBot's own roles,
  * - a drop that would leave the invoking admin without `Administrator`.
  */
+/**
+ * Whether being added to the admin group's role leaves a member holding
+ * Administrator once the plan is applied: only when that role already has the
+ * bit or this plan grants it.
+ */
+export function moveKeepsAdministrator(
+  choice: Pick<AdminFixChoice, "grantAdministrator">,
+  adminGroupRoleIds: readonly string[],
+  roles: readonly RoleState[],
+): boolean {
+  if (choice.grantAdministrator) return adminGroupRoleIds.length > 0;
+  const first = roles.find((r) => r.id === adminGroupRoleIds[0]);
+  return first !== undefined && hasAdministrator(first.permissions);
+}
+
 export function buildAdminFixDesired(
   choice: AdminFixChoice,
   report: AdminReport,
   adminGroupRoleIds: readonly string[],
   scanned: ScannedState,
+  groups: readonly GroupSpec[] = [],
 ): { desired: DesiredState; issues: PlanIssue[] } {
   const issues: PlanIssue[] = [];
   const byId = new Map(scanned.roles.map((r) => [r.id, r]));
@@ -397,6 +413,37 @@ export function buildAdminFixDesired(
       issues.push({
         code: "admin-group-role",
         message: `"${role.name}" is the admin group's own role; it keeps Administrator.`,
+        targetId: id,
+      });
+      continue;
+    }
+    // Bots are never touched: a role a bot holds Administrator through stays.
+    const botHolders = report.bots.filter((b) => b.viaRoleIds.includes(id));
+    if (botHolders.length > 0) {
+      issues.push({
+        code: "bot-role",
+        message: `"${role.name}" also gives Administrator to ${botHolders
+          .map((b) => b.name)
+          .join(
+            ", ",
+          )}. Bots are never changed here; reduce the bot's permissions separately.`,
+        targetId: id,
+      });
+      continue;
+    }
+    // A group that defines Administrator for this role would see the drop as
+    // drift and put it back (enforce) or keep proposing it (flag).
+    const definer = groups.find(
+      (g) =>
+        g.roleId === id &&
+        !g.capabilities.includes("admin") &&
+        g.permissions !== null &&
+        hasAdministrator(g.permissions),
+    );
+    if (definer) {
+      issues.push({
+        code: "group-defines-administrator",
+        message: `The group "${definer.name}" defines Administrator for "${role.name}". Edit the group first, or the sync would restore it.`,
         targetId: id,
       });
       continue;

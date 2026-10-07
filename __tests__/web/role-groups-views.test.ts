@@ -393,6 +393,23 @@ describe("sync with Discord (#1021)", () => {
       expect(html).toContain("does not recreate it on its own");
     });
 
+    it("doesn't offer dropping a role a bot also holds Administrator through", () => {
+      const html = renderRoleGroupsPage(
+        props({
+          adminReport: {
+            humans: [
+              { id: "u1", name: "Bob", viaRoleIds: ["legacy", "shared"] },
+            ],
+            bots: [{ id: "b2", name: "Music", viaRoleIds: ["shared"] }],
+          },
+          roleNames: { legacy: "Old admins", shared: "Staff bots" },
+        }),
+      );
+      expect(html).toContain('name="drop" value="legacy"');
+      expect(html).not.toContain('name="drop" value="shared"');
+      expect(html).toContain('name="move" value="u1"');
+    });
+
     it("confirms when everyone is in the group", () => {
       const html = renderRoleGroupsPage(
         props({ adminReport: { humans: [], bots: [] } }),

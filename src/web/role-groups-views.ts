@@ -341,7 +341,12 @@ function renderAdminSync(props: RoleGroupsPageProps): string {
         )
         .join("")}</ul>`
     : "";
-  const viaRoles = [...new Set(humans.flatMap((h) => h.viaRoleIds))];
+  // A role a bot holds Administrator through isn't offered: bots are never
+  // touched (the plan refuses it too).
+  const botRoles = new Set((report?.bots ?? []).flatMap((b) => b.viaRoleIds));
+  const viaRoles = [...new Set(humans.flatMap((h) => h.viaRoleIds))].filter(
+    (id) => !botRoles.has(id),
+  );
   const fixes =
     humans.length > 0
       ? `<fieldset><legend>Move into the admin group (adds the admin role; removes nothing)</legend>${humans

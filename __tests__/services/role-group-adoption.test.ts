@@ -432,10 +432,15 @@ describe("admin group sync (#1021)", () => {
         }),
       }),
     );
-    const { plan, extraErrors } = await planAdminFix(guild, "admin", {
-      moveMemberIds: ["u2"],
-      dropRoleIds: [],
-    });
+    const { plan, extraErrors, moveKeepsAdmin } = await planAdminFix(
+      guild,
+      "admin",
+      {
+        moveMemberIds: ["u2"],
+        dropRoleIds: [],
+      },
+    );
+    expect(moveKeepsAdmin).toBe(true);
     expect(extraErrors).toEqual([]);
     expect(plan.errors).toEqual([]);
     expect(plan.operations).toEqual([
@@ -453,6 +458,7 @@ describe("admin group sync (#1021)", () => {
     ]);
     mockScan.mockResolvedValue(
       adminScan({
+        members: members.filter((m) => m.id !== "b9"),
         scanned: scanned({
           adminRoleIds: ["r1"],
           roles: [

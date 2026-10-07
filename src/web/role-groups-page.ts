@@ -176,7 +176,7 @@ export async function loadAdminFixPreview(
   const losing = (built.report?.humans ?? [])
     .filter(
       (h) =>
-        !moved.has(h.id) &&
+        !(moved.has(h.id) && built.moveKeepsAdmin) &&
         h.viaRoleIds.length > 0 &&
         h.viaRoleIds.every((r) => dropped.has(r)),
     )
