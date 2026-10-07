@@ -365,6 +365,23 @@ describe("sync with Discord (#1021)", () => {
     });
   });
 
+  it("starts tracking a role name once and never overwrites a tracked one", async () => {
+    const a = await svc.create(G, { name: "A", roleId: "r1" });
+    const b = await svc.create(G, {
+      name: "B",
+      roleId: "r2",
+      roleName: "Kept",
+    });
+    if (!a.ok || !b.ok) throw new Error("setup");
+    await svc.trackRoleNames(G, [
+      { groupId: a.group.id, roleName: "First" },
+      { groupId: b.group.id, roleName: "Overwritten" },
+    ]);
+    expect((await svc.get(G, a.group.id))?.roleName).toBe("First");
+    expect((await svc.get(G, b.group.id))?.roleName).toBe("Kept");
+    await svc.trackRoleNames(G, []);
+  });
+
   it("applies adopted values, a per-group policy and the drift signature", async () => {
     const g = await svc.create(G, {
       name: "A",

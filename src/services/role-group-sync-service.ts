@@ -1,7 +1,10 @@
 import type { Client, Guild, Role } from "discord.js";
 import logger from "../utils/logger.js";
 import { sanitizeForLog } from "../utils/log-sanitize.js";
-import { AdoptionSnapshot } from "../models/adoption-snapshot.js";
+import {
+  AdoptionSnapshot,
+  ADOPTION_STALE_AFTER_MS,
+} from "../models/adoption-snapshot.js";
 import { ScheduledService } from "./scheduled-service.js";
 import { DiscordLogger } from "./discord-logger.js";
 import {
@@ -22,7 +25,7 @@ import {
   type DesiredState,
   type RoleState,
 } from "./server-adoption-planner.js";
-import { linkCreatedRoles } from "./role-group-adoption.js";
+import { linkCreatedRoles, trackNames } from "./role-group-adoption.js";
 import {
   BUSY_MESSAGE,
   ServerAdoptionService,
@@ -237,8 +240,16 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
 
   private async adoptionIsActive(guildId: string): Promise<boolean> {
     try {
+      // A dead apply stays `active` until the daily recovery; ignore one
+      // whose heartbeat has stopped, as the engine's own lock does.
       return (
-        (await AdoptionSnapshot.exists({ guildId, active: true })) !== null
+        (await AdoptionSnapshot.exists({
+          guildId,
+          active: true,
+          heartbeatAt: {
+            $gte: new Date(Date.now() - ADOPTION_STALE_AFTER_MS),
+          },
+        })) !== null
       );
     } catch {
       return true; // can't tell: don't risk reading a half-applied state
@@ -266,6 +277,8 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
     const roleStates = [
       ...(await guild.roles.fetch(undefined, { force: true })).values(),
     ].map(toRoleState);
+    // Groups linked before name tracking began start tracking now.
+    groups = await trackNames(guild.id, groups, roleStates);
     let items = detectDrift(groups, roleStates, guild.id);
 
     // 1. Deleted roles: mark unlinked (a fact), recreate only under enforce.
@@ -385,9 +398,7 @@ export class RoleGroupSyncService extends ScheduledService<ReconcileSummary | nu
 
     try {
       const scan = await scanGuildRoles(guild, botId, groups, false);
-      const { desired: all, issues } = buildDesiredState(groups, scan.scanned, {
-        ensureAdministrator: false,
-      });
+      const { desired: all, issues } = buildDesiredState(groups, scan.scanned);
       const mine = groups.filter((g) => enforceIds.has(g.id));
       const roleIds = new Set(
         mine.flatMap((g) => (g.roleId ? [g.roleId] : [])),

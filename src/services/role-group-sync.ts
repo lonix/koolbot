@@ -302,13 +302,23 @@ export interface AdminFixChoice {
   moveMemberIds: readonly string[];
   /** Other roles to drop `Administrator` from. Never pre-selected. */
   dropRoleIds: readonly string[];
+  /**
+   * Give the admin group's role the `Administrator` permission. Its own
+   * opt-in: linking an existing role never changes its permissions on its
+   * own, and this widens access for everyone holding the role.
+   */
+  grantAdministrator?: boolean;
 }
 
 /**
- * The desired state for the two ways of resolving an out-of-group
- * administrator: add them to the admin group (additive), or drop
- * `Administrator` from the other role (an edit; snapshotted). Anything unsafe
- * is returned as an issue and blocks the plan:
+ * The desired state for resolving the admin group <-> `Administrator` gap
+ * (#1021). Each part is an explicit choice, previewed before it is applied:
+ *
+ * - add humans who hold Administrator elsewhere to the admin group (additive),
+ * - give the admin group's role Administrator (an edit; snapshotted),
+ * - drop Administrator from another role (an edit; snapshotted).
+ *
+ * Anything unsafe is returned as an issue and blocks the plan:
  *
  * - managed roles and roles at or above the bot (also refused by the planner),
  * - KoolBot's own roles,
@@ -317,7 +327,7 @@ export interface AdminFixChoice {
 export function buildAdminFixDesired(
   choice: AdminFixChoice,
   report: AdminReport,
-  adminGroupRoleId: string,
+  adminGroupRoleIds: readonly string[],
   scanned: ScannedState,
 ): { desired: DesiredState; issues: PlanIssue[] } {
   const issues: PlanIssue[] = [];
@@ -334,9 +344,30 @@ export function buildAdminFixDesired(
     });
   }
 
-  const dropIds = [...new Set(choice.dropRoleIds)];
-  const roles: DesiredState["roles"] = [];
-  for (const id of dropIds) {
+  const roles: NonNullable<DesiredState["roles"]> = [];
+  /** Permissions after the plan, for the lockout check. */
+  const after = new Map(scanned.roles.map((r) => [r.id, r.permissions]));
+
+  if (choice.grantAdministrator) {
+    for (const id of adminGroupRoleIds) {
+      const role = byId.get(id);
+      if (!role) {
+        issues.push({
+          code: "unknown-role",
+          message: "The admin group's role no longer exists.",
+          targetId: id,
+        });
+        continue;
+      }
+      if (hasAdministrator(role.permissions)) continue;
+      const permissions = (big(role.permissions) | ADMINISTRATOR).toString();
+      roles.push({ id, name: role.name, permissions });
+      after.set(id, permissions);
+    }
+  }
+
+  let dropped = 0;
+  for (const id of new Set(choice.dropRoleIds)) {
     const role = byId.get(id);
     if (!role || id === scanned.guildId) {
       issues.push({
@@ -362,39 +393,65 @@ export function buildAdminFixDesired(
       });
       continue;
     }
+    if (adminGroupRoleIds.includes(id)) {
+      issues.push({
+        code: "admin-group-role",
+        message: `"${role.name}" is the admin group's own role; it keeps Administrator.`,
+        targetId: id,
+      });
+      continue;
+    }
     if (!hasAdministrator(role.permissions)) continue;
-    roles.push({
-      id,
-      name: role.name,
-      permissions: (big(role.permissions) & ~ADMINISTRATOR).toString(),
-    });
+    const permissions = (big(role.permissions) & ~ADMINISTRATOR).toString();
+    roles.push({ id, name: role.name, permissions });
+    after.set(id, permissions);
+    dropped += 1;
   }
 
   // The invoking admin must keep Administrator once the plan is applied.
-  const dropped = new Set(roles.map((r) => r.id as string));
-  const adminId = scanned.adminUserId;
-  const keeps =
-    adminId === scanned.ownerId ||
-    scanned.adminRoleIds.includes(adminGroupRoleId) ||
-    scanned.adminRoleIds.some((id) => {
-      const r = byId.get(id);
-      return r && hasAdministrator(r.permissions) && !dropped.has(id);
-    });
-  if (dropped.size > 0 && !keeps) {
-    issues.push({
-      code: "admin-lockout",
-      message:
-        "This would remove your own Administrator access. Add yourself to the admin group first, or keep that role.",
-    });
+  if (dropped > 0 && scanned.adminUserId !== scanned.ownerId) {
+    const heldRoles = new Set(scanned.adminRoleIds);
+    if (memberIds.includes(scanned.adminUserId) && adminGroupRoleIds[0]) {
+      heldRoles.add(adminGroupRoleIds[0]);
+    }
+    const keeps = [...heldRoles].some((id) => hasAdministrator(after.get(id)));
+    if (!keeps) {
+      issues.push({
+        code: "admin-lockout",
+        message:
+          "This would remove your own Administrator access. Add yourself to the admin group first, or keep that role.",
+      });
+    }
   }
 
   const desired: DesiredState = {
     ...(roles.length ? { roles } : {}),
-    ...(memberIds.length
+    ...(memberIds.length && adminGroupRoleIds[0]
       ? {
-          memberGrants: [{ role: { id: adminGroupRoleId }, memberIds }],
+          memberGrants: [{ role: { id: adminGroupRoleIds[0] }, memberIds }],
         }
       : {}),
   };
   return { desired, issues };
+}
+
+/**
+ * Role names to start tracking for drift: groups linked before name tracking
+ * existed (or whose name was never recorded) take the role's current name, so
+ * only a *later* rename counts as drift.
+ */
+export function roleNamesToTrack(
+  groups: readonly GroupSpec[],
+  roles: readonly RoleState[],
+  guildId: string,
+): Array<{ groupId: string; roleName: string }> {
+  const byId = new Map(roles.map((r) => [r.id, r]));
+  const out: Array<{ groupId: string; roleName: string }> = [];
+  for (const g of groups) {
+    if (g.gateOnly || g.unlinked || !g.roleId || g.roleName) continue;
+    const role = byId.get(g.roleId);
+    if (!role || role.managed || role.id === guildId) continue;
+    out.push({ groupId: g.id, roleName: role.name });
+  }
+  return out;
 }

@@ -6,6 +6,7 @@ import {
   driftSignature,
   findOutOfGroupAdministrators,
   resolvePolicy,
+  roleNamesToTrack,
   type ScannedMember,
 } from "../../src/services/role-group-sync.js";
 import type { GroupSpec } from "../../src/services/role-group-plan.js";
@@ -304,7 +305,7 @@ describe("buildAdminFixDesired", () => {
     const { desired, issues } = buildAdminFixDesired(
       { moveMemberIds: ["u1", "u1"], dropRoleIds: [] },
       report,
-      "admins",
+      ["admins"],
       scanned(),
     );
     expect(issues).toEqual([]);
@@ -318,7 +319,7 @@ describe("buildAdminFixDesired", () => {
     const { desired, issues } = buildAdminFixDesired(
       { moveMemberIds: ["stranger"], dropRoleIds: [] },
       report,
-      "admins",
+      ["admins"],
       scanned(),
     );
     expect(issues[0]).toMatchObject({ code: "not-reported" });
@@ -329,7 +330,7 @@ describe("buildAdminFixDesired", () => {
     const { desired, issues } = buildAdminFixDesired(
       { moveMemberIds: [], dropRoleIds: ["legacy"] },
       report,
-      "admins",
+      ["admins"],
       scanned(),
     );
     expect(issues).toEqual([]);
@@ -342,7 +343,7 @@ describe("buildAdminFixDesired", () => {
     const { desired, issues } = buildAdminFixDesired(
       { moveMemberIds: [], dropRoleIds: ["botrole", "managed"] },
       report,
-      "admins",
+      ["admins"],
       scanned(),
     );
     expect(issues.map((i) => i.code)).toEqual(["own-role", "role-protected"]);
@@ -353,7 +354,7 @@ describe("buildAdminFixDesired", () => {
     const lockout = buildAdminFixDesired(
       { moveMemberIds: [], dropRoleIds: ["legacy"] },
       report,
-      "admins",
+      ["admins"],
       scanned({ adminRoleIds: ["legacy"] }),
     );
     expect(lockout.issues.map((i) => i.code)).toContain("admin-lockout");
@@ -363,14 +364,14 @@ describe("buildAdminFixDesired", () => {
     const viaGroup = buildAdminFixDesired(
       { moveMemberIds: [], dropRoleIds: ["legacy"] },
       report,
-      "admins",
+      ["admins"],
       scanned({ adminRoleIds: ["legacy", "admins"] }),
     );
     expect(viaGroup.issues).toEqual([]);
     const owner = buildAdminFixDesired(
       { moveMemberIds: [], dropRoleIds: ["legacy"] },
       report,
-      "admins",
+      ["admins"],
       scanned({ adminRoleIds: ["legacy"], adminUserId: "owner" }),
     );
     expect(owner.issues).toEqual([]);
@@ -380,9 +381,126 @@ describe("buildAdminFixDesired", () => {
     const { issues } = buildAdminFixDesired(
       { moveMemberIds: [], dropRoleIds: ["nope"] },
       report,
-      "admins",
+      ["admins"],
       scanned(),
     );
     expect(issues[0]).toMatchObject({ code: "unknown-role" });
+  });
+
+  it("gives the admin group's role Administrator only when asked, keeping its other permissions", () => {
+    const state = scanned({
+      roles: [
+        role("g", 0),
+        role("admins", 9, { permissions: "1024" }),
+        role("legacy", 8, { permissions: "8200" }),
+        role("botrole", 20, { permissions: ADMIN }),
+      ],
+    });
+    const none = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: [] },
+      report,
+      ["admins"],
+      state,
+    );
+    expect(none.desired).toEqual({});
+    const granted = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: [], grantAdministrator: true },
+      report,
+      ["admins"],
+      state,
+    );
+    expect(granted.issues).toEqual([]);
+    expect(granted.desired.roles).toEqual([
+      { id: "admins", name: "role-admins", permissions: "1032" },
+    ]);
+    // Already carrying it: nothing to do.
+    const again = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: [], grantAdministrator: true },
+      report,
+      ["admins"],
+      scanned(),
+    );
+    expect(again.desired.roles).toBeUndefined();
+  });
+
+  it("does not count the admin group's role as keeping access until it carries Administrator", () => {
+    const state = scanned({
+      adminRoleIds: ["legacy", "admins"],
+      roles: [
+        role("g", 0),
+        role("admins", 9, { permissions: "0" }),
+        role("legacy", 8, { permissions: "8200" }),
+        role("botrole", 20, { permissions: ADMIN }),
+      ],
+    });
+    const lockout = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: ["legacy"] },
+      report,
+      ["admins"],
+      state,
+    );
+    expect(lockout.issues.map((i) => i.code)).toContain("admin-lockout");
+    const withGrant = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: ["legacy"], grantAdministrator: true },
+      report,
+      ["admins"],
+      state,
+    );
+    expect(withGrant.issues).toEqual([]);
+  });
+
+  it("counts being moved into the admin group as keeping access", () => {
+    const state = scanned({ adminRoleIds: ["legacy"], adminUserId: "u1" });
+    const { issues } = buildAdminFixDesired(
+      { moveMemberIds: ["u1"], dropRoleIds: ["legacy"] },
+      report,
+      ["admins"],
+      state,
+    );
+    expect(issues).toEqual([]);
+  });
+
+  it("won't drop Administrator from the admin group's own role", () => {
+    const { issues, desired } = buildAdminFixDesired(
+      { moveMemberIds: [], dropRoleIds: ["admins"] },
+      report,
+      ["admins"],
+      scanned(),
+    );
+    expect(issues[0]).toMatchObject({ code: "admin-group-role" });
+    expect(desired.roles).toBeUndefined();
+  });
+});
+
+describe("roleNamesToTrack", () => {
+  it("starts tracking groups linked before name tracking, only once", () => {
+    const live = [
+      role("g", 0),
+      role("r1", 2, { name: "Mods" }),
+      role("r2", 3, { name: "Booster", managed: true }),
+      role("r3", 4, { name: "Already" }),
+    ];
+    const groups = [
+      group({ id: "a", roleId: "r1" }),
+      group({ id: "b", roleId: "r2", gateOnly: true }),
+      group({ id: "c", roleId: "r3", roleName: "Already" }),
+      group({ id: "d", roleId: "gone" }),
+      group({ id: "e", roleId: null, unlinked: true }),
+    ];
+    expect(roleNamesToTrack(groups, live, "g")).toEqual([
+      { groupId: "a", roleName: "Mods" },
+    ]);
+  });
+
+  it("makes a later rename show as drift once tracked", () => {
+    const groups = [group({ id: "a", roleId: "r1" })];
+    const before = [role("g", 0), role("r1", 2, { name: "Mods" })];
+    expect(detectDrift(groups, before, "g")).toEqual([]);
+    const tracked = roleNamesToTrack(groups, before, "g");
+    const withName = [{ ...groups[0], roleName: tracked[0].roleName }];
+    const after = [role("g", 0), role("r1", 2, { name: "Renamed" })];
+    expect(detectDrift(withName, after, "g")).toEqual([
+      expect.objectContaining({ kind: "name" }),
+    ]);
   });
 });

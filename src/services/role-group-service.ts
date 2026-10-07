@@ -473,6 +473,26 @@ export class RoleGroupService {
     }
   }
 
+  /** Start tracking role names recorded for the first time (never overwrites). */
+  public async trackRoleNames(
+    guildId: string,
+    entries: ReadonlyArray<{ groupId: string; roleName: string }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+    try {
+      await RoleGroup.bulkWrite(
+        entries.map((e) => ({
+          updateOne: {
+            filter: { _id: e.groupId, guildId, roleName: null },
+            update: { $set: { roleName: e.roleName } },
+          },
+        })),
+      );
+    } finally {
+      this.invalidate(guildId);
+    }
+  }
+
   public async setSyncPolicy(
     guildId: string,
     groupId: string,

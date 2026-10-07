@@ -30,6 +30,7 @@ const mockAdopted = jest.fn<(...a: any[]) => Promise<void>>();
 const mockSetPolicy = jest.fn<(...a: any[]) => Promise<void>>();
 const mockSetSig = jest.fn<(...a: any[]) => Promise<void>>();
 const mockScan = jest.fn<(...a: any[]) => Promise<any>>();
+const mockTrack = jest.fn<(...a: any[]) => Promise<void>>();
 jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
   RoleGroupService: {
     getInstance: () => ({
@@ -39,17 +40,37 @@ jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
       applyAdopted: mockAdopted,
       setSyncPolicy: mockSetPolicy,
       setDriftSignature: mockSetSig,
+      trackRoleNames: mockTrack,
     }),
   },
   scanGuildRoles: mockScan,
 }));
 const mockLinkCreated = jest.fn<(...a: any[]) => Promise<number>>();
+const { roleNamesToTrack } =
+  await import("../../src/services/role-group-sync.js");
 jest.unstable_mockModule("../../src/services/role-group-adoption.js", () => ({
   linkCreatedRoles: mockLinkCreated,
+  // Same behaviour as the real helper, over the mocked group service.
+  trackNames: async (
+    guildId: string,
+    groups: Array<Record<string, unknown>>,
+    roles: unknown[],
+  ) => {
+    const track = roleNamesToTrack(groups as never, roles as never, guildId);
+    if (track.length === 0) return groups;
+    await mockTrack(guildId, track);
+    const names = new Map(track.map((t) => [t.groupId, t.roleName]));
+    return groups.map((g) =>
+      names.has(g.id as string)
+        ? { ...g, roleName: names.get(g.id as string) }
+        : g,
+    );
+  },
 }));
 const mockActive = jest.fn<(...a: any[]) => Promise<unknown>>();
 jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
   AdoptionSnapshot: { exists: mockActive },
+  ADOPTION_STALE_AFTER_MS: 30 * 60 * 1000,
 }));
 const mockLog = jest.fn<(...a: any[]) => Promise<boolean>>();
 jest.unstable_mockModule("../../src/services/discord-logger.js", () => ({
@@ -202,6 +223,35 @@ describe("reconcileGuild", () => {
     expect(s).toMatchObject({ groups: 1, drift: 0 });
     expect(mockLog).not.toHaveBeenCalled();
     expect(mockSetSig).not.toHaveBeenCalled();
+  });
+
+  it("only treats an apply with a live heartbeat as running", async () => {
+    await svc.reconcileGuild(guild());
+    const filter = mockActive.mock.calls[0][0] as {
+      guildId: string;
+      active: boolean;
+      heartbeatAt: { $gte: Date };
+    };
+    expect(filter).toMatchObject({ guildId: "g", active: true });
+    const age = Date.now() - filter.heartbeatAt.$gte.getTime();
+    expect(age).toBeGreaterThan(29 * 60_000);
+    expect(age).toBeLessThan(31 * 60_000);
+  });
+
+  it("starts tracking role names for older groups, then flags a later rename", async () => {
+    mockList.mockResolvedValue([grp({ roleName: null })]);
+    liveRoles = [liveRole("g", 0), liveRole("r1", 3, { name: "Mods" })];
+    await svc.reconcileGuild(guild());
+    expect(mockTrack).toHaveBeenCalledWith("g", [
+      { groupId: "g1", roleName: "Mods" },
+    ]);
+    expect(mockLog).not.toHaveBeenCalled();
+
+    liveRoles = [liveRole("g", 0), liveRole("r1", 3, { name: "Renamed" })];
+    mockList.mockResolvedValue([grp({ roleName: "Mods" })]);
+    const s = await svc.reconcileGuild(guild());
+    expect(s.drift).toBe(1);
+    expect(mockLog).toHaveBeenCalledTimes(1);
   });
 
   it("skips while an adoption apply or rollback is running", async () => {

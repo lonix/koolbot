@@ -2182,6 +2182,7 @@ export function createReadOnlyRouter(
         session.discordUserId,
         ids(req.query.move),
         ids(req.query.drop),
+        req.query.grant === "1",
       );
       res.type("text/html").send(renderAdminFixPage({ ...common, ...data }));
     }),

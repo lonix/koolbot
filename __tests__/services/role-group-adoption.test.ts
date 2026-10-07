@@ -4,6 +4,7 @@ import type { Guild } from "discord.js";
 const mockList = jest.fn<(...a: any[]) => Promise<any[]>>();
 const mockLink = jest.fn<(...a: any[]) => Promise<void>>();
 const mockUses = jest.fn<(...a: any[]) => Promise<string[]>>();
+const mockTrack = jest.fn<(...a: any[]) => Promise<void>>();
 const mockScan = jest.fn<(...a: any[]) => Promise<any>>();
 jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
   RoleGroupService: {
@@ -11,6 +12,7 @@ jest.unstable_mockModule("../../src/services/role-group-service.js", () => ({
       list: mockList,
       linkRole: mockLink,
       featureUsesOfRole: mockUses,
+      trackRoleNames: mockTrack,
     }),
   },
   scanGuildRoles: mockScan,
@@ -327,9 +329,23 @@ describe("admin group sync (#1021)", () => {
     ...over,
   });
 
-  it("makes the admin group's role carry Administrator in the plan and reports out-of-group administrators", async () => {
+  it("flags an admin group lacking Administrator without folding it into the plan, and reports out-of-group administrators", async () => {
     mockList.mockResolvedValue([grp({ capabilities: ["admin"] })]);
-    mockScan.mockResolvedValue(adminScan());
+    // The realistic bot role: ManageRoles, but not Administrator.
+    mockScan.mockResolvedValue(
+      adminScan({
+        scanned: scanned({
+          adminRoleIds: ["r1"],
+          roles: [
+            role("g", 0),
+            role("r1", 3, { name: "Admin" }),
+            role("r5", 4, { name: "Old admins", permissions: "8" }),
+            role("botrole", 20, { permissions: "268435456" }),
+          ],
+          memberRoles: {},
+        }),
+      }),
+    );
     const built = await planRoleGroups(guild, "admin");
     expect(mockScan).toHaveBeenCalledWith(
       guild,
@@ -338,18 +354,43 @@ describe("admin group sync (#1021)", () => {
       false,
       true,
     );
+    // Reordering etc. stays applicable: no Administrator grant, no error.
     expect(built.plan.errors).toEqual([]);
-    expect(built.plan.operations).toEqual([
-      expect.objectContaining({
-        type: "role.edit",
-        roleId: "r1",
-        changes: { permissions: "8" },
-      }),
-    ]);
+    expect(built.plan.operations).toEqual([]);
+    expect(planIsApplicable(built)).toBe(true);
     expect(built.adminReport?.humans.map((h) => h.id)).toEqual(["u2"]);
-    expect(built.adminReport?.bots.map((b) => b.id)).toEqual(["kool", "b9"]);
+    expect(built.adminReport?.bots.map((b) => b.id)).toEqual(["b9"]);
     expect(built.drift.map((d) => d.kind)).toContain("admin-permission");
     expect(adminGroupRoleIds(built.groups)).toEqual(["r1"]);
+  });
+
+  it("starts tracking role names for groups linked before name tracking", async () => {
+    mockList.mockResolvedValue([grp({ roleName: null })]);
+    mockScan.mockResolvedValue({
+      scanned: scanned(),
+      memberCounts: new Map(),
+      botIds: null,
+      members: null,
+    });
+    const built = await planRoleGroups(guild, "admin");
+    expect(mockTrack).toHaveBeenCalledWith("g", [
+      { groupId: "g1", roleName: "role-r1" },
+    ]);
+    expect(built.groups[0].roleName).toBe("role-r1");
+    expect(built.drift).toEqual([]);
+  });
+
+  it("carries on when name tracking can't be saved", async () => {
+    mockTrack.mockRejectedValue(new Error("db"));
+    mockList.mockResolvedValue([grp({ roleName: null })]);
+    mockScan.mockResolvedValue({
+      scanned: scanned(),
+      memberCounts: new Map(),
+      botIds: null,
+      members: null,
+    });
+    const built = await planRoleGroups(guild, "admin");
+    expect(built.drift).toEqual([]);
   });
 
   it("skips the report and the member scan when there is no admin group", async () => {
@@ -435,6 +476,58 @@ describe("admin group sync (#1021)", () => {
         changes: { permissions: "8192" },
       }),
     ]);
+  });
+
+  it("plans giving the admin group Administrator as its own choice, without a member list", async () => {
+    mockList.mockResolvedValue([grp({ capabilities: ["admin"] })]);
+    mockScan.mockResolvedValue(adminScan({ members: null, botIds: null }));
+    const { plan, extraErrors } = await planAdminFix(guild, "admin", {
+      moveMemberIds: [],
+      dropRoleIds: [],
+      grantAdministrator: true,
+    });
+    expect(extraErrors).toEqual([]);
+    expect(plan.errors).toEqual([]);
+    expect(plan.operations).toEqual([
+      expect.objectContaining({
+        type: "role.edit",
+        roleId: "r1",
+        changes: { permissions: "8" },
+      }),
+    ]);
+  });
+
+  it("blocks the grant while KoolBot itself lacks Administrator", async () => {
+    mockList.mockResolvedValue([grp({ capabilities: ["admin"] })]);
+    mockScan.mockResolvedValue(
+      adminScan({
+        scanned: scanned({
+          adminRoleIds: ["r1"],
+          roles: [
+            role("g", 0),
+            role("r1", 3),
+            role("botrole", 20, { permissions: "268435456" }),
+          ],
+        }),
+      }),
+    );
+    const { plan } = await planAdminFix(guild, "admin", {
+      moveMemberIds: [],
+      dropRoleIds: [],
+      grantAdministrator: true,
+    });
+    expect(plan.errors.map((e) => e.code)).toContain("bot-lacks-permission");
+  });
+
+  it("needs the member list to move or drop, and says so", async () => {
+    mockList.mockResolvedValue([grp({ capabilities: ["admin"] })]);
+    mockScan.mockResolvedValue(adminScan({ members: null, botIds: null }));
+    const { extraErrors } = await planAdminFix(guild, "admin", {
+      moveMemberIds: ["u2"],
+      dropRoleIds: [],
+    });
+    expect(extraErrors[0]).toMatchObject({ code: "no-report" });
+    expect(extraErrors[0].message).toContain("Server Members intent");
   });
 
   it("reports there is nothing to sync without an admin group", async () => {

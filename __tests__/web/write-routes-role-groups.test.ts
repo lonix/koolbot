@@ -43,6 +43,7 @@ const svc: Svc = {
   list: jest.fn(),
   get: jest.fn(),
   setSyncPolicy: jest.fn(),
+  markUnlinked: jest.fn(),
   requestRecreate: jest.fn(),
   relinkTo: jest.fn(),
 };
@@ -142,6 +143,7 @@ beforeEach(() => {
   ]);
   svc.get.mockResolvedValue(group());
   svc.setSyncPolicy.mockResolvedValue(undefined);
+  svc.markUnlinked.mockResolvedValue(true);
   svc.requestRecreate.mockResolvedValue(true);
   svc.relinkTo.mockResolvedValue({ ok: true, group: group() });
 });
@@ -579,6 +581,28 @@ describe("POST /role-groups/:id/relink (#1021)", () => {
     expect(svc.requestRecreate).not.toHaveBeenCalled();
   });
 
+  it("notices a role deleted while the sync was off, and offers the same choices", async () => {
+    svc.get
+      .mockResolvedValueOnce(group({ roleId: "gone" }))
+      .mockResolvedValueOnce(unlinked({ lostRoleId: "gone" }));
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "recreate",
+    });
+    expect(svc.markUnlinked).toHaveBeenCalledWith("guild-1", "g1", "gone");
+    expect(flashOf(res).type).toBe("ok");
+    expect(svc.requestRecreate).toHaveBeenCalledWith("guild-1", "g1");
+  });
+
+  it("leaves a group whose role still exists alone", async () => {
+    await mount();
+    const res = await harness.post("/role-groups/g1/relink", {
+      mode: "recreate",
+    });
+    expect(svc.markUnlinked).not.toHaveBeenCalled();
+    expect(flashOf(res).type).toBe("err");
+  });
+
   it("asks for a new role without creating anything in Discord", async () => {
     svc.get.mockResolvedValue(unlinked());
     await mount();
@@ -696,13 +720,18 @@ describe("POST /role-groups/admin-fix/apply (#1021)", () => {
       planId: "fix-1",
       move: ["u1", "u2"],
       drop: "r5",
+      grant: "1",
     });
     expect(res.status).toBe(303);
     expect(res.headers.get("location")).toContain("?job=");
     expect(mockPlanAdminFix).toHaveBeenCalledWith(
       expect.anything(),
       expect.any(String),
-      { moveMemberIds: ["u1", "u2"], dropRoleIds: ["r5"] },
+      {
+        moveMemberIds: ["u1", "u2"],
+        dropRoleIds: ["r5"],
+        grantAdministrator: true,
+      },
     );
     expect(mockRecordAudit).toHaveBeenCalledWith(
       expect.anything(),

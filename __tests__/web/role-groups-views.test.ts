@@ -59,6 +59,7 @@ const props = (
   botScanUnavailable: false,
   botsMissing: 0,
   adminReport: null,
+  adminGroupLacksAdministrator: false,
   membersUnavailable: false,
   roleNames: {},
   globalPolicy: "flag",
@@ -325,6 +326,38 @@ describe("sync with Discord (#1021)", () => {
       expect(html).not.toContain('name="drop" value="bots"');
     });
 
+    it("offers giving the admin group Administrator as an unticked choice", () => {
+      const html = renderRoleGroupsPage(
+        props({
+          adminReport: { humans: [], bots: [] },
+          adminGroupLacksAdministrator: true,
+        }),
+      );
+      expect(html).toContain("doesn't carry Administrator");
+      expect(html).toContain('name="grant" value="1"');
+      expect(html).not.toMatch(/name="grant"[^>]*checked/);
+      expect(html).toContain('action="/admin/role-groups/admin-fix"');
+    });
+
+    it("still offers the grant when the member list is unavailable", () => {
+      const html = renderRoleGroupsPage(
+        props({
+          membersUnavailable: true,
+          adminGroupLacksAdministrator: true,
+        }),
+      );
+      expect(html).toContain("Server Members intent is off");
+      expect(html).toContain('name="grant" value="1"');
+    });
+
+    it("offers re-linking for a group whose role vanished before the sync noticed", () => {
+      const html = renderRoleGroupsPage(
+        props({ groups: [row({ roleMissing: true })] }),
+      );
+      expect(html).toContain('name="mode" value="recreate"');
+      expect(html).toContain("does not recreate it on its own");
+    });
+
     it("confirms when everyone is in the group", () => {
       const html = renderRoleGroupsPage(
         props({ adminReport: { humans: [], bots: [] } }),
@@ -344,6 +377,7 @@ describe("renderAdminFixPage", () => {
     extraErrors: [],
     moveIds: ["u1"],
     dropIds: ["legacy"],
+    grant: false,
     losing: [],
     ...over,
   });
@@ -365,6 +399,12 @@ describe("renderAdminFixPage", () => {
     );
     expect(html).toContain("Your own access");
     expect(html).not.toContain("admin-fix/apply");
+  });
+
+  it("carries the grant choice into the apply form", () => {
+    const html = renderAdminFixPage(p({ grant: true }));
+    expect(html).toContain('name="grant" value="1"');
+    expect(renderAdminFixPage(p())).not.toContain('name="grant"');
   });
 
   it("names members who would lose Administrator", () => {

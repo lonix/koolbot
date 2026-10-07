@@ -26,6 +26,7 @@ type PageData = Pick<
   | "botScanUnavailable"
   | "botsMissing"
   | "adminReport"
+  | "adminGroupLacksAdministrator"
   | "membersUnavailable"
   | "roleNames"
   | "globalPolicy"
@@ -75,6 +76,7 @@ export async function loadRoleGroupsPage(
       botScanUnavailable: false,
       botsMissing: 0,
       adminReport: null,
+      adminGroupLacksAdministrator: false,
       membersUnavailable: false,
       roleNames: {},
       globalPolicy,
@@ -136,6 +138,9 @@ export async function loadRoleGroupsPage(
     botScanUnavailable: built.botScanUnavailable,
     botsMissing,
     adminReport: built.adminReport,
+    adminGroupLacksAdministrator: built.drift.some(
+      (d) => d.kind === "admin-permission",
+    ),
     membersUnavailable: built.membersUnavailable,
     roleNames: Object.fromEntries(scanned.roles.map((r) => [r.id, r.name])),
     globalPolicy,
@@ -153,16 +158,18 @@ export async function loadAdminFixPreview(
   adminUserId: string,
   moveIds: string[],
   dropIds: string[],
+  grantAdministrator: boolean,
 ): Promise<
   Pick<
     AdminFixPageProps,
-    "plan" | "extraErrors" | "moveIds" | "dropIds" | "losing"
+    "plan" | "extraErrors" | "moveIds" | "dropIds" | "grant" | "losing"
   >
 > {
   const guild = await client.guilds.fetch(guildId);
   const built = await planAdminFix(guild, adminUserId, {
     moveMemberIds: moveIds,
     dropRoleIds: dropIds,
+    grantAdministrator,
   });
   const dropped = new Set(dropIds);
   const moved = new Set(moveIds);
@@ -179,6 +186,7 @@ export async function loadAdminFixPreview(
     extraErrors: built.extraErrors,
     moveIds,
     dropIds,
+    grant: grantAdministrator,
     losing,
   };
 }

@@ -6,12 +6,14 @@ import {
   type AdoptionPlan,
   type DesiredState,
   type PlanIssue,
+  type RoleState,
 } from "./server-adoption-planner.js";
 import { buildDesiredState } from "./role-group-plan.js";
 import {
   buildAdminFixDesired,
   detectDrift,
   findOutOfGroupAdministrators,
+  roleNamesToTrack,
   type AdminFixChoice,
   type AdminReport,
   type DriftItem,
@@ -58,7 +60,8 @@ export async function planRoleGroups(
   guild: Guild,
   adminUserId: string,
 ): Promise<GroupPlan> {
-  const groups = await RoleGroupService.getInstance().list(guild.id);
+  const service = RoleGroupService.getInstance();
+  let groups = await service.list(guild.id);
   const needBots = groups.some((g) => g.capabilities.includes("bot"));
   const adminRoleIds = adminGroupRoleIds(groups);
   const needMembers = adminRoleIds.length > 0;
@@ -69,11 +72,8 @@ export async function planRoleGroups(
     needBots,
     needMembers,
   );
-  // The plan makes the admin group's role carry Administrator (#1021); it is
-  // previewed and applied like any other change, never done on its own.
-  const { desired, issues } = buildDesiredState(groups, scan.scanned, {
-    ensureAdministrator: true,
-  });
+  groups = await trackNames(guild.id, groups, scan.scanned.roles);
+  const { desired, issues } = buildDesiredState(groups, scan.scanned);
   const plan = planAdoption(scan.scanned, desired, {
     approverId: adminUserId,
   });
@@ -97,6 +97,29 @@ export async function planRoleGroups(
         : null,
     membersUnavailable: needMembers && scan.members === null,
   };
+}
+
+/**
+ * Groups linked before name tracking existed start tracking the role's current
+ * name here, so only a later rename counts as drift (#1021). Best effort.
+ */
+export async function trackNames(
+  guildId: string,
+  groups: RoleGroupView[],
+  roles: readonly RoleState[],
+): Promise<RoleGroupView[]> {
+  const track = roleNamesToTrack(groups, roles, guildId);
+  if (track.length === 0) return groups;
+  try {
+    await RoleGroupService.getInstance().trackRoleNames(guildId, track);
+  } catch (error) {
+    logger.warn("role groups: could not start tracking role names", error);
+    return groups;
+  }
+  const names = new Map(track.map((t) => [t.groupId, t.roleName]));
+  return groups.map((g) =>
+    names.has(g.id) ? { ...g, roleName: names.get(g.id) ?? null } : g,
+  );
 }
 
 /** Role ids behind the groups that carry the `admin` capability. */
@@ -140,19 +163,25 @@ export async function planAdminFix(
       : null;
   const extraErrors: PlanIssue[] = [];
   let desired: DesiredState = {};
-  if (!report) {
+  const needsMembers =
+    choice.moveMemberIds.length > 0 || choice.dropRoleIds.length > 0;
+  if (adminRoles.length === 0) {
     extraErrors.push({
       code: "no-report",
       message:
-        adminRoles.length === 0
-          ? "There is no admin group with a role, so there is nothing to sync."
-          : "The member list couldn't be read (the Server Members intent is off).",
+        "There is no admin group with a role, so there is nothing to sync.",
+    });
+  } else if (!report && needsMembers) {
+    extraErrors.push({
+      code: "no-report",
+      message:
+        "The member list couldn't be read (the Server Members intent is off).",
     });
   } else {
     const built = buildAdminFixDesired(
       choice,
-      report,
-      adminRoles[0],
+      report ?? { humans: [], bots: [] },
+      adminRoles,
       scan.scanned,
     );
     desired = built.desired;

@@ -251,40 +251,12 @@ describe("buildDesiredState", () => {
     expect(desired.roles).toEqual([]);
   });
 
-  it("adds Administrator to an admin group's role only when asked (#1021)", () => {
-    const groups = [
-      group({ id: "a", roleId: "r1", capabilities: ["admin"] }),
-      group({ id: "b", roleId: "r2", rank: 2, permissions: "1024" }),
-    ];
-    const state = scan({
-      roles: [
-        role("g", 0),
-        role("r1", 3),
-        role("r2", 5, { permissions: "1024" }),
-      ],
-    });
-    expect(buildDesiredState(groups, state).desired.roles).toEqual([]);
-    const withAdmin = buildDesiredState(groups, state, {
-      ensureAdministrator: true,
-    });
-    expect(withAdmin.desired.roles).toEqual([
-      { id: "r1", name: "role-r1", permissions: "8" },
-    ]);
-  });
-
-  it("keeps the other permissions when adding Administrator", () => {
-    const { desired } = buildDesiredState(
-      [
-        group({
-          id: "a",
-          roleId: "r1",
-          capabilities: ["admin"],
-          permissions: "1024",
-        }),
-      ],
-      scan({ roles: [role("g", 0), role("r1", 3, { permissions: "1024" })] }),
-      { ensureAdministrator: true },
+  it("never adds Administrator to an admin group's role on its own (#1021)", () => {
+    const { desired, issues } = buildDesiredState(
+      [group({ id: "a", roleId: "r1", capabilities: ["admin"] })],
+      scan({ roles: [role("g", 0), role("r1", 3)] }),
     );
-    expect(desired.roles?.[0].permissions).toBe("1032");
+    expect(issues).toEqual([]);
+    expect(desired.roles).toEqual([]);
   });
 });

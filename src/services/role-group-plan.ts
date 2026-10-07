@@ -217,19 +217,9 @@ export interface DesiredFromGroups {
  *   role first.
  * - A tracked role name (`roleName`) is restored when the role was renamed.
  */
-export interface BuildOptions {
-  /**
-   * Make the role behind every `admin` group carry Discord's `Administrator`
-   * permission (#1021). Off for automatic enforcement, which only restores
-   * what the admin defined and never widens a role's access on its own.
-   */
-  ensureAdministrator?: boolean;
-}
-
 export function buildDesiredState(
   groups: readonly GroupSpec[],
   scanned: ScannedState,
-  options: BuildOptions = {},
 ): DesiredFromGroups {
   const issues: PlanIssue[] = [];
   const byId = new Map(scanned.roles.map((r) => [r.id, r]));
@@ -257,15 +247,8 @@ export function buildDesiredState(
     const desired: DesiredRole = existing
       ? { id: existing.id, name: g.roleName ?? existing.name }
       : { name: g.name };
-    let wanted = g.permissions;
-    if (options.ensureAdministrator && g.capabilities.includes("admin")) {
-      wanted = (
-        BigInt(wanted ?? existing?.permissions ?? "0") |
-        PermissionsBitField.Flags.Administrator
-      ).toString();
-    }
-    if (wanted !== null && wanted !== existing?.permissions) {
-      desired.permissions = wanted;
+    if (g.permissions !== null && g.permissions !== existing?.permissions) {
+      desired.permissions = g.permissions;
     }
     if (g.colour !== null && g.colour !== existing?.color) {
       desired.color = g.colour;

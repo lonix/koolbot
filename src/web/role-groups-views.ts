@@ -73,6 +73,8 @@ export interface RoleGroupsPageProps {
   botsMissing: number;
   /** Administrators outside the admin group; `null` = report skipped (#1021). */
   adminReport: AdminReport | null;
+  /** The admin group's role doesn't carry Administrator (drift). */
+  adminGroupLacksAdministrator: boolean;
   /** An admin group exists but the member list couldn't be read. */
   membersUnavailable: boolean;
   /** Role id to name, for the administrator report. */
@@ -151,7 +153,7 @@ function relinkForm(
   const recreate = g.gateOnly
     ? ""
     : `<form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="inline-form">${csrf}<input type="hidden" name="mode" value="recreate"><button type="submit" class="btn">Create a new role</button></form>`;
-  return `<div class="notice warn" role="status"><strong>Unlinked:</strong> the Discord role${g.lostRoleId ? ` <span class="mono">${escapeHtml(g.lostRoleId)}</span>` : ""} was deleted. KoolBot does not recreate it on its own.
+  return `<div class="notice warn" role="status"><strong>Unlinked:</strong> the Discord role${(g.lostRoleId ?? g.roleId) ? ` <span class="mono">${escapeHtml(g.lostRoleId ?? g.roleId ?? "")}</span>` : ""} was deleted. KoolBot does not recreate it on its own.
 ${recreate}
 <form method="POST" action="/admin/role-groups/${escapeHtml(g.id)}/relink" class="inline-form">${csrf}<input type="hidden" name="mode" value="link"><label>Link another role <select name="roleId" required><option value="">Choose…</option>${choices}</select></label> <button type="submit" class="btn">Link</button></form></div>`;
 }
@@ -237,7 +239,7 @@ function renderGroups(props: RoleGroupsPageProps, csrf: string): string {
       return `<tr>
 <td>${i + 1}</td>
 <td><strong>${escapeHtml(g.name)}</strong></td>
-<td>${roleCell(g)}${driftCell(g)}${g.unlinked ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
+<td>${roleCell(g)}${driftCell(g)}${g.unlinked || g.roleMissing ? relinkForm(g, csrf, props.roleOptions) : ""}</td>
 <td>${g.memberCount === null ? `<span class="muted">?</span>` : g.memberCount}</td>
 <td>${caps}</td>
 <td>${move("up", i === 0)} ${move("down", i === last)}</td>
@@ -308,46 +310,64 @@ function renderPlan(props: RoleGroupsPageProps, csrf: string): string {
 }
 
 function renderAdminSync(props: RoleGroupsPageProps): string {
-  if (props.membersUnavailable) {
-    return `<div class="notice warn" role="status">Administrators can't be checked: the Server Members intent is off, so the member list is unavailable.</div>`;
-  }
-  const report = props.adminReport;
-  if (!report) {
-    return `<p class="muted">No admin group with a role is defined, so there is nothing to sync. The server owner counts as admin for web sign-in on their own, and nobody is flagged.</p>`;
-  }
   const roleName = (id: string): string =>
     escapeHtml(props.roleNames[id] ?? id);
-  const bots = report.bots.length
+  const report = props.adminReport;
+  const humans = report?.humans ?? [];
+  const grant = props.adminGroupLacksAdministrator
+    ? `<fieldset><legend>Give the admin group Administrator</legend>
+<label class="check"><input type="checkbox" name="grant" value="1"> Add the Administrator permission to the admin group's role. Everyone holding that role gets it.</label></fieldset>`
+    : "";
+  const intro = props.adminGroupLacksAdministrator
+    ? `<div class="notice warn" role="status">The admin group's role doesn't carry Administrator. That is a choice, not something applied automatically: tick it below and review the plan.</div>`
+    : "";
+  const unavailable = props.membersUnavailable
+    ? `<div class="notice warn" role="status">Other administrators can't be checked: the Server Members intent is off, so the member list is unavailable.</div>`
+    : "";
+  if (!report && !props.membersUnavailable && !grant) {
+    return `<p class="muted">No admin group with a role is defined, so there is nothing to sync. The server owner counts as admin for web sign-in on their own, and nobody is flagged.</p>`;
+  }
+  const bots = report?.bots.length
     ? `<h3>Bots with Administrator (${report.bots.length})</h3>
 <p class="muted">Bots are never counted as out-of-group administrators and are never touched. Consider reducing each to the permissions it actually needs.</p>
 <ul>${report.bots
         .map(
-          (b) =>
-            `<li>${escapeHtml(b.name)}${b.self ? " (KoolBot)" : ""} <span class="muted">via ${b.viaRoleIds.map(roleName).join(", ")}</span></li>`,
+          (bot) =>
+            `<li>${escapeHtml(bot.name)}${bot.self ? " (KoolBot)" : ""} <span class="muted">via ${bot.viaRoleIds.map(roleName).join(", ")}</span></li>`,
         )
         .join("")}</ul>`
     : "";
-  if (report.humans.length === 0) {
-    return `<p class="muted">Everyone with Administrator is in the admin group (or is the server owner).</p>${bots}`;
-  }
-  const viaRoles = [...new Set(report.humans.flatMap((h) => h.viaRoleIds))];
-  return `<p>${report.humans.length} member(s) hold Administrator through a role outside the admin group. Choose what to do, then review the plan: nothing is selected for you.</p>
-<form method="GET" action="/admin/role-groups/admin-fix" class="stack">
-<fieldset><legend>Move into the admin group (adds the admin role; removes nothing)</legend>${report.humans
-    .map(
-      (h) =>
-        `<label class="check"><input type="checkbox" name="move" value="${escapeHtml(h.id)}"> ${escapeHtml(h.name)} <span class="muted">via ${h.viaRoleIds.map(roleName).join(", ")}</span></label>`,
-    )
-    .join(" ")}</fieldset>
+  const viaRoles = [...new Set(humans.flatMap((h) => h.viaRoleIds))];
+  const fixes =
+    humans.length > 0
+      ? `<fieldset><legend>Move into the admin group (adds the admin role; removes nothing)</legend>${humans
+          .map(
+            (h) =>
+              `<label class="check"><input type="checkbox" name="move" value="${escapeHtml(h.id)}"> ${escapeHtml(h.name)} <span class="muted">via ${h.viaRoleIds.map(roleName).join(", ")}</span></label>`,
+          )
+          .join(" ")}</fieldset>
 <fieldset><legend>Or drop Administrator from the other role (edits the role for everyone in it)</legend>${viaRoles
-    .map(
-      (id) =>
-        `<label class="check"><input type="checkbox" name="drop" value="${escapeHtml(id)}"> @${roleName(id)}</label>`,
-    )
-    .join(" ")}
-<p class="muted">Integration-managed roles and KoolBot's own role can't be edited. You can't drop a role if that would remove your own Administrator access.</p></fieldset>
+          .map(
+            (id) =>
+              `<label class="check"><input type="checkbox" name="drop" value="${escapeHtml(id)}"> @${roleName(id)}</label>`,
+          )
+          .join(" ")}
+<p class="muted">Integration-managed roles and KoolBot's own role can't be edited. You can't drop a role if that would remove your own Administrator access.</p></fieldset>`
+      : "";
+  const status =
+    report && humans.length === 0
+      ? `<p class="muted">Everyone with Administrator is in the admin group (or is the server owner).</p>`
+      : humans.length > 0
+        ? `<p>${humans.length} member(s) hold Administrator through a role outside the admin group. Choose what to do, then review the plan: nothing is selected for you.</p>`
+        : "";
+  const form =
+    fixes || grant
+      ? `<form method="GET" action="/admin/role-groups/admin-fix" class="stack">
+${grant}${fixes}
 <button type="submit" class="btn">Preview the plan</button>
-</form>${bots}`;
+</form>`
+      : "";
+  return `${intro}${unavailable}${status}${form}${bots}`;
 }
 
 export interface AdminFixPageProps {
@@ -358,6 +378,8 @@ export interface AdminFixPageProps {
   extraErrors: PlanIssue[];
   moveIds: string[];
   dropIds: string[];
+  /** Give the admin group's role Administrator. */
+  grant: boolean;
   /** Names of members who would lose Administrator and were not moved. */
   losing: string[];
 }
@@ -387,6 +409,7 @@ export function renderAdminFixPage(props: AdminFixPageProps): string {
     ...props.dropIds.map(
       (id) => `<input type="hidden" name="drop" value="${escapeHtml(id)}">`,
     ),
+    ...(props.grant ? [`<input type="hidden" name="grant" value="1">`] : []),
   ].join("");
   const form = applicable
     ? `<form method="POST" action="/admin/role-groups/admin-fix/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first so it can be rolled back.');">${csrf}${hidden}<input type="hidden" name="planId" value="${escapeHtml(props.plan.id)}"><button type="submit" class="btn btn-primary">Apply plan</button> <a class="btn" href="/admin/role-groups">Back</a></form>`
@@ -440,7 +463,7 @@ ${renderDriftSummary(props)}
 </div>
 <div class="card">
   <h2>Administrators and the admin group</h2>
-  <p class="muted">The group flagged <code>admin</code> carries Discord's Administrator permission. Applying the plan adds it to that role if it is missing. Web sign-in accepts either the admin group or Administrator.</p>
+  <p class="muted">The group flagged <code>admin</code> carries Discord's Administrator permission. If the role lacks it you can add it below, as a separate choice you review first. Web sign-in accepts either the admin group or Administrator.</p>
   ${renderAdminSync(props)}
 </div>
 <div class="card">

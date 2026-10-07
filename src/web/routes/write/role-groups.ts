@@ -287,7 +287,19 @@ export function createRoleGroupsRouter(client: Client): Router {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
       const mode = getString(req, "mode");
-      const group = await groups().get(session.guildId, id);
+      let group = await groups().get(session.guildId, id);
+      if (group && !group.unlinked && group.roleId) {
+        // The role may have been deleted while the sync is switched off:
+        // that is a fact, so record it and carry on.
+        const guild = await fetchGuild(session.guildId);
+        const roles = guild
+          ? await guild.roles.fetch().catch(() => null)
+          : null;
+        if (roles && !roles.has(group.roleId)) {
+          await groups().markUnlinked(session.guildId, id, group.roleId);
+          group = await groups().get(session.guildId, id);
+        }
+      }
       if (!group?.unlinked) {
         flashRedirect(res, PAGE, {
           type: "err",
@@ -490,6 +502,7 @@ export function createRoleGroupsRouter(client: Client): Router {
       const choice = {
         moveMemberIds: toArray(body["move"]),
         dropRoleIds: toArray(body["drop"]),
+        grantAdministrator: getString(req, "grant") === "1",
       };
       const planId = getString(req, "planId");
       const guild = await fetchGuild(session.guildId);
@@ -528,6 +541,7 @@ export function createRoleGroupsRouter(client: Client): Router {
           details: {
             moved: choice.moveMemberIds.length,
             dropped: choice.dropRoleIds.length,
+            grantAdministrator: choice.grantAdministrator,
             operations: built.plan.operations.length,
           },
           result: "success",
