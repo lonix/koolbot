@@ -1452,6 +1452,12 @@ export class VoiceChannelManager {
         userLimit: 0, // 0 = unlimited by default
       });
 
+      // Record the channel as KoolBot's own the moment it exists, before
+      // anything that can fail: if the move below fails and the compensating
+      // delete fails too, the orphan must still be known as ours so
+      // managed-only cleanup can remove it after a restart (#1032).
+      await this.recordManagedChannel(member.guild?.id, channel.id);
+
       // Move the user before recording ownership: if the move fails (which can
       // happen when the gateway voice state is stale, e.g. AFK→lobby), we don't
       // want a permanent userChannels entry that locks the user out of future
@@ -1467,6 +1473,7 @@ export class VoiceChannelManager {
           await channel.delete(
             "Failed to move user into newly created channel",
           );
+          await this.forgetManagedChannel(channel.id);
         } catch (deleteError) {
           logger.error(
             "Error deleting orphaned channel after setChannel failure:",
@@ -1478,7 +1485,6 @@ export class VoiceChannelManager {
 
       this.userChannels.set(member.id, channel);
       await this.persistOwnership(member.guild?.id, channel.id, member.id);
-      await this.recordManagedChannel(member.guild?.id, channel.id);
       logger.info(
         `Created voice channel ${channelName} for ${member.displayName}`,
       );

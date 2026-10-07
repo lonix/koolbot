@@ -731,6 +731,45 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(guild.channels.create).not.toHaveBeenCalled();
     });
 
+    describe("a failed move into a newly created channel (#1078 review)", () => {
+      function failingMember(): any {
+        return {
+          id: "user-1",
+          displayName: "Alice",
+          guild,
+          voice: {
+            setChannel: jest.fn<any>().mockRejectedValue(new Error("stale")),
+          },
+        };
+      }
+
+      it("keeps the orphan tracked as ours when the compensating delete also fails", async () => {
+        settings["voicechannels.cleanup.managed_only"] = true;
+        (guild.channels.create as jest.Mock).mockImplementationOnce(
+          async (opts: any) => {
+            const channel = addChannel("orphan-id", opts.name);
+            channel.delete.mockRejectedValue(new Error("cannot delete"));
+            return channel;
+          },
+        );
+
+        await (manager as any).createUserChannel(failingMember());
+
+        // Recorded before the move, and not forgotten because the delete
+        // failed: managed-only cleanup can still remove it after a restart.
+        expect(managedStore.has("orphan-id")).toBe(true);
+      });
+
+      it("forgets the channel again once the compensating delete succeeds", async () => {
+        settings["voicechannels.cleanup.managed_only"] = true;
+
+        await (manager as any).createUserChannel(failingMember());
+
+        expect(managedStore.size).toBe(0);
+        expect(guild.channels.cache.has("created-1")).toBe(false);
+      });
+    });
+
     it("renames the lobby by its legacy name on shutdown and startup (#1078 review)", async () => {
       settings["voicechannels.lobby.name"] = "";
       settings["voice_channel.lobby_channel_name"] = "Old Lobby";

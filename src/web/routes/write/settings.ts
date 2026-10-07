@@ -47,6 +47,17 @@ import {
   effectiveValueChanged,
 } from "./schedule-rearm.js";
 
+/**
+ * Keys whose value the rest of a feature page renders from, beyond the
+ * `*.enabled` flags: saving one reloads the page so nothing keeps describing
+ * the old value. `voicechannels.cleanup.managed_only` changes the wording and
+ * promise of the Force cleanup confirmation, so a stale dialog there would
+ * claim foreign channels are safe while the POST runs the legacy sweep.
+ */
+const RELOAD_ON_SAVE_KEYS: ReadonlySet<string> = new Set([
+  "voicechannels.cleanup.managed_only",
+]);
+
 export function createSettingsRouter(client: Client): Router {
   const router = Router();
 
@@ -570,7 +581,9 @@ export function createSettingsRouter(client: Client): Router {
       const reload =
         redirectTo !== "/admin/settings" &&
         (changedKeys.some((k) => k.endsWith(".enabled")) ||
-          applied.some((a) => unknownBefore.has(a.key)));
+          applied.some(
+            (a) => unknownBefore.has(a.key) || RELOAD_ON_SAVE_KEYS.has(a.key),
+          ));
       const rearmNote = rearmFailureNote(rearmFailed);
       const label = category || "section";
       if (failed.length === 0) {
