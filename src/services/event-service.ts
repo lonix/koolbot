@@ -356,9 +356,15 @@ export class EventService extends ScheduledService {
       $or: [
         { state: { $in: ["scheduled", "active"] } },
         { state: "ended", channelId: { $ne: null } },
-        // Ended recurring occurrences whose successor has not been spawned
-        // yet (e.g. the bot restarted between ending and spawning, #744).
-        { state: "ended", recurrence: { $ne: "none" }, nextSpawned: false },
+        // Ended — or individually cancelled — recurring occurrences whose
+        // successor has not been created yet (e.g. a crash between ending
+        // and spawning, #744). A whole-series cancel is excluded.
+        {
+          state: { $in: ["ended", "cancelled"] },
+          recurrence: { $ne: "none" },
+          nextSpawned: false,
+          seriesCancelled: { $ne: true },
+        },
       ],
     });
 
@@ -435,8 +441,14 @@ export class EventService extends ScheduledService {
       await this.logLifecycle(event);
     }
 
-    // 5. A finished occurrence hands over to the next one in its series.
-    if (event.state === "ended" && isRecurring(event) && !event.nextSpawned) {
+    // 5. A finished (or individually cancelled) occurrence hands over to the
+    // next one in its series.
+    if (
+      (event.state === "ended" || event.state === "cancelled") &&
+      isRecurring(event) &&
+      !event.nextSpawned &&
+      !event.seriesCancelled
+    ) {
       await this.spawnNextOccurrence(event, now);
     }
   }
@@ -452,29 +464,37 @@ export class EventService extends ScheduledService {
   /**
    * Create the occurrence after `previous`, exactly once.
    *
-   * `nextSpawned` is flipped with an atomic compare-and-set before anything
-   * is created, so overlapping callers (the scan, a cancel-this-occurrence,
-   * another replica) cannot both spawn a successor; the loser sees `null`
-   * and stands down. If creation then fails the flag is released so the next
-   * scan retries. The series' schedule comes from its anchor
-   * (`computeOccurrenceStart`); cadence steps already in the past — the bot
-   * was down, or the series was paused — are skipped, not back-filled.
+   * Idempotent rather than claim-first: the successor is inserted under the
+   * unique `(guildId, seriesId, occurrenceIndex)` key, so a crash, a restart
+   * or a concurrent caller (the scan, a cancel-this-occurrence, another
+   * replica) at worst finds the row already there and adopts it. Only after
+   * the successor exists is `previous.nextSpawned` set, as a "done" marker; a
+   * crash before that is simply retried on the next scan.
+   *
+   * Series cancellation is durable (`seriesCancelled` on every row, set
+   * before open rows are cancelled). A spawn that raced past the first check
+   * re-reads the flag after inserting and cancels its own successor, and
+   * `cancelSeries`' open-row query cannot miss a successor inserted before
+   * that re-read — so a cancelled series cannot be revived either way.
+   *
+   * The schedule comes from the series anchor (`computeOccurrenceStart`);
+   * cadence steps already in the past — the bot was down, or the series was
+   * paused — are skipped, not back-filled.
    */
   private async spawnNextOccurrence(
     previous: IEvent,
     now: Date,
   ): Promise<IEvent | null> {
     if (!isRecurring(previous) || !previous.seriesId) return null;
+    if (previous.nextSpawned || previous.seriesCancelled) return null;
     if (!(await this.isRecurrenceEnabled())) return null;
 
-    const claimed = await Event.findOneAndUpdate(
-      { _id: previous._id, nextSpawned: false },
-      { $set: { nextSpawned: true } },
-    );
-    if (!claimed) return null;
-    previous.nextSpawned = true;
-
+    const seriesId = previous.seriesId;
     try {
+      // The caller's copy may predate a series cancel or another replica.
+      const fresh = await Event.findById(previous._id);
+      if (!fresh || fresh.nextSpawned || fresh.seriesCancelled) return null;
+
       const anchor = previous.seriesStart ?? previous.startTime;
       let index = previous.occurrenceIndex + 1;
       let start = computeOccurrenceStart(
@@ -500,49 +520,73 @@ export class EventService extends ScheduledService {
         throw new Error("no future occurrence within the search window");
       }
 
-      const existing = await Event.findOne({
+      const key = {
         guildId: previous.guildId,
-        seriesId: previous.seriesId,
+        seriesId,
         occurrenceIndex: index,
-      });
-      if (existing) return existing;
+      };
+      let next: IEvent | null = await Event.findOne(key);
+      let created = false;
+      if (!next) {
+        const doc = new Event({
+          guildId: previous.guildId,
+          title: previous.title,
+          description: previous.description,
+          startTime: start,
+          timezone: previous.timezone,
+          durationMinutes: previous.durationMinutes,
+          categoryId: previous.categoryId,
+          state: "scheduled",
+          reminderSent: false,
+          rsvps: [],
+          recurrence: previous.recurrence,
+          seriesId,
+          occurrenceIndex: index,
+          seriesStart: anchor,
+          nextSpawned: false,
+          seriesCancelled: false,
+          createdBy: previous.createdBy,
+        });
+        try {
+          await doc.save();
+          next = doc;
+          created = true;
+        } catch (error) {
+          // Lost the insert race to another caller: adopt their row.
+          if ((error as { code?: number }).code !== 11000) throw error;
+          next = await Event.findOne(key);
+        }
+      }
+      if (!next) return null;
 
-      const next = new Event({
-        guildId: previous.guildId,
-        title: previous.title,
-        description: previous.description,
-        startTime: start,
-        timezone: previous.timezone,
-        durationMinutes: previous.durationMinutes,
-        categoryId: previous.categoryId,
-        state: "scheduled",
-        reminderSent: false,
-        rsvps: [],
-        recurrence: previous.recurrence,
-        seriesId: previous.seriesId,
-        occurrenceIndex: index,
-        seriesStart: anchor,
-        nextSpawned: false,
-        createdBy: previous.createdBy,
-      });
-      await next.save();
-      await this.postAnnouncement(next).catch((error) =>
-        logger.error("Failed to post event announcement:", error),
-      );
-      logger.info(
-        `Spawned occurrence ${index} of event series ${sanitizeForLog(previous.seriesId)}`,
-      );
-      return next;
-    } catch (error) {
-      logger.error(
-        `Failed to spawn the next occurrence of series ${sanitizeForLog(previous.seriesId)}:`,
-        error,
-      );
-      previous.nextSpawned = false;
+      if (created) {
+        await this.postAnnouncement(next).catch((error) =>
+          logger.error("Failed to post event announcement:", error),
+        );
+        // A series cancel may have landed between the check above and the
+        // insert; if so, take the successor down again.
+        const recheck = await Event.findById(previous._id);
+        if (recheck?.seriesCancelled) {
+          await this.cancelOne(next);
+          return null;
+        }
+        logger.info(
+          `Spawned occurrence ${index} of event series ${sanitizeForLog(seriesId)}`,
+        );
+      }
+
       await Event.updateOne(
         { _id: previous._id },
-        { $set: { nextSpawned: false } },
-      ).catch(() => undefined);
+        { $set: { nextSpawned: true } },
+      );
+      previous.nextSpawned = true;
+      return next;
+    } catch (error) {
+      // Nothing to undo: `nextSpawned` is untouched, so the next scan retries.
+      logger.error(
+        `Failed to spawn the next occurrence of series ${sanitizeForLog(seriesId)}:`,
+        error,
+      );
       return null;
     }
   }
@@ -618,7 +662,7 @@ export class EventService extends ScheduledService {
     if (event.state === "cancelled") return event;
 
     await this.cancelOne(event);
-    if (isRecurring(event) && !event.nextSpawned) {
+    if (isRecurring(event) && !event.nextSpawned && !event.seriesCancelled) {
       await this.spawnNextOccurrence(event, new Date());
     }
     return event;
@@ -647,7 +691,7 @@ export class EventService extends ScheduledService {
     // resurrect the series.
     await Event.updateMany(
       { guildId: event.guildId, seriesId: event.seriesId },
-      { $set: { nextSpawned: true } },
+      { $set: { seriesCancelled: true } },
     );
     const open = await Event.find({
       guildId: event.guildId,

@@ -86,9 +86,13 @@ export interface IEvent extends Document {
    * than chained from the previous one, so a monthly series started on the
    * 31st returns to the 31st after a short month instead of drifting. */
   seriesStart: Date | null;
-  /** Set (atomically) once this occurrence has spawned its successor, or when
-   * the series was cancelled, so the successor is created exactly once. */
+  /** Set once this occurrence's successor exists. Only a "done" marker: the
+   * successor itself is created idempotently (unique series/index key), so a
+   * crash before this is set is retried safely. */
   nextSpawned: boolean;
+  /** The whole series was cancelled; no occurrence may spawn a successor.
+   * Set on every row of the series before its open rows are cancelled. */
+  seriesCancelled: boolean;
   createdBy: string;
   createdAt: Date;
   updatedAt: Date;
@@ -139,6 +143,7 @@ const EventSchema = new Schema<IEvent>(
     occurrenceIndex: { type: Number, default: 0 },
     seriesStart: { type: Date, default: null },
     nextSpawned: { type: Boolean, default: false },
+    seriesCancelled: { type: Boolean, default: false },
     createdBy: { type: String, required: true },
   },
   {
@@ -150,7 +155,11 @@ const EventSchema = new Schema<IEvent>(
 // (`{ guildId, "rsvps.userId": userId }`), which was otherwise a collection
 // scan (#914).
 EventSchema.index({ "rsvps.userId": 1 });
-// Series lookups: cancel-series and the spawn-next dedupe guard.
-EventSchema.index({ guildId: 1, seriesId: 1, occurrenceIndex: 1 });
+// One row per occurrence of a series. This unique key is what makes spawning
+// the successor idempotent across crashes, restarts and replicas (#744).
+EventSchema.index(
+  { guildId: 1, seriesId: 1, occurrenceIndex: 1 },
+  { unique: true, partialFilterExpression: { seriesId: { $type: "string" } } },
+);
 
 export const Event = mongoose.model<IEvent>("Event", EventSchema);

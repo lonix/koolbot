@@ -824,6 +824,7 @@ describe("recurring event lifecycle", () => {
       seriesId: "occ-0",
       occurrenceIndex: 0,
       nextSpawned: false,
+      seriesCancelled: false,
       createdBy: "admin-1",
       rsvps: [{ userId: "u1", status: "going" }],
       save: jest.fn(async () => undefined),
@@ -838,6 +839,10 @@ describe("recurring event lifecycle", () => {
   };
 
   beforeEach(() => {
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: false,
+    }));
     EventMock.findOneAndUpdate = jest.fn(async () => ({}));
     EventMock.findOne = jest.fn(async () => null);
     EventMock.updateOne = jest.fn(async () => ({}));
@@ -918,15 +923,19 @@ describe("recurring event lifecycle", () => {
       "2026-07-10T20:00:00.000Z",
     );
     expect(postAnnouncement).toHaveBeenCalledWith(created[0]);
-    expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
-      { _id: "occ-0", nextSpawned: false },
+    // Marked done only once the successor exists.
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "occ-0" },
       { $set: { nextSpawned: true } },
     );
   });
 
-  it("does not spawn twice when another caller already claimed the successor", async () => {
+  it("does not spawn when another caller already created the successor", async () => {
     const { service } = buildService();
-    EventMock.findOneAndUpdate = jest.fn(async () => null);
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: true,
+      seriesCancelled: false,
+    }));
     const next = await (service as unknown as Spawner).spawnNextOccurrence(
       ended(),
       NOW,
@@ -946,17 +955,71 @@ describe("recurring event lifecycle", () => {
     );
   });
 
-  it("does not spawn while recurrence is disabled, leaving the claim untouched", async () => {
+  it("does not spawn into a series that was cancelled", async () => {
+    const { service } = buildService();
+    EventMock.findById = jest.fn(async () => ({
+      nextSpawned: false,
+      seriesCancelled: true,
+    }));
+    const next = await (service as unknown as Spawner).spawnNextOccurrence(
+      ended(),
+      NOW,
+    );
+    expect(next).toBeNull();
+    expect(created).toHaveLength(0);
+  });
+
+  it("takes its successor down again when the series is cancelled mid-spawn", async () => {
+    const { service } = buildService();
+    EventMock.findById = jest
+      .fn()
+      .mockResolvedValueOnce({ nextSpawned: false, seriesCancelled: false })
+      .mockResolvedValue({ nextSpawned: false, seriesCancelled: true });
+    const cancelOne = jest.fn(async () => undefined);
+    (service as unknown as { cancelOne: jest.Mock }).cancelOne = cancelOne;
+    const next = await (service as unknown as Spawner).spawnNextOccurrence(
+      ended(),
+      NOW,
+    );
+    expect(next).toBeNull();
+    expect(cancelOne).toHaveBeenCalledWith(created[0]);
+    expect(EventMock.updateOne).not.toHaveBeenCalled();
+  });
+
+  it("adopts the winner's row when the unique-key insert loses a race", async () => {
+    const { service } = buildService();
+    const winner = { _id: "occ-1" };
+    EventMock.findOne = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(winner);
+    EventMock.mockImplementation(function (this: Doc) {
+      this.save = jest.fn(async () => {
+        throw Object.assign(new Error("E11000 duplicate key"), { code: 11000 });
+      });
+    } as never);
+    const next = await (service as unknown as Spawner).spawnNextOccurrence(
+      ended(),
+      NOW,
+    );
+    expect(next).toBe(winner);
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "occ-0" },
+      { $set: { nextSpawned: true } },
+    );
+  });
+
+  it("does not spawn while recurrence is disabled", async () => {
     const { service } = buildService(false);
     const next = await (service as unknown as Spawner).spawnNextOccurrence(
       ended(),
       NOW,
     );
     expect(next).toBeNull();
-    expect(EventMock.findOneAndUpdate).not.toHaveBeenCalled();
+    expect(EventMock.findById).not.toHaveBeenCalled();
   });
 
-  it("releases the claim when creating the successor fails", async () => {
+  it("leaves the occurrence retryable when creating the successor fails", async () => {
     const { service } = buildService();
     EventMock.mockImplementation(function (this: Doc) {
       this.save = jest.fn(async () => {
@@ -969,10 +1032,7 @@ describe("recurring event lifecycle", () => {
       NOW,
     );
     expect(next).toBeNull();
-    expect(EventMock.updateOne).toHaveBeenCalledWith(
-      { _id: "occ-0" },
-      { $set: { nextSpawned: false } },
-    );
+    expect(EventMock.updateOne).not.toHaveBeenCalled();
     expect(previous.nextSpawned).toBe(false);
   });
 
@@ -1014,6 +1074,42 @@ describe("recurring event lifecycle", () => {
     expect(occurrence.state).toBe("ended");
     expect(created).toHaveLength(1);
     expect(created[0].occurrenceIndex).toBe(1);
+  });
+
+  it("processEvent recovers a cancelled occurrence that never got a successor", async () => {
+    const { service } = buildService();
+    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const occurrence = ended({
+      state: "cancelled",
+      startTime: soon,
+      seriesStart: soon,
+    });
+    await (
+      service as unknown as {
+        processEvent: (...a: unknown[]) => Promise<void>;
+      }
+    ).processEvent(occurrence, {}, new Date(), {
+      reminderMs: 0,
+      leadMs: 0,
+      graceMs: 0,
+    });
+    expect(created).toHaveLength(1);
+    expect(created[0].occurrenceIndex).toBe(1);
+  });
+
+  it("processEvent does not respawn from a whole-series cancellation", async () => {
+    const { service } = buildService();
+    const occurrence = ended({ state: "cancelled", seriesCancelled: true });
+    await (
+      service as unknown as {
+        processEvent: (...a: unknown[]) => Promise<void>;
+      }
+    ).processEvent(occurrence, {}, NOW, {
+      reminderMs: 0,
+      leadMs: 0,
+      graceMs: 0,
+    });
+    expect(created).toHaveLength(0);
   });
 
   it("cancelEvent on one occurrence skips it and spawns the next", async () => {
@@ -1067,7 +1163,7 @@ describe("recurring event lifecycle", () => {
     expect(b.state).toBe("cancelled");
     expect(EventMock.updateMany).toHaveBeenCalledWith(
       { guildId: "guild-1", seriesId: "occ-0" },
-      { $set: { nextSpawned: true } },
+      { $set: { seriesCancelled: true } },
     );
     expect(created).toHaveLength(0);
   });
