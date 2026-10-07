@@ -1303,20 +1303,25 @@ describe("recurring event lifecycle", () => {
   it("adopts the winner's row when the unique-key insert loses a race", async () => {
     const { service } = buildService();
     const winner = { _id: "occ-1" };
+    // Later-occurrence lookup and pre-insert slot lookup both miss; only the
+    // lookup after the insert rejects finds the winner.
     EventMock.findOne = jest
       .fn()
       .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
       .mockResolvedValue(winner);
+    const save = jest.fn(async () => {
+      throw Object.assign(new Error("E11000 duplicate key"), { code: 11000 });
+    });
     EventMock.mockImplementation(function (this: Doc) {
-      this.save = jest.fn(async () => {
-        throw Object.assign(new Error("E11000 duplicate key"), { code: 11000 });
-      });
+      this.save = save;
     } as never);
     const next = await (service as unknown as Spawner).spawnNextOccurrence(
       ended(),
       NOW,
     );
     expect(next).toBe(winner);
+    expect(save).toHaveBeenCalledTimes(1); // the insert really was attempted
     expect(EventMock.updateOne).toHaveBeenCalledWith(
       { _id: "occ-0" },
       { $set: { nextSpawned: true } },
