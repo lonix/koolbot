@@ -596,6 +596,7 @@ export class EventService extends ScheduledService {
           seriesId,
           occurrenceIndex: index,
           seriesStart: anchor,
+          spawnedFrom: String(previous._id),
           nextSpawned: false,
           seriesCancelled: false,
           createdBy: previous.createdBy,
@@ -620,6 +621,10 @@ export class EventService extends ScheduledService {
           guildId: previous.guildId,
           seriesId,
           occurrenceIndex: { $gt: previous.occurrenceIndex, $lt: index },
+          // Only competing successors of THIS predecessor count; a later
+          // descendant legitimately spawned from another occurrence must not.
+          spawnedFrom: String(previous._id),
+          _id: { $ne: next._id },
         });
         if (sibling) {
           await this.discardDuplicate(next);
@@ -638,6 +643,7 @@ export class EventService extends ScheduledService {
           guildId: previous.guildId,
           seriesId,
           occurrenceIndex: { $gt: index },
+          spawnedFrom: String(previous._id),
           state: "scheduled",
         });
         for (const duplicate of higher) {

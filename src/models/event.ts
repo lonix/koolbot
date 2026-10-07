@@ -86,6 +86,10 @@ export interface IEvent extends Document {
    * than chained from the previous one, so a monthly series started on the
    * 31st returns to the 31st after a short month instead of drifting. */
   seriesStart: Date | null;
+  /** The occurrence that spawned this one (its `_id`, as a string); null for
+   * the first occurrence. Lets the successor dedupe tell competing successors
+   * of one predecessor apart from legitimate later descendants. */
+  spawnedFrom: string | null;
   /** Set once this occurrence's successor exists. Only a "done" marker: the
    * successor itself is created idempotently (unique series/index key), so a
    * crash before this is set is retried safely. */
@@ -142,6 +146,7 @@ const EventSchema = new Schema<IEvent>(
     seriesId: { type: String, default: null },
     occurrenceIndex: { type: Number, default: 0 },
     seriesStart: { type: Date, default: null },
+    spawnedFrom: { type: String, default: null },
     nextSpawned: { type: Boolean, default: false },
     seriesCancelled: { type: Boolean, default: false },
     createdBy: { type: String, required: true },

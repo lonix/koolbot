@@ -1204,12 +1204,16 @@ describe("recurring event lifecycle", () => {
     );
     expect(next).toBe(created[0]);
     expect(created[0].occurrenceIndex).toBe(1);
+    // Only competing successors of the SAME predecessor are swept, so a
+    // legitimate descendant (spawned from another occurrence) is never hit.
     expect(EventMock.find).toHaveBeenCalledWith(
       expect.objectContaining({
         occurrenceIndex: { $gt: 1 },
+        spawnedFrom: "occ-0",
         state: "scheduled",
       }),
     );
+    expect(created[0].spawnedFrom).toBe("occ-0");
     expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: "occ-2" });
     expect(postAnnouncement).toHaveBeenCalledWith(created[0]);
   });
@@ -1230,6 +1234,9 @@ describe("recurring event lifecycle", () => {
     );
     expect(result).toBe(sibling);
     expect(created[0].occurrenceIndex).toBe(2);
+    expect(EventMock.findOne).toHaveBeenLastCalledWith(
+      expect.objectContaining({ spawnedFrom: "occ-0" }),
+    );
     expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: created[0]._id });
     expect(postAnnouncement).not.toHaveBeenCalled();
     expect(EventMock.updateOne).toHaveBeenCalledWith(
