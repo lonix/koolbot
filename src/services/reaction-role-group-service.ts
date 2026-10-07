@@ -244,34 +244,52 @@ export class ReactionRoleGroupService {
         !anchor && anchorId
           ? existingRows.filter((r) => r.messageId === anchorId)
           : [];
-      const effectiveMode: ReactionRoleMode =
-        (liveRows[0] ?? goneRows[0])
-          ? (liveRows[0] ?? goneRows[0]).mode
-          : REACTION_ROLE_MODES.includes(mode)
-            ? mode
-            : "unique";
 
-      // A recreated picker finds the bot's own earlier roles by name; carry
-      // their ownership over from the archived incarnation(s) of this group.
+      // One restoration path for a recreated picker. Its options come from
+      // either the dead picker's still-live rows (archived by this run, once
+      // the replacement exists) or, when the picker was deleted earlier and
+      // `ReactionRoleService.handleMessageDelete` already archived them, from
+      // the LATEST archived incarnation of this group. Ownership of bot-made
+      // roles is carried over from every archived incarnation.
       const ownedRoleIds = new Set<string>();
+      let restoreRows = goneRows;
       if (!anchor) {
         const archived = await ReactionRoleConfig.find({
           guildId,
           groupKey,
           isArchived: true,
-          autoCreated: true,
         });
-        for (const r of archived) ownedRoleIds.add(r.roleId);
+        for (const r of archived) {
+          if (r.autoCreated) ownedRoleIds.add(r.roleId);
+        }
+        if (restoreRows.length === 0 && archived.length > 0) {
+          const stamp = (r: { archivedAt?: Date }): number =>
+            r.archivedAt ? new Date(r.archivedAt).getTime() : 0;
+          const newest = archived.reduce((a, b) =>
+            stamp(b) > stamp(a) ? b : a,
+          );
+          restoreRows = archived.filter(
+            (r) => r.messageId === newest.messageId,
+          );
+        }
       }
+
+      // An existing incarnation (live or archived) keeps its original mode.
+      const modeSource = liveRows[0] ?? restoreRows[0];
+      const effectiveMode: ReactionRoleMode = modeSource
+        ? modeSource.mode
+        : REACTION_ROLE_MODES.includes(mode)
+          ? mode
+          : "unique";
 
       // Resolve roles by name without creating anything yet.
       const allRoles = await this.api(
         () => guild.roles.fetch(),
         "fetch guild roles",
       );
-      // Options carried into a recreated picker: archived rows whose role
+      // Options carried into a recreated picker: restoration rows whose role
       // still exists (re-validated below). Roles deleted in Discord drop out.
-      const restoredRows = goneRows.filter((r) => allRoles.has(r.roleId));
+      const restoredRows = restoreRows.filter((r) => allRoles.has(r.roleId));
       const keptRows = anchor ? liveRows : restoredRows;
       const haveRoleIds = new Set(keptRows.map((r) => r.roleId));
       const haveEmojis = new Set(keptRows.map((r) => r.emoji));
@@ -322,9 +340,15 @@ export class ReactionRoleGroupService {
         if (!ok.ok) return fail(ok.message);
       }
 
-      const colour = parseRoleColour(
-        await configService.getString("reactionroles.group_role_colour", ""),
-      );
+      const rawColour = (
+        await configService.getString("reactionroles.group_role_colour", "")
+      ).trim();
+      const colour = parseRoleColour(rawColour);
+      if (rawColour && colour === undefined) {
+        return fail(
+          `Setting reactionroles.group_role_colour ("${rawColour}") is not a valid #RRGGBB colour. Fix it or leave it empty.`,
+        );
+      }
       const reused: string[] = [];
       const created: string[] = [];
       for (const t of todo) {
