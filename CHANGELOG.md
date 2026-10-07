@@ -1,5 +1,42 @@
 # Changelog
 
+## [2.1.0](https://github.com/lonix/koolbot/compare/v2.0.1...v2.1.0) (2026-10-07)
+
+
+### 🚀 Features
+
+* **adoption:** keep role groups in sync with Discord ([#1098](https://github.com/lonix/koolbot/issues/1098)) ([14a30de](https://github.com/lonix/koolbot/commit/14a30de7fba297c9a9be6a23251794872bbaef01))
+* **adoption:** optional rules / TOS acceptance role ([#1100](https://github.com/lonix/koolbot/issues/1100)) ([c01bc63](https://github.com/lonix/koolbot/commit/c01bc63f7c67715123ea32830c392b3f25db328b))
+* **adoption:** plan / apply / snapshot / rollback engine for server permission changes ([#1073](https://github.com/lonix/koolbot/issues/1073)) ([f9ccecb](https://github.com/lonix/koolbot/commit/f9ccecb7e992dada24ec2c98ccf9f29cca33771a))
+* **commands:** choose DM or ephemeral delivery for /me and /config links ([#1080](https://github.com/lonix/koolbot/issues/1080)) ([45a8fad](https://github.com/lonix/koolbot/commit/45a8fade3b6a29ba7e0c593192535f5910952351)), closes [#1067](https://github.com/lonix/koolbot/issues/1067)
+* **events:** support recurring events (weekly/biweekly/monthly) ([#1082](https://github.com/lonix/koolbot/issues/1082)) ([080e30c](https://github.com/lonix/koolbot/commit/080e30c0218b1cec88095ba2a94538e286c03b31))
+* **moderation:** case lifecycle with review dates and outcomes ([#1072](https://github.com/lonix/koolbot/issues/1072)) ([73ccf1a](https://github.com/lonix/koolbot/commit/73ccf1a1d47b27046146b9eb7bc001b228b95eb6))
+* **tickets:** member support tickets with private channels, /ticket command and admin page ([#1071](https://github.com/lonix/koolbot/issues/1071)) ([655ebae](https://github.com/lonix/koolbot/commit/655ebaecee3b322cfe5a882e17d10947e4505fec))
+* **welcome:** greet new members in a configured channel ([#1084](https://github.com/lonix/koolbot/issues/1084)) ([a6a808e](https://github.com/lonix/koolbot/commit/a6a808e67a3084b2270f8cfe8b8759d31f8ce484))
+
+
+### 🐛 Bug Fixes
+
+* **database:** remove duplicate AdoptionSnapshot guildId index ([#1104](https://github.com/lonix/koolbot/issues/1104)) ([dadaec4](https://github.com/lonix/koolbot/commit/dadaec4482c3bf01852fe5d11d9878a4b2d39ab5)), closes [#1102](https://github.com/lonix/koolbot/issues/1102)
+* **deps:** upgrade js-yaml to 5.x and use namespace import in poll-service ([#1075](https://github.com/lonix/koolbot/issues/1075)) ([3e3be2c](https://github.com/lonix/koolbot/commit/3e3be2c9b0a6d9a70be2594f4fa993af4ac44bf8))
+* **events:** set updatePipeline on aggregation-pipeline updates ([#1105](https://github.com/lonix/koolbot/issues/1105)) ([c606cec](https://github.com/lonix/koolbot/commit/c606cecf8faf0f1eecb307499d372048902c1d41)), closes [#1103](https://github.com/lonix/koolbot/issues/1103)
+* **voice:** keep quotes in lobby name during health check ([#1093](https://github.com/lonix/koolbot/issues/1093)) ([a8b9f09](https://github.com/lonix/koolbot/commit/a8b9f0938d79d0c97dd3d68d03db18a3beb9a72f))
+* **voice:** only clean up voice channels KoolBot created, behind a managed-only toggle ([#1078](https://github.com/lonix/koolbot/issues/1078)) ([eaca3a8](https://github.com/lonix/koolbot/commit/eaca3a8b81fbac55147a783b61b7dea84be4b828))
+* **voice:** persist waiting-room link across restarts ([#1092](https://github.com/lonix/koolbot/issues/1092)) ([6d5d51e](https://github.com/lonix/koolbot/commit/6d5d51e479ff3433f2125dce36800c6b4cd2561d))
+* **voice:** retry managed-channel record when the write fails ([#1091](https://github.com/lonix/koolbot/issues/1091)) ([dbe886b](https://github.com/lonix/koolbot/commit/dbe886b5dd4051753f7dba27ec7b6ca9aa1c65e9)), closes [#1088](https://github.com/lonix/koolbot/issues/1088)
+* **web-ui:** hide the member Privacy section when the feature is disabled ([#1077](https://github.com/lonix/koolbot/issues/1077)) ([44557a6](https://github.com/lonix/koolbot/commit/44557a6e37ba06e060ab8439f0e4875d51991e78))
+* **web-ui:** only a two-segment &lt;category&gt;.enabled is a settings cascade master ([#1076](https://github.com/lonix/koolbot/issues/1076)) ([1cb1c63](https://github.com/lonix/koolbot/commit/1cb1c63521fbe4aa86b9dd658f0326566a35eb92))
+
+
+### ♻️ Refactoring
+
+* **web-ui:** declare reloadOnSave in settings metadata ([#1099](https://github.com/lonix/koolbot/issues/1099)) ([0be9763](https://github.com/lonix/koolbot/commit/0be9763eeb104c59e3c15b9f50deed73093f6b20))
+
+
+### ⚙️ CI/CD
+
+* **docker:** label-triggered preview image builds for PRs ([#1095](https://github.com/lonix/koolbot/issues/1095)) ([28781c7](https://github.com/lonix/koolbot/commit/28781c71c09d6d716eda96eed7f335a028ae4e3f))
+
 ## [2.0.1](https://github.com/lonix/koolbot/compare/v2.0.0...v2.0.1) (2026-10-04)
 
 
