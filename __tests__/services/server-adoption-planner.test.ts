@@ -1118,3 +1118,42 @@ describe("planAdoption: round thirteen", () => {
     expect(plan.operations.map((o) => o.type)).toEqual(["role.delete"]);
   });
 });
+
+describe("planAdoption: round fourteen", () => {
+  it("rejects @everyone as a member grant target", () => {
+    const plan = planAdoption(scan(), {
+      memberGrants: [{ role: { id: "g1" }, memberIds: ["a"] }],
+    });
+    expect(codes(plan)).toEqual(["role-protected"]);
+  });
+
+  it("rejects malformed feature permissions instead of passing the check vacuously", () => {
+    const plan = planAdoption(scan(), {
+      overwrites: [
+        { channelId: "chat", target: { id: "member" }, allow: VIEW, deny: "0" },
+      ],
+      featureChannels: [
+        { channelId: "chat", feature: "quotes", permissions: "oops" },
+      ],
+    });
+    expect(codes(plan)).toEqual(["invalid-permissions"]);
+  });
+
+  it("emits one delete for a target requested twice", () => {
+    const state = scan({ channels: [channel({ id: "old" })] });
+    const plan = planAdoption(state, {
+      deletions: [
+        { kind: "channel", id: "old" },
+        { kind: "channel", id: "old" },
+        { kind: "role", id: "member" },
+        { kind: "role", id: "member" },
+      ],
+      approvals: [
+        approval("channel.delete", "old"),
+        approval("role.delete", "member"),
+      ],
+    });
+    expect(plan.errors).toEqual([]);
+    expect(plan.operations).toHaveLength(2);
+  });
+});

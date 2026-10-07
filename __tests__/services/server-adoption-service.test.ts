@@ -1595,3 +1595,25 @@ describe("review hardening, round thirteen", () => {
     ).toHaveLength(2);
   });
 });
+
+describe("review hardening, round fourteen", () => {
+  it("looks a crashed role up by the colour and permissions it was created with", async () => {
+    const h = harness();
+    const seen: Array<{ color: number; permissions: string } | undefined> = [];
+    h.deps.gateway.findRoleByName = async (_n, _after, expect) => {
+      seen.push(expect);
+      return null;
+    };
+    const p = planAdoption(scanned(), {
+      roles: [{ name: "New", color: 7, permissions: VIEW }],
+    });
+    h.failOn.add("createRole:New");
+    const first = await new ServerAdoptionService(h.deps).apply(p, opts);
+    h.failOn.clear();
+    await new ServerAdoptionService(h.deps).apply(p, {
+      ...opts,
+      resumeSnapshotId: first.snapshotId,
+    });
+    expect(seen.filter(Boolean)).toEqual([{ color: 7, permissions: VIEW }]);
+  });
+});

@@ -836,6 +836,14 @@ export function planAdoption(
   // ---- member grants -------------------------------------------------
   for (const grant of desired.memberGrants ?? []) {
     const resolved = resolveRole(grant.role);
+    if (resolved !== "ambiguous" && resolved?.id === everyoneId) {
+      err(
+        "role-protected",
+        "@everyone applies to every member and can't be granted.",
+        everyoneId,
+      );
+      continue;
+    }
     if (resolved === "ambiguous") {
       err(
         "ambiguous-role",
@@ -935,7 +943,12 @@ export function planAdoption(
     return { ok: true, approval };
   };
 
+  const seenDeletions = new Set<string>();
   for (const del of desired.deletions ?? []) {
+    // The same target twice would emit two deletes on one approval.
+    const deletionKey = `${del.kind}:${del.id}`;
+    if (seenDeletions.has(deletionKey)) continue;
+    seenDeletions.add(deletionKey);
     if (del.kind === "channel") {
       const channel = channelsById.get(del.id);
       if (!channel) continue; // already gone: idempotent
@@ -1251,6 +1264,14 @@ export function planAdoption(
     for (const feature of featureChannels) {
       const channel = channelsById.get(feature.channelId);
       if (!channel) continue;
+      if (feature.permissions && !isValidBitfield(feature.permissions)) {
+        err(
+          "invalid-permissions",
+          `The permissions required for ${feature.feature} on "${channel.name}" are not valid.`,
+          channel.id,
+        );
+        continue;
+      }
       const needed = feature.permissions
         ? big(feature.permissions)
         : ViewChannel;

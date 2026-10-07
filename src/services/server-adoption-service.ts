@@ -97,7 +97,12 @@ export interface AdoptionGateway {
     createdAfter: Date,
   ): Promise<string | null>;
   /** Used to reconcile a role.create whose result was never recorded. */
-  findRoleByName(name: string, createdAfter: Date): Promise<string | null>;
+  findRoleByName(
+    name: string,
+    createdAfter: Date,
+    /** Colour and permissions the role was created with; a candidate must match. */
+    expect?: { color: number; permissions: string },
+  ): Promise<string | null>;
   readChannel(channelId: string): Promise<ChannelState | null>;
 }
 
@@ -940,6 +945,7 @@ export class ServerAdoptionService {
                 gateway.findRoleByName(
                   op.name,
                   startedAt ? new Date(startedAt) : new Date(0),
+                  { color: op.color, permissions: op.permissions },
                 ),
               `look up role ${op.name}`,
             )
@@ -1348,6 +1354,7 @@ export class ServerAdoptionService {
                     gateway.findRoleByName(
                       prior.name,
                       new Date(earlier.startedAt),
+                      { color: prior.color, permissions: prior.permissions },
                     ),
                   `look up role ${prior.name}`,
                 )
@@ -1819,10 +1826,18 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
   public async findRoleByName(
     name: string,
     createdAfter: Date,
+    expect?: { color: number; permissions: string },
   ): Promise<string | null> {
     const roles = await this.guild.roles.fetch(undefined, { force: true });
+    // Name and creation time alone do not prove the role is ours: it must
+    // also look like what we asked Discord to create.
     const matches = roles.filter(
-      (r) => r.name === name && createdSince(r.id, createdAfter),
+      (r) =>
+        r.name === name &&
+        createdSince(r.id, createdAfter) &&
+        (!expect ||
+          (r.color === expect.color &&
+            r.permissions.bitfield === BigInt(expect.permissions))),
     );
     return uniqueOrNull(
       matches.map((r) => r.id),
