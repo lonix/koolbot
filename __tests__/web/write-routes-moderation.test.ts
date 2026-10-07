@@ -55,6 +55,7 @@ jest.unstable_mockModule(
   "../../src/services/moderation-case-service.js",
   () => ({
     ModerationCaseError: MockCaseError,
+    MAX_REVIEW_DAYS: 3650,
     ModerationCaseService: {
       getInstance: (): unknown => ({
         isEnabled: mockIsEnabled,

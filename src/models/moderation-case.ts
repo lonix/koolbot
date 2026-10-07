@@ -79,6 +79,12 @@ export interface IModerationCase extends Document {
   /** The log row that enacted a readmission, once a later phase records one. */
   resolutionEntryId: Types.ObjectId | null;
   events: IModerationCaseEvent[];
+  /**
+   * Version token: every transition filters on the value it read and `$inc`s
+   * it, so exactly one of two concurrent writers wins. A timestamp cannot do
+   * this (two writes in one millisecond collide); an integer can.
+   */
+  revision: number;
   updatedAt: Date;
 }
 
@@ -125,6 +131,7 @@ const ModerationCaseSchema = new Schema<IModerationCase>(
     openedByUserId: { type: String, required: true },
     resolutionEntryId: { type: Schema.Types.ObjectId, default: null },
     events: { type: [ModerationCaseEventSchema], default: [] },
+    revision: { type: Number, required: true, default: 0 },
     updatedAt: { type: Date, required: true, default: Date.now },
   },
   { timestamps: false },

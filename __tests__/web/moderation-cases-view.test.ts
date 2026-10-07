@@ -76,6 +76,7 @@ const card = (over: Partial<CaseView> = {}): CaseView => ({
 const groups = (over: Partial<CaseGroups> = {}): CaseGroups => ({
   overdue: [],
   dueSoon: [],
+  scheduled: [],
   indefinite: [],
   recentlyResolved: [],
   ...over,
@@ -109,9 +110,29 @@ describe("Cases section", () => {
     });
     expect(html).toContain("<h3>Overdue (1)</h3>");
     expect(html).toContain("<h3>Due soon (1)</h3>");
+    expect(html).toContain("<h3>Scheduled (0)</h3>");
     expect(html).toContain("<h3>No review date (0)</h3>");
     expect(html).toContain("<h3>Recently resolved (1)</h3>");
     expect(html).toContain("No open case is without a review date.");
+  });
+
+  it("offers the decision controls on a case scheduled beyond the look-ahead window", () => {
+    const html = render({
+      casesEnabled: true,
+      caseGroups: groups({
+        scheduled: [
+          card({
+            id: "far",
+            caseNumber: 21,
+            status: "open",
+            reviewAt: "2027-01-01T09:00:00.000Z",
+          }),
+        ],
+      }),
+    });
+    expect(html).toContain("<h3>Scheduled (1)</h3>");
+    expect(html).toContain('action="/admin/moderation/cases/far/uphold"');
+    expect(html).toContain('formaction="/admin/moderation/cases/far/readmit"');
   });
 
   it("shows the member, the original reason, and their prior history", () => {
@@ -279,6 +300,7 @@ describe("buildCaseGroups", () => {
   const queue = (over: Partial<CaseQueue> = {}): CaseQueue => ({
     overdue: [],
     dueSoon: [],
+    scheduled: [],
     indefinite: [],
     recentlyResolved: [],
     ...over,
@@ -414,6 +436,7 @@ describe("loadModerationCaseData", () => {
   const queue: CaseQueue = {
     overdue: [queued as never],
     dueSoon: [],
+    scheduled: [],
     indefinite: [],
     recentlyResolved: [],
   };

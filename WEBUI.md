@@ -1148,7 +1148,7 @@ With `moderation.cases.enabled` on, the page also gains a **Cases** section and 
 In the column, a kick or ban row without a case offers an **Open case** form (review in N days, pre-filled from
 `moderation.cases.default_review_days`; clear it for a case with no review date), and a row with one shows its
 number and status. The section groups cases into **Overdue** (review date passed), **Due soon** (next 7 days),
-**No review date** and **Recently resolved** (last 30 days). Each card shows the member, the original reason,
+**Scheduled** (review date further out), **No review date** and **Recently resolved** (last 30 days). Each card shows the member, the original reason,
 who acted, the member's **prior log history** (newest 10 entries) and the case's decision trail. A live card
 offers **Uphold** (keep it, schedule the next review), **Extend** (new review date, required), **Make permanent**
 and **Readmit**; staff may decide a case before it is due. Readmit records the decision only, it does not unban in

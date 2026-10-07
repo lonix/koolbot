@@ -64,7 +64,7 @@ const { ModerationCaseService, ModerationCaseError } =
   await import("../../src/services/moderation-case-service.js");
 
 const DAY = 24 * 60 * 60 * 1000;
-const VERSION = new Date("2026-02-01T00:00:00Z");
+const REVISION = 4;
 const future = (days = 30): Date => new Date(Date.now() + days * DAY);
 
 function service(): InstanceType<typeof ModerationCaseService> {
@@ -78,7 +78,7 @@ function liveCase(status: string, extra: Record<string, unknown> = {}) {
     guildId: "g1",
     caseNumber: 14,
     status,
-    updatedAt: VERSION,
+    revision: REVISION,
     ...extra,
   };
 }
@@ -346,8 +346,9 @@ describe("decide", () => {
       guildId: "g1",
       status: t.from,
       // The version read, so an open → open decision cannot be applied twice.
-      updatedAt: VERSION,
+      revision: REVISION,
     });
+    expect(update.$inc).toEqual({ revision: 1 });
     expect(update.$set.status).toBe(t.to);
     expect(update.$set.reviewAt).toEqual(t.keepsDate ? next : null);
     expect(update.$push.events).toMatchObject({
@@ -467,19 +468,17 @@ describe("decide", () => {
 });
 
 describe("decide: open → open races", () => {
-  it("lets exactly one of two concurrent upholds win, though the status never changes", async () => {
-    // Both staff read the case as `open` at the same version. The first
-    // conditional update matches and bumps `updatedAt`; the second filter
-    // still carries the old version, so it matches nothing even though the
-    // status is still `open`.
-    let version = VERSION;
-    caseFindOne.mockImplementation(() =>
-      query(liveCase("open", { updatedAt: version })),
-    );
+  it("lets exactly one of two concurrent decisions win, though the status never changes", async () => {
+    // Both staff read the case as `open` at the same revision. The first
+    // conditional update matches and bumps the revision; the second filter
+    // still carries the old one, so it matches nothing even though the
+    // status is still `open` — and even if both land in the same millisecond.
+    let revision = REVISION;
+    caseFindOne.mockImplementation(() => query(liveCase("open", { revision })));
     caseFindOneAndUpdate.mockImplementation((filter: Record<string, any>) => {
-      if (filter.updatedAt.getTime() !== version.getTime()) return query(null);
-      version = new Date(version.getTime() + 1000);
-      return query(liveCase("open", { updatedAt: version }));
+      if (filter.revision !== revision) return query(null);
+      revision += 1;
+      return query(liveCase("open", { revision }));
     });
 
     const svc = service();
@@ -531,6 +530,7 @@ describe("markUnderReview", () => {
     expect(filter.status).toBe("open");
     expect(filter.reviewAt.$lte).toBeInstanceOf(Date);
     expect(update.$set.status).toBe("under_review");
+    expect(update.$inc).toEqual({ revision: 1 });
     expect(update.$push.events).toMatchObject({
       byUserId: "system",
       from: "open",
@@ -557,15 +557,20 @@ describe("getQueue", () => {
     await service().getQueue("g1", now);
 
     const filters = caseFind.mock.calls.map((c) => c[0] as Record<string, any>);
-    expect(filters).toHaveLength(4);
+    expect(filters).toHaveLength(5);
     for (const f of filters) expect(f.guildId).toBe("g1");
 
-    const [overdue, soon, indefinite, resolved] = filters;
+    const [overdue, soon, scheduled, indefinite, resolved] = filters;
     expect(overdue.status).toEqual({ $in: ["open", "under_review"] });
     expect(overdue.reviewAt).toEqual({ $lte: now });
     expect(soon.status).toBe("open");
     expect(soon.reviewAt.$gt).toEqual(now);
     expect(soon.reviewAt.$lte).toEqual(new Date(now.getTime() + 7 * DAY));
+    // Beyond the look-ahead window: still open and decidable, so it needs a group.
+    expect(scheduled).toMatchObject({
+      status: "open",
+      reviewAt: { $gt: new Date(now.getTime() + 7 * DAY) },
+    });
     expect(indefinite).toMatchObject({ status: "open", reviewAt: null });
     expect(resolved.status).toEqual({ $in: ["upheld", "lifted", "expired"] });
     expect(resolved.updatedAt.$gte).toEqual(new Date(now.getTime() - 30 * DAY));
@@ -585,7 +590,16 @@ describe("lookups", () => {
   it("falls back to 90 days when the default window is unusable", async () => {
     getNumberMock.mockResolvedValue(-5);
     expect(await service().getDefaultReviewDays()).toBe(90);
+    getNumberMock.mockResolvedValue(0.5);
+    expect(await service().getDefaultReviewDays()).toBe(90);
     getNumberMock.mockResolvedValue(30);
     expect(await service().getDefaultReviewDays()).toBe(30);
+  });
+
+  it("normalises a stored default to the whole days the forms accept", async () => {
+    getNumberMock.mockResolvedValue(1.5);
+    expect(await service().getDefaultReviewDays()).toBe(1);
+    getNumberMock.mockResolvedValue(5000);
+    expect(await service().getDefaultReviewDays()).toBe(3650);
   });
 });

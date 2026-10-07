@@ -73,12 +73,16 @@ export interface CaseQueue {
   overdue: IModerationCase[];
   /** `open` with a `reviewAt` inside the look-ahead window. */
   dueSoon: IModerationCase[];
+  /** `open` with a `reviewAt` beyond the look-ahead window. */
+  scheduled: IModerationCase[];
   /** `open` with no review date; never enters the due queue. */
   indefinite: IModerationCase[];
   /** Terminal cases resolved inside the look-back window. */
   recentlyResolved: IModerationCase[];
 }
 
+/** Ten years: far past any sane review, and keeps a typo out of the queue. */
+export const MAX_REVIEW_DAYS = 3650;
 export const DUE_SOON_DAYS = 7;
 export const RECENTLY_RESOLVED_DAYS = 30;
 /** Cap per queue group; the queue is a prompt, and cases are rare. */
@@ -157,7 +161,11 @@ export class ModerationCaseService {
     const days = await this.configService
       .getNumber("moderation.cases.default_review_days", 90)
       .catch(() => 90);
-    return Number.isFinite(days) && days > 0 ? days : 90;
+    // The forms accept whole days from 1 to MAX_REVIEW_DAYS; a stored value
+    // outside that (a fractional or huge number is storable) would pre-fill a
+    // form that cannot be submitted, so normalise to the same domain.
+    if (!Number.isFinite(days) || days < 1) return 90;
+    return Math.min(MAX_REVIEW_DAYS, Math.floor(days));
   }
 
   /**
@@ -244,6 +252,7 @@ export class ModerationCaseService {
           note: input.note,
         },
       ],
+      revision: 0,
       updatedAt: now,
     };
     let created: IModerationCase;
@@ -320,12 +329,13 @@ export class ModerationCaseService {
         guildId: input.guildId,
         status: current.status,
         // `uphold` and `extend` leave the status at `open`, so the status
-        // alone cannot tell a second writer it lost. Every transition stamps
-        // `updatedAt`, so the value read is the version token.
-        updatedAt: current.updatedAt,
+        // alone cannot tell a second writer it lost. Every transition bumps
+        // `revision`, so the value read is the version token.
+        revision: current.revision,
       },
       {
         $set: { status: transition.to, reviewAt, updatedAt: now },
+        $inc: { revision: 1 },
         $push: { events: event },
       },
       { new: true },
@@ -367,6 +377,7 @@ export class ModerationCaseService {
       },
       {
         $set: { status: "under_review", updatedAt: now },
+        $inc: { revision: 1 },
         $push: { events: event },
       },
       { new: true },
@@ -450,21 +461,26 @@ export class ModerationCaseService {
         .lean<IModerationCase[]>()
         .exec();
 
-    const [overdue, dueSoon, indefinite, recentlyResolved] = await Promise.all([
-      find(
-        { status: { $in: LIVE_CASE_STATUSES }, reviewAt: { $lte: now } },
-        { reviewAt: 1 },
-      ),
-      find(
-        { status: "open", reviewAt: { $gt: now, $lte: soon } },
-        { reviewAt: 1 },
-      ),
-      find({ status: "open", reviewAt: null }, { openedAt: 1 }),
-      find(
-        { status: { $in: TERMINAL_CASE_STATUSES }, updatedAt: { $gte: since } },
-        { updatedAt: -1 },
-      ),
-    ]);
-    return { overdue, dueSoon, indefinite, recentlyResolved };
+    const [overdue, dueSoon, scheduled, indefinite, recentlyResolved] =
+      await Promise.all([
+        find(
+          { status: { $in: LIVE_CASE_STATUSES }, reviewAt: { $lte: now } },
+          { reviewAt: 1 },
+        ),
+        find(
+          { status: "open", reviewAt: { $gt: now, $lte: soon } },
+          { reviewAt: 1 },
+        ),
+        find({ status: "open", reviewAt: { $gt: soon } }, { reviewAt: 1 }),
+        find({ status: "open", reviewAt: null }, { openedAt: 1 }),
+        find(
+          {
+            status: { $in: TERMINAL_CASE_STATUSES },
+            updatedAt: { $gte: since },
+          },
+          { updatedAt: -1 },
+        ),
+      ]);
+    return { overdue, dueSoon, scheduled, indefinite, recentlyResolved };
   }
 }

@@ -16,6 +16,7 @@ import logger from "../../../utils/logger.js";
 import {
   ModerationCaseError,
   ModerationCaseService,
+  MAX_REVIEW_DAYS,
   type ModerationCaseDecision,
 } from "../../../services/moderation-case-service.js";
 import { ModerationCaseReviewService } from "../../../services/moderation-case-review-service.js";
@@ -32,8 +33,6 @@ import {
 
 const MODERATION_PAGE = "/admin/moderation";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
-/** Ten years: far past any sane review, and keeps a typo out of the queue. */
-const MAX_REVIEW_DAYS = 3650;
 
 const DECISIONS: ModerationCaseDecision[] = [
   "uphold",

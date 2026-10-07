@@ -4702,6 +4702,7 @@ function renderCasesSection(props: ModerationProps): string {
   const body = groups
     ? `${renderCaseGroup("Overdue", "Nothing is waiting for review.", groups.overdue, props)}
 ${renderCaseGroup("Due soon", "Nothing falls due in the next 7 days.", groups.dueSoon, props)}
+${renderCaseGroup("Scheduled", "No open case has a review date more than 7 days away.", groups.scheduled, props)}
 ${renderCaseGroup("No review date", "No open case is without a review date.", groups.indefinite, props)}
 ${renderCaseGroup("Recently resolved", "Nothing was resolved in the last 30 days.", groups.recentlyResolved, props)}`
     : '<div class="notice">The case queue could not be read. Check the bot\'s logs and reload the page.</div>';

@@ -70,6 +70,7 @@ export interface CaseView {
 export interface CaseGroups {
   overdue: CaseView[];
   dueSoon: CaseView[];
+  scheduled: CaseView[];
   indefinite: CaseView[];
   recentlyResolved: CaseView[];
 }
@@ -148,6 +149,7 @@ export function buildCaseGroups(
   return {
     overdue: queue.overdue.map(view),
     dueSoon: queue.dueSoon.map(view),
+    scheduled: queue.scheduled.map(view),
     indefinite: queue.indefinite.map(view),
     recentlyResolved: queue.recentlyResolved.map(view),
   };
@@ -213,6 +215,7 @@ export async function loadModerationCaseData(args: {
     ? [
         ...queue.overdue,
         ...queue.dueSoon,
+        ...queue.scheduled,
         ...queue.indefinite,
         ...queue.recentlyResolved,
       ]
