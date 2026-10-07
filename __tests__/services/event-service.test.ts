@@ -757,11 +757,11 @@ describe("computeOccurrenceStart", () => {
   });
 
   it("rolls a wall-clock time inside a DST gap forward instead of failing", () => {
-    // 02:30 does not exist in London on 2026-03-29.
-    const anchor = new Date("2026-03-22T02:30:00Z");
+    // London skips 01:00–01:59 on 2026-03-29, so 01:30 does not exist.
+    // It rolls forward to 02:30 BST (01:30 UTC), not back to 00:30.
+    const anchor = new Date("2026-03-22T01:30:00Z");
     const result = computeOccurrenceStart(anchor, "weekly", 1, "Europe/London");
-    expect(Number.isNaN(result.getTime())).toBe(false);
-    expect(result.getTime()).toBeGreaterThan(anchor.getTime());
+    expect(result.toISOString()).toBe("2026-03-29T01:30:00.000Z");
   });
 });
 
@@ -1034,6 +1034,91 @@ describe("recurring event lifecycle", () => {
     ).processEvent(open, {}, NOW, { reminderMs: 0, leadMs: 0, graceMs: 0 });
     expect(cancelOne).toHaveBeenCalledWith(open);
     expect(created).toHaveLength(0);
+  });
+
+  it("removes its own successor when a lower-indexed sibling already exists", async () => {
+    const { service, postAnnouncement } = buildService();
+    const sibling = { _id: "occ-1", occurrenceIndex: 1 };
+    EventMock.findOne = jest
+      .fn()
+      .mockResolvedValueOnce(null) // no later occurrence yet
+      .mockResolvedValueOnce(null) // index slot free
+      .mockResolvedValueOnce(sibling); // sibling found after our insert
+    EventMock.deleteOne = jest.fn(async () => ({}));
+    const later = new Date("2026-07-12T12:00:00Z"); // past occurrence 1's start
+    const result = await (service as unknown as Spawner).spawnNextOccurrence(
+      ended(),
+      later,
+    );
+    expect(result).toBe(sibling);
+    expect(created[0].occurrenceIndex).toBe(2);
+    expect(EventMock.deleteOne).toHaveBeenCalledWith({ _id: created[0]._id });
+    expect(postAnnouncement).not.toHaveBeenCalled();
+    expect(EventMock.updateOne).toHaveBeenCalledWith(
+      { _id: "occ-0" },
+      { $set: { nextSpawned: true } },
+    );
+  });
+
+  it("retries a missing RSVP announcement on a recurring occurrence", async () => {
+    const { service, postAnnouncement } = buildService();
+    (service as unknown as { configService: unknown }).configService = {
+      getString: jest.fn(async () => "chan-1"),
+      getNumber: jest.fn(async () => 0),
+      getBoolean: jest.fn(async () => true),
+    };
+    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const occurrence = ended({
+      state: "scheduled",
+      announcementMessageId: null,
+      channelId: null,
+      startTime: soon,
+      seriesStart: soon,
+    });
+    const run = (): Promise<void> =>
+      (
+        service as unknown as {
+          processEvent: (...a: unknown[]) => Promise<void>;
+        }
+      ).processEvent(occurrence, {}, new Date(), {
+        reminderMs: 0,
+        leadMs: 0,
+        graceMs: 0,
+      });
+    await run();
+    expect(postAnnouncement).toHaveBeenCalledWith(occurrence);
+
+    postAnnouncement.mockClear();
+    occurrence.announcementMessageId = "msg-1";
+    await run();
+    expect(postAnnouncement).not.toHaveBeenCalled();
+  });
+
+  it("does not retry an announcement when no channel is configured", async () => {
+    const { service, postAnnouncement } = buildService();
+    (service as unknown as { configService: unknown }).configService = {
+      getString: jest.fn(async () => ""),
+      getNumber: jest.fn(async () => 0),
+      getBoolean: jest.fn(async () => true),
+    };
+    const soon = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await (
+      service as unknown as {
+        processEvent: (...a: unknown[]) => Promise<void>;
+      }
+    ).processEvent(
+      ended({
+        state: "scheduled",
+        announcementMessageId: null,
+        channelId: null,
+        startTime: soon,
+        seriesStart: soon,
+      }),
+      {},
+      new Date(),
+      { reminderMs: 0, leadMs: 0, graceMs: 0 },
+    );
+    expect(postAnnouncement).not.toHaveBeenCalled();
   });
 
   it("adopts the winner's row when the unique-key insert loses a race", async () => {

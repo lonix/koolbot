@@ -277,7 +277,19 @@ export function computeOccurrenceStart(
     target = new Date(Date.UTC(y, m - 1, d + stepDays * index));
   }
   const date = target.toISOString().slice(0, 10);
-  return fromZonedTime(`${date}T${time}`, zone);
+  const resolved = fromZonedTime(`${date}T${time}`, zone);
+  // A wall-clock time inside a DST gap does not exist; `fromZonedTime`
+  // resolves it backwards, to an instant that reads earlier than requested.
+  // Push it forward by the gap so 01:30 becomes 02:30 rather than 00:30.
+  const toSeconds = (hms: string): number => {
+    const [h, m, sec] = hms.split(":").map(Number);
+    return h * 3600 + m * 60 + sec;
+  };
+  let drift =
+    toSeconds(time) - toSeconds(formatInTimeZone(resolved, zone, "HH:mm:ss"));
+  if (drift > 43200) drift -= 86400;
+  else if (drift < -43200) drift += 86400;
+  return drift > 0 ? new Date(resolved.getTime() + drift * 1000) : resolved;
 }
 
 function accentColor(state: IEvent["state"]): number {
@@ -410,6 +422,16 @@ export class EventService extends ScheduledService {
     ) {
       await this.cancelOne(event);
       return;
+    }
+
+    // A recurring occurrence whose RSVP post failed (or was never made) is
+    // retried here, since nothing else would ever repair it.
+    if (
+      isRecurring(event) &&
+      !event.announcementMessageId &&
+      (event.state === "scheduled" || event.state === "active")
+    ) {
+      await this.ensureAnnouncement(event);
     }
 
     // 1. Reminder (before start, once).
@@ -586,6 +608,23 @@ export class EventService extends ScheduledService {
       if (!next) return null;
 
       if (created) {
+        // Two spawns whose `now` straddled a cadence boundary can pick
+        // different indices and both insert. Whoever sees a lower-indexed
+        // sibling removes its own just-inserted row; the lowest survives.
+        const sibling = await Event.findOne({
+          guildId: previous.guildId,
+          seriesId,
+          occurrenceIndex: { $gt: previous.occurrenceIndex, $lt: index },
+        });
+        if (sibling) {
+          await Event.deleteOne({ _id: next._id });
+          await Event.updateOne(
+            { _id: previous._id },
+            { $set: { nextSpawned: true } },
+          );
+          previous.nextSpawned = true;
+          return sibling;
+        }
         await this.postAnnouncement(next).catch((error) =>
           logger.error("Failed to post event announcement:", error),
         );
@@ -1014,6 +1053,19 @@ export class EventService extends ScheduledService {
     );
 
     return { embeds: [embed], components: [row] };
+  }
+
+  /** Post the RSVP message for a saved event that has none, when a channel is
+   * configured (no channel is a deliberate no-op, not a failure to retry). */
+  private async ensureAnnouncement(event: IEvent): Promise<void> {
+    const channelId = await this.configService.getString(
+      "events.announcement_channel_id",
+      "",
+    );
+    if (!channelId) return;
+    await this.postAnnouncement(event).catch((error) =>
+      logger.error("Failed to post event announcement:", error),
+    );
   }
 
   private async postAnnouncement(event: IEvent): Promise<void> {
