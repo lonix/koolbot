@@ -27,6 +27,7 @@ import { MONTH_NAMES } from "./user-layout.js";
 import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import type { ModerationAction } from "../models/moderation-log.js";
+import type { TicketStatus } from "../models/ticket.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
 import { formatVersion } from "../utils/semver.js";
 
@@ -4675,6 +4676,179 @@ ${renderFeatureSettingsCard({
   return renderAdminPage({
     title: "Moderation log",
     active: "/admin/moderation",
+    body,
+    csrfToken: props.csrfToken,
+    remainingMs: props.remainingMs,
+    navFeatureStatus: props.navFeatureStatus,
+  });
+}
+
+// ---------- Support tickets (issue #1004) ----------
+
+export interface TicketRow {
+  id: string;
+  createdAt: string;
+  authorId: string;
+  authorLabel: string;
+  channelId: string;
+  subject: string;
+  status: TicketStatus;
+  claimedByLabel: string | null;
+  closedByLabel: string | null;
+  closedAt: string | null;
+}
+
+export interface TicketsProps extends CommonProps {
+  enabled: boolean;
+  /** `""` shows every status. */
+  statusFilter: string;
+  statusOptions: readonly TicketStatus[];
+  rows: TicketRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  settingRows?: SettingRow[];
+  pickers?: FeatureSettingsPickers;
+  dependencyState?: ReadonlyMap<string, boolean>;
+  settingsUnavailable?: boolean;
+  flash?: FlashMessage | null;
+}
+
+function ticketStatusTag(status: TicketStatus): string {
+  const cls =
+    status === "closed"
+      ? "tag-off"
+      : status === "claimed"
+        ? "tag-on"
+        : "tag-warn";
+  return `<span class="tag ${cls}">${escapeHtml(status)}</span>`;
+}
+
+function buildTicketsQueryString(statusFilter: string, page: number): string {
+  const parts: string[] = [];
+  if (statusFilter) parts.push(`status=${encodeURIComponent(statusFilter)}`);
+  if (page > 1) parts.push(`page=${page}`);
+  return parts.length === 0 ? "" : `?${parts.join("&")}`;
+}
+
+export function renderTicketsPage(props: TicketsProps): string {
+  const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
+  const page = Math.min(Math.max(1, props.page), totalPages);
+  const csrfInput = `<input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">`;
+
+  const statusOptionsHtml = props.statusOptions
+    .map(
+      (st) =>
+        `<option value="${escapeHtml(st)}"${st === props.statusFilter ? " selected" : ""}>${escapeHtml(st)}</option>`,
+    )
+    .join("");
+
+  const action = (
+    t: TicketRow,
+    verb: "claim" | "close" | "reopen",
+    label: string,
+    cls: string,
+  ): string =>
+    `<form method="POST" action="/admin/tickets/${escapeHtml(t.id)}/${verb}" class="inline-form">${csrfInput}<button type="submit" class="btn btn-sm ${cls}" aria-label="${escapeHtml(label)} ticket ${escapeHtml(t.id)}">${escapeHtml(label)}</button></form>`;
+
+  const rowsHtml =
+    props.rows.length === 0
+      ? `<div class="empty">No tickets match the current filter.</div>`
+      : `<table>
+<thead><tr>
+<th scope="col">Opened</th><th scope="col">Member</th><th scope="col">Subject</th><th scope="col">Status</th>
+<th scope="col">Handled by</th><th scope="col">Actions</th>
+</tr></thead>
+<tbody>${props.rows
+          .map((t) => {
+            const handled = [
+              t.claimedByLabel
+                ? `Claimed: ${escapeHtml(t.claimedByLabel)}`
+                : "",
+              t.closedByLabel ? `Closed: ${escapeHtml(t.closedByLabel)}` : "",
+            ]
+              .filter(Boolean)
+              .join("<br>");
+            const actions =
+              t.status === "closed"
+                ? action(t, "reopen", "Reopen", "")
+                : [
+                    t.status === "open" ? action(t, "claim", "Claim", "") : "",
+                    action(t, "close", "Close", "btn-danger"),
+                  ].join(" ");
+            return `<tr>
+<td class="muted mono">${escapeHtml(t.createdAt)}</td>
+<td title="${escapeHtml(t.authorId)}">${escapeHtml(t.authorLabel)}</td>
+<td>${escapeHtml(t.subject)}<div class="muted mono">id: ${escapeHtml(t.id)} · channel: ${escapeHtml(t.channelId)}</div></td>
+<td>${ticketStatusTag(t.status)}</td>
+<td class="muted">${handled || "—"}</td>
+<td class="actions">${actions}</td>
+</tr>`;
+          })
+          .join("")}</tbody></table>`;
+
+  const prevLink =
+    page > 1
+      ? `<a class="btn btn-sm" href="/admin/tickets${buildTicketsQueryString(props.statusFilter, page - 1)}">← Prev</a>`
+      : `<button class="btn btn-sm" disabled>← Prev</button>`;
+  const nextLink =
+    page < totalPages
+      ? `<a class="btn btn-sm" href="/admin/tickets${buildTicketsQueryString(props.statusFilter, page + 1)}">Next →</a>`
+      : `<button class="btn btn-sm" disabled>Next →</button>`;
+
+  const body = `
+<h1>Support tickets</h1>
+<p class="subtitle">Private help channels members open with <code>/ticket open</code>. Closing archives the channel (locked, never deleted); reopen restores it.</p>
+${renderFlash(props.flash)}
+${renderFeatureDisabledNotice({ enabled: props.enabled, label: "Tickets", featureKey: "tickets.enabled", returnTo: "/admin/tickets", csrfToken: props.csrfToken })}
+
+<div class="card">
+  <h2>Status</h2>
+  <dl class="kv">
+    <dt>Tickets</dt><dd>${props.enabled ? '<span class="tag tag-on">enabled</span>' : '<span class="tag tag-off">disabled</span>'}</dd>
+    <dt>Tickets matched</dt><dd>${props.total}</dd>
+  </dl>
+  <p class="muted">The bot needs <strong>Manage Channels</strong> and <strong>Manage Roles</strong> (to set the private permissions) and, for a category, access to it.</p>
+</div>
+${renderFeatureSettingsCard({
+  intro:
+    "Choose the staff role and category, and whether a transcript is saved when a ticket closes. Saved through the shared settings route.",
+  category: "tickets",
+  settingRows: props.settingRows ?? [],
+  pickers: props.pickers,
+  returnTo: "/admin/tickets",
+  csrfToken: props.csrfToken,
+  dependencyState: props.dependencyState,
+  unavailable: props.settingsUnavailable,
+})}
+
+<div class="card">
+  <h2>Filter</h2>
+  <form method="GET" action="/admin/tickets" class="inline-form">
+    <label>Status
+      <select name="status">
+        <option value="">— any —</option>
+        ${statusOptionsHtml}
+      </select>
+    </label>
+    <button type="submit" class="btn btn-primary btn-sm">Apply</button>
+    <a class="btn btn-sm" href="/admin/tickets">Reset</a>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Tickets (page ${page} of ${totalPages})</h2>
+  ${rowsHtml}
+  <div class="inline-form" style="margin-top:.75rem">
+    ${prevLink}
+    ${nextLink}
+    <span class="muted">${props.pageSize} per page</span>
+  </div>
+</div>
+`;
+  return renderAdminPage({
+    title: "Support tickets",
+    active: "/admin/tickets",
     body,
     csrfToken: props.csrfToken,
     remainingMs: props.remainingMs,

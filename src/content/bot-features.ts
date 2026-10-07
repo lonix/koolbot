@@ -61,6 +61,11 @@ export const BOT_FEATURES: Readonly<Record<string, BotFeatureInfo>> = {
     label: "Reminders",
     description: "Set personal reminders with `/remind`",
   },
+  tickets: {
+    emoji: "🎫",
+    label: "Support Tickets",
+    description: "Get private help from staff with `/ticket open`",
+  },
   birthdays: {
     emoji: "🎂",
     label: "Birthdays",

@@ -37,6 +37,7 @@ See [WEBUI.md](WEBUI.md) for the full surface breakdown.
   - [/event](#event)
   - [/lfg](#lfg)
   - [/remind](#remind)
+  - [/ticket](#ticket)
 - [Moderation commands](#-moderation-commands)
   - [/warn](#warn)
   - [/timeout](#timeout)
@@ -716,6 +717,50 @@ default); cancel one to make room.
 
 ---
 
+### `/ticket`
+
+**Description:** Get private help from staff. `/ticket open` creates a text
+channel only you and the staff role can see; `/ticket close` archives it.
+
+**Enable:** Web UI → Tickets (or Settings) → set `tickets.staff_role_id`, then
+`tickets.enabled = true` → Reload commands. Opening a ticket is refused until
+the staff role is set.
+
+**Usage:**
+
+```text
+/ticket open subject:"Can't join the voice lobby"
+/ticket close
+/ticket close id:697bdfe2808f7d245289392c
+/ticket claim
+```
+
+#### `/ticket open`
+
+Creates the private channel (under `tickets.category_id` when set), grants you
+and the staff role access, hides it from everyone else, and posts your
+subject with a ping to the staff role. The reply is ephemeral and links the
+new channel.
+
+#### `/ticket close`
+
+Run it **inside the ticket channel**. You can close your own ticket; staff can
+close any ticket, from anywhere, by passing its `id` (shown on the
+`/admin/tickets` page). Closing renames the channel `closed-…`, stops the
+author posting, and — when `tickets.transcript_on_close` is on — posts a
+plain-text log of the conversation into the channel first. The channel is
+**archived, not deleted**; staff can reopen it from the Web UI.
+
+#### `/ticket claim`
+
+Staff only. Marks the ticket as yours so colleagues know it is handled.
+
+**Staff** means anyone holding `tickets.staff_role_id`, plus server
+administrators. Listing, claiming, closing and reopening tickets is also
+available on the `/admin/tickets` Web UI page.
+
+---
+
 ## 🚨 Moderation commands
 
 A lightweight, queryable **moderation log**. KoolBot records the actions you
@@ -1116,6 +1161,7 @@ surfaces share the same validation.
 | `/event` create/cancel/start   | Administrator    | Events enabled                |
 | `/lfg`                         | Everyone\*       | LFG enabled                   |
 | `/remind`                      | Everyone\*       | Reminders enabled             |
+| `/ticket`                      | Everyone\*       | Tickets enabled               |
 | `/warn`                        | Moderate Members | Moderation log enabled        |
 | `/timeout`                     | Moderate Members | Moderation log enabled        |
 | `/ban`                         | Ban Members      | Moderation log enabled        |
@@ -1222,6 +1268,8 @@ when its message, role, category, or channel is deleted.
 /remind set message:"..." in:2h     # Set a personal reminder
 /remind list                        # Your pending reminders
 /remind cancel id:"..."             # Cancel one of your reminders
+/ticket open subject:"..."          # Open a private ticket with staff
+/ticket close                       # Close the ticket you are in
 /warn user:@User reason:"..."       # (mod) record a warning
 /timeout user:@User duration:180 reason:"..."  # (mod) time out for 1m-28d
 /ban user:@User reason:"..." [delete_days:N]   # (mod) ban and record it

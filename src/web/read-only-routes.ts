@@ -71,6 +71,8 @@ import { WebAuditLog } from "../models/web-audit-log.js";
 import { DiscordCommandAuditLog } from "../models/discord-command-audit-log.js";
 import { ModerationService } from "../services/moderation-service.js";
 import type { ModerationAction } from "../models/moderation-log.js";
+import { TICKET_STATUSES, type TicketStatus } from "../models/ticket.js";
+import { TicketChannelManager } from "../services/ticket-channel-manager.js";
 import { getCommandMetricsSummary } from "../services/command-metrics-query.js";
 import { getGuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import { getServerTimezone, resolveTimezone } from "../utils/timezone.js";
@@ -102,6 +104,8 @@ import {
   renderPermissionsPage,
   renderPollsPage,
   renderModerationPage,
+  renderTicketsPage,
+  type TicketRow,
   renderQuotesPage,
   renderBirthdaysPage,
   renderReactionRolesPage,
@@ -234,6 +238,13 @@ export const ANNOUNCEMENTS_SETTING_KEYS = ["announcements.enabled"] as const;
  * pair is the feature's Discord log channel; it stays in the Core section of
  * Settings too, and is surfaced here because it only matters to this feature.
  */
+export const TICKETS_SETTING_KEYS = [
+  "tickets.enabled",
+  "tickets.staff_role_id",
+  "tickets.category_id",
+  "tickets.transcript_on_close",
+] as const;
+
 export const MODERATION_SETTING_KEYS = [
   "moderation.enabled",
   "moderation.retention_days",
@@ -2398,6 +2409,111 @@ export function createReadOnlyRouter(
           pickers: moderationSettings.pickers,
           dependencyState: moderationSettings.dependencyState,
           settingsUnavailable: moderationSettings.unavailable,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // ---------- Support tickets (#1004) ----------
+  router.get(
+    "/tickets",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const config = ConfigService.getInstance();
+      const manager = TicketChannelManager.getInstance(client);
+
+      const pageSize = 50;
+      const pageRaw = Number.parseInt(String(req.query.page ?? "1"), 10);
+      const page = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+      const statusRaw = String(req.query.status ?? "").trim();
+      const statusFilter = (TICKET_STATUSES as readonly string[]).includes(
+        statusRaw,
+      )
+        ? (statusRaw as TicketStatus)
+        : undefined;
+
+      const [enabled, ticketSettings] = await Promise.all([
+        config.getBoolean("tickets.enabled", false),
+        loadFeatureSettings(client, common.guildId, TICKETS_SETTING_KEYS),
+      ]);
+      const [total, docs] = enabled
+        ? await Promise.all([
+            manager.count(common.guildId, statusFilter).catch(() => 0),
+            manager
+              .list(common.guildId, {
+                status: statusFilter,
+                limit: pageSize,
+                skip: (page - 1) * pageSize,
+              })
+              .catch(() => []),
+          ])
+        : [0, []];
+
+      // Resolve member labels in one batched fetch (see the moderation page).
+      const ids = new Set<string>();
+      for (const d of docs) {
+        ids.add(d.authorId);
+        if (d.claimedBy) ids.add(d.claimedBy);
+        if (d.closedBy) ids.add(d.closedBy);
+      }
+      const labels = new Map<string, string>();
+      if (ids.size > 0) {
+        try {
+          const guild = await client.guilds.fetch(common.guildId);
+          const missing: string[] = [];
+          for (const id of ids) {
+            const cached = guild.members.cache.get(id);
+            if (cached) labels.set(id, cached.displayName);
+            else missing.push(id);
+          }
+          if (missing.length > 0) {
+            const fetched = await guild.members
+              .fetch({ user: missing })
+              .catch(() => null);
+            if (fetched) {
+              for (const [id, member] of fetched) {
+                labels.set(id, member.displayName);
+              }
+            }
+          }
+        } catch (err) {
+          logger.debug("tickets page member-label fetch failed", err);
+        }
+      }
+      const label = (id: string | null): string | null =>
+        id ? (labels.get(id) ?? id) : null;
+
+      const rows: TicketRow[] = docs.map((d) => ({
+        id: String(d._id),
+        createdAt:
+          d.createdAt instanceof Date
+            ? d.createdAt.toISOString()
+            : String(d.createdAt ?? ""),
+        authorId: d.authorId,
+        authorLabel: label(d.authorId) ?? d.authorId,
+        channelId: d.channelId,
+        subject: d.subject,
+        status: d.status,
+        claimedByLabel: label(d.claimedBy),
+        closedByLabel: label(d.closedBy),
+        closedAt: d.closedAt ? d.closedAt.toISOString() : null,
+      }));
+
+      res.type("text/html").send(
+        renderTicketsPage({
+          ...common,
+          enabled,
+          statusFilter: statusFilter ?? "",
+          statusOptions: TICKET_STATUSES,
+          rows,
+          total,
+          page,
+          pageSize,
+          settingRows: ticketSettings.settingRows,
+          pickers: ticketSettings.pickers,
+          dependencyState: ticketSettings.dependencyState,
+          settingsUnavailable: ticketSettings.unavailable,
           flash: readFlash(req),
         }),
       );

@@ -434,6 +434,42 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Names the moderator inside another member's record; the record is not theirs to erase, and who acted is part of it.",
   },
   {
+    source: "src/models/ticket.ts",
+    collection: "ticket",
+    field: "authorId",
+    exportable: false,
+    guildScoped: true,
+    note: "Support record staff work from: the subject and staff handling of a private help request. Kept out of the self-service export so the staff-side handling stays with staff.",
+    onDelete: "retain",
+    subject: "self",
+    deleteNote:
+      "Support record. Erasing it from a self-service endpoint would orphan a ticket channel staff may still be working in; staff remove the ticket channel itself.",
+  },
+  {
+    source: "src/models/ticket.ts",
+    collection: "ticket",
+    field: "claimedBy",
+    exportable: false,
+    guildScoped: true,
+    note: "Names the staff member handling another member's ticket.",
+    onDelete: "retain",
+    subject: "mention",
+    deleteNote:
+      "Names the staff member inside another member's ticket; the record is not theirs to erase.",
+  },
+  {
+    source: "src/models/ticket.ts",
+    collection: "ticket",
+    field: "closedBy",
+    exportable: false,
+    guildScoped: true,
+    note: "Names who closed another member's ticket (the author or staff).",
+    onDelete: "retain",
+    subject: "mention",
+    deleteNote:
+      "Names who closed the ticket inside a record that belongs to the ticket's author and staff; not the closer's to erase.",
+  },
+  {
     source: "src/models/discord-command-audit-log.ts",
     collection: "discord-command-audit-log",
     field: "discordUserId",

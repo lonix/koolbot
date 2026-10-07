@@ -128,6 +128,12 @@ export const NAV_ITEMS: NavItem[] = [
     featureKey: "quotes.enabled",
   },
   {
+    href: "/admin/tickets",
+    label: "Tickets",
+    group: "Features",
+    featureKey: "tickets.enabled",
+  },
+  {
     href: "/admin/voice-channels",
     label: "Voice Channels",
     group: "Features",

@@ -376,6 +376,12 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "birthdays.role_duration_hours",
   ],
   reminders: ["reminders.enabled", "reminders.max_pending"],
+  tickets: [
+    "tickets.enabled",
+    "tickets.staff_role_id",
+    "tickets.category_id",
+    "tickets.transcript_on_close",
+  ],
   leaderboard_roles: [
     "leaderboard_roles.enabled",
     "leaderboard_roles.period",
@@ -411,6 +417,7 @@ export const WIZARD_FEATURE_ORDER = [
   "digest",
   "birthdays",
   "reminders",
+  "tickets",
   "leaderboard_roles",
 ];
 
