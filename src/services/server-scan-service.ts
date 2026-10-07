@@ -372,6 +372,33 @@ export function mapFeatureBindings(
   return { channels, roles };
 }
 
+/**
+ * The effective configuration for every known key: the stored value, else
+ * the environment fallback, else the schema default. A failed database read
+ * throws, so the planner never diffs against a half-read config.
+ */
+export async function readEffectiveConfig(): Promise<
+  Record<string, ConfigValue | undefined>
+> {
+  const known = defaultConfig as unknown as Record<string, unknown>;
+  const rows = await ConfigService.getInstance().getAll();
+  const stored = new Map<string, unknown>(rows.map((r) => [r.key, r.value]));
+  const out: Record<string, ConfigValue | undefined> = {};
+  for (const [key, fallback] of Object.entries(known)) {
+    const value = stored.has(key)
+      ? stored.get(key)
+      : (getEnvConfigValue(key) ?? fallback);
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "boolean"
+    ) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 /** Infer how the server names its channels (#1019 naming detection). */
 export function detectNamingConvention(
   channelNames: string[],
@@ -718,29 +745,8 @@ export class ServerScanService {
     }
   }
 
-  /**
-   * The effective configuration for every known key: the stored value, else
-   * the environment fallback, else the schema default. A failed database read
-   * throws, so the planner never diffs against a half-read config.
-   */
-  private async readConfig(): Promise<Record<string, ConfigValue | undefined>> {
-    const known = defaultConfig as unknown as Record<string, unknown>;
-    const rows = await ConfigService.getInstance().getAll();
-    const stored = new Map<string, unknown>(rows.map((r) => [r.key, r.value]));
-    const out: Record<string, ConfigValue | undefined> = {};
-    for (const [key, fallback] of Object.entries(known)) {
-      const value = stored.has(key)
-        ? stored.get(key)
-        : (getEnvConfigValue(key) ?? fallback);
-      if (
-        typeof value === "string" ||
-        typeof value === "number" ||
-        typeof value === "boolean"
-      ) {
-        out[key] = value;
-      }
-    }
-    return out;
+  private readConfig(): Promise<Record<string, ConfigValue | undefined>> {
+    return readEffectiveConfig();
   }
 
   private describeChannel(

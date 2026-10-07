@@ -110,6 +110,13 @@ export interface ConfigSchema {
   "welcome.roles_message_id": string; // Optional reaction-role message to deep-link as {roles}
   "welcome.rules_channel_id": string; // Optional rules channel mentioned as {rules}
 
+  "rules.enabled": boolean;
+  "rules.channel_id": string; // Read-only channel holding the rules message
+  "rules.role_id": string; // Role granted when a member accepts
+  "rules.message": string; // Rules text shown above the Accept button
+  "rules.button_label": string; // Accept button text
+  "rules.message_id": string; // Managed by KoolBot: the posted rules message
+
   // Events — scheduled/temporary voice channels (#708)
   "events.enabled": boolean;
   "events.category_id": string; // Category the temp event voice channels are created under
@@ -402,6 +409,15 @@ export const defaultConfig: ConfigSchema = {
   "welcome.mention": true,
   "welcome.roles_message_id": "",
   "welcome.rules_channel_id": "",
+
+  // Rules / TOS acceptance role (#1024) — off by default
+  "rules.enabled": false,
+  "rules.channel_id": "",
+  "rules.role_id": "",
+  "rules.message":
+    "Please read the server rules above, then press the button to accept them and unlock the rest of the server.",
+  "rules.button_label": "I accept the rules",
+  "rules.message_id": "",
 
   // Events (#708) — feature gate off by default (rule 1)
   "events.enabled": false,
@@ -1026,6 +1042,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Welcome Messages",
     description:
       "Greet new members in a configured channel, optionally pointing them at the self-assign role picker and the rules channel. Needs the privileged Server Members Intent (GUILD_MEMBERS_INTENT=true) so Discord delivers member-join events.",
+  },
+  rules: {
+    title: "Rules Acceptance",
+    description:
+      "Optional rules / terms gate: KoolBot posts the rules with an Accept button in a read-only channel and grants an acceptance role. Off by default; manage the rollout (existing members, gated channels) on the Rules page. Discord's own Membership Screening or Onboarding does the same job on Community servers; don't run both.",
   },
   events: {
     title: "Events",
@@ -1666,6 +1687,47 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Optional channel mentioned by the {rules} placeholder in the welcome message.",
     category: "welcome",
     type: "channel",
+  },
+  "rules.enabled": {
+    label: "Rules acceptance enabled",
+    description:
+      "Let members accept the server rules with a button and receive an acceptance role. Off by default. If Discord's Membership Screening or Onboarding is already active, new members would accept the rules twice; use one gate, not both.",
+    category: "rules",
+    type: "boolean",
+  },
+  "rules.channel_id": {
+    label: "Rules channel",
+    description:
+      "Channel where KoolBot posts the rules message with the Accept button. Make it read-only for members.",
+    category: "rules",
+    type: "channel",
+  },
+  "rules.role_id": {
+    label: "Acceptance role",
+    description:
+      "Role granted when a member presses Accept. Pick an existing role (for example a verified role) or create one on the Rules page. Its current holders count as already accepted.",
+    category: "rules",
+    type: "role",
+  },
+  "rules.message": {
+    label: "Rules message text",
+    description:
+      "Text posted with the Accept button. Put the rules themselves in the channel above it, or write them here.",
+    category: "rules",
+    type: "string",
+  },
+  "rules.button_label": {
+    label: "Accept button label",
+    description: "Text on the Accept button (up to 80 characters).",
+    category: "rules",
+    type: "string",
+  },
+  "rules.message_id": {
+    label: "Rules message ID",
+    description:
+      "Managed by KoolBot: the ID of the posted rules message. Clear it to have a fresh message posted.",
+    category: "rules",
+    type: "string",
   },
   "events.enabled": {
     label: "Events enabled",

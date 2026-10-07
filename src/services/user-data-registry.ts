@@ -236,6 +236,18 @@ export const USER_DATA_REGISTRY: readonly UserDataField[] = [
       "Self-declared personal data the member entered themselves. Not quite the simple delete it looks: this row is the only record of two things the bot did in Discord — `roleAssignedAt`/`roleAssignedId` for the temporary birthday role, and `announcements` for every birthday message it posted about the member. Both have to be undone before the row goes, or the expiry sweep can never find the grant and the posts naming them (and often their age) stay up for good (#916).",
   },
   {
+    source: "src/models/rules-acceptance.ts",
+    collection: "rules-acceptance",
+    field: "userId",
+    exportable: true,
+    guildScoped: true,
+    note: "When the member accepted the server rules, and whether by button or because they already held the acceptance role when it was adopted (#1024).",
+    onDelete: "hard-delete",
+    subject: "self",
+    deleteNote:
+      "The member's own acceptance record. Deleting it does not take the acceptance role back: the role is an admin-managed Discord permission, and a member who wants it gone can ask a moderator.",
+  },
+  {
     source: "src/models/user-notification-prefs.ts",
     collection: "user-notification-prefs",
     field: "userId",

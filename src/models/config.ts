@@ -39,6 +39,7 @@ export const CONFIG_CATEGORIES = [
   "reactiontracking",
   "reminders",
   "rewind",
+  "rules",
   "tickets",
   "voicechannels",
   "voicetracking",

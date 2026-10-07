@@ -162,6 +162,14 @@ export interface PlanOptions {
    * `adminUserId`.
    */
   approverId?: string;
+  /**
+   * Run member role grants and config links before any channel overwrite,
+   * put @everyone denies after every allow, and skip those overwrites if an
+   * earlier step failed. For gates that hide channels from
+   * members who don't hold the granted role: nobody may be locked out by a
+   * half-finished rollout (#1024).
+   */
+  grantsBeforeOverwrites?: boolean;
 }
 
 interface OpBase {
@@ -171,6 +179,8 @@ interface OpBase {
   targetId: string | null;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
+  /** Set by `grantsBeforeOverwrites`: only runs when every earlier step succeeded. */
+  afterGrants?: boolean;
 }
 
 export interface RoleCreateOp extends OpBase {
@@ -209,6 +219,8 @@ export interface ConfigSetOp extends OpBase {
   type: "config.set";
   key: string;
   value: ConfigValue;
+  /** `value` is a `new:` role ref, resolved to the created role's id at apply time. */
+  valueIsRoleRef?: boolean;
   previous: ConfigValue | null;
 }
 export interface OverwriteRemoveOp extends OpBase {
@@ -918,6 +930,10 @@ export function planAdoption(
       class: "additive",
       key,
       value: wanted,
+      ...(typeof wanted === "string" &&
+      ops.some((o) => o.type === "role.create" && o.ref === wanted)
+        ? { valueIsRoleRef: true }
+        : {}),
       previous: current ?? null,
       summary: `Set ${key}`,
       targetId: key,
@@ -1103,14 +1119,35 @@ export function planAdoption(
   // ---- ordering ------------------------------------------------------
   const phaseOf = (op: PlanOperation): number => {
     if (op.type === "overwrite.set") {
+      // A deny for @everyone comes after every allow, so a failed allow never
+      // leaves a channel hidden from the role that should still see it.
+      if (
+        options.grantsBeforeOverwrites &&
+        op.overwriteTargetId === scanned.guildId
+      ) {
+        return 3.5;
+      }
       return channelsById.get(op.channelId)?.kind === "category" ? 2 : 3;
+    }
+    if (options.grantsBeforeOverwrites) {
+      if (op.type === "member.role.add") return 1.5;
+      // A config link to a role this plan creates (e.g. the acceptance role)
+      // lands before any gate, so a failed link keeps the gate unapplied.
+      if (op.type === "config.set") return 1.6;
     }
     return PHASE_ORDER[op.type];
   };
+  const gateAfterGrants = !!options.grantsBeforeOverwrites;
   const ordered = ops
     .map((op, index) => ({ op, index }))
     .sort((a, b) => phaseOf(a.op) - phaseOf(b.op) || a.index - b.index)
-    .map(({ op }, i) => ({ ...op, id: `op-${i + 1}` }) as PlanOperation);
+    .map(({ op }, i) => {
+      const next = { ...op, id: `op-${i + 1}` } as PlanOperation;
+      if (gateAfterGrants && next.type === "overwrite.set") {
+        next.afterGrants = true;
+      }
+      return next;
+    });
 
   // ---- the bot must hold the permissions Discord will demand ---------------
   const needsManageRoles = ordered.some(

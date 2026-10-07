@@ -77,6 +77,7 @@ import { PollParticipationTracking } from "../models/poll-participation-tracking
 import { PollTurnout } from "../models/poll-turnout.js";
 import { ReactionActivityTracking } from "../models/reaction-activity-tracking.js";
 import { Reminder } from "../models/reminder.js";
+import { RulesAcceptance } from "../models/rules-acceptance.js";
 import { RewindNudgeState } from "../models/rewind-nudge-state.js";
 import { RewindSnapshot } from "../models/rewind-snapshot.js";
 import { UserAchievements } from "../models/user-achievements.js";
@@ -439,6 +440,14 @@ const DELETERS: Record<string, CollectionDeleter> = {
     },
   },
 
+  "rules-acceptance": {
+    actions: ["hard-delete"],
+    run: async ({ userId, guildId }, emit) => {
+      const result = await RulesAcceptance.deleteMany({ userId, guildId });
+      emit(deleted(result.deletedCount));
+    },
+  },
+
   "user-name-history": {
     actions: ["hard-delete"],
     run: async ({ userId, guildId }, emit) => {
@@ -599,6 +608,7 @@ export const PURGE_ORDER: readonly string[] = [
   "poll-turnout",
   "user-achievements",
   "user-notification-prefs",
+  "rules-acceptance",
   "user-name-history",
   "user-voice-preferences",
   "rewind-snapshot",

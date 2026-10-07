@@ -42,6 +42,7 @@ Complete configuration reference for all KoolBot settings.
 - [Rewind (Year-in-Review)](#-rewind-year-in-review)
 - [Birthdays](#-birthdays)
 - [Welcome Messages](#-welcome-messages)
+- [Rules Acceptance](#-rules-acceptance)
 - [Events](#-events)
 - [LFG (Looking for Group)](#-lfg-looking-for-group)
 - [Reminders](#-reminders)
@@ -749,6 +750,36 @@ members unprompted.
   leaves and rejoins within a few minutes is greeted once.
 - A missing or unreadable channel is logged as a warning and skipped; a
   join never crashes the bot.
+
+---
+
+## 📜 Rules Acceptance
+
+An optional rules / terms-of-service gate. KoolBot posts the rules with an
+**Accept** button in a read-only channel; pressing it grants an acceptance role
+and records when. Off by default. There is no slash command: edit these
+settings on the Web UI **Settings** page or the Setup Wizard, and use the
+**Rules** page (`/admin/rules`) to post the message and to preview and apply
+the rollout (creating the role, granting it to existing members, gating
+channels).
+
+> **Discord's native gate.** Community servers already have Membership
+> Screening, a rules channel and Onboarding. Use those there; running both
+> means new members accept the rules twice. The KoolBot role is for
+> non-Community servers or when you want a custom message or button.
+
+| Setting              | Default                              | Description                                                                                                              |
+| -------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `rules.enabled`      | `false`                              | Master switch for the Accept button                                                                                      |
+| `rules.channel_id`   | `""`                                 | Channel where the rules message is posted (make it read-only for members)                                                |
+| `rules.role_id`      | `""`                                 | Acceptance role granted on Accept; pick an existing role (its holders count as accepted) or create one on the Rules page |
+| `rules.message`      | `"Please read the server rules ..."` | Text posted with the button                                                                                              |
+| `rules.button_label` | `"I accept the rules"`               | Button text (up to 80 characters)                                                                                        |
+| `rules.message_id`   | `""`                                 | Managed by KoolBot: the posted message's ID. Clear it to post a fresh message                                            |
+
+When a member accepts, KoolBot stores _accepted at_ (and whether it was by
+button or because they already held the role). It is part of the member's
+`/me/privacy` export and is deleted by a data reset.
 
 ---
 
@@ -1752,6 +1783,15 @@ leave the graph in a broken state.
 - `welcome.mention` (bool, default: true)
 - `welcome.roles_message_id` (string, default: "")
 - `welcome.rules_channel_id` (string, default: "")
+
+#### Rules Acceptance
+
+- `rules.enabled` (bool, default: false)
+- `rules.channel_id` (string, default: "")
+- `rules.role_id` (string, default: "")
+- `rules.message` (string, default: the "Please read the server rules above ..." text)
+- `rules.button_label` (string, default: "I accept the rules")
+- `rules.message_id` (string, default: "")
 
 #### Events
 

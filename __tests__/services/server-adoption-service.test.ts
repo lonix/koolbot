@@ -1723,3 +1723,98 @@ describe("review hardening, round sixteen", () => {
     );
   });
 });
+
+describe("grants before gating overwrites", () => {
+  const desired = {
+    memberGrants: [{ role: { id: "member" }, memberIds: ["m1", "m2"] }],
+    overwrites: [
+      { channelId: "chat", target: { id: "g1" }, allow: "0", deny: VIEW },
+      { channelId: "chat", target: { id: "staff" }, allow: VIEW, deny: "0" },
+    ],
+  };
+
+  it("orders grants first only when asked, and tags the gating overwrites", () => {
+    const def = planAdoption(scanned(), desired);
+    expect(def.operations.map((o) => o.type)).toEqual([
+      "overwrite.set",
+      "overwrite.set",
+      "member.role.add",
+    ]);
+    const gated = planAdoption(scanned(), desired, {
+      grantsBeforeOverwrites: true,
+    });
+    expect(gated.operations.map((o) => o.type)).toEqual([
+      "member.role.add",
+      "overwrite.set",
+      "overwrite.set",
+    ]);
+    expect(gated.operations[1]).toMatchObject({ afterGrants: true });
+    expect(gated.operations[2]).toMatchObject({ afterGrants: true });
+  });
+
+  it("skips the gate when a grant failed, and applies it on resume", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), desired, {
+      grantsBeforeOverwrites: true,
+    });
+    h.failMembers.add("m2");
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    expect(first.skipped).toEqual(["op-2", "op-3"]);
+
+    h.failMembers.clear();
+    const second = await h.service.apply(p, {
+      ...opts,
+      resumeSnapshotId: first.snapshotId,
+    });
+    expect(second.status).toBe("applied");
+    expect(second.applied).toEqual(expect.arrayContaining(["op-2", "op-3"]));
+  });
+
+  it("applies every role allow before the @everyone deny, and skips the deny when an allow failed", async () => {
+    const h = harness();
+    const both = {
+      overwrites: [
+        { channelId: "chat", target: { id: "g1" }, allow: "0", deny: VIEW },
+        { channelId: "chat", target: { id: "staff" }, allow: VIEW, deny: "0" },
+      ],
+    };
+    const p = planAdoption(scanned(), both, { grantsBeforeOverwrites: true });
+    expect(
+      p.operations.map(
+        (o) => (o as { overwriteTargetId: string }).overwriteTargetId,
+      ),
+    ).toEqual(["staff", "g1"]);
+    h.failOn.add("setOverwrite:chat:staff");
+    const r = await h.service.apply(p, opts);
+    expect(r.skipped).toEqual(["op-2"]);
+    expect(h.calls).not.toContain("setOverwrite:chat:g1");
+  });
+
+  it("links a created role into config as a plan step and rolls it back", async () => {
+    const h = harness();
+    h.overrideAbsent.add("rules.role_id");
+    const p = planAdoption(
+      scanned(),
+      {
+        roles: [{ name: "Rules accepted" }],
+        config: { "rules.role_id": "new:rules accepted" },
+      },
+      { grantsBeforeOverwrites: true },
+    );
+    expect(p.operations.find((o) => o.type === "config.set")).toMatchObject({
+      valueIsRoleRef: true,
+    });
+    const applied = await h.service.apply(p, opts);
+    expect(applied.status).toBe("applied");
+    expect(h.calls).toContain("config:rules.role_id=role-1");
+    await h.service.rollback(applied.snapshotId, { actor });
+    expect(h.calls).toContain("configDelete:rules.role_id");
+    // The link is undone before the role itself is rolled back.
+    expect(
+      h.calls.indexOf("audit:adoption.rollback.config.set:success"),
+    ).toBeLessThan(
+      h.calls.indexOf("audit:adoption.rollback.role.create:success"),
+    );
+  });
+});

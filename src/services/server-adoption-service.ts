@@ -550,8 +550,13 @@ export class ServerAdoptionService {
             options.onProgress?.({ ...progress });
             continue;
           }
-          // Destructive steps only run when every earlier step succeeded.
-          if (isDestructive(op) && earlierFailure) {
+          // Destructive steps (and gates ordered after their grants) only run
+          // when every earlier step succeeded.
+          if (
+            (isDestructive(op) ||
+              (op.type === "overwrite.set" && op.afterGrants)) &&
+            earlierFailure
+          ) {
             record.status = "skipped";
             record.error = "Skipped: an earlier operation failed.";
             progress.skipped++;
@@ -1054,7 +1059,13 @@ export class ServerAdoptionService {
         return op.roleId;
       }
       case "config.set":
-        await config.set(op.key, op.value);
+        // A `new:` ref (the role this plan just created) resolves to its id.
+        await config.set(
+          op.key,
+          op.valueIsRoleRef && typeof op.value === "string"
+            ? this.resolveRef(snapshot, op.value)
+            : op.value,
+        );
         return op.key;
       case "member.role.add":
         return this.applyMembers(op, snapshot, options, persist);
