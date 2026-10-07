@@ -12,6 +12,7 @@
 import {
   Router,
   type NextFunction,
+  type Request,
   type Response,
   type RequestHandler,
 } from "express";
@@ -1361,6 +1362,20 @@ export function createUserRouter(
 
   router.get(
     "/privacy/export",
+    // Gate before the limiter (#1066): while the section is off these
+    // requests must stay a plain 404 and must not spend the export allowance,
+    // or the first download after re-enabling could be rate-limited.
+    (_req: Request, res: Response, next: NextFunction): void => {
+      isPrivacyExportEnabled()
+        .then((on) => {
+          if (!on) {
+            res.status(404).type("text/plain").send("Not found");
+            return;
+          }
+          next();
+        })
+        .catch(next);
+    },
     exportLimiter,
     asyncHandler(async (req, res) => {
       const session = req.webSession;
@@ -1372,24 +1387,6 @@ export function createUserRouter(
         userId: session.discordUserId,
         guildId: session.guildId,
       });
-
-      // Unlike the gated *pages*, the download refuses outright when the
-      // feature is off: there is nothing to pre-set here, and serving the
-      // file anyway would make the config key decorative.
-      if (!(await isPrivacyExportEnabled())) {
-        await recordAudit(session, {
-          action: "user.privacy.export",
-          targetId: userId,
-          details: { reason: "feature-disabled" },
-          result: "failure",
-          errorMessage: "privacy.enabled is off",
-        });
-        res
-          .status(403)
-          .type("text/plain")
-          .send("The self-service data export is not enabled on this server.");
-        return;
-      }
 
       const progress = createExportProgress();
       // Serve as a downloaded file, never as a rendered page: `nosniff` so a
@@ -1460,6 +1457,11 @@ export function createUserRouter(
         guildId: session.guildId,
       });
       const flags = await readUserFeatureFlags();
+      // Hidden while off (#1066): 404, not a disabled banner.
+      if (!flags.privacyEnabled) {
+        res.status(404).type("text/plain").send("Not found");
+        return;
+      }
       const maxItems = await UserDataExportService.getInstance().getMaxItems();
       const [resetEnabled, cooldownHours, optOutDisabledKeys] =
         await Promise.all([
@@ -1558,6 +1560,9 @@ export function createUserRouter(
         }
       }
 
+      // Opting back in stays possible with the export off, but /me/privacy
+      // then 404s (#1066), so land the member on the overview instead.
+      const landing = (await isPrivacyExportEnabled()) ? "/me/privacy" : "/me/";
       const service = TrackingOptOutService.getInstance();
       // False when work from an opt-out could not be confirmed finished:
       // for an opt-out it is stored anyway, for an opt-in nothing changed.
@@ -1582,7 +1587,7 @@ export function createUserRouter(
         });
         res.redirect(
           303,
-          flashUrl("/me/privacy", {
+          flashUrl(landing, {
             type: "err",
             text: "Could not save your tracking choice — nothing changed. Please try again.",
           }),
@@ -1606,7 +1611,7 @@ export function createUserRouter(
       res.redirect(
         303,
         flashUrl(
-          "/me/privacy",
+          landing,
           action === "opt-in"
             ? settled
               ? {

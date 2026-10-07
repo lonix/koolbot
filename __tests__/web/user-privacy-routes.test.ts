@@ -246,14 +246,66 @@ describe("/me/privacy", () => {
     expect(captured.body).toContain("What's not in it");
   });
 
-  it("shows the shared disabled banner and no download when off", async () => {
+  it("returns 404 and renders no page when off (#1066)", async () => {
     await installCommonMocks(false);
     const { captured } = await dispatch("/privacy");
 
-    expect(captured.body).toContain(
-      "hasn't enabled self-service data export yet",
-    );
+    expect(captured.statusCode).toBe(404);
     expect(captured.body).not.toContain("Download my data (JSON)");
+    expect(captured.body).not.toContain("Privacy");
+  });
+});
+
+describe("Privacy section visibility on /me pages (#1066)", () => {
+  beforeEach(() => {
+    process.env.WEBUI_SESSION_SECRET = SECRET;
+    process.env.WEBUI_INACTIVITY_TIMEOUT_MINUTES = "30";
+    (WebSessionService as unknown as { instance: unknown }).instance = null;
+    auditRows = [];
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it("shows the nav entry and overview card when enabled", async () => {
+    await installCommonMocks(true);
+    const { captured } = await dispatch("/");
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toContain('href="/me/privacy"');
+    expect(captured.body).toContain("See what Koolbot stores about you");
+  });
+
+  it("hides the nav entry and overview card when disabled", async () => {
+    await installCommonMocks(false);
+    const { captured } = await dispatch("/");
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).not.toContain("/me/privacy");
+    expect(captured.body).not.toContain("See what Koolbot stores about you");
+  });
+
+  it("hides the nav entry on other /me pages too", async () => {
+    await installCommonMocks(false);
+    const { captured } = await dispatch("/timezone");
+
+    expect(captured.body).not.toContain("/me/privacy");
+  });
+
+  it("returns without a restart once the config flips", async () => {
+    await installCommonMocks(false);
+    const first = await dispatch("/privacy");
+    expect(first.captured.statusCode).toBe(404);
+
+    jest.restoreAllMocks();
+    await installCommonMocks(true);
+    const second = await dispatch("/privacy", { router: first.router });
+    expect(second.captured.statusCode).toBe(200);
+    expect(second.captured.body).toContain("Download my data (JSON)");
+
+    const overview = await dispatch("/", { router: first.router });
+    expect(overview.captured.body).toContain('href="/me/privacy"');
   });
 });
 
@@ -318,20 +370,39 @@ describe("/me/privacy/export", () => {
     });
   });
 
-  it("refuses and audits the attempt when the feature is disabled", async () => {
+  it("returns 404 without streaming or auditing when the feature is disabled (#1066)", async () => {
     await installCommonMocks(false);
     await stubExportService(["{}"], { collections: [], truncated: [] });
 
     const { captured } = await dispatch("/privacy/export");
 
-    expect(captured.statusCode).toBe(403);
+    expect(captured.statusCode).toBe(404);
     expect(captured.written).toEqual([]);
-    expect(auditRows).toHaveLength(1);
-    expect(auditRows[0]).toMatchObject({
-      action: "user.privacy.export",
-      result: "failure",
-      details: { reason: "feature-disabled" },
+    expect(auditRows).toHaveLength(0);
+  });
+
+  it("stays 404 on repeated requests while disabled and spends no rate-limit allowance (#1066)", async () => {
+    await installCommonMocks(false);
+    await stubExportService(["{}"], { collections: [], truncated: [] });
+
+    const first = await dispatch("/privacy/export", { ip: "203.0.113.9" });
+    const router = first.router;
+    for (let i = 0; i < 5; i += 1) {
+      const r = await dispatch("/privacy/export", {
+        ip: "203.0.113.9",
+        router,
+      });
+      expect(r.captured.statusCode).toBe(404);
+    }
+    expect(first.captured.statusCode).toBe(404);
+
+    // Enabling the feature: the very next download is served, not 429.
+    await installCommonMocks(true);
+    const after = await dispatch("/privacy/export", {
+      ip: "203.0.113.9",
+      router,
     });
+    expect(after.captured.statusCode).toBe(200);
   });
 
   it("audits a failure when the stream breaks mid-file", async () => {

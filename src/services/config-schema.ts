@@ -399,8 +399,8 @@ export const defaultConfig: ConfigSchema = {
   "tickets.transcript_on_close": true,
 
   // Self-service data export defaults (#719). Master gate off, rule 1 —
-  // the /me/privacy page renders the standard "off" banner and the export
-  // route refuses until an operator opts in. The ceiling bounds the most
+  // the Privacy section is hidden from /me and /me/privacy plus the export
+  // route return 404 until an operator opts in (#1066). The ceiling bounds the most
   // expensive read a member can trigger; it is per collection, and the
   // payload names anything it clipped.
   "privacy.enabled": false,
@@ -1702,7 +1702,7 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
   "privacy.enabled": {
     label: "Self-service data export enabled",
     description:
-      "Let members download everything KoolBot has stored about them from the /me/privacy page. Moderation records, admin audit logs and session rows are never included. When off, the page shows a disabled notice and the download refuses.",
+      "Let members download everything KoolBot has stored about them from the /me/privacy page. Moderation records, admin audit logs and session rows are never included. When off, the Privacy section is hidden from /me (nav entry and Overview card) and /me/privacy and its download return 404.",
     category: "privacy",
     type: "boolean",
   },
