@@ -637,7 +637,10 @@ export class VoiceChannelManager {
         }
       }
     } catch (error) {
+      // Fail closed: continuing into the startup sweep with empty links could
+      // delete a live waiting room. The caller (initialize) aborts instead.
       logger.error("Error restoring waiting rooms:", error);
+      throw error;
     }
   }
 
@@ -659,14 +662,22 @@ export class VoiceChannelManager {
     try {
       const rows = await ManagedVoiceChannel.find(
         { guildId: guild.id, kind: "waiting_room" },
-        { channelId: 1, kind: 1 },
+        { channelId: 1, kind: 1, mainChannelId: 1 },
       );
       for (const row of rows) {
-        if (
-          row.kind === "waiting_room" &&
-          !guild.channels.cache.has(row.channelId)
-        ) {
+        if (row.kind !== "waiting_room") continue;
+        if (!guild.channels.cache.has(row.channelId)) {
           await this.forgetManagedChannel(row.channelId);
+        } else if (
+          row.mainChannelId &&
+          !guild.channels.cache.has(row.mainChannelId)
+        ) {
+          // Main channel is gone but the waiting room survived (occupied):
+          // keep it tracked as ours, but drop the dead link.
+          await ManagedVoiceChannel.updateOne(
+            { channelId: row.channelId },
+            { $unset: { mainChannelId: "" } },
+          );
         }
       }
     } catch (error) {

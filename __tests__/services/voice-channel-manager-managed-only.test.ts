@@ -1173,10 +1173,58 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
     it("restored waiting room notifies the owner on join", async () => {
       const { waiting } = await setupPair(1);
       manager = newManager();
-      waiting.members.set("w-1", { user: { bot: false } });
+      const member: any = {
+        id: "w-1",
+        displayName: "Waiter",
+        guild,
+        user: { bot: false },
+      };
+      waiting.members.set("w-1", member);
+      await manager.initialize(GUILD_ID);
+      const notify = jest
+        .spyOn(manager as any, "notifyOwnerUserWaiting")
+        .mockResolvedValue(undefined as never);
+
+      await manager.handleVoiceStateUpdate(
+        { channel: null, member } as any,
+        { channel: waiting, member } as any,
+      );
+
+      expect(notify).toHaveBeenCalledWith("main-id", member);
+    });
+
+    it("aborts initialization without sweeping when the waiting-room read fails", async () => {
+      const { waiting } = await setupPair(1);
+      manager = newManager();
+      const stub = ManagedVoiceChannel as unknown as { find: jest.Mock };
+      const realFind = stub.find.getMockImplementation()!;
+      stub.find.mockImplementationOnce(async () => {
+        throw new Error("mongo down");
+      });
+
       await manager.initialize(GUILD_ID);
 
-      expect(manager.getMainChannelForWaitingRoom(waiting.id)).toBe("main-id");
+      expect(waiting.delete).not.toHaveBeenCalled();
+      stub.find.mockImplementation(realFind);
+    });
+
+    it("clears a dead mainChannelId but keeps an occupied surviving waiting room tracked", async () => {
+      settings["voicechannels.cleanup.managed_only"] = true;
+      markMigrated();
+      const { main, waiting } = await setupPair(1);
+      waiting.members.set("w-1", { user: { bot: false } });
+      guildChannels.delete(main.id);
+      category.children.cache.delete(main.id);
+
+      manager = newManager();
+      await manager.initialize(GUILD_ID);
+
+      expect(waiting.delete).not.toHaveBeenCalled();
+      expect(managedStore.has(waiting.id)).toBe(true);
+      expect(ManagedVoiceChannel.updateOne).toHaveBeenCalledWith(
+        { channelId: waiting.id },
+        { $unset: { mainChannelId: "" } },
+      );
     });
 
     it("prunes the row when the waiting room itself no longer exists", async () => {
