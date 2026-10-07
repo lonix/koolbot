@@ -2653,13 +2653,14 @@ function reactionRoleRow(rr: ReactionRoleRow, csrfInput: string): string {
  * advertised limit is reachable without JavaScript.
  */
 function groupOptionRows(
+  formLabel: string,
   placeholders: (i: number) => [string, string],
 ): string {
   const row = (i: number): string => {
     const [role, emoji] = placeholders(i);
     return `<div class="inline-form">
-      <input type="text" name="roleName" maxlength="100" placeholder="${escapeHtml(role)}">
-      <input type="text" name="emoji" maxlength="100" placeholder="${escapeHtml(emoji)}">
+      <input type="text" name="roleName" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} role name`)}" placeholder="${escapeHtml(role)}">
+      <input type="text" name="emoji" maxlength="100" aria-label="${escapeHtml(`${formLabel}: option ${i + 1} emoji`)}" placeholder="${escapeHtml(emoji)}">
     </div>`;
   };
   const visible = 6;
@@ -2775,7 +2776,7 @@ ${settingsCard}
         <option value="toggle">Toggle — independent add/remove per option</option>
       </select>
     </label>
-    ${groupOptionRows((i) => [`Role name${i < 2 ? " (required)" : ""}`, `Emoji${i < 2 ? " (required)" : ""}`])}
+    ${groupOptionRows("Role group", (i) => [`Role name${i < 2 ? " (required)" : ""}`, `Emoji${i < 2 ? " (required)" : ""}`])}
     <button type="submit" class="btn btn-primary">Create role group</button>
   </form>
 </div>
@@ -2801,7 +2802,7 @@ ${settingsCard}
         <option value="toggle">Toggle — independent add/remove</option>
       </select>
     </label>
-    ${groupOptionRows((i) => [`Custom role name${i < 1 ? " (custom only)" : ""}`, "Emoji"])}
+    ${groupOptionRows("Custom role group", (i) => [`Custom role name${i < 1 ? " (custom only)" : ""}`, "Emoji"])}
     <button type="submit" class="btn btn-primary">Generate roles</button>
   </form>
 </div>

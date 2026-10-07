@@ -7,6 +7,7 @@ const model = {
   find: jest.fn<() => Promise<unknown[]>>(),
   insertMany: jest.fn<() => Promise<unknown>>(),
   updateMany: jest.fn<() => Promise<unknown>>(),
+  deleteMany: jest.fn<() => Promise<unknown>>(),
 };
 
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
@@ -100,6 +101,8 @@ beforeEach(() => {
   );
   model.find.mockResolvedValue([]);
   model.insertMany.mockResolvedValue([]);
+  model.updateMany.mockResolvedValue({});
+  model.deleteMany.mockResolvedValue({});
 });
 
 describe("parseRoleColour", () => {
@@ -342,6 +345,84 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(labels).toContain("restore group message m1");
     expect(labels.some((l) => l.startsWith("remove reaction"))).toBe(true);
     expect(s.message.delete).not.toHaveBeenCalled();
+  });
+
+  it("recreates a gone picker from archived rows plus the new option", async () => {
+    const s = setup([
+      { id: "r1", name: "Europe" },
+      { id: "r9", name: "Africa" },
+    ]);
+    const goneRows = [
+      { ...liveRow, autoCreated: true },
+      {
+        ...liveRow,
+        roleId: "r9",
+        emoji: "🌍",
+        roleName: "Africa",
+        autoCreated: false,
+      },
+    ];
+    model.find.mockResolvedValue(goneRows);
+    s.channel.messages.fetch.mockRejectedValue(
+      Object.assign(new Error("Unknown Message"), { code: 10008 }),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", [
+      { roleName: "Asia", emoji: "🌏" },
+    ]);
+    expect(r.success).toBe(true);
+    expect(r.addedEntries).toBe(1);
+    // all three options are reacted on the new picker and persisted
+    expect(s.message.react).toHaveBeenCalledTimes(3);
+    const docs = (
+      model.insertMany.mock.calls[0] as unknown as [
+        Array<{ roleId: string; autoCreated: boolean; groupId: string }>,
+      ]
+    )[0];
+    expect(docs.map((d) => d.roleId).sort()).toEqual(["new1", "r1", "r9"]);
+    expect(docs.find((d) => d.roleId === "r1")?.autoCreated).toBe(true);
+    expect(docs.find((d) => d.roleId === "r9")?.autoCreated).toBe(false);
+    expect(new Set(docs.map((d) => d.groupId))).toEqual(new Set(["m1"]));
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("recreates a gone picker even when the submission is already archived", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    model.find.mockResolvedValue([liveRow]);
+    s.channel.messages.fetch.mockRejectedValue(
+      Object.assign(new Error("Unknown Message"), { code: 10008 }),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", [
+      { roleName: "Europe", emoji: "🇪🇺" },
+    ]);
+    expect(r.success).toBe(true);
+    expect(s.channel.send).toHaveBeenCalledTimes(1);
+    expect(model.insertMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("removes this run's mappings and un-archives old rows when insertMany fails", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    model.find.mockResolvedValue([liveRow]);
+    s.channel.messages.fetch.mockRejectedValue(
+      Object.assign(new Error("Unknown Message"), { code: 10008 }),
+    );
+    model.insertMany.mockRejectedValue(new Error("partial write"));
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(model.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        guildId: "g1",
+        messageId: "m1",
+        isArchived: false,
+      }),
+    );
+    const unarchive = model.updateMany.mock.calls.find(
+      (c) => (c as unknown[])[1] && "$unset" in ((c as unknown[])[1] as object),
+    );
+    expect(unarchive).toBeDefined();
+    expect(s.message.delete).toHaveBeenCalled();
   });
 
   it("validates input before touching Discord", async () => {

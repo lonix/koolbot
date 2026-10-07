@@ -2011,8 +2011,22 @@ export class ReactionRoleService {
 
       // Delete every role in the group, except roles the bot did not create
       // (the grouped-role generator reuses existing roles, #1064).
-      for (const config of configs) {
-        if (config.autoCreated === false) continue;
+      // Earlier picker incarnations of the same generated group may own roles
+      // the current one no longer lists; include them, once per role.
+      const archivedOwned = first.groupKey
+        ? await ReactionRoleConfig.find({
+            guildId,
+            groupKey: first.groupKey,
+            isArchived: true,
+          })
+        : [];
+      const seenRoleIds = new Set<string>();
+      const cleanupConfigs = [...configs, ...archivedOwned].filter((c) => {
+        if (c.autoCreated === false || seenRoleIds.has(c.roleId)) return false;
+        seenRoleIds.add(c.roleId);
+        return true;
+      });
+      for (const config of cleanupConfigs) {
         try {
           // Same guard as deleteReactionRole: a role reused by a mapping
           // outside this group must survive, or that picker would dangle.

@@ -2240,6 +2240,11 @@ describe("renderReactionRolesPage", () => {
     });
     expect(html.match(/name="roleName"/g)).toHaveLength(40);
     expect(html).toContain("More options (up to 20)");
+    // every option field has a distinct accessible name
+    const labels =
+      html.match(/aria-label="[^"]*option \d+ (?:role name|emoji)"/g) ?? [];
+    expect(labels).toHaveLength(80);
+    expect(new Set(labels).size).toBe(80);
   });
 
   it("shows the empty state for active and archived", () => {

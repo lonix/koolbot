@@ -182,6 +182,9 @@ export class ReactionRoleGroupService {
     let editedAnchor: Message | null = null;
     let previousEmbeds: EmbedBuilder[] = [];
     const addedReactions: string[] = [];
+    // Rollback bookkeeping for the persistence step.
+    let archivedAnchorId: string | null = null;
+    let insertAttempt: { messageId: string; roleIds: string[] } | null = null;
 
     try {
       const configService = ConfigService.getInstance();
@@ -235,18 +238,18 @@ export class ReactionRoleGroupService {
         );
       }
       const liveRows = anchor ? existingRows : [];
-      // Rows whose picker message is gone are archived, never deleted.
-      if (!anchor && existingRows.length > 0) {
-        await ReactionRoleConfig.updateMany(
-          { guildId, groupKey, messageId: anchorId, isArchived: false },
-          { isArchived: true, archivedAt: new Date() },
-        );
-      }
-      const effectiveMode: ReactionRoleMode = liveRows[0]
-        ? liveRows[0].mode
-        : REACTION_ROLE_MODES.includes(mode)
-          ? mode
-          : "unique";
+      // Picker gone: its rows are archived (never deleted) once the
+      // replacement is posted, and carried into the new picker below.
+      const goneRows =
+        !anchor && anchorId
+          ? existingRows.filter((r) => r.messageId === anchorId)
+          : [];
+      const effectiveMode: ReactionRoleMode =
+        (liveRows[0] ?? goneRows[0])
+          ? (liveRows[0] ?? goneRows[0]).mode
+          : REACTION_ROLE_MODES.includes(mode)
+            ? mode
+            : "unique";
 
       // A recreated picker finds the bot's own earlier roles by name; carry
       // their ownership over from the archived incarnation(s) of this group.
@@ -261,14 +264,17 @@ export class ReactionRoleGroupService {
         for (const r of archived) ownedRoleIds.add(r.roleId);
       }
 
-      const haveRoleIds = new Set(liveRows.map((r) => r.roleId));
-      const haveEmojis = new Set(liveRows.map((r) => r.emoji));
-
       // Resolve roles by name without creating anything yet.
       const allRoles = await this.api(
         () => guild.roles.fetch(),
         "fetch guild roles",
       );
+      // Options carried into a recreated picker: archived rows whose role
+      // still exists (re-validated below). Roles deleted in Discord drop out.
+      const restoredRows = goneRows.filter((r) => allRoles.has(r.roleId));
+      const keptRows = anchor ? liveRows : restoredRows;
+      const haveRoleIds = new Set(keptRows.map((r) => r.roleId));
+      const haveEmojis = new Set(keptRows.map((r) => r.emoji));
       const byName = new Map<string, Role>();
       for (const r of allRoles.values()) {
         if (r.id === guild.roles.everyone.id || r.managed) continue;
@@ -287,7 +293,8 @@ export class ReactionRoleGroupService {
         todo.push({ ...e, role });
       }
 
-      if (todo.length === 0) {
+      // A missing picker still needs recreating even if nothing new was added.
+      if (todo.length === 0 && anchor) {
         return {
           success: true,
           message: `Group **${name}** is already up to date (${skipped} option${skipped === 1 ? "" : "s"} already present). Nothing changed.`,
@@ -299,16 +306,19 @@ export class ReactionRoleGroupService {
           skippedEntries: skipped,
         };
       }
-      if (liveRows.length + todo.length > MAX_GROUP_ENTRIES) {
+      if (keptRows.length + todo.length > MAX_GROUP_ENTRIES) {
         return fail(
           `Adding ${todo.length} option(s) would exceed the ${MAX_GROUP_ENTRIES}-reaction limit for this group.`,
         );
       }
 
       // Validate reused roles are assignable before creating anything.
-      for (const t of todo) {
-        if (!t.role) continue;
-        const ok = await rrService.validateRoleAssignable(guild, t.role);
+      const toValidate = [
+        ...restoredRows.map((r) => allRoles.get(r.roleId)!),
+        ...todo.flatMap((t) => (t.role ? [t.role] : [])),
+      ];
+      for (const role of toValidate) {
+        const ok = await rrService.validateRoleAssignable(guild, role);
         if (!ok.ok) return fail(ok.message);
       }
 
@@ -342,7 +352,7 @@ export class ReactionRoleGroupService {
 
       // Picker message: edit the existing one, or post a fresh one.
       const rowsAfter = [
-        ...liveRows.map((r) => ({ roleName: r.roleName, emoji: r.emoji })),
+        ...keptRows.map((r) => ({ roleName: r.roleName, emoji: r.emoji })),
         ...todo.map((t) => ({ roleName: t.role!.name, emoji: t.emoji })),
       ];
       const embed = new EmbedBuilder()
@@ -378,17 +388,37 @@ export class ReactionRoleGroupService {
         );
         target = postedMessage;
       }
-      for (const t of todo) {
+      // A top-up only adds the new reactions; a fresh picker gets them all.
+      const reactEmojis = [
+        ...(anchor ? [] : restoredRows.map((r) => r.emoji)),
+        ...todo.map((t) => t.emoji),
+      ];
+      for (const emoji of reactEmojis) {
         await this.api(
-          () => target.react(t.emoji),
-          `react ${t.emoji} on group message`,
+          () => target.react(emoji),
+          `react ${emoji} on group message`,
         );
-        addedReactions.push(t.emoji);
+        addedReactions.push(emoji);
       }
 
       const groupId = liveRows[0]?.groupId ?? target.id;
-      await ReactionRoleConfig.insertMany(
-        todo.map((t) => ({
+      const newDocs = [
+        ...(anchor
+          ? []
+          : restoredRows.map((r) => ({
+              guildId,
+              messageId: target.id,
+              roleId: r.roleId,
+              emoji: r.emoji,
+              roleName: r.roleName,
+              style: "reaction" as const,
+              autoCreated: r.autoCreated,
+              mode: effectiveMode,
+              groupId,
+              groupKey,
+              isArchived: false,
+            }))),
+        ...todo.map((t) => ({
           guildId,
           messageId: target.id,
           roleId: t.role!.id,
@@ -404,7 +434,22 @@ export class ReactionRoleGroupService {
           groupKey,
           isArchived: false,
         })),
-      );
+      ];
+      // Persist: archive the dead picker's rows, then insert the new ones. A
+      // failure at any point is undone by the catch (it cannot tell how much
+      // of a failed write was committed).
+      if (goneRows.length > 0 && anchorId) {
+        archivedAnchorId = anchorId;
+        await ReactionRoleConfig.updateMany(
+          { guildId, groupKey, messageId: anchorId, isArchived: false },
+          { isArchived: true, archivedAt: new Date() },
+        );
+      }
+      insertAttempt = {
+        messageId: target.id,
+        roleIds: newDocs.map((d) => d.roleId),
+      };
+      await ReactionRoleConfig.insertMany(newDocs);
 
       logger.info(
         `Generated reaction role group ${sanitizeForLog(name)}: ${created.length} created, ${reused.length} reused, ${skipped} skipped`,
@@ -425,6 +470,30 @@ export class ReactionRoleGroupService {
         error,
       );
       // Undo only what this run created. Existing roles/messages stay.
+      // Rows first, so no mapping ever points at a resource deleted below.
+      const attempt = insertAttempt as {
+        messageId: string;
+        roleIds: string[];
+      } | null;
+      if (attempt) {
+        await ReactionRoleConfig.deleteMany({
+          guildId,
+          messageId: attempt.messageId,
+          roleId: { $in: attempt.roleIds },
+          isArchived: false,
+        }).catch((err) => logger.warn("Could not remove new mappings:", err));
+      }
+      if (archivedAnchorId) {
+        await ReactionRoleConfig.updateMany(
+          {
+            guildId,
+            groupKey,
+            messageId: archivedAnchorId,
+            isArchived: true,
+          },
+          { isArchived: false, $unset: { archivedAt: 1 } },
+        ).catch((err) => logger.warn("Could not un-archive group rows:", err));
+      }
       if (editedAnchor) {
         const a = editedAnchor as Message;
         await this.api(

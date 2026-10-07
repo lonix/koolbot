@@ -319,6 +319,48 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
     expect(roleDelete).toHaveBeenCalledTimes(1);
   });
 
+  it("also removes bot-created roles that only an archived incarnation owns", async () => {
+    const roleDelete = jest
+      .fn<() => Promise<unknown>>()
+      .mockResolvedValue(undefined);
+    const fetchRole = jest
+      .fn<(id: string) => Promise<unknown>>()
+      .mockResolvedValue({ delete: roleDelete });
+    const guild = {
+      channels: {
+        fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(null),
+      },
+      roles: { fetch: fetchRole },
+    };
+    const client = {
+      guilds: {
+        fetch: jest.fn<() => Promise<unknown>>().mockResolvedValue(guild),
+      },
+    };
+    const { service } = createService(client);
+    const live = {
+      roleId: "cur",
+      messageId: "grp1",
+      autoCreated: true,
+      groupKey: "region",
+    };
+    model.find.mockResolvedValueOnce([live]).mockResolvedValueOnce([
+      { ...live, roleId: "cur", isArchived: true },
+      { ...live, roleId: "old", isArchived: true },
+      { ...live, roleId: "foreign", autoCreated: false, isArchived: true },
+    ]);
+    model.deleteMany.mockResolvedValue({ deletedCount: 1 });
+    model.countDocuments.mockResolvedValue(0);
+
+    await service.deleteReactionRoleGroup("g1", "grp1");
+
+    expect(fetchRole.mock.calls.map((c) => c[0]).sort()).toEqual([
+      "cur",
+      "old",
+    ]);
+    expect(roleDelete).toHaveBeenCalledTimes(2);
+  });
+
   it("returns not-found when the group has no configs", async () => {
     const client = {
       guilds: { fetch: jest.fn<() => Promise<unknown>>() },
