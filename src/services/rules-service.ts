@@ -205,12 +205,23 @@ export class RulesService {
         ...payload,
         allowedMentions: { parse: [] },
       });
-      await config.set(
-        "rules.message_id",
-        sent.id,
-        "Managed by KoolBot: the ID of the posted rules message.",
-        "rules",
-      );
+      try {
+        await config.set(
+          "rules.message_id",
+          sent.id,
+          "Managed by KoolBot: the ID of the posted rules message.",
+          "rules",
+        );
+      } catch (error) {
+        // Without the stored ID the button is always "out of date" and a retry
+        // would post a duplicate, so take the message back down.
+        await sent.delete().catch((deleteError: unknown) => {
+          logger.warn(
+            `Couldn't remove the unlinked rules message ${sent.id}: ${sanitizeForLog(getErrorMessage(deleteError))}`,
+          );
+        });
+        throw error;
+      }
       return { ok: true, action: "posted", messageId: sent.id };
     } catch (error) {
       logger.error(
@@ -292,16 +303,35 @@ export class RulesService {
       }
       // An existing holder who never clicked still gets a record, so the
       // accepted-at data is complete; "adopted" keeps it honest.
-      await RulesAcceptance.updateOne(
-        { userId: member.id, guildId: guild.id },
-        {
-          $setOnInsert: {
-            acceptedAt: new Date(),
-            source: already ? "adopted" : "button",
+      try {
+        await RulesAcceptance.updateOne(
+          { userId: member.id, guildId: guild.id },
+          {
+            $setOnInsert: {
+              acceptedAt: new Date(),
+              source: already ? "adopted" : "button",
+            },
           },
-        },
-        { upsert: true },
-      );
+          { upsert: true },
+        );
+      } catch (error) {
+        logger.error(
+          `Couldn't record the rules acceptance: ${sanitizeForLog(getErrorMessage(error))}`,
+        );
+        // Only undo a role this attempt added, so the member isn't left with
+        // access and no accepted-at record. A pre-existing holder keeps theirs.
+        if (!already) {
+          await member.roles
+            .remove(role, "Rules acceptance could not be recorded")
+            .catch((removeError: unknown) => {
+              logger.error(
+                `Couldn't take back role ${role.id} from ${member.id}: ${sanitizeForLog(getErrorMessage(removeError))}`,
+              );
+            });
+        }
+        await reply("Something went wrong. Please try again in a moment.");
+        return;
+      }
       await reply(
         already
           ? "You have already accepted the rules. Thank you!"

@@ -100,6 +100,7 @@ describe("roleProblem", () => {
 describe("handleAcceptButton", () => {
   const order: string[] = [];
   const add = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+  const remove = jest.fn<(...args: unknown[]) => Promise<unknown>>();
   let hasRole = false;
   let rolePerms: bigint = 0n;
   let config: Record<string, boolean | string>;
@@ -141,7 +142,7 @@ describe("handleAcceptButton", () => {
           },
           fetch: jest.fn(async () => ({
             id: "u1",
-            roles: { cache: { has: () => hasRole }, add },
+            roles: { cache: { has: () => hasRole }, add, remove },
           })),
         },
       },
@@ -161,6 +162,7 @@ describe("handleAcceptButton", () => {
     mockGetBoolean.mockImplementation(async (k) => Boolean(config[k]));
     mockGetString.mockImplementation(async (k) => String(config[k] ?? ""));
     add.mockResolvedValue(undefined);
+    remove.mockResolvedValue(undefined);
     mockUpdateOne.mockResolvedValue({});
   });
 
@@ -225,6 +227,41 @@ describe("handleAcceptButton", () => {
     expect(order[0]).toBe("defer");
     expect(add).not.toHaveBeenCalled();
     expect(mockUpdateOne).not.toHaveBeenCalled();
+  });
+
+  it("takes back a role it just added when the record can't be saved", async () => {
+    mockUpdateOne.mockRejectedValue(new Error("mongo down"));
+    const i = interaction();
+    await service().handleAcceptButton(i);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(remove).toHaveBeenCalledTimes(1);
+    expect(i.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("try again"),
+    });
+  });
+
+  it("logs a failed compensation and still replies with the retry message", async () => {
+    mockUpdateOne.mockRejectedValue(new Error("mongo down"));
+    remove.mockRejectedValue(new Error("Missing Permissions"));
+    const i = interaction();
+    await service().handleAcceptButton(i);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn't take back role"),
+    );
+    expect(i.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("try again"),
+    });
+  });
+
+  it("never removes a role the member already held", async () => {
+    hasRole = true;
+    mockUpdateOne.mockRejectedValue(new Error("mongo down"));
+    const i = interaction();
+    await service().handleAcceptButton(i);
+    expect(remove).not.toHaveBeenCalled();
+    expect(i.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("try again"),
+    });
   });
 
   it("never throws and tells the member when Discord rejects the grant", async () => {
@@ -337,5 +374,135 @@ describe("recordExistingHolders", () => {
     expect(await service().recordExistingHolders(makeGuild(ok))).toEqual({
       recorded: 0,
     });
+  });
+});
+
+describe("buildMessage and postOrUpdateMessage", () => {
+  const BOT = "bot1";
+  let config: Record<string, string>;
+  const send = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+  const edit = jest.fn<(...args: unknown[]) => Promise<unknown>>();
+  const del = jest.fn<() => Promise<unknown>>();
+  const fetchMessage = jest.fn<(id: string) => Promise<unknown>>();
+  let textBased = true;
+
+  const guild = (): never =>
+    ({
+      id: "g1",
+      channels: {
+        fetch: jest.fn(async (id: string) =>
+          id === "c1"
+            ? {
+                isTextBased: () => textBased,
+                send,
+                messages: { fetch: fetchMessage },
+              }
+            : null,
+        ),
+      },
+    }) as never;
+
+  const service = (): InstanceType<typeof RulesService> => {
+    RulesService.reset();
+    return RulesService.getInstance({ user: { id: BOT } } as never);
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    textBased = true;
+    config = { "rules.channel_id": "c1", "rules.message": "Be kind." };
+    mockGetString.mockImplementation(async (k) => config[k] ?? "");
+    mockSet.mockResolvedValue(undefined);
+    send.mockResolvedValue({ id: "new1", delete: del });
+    del.mockResolvedValue(undefined);
+    edit.mockResolvedValue(undefined);
+    fetchMessage.mockResolvedValue({ id: "m1", author: { id: BOT }, edit });
+  });
+
+  it("builds the message from config with defaults and a limited label", async () => {
+    const built = await service().buildMessage();
+    expect(built.content).toBe("Be kind.");
+    expect(built.components).toHaveLength(1);
+    config["rules.message"] = "";
+    config["rules.button_label"] = "x".repeat(200);
+    const fallback = await service().buildMessage();
+    expect(fallback.content).toContain("accept the server rules");
+    const row = fallback.components[0].toJSON() as unknown as {
+      components: { label: string; custom_id: string }[];
+    };
+    expect(row.components[0].custom_id).toBe(RULES_ACCEPT_CUSTOM_ID);
+    expect(row.components[0].label.length).toBeLessThanOrEqual(80);
+  });
+
+  it("posts a new message and stores its id", async () => {
+    const r = await service().postOrUpdateMessage(guild());
+    expect(r).toEqual({ ok: true, action: "posted", messageId: "new1" });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(mockSet).toHaveBeenCalledWith(
+      "rules.message_id",
+      "new1",
+      expect.any(String),
+      "rules",
+    );
+  });
+
+  it("edits the bot's existing message instead of posting", async () => {
+    config["rules.message_id"] = "m1";
+    const r = await service().postOrUpdateMessage(guild());
+    expect(r).toEqual({ ok: true, action: "updated", messageId: "m1" });
+    expect(edit).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    expect(mockSet).not.toHaveBeenCalled();
+  });
+
+  it("posts a fresh message when the stored one isn't the bot's or is gone", async () => {
+    config["rules.message_id"] = "m1";
+    fetchMessage.mockResolvedValue({
+      id: "m1",
+      author: { id: "someone" },
+      edit,
+    });
+    expect((await service().postOrUpdateMessage(guild())).action).toBe(
+      "posted",
+    );
+    expect(edit).not.toHaveBeenCalled();
+    fetchMessage.mockRejectedValue(new Error("Unknown Message"));
+    expect((await service().postOrUpdateMessage(guild())).action).toBe(
+      "posted",
+    );
+  });
+
+  it("refuses without a usable channel", async () => {
+    config["rules.channel_id"] = "";
+    expect((await service().postOrUpdateMessage(guild())).ok).toBe(false);
+    config["rules.channel_id"] = "c1";
+    textBased = false;
+    expect((await service().postOrUpdateMessage(guild())).ok).toBe(false);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("reports a failed send without storing anything", async () => {
+    send.mockRejectedValue(new Error("Missing Access"));
+    const r = await service().postOrUpdateMessage(guild());
+    expect(r.ok).toBe(false);
+    expect(mockSet).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("deletes the just-posted message when the id can't be stored", async () => {
+    mockSet.mockRejectedValue(new Error("mongo down"));
+    const r = await service().postOrUpdateMessage(guild());
+    expect(r.ok).toBe(false);
+    expect(del).toHaveBeenCalledTimes(1);
+  });
+
+  it("still reports failure when that cleanup delete also fails", async () => {
+    mockSet.mockRejectedValue(new Error("mongo down"));
+    del.mockRejectedValue(new Error("Missing Permissions"));
+    const r = await service().postOrUpdateMessage(guild());
+    expect(r.ok).toBe(false);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Couldn't remove the unlinked rules message"),
+    );
   });
 });

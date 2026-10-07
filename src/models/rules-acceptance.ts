@@ -8,8 +8,9 @@ export type RulesAcceptanceSource = (typeof RULES_ACCEPTANCE_SOURCES)[number];
  * When a member accepted the server rules (#1024), per `(userId, guildId)`.
  *
  * `source: "button"` is a member clicking Accept. `"adopted"` marks members who
- * already held the acceptance role when it was adopted (or were granted it by
- * an adoption plan for existing members), so they never have to click.
+ * already held the acceptance role: it is written by the explicit "record
+ * current holders" action, or when such a holder clicks Accept. Adoption-plan
+ * grants only add the role; they do not create records.
  */
 export interface IRulesAcceptance extends Document {
   userId: string;

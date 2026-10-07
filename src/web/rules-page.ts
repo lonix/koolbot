@@ -194,7 +194,7 @@ function renderRollout(p: RulesPageProps, csrf: string): string {
   </form>`;
   return `<div class="card">
   <h2>Roll out to this server</h2>
-  <p class="muted">Optional and off until you choose it. Nothing is changed in Discord until you apply a previewed plan; every apply saves a snapshot that can be rolled back. Members of the server who already hold a picked role count as accepted.</p>
+  <p class="muted">Optional and off until you choose it. Nothing is changed in Discord until you apply a previewed plan; every apply saves a snapshot first. Rolling back from the Web UI is not available yet. Members of the server who already hold a picked role count as accepted.</p>
   ${form}
   ${p.plan ? renderPlan(p, csrf) : ""}
 </div>`;
@@ -231,7 +231,7 @@ function renderPlan(p: RulesPageProps, csrf: string): string {
       )
       .join("");
   const apply = rulesPlanIsApplicable(plan)
-    ? `<form method="POST" action="/admin/rules/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first so it can be rolled back.');">${csrf}${hidden}<button type="submit" class="btn btn-primary">Apply plan</button></form>`
+    ? `<form method="POST" action="/admin/rules/apply" onsubmit="return confirm('Apply this plan to Discord? A snapshot is saved first.');">${csrf}${hidden}<button type="submit" class="btn btn-primary">Apply plan</button></form>`
     : plan.plan.operations.length === 0 && plan.extraErrors.length === 0
       ? `<p class="muted">Nothing to change: the server already matches.</p>`
       : "";

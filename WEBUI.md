@@ -1195,8 +1195,8 @@ settings (`rules.channel_id`, `rules.role_id`, `rules.message`, `rules.button_la
   resumable by the engine), and **gate channels** (deny View Channel for @everyone, allow it for
   the role). The preview shows the shared adoption diff plus how many members hold the role and
   how many would lose sight of the gated channels; the owner and administrators always see
-  everything. Nothing is written until **Apply plan**, every apply saves a snapshot that can be
-  rolled back, and re-running on an adopted server gives an empty plan. The rules channel itself
+  everything. Nothing is written until **Apply plan**, every apply saves a snapshot (rolling back
+  from the Web UI isn't available yet), and re-running on an adopted server gives an empty plan. The rules channel itself
   can't be gated, and the plan refuses changes to managed roles or roles at or above the bot's.
 - **Native Discord gate.** On Community servers Discord has its own rules channel, Membership
   Screening and Onboarding. Use the native gate there; the KoolBot role is for non-Community
