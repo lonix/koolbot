@@ -64,6 +64,7 @@ function scan(over: Partial<ScannedState> = {}): ScannedState {
       channel({ id: "chat", name: "chat", parentId: "cat" }),
     ],
     config: {},
+    memberRoles: {},
     boundChannelIds: [],
     koolbotCreatedIds: [],
     ...over,
@@ -1155,5 +1156,36 @@ describe("planAdoption: round fourteen", () => {
     });
     expect(plan.errors).toEqual([]);
     expect(plan.operations).toHaveLength(2);
+  });
+});
+
+describe("planAdoption: round fifteen", () => {
+  it("blocks member grants when the scan has no member-role inventory", () => {
+    const state = scan();
+    delete (state as { memberRoles?: unknown }).memberRoles;
+    const plan = planAdoption(state, {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a"] }],
+    });
+    expect(codes(plan)).toEqual(["missing-member-inventory"]);
+  });
+
+  it("blocks binding a feature to a channel the bot already cannot use", () => {
+    const state = scan({
+      roles: scan()
+        .roles.map((r) =>
+          r.id === "botrole"
+            ? { ...r, permissions: F.ManageRoles.toString() }
+            : r,
+        )
+        .map((r) => (r.id === "g1" ? { ...r, permissions: "0" } : r)),
+    });
+    const plan = planAdoption(state, {
+      overwrites: [
+        { channelId: "cat", target: { id: "member" }, allow: "0", deny: "0" },
+      ],
+      featureChannels: [{ channelId: "chat", feature: "quotes" }],
+      config: { "adoption.snapshot.retention_days": 10 },
+    });
+    expect(codes(plan)).toContain("feature-channel-unusable");
   });
 });

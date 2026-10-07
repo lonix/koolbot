@@ -868,8 +868,18 @@ export function planAdoption(
       touchedRoles.add(resolved.existing.id);
     }
     const holders = scanned.memberRoles;
+    if (!holders) {
+      // Without the inventory every member would look like they lack the role,
+      // so planning an already-applied grant would never come out empty.
+      err(
+        "missing-member-inventory",
+        "Member grants need the scan's member-role inventory to tell who already has the role.",
+        resolved.id,
+      );
+      continue;
+    }
     const missing = grant.memberIds.filter(
-      (id) => !holders || !(holders[id] ?? []).includes(resolved.id),
+      (id) => !(holders[id] ?? []).includes(resolved.id),
     );
     if (missing.length === 0) continue;
     ops.push({
@@ -1287,6 +1297,14 @@ export function planAdoption(
         err(
           "bot-lockout",
           `This change would lock the bot out of "${channel.name}", which the ${feature.feature} feature needs.`,
+          channel.id,
+        );
+      else if (!b.has && named.has(channel.id))
+        // Explicitly requested for a feature but unusable by the bot: that
+        // would bind a feature to a channel it cannot work in.
+        err(
+          "feature-channel-unusable",
+          `The bot cannot use "${channel.name}", which the ${feature.feature} feature needs.`,
           channel.id,
         );
       else if (!b.had && !b.has && touchedChannels.has(channel.id))

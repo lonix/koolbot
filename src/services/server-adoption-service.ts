@@ -757,7 +757,11 @@ export class ServerAdoptionService {
       if (!record || record.status === "applied") continue;
       if (op.type === "role.create" && record.startedAt) {
         const roleId = await callApi(
-          () => gateway.findRoleByName(op.name, new Date(record.startedAt!)),
+          () =>
+            gateway.findRoleByName(op.name, new Date(record.startedAt!), {
+              color: op.color,
+              permissions: op.permissions,
+            }),
           `look up role ${op.name}`,
         );
         if (roleId) {

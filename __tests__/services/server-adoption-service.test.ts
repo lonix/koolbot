@@ -98,6 +98,7 @@ function scanned(over: Partial<Scanned> = {}): Scanned {
       },
     ],
     config: { "adoption.snapshot.retention_days": 90 },
+    memberRoles: {},
     boundChannelIds: [],
     koolbotCreatedIds: [],
     ...over,
@@ -1615,5 +1616,31 @@ describe("review hardening, round fourteen", () => {
       resumeSnapshotId: first.snapshotId,
     });
     expect(seen.filter(Boolean)).toEqual([{ color: 7, permissions: VIEW }]);
+  });
+});
+
+describe("review hardening, round fifteen", () => {
+  it("a rollback of an interrupted create also requires the colour and permissions to match", async () => {
+    const h = harness();
+    const seen: Array<{ color: number; permissions: string } | undefined> = [];
+    h.deps.gateway.findRoleByName = async (_n, _a, expect) => {
+      seen.push(expect);
+      return null;
+    };
+    const p = planAdoption(scanned(), {
+      roles: [{ name: "New", color: 5, permissions: VIEW }],
+    });
+    const applied = await h.service.apply(p, opts);
+    const rec = h.records.get(applied.snapshotId)!;
+    rec.status = "partial";
+    rec.operations[0].status = "pending";
+    rec.operations[0].startedAt = new Date().toISOString() as never;
+    await new ServerAdoptionService(h.deps).rollback(applied.snapshotId, {
+      actor,
+    });
+    expect(seen.filter(Boolean)).toContainEqual({
+      color: 5,
+      permissions: VIEW,
+    });
   });
 });
