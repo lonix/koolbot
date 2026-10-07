@@ -2,11 +2,13 @@ import { describe, it, expect, beforeEach, jest } from "@jest/globals";
 import { PermissionFlagsBits } from "discord.js";
 
 const mockGetString = jest.fn<(key: string, def?: string) => Promise<string>>();
+const mockGetBoolean =
+  jest.fn<(key: string, def?: boolean) => Promise<boolean>>();
 jest.unstable_mockModule("../../src/services/config-service.js", () => ({
   ConfigService: {
     getInstance: jest.fn(() => ({
       getString: mockGetString,
-      getBoolean: jest.fn(),
+      getBoolean: mockGetBoolean,
       set: jest.fn(),
     })),
   },
@@ -19,15 +21,11 @@ jest.unstable_mockModule("../../src/utils/logger.js", () => ({
     debug: jest.fn(),
   },
 }));
-jest.unstable_mockModule("../../src/models/adoption-snapshot.js", () => ({
-  AdoptionSnapshot: { find: jest.fn() },
-}));
 
 const {
   gateBits,
   planRulesGate,
   countLockedOut,
-  linkCreatedRulesRole,
   RULES_ROLE_REF,
   rulesPlanIsApplicable,
   DEFAULT_RULES_ROLE_NAME,
@@ -144,6 +142,7 @@ function fakeGuild(
         new Map([
           ["11111", channel("11111")],
           ["22222", channel("22222")],
+          ["33333", channel("33333")],
         ]),
     },
     members: {
@@ -154,11 +153,26 @@ function fakeGuild(
   };
 }
 
+const roleCfg = (k: string, roleId: string): string =>
+  k === "rules.role_id"
+    ? roleId
+    : k === "rules.channel_id"
+      ? "11111"
+      : k === "rules.message_id"
+        ? "msg1"
+        : "";
+
 describe("planRulesGate", () => {
   beforeEach(() => {
     mockGetString.mockReset();
+    mockGetBoolean.mockReset();
+    mockGetBoolean.mockResolvedValue(true);
     mockGetString.mockImplementation(async (k) =>
-      k === "rules.channel_id" ? "11111" : "",
+      k === "rules.channel_id"
+        ? "11111"
+        : k === "rules.message_id"
+          ? "msg1"
+          : "",
     );
   });
 
@@ -191,9 +205,7 @@ describe("planRulesGate", () => {
   });
 
   it("previews who would be locked out when existing members aren't granted", async () => {
-    mockGetString.mockImplementation(async (k) =>
-      k === "rules.role_id" ? "100" : "",
-    );
+    mockGetString.mockImplementation(async (k) => roleCfg(k, "100"));
     const guild = fakeGuild({ admin: [], a: [], b: ["100"] });
     const p = await planRulesGate(guild as never, "admin", {
       createRole: false,
@@ -239,9 +251,7 @@ describe("planRulesGate", () => {
       [role({ managed: true }), "role-managed"],
       [role({ position: 10 }), "role-too-high"],
     ] as const) {
-      mockGetString.mockImplementation(async (k) =>
-        k === "rules.role_id" ? "200" : "",
-      );
+      mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
       const guild = fakeGuild({ admin: [], a: [] }, [r]);
       const p = await planRulesGate(guild as never, "admin", gateOnly);
       expect(p.extraErrors.map((e) => e.code)).toContain(code);
@@ -250,9 +260,7 @@ describe("planRulesGate", () => {
   });
 
   it("orders grants before the gating overwrites", async () => {
-    mockGetString.mockImplementation(async (k) =>
-      k === "rules.role_id" ? "200" : "",
-    );
+    mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
     const guild = fakeGuild({ admin: [], a: [], b: [] }, [role({})]);
     const p = await planRulesGate(guild as never, "admin", {
       ...gateOnly,
@@ -263,6 +271,71 @@ describe("planRulesGate", () => {
       "overwrite.set",
       "overwrite.set",
     ]);
+  });
+
+  it("links the created role through a config step before any gate", async () => {
+    const guild = fakeGuild({ admin: [], a: [] });
+    const p = await planRulesGate(guild as never, "admin", {
+      createRole: true,
+      grantExisting: false,
+      gateChannelIds: ["22222"],
+    });
+    const ops = p.plan.operations;
+    const cfg = ops.find((o) => o.type === "config.set");
+    expect(cfg).toMatchObject({
+      key: "rules.role_id",
+      value: RULES_ROLE_REF,
+      valueIsRoleRef: true,
+    });
+    expect(ops.map((o) => o.type)).toEqual([
+      "role.create",
+      "config.set",
+      "overwrite.set",
+      "overwrite.set",
+    ]);
+  });
+
+  it("puts the role allow before the @everyone deny on every channel", async () => {
+    mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
+    const guild = fakeGuild({ admin: [], a: [] }, [role({})]);
+    const p = await planRulesGate(guild as never, "admin", {
+      ...gateOnly,
+      gateChannelIds: ["22222", "33333"],
+    });
+    const targets = p.plan.operations
+      .filter((o) => o.type === "overwrite.set")
+      .map((o) => (o as { overwriteTargetId: string }).overwriteTargetId);
+    expect(targets).toEqual(["200", "200", "g1", "g1"]);
+    expect(
+      p.plan.operations.every(
+        (o) => o.type !== "overwrite.set" || o.afterGrants === true,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["rules are disabled", () => mockGetBoolean.mockResolvedValue(false)],
+    [
+      "no rules message is posted",
+      () =>
+        mockGetString.mockImplementation(async (k) =>
+          k === "rules.message_id" ? "" : roleCfg(k, "200"),
+        ),
+    ],
+    [
+      "the rules channel doesn't exist",
+      () =>
+        mockGetString.mockImplementation(async (k) =>
+          k === "rules.channel_id" ? "99999" : roleCfg(k, "200"),
+        ),
+    ],
+  ])("blocks gating when %s", async (_n, arrange) => {
+    mockGetString.mockImplementation(async (k) => roleCfg(k, "200"));
+    arrange();
+    const guild = fakeGuild({ admin: [], a: [] }, [role({})]);
+    const p = await planRulesGate(guild as never, "admin", gateOnly);
+    expect(p.extraErrors.map((e) => e.code)).toContain("acceptance-inactive");
+    expect(rulesPlanIsApplicable(p)).toBe(false);
   });
 
   it("refuses to gate the rules channel itself", async () => {
@@ -355,41 +428,6 @@ describe("countLockedOut", () => {
     expect(
       countLockedOut({ ...base, memberRoles, channels, grantExisting: true }),
     ).toBe(0);
-  });
-});
-
-describe("linkCreatedRulesRole", () => {
-  it("stores only the exact role the apply created, when none is set", async () => {
-    const set = jest.fn();
-    mockGetString.mockResolvedValue("");
-    const { ConfigService } =
-      await import("../../src/services/config-service.js");
-    (ConfigService.getInstance as jest.Mock).mockReturnValue({
-      getString: mockGetString,
-      set,
-    });
-    const { AdoptionSnapshot } =
-      await import("../../src/models/adoption-snapshot.js");
-    const lean = jest.fn();
-    (AdoptionSnapshot as unknown as { findById: jest.Mock }).findById = jest
-      .fn()
-      .mockReturnValue({ lean });
-    lean.mockResolvedValueOnce({
-      createdRoles: [{ ref: "new:other", roleId: "9", name: "Rules accepted" }],
-    });
-    expect(await linkCreatedRulesRole("snap")).toBe(false);
-    lean.mockResolvedValueOnce({
-      createdRoles: [
-        { ref: RULES_ROLE_REF, roleId: "42", name: "Rules accepted" },
-      ],
-    });
-    expect(await linkCreatedRulesRole("snap")).toBe(true);
-    expect(set).toHaveBeenCalledWith(
-      "rules.role_id",
-      "42",
-      expect.any(String),
-      "rules",
-    );
   });
 });
 

@@ -182,6 +182,22 @@ export class RulesService {
         await reply("Rules acceptance is not active on this server.");
         return;
       }
+      // Only the message the bot currently manages counts: an older copy left
+      // behind after the rules moved must not still grant the role.
+      const [activeMessageId, activeChannelId] = await Promise.all([
+        config.getString("rules.message_id", ""),
+        config.getString("rules.channel_id", ""),
+      ]);
+      if (
+        !activeMessageId.trim() ||
+        interaction.message.id !== activeMessageId.trim() ||
+        interaction.channelId !== activeChannelId.trim()
+      ) {
+        await reply(
+          "This rules message is out of date. Please use the current rules message.",
+        );
+        return;
+      }
       const guild = interaction.guild;
       if (!guild || (env.guildId && guild.id !== env.guildId)) {
         await reply("This button only works in the server.");

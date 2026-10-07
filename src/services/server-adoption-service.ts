@@ -1069,7 +1069,13 @@ export class ServerAdoptionService {
         return op.roleId;
       }
       case "config.set":
-        await config.set(op.key, op.value);
+        // A `new:` ref (the role this plan just created) resolves to its id.
+        await config.set(
+          op.key,
+          op.valueIsRoleRef && typeof op.value === "string"
+            ? this.resolveRef(snapshot, op.value)
+            : op.value,
+        );
         return op.key;
       case "member.role.add":
         return this.applyMembers(op, snapshot, options, persist);

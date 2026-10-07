@@ -163,8 +163,9 @@ export interface PlanOptions {
    */
   approverId?: string;
   /**
-   * Run member role grants before any channel overwrite, and skip those
-   * overwrites if an earlier step failed. For gates that hide channels from
+   * Run member role grants and config links before any channel overwrite,
+   * put @everyone denies after every allow, and skip those overwrites if an
+   * earlier step failed. For gates that hide channels from
    * members who don't hold the granted role: nobody may be locked out by a
    * half-finished rollout (#1024).
    */
@@ -218,6 +219,8 @@ export interface ConfigSetOp extends OpBase {
   type: "config.set";
   key: string;
   value: ConfigValue;
+  /** `value` is a `new:` role ref, resolved to the created role's id at apply time. */
+  valueIsRoleRef?: boolean;
   previous: ConfigValue | null;
 }
 export interface OverwriteRemoveOp extends OpBase {
@@ -927,6 +930,10 @@ export function planAdoption(
       class: "additive",
       key,
       value: wanted,
+      ...(typeof wanted === "string" &&
+      ops.some((o) => o.type === "role.create" && o.ref === wanted)
+        ? { valueIsRoleRef: true }
+        : {}),
       previous: current ?? null,
       summary: `Set ${key}`,
       targetId: key,
@@ -1112,16 +1119,25 @@ export function planAdoption(
   // ---- ordering ------------------------------------------------------
   const phaseOf = (op: PlanOperation): number => {
     if (op.type === "overwrite.set") {
+      // A deny for @everyone comes after every allow, so a failed allow never
+      // leaves a channel hidden from the role that should still see it.
+      if (
+        options.grantsBeforeOverwrites &&
+        op.overwriteTargetId === scanned.guildId
+      ) {
+        return 3.5;
+      }
       return channelsById.get(op.channelId)?.kind === "category" ? 2 : 3;
     }
-    if (op.type === "member.role.add" && options.grantsBeforeOverwrites) {
-      return 1.5;
+    if (options.grantsBeforeOverwrites) {
+      if (op.type === "member.role.add") return 1.5;
+      // A config link to a role this plan creates (e.g. the acceptance role)
+      // lands before any gate, so a failed link keeps the gate unapplied.
+      if (op.type === "config.set") return 1.6;
     }
     return PHASE_ORDER[op.type];
   };
-  const gateAfterGrants =
-    !!options.grantsBeforeOverwrites &&
-    ops.some((op) => op.type === "member.role.add");
+  const gateAfterGrants = !!options.grantsBeforeOverwrites;
   const ordered = ops
     .map((op, index) => ({ op, index }))
     .sort((a, b) => phaseOf(a.op) - phaseOf(b.op) || a.index - b.index)

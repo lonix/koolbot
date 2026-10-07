@@ -68,6 +68,8 @@ describe("handleAcceptButton", () => {
     ({
       customId: RULES_ACCEPT_CUSTOM_ID,
       user: { id: "u1" },
+      channelId: "c1",
+      message: { id: "m1" },
       deferReply: jest.fn(async () => {
         order.push("defer");
       }),
@@ -99,7 +101,12 @@ describe("handleAcceptButton", () => {
     jest.clearAllMocks();
     order.length = 0;
     hasRole = false;
-    config = { "rules.enabled": true, "rules.role_id": "r1" };
+    config = {
+      "rules.enabled": true,
+      "rules.role_id": "r1",
+      "rules.channel_id": "c1",
+      "rules.message_id": "m1",
+    };
     mockGetBoolean.mockImplementation(async (k) => Boolean(config[k]));
     mockGetString.mockImplementation(async (k) => String(config[k] ?? ""));
     add.mockResolvedValue(undefined);
@@ -122,6 +129,22 @@ describe("handleAcceptButton", () => {
     ];
     expect(filter).toEqual({ userId: "u1", guildId: "g1" });
     expect(update.$setOnInsert.source).toBe("button");
+  });
+
+  it.each([
+    ["message", { "rules.message_id": "m2" }],
+    ["channel", { "rules.channel_id": "c2" }],
+    ["cleared message id", { "rules.message_id": "" }],
+  ])("rejects a click from an outdated rules %s", async (_n, change) => {
+    Object.assign(config, change);
+    const i = interaction();
+    await service().handleAcceptButton(i);
+    expect(order[0]).toBe("defer");
+    expect(add).not.toHaveBeenCalled();
+    expect(mockUpdateOne).not.toHaveBeenCalled();
+    expect(i.editReply).toHaveBeenCalledWith({
+      content: expect.stringContaining("out of date"),
+    });
   });
 
   it("records an existing holder as adopted without re-granting", async () => {

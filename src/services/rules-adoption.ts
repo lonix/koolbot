@@ -7,7 +7,6 @@ import {
 import logger from "../utils/logger.js";
 import { ConfigService } from "./config-service.js";
 import { roleProblem, ROLE_PROBLEM_TEXT } from "./rules-service.js";
-import { AdoptionSnapshot } from "../models/adoption-snapshot.js";
 import {
   effectivePermissions,
   planAdoption,
@@ -184,6 +183,9 @@ export async function planRulesGate(
   const roleId = (await config.getString("rules.role_id", "")).trim() || null;
   const rulesChannelId =
     (await config.getString("rules.channel_id", "")).trim() || null;
+  const rulesEnabled = await config.getBoolean("rules.enabled", false);
+  const rulesMessageId =
+    (await config.getString("rules.message_id", "")).trim() || null;
 
   const [roles, channelMap, me, admin] = await Promise.all([
     guild.roles.fetch(),
@@ -316,6 +318,19 @@ export async function planRulesGate(
         "The member list couldn't be read (the Server Members intent is off), so existing members can't be granted the role.",
     });
   }
+  if (options.gateChannelIds.length > 0) {
+    // A gate with no way through hides channels from newcomers for good, so
+    // the acceptance flow must be live before anything is hidden.
+    const rulesChannelOk =
+      !!rulesChannelId && scanned.channels.some((c) => c.id === rulesChannelId);
+    if (!rulesEnabled || !rulesChannelOk || !rulesMessageId) {
+      extraErrors.push({
+        code: "acceptance-inactive",
+        message:
+          "Gating needs a working acceptance flow first: turn on Rules acceptance, choose an existing rules channel and post the rules message. Nothing is hidden until then.",
+      });
+    }
+  }
   if (rulesChannelId && options.gateChannelIds.includes(rulesChannelId)) {
     extraErrors.push({
       code: "gate-rules-channel",
@@ -337,8 +352,15 @@ export async function planRulesGate(
       { role: roleRef, memberIds: Object.keys(memberRoles) },
     ];
   }
+  if (creating) {
+    // Part of the plan (and so of the snapshot): a failed link is a failed
+    // step that keeps the gate unapplied, and a rollback restores the previous
+    // `rules.role_id` before the created role is deleted.
+    desired.config = { "rules.role_id": RULES_ROLE_REF };
+  }
+  const allows: NonNullable<DesiredState["overwrites"]> = [];
+  const denies: NonNullable<DesiredState["overwrites"]> = [];
   if (options.gateChannelIds.length > 0 && (roleId || creating)) {
-    desired.overwrites = [];
     for (const channelId of options.gateChannelIds) {
       const channel = scanned.channels.find((c) => c.id === channelId);
       if (!channel) {
@@ -357,11 +379,11 @@ export async function planRulesGate(
         roleId ? channel.overwrites.find((o) => o.id === roleId) : undefined,
         "role",
       );
-      desired.overwrites.push(
-        { channelId, target: { id: guild.id }, ...everyone },
-        { channelId, target: roleRef, ...holder },
-      );
+      allows.push({ channelId, target: roleRef, ...holder });
+      denies.push({ channelId, target: { id: guild.id }, ...everyone });
     }
+    // Every role allow precedes every @everyone deny.
+    desired.overwrites = [...allows, ...denies];
   }
 
   const plan = planAdoption(scanned, desired, {
@@ -413,32 +435,3 @@ export function rulesPlanIsApplicable(p: RulesPlan): boolean {
 
 /** The ref the planner gives the role it creates (`new:<lowercase name>`). */
 export const RULES_ROLE_REF = `new:${DEFAULT_RULES_ROLE_NAME.toLowerCase()}`;
-
-/**
- * After an apply finished, store the acceptance role that exact apply created
- * as `rules.role_id` (only while it is still empty). Called from the
- * CSRF-protected apply route's completion hook, never from page rendering.
- */
-export async function linkCreatedRulesRole(
-  snapshotId: string,
-): Promise<boolean> {
-  const config = ConfigService.getInstance();
-  if ((await config.getString("rules.role_id", "")).trim()) return false;
-  try {
-    const snap = await AdoptionSnapshot.findById(snapshotId).lean();
-    const created = (
-      (snap?.createdRoles ?? []) as Array<{ ref: string; roleId: string }>
-    ).find((r) => r.ref === RULES_ROLE_REF);
-    if (!created) return false;
-    await config.set(
-      "rules.role_id",
-      created.roleId,
-      "Role granted when a member presses Accept.",
-      "rules",
-    );
-    return true;
-  } catch (error) {
-    logger.warn("rules: linking the created role failed", error);
-    return false;
-  }
-}

@@ -12,9 +12,7 @@ import { Client, type Guild } from "discord.js";
 import logger from "../../../utils/logger.js";
 import { RulesService } from "../../../services/rules-service.js";
 import {
-  linkCreatedRulesRole,
   planRulesGate,
-  RULES_ROLE_REF,
   rulesPlanIsApplicable,
 } from "../../../services/rules-adoption.js";
 import { ServerAdoptionService } from "../../../services/server-adoption-service.js";
@@ -155,24 +153,8 @@ export function createRulesRouter(client: Client): Router {
       }
       const engine = await ServerAdoptionService.getInstance(client, guild);
       try {
-        const createsRole = built.plan.operations.some(
-          (o) => o.type === "role.create" && o.ref === RULES_ROLE_REF,
-        );
         const job = engine.startApply(built.plan, {
           actor: session,
-          // Store the role this exact apply created (no config writes on GET).
-          onFinished: async (result) => {
-            if (
-              createsRole &&
-              (await linkCreatedRulesRole(result.snapshotId))
-            ) {
-              await recordAudit(session, {
-                action: "rules.link-role",
-                targetId: result.snapshotId,
-                result: "success",
-              });
-            }
-          },
         });
         await recordAudit(session, {
           action: "rules.apply",
