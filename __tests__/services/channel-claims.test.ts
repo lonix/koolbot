@@ -1452,3 +1452,76 @@ describe("effective @everyone visibility and Discord's overwrite limit", () => {
     ).toEqual([]);
   });
 });
+
+describe("voice adoption risk (first managed-only migration)", () => {
+  const voiceCat = (over: Partial<ChannelClaim> = {}): ChannelClaim => ({
+    channelId: C_VCAT,
+    action: "leave",
+    bindKey: "voicechannels.category_id",
+    ...over,
+  });
+  /** A category whose only extra voice channel looks like KoolBot's naming. */
+  const lookalike = (name: string, config = {}) => {
+    const s = fixture({ config });
+    s.channels.find((c) => c.id === C_TEMP)!.name = name;
+    return s;
+  };
+
+  it("blocks adopting a foreign channel that follows the voice prefix, before the migration", () => {
+    const s = lookalike("🔊 |  Red team");
+    const claim = voiceCat({ voiceManagedOnly: true, usePrefix: true });
+    const r = plan([claim], s);
+    expect(r.errors).toContain("voice-adoption-risk");
+    expect(
+      buildClaimsDesiredState([claim], ctxFor(s)).issues.find(
+        (i) => i.code === "voice-adoption-risk",
+      )!.message,
+    ).toContain("Red team");
+  });
+
+  it("checks the stored prefix when managed-only is already on", () => {
+    const s = lookalike("🎮 Someone's room", {
+      "voicechannels.cleanup.managed_only": true,
+    });
+    expect(plan([voiceCat()], s).errors).toContain("voice-adoption-risk");
+  });
+
+  it("checks a suffix pattern too", () => {
+    const s = lookalike("Red team's Room", {
+      "voicechannels.cleanup.managed_only": true,
+      "voicechannels.channel.prefix": "",
+      "voicechannels.channel.suffix": "'s Room",
+    });
+    expect(plan([voiceCat()], s).errors).toContain("voice-adoption-risk");
+  });
+
+  it("allows the same state once the migration marker exists", () => {
+    const s = lookalike("🔊 |  Red team");
+    const claim = voiceCat({ voiceManagedOnly: true, usePrefix: true });
+    expect(plan([claim], s, { voiceMigrationDone: true }).errors).toEqual([]);
+  });
+
+  it("allows channels that don't follow the naming, and the lobby itself", () => {
+    const s = lookalike("TempVoice room");
+    expect(
+      plan([voiceCat({ voiceManagedOnly: true, usePrefix: true })], s).errors,
+    ).toEqual([]);
+  });
+
+  it("doesn't apply without managed-only (that path has its own cleanup-risk error)", () => {
+    const s = lookalike("🎮 Someone's room");
+    expect(plan([voiceCat()], s).errors).toContain("voice-cleanup-risk");
+    expect(plan([voiceCat()], s).errors).not.toContain("voice-adoption-risk");
+  });
+});
+
+describe("the shared sets are the one source for the managers", () => {
+  it("quote and notices channels use the same read-only sets", () => {
+    expect(featureTarget("quotes.channel_id")!.everyone).toBe(
+      featureTarget("notices.channel_id")!.everyone,
+    );
+    expect([
+      ...featureTarget("quotes.channel_id")!.botPermissions.allow,
+    ]).toEqual([...featureTarget("notices.channel_id")!.botPermissions.allow]);
+  });
+});

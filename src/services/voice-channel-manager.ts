@@ -2,6 +2,7 @@ import { matchesVoiceNamingPattern } from "../utils/voice-naming.js";
 import {
   VOICE_ROOM_EVERYONE,
   VOICE_ROOM_OWNER,
+  toOverwriteOptions,
 } from "../utils/channel-permissions.js";
 import {
   VoiceState,
@@ -1316,12 +1317,10 @@ export class VoiceChannelManager {
       logger.info(
         `[Manual Transfer] Granting ManageChannels permission to new owner ${newOwnerId}`,
       );
-      await channel.permissionOverwrites.create(newOwnerId, {
-        ManageChannels: true,
-        Connect: true,
-        Speak: true,
-        ViewChannel: true,
-      });
+      await channel.permissionOverwrites.create(
+        newOwnerId,
+        toOverwriteOptions(VOICE_ROOM_OWNER),
+      );
 
       // Remove ManageChannels from previous owner (keep other permissions)
       logger.info(
@@ -3019,12 +3018,10 @@ export class VoiceChannelManager {
       logger.info(
         `[Ownership Transfer] Granting ManageChannels permission to new owner ${newOwner.id}`,
       );
-      await channel.permissionOverwrites.create(newOwner.id, {
-        ManageChannels: true,
-        Connect: true,
-        Speak: true,
-        ViewChannel: true,
-      });
+      await channel.permissionOverwrites.create(
+        newOwner.id,
+        toOverwriteOptions(VOICE_ROOM_OWNER),
+      );
 
       // Remove ManageChannels from previous owner if exists
       if (currentOwnerId) {

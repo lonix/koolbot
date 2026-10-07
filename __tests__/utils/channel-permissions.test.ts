@@ -235,3 +235,32 @@ describe("structural guard: whatever a read-only claim denies is restored", () =
     expect([...botReadOnlySet("text").allow]).toContain("EmbedLinks");
   });
 });
+
+describe("managers that now consume the shared sets keep their call shapes", () => {
+  it("voice ownership transfer grants the same options as before", () => {
+    expect(toOverwriteOptions(VOICE_ROOM_OWNER)).toEqual({
+      ManageChannels: true,
+      Connect: true,
+      Speak: true,
+      ViewChannel: true,
+    });
+  });
+
+  it("the quote channel gets the notices shape (plus the bot's EmbedLinks)", () => {
+    expect(toOverwriteOptions(NOTICES_EVERYONE)).toEqual({
+      SendMessages: false,
+      SendMessagesInThreads: false,
+      CreatePublicThreads: false,
+      CreatePrivateThreads: false,
+      AddReactions: true,
+      ViewChannel: true,
+      ReadMessageHistory: true,
+    });
+    expect(toOverwriteOptions(NOTICES_BOT)).toMatchObject({
+      SendMessages: true,
+      ManageMessages: true,
+      ManageChannels: true,
+      EmbedLinks: true,
+    });
+  });
+});
