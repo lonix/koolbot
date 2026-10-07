@@ -380,8 +380,9 @@ export function renderUserPage(opts: UserPageOptions): string {
 function renderPageNav(active: string, flags: UserFeatureFlags): string {
   // A feature-gated page whose feature is off is greyed with an "off" badge
   // rather than hidden (#709), so it stays discoverable and its choice stays
-  // pre-settable. The one exception is Privacy (#1066): it is read-only, so
-  // it is dropped entirely while off. `undefined` flags are treated as
+  // pre-settable. The one exception is Privacy (#1066): none of its choices
+  // (tracking opt-in/out, export, deletion) can be pre-set while the feature
+  // is off, so it is dropped entirely. `undefined` flags are treated as
   // enabled so non-gating callers/tests render plain links.
   const items = USER_NAV_ITEMS.filter(
     (item) => !(item.feature === "privacy" && flags.privacyEnabled === false),

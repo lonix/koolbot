@@ -381,6 +381,30 @@ describe("/me/privacy/export", () => {
     expect(auditRows).toHaveLength(0);
   });
 
+  it("stays 404 on repeated requests while disabled and spends no rate-limit allowance (#1066)", async () => {
+    await installCommonMocks(false);
+    await stubExportService(["{}"], { collections: [], truncated: [] });
+
+    const first = await dispatch("/privacy/export", { ip: "203.0.113.9" });
+    const router = first.router;
+    for (let i = 0; i < 5; i += 1) {
+      const r = await dispatch("/privacy/export", {
+        ip: "203.0.113.9",
+        router,
+      });
+      expect(r.captured.statusCode).toBe(404);
+    }
+    expect(first.captured.statusCode).toBe(404);
+
+    // Enabling the feature: the very next download is served, not 429.
+    await installCommonMocks(true);
+    const after = await dispatch("/privacy/export", {
+      ip: "203.0.113.9",
+      router,
+    });
+    expect(after.captured.statusCode).toBe(200);
+  });
+
   it("audits a failure when the stream breaks mid-file", async () => {
     await installCommonMocks(true);
     const { UserDataExportService } =

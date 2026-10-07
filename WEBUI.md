@@ -1187,8 +1187,8 @@ the feature is enabled; the read-only Rewind page simply shows the banner in
 place of the recap. This makes "not enabled yet, but my choice is
 remembered" clearly distinguishable from "broken".
 
-**Privacy is the exception (#1066).** It is a read-only surface with nothing
-to pre-set, so while `privacy.enabled` is off the Privacy nav entry and the
+**Privacy is the exception (#1066).** None of its choices (tracking opt-in/out, export,
+deletion) can be pre-set while the feature is off, so while `privacy.enabled` is off the Privacy nav entry and the
 Overview card are not rendered at all, and `GET /me/privacy` and
 `GET /me/privacy/export` return `404`. Enabling the key brings everything
 back on the next request (the settings save reloads the config cache; no

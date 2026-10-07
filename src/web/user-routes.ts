@@ -12,6 +12,7 @@
 import {
   Router,
   type NextFunction,
+  type Request,
   type Response,
   type RequestHandler,
 } from "express";
@@ -1361,6 +1362,20 @@ export function createUserRouter(
 
   router.get(
     "/privacy/export",
+    // Gate before the limiter (#1066): while the section is off these
+    // requests must stay a plain 404 and must not spend the export allowance,
+    // or the first download after re-enabling could be rate-limited.
+    (_req: Request, res: Response, next: NextFunction): void => {
+      isPrivacyExportEnabled()
+        .then((on) => {
+          if (!on) {
+            res.status(404).type("text/plain").send("Not found");
+            return;
+          }
+          next();
+        })
+        .catch(next);
+    },
     exportLimiter,
     asyncHandler(async (req, res) => {
       const session = req.webSession;
@@ -1372,14 +1387,6 @@ export function createUserRouter(
         userId: session.discordUserId,
         guildId: session.guildId,
       });
-
-      // The whole Privacy section is hidden while off (#1066): answer 404 so
-      // nothing reveals the feature exists. Nothing is audited, as there was
-      // no export attempt against a feature that is not there.
-      if (!(await isPrivacyExportEnabled())) {
-        res.status(404).type("text/plain").send("Not found");
-        return;
-      }
 
       const progress = createExportProgress();
       // Serve as a downloaded file, never as a rendered page: `nosniff` so a
