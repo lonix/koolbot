@@ -135,6 +135,7 @@ function harness() {
   const lookups: string[] = [];
   const createdRoleIds = new Set<string>();
   let configIssues: string[] = [];
+  const overrideAbsent = new Set<string>();
   let strictAuditFails = false;
   const strictAudits: string[] = [];
   let n = 0;
@@ -275,6 +276,7 @@ function harness() {
         run(`configDelete:${k}`);
       },
       validate: async () => configIssues,
+      hasOverride: async (key) => overrideAbsent.has(key) === false,
       read: async (key) =>
         liveConfig.has(key)
           ? liveConfig.get(key)!
@@ -300,6 +302,7 @@ function harness() {
     failOn,
     failMembers,
     alreadyHolds,
+    overrideAbsent,
     liveConfig,
     existingChannelByName,
     createdRoleIds,
@@ -629,6 +632,7 @@ describe("review hardening", () => {
   it("removes the override when the setting had no stored value", async () => {
     const h = harness();
     h.liveConfig.set("adoption.snapshot.retention_days", null);
+    h.overrideAbsent.add("adoption.snapshot.retention_days");
     const p = planAdoption(scanned({ config: {} }), {
       config: { "adoption.snapshot.retention_days": 30 },
     });
@@ -1642,5 +1646,52 @@ describe("review hardening, round fifteen", () => {
       color: 5,
       permissions: VIEW,
     });
+  });
+});
+
+describe("review hardening, round sixteen", () => {
+  it("restores 'no override' for a setting that only had a default, not today's default as an override", async () => {
+    const h = harness();
+    h.overrideAbsent.add("adoption.snapshot.retention_days");
+    // The scan sees the effective default (90) even though nothing is stored.
+    const p = planAdoption(
+      scanned({ config: { "adoption.snapshot.retention_days": 90 } }),
+      {
+        config: { "adoption.snapshot.retention_days": 30 },
+      },
+    );
+    const applied = await h.service.apply(p, opts);
+    expect(h.records.get(applied.snapshotId)!.configOverrides).toEqual({
+      "adoption.snapshot.retention_days": false,
+    });
+    h.calls.length = 0;
+    await h.service.rollback(applied.snapshotId, { actor });
+    expect(h.calls).toContain("configDelete:adoption.snapshot.retention_days");
+    expect(h.calls).not.toContain("config:adoption.snapshot.retention_days=90");
+  });
+
+  it("puts a stored override back to its previous value", async () => {
+    const h = harness();
+    const p = planAdoption(
+      scanned({ config: { "adoption.snapshot.retention_days": 90 } }),
+      {
+        config: { "adoption.snapshot.retention_days": 30 },
+      },
+    );
+    const applied = await h.service.apply(p, opts);
+    h.calls.length = 0;
+    await h.service.rollback(applied.snapshotId, { actor });
+    expect(h.calls).toContain("config:adoption.snapshot.retention_days=90");
+  });
+
+  it("refuses a destructive background apply without a live check before starting a job", () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      deletions: [{ kind: "channel", id: "old-cat" }],
+      approvals: [approval("channel.delete", "old-cat")],
+    });
+    expect(() => h.service.startApply(p, { actor, batchDelayMs: 0 })).toThrow(
+      /live-state check/,
+    );
   });
 });

@@ -62,6 +62,8 @@ export interface IAdoptionSnapshot extends Document {
   /** Member-operation progress, keyed by opId. */
   /** Recreations a rollback began; a retry reconciles them instead of duplicating. */
   restoreIntents: IRestoreIntent[];
+  /** Whether each touched setting had a stored override before the apply. */
+  configOverrides: Record<string, boolean>;
   /** Roles recreated by a rollback of a delete: old id → new id. */
   restoredRoles: Array<{ oldId: string; newId: string }>;
   /** Operations whose rollback already succeeded (retry skips them). */
@@ -108,6 +110,7 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
     operations: { type: Schema.Types.Mixed, default: [] },
     createdRoles: { type: Schema.Types.Mixed, default: [] },
     restoredChannels: { type: Schema.Types.Mixed, default: [] },
+    configOverrides: { type: Schema.Types.Mixed, default: {} },
     restoreIntents: { type: Schema.Types.Mixed, default: [] },
     restoredRoles: { type: Schema.Types.Mixed, default: [] },
     rolledBackOps: { type: Schema.Types.Mixed, default: [] },

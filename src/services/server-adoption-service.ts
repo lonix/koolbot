@@ -30,7 +30,7 @@ import {
 import type { WebSessionContext } from "../web/session.js";
 import { ConfigService } from "./config-service.js";
 import { Config } from "../models/config.js";
-import { settingsMetadata } from "./config-schema.js";
+import { defaultConfig, settingsMetadata } from "./config-schema.js";
 import {
   computePlanId,
   isApplicable,
@@ -119,6 +119,8 @@ export interface AdoptionSnapshotRecord {
   restoredChannels: Array<{ oldId: string; newId: string }>;
   restoredRoles: Array<{ oldId: string; newId: string }>;
   restoreIntents: IRestoreIntent[];
+  /** Whether each touched setting had a stored override before the apply. */
+  configOverrides: Record<string, boolean>;
   /** Operations whose rollback already succeeded, so a retry skips them. */
   rolledBackOps: string[];
   memberProgress: Record<
@@ -158,8 +160,10 @@ export interface AdoptionConfigWriter {
   delete(key: string): Promise<void>;
   /** Dependency problems the whole batch would cause (empty = fine). */
   validate(batch: Record<string, ConfigValue>): Promise<string[]>;
-  /** The stored value, or null when none is stored. */
+  /** The effective value (stored, environment or default) a scan would see. */
   read(key: string): Promise<ConfigValue | null>;
+  /** Whether a stored override exists, as opposed to a default or env value. */
+  hasOverride(key: string): Promise<boolean>;
   reload(): Promise<void>;
 }
 
@@ -322,7 +326,9 @@ export class ServerAdoptionService {
    * inside a web request; the UI polls `getJob` for progress.
    */
   public startApply(plan: AdoptionPlan, options: ApplyOptions): AdoptionJob {
-    this.assertApplicable(plan);
+    // Same validation as apply(), done up front so a plan that can never run
+    // is refused here instead of failing inside the detached job.
+    this.assertApplicable(plan, options);
     this.pruneJobs();
     const job: AdoptionJob = {
       id: randomUUID(),
@@ -468,6 +474,12 @@ export class ServerAdoptionService {
           );
         }
       }
+      // Remember which settings had a stored override before we touch them,
+      // so a rollback can put back "no override" instead of a default value.
+      const configOverrides: Record<string, boolean> = {};
+      for (const key of Object.keys(plan.baseline.config)) {
+        configOverrides[key] = await this.deps.config.hasOverride(key);
+      }
       // The snapshot is saved before the first Discord write.
       snapshot = await store.create({
         planId: plan.id,
@@ -484,6 +496,7 @@ export class ServerAdoptionService {
         restoredChannels: [],
         restoredRoles: [],
         restoreIntents: [],
+        configOverrides,
         rolledBackOps: [],
         memberProgress: {},
       });
@@ -624,7 +637,11 @@ export class ServerAdoptionService {
               configFailed = true;
               // Config writes skip per-key dependency checks, so a half-applied
               // batch could leave an invalid prefix. Put the prefix back.
-              await this.revertConfigPrefix(plan, records);
+              await this.revertConfigPrefix(
+                plan,
+                records,
+                snapshot.configOverrides ?? {},
+              );
             }
             await this.auditOp(
               options.actor,
@@ -817,13 +834,18 @@ export class ServerAdoptionService {
   private async revertConfigPrefix(
     plan: AdoptionPlan,
     records: Map<string, IAdoptionOperationRecord>,
+    overrides: Record<string, boolean>,
   ): Promise<void> {
     for (const op of [...plan.operations].reverse()) {
       const record = records.get(op.id);
       if (op.type !== "config.set" || record?.status !== "applied") continue;
       try {
         const prior = plan.baseline.config[op.key];
-        if (prior === null || prior === undefined) {
+        if (
+          prior === null ||
+          prior === undefined ||
+          overrides[op.key] === false
+        ) {
           await this.deps.config.delete(op.key);
         } else {
           await this.deps.config.set(op.key, prior);
@@ -1411,7 +1433,13 @@ export class ServerAdoptionService {
         }
         case "config.set": {
           const prior = baseline.config[op.key];
-          if (prior === null || prior === undefined) {
+          // Restore "no override" exactly, rather than writing today's
+          // default back as a permanent override.
+          if (
+            prior === null ||
+            prior === undefined ||
+            snapshot.configOverrides?.[op.key] === false
+          ) {
             await config.delete(op.key);
           } else {
             await config.set(op.key, prior);
@@ -1569,8 +1597,16 @@ class ConfigServiceWriter implements AdoptionConfigWriter {
     return issues.map((i) => i.message);
   }
   public async read(key: string): Promise<ConfigValue | null> {
-    const row = await Config.findOne({ key }).lean();
-    return row ? (row.value as ConfigValue) : null;
+    const service = ConfigService.getInstance();
+    const fallback = (defaultConfig as unknown as Record<string, ConfigValue>)[
+      key
+    ];
+    if (typeof fallback === "boolean") return service.getBoolean(key, fallback);
+    if (typeof fallback === "number") return service.getNumber(key, fallback);
+    return service.getString(key, String(fallback ?? ""));
+  }
+  public async hasOverride(key: string): Promise<boolean> {
+    return (await Config.exists({ key })) !== null;
   }
   public reload(): Promise<void> {
     return ConfigService.getInstance().triggerReload();
@@ -1618,6 +1654,7 @@ export class MongoAdoptionStore implements AdoptionStore {
       restoredChannels: doc.restoredChannels ?? [],
       restoredRoles: doc.restoredRoles ?? [],
       restoreIntents: doc.restoreIntents ?? [],
+      configOverrides: doc.configOverrides ?? {},
       rolledBackOps: doc.rolledBackOps ?? [],
       memberProgress: doc.memberProgress ?? {},
       rolledBackBy: doc.rolledBackBy ?? null,
