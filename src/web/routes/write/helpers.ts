@@ -323,6 +323,7 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "reactionroles.enabled",
     "reactionroles.message_channel_id",
     "reactionroles.style",
+    "reactionroles.group_role_colour",
   ],
   announcements: ["announcements.enabled"],
   notices: ["notices.enabled", "notices.channel_id", "notices.header_enabled"],

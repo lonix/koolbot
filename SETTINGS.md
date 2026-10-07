@@ -1122,11 +1122,12 @@ Self-assignable roles via message reactions. Users react to a message
 to get a role and access to a dedicated category. Role CRUD happens on
 the Web UI's **Reaction Roles** page.
 
-| Setting                            | Default    | Description                                                                                   |
-| ---------------------------------- | ---------- | --------------------------------------------------------------------------------------------- |
-| `reactionroles.enabled`            | `false`    | Enable reaction role system                                                                   |
-| `reactionroles.message_channel_id` | `""`       | Channel ID where reaction-role messages are posted                                            |
-| `reactionroles.style`              | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu) |
+| Setting                            | Default    | Description                                                                                       |
+| ---------------------------------- | ---------- | ------------------------------------------------------------------------------------------------- |
+| `reactionroles.enabled`            | `false`    | Enable reaction role system                                                                       |
+| `reactionroles.message_channel_id` | `""`       | Channel ID where reaction-role messages are posted                                                |
+| `reactionroles.style`              | `reaction` | Surface style for new role messages: `reaction` (classic emoji), `button`, or `select` (menu)     |
+| `reactionroles.group_role_colour`  | `""`       | Colour (`#RRGGBB`) for roles created by the grouped-role generator; empty keeps Discord's default |
 
 ### How it works
 
@@ -1617,6 +1618,7 @@ leave the graph in a broken state.
 - `reactionroles.enabled` (bool, default: false)
 - `reactionroles.message_channel_id` (string, default: "")
 - `reactionroles.style` (string, default: "reaction"; one of: reaction, button, select)
+- `reactionroles.group_role_colour` (string, default: "")
 
 #### Leaderboard Role Rewards
 

@@ -145,6 +145,7 @@ export interface ConfigSchema {
   // Reaction Roles
   "reactionroles.enabled": boolean;
   "reactionroles.message_channel_id": string; // Channel for reaction role messages
+  "reactionroles.group_role_colour": string; // #RRGGBB for generated group roles ("" = default)
   "reactionroles.style": string; // Surface style for new role messages: reaction | button | select
 
   // Notices System
@@ -441,6 +442,7 @@ export const defaultConfig: ConfigSchema = {
   "reactionroles.enabled": false,
   "reactionroles.message_channel_id": "",
   "reactionroles.style": "reaction",
+  "reactionroles.group_role_colour": "",
 
   // Notices System defaults
   "notices.enabled": false,
@@ -1853,6 +1855,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       { value: "button", label: "Button" },
       { value: "select", label: "Select menu" },
     ],
+  },
+
+  "reactionroles.group_role_colour": {
+    label: "Generated group role colour",
+    description:
+      "Colour (#RRGGBB) given to roles the grouped-role generator creates on the Reaction Roles page. Leave empty for Discord's default. Generated roles never get any permissions, and existing roles of the same name are reused untouched.",
+    category: "reactionroles",
+    type: "string",
   },
 
   // Notices System

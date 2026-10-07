@@ -80,7 +80,7 @@ What changes per session:
 - **A `/me/*` handler can only read/write the signed-in user's own rows.**
   This is enforced by the `assertSelfScope` helper (see
   `src/web/user-routes.ts`) and applies to admin-role sessions too — an
-  admin on `/me/notifications` sees *their* prefs, not the guild's. Admins
+  admin on `/me/notifications` sees _their_ prefs, not the guild's. Admins
   who need to act on another user's data do so via the admin panel's
   audit/user tooling, not by impersonating them on `/me/*`.
 
@@ -174,7 +174,7 @@ Key properties:
   (default 24h) so an active operator isn't kicked out at the much
   shorter link TTL.
 - **Re-issuing kills the prior session.** Running `/me` or `/config` again revokes
-  all of *your* unrevoked sessions and mints a new one. Other admins'
+  all of _your_ unrevoked sessions and mints a new one. Other admins'
   sessions are untouched.
 - **Permissions re-checked every request.** The cookie-session middleware
   re-validates the session on every hit, per role: an `admin` session
@@ -250,15 +250,15 @@ by editing `.env` and restarting the container.
 
 ### Required when the Web UI is enabled
 
-| Variable                            | Required          | Default | Notes                                                                                            |
-| ----------------------------------- | ----------------- | ------- | ------------------------------------------------------------------------------------------------ |
-| `WEBUI_ENABLED`                     | yes (to turn on)  | `false` | `true` mounts `/admin/*`; anything else leaves it 404.                                           |
-| `WEBUI_BASE_URL`                    | yes when enabled  | —       | Public URL the DM'd link points at, e.g. `https://bot.example.com`. No trailing slash needed.    |
-| `WEBUI_SESSION_SECRET`              | yes when enabled  | —       | HMAC key for token hashes and signed cookies. Use 32+ random bytes (`openssl rand -base64 32`).  |
-| `WEBUI_SESSION_TTL_MINUTES`         | no                | `10`    | TTL of the DM'd link from issuance.                                                              |
-| `WEBUI_SESSION_LIFETIME_HOURS`      | no                | `24`    | Hard cap on a redeemed session, measured from redemption. Bounds the sliding inactivity window.  |
-| `WEBUI_INACTIVITY_TIMEOUT_MINUTES`  | no                | `30`    | Sliding cookie window after redemption.                                                          |
-| `WEBUI_TRUST_PROXY`                 | no                | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.     |
+| Variable                           | Required         | Default | Notes                                                                                           |
+| ---------------------------------- | ---------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `WEBUI_ENABLED`                    | yes (to turn on) | `false` | `true` mounts `/admin/*`; anything else leaves it 404.                                          |
+| `WEBUI_BASE_URL`                   | yes when enabled | —       | Public URL the DM'd link points at, e.g. `https://bot.example.com`. No trailing slash needed.   |
+| `WEBUI_SESSION_SECRET`             | yes when enabled | —       | HMAC key for token hashes and signed cookies. Use 32+ random bytes (`openssl rand -base64 32`). |
+| `WEBUI_SESSION_TTL_MINUTES`        | no               | `10`    | TTL of the DM'd link from issuance.                                                             |
+| `WEBUI_SESSION_LIFETIME_HOURS`     | no               | `24`    | Hard cap on a redeemed session, measured from redemption. Bounds the sliding inactivity window. |
+| `WEBUI_INACTIVITY_TIMEOUT_MINUTES` | no               | `30`    | Sliding cookie window after redemption.                                                         |
+| `WEBUI_TRUST_PROXY`                | no               | (off)   | Set to a hop count (e.g. `1`) when running behind a reverse proxy that sets `X-Forwarded-*`.    |
 
 `WEBUI_SESSION_SECRET` must be at least 32 bytes; a shorter value is
 rejected at startup and the Web UI is not mounted.
@@ -280,10 +280,10 @@ served on the same port (3000) as `/health` whether or not the Web UI is
 enabled. See [Prometheus / OpenMetrics endpoint](#prometheus--openmetrics-endpoint)
 below for the full rundown.
 
-| Variable          | Required | Default | Notes                                                                 |
-| ----------------- | -------- | ------- | --------------------------------------------------------------------- |
-| `METRICS_ENABLED` | no       | `false` | `true` mounts `/metrics`; anything else leaves it 404.                |
-| `METRICS_TOKEN`   | no       | (empty) | When set, requests must send `Authorization: Bearer <token>` or 401.  |
+| Variable          | Required | Default | Notes                                                                |
+| ----------------- | -------- | ------- | -------------------------------------------------------------------- |
+| `METRICS_ENABLED` | no       | `false` | `true` mounts `/metrics`; anything else leaves it 404.               |
+| `METRICS_TOKEN`   | no       | (empty) | When set, requests must send `Authorization: Bearer <token>` or 401. |
 
 ---
 
@@ -378,7 +378,7 @@ services:
     stop_grace_period: 30s
     stop_signal: SIGTERM
     ports:
-      - "3000:3000"   # /health and /admin (when WEBUI_ENABLED=true)
+      - "3000:3000" # /health and /admin (when WEBUI_ENABLED=true)
 
   mongodb:
     image: mongo:8
@@ -517,7 +517,7 @@ forwards `X-Forwarded-For` to the bot. `WEBUI_TRUST_PROXY=1` tells the
 bot's rate limiter to trust exactly one hop (Caddy) when reading client
 IPs.
 
-⚠️ **Trust-proxy is a footgun if the bot is *also* directly reachable.**
+⚠️ **Trust-proxy is a footgun if the bot is _also_ directly reachable.**
 By default the bot ignores `X-Forwarded-*` headers, so a direct client
 cannot spoof its IP. Setting `WEBUI_TRUST_PROXY=1` flips that: any
 request reaching the bot — including a direct one that bypasses Caddy
@@ -532,7 +532,7 @@ trusting forwarded headers.
 
 ### Tailscale / Cloudflare Tunnel
 
-Set `WEBUI_BASE_URL` to whatever URL your tunnel hands out and *don't*
+Set `WEBUI_BASE_URL` to whatever URL your tunnel hands out and _don't_
 publish port `3000` to the public internet. The bot only needs to be
 reachable from the tunnel sidecar's network namespace.
 
@@ -607,7 +607,7 @@ That said:
   `/live` (liveness — always `OK` once the process is up), `/ready`
   (readiness — `OK` only when MongoDB and Discord are reachable, `503`
   otherwise), and `/health` (a backward-compatible alias of `/ready`).
-  They are intentionally minimal, but `/ready`/`/health` *do* report
+  They are intentionally minimal, but `/ready`/`/health` _do_ report
   whether MongoDB and Discord are reachable. Restrict them to your
   monitoring system if you'd rather not advertise that. Kubernetes
   deployments should use `/live` for the livenessProbe and `/ready` for
@@ -795,18 +795,18 @@ Channels, Weekly Digest, Leaderboard Roles, Tickets, Voice Analytics). Feature p
 are switched off sort to the bottom of their group.
 
 The **Dashboard** has a **Version** card (#1029) that shows the running version
-next to the latest KoolBot release, with its state: *up to date*, *update
-available* (with the kind: major, minor or patch), or *couldn't check*. It also
+next to the latest KoolBot release, with its state: _up to date_, _update
+available_ (with the kind: major, minor or patch), or _couldn't check_. It also
 links to the release notes and has a **Check now** button. When an update is
 available, the card shows how to update for Docker Compose, plain Docker and
 source installs, and warns that a major update may include breaking changes.
-Every admin page shows the running version in the top banner, plus an *Update
-available* badge when the instance is behind.
+Every admin page shows the running version in the top banner, plus an _Update
+available_ badge when the instance is behind.
 
 The check runs at startup, every 12 hours and on **Check now** (at most once a
 minute). The result is cached, so no page waits on GitHub. A failed check
 (offline, air-gapped, rate-limited) never breaks the page. The card shows
-*couldn't check* with the reason and the last successful result.
+_couldn't check_ with the reason and the last successful result.
 
 - **What is sent:** one anonymous `GET` of
   `https://api.github.com/repos/lonix/koolbot/releases/latest`, public release
@@ -883,27 +883,41 @@ sure the lobby exists. Turn on **Only clean up channels KoolBot created**
 shared one: startup, periodic and forced cleanup then delete only empty channels
 KoolBot created itself, and the card also lets you pick the lobby channel by ID.
 
-The **Reaction Roles** page offers two ways to add a mapping (#813). *Create a
-reaction role* mints a brand-new Discord role and posts a picker message; the
-*Create a private category + channel* checkbox is on by default (preserving the
+The **Reaction Roles** page offers two ways to add a mapping (#813). _Create a
+reaction role_ mints a brand-new Discord role and posts a picker message; the
+_Create a private category + channel_ checkbox is on by default (preserving the
 original behaviour) — untick it to opt out and get a plain self-assign role with
-no attached channel. *Bind an existing role* maps an
+no attached channel. _Bind an existing role_ maps an
 emoji to a role you already manage (no role/category/channel is created) and,
 when given an existing message ID, adds the mapping to that message — so one
 picker message can carry many emoji→role mappings. Both paths validate the role
 hierarchy up front (the bot needs **Manage Roles** and a role ranked above the
 target) and surface an actionable error instead of silently failing at reaction
 time. Rows are tagged **managed** (bot-created; delete tears down the role +
-category + channel) or **bound** (points at a pre-existing role; *Remove* only
+category + channel) or **bound** (points at a pre-existing role; _Remove_ only
 unbinds the mapping and never deletes the role).
 
-A third path, *Create a role group*, posts one shared message with two or more
+A third path, _Create a role group_, posts one shared message with two or more
 role options and an assignment mode: **unique** (pick exactly one, the default
 for groups), **sticky** (add-only, removing the reaction never revokes the role)
 or **toggle** (each option independently added and removed). The two single-role
 paths accept **toggle** or **sticky**. How a new message lets members pick
 (emoji reactions, buttons or a select menu) comes from the surface style,
 `reactionroles.style`; existing messages keep the style they were created with.
+
+**Generate a grouped set** (#1064) creates a whole group of roles and one picker
+message in one step, from a preset (**Region**: seven world regions; **Country**:
+twenty common countries with flag emoji, Nordics first) or a custom group (a name
+plus role/emoji rows, up to 20 options per group, which is Discord's reaction limit
+per message). Preset lists live in `src/content/reaction-role-groups.ts`. The
+generator is idempotent and non-destructive: a role with the same name
+(case-insensitive) is reused and left untouched, roles it creates get no
+permissions and aren't mentionable (colour from `reactionroles.group_role_colour`,
+default Discord's), and running a group again only adds the missing options by
+editing the existing picker message. It never removes roles, mappings or
+reactions. The mode defaults to **unique** (pick exactly one, e.g. one region);
+choose sticky or toggle if members may hold several. Deleting a generated group
+removes only roles the bot created, so reused roles survive.
 
 Its **Settings** card (#974) edits `reactionroles.enabled`, the message channel
 (`reactionroles.message_channel_id`, a text-channel picker) and the surface
@@ -975,7 +989,7 @@ flipping the feature re-arms the birthday job straight away.
 
 On the **Settings** page, a toggle whose feature declares a hard dependency
 (`dependsOn` in `settingsMetadata`) is rendered **disabled and greyed** with an
-inline *"Requires X enabled"* hint until every dependency is on — the hint names
+inline _"Requires X enabled"_ hint until every dependency is on — the hint names
 each unmet dependency by its human label and links to its section (#666). This is
 the friendly front for the write-time validator (#663): both read the same
 `dependsOn` graph, so the greyed control and the server-side rejection never
@@ -993,13 +1007,13 @@ role / category key gets a real picker dropdown instead of a raw-ID text box,
 fixed-option keys get a `<select>`, and each field is titled by its
 human-readable label (`SettingMetadata.label`) with the dotted config key kept
 only as monospace helper text. The cascade-disable behaviour and the
-*"Requires X enabled"* dependency hints/locks (including cross-feature targets
+_"Requires X enabled"_ dependency hints/locks (including cross-feature targets
 that live on another wizard step) carry over as well, so the two surfaces stay
 in lockstep and can't drift apart.
 
 The **Bot Status** page (`/admin/bot-status`) edits the three "Watching …"
 presence message pools the bot rotates through, picked by how many users
-are in voice: the *empty*, *one user*, and *multiple users* pools. Each
+are in voice: the _empty_, _one user_, and _multiple users_ pools. Each
 pool has an add / edit / remove / reorder list plus a paste-a-list
 import/export box (newline- or JSON-encoded), built on a reusable
 string-array editor. Entries are stored per-guild in MongoDB and take
@@ -1007,7 +1021,7 @@ effect immediately — no redeploy or restart needed. A pool with
 no stored rows falls back to the built-in defaults in
 `src/content/statuses.ts`, so behaviour is unchanged on a fresh install;
 use **Seed defaults into store** to start editing from those defaults.
-Entries in the *multiple users* pool must contain the `{count}`
+Entries in the _multiple users_ pool must contain the `{count}`
 placeholder (replaced with the live user count); the editor rejects saves
 that omit it.
 
@@ -1064,7 +1078,7 @@ voice-leaderboard role rewards. Its settings card edits `leaderboard_roles.enabl
 (on and off), the period (week / month / all time), the recalculation cron and the
 role-change announcement channel; a save that changes the enable flag or the cron
 re-arms the recalculation job immediately, as on the Digest page. The **Tiers** card edits `leaderboard_roles.tiers`
-as rows — a *Top N* number plus a role picker, with **Add tier** / **Remove** (without
+as rows — a _Top N_ number plus a role picker, with **Add tier** / **Remove** (without
 JavaScript, one spare row is rendered and clearing a row removes it). On save each
 Top N must be unique and between 1 and 1000, each tier needs its own role, and every
 role must exist, not be integration-managed, and sit below the bot's highest role;
@@ -1090,8 +1104,8 @@ lets admins name the roles that matter on their server and rank them: as many or
 they like (Admin, Mod, Helper, VIP, Friends, Bots …). Groups are optional; with none defined
 every feature keeps its current behaviour.
 
-- **Create / edit / reorder / delete.** A group is backed by an *existing role* (picked from the
-  server's roles, with its member count) or by a *new role* the engine creates when the plan is
+- **Create / edit / reorder / delete.** A group is backed by an _existing role_ (picked from the
+  server's roles, with its member count) or by a _new role_ the engine creates when the plan is
   applied. Rank is edited with the ↑ / ↓ buttons; the list is shown highest first, and role
   positions in Discord follow it when applied. **Presets** (Admin, Moderator, Helper, VIP, Bots)
   pre-fill the permission and capability boxes, which stay editable.
@@ -1103,7 +1117,7 @@ every feature keeps its current behaviour.
   with or without a group. Developers: use `RoleGroupService.getGroupsWith(guildId, "staff")`,
   `memberHasCapability(member, "staff")` and `memberIsAtOrAbove(member, groupId)`.
 - **Linking an existing role never moves anyone.** Its current holders keep it, and its
-  permissions and colour are left alone unless you explicitly tick *Set the role's permissions*
+  permissions and colour are left alone unless you explicitly tick _Set the role's permissions_
   or enter a colour. Large cosmetic groups work: counts come from Discord without loading members.
 - **Locked roles.** @everyone and roles at or above the bot's highest role can't be picked.
   Integration-managed roles (Server Booster, subscriptions, bot roles) can be linked only as
@@ -1152,7 +1166,7 @@ feature, the `events.category_id` channel category, and the
 category or announcement channel is missing, since event channels and RSVP
 messages won't be created without them) plus the resolved event timezone. The
 events table lists each event's title, start time, lifecycle state
-(*scheduled* / *active* / *ended* / *cancelled*), live RSVP tallies (✅ going ·
+(_scheduled_ / _active_ / _ended_ / _cancelled_), live RSVP tallies (✅ going ·
 🤔 maybe · 🚫 can't), channel, and id. Events that are still open get two
 lifecycle controls — **Start now** (spin the event up immediately) and
 **Cancel** (a confirm-guarded stop) — while finished events show no actions. A
@@ -1226,22 +1240,22 @@ existing achievements award detection. `celebrations.enabled` depends on
 
 ### User self-service (`/me/*`, both admin and user roles)
 
-| Page                                    | What it's for                                                                                                                                              |
-| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                       |
-| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.      |
-| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.            |
-| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row.  |
-| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row.  |
-| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.      |
-| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.          |
+| Page                                    | What it's for                                                                                                                                             |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Overview** (`/me/`)                   | Index for your own settings — links to the available per-user pages.                                                                                      |
+| **Notifications** (`/me/notifications`) | Opt in to DM nudges (achievements, weekly digest, Rewind). Off by default — Koolbot never DMs you until you opt in here. Records a `WebAuditLog` row.     |
+| **Voice** (`/me/voice`)                 | Manage your channel name pattern and saved voice-channel presets (rename, edit, set-default, delete). Gated by `voicechannels.presets.enabled`.           |
+| **Timezone** (`/me/timezone`)           | Pick the IANA timezone Koolbot renders your times in (digest, Rewind, voicestats) and uses to evaluate your birthday. Saving records a `WebAuditLog` row. |
+| **Birthday** (`/me/birthday`)           | Set your birthday (month/day, optional year) so Koolbot can celebrate it on the day in your own timezone. Saving or removing records a `WebAuditLog` row. |
+| **Rewind** (`/me/rewind`)               | Personal year-in-review: voice time, top voice companions, peak day, longest session, streak, badges, rank, weekly journey, text & reaction activity.     |
+| **Privacy** (`/me/privacy`)             | See what Koolbot stores about you, download it as one JSON file, and (if `privacy.delete.enabled`) reset it. Gated by `privacy.enabled`; audited.         |
 
 **Disabled-feature handling is uniform across `/me/*` (#709).** A
 feature-gated page whose feature an admin has turned off is never hidden
 behind a 404 or silently dropped: the nav link stays visible (greyed with
 an "off" badge, mirroring the admin nav), the Overview lists its card with
-an "off" tag, and opening the page shows one consistent banner — *"Your
-server admin hasn't enabled X yet."* Settings pages (Voice, Birthday) keep
+an "off" tag, and opening the page shows one consistent banner — _"Your
+server admin hasn't enabled X yet."_ Settings pages (Voice, Birthday) keep
 their editable form so members can pre-set a choice that applies the moment
 the feature is enabled; the read-only Rewind page simply shows the banner in
 place of the recap. This makes "not enabled yet, but my choice is
@@ -1291,7 +1305,7 @@ per-user voice preferences that back the Discord control panel's
 **Presets** button. It exposes two things: a **channel name pattern**
 (applied to every channel you spawn from the lobby — use `{username}` as a
 placeholder for your display name; leave blank for the server default
-naming) and your **saved presets**. Presets themselves are still *created*
+naming) and your **saved presets**. Presets themselves are still _created_
 in Discord by snapshotting a live channel (control panel → Presets → Save
 current as preset); the web page lets you **edit** a preset's name, channel
 name, user limit, and bitrate, **set-default** (the default auto-applies on
@@ -1321,7 +1335,7 @@ Years with no data render a friendly empty state.
 The **"when you're online"** block (#675) shows two duration-weighted
 distributions computed from your existing voice sessions — a 24-bar
 hour-of-day histogram and a 7-bar day-of-week breakdown — with your peak hour
-and day called out (e.g. *"Most active: Friday · 10 PM"*). Both are bucketed
+and day called out (e.g. _"Most active: Friday · 10 PM"_). Both are bucketed
 in **your** timezone (set it on the Timezone page), and each session is split
 across the local hour and midnight boundaries it crosses so long and overnight
 sessions land in the right hours/weekdays. The block hides itself when you have
@@ -1350,7 +1364,7 @@ render older snapshots even after the summary shape gains new fields.
 
 The **Privacy** page describes what Koolbot has stored about the signed-in
 member and hands it over as a single JSON file from
-`GET /me/privacy/export`. It is a *record*, not a recap — Rewind is the
+`GET /me/privacy/export`. It is a _record_, not a recap — Rewind is the
 narrative version.
 
 What the file contains is decided by an explicit allowlist registry in
@@ -1541,11 +1555,11 @@ nav stays navigable.
 The conventions above are gated in CI by three Jest suites, so a page that
 breaks one fails the build rather than being found by a user:
 
-| Suite | What it gates |
-| --- | --- |
-| `__tests__/web/a11y-axe.test.ts` | Runs [axe-core](https://github.com/dequelabs/axe-core) over every page renderer's output — labels, landmarks, heading order, `lang`, table semantics, ARIA validity. |
-| `__tests__/web/a11y-routes.test.ts` | Runs axe over pages served through the real router (consent, the 401 error page, the `/me` surface) so the wiring around the renderers is gated too. |
-| `__tests__/web/a11y-contrast.test.ts` | Computes the WCAG contrast ratio for every `THEME` foreground/background pair: 4.5:1 for text, 3:1 for control borders and the focus ring. |
+| Suite                                 | What it gates                                                                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `__tests__/web/a11y-axe.test.ts`      | Runs [axe-core](https://github.com/dequelabs/axe-core) over every page renderer's output — labels, landmarks, heading order, `lang`, table semantics, ARIA validity. |
+| `__tests__/web/a11y-routes.test.ts`   | Runs axe over pages served through the real router (consent, the 401 error page, the `/me` surface) so the wiring around the renderers is gated too.                 |
+| `__tests__/web/a11y-contrast.test.ts` | Computes the WCAG contrast ratio for every `THEME` foreground/background pair: 4.5:1 for text, 3:1 for control borders and the focus ring.                           |
 
 The page list the axe scan walks lives in `__tests__/web/a11y-pages.ts`.
 **When you add a page renderer, add a fixture for it there** — a page that
@@ -1581,7 +1595,7 @@ One of:
 
 - It was already redeemed (single-use). Run `/me` again (administrators: `/config`).
 - It expired (default 10 minutes). Run `/me` again (administrators: `/config`).
-- You ran `/me` or `/config` a second time and got a *newer* link, which revoked
+- You ran `/me` or `/config` a second time and got a _newer_ link, which revoked
   this one. Use the most recent DM.
 - `WEBUI_SESSION_SECRET` changed between issuance and redemption.
 

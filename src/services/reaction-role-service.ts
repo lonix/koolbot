@@ -1019,7 +1019,7 @@ export class ReactionRoleService {
    * are kept as their full `<:name:id>` / `<a:name:id>` markup; standard
    * emojis are stored as their Unicode character unchanged.
    */
-  private normalizeEmoji(emoji: string): string {
+  public normalizeEmoji(emoji: string): string {
     const customEmojiMatch = emoji.match(/<a?:(\w+):(\d+)>/);
     return customEmojiMatch ? customEmojiMatch[0] : emoji;
   }
@@ -1044,7 +1044,7 @@ export class ReactionRoleService {
    * surfaced as a `logger.error` deep inside `handleReactionAdd`. Surfacing it
    * at create/bind time turns a silent no-op into an actionable message.
    */
-  private async validateRoleAssignable(
+  public async validateRoleAssignable(
     guild: Guild,
     role: Role,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -2009,8 +2009,10 @@ export class ReactionRoleService {
         logger.warn("Could not delete group category:", error);
       }
 
-      // Delete every role in the group.
+      // Delete every role in the group, except roles the bot did not create
+      // (the grouped-role generator reuses existing roles, #1064).
       for (const config of configs) {
+        if (config.autoCreated === false) continue;
         try {
           const role = await guild.roles.fetch(config.roleId);
           if (role) {
