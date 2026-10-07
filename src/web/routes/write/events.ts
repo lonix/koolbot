@@ -12,7 +12,12 @@ import logger from "../../../utils/logger.js";
 import {
   EventService,
   parseEventDateTime,
+  RecurrenceDisabledError,
 } from "../../../services/event-service.js";
+import {
+  EVENT_RECURRENCES,
+  type EventRecurrence,
+} from "../../../models/event.js";
 import { isValidTimezone, resolveTimezone } from "../../../utils/timezone.js";
 import { ConfigService } from "../../../services/config-service.js";
 import { recordAudit } from "../../audit.js";
@@ -42,6 +47,7 @@ export function createEventsRouter(client: Client): Router {
       const time = getString(req, "time");
       const durationRaw = getString(req, "duration");
       const tzInput = getString(req, "timezone");
+      const recurrenceRaw = getString(req, "recurrence") || "none";
 
       if (!title || !date || !time) {
         flashRedirect(res, "/admin/events", {
@@ -58,6 +64,14 @@ export function createEventsRouter(client: Client): Router {
         flashRedirect(res, "/admin/events", { type: "err", text: lengthError });
         return;
       }
+      if (!(EVENT_RECURRENCES as readonly string[]).includes(recurrenceRaw)) {
+        flashRedirect(res, "/admin/events", {
+          type: "err",
+          text: `Invalid recurrence: ${recurrenceRaw}`,
+        });
+        return;
+      }
+      const recurrence = recurrenceRaw as EventRecurrence;
       if (tzInput && !isValidTimezone(tzInput)) {
         flashRedirect(res, "/admin/events", {
           type: "err",
@@ -112,6 +126,7 @@ export function createEventsRouter(client: Client): Router {
           startTime,
           timezone: resolveTimezone(timezone),
           durationMinutes,
+          recurrence,
           createdBy: session.discordUserId,
         });
         await recordAudit(session, {
@@ -121,6 +136,7 @@ export function createEventsRouter(client: Client): Router {
             title,
             startTime: startTime.toISOString(),
             durationMinutes,
+            recurrence,
           },
           result: "success",
         });
@@ -130,7 +146,9 @@ export function createEventsRouter(client: Client): Router {
         });
       } catch (err) {
         const text = err instanceof Error ? err.message : "Unknown error";
-        logger.error("Create event failed", err);
+        if (!(err instanceof RecurrenceDisabledError)) {
+          logger.error("Create event failed", err);
+        }
         await recordAudit(session, {
           action: "event.create",
           details: { title },
@@ -150,18 +168,25 @@ export function createEventsRouter(client: Client): Router {
     asyncHandler(async (req, res) => {
       const session = requireSessionContext(req);
       const id = String(req.params.id);
+      const series = getString(req, "scope") === "series";
       const service = EventService.getInstance(client);
-      const event = await service.cancelEvent(id, session.guildId);
+      const event = series
+        ? ((await service.cancelSeries(id, session.guildId))?.event ?? null)
+        : await service.cancelEvent(id, session.guildId);
       const ok = event !== null;
       await recordAudit(session, {
-        action: "event.cancel",
+        action: series ? "event.cancel-series" : "event.cancel",
         targetId: id,
         result: ok ? "success" : "failure",
         errorMessage: ok ? null : "not found or wrong guild",
       });
       flashRedirect(res, "/admin/events", {
         type: ok ? "ok" : "err",
-        text: ok ? `Cancelled event ${id}.` : `Event ${id} not found.`,
+        text: ok
+          ? series
+            ? `Cancelled the series containing event ${id}.`
+            : `Cancelled event ${id}.`
+          : `Event ${id} not found.`,
       });
     }),
   );
