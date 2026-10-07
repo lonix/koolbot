@@ -682,7 +682,11 @@ export function settingValueFieldName(key: string): string {
  */
 export function findCascadeMasterKey(rows: SettingRow[]): string | null {
   return pickCascadeMasterKey(
-    rows.map((r) => ({ key: r.key, isBoolean: r.type === "boolean" })),
+    rows.map((r) => ({
+      key: r.key,
+      isBoolean: r.type === "boolean",
+      category: r.category,
+    })),
   );
 }
 

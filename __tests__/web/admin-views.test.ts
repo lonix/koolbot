@@ -4202,6 +4202,16 @@ describe("findCascadeMasterKey", () => {
     ).toBeNull();
   });
 
+  it("ignores a foreign two-segment toggle living in another section (#1076 review)", () => {
+    const aka = { ...row("aka.enabled", "boolean"), category: "namehistory" };
+    const nh = {
+      ...row("namehistory.enabled", "boolean"),
+      category: "namehistory",
+    };
+    expect(findCascadeMasterKey([aka, nh])).toBe("namehistory.enabled");
+    expect(findCascadeMasterKey([aka])).toBeNull();
+  });
+
   it("ignores non-boolean .enabled keys", () => {
     expect(findCascadeMasterKey([row("quotes.enabled", "string")])).toBeNull();
   });

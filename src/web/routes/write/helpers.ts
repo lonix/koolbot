@@ -572,6 +572,9 @@ export function findSectionMasterKey(keys: string[]): string | null {
       key,
       isBoolean:
         typeof defaultConfig[key as keyof typeof defaultConfig] === "boolean",
+      category:
+        settingsMetadata[key as keyof typeof settingsMetadata]?.category ??
+        key.split(".")[0],
     })),
   );
 }

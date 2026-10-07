@@ -591,6 +591,22 @@ describe("findSectionMasterKey", () => {
   });
 });
 
+describe("findSectionMasterKey foreign toggles (#1076 review)", () => {
+  it("picks namehistory.enabled, not aka.enabled, in the namehistory section", () => {
+    expect(
+      findSectionMasterKey([
+        "aka.enabled",
+        "namehistory.enabled",
+        "namehistory.retention_days",
+      ]),
+    ).toBe("namehistory.enabled");
+  });
+
+  it("has no master when only the foreign toggle is present", () => {
+    expect(findSectionMasterKey(["aka.enabled"])).toBeNull();
+  });
+});
+
 describe("safeAdminRedirect (#610)", () => {
   it("allows a known feature-page nav target", () => {
     expect(safeAdminRedirect("/admin/polls")).toBe("/admin/polls");
