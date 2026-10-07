@@ -843,6 +843,7 @@ describe("recurring event lifecycle", () => {
       nextSpawned: false,
       seriesCancelled: false,
     }));
+    EventMock.exists = jest.fn(async () => null);
     EventMock.findOneAndUpdate = jest.fn(async () => ({}));
     EventMock.findOne = jest.fn(async () => null);
     EventMock.updateOne = jest.fn(async () => ({}));
@@ -1020,6 +1021,90 @@ describe("recurring event lifecycle", () => {
     );
     await (service as unknown as Spawner).spawnNextOccurrence(ended(), NOW);
     expect(created[0].seriesCancelled).toBe(true);
+  });
+
+  it("processEvent cancels an open occurrence when a sibling carries the series cancellation", async () => {
+    const { service } = buildService();
+    EventMock.exists = jest.fn(async () => ({ _id: "occ-0" }));
+    const late = ended({ _id: "occ-3", state: "scheduled" });
+    const cancelOne = jest.fn(async () => undefined);
+    (service as unknown as { cancelOne: jest.Mock }).cancelOne = cancelOne;
+    await (
+      service as unknown as {
+        processEvent: (...a: unknown[]) => Promise<void>;
+      }
+    ).processEvent(late, {}, NOW, { reminderMs: 0, leadMs: 0, graceMs: 0 });
+    expect(EventMock.exists).toHaveBeenCalledWith({
+      guildId: "guild-1",
+      seriesId: "occ-0",
+      seriesCancelled: true,
+    });
+    expect(late.seriesCancelled).toBe(true);
+    expect(cancelOne).toHaveBeenCalledWith(late);
+    expect(created).toHaveLength(0);
+  });
+
+  describe("postAnnouncement", () => {
+    function realPost(
+      service: InstanceType<typeof EventService>,
+      event: unknown,
+    ): Promise<void> {
+      const proto = Object.getPrototypeOf(service) as {
+        postAnnouncement: (e: unknown) => Promise<void>;
+      };
+      return proto.postAnnouncement.call(service, event);
+    }
+
+    function setup(): {
+      service: InstanceType<typeof EventService>;
+      message: { id: string; delete: jest.Mock };
+      event: Doc;
+    } {
+      const { service } = buildService();
+      (service as unknown as { configService: unknown }).configService = {
+        getString: jest.fn(async () => "chan-1"),
+      };
+      const message = {
+        id: "msg-mine",
+        delete: jest.fn(async () => undefined),
+      };
+      (service as unknown as { fetchTextChannel: jest.Mock }).fetchTextChannel =
+        jest.fn(async () => ({ send: jest.fn(async () => message) }));
+      const event = ended({
+        state: "scheduled",
+        announcementChannelId: null,
+        announcementMessageId: null,
+      });
+      return { service, message, event };
+    }
+
+    it("claims the message id atomically and tracks the post", async () => {
+      const { service, message, event } = setup();
+      await realPost(service, event);
+      expect(EventMock.findOneAndUpdate).toHaveBeenCalledWith(
+        { _id: "occ-0", announcementMessageId: null },
+        {
+          $set: {
+            announcementChannelId: "chan-1",
+            announcementMessageId: "msg-mine",
+          },
+        },
+      );
+      expect(event.announcementMessageId).toBe("msg-mine");
+      expect(message.delete).not.toHaveBeenCalled();
+    });
+
+    it("deletes its own post and adopts the winner's ids when it loses the race", async () => {
+      const { service, message, event } = setup();
+      EventMock.findOneAndUpdate = jest.fn(async () => null);
+      EventMock.findById = jest.fn(async () => ({
+        announcementChannelId: "chan-1",
+        announcementMessageId: "msg-winner",
+      }));
+      await realPost(service, event);
+      expect(message.delete).toHaveBeenCalled();
+      expect(event.announcementMessageId).toBe("msg-winner");
+    });
   });
 
   it("processEvent finishes an interrupted series cancel instead of running the lifecycle", async () => {

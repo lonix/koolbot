@@ -417,9 +417,14 @@ export class EventService extends ScheduledService {
     // A series cancel that was interrupted (crash, failed query) leaves
     // flagged rows still open: finish it instead of running their lifecycle.
     if (
-      event.seriesCancelled &&
-      (event.state === "scheduled" || event.state === "active")
+      (event.state === "scheduled" || event.state === "active") &&
+      (event.seriesCancelled ||
+        (isRecurring(event) && (await this.isSeriesCancelled(event))))
     ) {
+      // A successor inserted just after a series cancel can miss the flag
+      // (its spawner died before re-checking); a cancelled sibling anywhere
+      // in the series settles it, and the flag is carried onto this row.
+      event.seriesCancelled = true;
       await this.cancelOne(event);
       return;
     }
@@ -1055,6 +1060,14 @@ export class EventService extends ScheduledService {
     return { embeds: [embed], components: [row] };
   }
 
+  private async isSeriesCancelled(event: IEvent): Promise<boolean> {
+    return !!(await Event.exists({
+      guildId: event.guildId,
+      seriesId: event.seriesId,
+      seriesCancelled: true,
+    }));
+  }
+
   /** Post the RSVP message for a saved event that has none, when a channel is
    * configured (no channel is a deliberate no-op, not a failure to retry). */
   private async ensureAnnouncement(event: IEvent): Promise<void> {
@@ -1083,9 +1096,30 @@ export class EventService extends ScheduledService {
     if (!channel) return;
 
     const message = await channel.send(this.buildAnnouncementPayload(event));
+    // Claim the message id atomically (as `claimEventChannel` does for the
+    // channel): the creator and the scan's retry can both be sending at once,
+    // and a plain save would leave the loser's post untracked and never
+    // updated. The loser deletes its post and adopts the winner's ids.
+    const claimed = await Event.findOneAndUpdate(
+      { _id: event._id, announcementMessageId: null },
+      {
+        $set: {
+          announcementChannelId: channelId,
+          announcementMessageId: message.id,
+        },
+      },
+    );
+    if (!claimed) {
+      await message.delete().catch(() => undefined);
+      const fresh = await Event.findById(event._id).catch(() => null);
+      event.announcementChannelId =
+        fresh?.announcementChannelId ?? event.announcementChannelId;
+      event.announcementMessageId =
+        fresh?.announcementMessageId ?? event.announcementMessageId;
+      return;
+    }
     event.announcementChannelId = channelId;
     event.announcementMessageId = message.id;
-    await event.save();
   }
 
   /**
