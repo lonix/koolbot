@@ -315,7 +315,13 @@ export class VoiceChannelManager {
     return channel.name === (await this.getLobbyChannelName());
   }
 
-  /** Does a channel name look like one KoolBot would have generated? */
+  /**
+   * Does a channel name look like one KoolBot would have generated? Generated
+   * names are `<prefix> <name><suffix>`, so the prefix must lead and the
+   * suffix must trail (a live channel carries a trailing " 🔴" on top). A
+   * suffix merely appearing mid-name is a foreign channel: adopting it would
+   * make it deletable on first enable.
+   */
   private matchesNamingPattern(
     name: string,
     prefix: string,
@@ -323,7 +329,14 @@ export class VoiceChannelManager {
   ): boolean {
     if (!prefix && !suffix) return false;
     if (prefix && !name.startsWith(prefix)) return false;
-    if (suffix && !name.includes(suffix)) return false;
+    if (suffix) {
+      const liveSuffix = " 🔴";
+      const base = name.endsWith(liveSuffix)
+        ? name.slice(0, -liveSuffix.length)
+        : name;
+      if (!base.endsWith(suffix)) return false;
+      if (prefix && base.length < prefix.length + suffix.length) return false;
+    }
     return true;
   }
 

@@ -485,6 +485,19 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(migrationStore.get(GUILD_ID)?.adoptedCount).toBe(1);
     });
 
+    it("requires the suffix at the end of the name, not mid-name (#1078 review)", async () => {
+      addChannel("lobby-id", "Lobby");
+      const midName = addChannel("mid-id", "🎮 Alice's Room archive");
+      const live = addChannel("live-id", "🎮 Bob's Room 🔴");
+
+      await manager.initialize(GUILD_ID);
+
+      expect(midName.delete).not.toHaveBeenCalled();
+      // A live room keeps its generated name plus the live indicator.
+      expect(live.delete).toHaveBeenCalled();
+      expect(migrationStore.get(GUILD_ID)?.adoptedCount).toBe(1);
+    });
+
     it("marks adopted rows as adopted, not created", async () => {
       addChannel("lobby-id", "Lobby");
       addChannel("legacy-id", "🎮 Gina's Room", 1); // occupied: kept, row stays
