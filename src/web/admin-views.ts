@@ -1876,6 +1876,13 @@ export interface EventRow {
   maybe: number;
   cant: number;
   channelId: string | null;
+  /** Cadence label (e.g. "weekly") when part of a recurring series, else null (#744). */
+  recurrence?: string | null;
+  /** 1-based position within the series, for the indicator. */
+  occurrence?: number | null;
+  /** Finished occurrence whose successor hasn't been created yet, so the
+   * series is still live and can be cancelled from this row. */
+  awaitingSuccessor?: boolean;
 }
 
 export interface EventsProps extends CommonProps {
@@ -2185,15 +2192,26 @@ export function renderEventsPage(props: EventsProps): string {
   const tableRows = props.rows
     .map((e) => {
       const finished = e.state === "cancelled" || e.state === "ended";
+      const seriesForm = `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel the whole \\'${escapeJsInAttr(e.title)}\\' series?');">${csrfInput}<input type="hidden" name="scope" value="series"><button type="submit" class="btn btn-danger">Cancel series</button></form>`;
+      // A finished occurrence still awaiting its successor (e.g. recurrence
+      // was switched off meanwhile) keeps the series live: allow stopping it.
       const actions = finished
-        ? '<span class="muted">—</span>'
+        ? e.awaitingSuccessor
+          ? seriesForm
+          : '<span class="muted">—</span>'
         : `<form method="POST" action="/admin/events/${escapeHtml(e.id)}/start-now">${csrfInput}<button type="submit" class="btn">Start now</button></form>
-  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel event \\'${escapeJsInAttr(e.title)}\\'?');">${csrfInput}<button type="submit" class="btn btn-danger">Cancel</button></form>`;
+  <form method="POST" action="/admin/events/${escapeHtml(e.id)}/cancel" onsubmit="return confirm('Cancel ${e.recurrence ? "this occurrence of " : ""}event \\'${escapeJsInAttr(e.title)}\\'?');">${csrfInput}<button type="submit" class="btn btn-danger">${e.recurrence ? "Cancel occurrence" : "Cancel"}</button></form>${
+    e.recurrence ? `\n  ${seriesForm}` : ""
+  }`;
       const channelCell = e.channelId
         ? `<span class="mono">${escapeHtml(e.channelId)}</span>`
         : '<span class="muted">—</span>';
       return `<tr>
-<td>${escapeHtml(e.title)}</td>
+<td>${escapeHtml(e.title)}${
+        e.recurrence
+          ? ` <span class="tag" title="Part of a recurring series"><span aria-hidden="true">🔁</span> ${escapeHtml(e.recurrence)}${e.occurrence ? ` · #${e.occurrence}` : ""}</span>`
+          : ""
+      }</td>
 <td class="mono">${escapeHtml(e.when)}</td>
 <td>${eventStateTag(e.state)}</td>
 <td><span aria-hidden="true">✅</span> ${e.going} going · <span aria-hidden="true">🤔</span> ${e.maybe} maybe · <span aria-hidden="true">🚫</span> ${e.cant} can't</td>
@@ -2282,6 +2300,14 @@ ${renderFeatureSettingsCard({
     </label>
     <label>Timezone (IANA, optional — defaults to <code>${escapeHtml(props.timezone)}</code>)
       <input type="text" name="timezone" placeholder="Europe/London">
+    </label>
+    <label>Repeat
+      <select name="recurrence">
+        <option value="none" selected>Does not repeat</option>
+        <option value="weekly">Weekly</option>
+        <option value="biweekly">Every 2 weeks</option>
+        <option value="monthly">Monthly</option>
+      </select>
     </label>
     <button type="submit" class="btn btn-primary">Schedule event</button>
   </form>

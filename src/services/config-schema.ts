@@ -120,6 +120,7 @@ export interface ConfigSchema {
   "events.create_lead_minutes": number; // How long before start the temp channel is created
   "events.default_duration_minutes": number; // Default event length when none is given
   "events.channel_grace_minutes": number; // How long after end an empty channel lingers before cleanup
+  "events.recurrence_enabled": boolean; // Allow recurring events (weekly/biweekly/monthly series)
 
   // LFG — ad-hoc "looking for group" posts (#957)
   "lfg.enabled": boolean;
@@ -413,6 +414,7 @@ export const defaultConfig: ConfigSchema = {
   "events.create_lead_minutes": 15,
   "events.default_duration_minutes": 120,
   "events.channel_grace_minutes": 15,
+  "events.recurrence_enabled": true,
 
   // LFG (#957) — feature gate off by default (rule 1)
   "lfg.enabled": false,
@@ -1729,6 +1731,13 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "How long after an event ends the bot waits before deleting its (now empty) voice channel.",
     category: "events",
     type: "number",
+  },
+  "events.recurrence_enabled": {
+    label: "Recurring events enabled",
+    description:
+      "Allow events to repeat weekly, every two weeks or monthly. When off, new events are one-off only and finished recurring events stop spawning their next occurrence (already-scheduled ones are unaffected).",
+    category: "events",
+    type: "boolean",
   },
   "lfg.enabled": {
     label: "LFG enabled",

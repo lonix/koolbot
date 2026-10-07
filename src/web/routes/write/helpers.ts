@@ -370,6 +370,7 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "events.create_lead_minutes",
     "events.default_duration_minutes",
     "events.channel_grace_minutes",
+    "events.recurrence_enabled",
   ],
   digest: [
     "digest.enabled",

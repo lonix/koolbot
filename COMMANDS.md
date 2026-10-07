@@ -549,6 +549,13 @@ Schedule a new event.
   `events.default_duration_minutes`
 - `timezone` (optional) — IANA zone the date/time is interpreted in
   (e.g. `Europe/London`); defaults to `events.timezone`
+- `repeat` (optional) — make it a recurring series: `weekly`, `biweekly`
+  (every 2 weeks) or `monthly`, at the same wall-clock time. Needs
+  `events.recurrence_enabled`
+
+```text
+/event create title:"Game Night" date:2026-07-04 time:20:00 repeat:weekly
+```
 
 On creation the bot posts an RSVP message in the configured announcement
 channel with **Going / Maybe / Can't** buttons and a live attendee count.
@@ -556,6 +563,7 @@ channel with **Going / Maybe / Can't** buttons and a live attendee count.
 #### `/event list`
 
 List upcoming and in-progress events with their RSVP tallies and IDs.
+Occurrences of a recurring series are marked `🔁` with their cadence.
 
 ```text
 /event list
@@ -568,7 +576,16 @@ message is updated to show the event as cancelled.
 
 ```text
 /event cancel id:697bdfe2808f7d245289392c
+/event cancel id:697bdfe2808f7d245289392c scope:series
 ```
+
+**Options:**
+
+- `id` (required) — event ID from `/event list`
+- `scope` (optional) — for a recurring event: `occurrence` (default) cancels
+  just that date and the series carries on with the next one; `series`
+  cancels every upcoming occurrence and stops the series. Ignored for
+  one-off events.
 
 #### `/event start` (admin)
 
@@ -592,6 +609,10 @@ creation window.
 
 The whole lifecycle is driven by a once-a-minute scan, so it is
 restart-safe — progress is tracked on the stored event, not in memory.
+
+For a recurring event, step 5 also creates the **next occurrence** (new RSVP
+message, new channel) at the same wall-clock time; future occurrences are
+never pre-created.
 
 ---
 
