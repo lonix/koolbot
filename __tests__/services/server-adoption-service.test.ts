@@ -126,6 +126,7 @@ function harness() {
     channels: new Map<string, unknown>(),
   };
   const alreadyHolds = new Set<string>();
+  const liveConfig = new Map<string, string | number | boolean | null>();
   const existingChannelByName = new Map<string, string>();
   const staleIds = new Set<string>();
   const recoveries: string[] = [];
@@ -259,6 +260,10 @@ function harness() {
         run(`configDelete:${k}`);
       },
       validate: async () => configIssues,
+      read: async (key) =>
+        liveConfig.has(key)
+          ? liveConfig.get(key)!
+          : ((scanned().config[key] ?? null) as never),
       reload: async () => {
         calls.push("reload");
       },
@@ -280,6 +285,7 @@ function harness() {
     failOn,
     failMembers,
     alreadyHolds,
+    liveConfig,
     existingChannelByName,
     strictAudits,
     staleIds,
@@ -606,6 +612,7 @@ describe("review hardening", () => {
 
   it("removes the override when the setting had no stored value", async () => {
     const h = harness();
+    h.liveConfig.set("adoption.snapshot.retention_days", null);
     const p = planAdoption(scanned({ config: {} }), {
       config: { "adoption.snapshot.retention_days": 30 },
     });
@@ -1213,5 +1220,54 @@ describe("review hardening, round five", () => {
     expect(h.records.get(applied.snapshotId)!.restoredRoles[0].newId).toBe(
       "role-from-crash",
     );
+  });
+});
+
+describe("review hardening, round six", () => {
+  it("refuses to apply when a touched setting changed since planning", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      config: { "adoption.snapshot.retention_days": 30 },
+    });
+    h.liveConfig.set("adoption.snapshot.retention_days", 7);
+    await expect(h.service.apply(p, opts)).rejects.toThrow(
+      /setting adoption.snapshot.retention_days/,
+    );
+    expect(h.calls).not.toContain("snapshot.create");
+  });
+
+  it("keeps failed grants as maybe-ours so a timed-out grant is still revoked on rollback", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      memberGrants: [{ role: { id: "member" }, memberIds: ["a", "b"] }],
+    });
+    h.failMembers.add("b"); // times out, but did reach Discord
+    const first = await h.service.apply(p, opts);
+    expect(first.status).toBe("partial");
+    expect(
+      h.records.get(first.snapshotId)!.memberProgress["op-1"].inflight,
+    ).toEqual(["b"]);
+    h.failMembers.clear();
+    h.alreadyHolds.add("b"); // the earlier grant had landed
+    await h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId });
+    expect(
+      h.records.get(first.snapshotId)!.memberProgress["op-1"].granted,
+    ).toEqual(["a", "b"]);
+  });
+
+  it("only reconciles against things created after our write began", async () => {
+    const h = harness();
+    const seen: Date[] = [];
+    h.deps.gateway.findRoleByName = async (_n, after) => {
+      seen.push(after);
+      return null;
+    };
+    const p = planAdoption(scanned(), { roles: [{ name: "New" }] });
+    h.failOn.add("createRole:New");
+    const first = await h.service.apply(p, opts);
+    h.failOn.clear();
+    await h.service.apply(p, { ...opts, resumeSnapshotId: first.snapshotId });
+    expect(seen).toHaveLength(1);
+    expect(seen[0].getTime()).toBeGreaterThan(Date.now() - 60_000);
   });
 });

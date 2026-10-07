@@ -467,7 +467,10 @@ function approvalFor(
 
 /** Content hash of a plan; the executor recomputes it to detect tampering. */
 export function computePlanId(
-  plan: Pick<AdoptionPlan, "guildId" | "plannedBy" | "operations" | "baseline">,
+  plan: Pick<
+    AdoptionPlan,
+    "guildId" | "plannedBy" | "operations" | "baseline" | "errors"
+  >,
 ): string {
   return createHash("sha256")
     .update(
@@ -476,6 +479,7 @@ export function computePlanId(
         by: plan.plannedBy,
         ops: plan.operations,
         baseline: plan.baseline,
+        errors: plan.errors,
       }),
     )
     .digest("hex")
@@ -695,11 +699,27 @@ export function planAdoption(
       targetType = "role";
     } else {
       targetId = want.target.id;
+      if (targetType === "role" && !resolveRole({ id: targetId })) {
+        err(
+          "unknown-role",
+          `Role ${targetId} does not exist and is not planned.`,
+        );
+        continue;
+      }
     }
     if (!isValidBitfield(want.allow) || !isValidBitfield(want.deny)) {
       err(
         "invalid-permissions",
         `The overwrite on "${channel.name}" has an invalid allow/deny value.`,
+        channel.id,
+      );
+      continue;
+    }
+    // Discord only lets the bot allow what it holds itself.
+    if ((big(want.allow) & ~botBase) !== 0n) {
+      err(
+        "bot-lacks-permission",
+        `The bot cannot allow permissions it does not hold (overwrite on "${channel.name}").`,
         channel.id,
       );
       continue;
@@ -1132,6 +1152,7 @@ export function planAdoption(
     plannedBy: scanned.adminUserId,
     operations: ordered,
     baseline,
+    errors,
   });
 
   return {

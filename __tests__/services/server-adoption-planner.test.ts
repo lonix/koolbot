@@ -827,3 +827,58 @@ describe("planAdoption: review hardening, round five", () => {
     expect(computePlanId({ ...p, plannedBy: "someone" })).not.toBe(p.id);
   });
 });
+
+describe("planAdoption: review hardening, round six", () => {
+  it("changes the plan id when blocking errors are removed", async () => {
+    const { computePlanId } =
+      await import("../../src/services/server-adoption-planner.js");
+    const blocked = planAdoption(scan(), {
+      roles: [{ id: "high", name: "High", color: 9 }],
+    });
+    expect(blocked.errors.length).toBeGreaterThan(0);
+    expect(computePlanId({ ...blocked, errors: [] })).not.toBe(blocked.id);
+  });
+
+  it("rejects an overwrite for a role id that does not exist, but allows member targets", () => {
+    const plan = planAdoption(scan(), {
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { id: "ghost-role" },
+          allow: VIEW,
+          deny: "0",
+        },
+        {
+          channelId: "chat",
+          target: { id: "some-user" },
+          targetType: "member",
+          allow: VIEW,
+          deny: "0",
+        },
+      ],
+    });
+    expect(codes(plan)).toEqual(["unknown-role"]);
+    expect(plan.operations).toHaveLength(1);
+  });
+
+  it("blocks allowing permissions the bot does not hold", () => {
+    const limited = scan({
+      roles: scan().roles.map((r) =>
+        r.id === "botrole"
+          ? { ...r, permissions: (F.ViewChannel | F.ManageRoles).toString() }
+          : r,
+      ),
+    });
+    const plan = planAdoption(limited, {
+      overwrites: [
+        {
+          channelId: "chat",
+          target: { id: "member" },
+          allow: F.BanMembers.toString(),
+          deny: "0",
+        },
+      ],
+    });
+    expect(codes(plan)).toEqual(["bot-lacks-permission"]);
+  });
+});

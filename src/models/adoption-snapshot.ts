@@ -34,6 +34,8 @@ export interface IRestoreIntent {
   kind: "role" | "channel";
   oldId: string;
   name: string;
+  /** When the recreation began; only later-created candidates qualify. */
+  startedAt: string;
   parentId?: string | null;
   rawType?: number | null;
 }

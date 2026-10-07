@@ -9,6 +9,7 @@ import {
   type OverwriteType,
   DiscordAPIError,
   RESTJSONErrorCodes,
+  SnowflakeUtil,
   Routes,
 } from "discord.js";
 import logger from "../utils/logger.js";
@@ -28,6 +29,7 @@ import {
 } from "../web/audit.js";
 import type { WebSessionContext } from "../web/session.js";
 import { ConfigService } from "./config-service.js";
+import { Config } from "../models/config.js";
 import { settingsMetadata } from "./config-schema.js";
 import {
   computePlanId,
@@ -87,9 +89,10 @@ export interface AdoptionGateway {
     name: string,
     parentId: string | null,
     rawType: number | null,
+    createdAfter: Date,
   ): Promise<string | null>;
   /** Used to reconcile a role.create whose result was never recorded. */
-  findRoleByName(name: string): Promise<string | null>;
+  findRoleByName(name: string, createdAfter: Date): Promise<string | null>;
   readChannel(channelId: string): Promise<ChannelState | null>;
 }
 
@@ -145,6 +148,8 @@ export interface AdoptionConfigWriter {
   delete(key: string): Promise<void>;
   /** Dependency problems the whole batch would cause (empty = fine). */
   validate(batch: Record<string, ConfigValue>): Promise<string[]>;
+  /** The stored value, or null when none is stored. */
+  read(key: string): Promise<ConfigValue | null>;
   reload(): Promise<void>;
 }
 
@@ -532,6 +537,7 @@ export class ServerAdoptionService {
               options,
               persist,
               started,
+              record.startedAt,
             );
             record.status = "applied";
             record.error = null;
@@ -619,6 +625,15 @@ export class ServerAdoptionService {
         BigInt(live.permissions) !== BigInt(role.permissions)
       ) {
         drifted.push(`role "${role.name}"`);
+      }
+    }
+    for (const [key, expected] of Object.entries(plan.baseline.config)) {
+      const live = await this.deps.config.read(key);
+      if (
+        (live === null ? null : String(live)) !==
+        (expected === null ? null : String(expected))
+      ) {
+        drifted.push(`setting ${key}`);
       }
     }
     const overwriteKey = (o: OverwriteState): string =>
@@ -751,6 +766,7 @@ export class ServerAdoptionService {
     options: ApplyOptions,
     persist: () => Promise<void>,
     started: boolean,
+    startedAt?: Date | null,
   ): Promise<string | null> {
     const { gateway, callApi, config } = this.deps;
     switch (op.type) {
@@ -759,7 +775,11 @@ export class ServerAdoptionService {
         // may have created the role; adopt it instead of making a duplicate.
         const earlier = started
           ? await callApi(
-              () => gateway.findRoleByName(op.name),
+              () =>
+                gateway.findRoleByName(
+                  op.name,
+                  startedAt ? new Date(startedAt) : new Date(0),
+                ),
               `look up role ${op.name}`,
             )
           : null;
@@ -904,7 +924,9 @@ export class ServerAdoptionService {
       await persist();
       for (const memberId of toGrant) await grant(memberId);
       state.done += page.length;
-      state.inflight = [];
+      // A grant that failed (say, timed out) may still have reached Discord;
+      // keep those members as "maybe ours" until a retry reconciles them.
+      state.inflight = [...state.failed];
       await persist();
     }
     if (state.failed.length > 0) {
@@ -1087,6 +1109,7 @@ export class ServerAdoptionService {
                       prior.name,
                       parentId,
                       prior.rawType ?? null,
+                      new Date(earlier.startedAt),
                     ),
                   `look up channel ${prior.name}`,
                 )
@@ -1096,6 +1119,7 @@ export class ServerAdoptionService {
                 kind: "channel",
                 oldId: prior.id,
                 name: prior.name,
+                startedAt: new Date().toISOString(),
                 parentId,
                 rawType: prior.rawType ?? null,
               });
@@ -1125,7 +1149,11 @@ export class ServerAdoptionService {
             );
             const found = earlier
               ? await callApi(
-                  () => gateway.findRoleByName(prior.name),
+                  () =>
+                    gateway.findRoleByName(
+                      prior.name,
+                      new Date(earlier.startedAt),
+                    ),
                   `look up role ${prior.name}`,
                 )
               : null;
@@ -1134,6 +1162,7 @@ export class ServerAdoptionService {
                 kind: "role",
                 oldId: prior.id,
                 name: prior.name,
+                startedAt: new Date().toISOString(),
               });
               await persist();
             }
@@ -1331,6 +1360,10 @@ class ConfigServiceWriter implements AdoptionConfigWriter {
       await ConfigService.getInstance().findDependencyIssues(batch);
     return issues.map((i) => i.message);
   }
+  public async read(key: string): Promise<ConfigValue | null> {
+    const row = await Config.findOne({ key }).lean();
+    return row ? (row.value as ConfigValue) : null;
+  }
   public reload(): Promise<void> {
     return ConfigService.getInstance().triggerReload();
   }
@@ -1437,6 +1470,24 @@ const ignoreUnknown =
     if (error instanceof DiscordAPIError && error.code === code) return null;
     throw error;
   };
+
+/**
+ * Snowflake ids carry their creation time, so a candidate that already existed
+ * before our write began cannot be the thing that write created. A minute of
+ * slack covers clock skew between this host and Discord.
+ */
+const createdSince = (id: string, after: Date): boolean =>
+  SnowflakeUtil.timestampFrom(id) >= after.getTime() - 60_000;
+
+/** Reconcile only on an unambiguous match; two candidates need a human. */
+function uniqueOrNull(ids: string[], what: string): string | null {
+  if (ids.length > 1) {
+    throw new Error(
+      `More than one ${what} could be the one a crashed run created; check the server and retry.`,
+    );
+  }
+  return ids[0] ?? null;
+}
 
 const CHANNEL_TYPE: Record<ChannelState["kind"], ChannelType | null> = {
   category: ChannelType.GuildCategory,
@@ -1547,20 +1598,34 @@ export class DiscordAdoptionGateway implements AdoptionGateway {
     name: string,
     parentId: string | null,
     rawType: number | null,
+    createdAfter: Date,
   ): Promise<string | null> {
     const channels = await this.guild.channels.fetch();
-    const match = channels.find(
+    const matches = channels.filter(
       (c) =>
         !!c &&
         c.name === name &&
         c.parentId === parentId &&
-        (rawType === null || c.type === rawType),
+        (rawType === null || c.type === rawType) &&
+        createdSince(c.id, createdAfter),
     );
-    return match?.id ?? null;
+    return uniqueOrNull(
+      matches.map((c) => c!.id),
+      `channel "${name}"`,
+    );
   }
-  public async findRoleByName(name: string): Promise<string | null> {
+  public async findRoleByName(
+    name: string,
+    createdAfter: Date,
+  ): Promise<string | null> {
     const roles = await this.guild.roles.fetch(undefined, { force: true });
-    return roles.find((r) => r.name === name)?.id ?? null;
+    const matches = roles.filter(
+      (r) => r.name === name && createdSince(r.id, createdAfter),
+    );
+    return uniqueOrNull(
+      matches.map((r) => r.id),
+      `role "${name}"`,
+    );
   }
   public async readChannel(channelId: string): Promise<ChannelState | null> {
     const channel = await this.guild.channels
