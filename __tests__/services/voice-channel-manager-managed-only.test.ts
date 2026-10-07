@@ -20,7 +20,10 @@ jest.mock("../../src/services/voice-channel-tracker.js");
 jest.mock("../../src/services/config-service.js");
 
 // Import after mocks
-import { VoiceChannelManager } from "../../src/services/voice-channel-manager.js";
+import {
+  VoiceChannelManager,
+  stripSurroundingQuotes,
+} from "../../src/services/voice-channel-manager.js";
 import { ConfigService } from "../../src/services/config-service.js";
 import { VoiceChannelOwnership } from "../../src/models/voice-channel-ownership.js";
 import {
@@ -702,6 +705,60 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
 
       expect(lobby.name).toBe("Bob's Lobby");
       expect(lobby.setName).not.toHaveBeenCalled();
+    });
+
+    it("health check keeps a name-selected lobby's quotes and creates no duplicate (#1086)", async () => {
+      settings["voicechannels.lobby.name"] = "Bob's Lobby";
+      const lobby = addChannel("lobby-id", "Bob's Lobby");
+      jest.spyOn(manager as any, "getGuild").mockResolvedValue(guild as never);
+
+      await (manager as any).checkLobbyHealth();
+
+      expect(guild.channels.create).not.toHaveBeenCalled();
+      expect(lobby.setName).not.toHaveBeenCalled();
+    });
+
+    it("health check and join detection agree on a name with quotes (#1086)", async () => {
+      settings["voicechannels.lobby.name"] = "Bob's Lobby";
+      const lobby = addChannel("lobby-id", "Bob's Lobby");
+      const spy = jest
+        .spyOn(manager as any, "createUserChannel")
+        .mockResolvedValue(undefined);
+
+      const [oldState, newState] = voiceStateJoin(lobby);
+      await manager.handleVoiceStateUpdate(oldState, newState);
+
+      expect(spy).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ["voicechannels.lobby.name", '"Lobby"'],
+      ["voicechannels.lobby.name", "'Lobby'"],
+      ["voice_channel.lobby_channel_name", '"Lobby"'],
+      ["LOBBY_CHANNEL_NAME", "'Lobby'"],
+    ])(
+      "treats a surrounding-quoted %s value %s as Lobby (#1086)",
+      async (key, value) => {
+        settings["voicechannels.lobby.name"] = "";
+        settings["voice_channel.lobby_channel_name"] = "";
+        settings["LOBBY_CHANNEL_NAME"] = "";
+        settings[key] = value;
+        addChannel("lobby-id", "Lobby");
+        jest
+          .spyOn(manager as any, "getGuild")
+          .mockResolvedValue(guild as never);
+
+        expect(await (manager as any).getLobbyChannelName()).toBe("Lobby");
+        await (manager as any).checkLobbyHealth();
+        expect(guild.channels.create).not.toHaveBeenCalled();
+      },
+    );
+
+    it("stripSurroundingQuotes only removes a matching outer pair", () => {
+      expect(stripSurroundingQuotes(`"Bob's Lobby"`)).toBe("Bob's Lobby");
+      expect(stripSurroundingQuotes(`Bob's Lobby`)).toBe("Bob's Lobby");
+      expect(stripSurroundingQuotes(`"Lobby'`)).toBe(`"Lobby'`);
+      expect(stripSurroundingQuotes(`"`)).toBe(`"`);
     });
 
     it("does not fall back to name matches once the lobby ID resolves (#1078 review)", async () => {
