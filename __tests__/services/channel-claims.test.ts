@@ -1115,3 +1115,174 @@ describe("bypass detection and message deletion", () => {
     expect(r.warnings).not.toContain("feature-deletes-messages-later");
   });
 });
+
+describe("one composed result per channel (third review round)", () => {
+  const MEMBER = "100000000000000077";
+
+  it("blocks a plan that leaves the admin able to see a voice channel but not join it", () => {
+    const s = fixture();
+    s.roles = s.roles.map((r) =>
+      r.id === GUILD
+        ? { ...r, permissions: bitsOf(["ViewChannel", "Connect"]) }
+        : r,
+    );
+    // The admin's role overwrite restores visibility after the @everyone deny.
+    s.channels.find((c) => c.id === C_VOICE)!.overwrites = [
+      ow(R_ADMIN, F.ViewChannel),
+    ];
+    const built = {
+      overwrites: [
+        {
+          channelId: C_VOICE,
+          target: { id: GUILD },
+          allow: "0",
+          deny: (F.Connect | F.ViewChannel).toString(),
+        },
+      ],
+    };
+    const p = planAdoption(s, built, { approverId: ADMIN });
+    expect(p.errors.map((e) => e.code)).toContain("admin-access-lost");
+  });
+
+  it("a voice gate that keeps the admin's Connect is accepted", () => {
+    const r = plan([
+      { channelId: C_VOICE, action: "gate", roleIds: [R_ADMIN] },
+    ]);
+    expect(r.errors).toEqual([]);
+  });
+
+  it("quotes gets the same read-only shape the quote channel manager sets", () => {
+    const r = plan([
+      { channelId: C_LOOSE, action: "leave", bindKey: "quotes.channel_id" },
+    ]);
+    const everyone = setFor(r.plan, C_LOOSE, GUILD)!;
+    expect(BigInt(everyone.deny) & F.SendMessages).toBe(F.SendMessages);
+    expect(BigInt(everyone.allow) & F.AddReactions).toBe(F.AddReactions);
+    expect(BigInt(setFor(r.plan, C_LOOSE, BOT)!.allow) & F.ManageMessages).toBe(
+      F.ManageMessages,
+    );
+  });
+
+  it("a feature binding and an action both contribute to the bot's permissions", () => {
+    const r = plan([
+      {
+        channelId: C_LOBBY,
+        action: "read-only",
+        bindKey: "voicechannels.lobby.channel_id",
+      },
+    ]);
+    const bot = BigInt(setFor(r.plan, C_LOBBY, BOT)!.allow);
+    expect(bot & F.Speak).toBe(F.Speak); // from the read-only claim
+    expect(bot & F.Connect).toBe(F.Connect); // from the lobby feature
+  });
+
+  it("the bot can still create threads in a read-only channel", () => {
+    const r = plan([{ channelId: C_LOOSE, action: "read-only" }]);
+    const bot = BigInt(setFor(r.plan, C_LOOSE, BOT)!.allow);
+    expect(bot & F.CreatePublicThreads).toBe(F.CreatePublicThreads);
+    expect(bot & F.CreatePrivateThreads).toBe(F.CreatePrivateThreads);
+  });
+
+  it("with reactions disabled, a preserved AddReactions allow is closed for groups and reported otherwise", () => {
+    const s = fixture();
+    s.channels.find((c) => c.id === C_LOOSE)!.overwrites = [
+      ow(R_VIP, F.AddReactions),
+      ow(MEMBER, F.AddReactions, 0n, "member"),
+    ];
+    const r = buildClaimsDesiredState(
+      [{ channelId: C_LOOSE, action: "read-only" }],
+      ctxFor(s),
+    );
+    expect(
+      BigInt(
+        r.desired.overwrites!.find(
+          (o) => "id" in o.target && o.target.id === R_VIP,
+        )!.deny,
+      ) & F.AddReactions,
+    ).toBe(F.AddReactions);
+    expect(r.issues.map((i) => i.code)).toContain("read-only-not-exclusive");
+    const allowed = buildClaimsDesiredState(
+      [{ channelId: C_LOOSE, action: "read-only", allowReactions: true }],
+      ctxFor(s),
+    );
+    expect(allowed.issues.map((i) => i.code)).not.toContain(
+      "read-only-not-exclusive",
+    );
+  });
+
+  it("a stage channel is not a legacy-cleanup risk for a voice category", () => {
+    const s = fixture();
+    s.channels = s.channels.filter((c) => c.id !== C_TEMP);
+    s.channels.push(
+      chan("300000000000000050", {
+        parentId: C_VCAT,
+        kind: "voice",
+        rawType: ChannelType.GuildStageVoice,
+        name: "Town hall",
+      }),
+    );
+    expect(
+      plan(
+        [
+          {
+            channelId: C_VCAT,
+            action: "leave",
+            bindKey: "voicechannels.category_id",
+          },
+        ],
+        s,
+      ).errors,
+    ).toEqual([]);
+  });
+
+  it("a synced child with its own claim is composed on top of its category's plan", () => {
+    const r = plan([
+      { channelId: C_CAT, action: "gate", roleIds: [R_ADMIN] },
+      { channelId: C_TEXT, action: "read-only" },
+    ]);
+    const child = setFor(r.plan, C_TEXT, GUILD)!;
+    expect(BigInt(child.deny) & F.ViewChannel).toBe(F.ViewChannel); // category's gate
+    expect(BigInt(child.deny) & F.SendMessages).toBe(F.SendMessages); // its own claim
+    expect(setFor(r.plan, C_TEXT, R_ADMIN)).toBeDefined();
+  });
+
+  it("a bind-only claim on a synced child does not drop it from its category's gate", () => {
+    const r = plan([
+      { channelId: C_CAT, action: "gate", roleIds: [R_ADMIN] },
+      { channelId: C_TEXT, action: "leave", bindKey: "quotes.channel_id" },
+    ]);
+    expect(BigInt(setFor(r.plan, C_TEXT, GUILD)!.deny) & F.ViewChannel).toBe(
+      F.ViewChannel,
+    );
+  });
+
+  it("syncing a channel copies its category's planned state, not the pre-plan one", () => {
+    const r = plan([
+      { channelId: C_CAT, action: "gate", roleIds: [R_ADMIN] },
+      { channelId: C_UNSYNCED, action: "sync", approveReplace: true },
+    ]);
+    expect(
+      BigInt(setFor(r.plan, C_UNSYNCED, GUILD)!.deny) & F.ViewChannel,
+    ).toBe(F.ViewChannel);
+    expect(setFor(r.plan, C_UNSYNCED, R_ADMIN)).toBeDefined();
+  });
+
+  it("sync with a feature binding, or with the bot's own overwrite, reports a partial sync", () => {
+    const bound = plan([
+      {
+        channelId: C_UNSYNCED,
+        action: "sync",
+        bindKey: "quotes.channel_id",
+        approveReplace: true,
+      },
+    ]);
+    expect(bound.warnings).toContain("sync-partial");
+    const s = fixture();
+    s.channels.find((c) => c.id === C_UNSYNCED)!.overwrites = [
+      ow(BOT, F.ViewChannel, 0n, "member"),
+    ];
+    expect(
+      plan([{ channelId: C_UNSYNCED, action: "sync" }], s).warnings,
+    ).toContain("sync-partial");
+  });
+});

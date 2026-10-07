@@ -296,7 +296,7 @@ export const PHASE_ORDER: Record<PlanOperation["type"], number> = {
   "role.delete": 6,
 };
 
-const { ViewChannel, Administrator, ManageRoles, ManageChannels } =
+const { ViewChannel, Connect, Administrator, ManageRoles, ManageChannels } =
   PermissionsBitField.Flags;
 const ALL_PERMISSIONS = PermissionsBitField.All;
 
@@ -1265,12 +1265,14 @@ export function planAdoption(
 
     for (const channel of scanned.channels) {
       if (!after.channels.has(channel.id)) continue; // deleted
+      // Seeing a voice or stage channel is not enough to use it: an admin who
+      // could join must still be able to.
       const a = check(
         scanned.adminUserId,
         scanned.adminRoleIds,
         adminRoles,
         channel.id,
-        ViewChannel,
+        channel.kind === "voice" ? ViewChannel | Connect : ViewChannel,
       );
       if (a.had && !a.has)
         err(

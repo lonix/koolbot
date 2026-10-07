@@ -262,11 +262,21 @@ export const BOT_POSTS: PermissionSet = {
     "ReadMessageHistory",
     "SendMessages",
     "SendMessagesInThreads",
+    "CreatePublicThreads",
+    "CreatePrivateThreads",
     "EmbedLinks",
     "AddReactions",
   ],
   deny: [],
 };
+
+/** The union of permission sets: what a bot needs when several apply at once. */
+export function unionSets(...sets: readonly PermissionSet[]): PermissionSet {
+  return {
+    allow: [...new Set(sets.flatMap((x) => [...x.allow]))],
+    deny: [...new Set(sets.flatMap((x) => [...x.deny]))],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // The notices channel (notices-channel-manager.ts)

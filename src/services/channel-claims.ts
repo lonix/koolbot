@@ -1,8 +1,10 @@
+import { PermissionsBitField } from "discord.js";
 import {
   BOT_CATEGORY,
   BOT_POSTS,
   botGateSet,
   botReadOnlySet,
+  unionSets,
   BOT_VOICE_CATEGORY,
   BOT_VOICE_LOBBY,
   NOTICES_BOT,
@@ -127,6 +129,10 @@ const textTarget = (
  */
 export const FEATURE_TARGETS: readonly FeatureTarget[] = [
   textTarget("quotes.channel_id", "Quotes", {
+    // quote-channel-manager.ts sets up the same read-only channel as notices.
+    botPermissions: NOTICES_BOT,
+    readOnly: true,
+    everyone: NOTICES_EVERYONE,
     purges: {
       enabledKey: "quotes.enabled",
       what: "every few minutes the quote channel cleanup deletes the latest messages KoolBot didn't post, and quote sync (quotes.clear_on_sync) clears the whole channel",
@@ -312,7 +318,14 @@ export function buildClaimsDesiredState(
     }
     valid.push({ claim, channel });
   }
-  const claimed = new Set(valid.map((v) => v.channel.id));
+  // Categories first, so a channel's own claim is composed on top of its
+  // category's planned state rather than on the pre-plan one.
+  valid.sort(
+    (a, b) =>
+      Number(b.channel.kind === "category") -
+      Number(a.channel.kind === "category"),
+  );
+  const claimOf = new Map(valid.map((v) => [v.channel.id, v.claim]));
 
   // ---- role targets -------------------------------------------------------
   const resolveTargets = (
@@ -366,9 +379,18 @@ export function buildClaimsDesiredState(
     family: ChannelFamily,
     feature: FeatureTarget | undefined,
     readOnlyClaim: boolean,
+    actionNeeded = true,
   ): PermissionSet => {
-    if (feature) return feature.botPermissions;
-    return readOnlyClaim ? botReadOnlySet(family) : botGateSet(family);
+    // One set per channel: what the feature needs plus what the claim needs,
+    // so neither a binding nor an action can drop the other's permissions.
+    return unionSets(
+      feature?.botPermissions ?? { allow: [], deny: [] },
+      actionNeeded
+        ? readOnlyClaim
+          ? botReadOnlySet(family)
+          : botGateSet(family)
+        : { allow: [], deny: [] },
+    );
   };
 
   const removals: DesiredOverwriteRemoval[] = [];
@@ -419,7 +441,7 @@ export function buildClaimsDesiredState(
     warned.add(mark);
     issues.push({
       code,
-      message: `"${channel.name}" is only partly ${what}: ${offenders.join(", ")} already ${code === "gate-not-exclusive" ? "can see it" : "can post"} through their own overwrites, which are kept. Change those in Discord, or choose "Sync to category", if you want it exclusive.`,
+      message: `"${channel.name}" is only partly ${what}: ${offenders.join(", ")} already ${code === "gate-not-exclusive" ? "can see it" : "can still post or react"} through their own overwrites, which are kept. Change those in Discord, or choose "Sync to category", if you want it exclusive.`,
       targetId: channel.id,
     });
   };
@@ -469,7 +491,7 @@ export function buildClaimsDesiredState(
     const denyPost: PermissionSet = {
       allow: [],
       deny: readOnlyEveryone(family, {
-        allowReactions: true,
+        allowReactions: claim.allowReactions ?? false,
         lockReplies: claim.lockReplies ?? false,
       }).deny,
     };
@@ -579,7 +601,9 @@ export function buildClaimsDesiredState(
     const voiceChildren = scanned.channels.filter(
       (c) =>
         c.parentId === channel.id &&
-        c.kind === "voice" &&
+        // Cleanup and the managed-set migration only look at voice channels,
+        // not stages (the scan reports both as "voice").
+        channelFamily(c.rawType, c.kind) === "voice" &&
         c.id !== lobbyId &&
         !lobbyNames.has(c.name),
     );
@@ -637,6 +661,40 @@ export function buildClaimsDesiredState(
     }
   };
 
+  /** A channel's overwrites as the plan will leave them so far. */
+  const plannedOverwrites = (
+    ch: ChannelState,
+  ): Array<{
+    id: string;
+    type: "role" | "member";
+    allow: string;
+    deny: string;
+  }> => {
+    const out = new Map(
+      ch.overwrites.map((o) => [
+        o.id,
+        { id: o.id, type: o.type, allow: o.allow, deny: o.deny },
+      ]),
+    );
+    for (const [k, v] of running) {
+      const [cid, tid] = k.split(":") as [string, string];
+      if (cid === ch.id && v.touched) {
+        out.set(tid, { id: tid, type: v.type, allow: v.allow, deny: v.deny });
+      }
+    }
+    return [...out.values()];
+  };
+
+  /** Channels synced to a category that a claim on the category carries over. */
+  const syncedChildren = (category: ChannelState): ChannelState[] =>
+    scanned.channels.filter(
+      (c) =>
+        c.parentId === category.id &&
+        ctx.syncedToParent.get(c.id) === true &&
+        // A child that syncs itself copies the category's planned state.
+        claimOf.get(c.id)?.action !== "sync",
+    );
+
   // ---- per-claim handling -------------------------------------------------
   for (const { claim, channel } of valid) {
     const family = channelFamily(channel.rawType, channel.kind);
@@ -692,10 +750,7 @@ export function buildClaimsDesiredState(
         // the ones synced to it get the identical set. Mirroring it exactly
         // (rather than a per-type variant) keeps them reading as synced.
         if (family === "category") {
-          for (const child of scanned.channels) {
-            if (child.parentId !== channel.id || claimed.has(child.id))
-              continue;
-            if (ctx.syncedToParent.get(child.id) !== true) continue;
+          for (const child of syncedChildren(channel)) {
             gate(child, "mixed", targets, gateBot);
           }
         }
@@ -710,10 +765,7 @@ export function buildClaimsDesiredState(
         const roBot = botSetFor(roFamily, feature, true);
         readOnly(channel, roFamily, claim, posters, roBot);
         if (family === "category") {
-          for (const child of scanned.channels) {
-            if (child.parentId !== channel.id || claimed.has(child.id))
-              continue;
-            if (ctx.syncedToParent.get(child.id) !== true) continue;
+          for (const child of syncedChildren(channel)) {
             readOnly(child, "mixed", claim, posters, roBot);
           }
         }
@@ -731,9 +783,10 @@ export function buildClaimsDesiredState(
           );
           break;
         }
-        const parentKeys = new Set(parent.overwrites.map((o) => o.id));
+        const parentOverwrites = plannedOverwrites(parent);
+        const parentKeys = new Set(parentOverwrites.map((o) => o.id));
         let unmatchedProtected = 0;
-        for (const o of parent.overwrites) {
+        for (const o of parentOverwrites) {
           // Another bot's overwrite is never copied or replaced; if the
           // channel doesn't already match it, it can't read as fully synced.
           if (otherBots.has(o.id) || ctx.integrationRoleIds.has(o.id)) {
@@ -763,6 +816,7 @@ export function buildClaimsDesiredState(
         const own = channel.overwrites.filter(
           (o) => !parentKeys.has(o.id) && o.id !== scanned.botUserId,
         );
+        // (the bot's own overwrite is counted separately below)
         const removable = own.filter((o) => {
           if (otherBots.has(o.id)) return false;
           const role = roles.get(o.id);
@@ -771,7 +825,16 @@ export function buildClaimsDesiredState(
           if (o.type === "member" && !ctx.membersIntent) return false;
           return true;
         });
-        const preserved = own.length - removable.length + unmatchedProtected;
+        // KoolBot's own member overwrite stays (the bot needs its access, and a
+        // bound feature adds to it), so the channel can't read as fully synced.
+        const botOwn =
+          channel.overwrites.some((o) => o.id === scanned.botUserId) &&
+          !parentKeys.has(scanned.botUserId);
+        const preserved =
+          own.length -
+          removable.length +
+          unmatchedProtected +
+          (botOwn || (feature && !parentKeys.has(scanned.botUserId)) ? 1 : 0);
         if (preserved > 0) {
           issues.push({
             code: "sync-partial",
@@ -807,7 +870,28 @@ export function buildClaimsDesiredState(
       layer(channel, scanned.botUserId, "member", feature.botPermissions);
       if (feature.everyone && claim.action === "leave") {
         // e.g. the notices channel: read-only for everyone but the bot.
-        layer(channel, everyoneId, "role", feature.everyone);
+        // Never re-show a channel that is hidden from @everyone, whether by
+        // this plan (a category gate) or already.
+        const hidden =
+          (BigInt(
+            plannedOverwrites(channel).find((o) => o.id === everyoneId)?.deny ??
+              "0",
+          ) &
+            PermissionsBitField.Flags.ViewChannel) !==
+          0n;
+        layer(
+          channel,
+          everyoneId,
+          "role",
+          hidden
+            ? {
+                allow: feature.everyone.allow.filter(
+                  (n) => n !== "ViewChannel" && n !== "ReadMessageHistory",
+                ),
+                deny: feature.everyone.deny,
+              }
+            : feature.everyone,
+        );
       }
     }
   }
