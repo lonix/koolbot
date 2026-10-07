@@ -1144,6 +1144,18 @@ table without querying the moderation log. A **Settings** card on the page edits
 Core section of Settings); saving returns to the page with a flash message, and
 unticking `moderation.enabled` writes only that flag so the other values are kept.
 
+With `moderation.cases.enabled` on, the page also gains a **Cases** section and a **Case** column (#908).
+In the column, a kick or ban row without a case offers an **Open case** form (review in N days, pre-filled from
+`moderation.cases.default_review_days`; clear it for a case with no review date), and a row with one shows its
+number and status. The section groups cases into **Overdue** (review date passed), **Due soon** (next 7 days),
+**No review date** and **Recently resolved** (last 30 days). Each card shows the member, the original reason,
+who acted, the member's **prior log history** (newest 10 entries) and the case's decision trail. A live card
+offers **Uphold** (keep it, schedule the next review), **Extend** (new review date, required), **Make permanent**
+and **Readmit**; staff may decide a case before it is due. Readmit records the decision only, it does not unban in
+Discord. A **Run review pass now** button runs the due-review job on demand. Every decision is written to the
+Web UI audit log. A decision on a case someone else already resolved from another tab is refused with a message
+naming the status it found.
+
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,
 `celebrations.channel_id`). When enabled, the bot posts a loud, server-wide

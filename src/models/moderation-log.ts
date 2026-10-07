@@ -15,8 +15,11 @@ import mongoose, { Document, Schema } from "mongoose";
  *     taken through Discord's native UI or another bot still land in one
  *     place. `source` records which path produced the row.
  *
- * Deliberately kept simple (an append-only history, not a case-management
- * system): no appeals, expiry, or edit workflow. Indexed on
+ * Deliberately kept simple: an append-only history whose rows are never
+ * edited, with no appeals or expiry of its own. Lifecycle state (a review
+ * date and the outcome staff record when it comes due, issue #908) lives in
+ * `moderation-case.ts` and points back at these rows, so the append-only
+ * guarantee holds for every row here. Indexed on
  * `(guildId, userId, createdAt)` so the per-user `/modlog` lookup and the
  * server-wide admin listing are both covered.
  */

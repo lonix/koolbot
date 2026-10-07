@@ -981,6 +981,13 @@ command override in **Server Settings → Integrations → KoolBot**. See
 | `moderation.retention_days` | `365` | Days to keep moderation-log rows before the daily cleanup prunes them. Set to `0` to keep history forever |
 | `core.moderation.enabled` | `false` | Post an embed to the moderation log channel each time an action is recorded, with the member's prior history attached |
 | `core.moderation.channel_id` | `""` | Text channel that receives those embeds. Nothing is posted while this is empty |
+| `moderation.cases.enabled` | `false` | Case lifecycle: lets staff open a case against a kick or ban with an optional review date and record the outcome. Requires `moderation.enabled` |
+| `moderation.cases.review_cron` | `0 9 * * *` | When the job runs that moves cases whose review date has passed into the review queue |
+| `moderation.cases.default_review_days` | `90` | Review date pre-filled (days from now) when staff open a case |
+| `moderation.cases.retention_days` | `0` | Days to keep a resolved case, counted from its last decision. `0` keeps resolved cases forever. Open cases are never pruned |
+| `moderation.cases.history_grace_days` | `365` | How long after a case resolves its member's log history stays exempt from pruning. `0` protects it for as long as the case exists |
+| `core.moderation_review.enabled` | `false` | Post one summary to a channel when cases come due for review. Requires `moderation.cases.enabled` |
+| `core.moderation_review.channel_id` | `""` | Text channel that receives that summary. Nothing is posted while this is empty |
 
 **Notes:**
 
@@ -1012,12 +1019,35 @@ command override in **Server Settings → Integrations → KoolBot**. See
 - Mirroring native actions requires the bot to have the **View Audit Log**
   permission and the `GuildModeration` gateway intent (enabled by default in
   the bot). `/warn` works without View Audit Log.
-- The log is an append-only history, not a case-management system: there are
-  no appeals, expiring warnings, or auto-moderation thresholds.
+- The log is an append-only history: rows are never edited. There are no
+  appeals, expiring warnings, or auto-moderation thresholds — escalation stays
+  a human decision. Lifecycle state lives beside the log, in cases (below).
 - Retention: a daily cleanup job (03:30 server time) prunes rows older than
   `moderation.retention_days` (default: one year). Set it to `0` if the log
   should never be pruned. The job only runs while `moderation.enabled` is
   on.
+- **Cases** (`moderation.cases.*`): a kick or ban can carry a review date.
+  Staff open a case against a log row from the **Case** column of the
+  `/admin/moderation` page; when the date passes, the daily review job moves
+  the case into the review queue (and posts to `core.moderation_review.*`, if
+  set). Staff then **uphold** it (keep the removal, schedule the next
+  review), **extend** it (new review date), **make it permanent**, or
+  **readmit** the member. Every decision is kept in the case's own trail, so
+  the next time the member appears the moderator sees _"two warnings →
+  timeout → removed → reviewed → allowed back"_ instead of reconstructing it.
+  A case records the decision only: KoolBot never unbans for you, so lift a
+  ban in Discord yourself after readmitting. `/modlog` shows each case's state
+  under its kick or ban. Cases only open by hand, and nothing closes one
+  automatically.
+- **Cases and retention:** the daily prune skips every log entry a case
+  references and every row belonging to a member with an open case, or whose
+  case resolved within `moderation.cases.history_grace_days`, so a review
+  never finds its history already deleted. A case opened against an entry on
+  day 1 with a review at day 400 therefore still has its entry on day 400,
+  even with the default 365-day retention. Resolved cases are pruned on their
+  own rule, `moderation.cases.retention_days`.
+- **Privacy:** like the log, cases are moderation records and are excluded from
+  a member's data export and kept when a member resets their data.
 
 ---
 
@@ -1685,6 +1715,13 @@ leave the graph in a broken state.
 - `moderation.retention_days` (number, default: 365)
 - `core.moderation.enabled` (bool, default: false)
 - `core.moderation.channel_id` (string, default: "")
+- `moderation.cases.enabled` (bool, default: false)
+- `moderation.cases.review_cron` (string, default: `"0 9 * * *"`)
+- `moderation.cases.default_review_days` (number, default: 90)
+- `moderation.cases.retention_days` (number, default: 0)
+- `moderation.cases.history_grace_days` (number, default: 365)
+- `core.moderation_review.enabled` (bool, default: false)
+- `core.moderation_review.channel_id` (string, default: "")
 
 #### Cleanup
 
@@ -1757,6 +1794,7 @@ apply to the next log message — no restart is needed.
 | `core.config.enabled` / `core.config.channel_id` | bool / channel | `false` / `""` | Configuration reloads and their outcome |
 | `core.cron.enabled` / `core.cron.channel_id` | bool / channel | `false` / `""` | Scheduled-job outcomes (announcements, digests, other cron tasks) |
 | `core.moderation.enabled` / `core.moderation.channel_id` | bool / channel | `false` / `""` | Recorded moderation actions plus the member's prior history (needs `moderation.enabled`) |
+| `core.moderation_review.enabled` / `core.moderation_review.channel_id` | bool / channel | `false` / `""` | Daily summary of moderation cases that came due for review (needs `moderation.cases.enabled`) |
 | `core.updates.enabled` / `core.updates.channel_id` | bool / channel | `false` / `""` | One-time note when the update check first sees a newer KoolBot release (needs `core.updatecheck.enabled`) |
 
 Point every category at one channel for a single consolidated log, or split

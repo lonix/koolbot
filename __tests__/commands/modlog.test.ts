@@ -19,6 +19,23 @@ jest.unstable_mockModule("../../src/services/moderation-service.js", () => ({
   },
 }));
 
+// Case lines (#908) come from the case service, off unless a test opts in.
+const mockCasesEnabled = jest.fn<() => Promise<boolean>>();
+const mockGetCasesForEntries =
+  jest.fn<(guildId: string, ids: unknown[]) => Promise<Map<string, unknown>>>();
+
+jest.unstable_mockModule(
+  "../../src/services/moderation-case-service.js",
+  () => ({
+    ModerationCaseService: {
+      getInstance: jest.fn(() => ({
+        isEnabled: mockCasesEnabled,
+        getCasesForEntries: mockGetCasesForEntries,
+      })),
+    },
+  }),
+);
+
 jest.unstable_mockModule("../../src/utils/logger.js", () => ({
   default: {
     info: jest.fn(),
@@ -72,6 +89,11 @@ function embedDescription(editReply: jest.Mock): string {
   const payload = editReply.mock.calls[0][0] as { embeds: EmbedBuilder[] };
   return payload.embeds[0].data.description ?? "";
 }
+
+beforeEach(() => {
+  mockCasesEnabled.mockReset().mockResolvedValue(false);
+  mockGetCasesForEntries.mockReset().mockResolvedValue(new Map());
+});
 
 describe("Modlog Command", () => {
   it("has the correct command name", () => {
@@ -165,6 +187,161 @@ describe("Modlog Command", () => {
       expect(embedDescription(editReply)).toContain("\n> Spamming");
     });
   });
+
+  // #908: a kick or ban that has a case shows its state under the entry.
+  describe("case lines (#908)", () => {
+    const at = new Date("2026-03-12T00:00:00Z");
+    const ts = Math.floor(at.getTime() / 1000);
+
+    const removal = (
+      id: string,
+      action: "kick" | "ban" = "kick",
+      reason = "spam",
+    ) => ({
+      _id: id,
+      guildId: "guild-1",
+      userId: "target-1",
+      moderatorId: "123456789012345678",
+      action,
+      reason,
+      source: "audit",
+      createdAt: new Date("2026-01-12T00:00:00Z"),
+    });
+
+    const withCases = (cases: Record<string, unknown>) => {
+      mockCasesEnabled.mockResolvedValue(true);
+      mockGetCasesForEntries.mockResolvedValue(new Map(Object.entries(cases)));
+    };
+
+    beforeEach(() => {
+      mockIsEnabled.mockReset().mockResolvedValue(true);
+      mockCountHistory.mockReset().mockResolvedValue(1);
+      mockGetHistory.mockReset();
+    });
+
+    it.each([
+      [
+        "an open case with a review date",
+        { status: "open", reviewAt: at, events: [] },
+        `Case #14 — open, review <t:${ts}:D>`,
+      ],
+      [
+        "an open case without one",
+        { status: "open", reviewAt: null, events: [] },
+        "Case #14 — open, no review date",
+      ],
+      [
+        "a case under review",
+        { status: "under_review", reviewAt: at, events: [] },
+        `Case #14 — under review, due <t:${ts}:D>`,
+      ],
+      [
+        "a readmitted case, naming who decided",
+        {
+          status: "lifted",
+          reviewAt: null,
+          events: [{ at, byUserId: "staff-9" }],
+        },
+        `Case #14 — readmitted <t:${ts}:D> by <@staff-9>`,
+      ],
+      [
+        "a permanent case",
+        {
+          status: "upheld",
+          reviewAt: null,
+          events: [{ at, byUserId: "staff-9" }],
+        },
+        `Case #14 — made permanent <t:${ts}:D> by <@staff-9>`,
+      ],
+      [
+        "an expired case",
+        { status: "expired", reviewAt: null, events: [] },
+        "Case #14 — expired",
+      ],
+    ])("shows %s", async (_label, caseDoc, expected) => {
+      mockGetHistory.mockResolvedValue([removal("e1")]);
+      withCases({ e1: { caseNumber: 14, ...caseDoc } });
+      const { interaction, editReply } = makeInteraction();
+
+      await execute(interaction);
+
+      expect(embedDescription(editReply)).toContain(`\n${expected}`);
+    });
+
+    it("looks cases up once for the page, keyed on the page's entry ids", async () => {
+      mockGetHistory.mockResolvedValue([removal("e1"), removal("e2", "ban")]);
+      withCases({});
+      const { interaction } = makeInteraction();
+
+      await execute(interaction);
+
+      expect(mockGetCasesForEntries).toHaveBeenCalledTimes(1);
+      expect(mockGetCasesForEntries).toHaveBeenCalledWith("guild-1", [
+        "e1",
+        "e2",
+      ]);
+    });
+
+    it("leaves entries without a case, and every entry when cases are off, unchanged", async () => {
+      mockGetHistory.mockResolvedValue([removal("e1")]);
+      withCases({});
+      const first = makeInteraction();
+      await execute(first.interaction);
+      expect(embedDescription(first.editReply)).not.toContain("Case #");
+
+      mockCasesEnabled.mockResolvedValue(false);
+      mockGetCasesForEntries.mockClear();
+      await execute(makeInteraction().interaction);
+      expect(mockGetCasesForEntries).not.toHaveBeenCalled();
+    });
+
+    it("still shows the history when the case lookup fails", async () => {
+      mockGetHistory.mockResolvedValue([removal("e1")]);
+      mockCasesEnabled.mockResolvedValue(true);
+      mockGetCasesForEntries.mockRejectedValue(new Error("mongo down"));
+      const { interaction, editReply } = makeInteraction();
+
+      await execute(interaction);
+
+      expect(embedDescription(editReply)).toContain("Kick");
+    });
+
+    it("keeps a full page of maximal reasons plus case lines within 4096 characters", async () => {
+      const entries = Array.from({ length: PAGE_SIZE }, (_, i) =>
+        removal(
+          `e${i}`,
+          "ban",
+          `${String(i).padStart(3, "0")} ${"r".repeat(508)}`,
+        ),
+      );
+      mockCountHistory.mockResolvedValue(PAGE_SIZE);
+      mockGetHistory.mockResolvedValue(entries);
+      withCases(
+        Object.fromEntries(
+          entries.map((e) => [
+            e._id,
+            {
+              caseNumber: 1000,
+              status: "lifted",
+              reviewAt: null,
+              events: [{ at, byUserId: "123456789012345678" }],
+            },
+          ]),
+        ),
+      );
+      const { interaction, editReply } = makeInteraction();
+
+      await execute(interaction);
+
+      const description = embedDescription(editReply);
+      expect(description.length).toBeLessThanOrEqual(4096);
+      // Whatever is shown is shown whole, and anything dropped is said so.
+      const shown = description.match(/Case #1000/g)?.length ?? 0;
+      expect(shown).toBeGreaterThan(0);
+      if (shown < PAGE_SIZE) expect(description).toContain("more on this page");
+    });
+  });
+
   // The history count + page query are DB round trips; the handler must
   // acknowledge (ephemerally — visibility is fixed at the first ACK) before
   // them so a slow query cannot miss Discord's 3-second window (#842).

@@ -72,6 +72,7 @@ describe("DiscordLogger (#844)", () => {
         "cron",
         "errors",
         "moderation",
+        "moderation_review",
         "startup",
         "updates",
       ]);

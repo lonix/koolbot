@@ -56,6 +56,7 @@ import { EventService } from "./services/event-service.js";
 import { LfgService } from "./services/lfg-service.js";
 import { ReminderService } from "./services/reminder-service.js";
 import { ModerationService } from "./services/moderation-service.js";
+import { ModerationCaseReviewService } from "./services/moderation-case-review-service.js";
 import { WizardService } from "./services/wizard-service.js";
 import { MonitoringService } from "./services/monitoring-service.js";
 import {
@@ -513,6 +514,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         WebAuditLogCleanupService.getInstance().destroy();
         VersionCheckService.getInstance().destroy();
         ModerationLogCleanupService.getInstance().destroy();
+        moderationCaseReviewService.destroy();
         nameHistoryCleanup?.destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
@@ -595,6 +597,7 @@ let eventService: EventService;
 let lfgService: LfgService;
 let reminderService: ReminderService;
 let moderationService: ModerationService;
+let moderationCaseReviewService: ModerationCaseReviewService;
 
 // Wrap service instantiation in try-catch to ensure errors are caught
 try {
@@ -626,6 +629,7 @@ try {
   lfgService = LfgService.getInstance(client);
   reminderService = ReminderService.getInstance(client);
   moderationService = ModerationService.getInstance(client);
+  moderationCaseReviewService = ModerationCaseReviewService.getInstance(client);
 } catch (error) {
   logger.error("❌ Fatal error during service instantiation:", error);
   process.exit(1);
@@ -779,6 +783,10 @@ async function initializeServices(): Promise<void> {
     // Start the moderation-log retention cleanup cron (#742). Gates on
     // `moderation.enabled` and `moderation.retention_days` at run time.
     ModerationLogCleanupService.getInstance().start();
+
+    // Start the due-review job for moderation cases (#908). Gates on
+    // `moderation.enabled` and `moderation.cases.enabled`.
+    await moderationCaseReviewService.start();
 
     // Name history (#1038): retention cleanup cron, plus a clear startup
     // warning when nicknames cannot be recorded for lack of the intent.

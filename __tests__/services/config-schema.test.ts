@@ -487,6 +487,9 @@ describe("Config Schema", () => {
       "messagetracking.enabled": false,
       "reactiontracking.enabled": false,
       "moderation.enabled": false,
+      // Moderation cases (#908) — the lifecycle is its own opt-in on top of
+      // the log, so an upgrade changes nothing until an operator turns it on.
+      "moderation.cases.enabled": false,
       // Name history (#1038) — both gates ship off.
       "aka.enabled": false,
       "namehistory.enabled": false,
@@ -544,6 +547,9 @@ describe("Config Schema", () => {
       // Moderation context notices (#907) — same opt-in posture, and they
       // additionally require the `moderation.enabled` master gate.
       "core.moderation.enabled": false,
+      // Moderation case review notice (#908) — same opt-in posture; needs
+      // `moderation.cases.enabled`.
+      "core.moderation_review.enabled": false,
       // Update-available note (#1029) — same opt-in posture as the other
       // log categories.
       "core.updates.enabled": false,

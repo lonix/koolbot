@@ -28,6 +28,7 @@ import type { BotStatusPool } from "../content/statuses.js";
 import type { GuildVoiceHeatmap } from "../services/voice-activity-analytics.js";
 import type { ModerationAction } from "../models/moderation-log.js";
 import type { TicketStatus } from "../models/ticket.js";
+import type { CaseGroups, CaseView } from "./moderation-case-groups.js";
 import type { VersionCheckSnapshot } from "../services/version-check-service.js";
 import { formatVersion } from "../utils/semver.js";
 
@@ -4490,6 +4491,11 @@ ${renderFeatureSettingsCard({
 // ---------- Moderation log (issue #728) ----------
 
 export interface ModerationRow {
+  /** The log row's id; the "Open case" form posts it (#908). */
+  entryId: string;
+  /** The case opened against this row, if any. */
+  caseNumber: number | null;
+  caseStatus: string | null;
   createdAt: string;
   userId: string;
   userLabel: string;
@@ -4514,6 +4520,12 @@ export interface ModerationProps extends CommonProps {
   total: number;
   page: number;
   pageSize: number;
+  /** `moderation.cases.enabled` (and the master) — gates the whole section. */
+  casesEnabled?: boolean;
+  /** Pre-filled review window on the "Open case" and decision forms. */
+  defaultReviewDays?: number;
+  /** The review queue; null when cases are off or it could not be read. */
+  caseGroups?: CaseGroups | null;
   /**
    * The moderation keys, edited in place on this page (#977) through
    * {@link renderFeatureSettingsCard}: the `moderation.*` master and
@@ -4563,6 +4575,147 @@ function buildModerationQueryString(
   return parts.length === 0 ? "" : `?${parts.join("&")}`;
 }
 
+const CASE_STATUS_LABELS: Record<string, string> = {
+  open: "open",
+  under_review: "under review",
+  upheld: "upheld",
+  lifted: "readmitted",
+  expired: "expired",
+};
+
+function caseStatusTag(status: string): string {
+  const cls =
+    status === "under_review"
+      ? "tag-warn"
+      : status === "lifted"
+        ? "tag-on"
+        : status === "upheld"
+          ? "tag-off"
+          : "tag-off";
+  return `<span class="tag ${cls}">${escapeHtml(CASE_STATUS_LABELS[status] ?? status)}</span>`;
+}
+
+/** The Case column: the case's number and status, or a form to open one. */
+function renderRowCaseCell(row: ModerationRow, props: ModerationProps): string {
+  if (row.caseNumber !== null) {
+    return `#${row.caseNumber} ${caseStatusTag(row.caseStatus ?? "open")}`;
+  }
+  if (row.action !== "kick" && row.action !== "ban") {
+    return '<span class="muted">—</span>';
+  }
+  return `<details class="helper edit-details"><summary>Open case</summary>
+    <form method="POST" action="/admin/moderation/cases/open" class="stack">
+      <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+      <input type="hidden" name="entry_id" value="${escapeHtml(row.entryId)}">
+      <label>Review in (days)<input type="number" name="review_in_days" min="1" max="3650" value="${props.defaultReviewDays ?? 90}"></label>
+      <p class="muted">Clear the days for a case with no review date.</p>
+      <label>Note<input type="text" name="note" maxlength="500"></label>
+      <button type="submit" class="btn btn-primary btn-sm">Open case</button>
+    </form>
+  </details>`;
+}
+
+function renderCaseHistory(c: CaseView): string {
+  if (c.history.length === 0) {
+    return '<p class="muted">No other history on file.</p>';
+  }
+  const items = c.history
+    .map(
+      (h) =>
+        `<li><span class="mono muted">${escapeHtml(h.createdAt.slice(0, 10))}</span> ${moderationActionTag(h.action)} ${
+          h.reason
+            ? escapeHtml(h.reason.slice(0, 200))
+            : '<span class="muted">no reason</span>'
+        }</li>`,
+    )
+    .join("");
+  return `<ul class="muted">${items}</ul>`;
+}
+
+function renderCaseEvents(c: CaseView): string {
+  return `<ul class="muted">${c.events
+    .map((e) => {
+      const what = e.outcome
+        ? escapeHtml(e.outcome)
+        : e.to === "under_review"
+          ? "came due"
+          : "opened";
+      return `<li><span class="mono">${escapeHtml(e.at.slice(0, 10))}</span> ${what} by ${escapeHtml(e.byLabel)}${
+        e.note ? ` — ${escapeHtml(e.note)}` : ""
+      }</li>`;
+    })
+    .join("")}</ul>`;
+}
+
+function renderCaseActions(c: CaseView, props: ModerationProps): string {
+  const base = `/admin/moderation/cases/${encodeURIComponent(c.id)}`;
+  const days = props.defaultReviewDays ?? 90;
+  return `<form method="POST" action="${base}/uphold" class="stack">
+      <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+      <label>Next review in (days)<input type="number" name="next_review_in_days" min="1" max="3650" value="${days}"></label>
+      <label>Note<input type="text" name="note" maxlength="500"></label>
+      <div class="inline-form">
+        <button type="submit" class="btn btn-sm">Uphold</button>
+        <button type="submit" class="btn btn-sm" formaction="${base}/extend">Extend</button>
+        <button type="submit" class="btn btn-sm btn-danger" formaction="${base}/permanent" onclick="return confirm('Make this removal permanent? The case closes with no further review.');">Make permanent</button>
+        <button type="submit" class="btn btn-primary btn-sm" formaction="${base}/readmit" onclick="return confirm('Record readmission? KoolBot does not unban in Discord; do that there.');">Readmit</button>
+      </div>
+      <p class="muted">Uphold keeps the removal and schedules the next review (clear the days for none). Extend needs a date. Readmit records the decision only; lift the ban in Discord yourself.</p>
+    </form>`;
+}
+
+function renderCaseCard(c: CaseView, props: ModerationProps): string {
+  const review = c.reviewAt
+    ? `review ${escapeHtml(c.reviewAt.slice(0, 10))}`
+    : "no review date";
+  return `<div class="card">
+  <h3>Case #${c.caseNumber} · <span title="${escapeHtml(c.userId)}">${escapeHtml(c.userLabel)}</span> ${moderationActionTag(c.action)} ${caseStatusTag(c.status)}</h3>
+  <p class="muted">${c.live ? review : `closed ${escapeHtml(c.events[c.events.length - 1]?.at.slice(0, 10) ?? "")}`} · opened ${escapeHtml(c.openedAt.slice(0, 10))} by ${escapeHtml(c.openedByLabel)}${
+    c.originModeratorLabel
+      ? ` · action by ${escapeHtml(c.originModeratorLabel)}`
+      : ""
+  }</p>
+  <p>${c.reason ? escapeHtml(c.reason.slice(0, 300)) : '<span class="muted">No reason recorded.</span>'}</p>
+  <details class="helper" ${c.live ? "open" : ""}><summary>Prior history</summary>${renderCaseHistory(c)}</details>
+  <details class="helper"><summary>Decisions</summary>${renderCaseEvents(c)}</details>
+  ${c.live ? renderCaseActions(c, props) : ""}
+</div>`;
+}
+
+function renderCaseGroup(
+  title: string,
+  empty: string,
+  cases: CaseView[],
+  props: ModerationProps,
+): string {
+  return `<h3>${escapeHtml(title)} (${cases.length})</h3>${
+    cases.length === 0
+      ? `<div class="empty">${escapeHtml(empty)}</div>`
+      : cases.map((c) => renderCaseCard(c, props)).join("")
+  }`;
+}
+
+/** The Cases section: the review queue, grouped. Empty string when off. */
+function renderCasesSection(props: ModerationProps): string {
+  if (!props.casesEnabled) return "";
+  const groups = props.caseGroups;
+  const body = groups
+    ? `${renderCaseGroup("Overdue", "Nothing is waiting for review.", groups.overdue, props)}
+${renderCaseGroup("Due soon", "Nothing falls due in the next 7 days.", groups.dueSoon, props)}
+${renderCaseGroup("No review date", "No open case is without a review date.", groups.indefinite, props)}
+${renderCaseGroup("Recently resolved", "Nothing was resolved in the last 30 days.", groups.recentlyResolved, props)}`
+    : '<div class="notice">The case queue could not be read. Check the bot\'s logs and reload the page.</div>';
+  return `<div class="card">
+  <h2>Cases</h2>
+  <p class="subtitle">A case adds a review date to a kick or ban and records what staff decided when it came due. Escalation stays a human decision. Open a case from the <strong>Case</strong> column of the log below.</p>
+  <form method="POST" action="/admin/moderation/cases/run-review" class="inline-form" onsubmit="return confirm('Move every case whose review date has passed into review now?');">
+    <input type="hidden" name="_csrf" value="${escapeHtml(props.csrfToken)}">
+    <button type="submit" class="btn btn-sm">Run review pass now</button>
+  </form>
+  ${body}
+</div>`;
+}
+
 export function renderModerationPage(props: ModerationProps): string {
   const totalPages = Math.max(1, Math.ceil(props.total / props.pageSize));
   const page = Math.min(Math.max(1, props.page), totalPages);
@@ -4588,7 +4741,7 @@ export function renderModerationPage(props: ModerationProps): string {
       : `<table>
 <thead><tr>
 <th scope="col">When</th><th scope="col">User</th><th scope="col">Action</th><th scope="col">Moderator</th>
-<th scope="col">Reason</th><th scope="col">Source</th>
+<th scope="col">Reason</th><th scope="col">Source</th>${props.casesEnabled ? '<th scope="col">Case</th>' : ""}
 </tr></thead>
 <tbody>${props.rows
           .map((r) => {
@@ -4604,6 +4757,7 @@ export function renderModerationPage(props: ModerationProps): string {
 <td>${moderator}</td>
 <td class="muted">${r.reason ? escapeHtml(r.reason.slice(0, 200)) : "—"}</td>
 <td class="muted">${escapeHtml(r.source)}</td>
+${props.casesEnabled ? `<td>${renderRowCaseCell(r, props)}</td>` : ""}
 </tr>`;
           })
           .join("")}</tbody></table>`;
@@ -4642,6 +4796,8 @@ ${renderFeatureSettingsCard({
   dependencyState: props.dependencyState,
   unavailable: props.settingsUnavailable,
 })}
+
+${renderCasesSection(props)}
 
 <div class="card">
   <h2>Filters</h2>

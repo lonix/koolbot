@@ -56,6 +56,8 @@ export const TEXT_LIMITS = {
   pollQuestion: 300,
   /** Discord poll answer (option) cap. */
   pollAnswer: 55,
+  /** Staff note recorded on a moderation case decision (#908). */
+  caseNote: 500,
   /** Ceiling for any single free-text setting value. */
   configValue: 2000,
 } as const;
@@ -347,7 +349,15 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
     "aka.enabled",
     "namehistory.retention_days",
   ],
-  moderation: ["moderation.enabled", "moderation.retention_days"],
+  moderation: [
+    // `moderation.enabled` stays first: it is the master gate the apply step
+    // derives; `moderation.cases.enabled` is an extra gate (below).
+    "moderation.enabled",
+    "moderation.retention_days",
+    "moderation.cases.enabled",
+    "moderation.cases.default_review_days",
+    "moderation.cases.review_cron",
+  ],
   events: [
     "events.enabled",
     "events.category_id",
@@ -399,6 +409,7 @@ export const WIZARD_FEATURE_SETTINGS: Record<string, string[]> = {
  */
 export const WIZARD_FEATURE_EXTRA_GATES: Record<string, string[]> = {
   namehistory: ["aka.enabled"],
+  moderation: ["moderation.cases.enabled"],
 };
 
 export const WIZARD_FEATURE_ORDER = [
