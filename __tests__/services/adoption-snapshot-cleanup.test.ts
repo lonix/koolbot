@@ -106,5 +106,14 @@ describe("AdoptionSnapshotCleanupService", () => {
     const cutoff = (filter as { heartbeatAt: { $lt: Date } }).heartbeatAt.$lt;
     expect(Math.round((Date.now() - cutoff.getTime()) / 60000)).toBe(30);
     expect(update).toEqual({ $set: { status: "partial", active: false } });
+    // A dead rollback is handed back as rollback_partial, not as resumable.
+    const [rollbackFilter, rollbackUpdate] = mockUpdateMany.mock.calls[1];
+    expect(rollbackFilter).toMatchObject({
+      active: true,
+      status: "rolling_back",
+    });
+    expect(rollbackUpdate).toEqual({
+      $set: { status: "rollback_partial", active: false },
+    });
   });
 });

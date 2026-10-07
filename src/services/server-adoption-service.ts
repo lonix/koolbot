@@ -520,6 +520,14 @@ export class ServerAdoptionService {
             record.status = "skipped";
             record.error = "Skipped: an earlier config change failed.";
             progress.skipped++;
+            await this.auditOp(
+              options.actor,
+              plan,
+              snapshot.id,
+              op,
+              "failure",
+              record.error,
+            );
             await persist();
             options.onProgress?.({ ...progress });
             continue;
@@ -1152,7 +1160,11 @@ export class ServerAdoptionService {
     // Take the lock before anything is read-modify-written, so a concurrent
     // resume cannot have its progress overwritten by reconciliation.
     if (
-      !(await store.claim(snapshotId, ["applied", "partial"], "rolling_back"))
+      !(await store.claim(
+        snapshotId,
+        ["applied", "partial", "rollback_partial"],
+        "rolling_back",
+      ))
     ) {
       throw new AdoptionPlanError(
         "Snapshot is still being applied or rolled back; wait for it to finish before rolling back.",
@@ -1506,8 +1518,9 @@ export class ServerAdoptionService {
         rolledBackBy: options.actor.discordUserId,
       });
     } else {
-      // Back to its prior status so the rollback can be retried.
-      await store.update(snapshotId, { status: priorStatus });
+      // Some of it may already be undone, so the snapshot must not be resumed
+      // as an apply; only another rollback can pick it up.
+      await store.update(snapshotId, { status: "rollback_partial" });
     }
     try {
       await this.deps.config.reload();
@@ -1603,15 +1616,20 @@ export class MongoAdoptionStore implements AdoptionStore {
     guildId: string,
     staleAfterMs: number,
   ): Promise<number> {
-    const result = await AdoptionSnapshot.updateMany(
-      {
-        guildId,
-        active: true,
-        heartbeatAt: { $lt: new Date(Date.now() - staleAfterMs) },
-      },
+    const stale = {
+      guildId,
+      active: true,
+      heartbeatAt: { $lt: new Date(Date.now() - staleAfterMs) },
+    };
+    const applies = await AdoptionSnapshot.updateMany(
+      { ...stale, status: "applying" },
       { $set: { status: "partial", active: false } },
     );
-    return result.modifiedCount ?? 0;
+    const rollbacks = await AdoptionSnapshot.updateMany(
+      { ...stale, status: "rolling_back" },
+      { $set: { status: "rollback_partial", active: false } },
+    );
+    return (applies.modifiedCount ?? 0) + (rollbacks.modifiedCount ?? 0);
   }
   public async claim(
     id: string,

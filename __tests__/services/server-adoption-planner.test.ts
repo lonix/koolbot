@@ -399,7 +399,7 @@ describe("planAdoption: destructive operations", () => {
         }),
         channel({
           id: "chat",
-          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+          overwrites: [{ id: "staff", type: "role", allow: VIEW, deny: "0" }],
         }),
       ],
     });
@@ -410,7 +410,7 @@ describe("planAdoption: destructive operations", () => {
         { kind: "channel", id: "old" },
         { kind: "role", id: "member" },
       ],
-      overwriteRemovals: [{ channelId: "chat", targetId: "member" }],
+      overwriteRemovals: [{ channelId: "chat", targetId: "staff" }],
     });
     expect(codes(plan)).toEqual([
       "approval-required",
@@ -446,11 +446,11 @@ describe("planAdoption: destructive operations", () => {
         { kind: "channel", id: "old" },
         { kind: "role", id: "member" },
       ],
-      overwriteRemovals: [{ channelId: "chat", targetId: "member" }],
+      overwriteRemovals: [{ channelId: "chat", targetId: "staff" }],
       approvals: [
         approval("channel.delete", "old"),
         approval("role.delete", "member"),
-        approval("overwrite.remove", "chat:member"),
+        approval("overwrite.remove", "chat:staff"),
       ],
     });
     expect(plan.errors).toEqual([]);
@@ -478,10 +478,7 @@ describe("planAdoption: destructive operations", () => {
         approval("role.delete", "member"),
       ],
     });
-    expect(plan.baseline.channels.map((c) => c.id).sort()).toEqual([
-      "chat",
-      "old",
-    ]);
+    expect(plan.baseline.channels.map((c) => c.id)).toEqual(["old"]);
     expect(
       plan.baseline.channels.find((c) => c.id === "old")!.overwrites,
     ).toHaveLength(1);
@@ -1096,5 +1093,28 @@ describe("planAdoption: round twelve", () => {
   it("records the names of roles to be created so apply can check they are still absent", () => {
     const plan = planAdoption(scan(), { roles: [{ name: "Newcomers" }] });
     expect(plan.baseline.absentRoleNames).toEqual(["Newcomers"]);
+  });
+});
+
+describe("planAdoption: round thirteen", () => {
+  it("treats overwrites on a role being deleted as redundant", () => {
+    const state = scan({
+      channels: [
+        channel({
+          id: "chat",
+          overwrites: [{ id: "member", type: "role", allow: VIEW, deny: "0" }],
+        }),
+      ],
+    });
+    const plan = planAdoption(state, {
+      deletions: [{ kind: "role", id: "member" }],
+      overwriteRemovals: [{ channelId: "chat", targetId: "member" }],
+      overwrites: [
+        { channelId: "chat", target: { id: "member" }, allow: "0", deny: VIEW },
+      ],
+      approvals: [approval("role.delete", "member")],
+    });
+    expect(plan.errors).toEqual([]);
+    expect(plan.operations.map((o) => o.type)).toEqual(["role.delete"]);
   });
 });

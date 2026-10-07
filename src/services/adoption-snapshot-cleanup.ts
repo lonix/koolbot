@@ -69,11 +69,19 @@ export class AdoptionSnapshotCleanupService extends ScheduledService<AdoptionSna
   public async recoverStale(): Promise<number> {
     try {
       const cutoff = new Date(Date.now() - ADOPTION_STALE_AFTER_MS);
-      const result = await AdoptionSnapshot.updateMany(
-        { active: true, heartbeatAt: { $lt: cutoff } },
+      // Direction matters: a dead apply can be resumed, but a dead rollback
+      // must only ever be continued as a rollback.
+      const stale = { active: true, heartbeatAt: { $lt: cutoff } };
+      const applies = await AdoptionSnapshot.updateMany(
+        { ...stale, status: "applying" },
         { $set: { status: "partial", active: false } },
       );
-      const recovered = result.modifiedCount ?? 0;
+      const rollbacks = await AdoptionSnapshot.updateMany(
+        { ...stale, status: "rolling_back" },
+        { $set: { status: "rollback_partial", active: false } },
+      );
+      const recovered =
+        (applies.modifiedCount ?? 0) + (rollbacks.modifiedCount ?? 0);
       if (recovered > 0) {
         logger.warn(
           `Recovered ${recovered} stale adoption snapshot(s) to partial`,

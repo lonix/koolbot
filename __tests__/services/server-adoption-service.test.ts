@@ -242,7 +242,7 @@ function harness() {
             staleIds.has(r.id) &&
             (r.status === "applying" || r.status === "rolling_back")
           ) {
-            r.status = "partial";
+            r.status = r.status === "applying" ? "partial" : "rollback_partial";
             n++;
           }
         }
@@ -577,7 +577,7 @@ describe("ServerAdoptionService.rollback", () => {
     h.failOn.add("editRole:member:color");
     const r = await h.service.rollback(applied.snapshotId, { actor });
     expect(r.failed).toHaveLength(1);
-    expect(h.records.get(applied.snapshotId)!.status).toBe("applied");
+    expect(h.records.get(applied.snapshotId)!.status).toBe("rollback_partial");
   });
 });
 
@@ -746,7 +746,7 @@ describe("review hardening, round two", () => {
     };
     await h.service.rollback(applied.snapshotId, { actor });
     expect(during).toBe("rolling_back");
-    expect(h.records.get(applied.snapshotId)!.status).toBe("applied");
+    expect(h.records.get(applied.snapshotId)!.status).toBe("rollback_partial");
   });
 
   it("will not delete a channel that has members connected at delete time", async () => {
@@ -1548,5 +1548,50 @@ describe("review hardening, round twelve", () => {
       opts,
     );
     expect(h.service.getJob(first.id)).toBeUndefined();
+  });
+});
+
+describe("review hardening, round thirteen", () => {
+  it("a dead rollback can only be continued as a rollback, never resumed as an apply", async () => {
+    const h = harness();
+    const p = planAdoption(scanned(), {
+      roles: [{ id: "member", name: "Member", color: 2 }],
+    });
+    const applied = await h.service.apply(p, opts);
+    const rec = h.records.get(applied.snapshotId)!;
+    rec.status = "rolling_back";
+    h.staleIds.add(rec.id);
+    // Another admin's apply for the same server triggers stale recovery.
+    await h.deps.store.recoverStale("g1", 0);
+    expect(rec.status).toBe("rollback_partial");
+    await expect(
+      h.service.apply(p, { ...opts, resumeSnapshotId: applied.snapshotId }),
+    ).rejects.toThrow(/cannot be resumed/);
+    const r = await h.service.rollback(applied.snapshotId, { actor });
+    expect(r.failed).toEqual([]);
+    expect(rec.status).toBe("rolled_back");
+  });
+
+  it("audits the config operations it skips", async () => {
+    const h = harness();
+    const audits: string[] = [];
+    h.deps.audit = async (_s, e) => {
+      audits.push(`${e.action}:${e.result}`);
+    };
+    const p = planAdoption(
+      scanned({ config: { "adoption.snapshot.retention_days": 90 } }),
+      {
+        config: {
+          "adoption.snapshot.retention_days": 30,
+          "core.web_audit.retention_days": 10,
+        },
+      },
+    );
+    const first = p.operations[0] as { key: string; value: unknown };
+    h.failOn.add(`config:${first.key}=${first.value}`);
+    await new ServerAdoptionService(h.deps).apply(p, opts);
+    expect(
+      audits.filter((a) => a === "adoption.config.set:failure"),
+    ).toHaveLength(2);
   });
 });

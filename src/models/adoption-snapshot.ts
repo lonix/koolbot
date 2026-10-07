@@ -14,7 +14,13 @@ import mongoose, { Document, Schema } from "mongoose";
 export const ADOPTION_STALE_AFTER_MS = 30 * 60 * 1000;
 
 export type AdoptionSnapshotStatus =
-  "applying" | "rolling_back" | "applied" | "partial" | "rolled_back";
+  | "applying"
+  | "rolling_back"
+  | "applied"
+  | "partial"
+  /** A rollback that stopped part-way: only a rollback may claim it. */
+  | "rollback_partial"
+  | "rolled_back";
 
 export type AdoptionOperationStatus =
   "pending" | "applied" | "failed" | "skipped";
@@ -86,7 +92,14 @@ const AdoptionSnapshotSchema = new Schema<IAdoptionSnapshot>(
     appliedBy: { type: String, required: true },
     status: {
       type: String,
-      enum: ["applying", "rolling_back", "applied", "partial", "rolled_back"],
+      enum: [
+        "applying",
+        "rolling_back",
+        "applied",
+        "partial",
+        "rollback_partial",
+        "rolled_back",
+      ],
       required: true,
       default: "applying",
     },

@@ -713,6 +713,11 @@ export function planAdoption(
   }
 
   // ---- overwrites ----------------------------------------------------
+  // Deleting a role deletes its channel overwrites too, so a request that also
+  // touches one of them is redundant (and the removal would find nothing).
+  const deletingRoleIds = new Set(
+    (desired.deletions ?? []).flatMap((d) => (d.kind === "role" ? [d.id] : [])),
+  );
   const seenOverwrites = new Map<string, { allow: string; deny: string }>();
   for (const want of desired.overwrites ?? []) {
     const channel = channelsById.get(want.channelId);
@@ -754,6 +759,7 @@ export function planAdoption(
         continue;
       }
     }
+    if (targetType === "role" && deletingRoleIds.has(targetId)) continue;
     if (!isValidBitfield(want.allow) || !isValidBitfield(want.deny)) {
       err(
         "invalid-permissions",
@@ -1037,6 +1043,7 @@ export function planAdoption(
   );
   for (const rem of desired.overwriteRemovals ?? []) {
     if (deletingChannels.has(rem.channelId)) continue;
+    if (deletingRoleIds.has(rem.targetId)) continue;
     const channel = channelsById.get(rem.channelId);
     const existing = channel?.overwrites.find((o) => o.id === rem.targetId);
     if (!channel || !existing) continue; // nothing to remove: idempotent
