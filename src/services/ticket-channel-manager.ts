@@ -3,10 +3,12 @@ import {
   AttachmentBuilder,
   ChannelType,
   Client,
+  DiscordAPIError,
   EmbedBuilder,
   Guild,
   GuildMember,
   PermissionFlagsBits,
+  RESTJSONErrorCodes,
   TextChannel,
   type Message,
   type OverwriteResolvable,
@@ -315,7 +317,15 @@ export class TicketChannelManager {
     if (ticket.status === "closed")
       return { ok: false, reason: "already-closed" };
     const settings = await this.getSettings();
-    const channel = await this.fetchChannel(ticket);
+    let channel: TextChannel | null;
+    try {
+      channel = await this.fetchChannel(ticket);
+    } catch (error) {
+      logger.error(
+        `Failed to fetch ticket ${String(ticket._id)} channel: ${sanitizeForLog(getErrorMessage(error))}`,
+      );
+      return { ok: false, reason: "discord-error" };
+    }
     const manager = CommandManager.getInstance(this.client);
 
     // Locking is mandatory: a "closed" ticket the member can still write in
@@ -343,11 +353,29 @@ export class TicketChannelManager {
     // Reserve the transition so concurrent closes can't both run the side
     // effects below or overwrite who closed it; only the winner archives.
     const closedAt = new Date();
-    const reserved = await Ticket.findOneAndUpdate(
-      { _id: ticket._id, status: { $ne: "closed" } },
-      { $set: { status: "closed", closedBy: closerId, closedAt } },
-      { new: true },
-    ).exec();
+    let reserved;
+    try {
+      reserved = await Ticket.findOneAndUpdate(
+        { _id: ticket._id, status: { $ne: "closed" } },
+        { $set: { status: "closed", closedBy: closerId, closedAt } },
+        { new: true },
+      ).exec();
+    } catch (error) {
+      // The row could not be closed, so don't leave the channel locked
+      // behind a ticket that still reads as open.
+      logger.error(
+        `Failed to close ticket ${String(ticket._id)}: ${sanitizeForLog(getErrorMessage(error))}`,
+      );
+      if (channel) {
+        await channel.permissionOverwrites
+          .edit(ticket.authorId, {
+            SendMessages: true,
+            SendMessagesInThreads: null,
+          })
+          .catch(() => {});
+      }
+      return { ok: false, reason: "discord-error" };
+    }
     if (!reserved) return { ok: false, reason: "already-closed" };
     ticket.status = "closed";
     ticket.closedBy = closerId;
@@ -361,7 +389,12 @@ export class TicketChannelManager {
             const sent = await this.postTranscript(channel, ticket);
             if (sent) {
               ticket.transcriptMessageId = sent.id;
-              await ticket.save();
+              // Targeted update: a whole-document save could overwrite a
+              // concurrent state change with this request's snapshot.
+              await Ticket.updateOne(
+                { _id: ticket._id },
+                { $set: { transcriptMessageId: sent.id } },
+              ).exec();
             }
           } catch (error) {
             logger.warn(
@@ -391,7 +424,12 @@ export class TicketChannelManager {
     staffId: string,
   ): Promise<TicketResult> {
     if (ticket.status !== "closed") return { ok: false, reason: "not-closed" };
-    const channel = await this.fetchChannel(ticket);
+    let channel: TextChannel | null;
+    try {
+      channel = await this.fetchChannel(ticket);
+    } catch {
+      return { ok: false, reason: "discord-error" };
+    }
     if (!channel) return { ok: false, reason: "not-found" };
 
     try {
@@ -432,10 +470,19 @@ export class TicketChannelManager {
     try {
       const channel = await this.client.channels.fetch(ticket.channelId);
       if (channel && channel.type === ChannelType.GuildText) return channel;
-    } catch {
-      // Deleted by hand — handled by the callers.
+      return null;
+    } catch (error) {
+      // Only a confirmed "Unknown Channel" means it was deleted by hand. A
+      // transient failure must propagate, or a close would commit the record
+      // while the still-existing channel stays writable.
+      if (
+        error instanceof DiscordAPIError &&
+        error.code === RESTJSONErrorCodes.UnknownChannel
+      ) {
+        return null;
+      }
+      throw error;
     }
-    return null;
   }
 
   private async say(
@@ -443,7 +490,7 @@ export class TicketChannelManager {
     content: string,
     mentionUsers: string[],
   ): Promise<void> {
-    const channel = await this.fetchChannel(ticket);
+    const channel = await this.fetchChannel(ticket).catch(() => null);
     if (!channel) return;
     await channel
       .send({ content, allowedMentions: { users: mentionUsers } })
@@ -482,7 +529,12 @@ export class TicketChannelManager {
     const collected: Message[] = [];
     let before: string | undefined;
     while (collected.length < TRANSCRIPT_MAX_MESSAGES) {
-      const page = await channel.messages.fetch({ limit: 100, before });
+      const page = await CommandManager.getInstance(
+        this.client,
+      ).makeDiscordApiCall(
+        () => channel.messages.fetch({ limit: 100, before }),
+        "fetch ticket transcript page",
+      );
       if (page.size === 0) break;
       collected.push(...page.values());
       before = page.last()?.id;

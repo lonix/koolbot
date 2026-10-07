@@ -31,6 +31,7 @@ jest.unstable_mockModule("../../src/models/ticket.js", () => ({
     create: mockCreate,
     findOne: jest.fn(),
     findOneAndUpdate: mockFindOneAndUpdate,
+    updateOne: jest.fn(() => ({ exec: async () => ({}) })),
     find: jest.fn(),
     countDocuments: jest.fn(),
   },
@@ -387,12 +388,59 @@ describe("TicketChannelManager transitions", () => {
     expect(channel.send).not.toHaveBeenCalled();
   });
 
-  it("still closes the record when the channel is already gone", async () => {
+  it("does not close when the channel fetch fails transiently", async () => {
     const client = {
       user: { id: "bot" },
       channels: {
         fetch: jest.fn(async () => {
-          throw new Error("Unknown Channel");
+          throw new Error("ECONNRESET");
+        }),
+      },
+    } as never;
+    const t = ticket("open");
+    const result = await TicketChannelManager.getInstance(client).closeTicket(
+      t as never,
+      "staff-1",
+    );
+    expect(result).toEqual({ ok: false, reason: "discord-error" });
+    expect(t.status).toBe("open");
+  });
+
+  it("unlocks again when the row cannot be closed after the lock", async () => {
+    const { client, channel } = clientWithChannel();
+    mockFindOneAndUpdate.mockReturnValue({
+      exec: async () => {
+        throw new Error("db down");
+      },
+    });
+    const result = await TicketChannelManager.getInstance(client).closeTicket(
+      ticket("open") as never,
+      "staff-1",
+    );
+    expect(result).toEqual({ ok: false, reason: "discord-error" });
+    const edit = (
+      channel.permissionOverwrites as unknown as { edit: jest.Mock }
+    ).edit;
+    expect(edit).toHaveBeenLastCalledWith("u1", {
+      SendMessages: true,
+      SendMessagesInThreads: null,
+    });
+  });
+
+  it("still closes the record when the channel is confirmed gone", async () => {
+    const { DiscordAPIError } = await import("discord.js");
+    const client = {
+      user: { id: "bot" },
+      channels: {
+        fetch: jest.fn(async () => {
+          throw new DiscordAPIError(
+            { code: 10003, message: "Unknown Channel" },
+            10003,
+            404,
+            "GET",
+            "/channels/x",
+            {},
+          );
         }),
       },
     } as never;
