@@ -495,6 +495,18 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
       expect(migrationStore.get(GUILD_ID)?.adoptedCount).toBe(1);
     });
 
+    it("requires the generated prefix plus its space, not just the prefix characters (#1078 review)", async () => {
+      addChannel("lobby-id", "Lobby");
+      const lookalike = addChannel("look-id", "🎮Hana's Room");
+      const real = addChannel("real-id", "🎮 Hana's Room");
+
+      await manager.initialize(GUILD_ID);
+
+      expect(lookalike.delete).not.toHaveBeenCalled();
+      expect(real.delete).toHaveBeenCalled();
+      expect(migrationStore.get(GUILD_ID)?.adoptedCount).toBe(1);
+    });
+
     it("requires the suffix at the end of the name, not mid-name (#1078 review)", async () => {
       addChannel("lobby-id", "Lobby");
       const midName = addChannel("mid-id", "🎮 Alice's Room archive");
@@ -690,6 +702,33 @@ describe("VoiceChannelManager - managed-only cleanup (issue #1032)", () => {
 
       expect(lobby.name).toBe("Bob's Lobby");
       expect(lobby.setName).not.toHaveBeenCalled();
+    });
+
+    it("does not fall back to name matches once the lobby ID resolves (#1078 review)", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = addChannel("lobby-id", "Lobby"); // already online
+      const foreignOffline = addChannel("foreign-off-id", "Lobby (Offline)");
+
+      // The ID lobby is already online, so there is nothing to bring online:
+      // a foreign channel carrying the offline name must not be moved/renamed.
+      expect(await manager.renameLobbyToOnline(guild)).toBe(true);
+      expect(lobby.name).toBe("Lobby");
+      expect(foreignOffline.setName).not.toHaveBeenCalled();
+      expect(foreignOffline.delete).not.toHaveBeenCalled();
+      expect(guild.channels.create).not.toHaveBeenCalled();
+    });
+
+    it("ensure treats the ID lobby, not a foreign channel named like it, as the lobby (#1078 review)", async () => {
+      settings["voicechannels.lobby.channel_id"] = "lobby-id";
+      const lobby = addChannel("lobby-id", "Main Hall");
+      const foreign = addChannel("foreign-id", "Lobby");
+
+      expect(await manager.ensureLobbyChannelExists(guild)).toBe(true);
+
+      // The foreign "Lobby" did not satisfy the check; the ID lobby was renamed.
+      expect(lobby.name).toBe("Lobby");
+      expect(foreign.setName).not.toHaveBeenCalled();
+      expect(guild.channels.create).not.toHaveBeenCalled();
     });
 
     it("renames the lobby by its legacy name on shutdown and startup (#1078 review)", async () => {

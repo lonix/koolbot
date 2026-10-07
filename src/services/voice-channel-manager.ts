@@ -325,7 +325,7 @@ export class VoiceChannelManager {
 
   /**
    * Does a channel name look like one KoolBot would have generated? Generated
-   * names are `<prefix> <name><suffix>`, so the prefix must lead and the
+   * names are `<prefix> <name><suffix>`, so the prefix (and its space) must lead and the
    * suffix must trail (a live channel carries a trailing " 🔴" on top). A
    * suffix merely appearing mid-name is a foreign channel: adopting it would
    * make it deletable on first enable.
@@ -336,7 +336,9 @@ export class VoiceChannelManager {
     suffix: string,
   ): boolean {
     if (!prefix && !suffix) return false;
-    if (prefix && !name.startsWith(prefix)) return false;
+    // The generator always puts a space after the prefix; "Gamer Bob's Room"
+    // is not a "Game" room.
+    if (prefix && !name.startsWith(`${prefix} `)) return false;
     if (suffix) {
       const liveSuffix = " 🔴";
       const base = name.endsWith(liveSuffix)
@@ -2064,13 +2066,17 @@ export class VoiceChannelManager {
       // that channel is the lobby whatever it is currently called: if it is
       // not already carrying the online name, it is the one to bring online.
       const lobbyById = await this.getLobbyChannelById(guild);
-      const offlineLobbyChannel =
-        (lobbyById && lobbyById.name !== lobbyName ? lobbyById : undefined) ??
-        category.children.cache.find(
-          (channel): channel is VoiceChannel =>
-            channel.type === ChannelType.GuildVoice &&
-            channel.name === offlineLobbyName,
-        );
+      // Once the ID resolves the name fallback is off: a foreign channel that
+      // happens to carry the offline name must not be moved or renamed.
+      const offlineLobbyChannel = lobbyById
+        ? lobbyById.name !== lobbyName
+          ? lobbyById
+          : undefined
+        : category.children.cache.find(
+            (channel): channel is VoiceChannel =>
+              channel.type === ChannelType.GuildVoice &&
+              channel.name === offlineLobbyName,
+          );
 
       if (offlineLobbyChannel) {
         // Anyone sitting in the offline lobby was talking together while the
@@ -2216,13 +2222,17 @@ export class VoiceChannelManager {
 
       // First, try to find an existing online lobby (by ID when configured)
       const lobbyById = await this.getLobbyChannelById(guild);
-      const existingLobby =
-        (lobbyById && lobbyById.name === lobbyName ? lobbyById : undefined) ??
-        category.children.cache.find(
-          (channel): channel is VoiceChannel =>
-            channel.type === ChannelType.GuildVoice &&
-            channel.name === lobbyName,
-        );
+      // Once the ID resolves the name fallback is off, so a foreign channel
+      // named like the lobby is never mistaken for it.
+      const existingLobby = lobbyById
+        ? lobbyById.name === lobbyName
+          ? lobbyById
+          : undefined
+        : category.children.cache.find(
+            (channel): channel is VoiceChannel =>
+              channel.type === ChannelType.GuildVoice &&
+              channel.name === lobbyName,
+          );
 
       if (existingLobby) {
         logger.debug(`Lobby channel already exists: ${existingLobby.name}`);
@@ -2681,15 +2691,16 @@ export class VoiceChannelManager {
       const lobbyChannelName = lobbyById
         ? configuredLobbyName
         : configuredLobbyName.replace(/["']/g, "");
-      const offlineLobby =
-        (lobbyById && lobbyById.name !== lobbyChannelName
+      // Once the ID resolves the name fallback is off (see renameLobbyToOnline).
+      const offlineLobby = lobbyById
+        ? lobbyById.name !== lobbyChannelName
           ? lobbyById
-          : undefined) ??
-        category.children.cache.find(
-          (channel): channel is VoiceChannel =>
-            channel.type === ChannelType.GuildVoice &&
-            channel.name === offlineLobbyName,
-        );
+          : undefined
+        : category.children.cache.find(
+            (channel): channel is VoiceChannel =>
+              channel.type === ChannelType.GuildVoice &&
+              channel.name === offlineLobbyName,
+          );
 
       if (offlineLobby && lobbyById && offlineLobby.id === lobbyById.id) {
         // Never delete the channel the lobby ID points at: bring it online.
@@ -2765,7 +2776,7 @@ export class VoiceChannelManager {
 
       // Ensure normal lobby exists
       const lobbyChannel =
-        (await this.getLobbyChannelById(guild)) ??
+        lobbyById ??
         category.children.cache.find(
           (channel): channel is VoiceChannel =>
             channel.type === ChannelType.GuildVoice &&
