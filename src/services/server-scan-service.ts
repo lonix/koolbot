@@ -299,7 +299,8 @@ const FEATURE_NAME_HINTS: Array<{ test: RegExp; feature: string }> = [
   { test: /lfg|looking-?for/i, feature: "lfg" },
   { test: /mod-?log|audit|join-?log|server-?log/i, feature: "moderation" },
   { test: /notice|rules/i, feature: "notices" },
-  { test: /self-?roles?|roles$/i, feature: "reactionroles" },
+  // Grouped so the end anchor visibly applies to "roles" only.
+  { test: /(?:self-?roles?|roles$)/i, feature: "reactionroles" },
   { test: /lobby/i, feature: "voicechannels" },
 ];
 
