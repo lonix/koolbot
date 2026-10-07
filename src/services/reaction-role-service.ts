@@ -1051,10 +1051,13 @@ export class ReactionRoleService {
   ): Promise<{ ok: true } | { ok: false; message: string }> {
     // Callers that must route REST through a timeout/retry wrapper can pass
     // the bot member they already fetched; otherwise fall back to cache/fetch.
+    // `undefined` (omitted) keeps the cache/fetch fallback; an explicit `null`
+    // means the caller's own wrapped fetch failed, so do not retry outside it.
     const botMember =
-      resolvedBotMember ??
-      guild.members.me ??
-      (await guild.members.fetchMe().catch(() => null));
+      resolvedBotMember !== undefined
+        ? resolvedBotMember
+        : (guild.members.me ??
+          (await guild.members.fetchMe().catch(() => null)));
 
     if (!botMember) {
       return {
@@ -2016,22 +2019,8 @@ export class ReactionRoleService {
 
       // Delete every role in the group, except roles the bot did not create
       // (the grouped-role generator reuses existing roles, #1064).
-      // Earlier picker incarnations of the same generated group may own roles
-      // the current one no longer lists; include them, once per role.
-      const archivedOwned = first.groupKey
-        ? await ReactionRoleConfig.find({
-            guildId,
-            groupKey: first.groupKey,
-            isArchived: true,
-          })
-        : [];
-      const seenRoleIds = new Set<string>();
-      const cleanupConfigs = [...configs, ...archivedOwned].filter((c) => {
-        if (c.autoCreated === false || seenRoleIds.has(c.roleId)) return false;
-        seenRoleIds.add(c.roleId);
-        return true;
-      });
-      for (const config of cleanupConfigs) {
+      for (const config of configs) {
+        if (config.autoCreated === false) continue;
         try {
           // Same guard as deleteReactionRole: a role reused by a mapping
           // outside this group must survive, or that picker would dangle.
@@ -2039,11 +2028,6 @@ export class ReactionRoleService {
             guildId,
             roleId: config.roleId,
             groupId: { $ne: groupId },
-            // Archived rows from earlier picker incarnations of this same
-            // generated group are not outside references (#1064).
-            ...(first.groupKey
-              ? { $nor: [{ groupKey: first.groupKey, isArchived: true }] }
-              : {}),
           });
           if (stillUsed > 0) continue;
           const role = await guild.roles.fetch(config.roleId);
@@ -2056,13 +2040,6 @@ export class ReactionRoleService {
       }
 
       await ReactionRoleConfig.deleteMany({ guildId, groupId });
-      if (first.groupKey) {
-        await ReactionRoleConfig.deleteMany({
-          guildId,
-          groupKey: first.groupKey,
-          isArchived: true,
-        });
-      }
 
       logger.info(
         `Fully deleted reaction role group ${groupId} (${configs.length} roles)`,

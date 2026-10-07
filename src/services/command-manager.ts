@@ -129,6 +129,10 @@ export class CommandManager {
     operationName: string,
     timeoutMs: number = 30000,
     maxRetries: number = 3,
+    // Pass false for non-idempotent creates/sends: the race below does not
+    // cancel the original request, so retrying a timed-out call could run it
+    // twice. Rate-limit retries are unaffected (a 429 means it did not run).
+    retryOnTimeout: boolean = true,
   ): Promise<T> {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       // Track the timeout handle so it can be cleared once the race settles —
@@ -180,6 +184,14 @@ export class CommandManager {
           );
           await new Promise((resolve) =>
             setTimeout(resolve, retryAfter * 1000),
+          );
+        } else if (isTimeout && !retryOnTimeout) {
+          logger.warn(
+            `⏰ Discord API timeout for ${operationName}, not retrying (non-idempotent)`,
+          );
+          throw new Error(
+            `Discord API timeout for ${operationName}; not retried because it may still complete`,
+            { cause: error },
           );
         } else if (isTimeout) {
           logger.warn(

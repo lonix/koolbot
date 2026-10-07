@@ -241,36 +241,26 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     ).toHaveLength(2);
   });
 
-  it("carries autoCreated from archived rows when a picker is recreated", async () => {
-    const s = setup([
-      { id: "old1", name: "Europe" },
-      { id: "foreign", name: "Asia" },
-    ]);
+  it("ignores archived rows of earlier pickers and generates a fresh group", async () => {
+    const s = setup([{ id: "old1", name: "Europe" }]);
     model.find.mockImplementation(async (q: unknown) =>
       (q as { isArchived?: boolean }).isArchived === true
-        ? [
-            {
-              roleId: "old1",
-              autoCreated: true,
-              messageId: "dead",
-              emoji: "🇪🇺",
-              roleName: "Europe",
-              mode: "unique",
-              archivedAt: new Date(1000),
-            },
-          ]
+        ? [{ roleId: "old1", autoCreated: true, messageId: "dead" }]
         : [],
     );
     const svc = ReactionRoleGroupService.getInstance(s.client);
     const r = await svc.provisionGroup("g1", "Region", entries);
     expect(r.success).toBe(true);
+    expect(s.channel.send).toHaveBeenCalledTimes(1);
+    expect(model.updateMany).not.toHaveBeenCalled();
     const docs = (
       model.insertMany.mock.calls[0] as unknown as [
         Array<Record<string, unknown>>,
       ]
     )[0];
-    expect(docs.find((d) => d.roleId === "old1")?.autoCreated).toBe(true);
-    expect(docs.find((d) => d.roleId === "foreign")?.autoCreated).toBe(false);
+    // reused role is never re-owned from an archived incarnation
+    expect(docs.find((d) => d.roleId === "old1")?.autoCreated).toBe(false);
+    expect(docs.every((d) => d.groupId === "m1")).toBe(true);
   });
 
   it("serialises overlapping runs for the same guild", async () => {
@@ -311,7 +301,7 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     mode: "unique",
   };
 
-  it("does not archive rows when the picker fetch fails transiently", async () => {
+  it("stops without changes when the picker fetch fails transiently", async () => {
     const s = setup([{ id: "r1", name: "Europe" }]);
     model.find.mockResolvedValue([liveRow]);
     s.channel.messages.fetch.mockRejectedValue(
@@ -320,11 +310,14 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     const svc = ReactionRoleGroupService.getInstance(s.client);
     const r = await svc.provisionGroup("g1", "Region", entries);
     expect(r.success).toBe(false);
+    expect(r.message).toMatch(/try again/i);
     expect(model.updateMany).not.toHaveBeenCalled();
     expect(s.channel.send).not.toHaveBeenCalled();
+    expect(s.guild.roles.create).not.toHaveBeenCalled();
+    expect(model.insertMany).not.toHaveBeenCalled();
   });
 
-  it("archives rows and reposts only on a confirmed Unknown Message", async () => {
+  it("stops without changes when the picker message was deleted (10008)", async () => {
     const s = setup([]);
     model.find.mockResolvedValue([liveRow]);
     s.channel.messages.fetch.mockRejectedValue(
@@ -332,9 +325,15 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     );
     const svc = ReactionRoleGroupService.getInstance(s.client);
     const r = await svc.provisionGroup("g1", "Region", entries);
-    expect(r.success).toBe(true);
-    expect(model.updateMany).toHaveBeenCalledTimes(1);
-    expect(s.channel.send).toHaveBeenCalledTimes(1);
+    expect(r.success).toBe(false);
+    expect(r.message).toMatch(/deleted/);
+    expect(r.message).toMatch(/Reaction Roles page/);
+    expect(model.updateMany).not.toHaveBeenCalled();
+    expect(model.insertMany).not.toHaveBeenCalled();
+    expect(model.deleteMany).not.toHaveBeenCalled();
+    expect(s.channel.send).not.toHaveBeenCalled();
+    expect(s.guild.roles.create).not.toHaveBeenCalled();
+    expect(s.guild.roles.fetch).not.toHaveBeenCalled();
   });
 
   it("routes guild and channel fetches through the API wrapper", async () => {
@@ -378,66 +377,34 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(s.message.delete).not.toHaveBeenCalled();
   });
 
-  it("recreates a gone picker from archived rows plus the new option", async () => {
-    const s = setup([
-      { id: "r1", name: "Europe" },
-      { id: "r9", name: "Africa" },
-    ]);
-    const goneRows = [
-      { ...liveRow, autoCreated: true },
-      {
-        ...liveRow,
-        roleId: "r9",
-        emoji: "🌍",
-        roleName: "Africa",
-        autoCreated: false,
-      },
-    ];
-    model.find.mockResolvedValue(goneRows);
-    s.channel.messages.fetch.mockRejectedValue(
-      Object.assign(new Error("Unknown Message"), { code: 10008 }),
-    );
-    const svc = ReactionRoleGroupService.getInstance(s.client);
-    const r = await svc.provisionGroup("g1", "Region", [
-      { roleName: "Asia", emoji: "🌏" },
-    ]);
-    expect(r.success).toBe(true);
-    expect(r.addedEntries).toBe(1);
-    // all three options are reacted on the new picker and persisted
-    expect(s.message.react).toHaveBeenCalledTimes(3);
-    const docs = (
-      model.insertMany.mock.calls[0] as unknown as [
-        Array<{ roleId: string; autoCreated: boolean; groupId: string }>,
-      ]
-    )[0];
-    expect(docs.map((d) => d.roleId).sort()).toEqual(["new1", "r1", "r9"]);
-    expect(docs.find((d) => d.roleId === "r1")?.autoCreated).toBe(true);
-    expect(docs.find((d) => d.roleId === "r9")?.autoCreated).toBe(false);
-    expect(new Set(docs.map((d) => d.groupId))).toEqual(new Set(["m1"]));
-    expect(model.updateMany).toHaveBeenCalledTimes(1);
-  });
-
-  it("recreates a gone picker even when the submission is already archived", async () => {
+  it("drops retired rows holding an emoji being re-added on a top-up", async () => {
+    // handleRoleDelete archived the Asia row; the picker and Europe stay live.
     const s = setup([{ id: "r1", name: "Europe" }]);
     model.find.mockResolvedValue([liveRow]);
-    s.channel.messages.fetch.mockRejectedValue(
-      Object.assign(new Error("Unknown Message"), { code: 10008 }),
-    );
+    const order: string[] = [];
+    model.deleteMany.mockImplementation(async () => {
+      order.push("deleteMany");
+      return {};
+    });
+    model.insertMany.mockImplementation(async () => {
+      order.push("insertMany");
+      return [];
+    });
     const svc = ReactionRoleGroupService.getInstance(s.client);
-    const r = await svc.provisionGroup("g1", "Region", [
-      { roleName: "Europe", emoji: "🇪🇺" },
-    ]);
-    expect(r.success).toBe(true);
-    expect(s.channel.send).toHaveBeenCalledTimes(1);
-    expect(model.insertMany).toHaveBeenCalledTimes(1);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r).toMatchObject({ success: true, addedEntries: 1 });
+    expect(s.channel.send).not.toHaveBeenCalled();
+    expect(model.deleteMany).toHaveBeenCalledWith({
+      guildId: "g1",
+      messageId: "m1",
+      emoji: { $in: ["🌏"] },
+      isArchived: true,
+    });
+    expect(order).toEqual(["deleteMany", "insertMany"]);
   });
 
-  it("removes this run's mappings and un-archives old rows when insertMany fails", async () => {
+  it("removes this run's mappings when insertMany fails on a fresh group", async () => {
     const s = setup([{ id: "r1", name: "Europe" }]);
-    model.find.mockResolvedValue([liveRow]);
-    s.channel.messages.fetch.mockRejectedValue(
-      Object.assign(new Error("Unknown Message"), { code: 10008 }),
-    );
     model.insertMany.mockRejectedValue(new Error("partial write"));
     const svc = ReactionRoleGroupService.getInstance(s.client);
     const r = await svc.provisionGroup("g1", "Region", entries);
@@ -449,11 +416,96 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
         isArchived: false,
       }),
     );
-    const unarchive = model.updateMany.mock.calls.find(
-      (c) => (c as unknown[])[1] && "$unset" in ((c as unknown[])[1] as object),
-    );
-    expect(unarchive).toBeDefined();
+    expect(model.updateMany).not.toHaveBeenCalled();
     expect(s.message.delete).toHaveBeenCalled();
+  });
+
+  it("does not retry role creation on timeout and tells the admin to check", async () => {
+    const s = setup([]);
+    s.guild.roles.create.mockRejectedValueOnce(
+      new Error("Discord API timeout for create role Europe; not retried"),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(r.message).toMatch(/Roles list/);
+    expect(s.guild.roles.create).toHaveBeenCalledTimes(1);
+    expect(s.channel.send).not.toHaveBeenCalled();
+    const create = mockApi.mock.calls.find((c) =>
+      String(c[1]).startsWith("create role"),
+    ) as unknown[];
+    expect(create.slice(2)).toEqual([30000, 3, false]);
+  });
+
+  it("does not retry the picker post on timeout and rolls back only known roles", async () => {
+    const s = setup([]);
+    s.channel.send.mockRejectedValueOnce(
+      new Error("Discord API timeout for post group message; not retried"),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(r.message).toMatch(/channel for a half-created role or message/);
+    expect(s.channel.send).toHaveBeenCalledTimes(1);
+    expect(s.del).toHaveBeenCalledTimes(2);
+    expect(s.message.delete).not.toHaveBeenCalled();
+    const post = mockApi.mock.calls.find(
+      (c) => c[1] === "post group message",
+    ) as unknown[];
+    expect(post.slice(2)).toEqual([30000, 3, false]);
+  });
+
+  it("reports an unassignable same-name role instead of creating a duplicate", async () => {
+    const s = setup([]);
+    const roles = new Map<string, unknown>([
+      ["int1", { id: "int1", name: "Europe", managed: true }],
+    ]);
+    s.guild.roles.fetch.mockResolvedValue(roles as never);
+    mockValidate.mockImplementation(async (...a: unknown[]) =>
+      (a[1] as { managed: boolean }).managed
+        ? ({ ok: false, message: "Europe is managed" } as never)
+        : { ok: true },
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r).toMatchObject({ success: false, message: "Europe is managed" });
+    expect(s.guild.roles.create).not.toHaveBeenCalled();
+    expect(s.channel.send).not.toHaveBeenCalled();
+  });
+
+  it("prefers an assignable same-name role over a managed one", async () => {
+    const s = setup([]);
+    const roles = new Map<string, unknown>([
+      ["int1", { id: "int1", name: "Europe", managed: true }],
+      ["ok1", { id: "ok1", name: "europe", managed: false }],
+    ]);
+    s.guild.roles.fetch.mockResolvedValue(roles as never);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    expect(r.reusedRoles).toEqual(["ok1"]);
+  });
+
+  it("passes an explicit null bot member and does not refetch outside the wrapper", async () => {
+    const s = setup([{ id: "old1", name: "europe" }]);
+    const fetchMe = jest.fn(async () => {
+      throw new Error("down");
+    });
+    (s.guild as unknown as Record<string, unknown>).members = {
+      me: null,
+      fetchMe,
+    };
+    mockValidate.mockImplementation(async (...a: unknown[]) =>
+      a[2] === null
+        ? ({ ok: false, message: "couldn't resolve my membership" } as never)
+        : { ok: true },
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(mockValidate).toHaveBeenCalledWith(s.guild, expect.anything(), null);
+    expect(fetchMe).toHaveBeenCalledTimes(1);
+    expect(s.guild.roles.create).not.toHaveBeenCalled();
   });
 
   it("rejects a malformed non-empty role colour instead of ignoring it", async () => {
@@ -471,119 +523,6 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(r.message).toContain("reactionroles.group_role_colour");
     expect(s.created).toHaveLength(0);
     expect(s.channel.send).not.toHaveBeenCalled();
-  });
-
-  describe("picker deleted before the rerun (handleMessageDelete archived the rows)", () => {
-    const arch = (
-      messageId: string,
-      roleId: string,
-      emoji: string,
-      roleName: string,
-      at: number,
-      autoCreated = true,
-    ) => ({
-      guildId: "g1",
-      messageId,
-      roleId,
-      emoji,
-      roleName,
-      autoCreated,
-      mode: "sticky",
-      groupId: messageId,
-      groupKey: "region",
-      isArchived: true,
-      archivedAt: new Date(at),
-    });
-    const archivedOnly = () =>
-      model.find.mockImplementation(async (q: unknown) =>
-        (q as { isArchived?: boolean }).isArchived === true
-          ? currentArchived
-          : [],
-      );
-    let currentArchived: unknown[] = [];
-    const insertedDocs = () =>
-      (
-        model.insertMany.mock.calls[0] as unknown as [
-          Array<{
-            roleId: string;
-            autoCreated: boolean;
-            mode: string;
-            groupId: string;
-          }>,
-        ]
-      )[0];
-
-    it("restores all earlier options plus the new one, keeping ownership", async () => {
-      const s = setup([
-        { id: "r1", name: "Europe" },
-        { id: "r2", name: "Africa" },
-      ]);
-      currentArchived = [
-        arch("dead", "r1", "🇪🇺", "Europe", 1000),
-        arch("dead", "r2", "🌍", "Africa", 1001, false),
-      ];
-      archivedOnly();
-      const svc = ReactionRoleGroupService.getInstance(s.client);
-      const r = await svc.provisionGroup("g1", "Region", [
-        { roleName: "Asia", emoji: "🌏" },
-      ]);
-      expect(r.success).toBe(true);
-      expect(r.addedEntries).toBe(1);
-      expect(s.message.react).toHaveBeenCalledTimes(3);
-      const docs = insertedDocs();
-      expect(docs.map((d) => d.roleId).sort()).toEqual(["new1", "r1", "r2"]);
-      expect(docs.find((d) => d.roleId === "r1")?.autoCreated).toBe(true);
-      expect(docs.find((d) => d.roleId === "r2")?.autoCreated).toBe(false);
-      expect(new Set(docs.map((d) => d.mode))).toEqual(new Set(["sticky"]));
-      expect(new Set(docs.map((d) => d.groupId))).toEqual(new Set(["m1"]));
-      // rows were already archived: nothing to archive again
-      expect(model.updateMany).not.toHaveBeenCalled();
-    });
-
-    it("restores only the latest incarnation after two deletions", async () => {
-      const s = setup([
-        { id: "r1", name: "Europe" },
-        { id: "r2", name: "Africa" },
-        { id: "r3", name: "Oceania" },
-      ]);
-      currentArchived = [
-        arch("first", "r1", "🇪🇺", "Europe", 1000),
-        arch("first", "r3", "🌊", "Oceania", 1001),
-        arch("second", "r1", "🇪🇺", "Europe", 2000),
-        arch("second", "r2", "🌍", "Africa", 2001),
-      ];
-      archivedOnly();
-      const svc = ReactionRoleGroupService.getInstance(s.client);
-      const r = await svc.provisionGroup("g1", "Region", [
-        { roleName: "Asia", emoji: "🌏" },
-      ]);
-      expect(r.success).toBe(true);
-      expect(
-        insertedDocs()
-          .map((d) => d.roleId)
-          .sort(),
-      ).toEqual(["new1", "r1", "r2"]);
-      expect(s.message.react).toHaveBeenCalledTimes(3);
-    });
-
-    it("drops restored options whose role was deleted in Discord", async () => {
-      const s = setup([{ id: "r1", name: "Europe" }]);
-      currentArchived = [
-        arch("dead", "r1", "🇪🇺", "Europe", 1000),
-        arch("dead", "gone", "🌍", "Africa", 1001),
-      ];
-      archivedOnly();
-      const svc = ReactionRoleGroupService.getInstance(s.client);
-      const r = await svc.provisionGroup("g1", "Region", [
-        { roleName: "Asia", emoji: "🌏" },
-      ]);
-      expect(r.success).toBe(true);
-      expect(
-        insertedDocs()
-          .map((d) => d.roleId)
-          .sort(),
-      ).toEqual(["new1", "r1"]);
-    });
   });
 
   it("validates input before touching Discord", async () => {

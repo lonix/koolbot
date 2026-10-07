@@ -313,13 +313,11 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
       guildId: "g1",
       roleId: "shared",
       groupId: { $ne: "grp1" },
-      // archived incarnations of the same generated group don't count
-      $nor: [{ groupKey: "region", isArchived: true }],
     });
     expect(roleDelete).toHaveBeenCalledTimes(1);
   });
 
-  it("also removes bot-created roles that only an archived incarnation owns", async () => {
+  it("never deletes a reused role (autoCreated false)", async () => {
     const roleDelete = jest
       .fn<() => Promise<unknown>>()
       .mockResolvedValue(undefined);
@@ -338,27 +336,17 @@ describe("ReactionRoleService.deleteReactionRoleGroup", () => {
       },
     };
     const { service } = createService(client);
-    const live = {
-      roleId: "cur",
-      messageId: "grp1",
-      autoCreated: true,
-      groupKey: "region",
-    };
-    model.find.mockResolvedValueOnce([live]).mockResolvedValueOnce([
-      { ...live, roleId: "cur", isArchived: true },
-      { ...live, roleId: "old", isArchived: true },
-      { ...live, roleId: "foreign", autoCreated: false, isArchived: true },
+    model.find.mockResolvedValue([
+      { roleId: "mine", messageId: "grp1", autoCreated: true },
+      { roleId: "reused", messageId: "grp1", autoCreated: false },
     ]);
-    model.deleteMany.mockResolvedValue({ deletedCount: 1 });
+    model.deleteMany.mockResolvedValue({ deletedCount: 2 });
     model.countDocuments.mockResolvedValue(0);
 
     await service.deleteReactionRoleGroup("g1", "grp1");
 
-    expect(fetchRole.mock.calls.map((c) => c[0]).sort()).toEqual([
-      "cur",
-      "old",
-    ]);
-    expect(roleDelete).toHaveBeenCalledTimes(2);
+    expect(fetchRole.mock.calls.map((c) => c[0])).toEqual(["mine"]);
+    expect(roleDelete).toHaveBeenCalledTimes(1);
   });
 
   it("returns not-found when the group has no configs", async () => {
@@ -419,5 +407,46 @@ describe("ReactionRoleService single-role guards on group members", () => {
 
     expect(result.success).toBe(false);
     expect(result.message).toMatch(/role group/i);
+  });
+});
+
+describe("ReactionRoleService.validateRoleAssignable bot member resolution", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (
+      ReactionRoleService as unknown as { instance?: ReactionRoleService }
+    ).instance = undefined;
+  });
+
+  const role = { id: "r1", name: "R", managed: false };
+  const makeGuild = (me: unknown, fetchMe: jest.Mock) => ({
+    members: { me, fetchMe },
+    roles: { everyone: { id: "everyone" } },
+  });
+
+  it("omitted argument keeps the cache/fetchMe fallback", async () => {
+    const { service } = createService({});
+    const fetchMe = jest.fn<() => Promise<unknown>>().mockResolvedValue(null);
+    const res = await service.validateRoleAssignable(
+      makeGuild(null, fetchMe) as never,
+      role as never,
+    );
+    expect(fetchMe).toHaveBeenCalledTimes(1);
+    expect(res.ok).toBe(false);
+  });
+
+  it("explicit null reports an error without calling fetchMe", async () => {
+    const { service } = createService({});
+    const fetchMe = jest.fn<() => Promise<unknown>>();
+    const res = await service.validateRoleAssignable(
+      makeGuild({ id: "bot" }, fetchMe) as never,
+      role as never,
+      null,
+    );
+    expect(fetchMe).not.toHaveBeenCalled();
+    expect(res).toMatchObject({
+      ok: false,
+      message: expect.stringContaining("own membership"),
+    });
   });
 });
