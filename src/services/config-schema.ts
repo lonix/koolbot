@@ -214,6 +214,9 @@ export interface ConfigSchema {
   "aka.enabled": boolean;
   "namehistory.enabled": boolean;
   "namehistory.retention_days": number; // 0 = keep forever
+
+  // Server adoption snapshots (#1018)
+  "adoption.snapshot.retention_days": number; // 0 = keep snapshots forever
 }
 
 /**
@@ -530,6 +533,10 @@ export const defaultConfig: ConfigSchema = {
   "aka.enabled": false,
   "namehistory.enabled": false,
   "namehistory.retention_days": 365,
+
+  // Server adoption (#1018). Snapshots are the rollback safety net, so the
+  // default keeps them for a quarter; 0 keeps them forever.
+  "adoption.snapshot.retention_days": 90,
 };
 
 /**
@@ -923,6 +930,11 @@ export const categoryMetadata: Record<string, CategoryMetadata> = {
     title: "Reaction Tracking",
     description:
       "Per-user counts of reactions given and received, stored as lifetime + per-year totals. Data-capture foundation for a future Rewind stat; surfacing lives in a follow-up.",
+  },
+  adoption: {
+    title: "Server Adoption",
+    description:
+      "Taking over roles, categories and channel permissions on an existing server. Every change is planned first, snapshotted, and can be rolled back.",
   },
   namehistory: {
     title: "Name History",
@@ -2149,6 +2161,14 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Record usernames, display names and (with the GuildMembers intent) server nicknames as the bot sees them. Recording works even while /aka is off. History starts from when this is turned on.",
     category: "namehistory",
     type: "boolean",
+  },
+  "adoption.snapshot.retention_days": {
+    label: "Adoption snapshot retention (days)",
+    description:
+      "Days to keep a server-adoption snapshot (the saved prior state used to roll a change back) before the daily cleanup job prunes it. Set to 0 to keep snapshots forever.",
+    category: "adoption",
+    type: "number",
+    min: RETENTION_MIN,
   },
   "namehistory.retention_days": {
     label: "Name history retention (days)",

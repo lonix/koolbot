@@ -778,6 +778,7 @@ No dashboard JSON ships with the bot — wire these up to taste:
 | **Voice Channels**    | `/vc force-reload` (**Force VC cleanup** button) + editable `voicechannels.*` settings              |
 | **Weekly Digest**     | (new — **Preview** dry-run, **Send now** button + editable `digest.*` settings)                     |
 | **Leaderboard Roles** | (new — tier editor, current holders, **Run now**) + editable `leaderboard_roles.*` settings         |
+| **Role Groups**       | (new — admin-defined, ranked role groups with capabilities; plan → preview → apply)                 |
 | **Voice Analytics**   | (new — guild-wide voice-activity heatmap; gated by `voicetracking.enabled`)                         |
 | **Database**          | `/dbtrunk status`, `/dbtrunk run`                                                                   |
 | **Command Audit**     | (new — slash-command audit log) + editable `core.*_audit.*` settings                                |
@@ -1084,6 +1085,46 @@ announcement); concurrent runs coalesce, and the per-tier grant/revoke counts ar
 reported in the flash message. Tier saves and runs are audited. **Settings** keeps the
 raw text field for `leaderboard_roles.tiers`.
 
+The **Role Groups** page (`/admin/role-groups`, #1020, part of the server-adoption epic #1017)
+lets admins name the roles that matter on their server and rank them: as many or as few as
+they like (Admin, Mod, Helper, VIP, Friends, Bots …). Groups are optional; with none defined
+every feature keeps its current behaviour.
+
+- **Create / edit / reorder / delete.** A group is backed by an *existing role* (picked from the
+  server's roles, with its member count) or by a *new role* the engine creates when the plan is
+  applied. Rank is edited with the ↑ / ↓ buttons; the list is shown highest first, and role
+  positions in Discord follow it when applied. **Presets** (Admin, Moderator, Helper, VIP, Bots)
+  pre-fill the permission and capability boxes, which stay editable.
+- **Capabilities** are what features query instead of hard-coding role ids: `admin`, `staff`
+  (moderator-level; `admin` implies it) and `bot` (bot accounts only: humans can't be in a bot
+  group, and member-facing features such as leaderboards, digest, achievements and welcome
+  ignore it). Groups without a capability are still usable for gating (a "Friends" or regional
+  role). The guild owner and members with the Administrator permission always count as `admin`,
+  with or without a group. Developers: use `RoleGroupService.getGroupsWith(guildId, "staff")`,
+  `memberHasCapability(member, "staff")` and `memberIsAtOrAbove(member, groupId)`.
+- **Linking an existing role never moves anyone.** Its current holders keep it, and its
+  permissions and colour are left alone unless you explicitly tick *Set the role's permissions*
+  or enter a colour. Large cosmetic groups work: counts come from Discord without loading members.
+- **Locked roles.** @everyone and roles at or above the bot's highest role can't be picked.
+  Integration-managed roles (Server Booster, subscriptions, bot roles) can be linked only as
+  **gate-only** groups: they can be referenced for gating, never edited, and carry no capability.
+- **Plan → preview → apply → snapshot.** Saving a group only records what you want. The **Plan**
+  card shows what applying would change in Discord (role creates and edits, including position to
+  match rank, and bot-group grants) using the shared adoption diff, with blocking errors and
+  warnings. **Apply plan** runs it through the adoption engine as a background job: a snapshot is
+  saved first, the page shows progress, and the apply can be rolled back. If the server changed
+  since the preview, the apply is refused and the new plan is shown.
+- **Bots.** When a `bot` group exists, bots not yet holding its role are listed in the plan and
+  added to the shared role on apply; their own managed roles are untouched. Listing bots needs the
+  Server Members intent; without it the page says so and plans no bot grants.
+- **Deleting a group** unlinks it by default and keeps the Discord role. A role KoolBot created
+  can be deleted along with the group; deleting a role that already existed is a separate,
+  explicit approval (the form shows its member count), and is refused while a feature such as
+  Leaderboard Roles or Reaction Roles still uses the role.
+
+Every write is audited. There is no slash command for this page: role groups are admin
+configuration and live in the Web UI only.
+
 The **Voice Analytics** page (`/admin/analytics`) is a read-only, guild-wide
 voice-activity heatmap (#675, Part B). It aggregates the already-stored
 `VoiceChannelTracking` sessions into a 24×7 (hour × weekday) grid of total
@@ -1158,6 +1199,22 @@ and **Readmit**; staff may decide a case before it is due. Readmit records the d
 Discord. A **Run review pass now** button runs the due-review job on demand. Every decision is written to the
 Web UI audit log. A decision on a case someone else already resolved from another tab is refused with a message
 naming the status it found.
+
+**Server scan** (`/admin/adopt`, #1019) is a read-only inventory of the guild: it has no forms and no write
+routes, and never writes to Discord. It lists **roles** (position, colour, cached member count, `managed` flag,
+whether KoolBot can manage the role, and which feature uses it), **categories and channels** (type, parent,
+whether permissions are synced to the parent, every overwrite as allow/deny, and which feature is bound to the
+channel by a `*.channel_id` / `*.category_id` / `*_channels` setting), **other bots** (integration role and the
+channels where they have overwrites) and **bot readiness**: the bot's guild permissions, its role-hierarchy
+position, and actionable warnings (for example "move the KoolBot role above X") that link to
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md#bot-cant-manage-roles-or-channels). It also shows what Discord already
+handles (Community, rules/system/public-updates channels, Onboarding prompts and the roles they hand out), the
+AFK channel, webhook-fed and followed channels, role-gated categories, the server's channel naming convention
+and native scheduled events. The scan never pages through the member list: role member counts come from the
+cache (a `+` marks a possibly low count unless the GuildMembers intent is on). **Include channel ownership
+hints** (`?sample=1`) additionally samples recent message authors to spot channels one bot posts in; it costs a
+REST call per channel, so it is off by default. The same data is available to code as
+`ServerScanService.scan()`, whose `scanned` member is the `ScannedState` the adoption planner diffs against.
 
 **Milestone celebrations** (`#657`, Part 2) have no dedicated page: they are
 configured entirely under **Settings** (`celebrations.enabled`,

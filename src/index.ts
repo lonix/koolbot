@@ -38,6 +38,7 @@ import { WebAuditLogCleanupService } from "./services/web-audit-cleanup.js";
 import { VersionCheckService } from "./services/version-check-service.js";
 import { ModerationLogCleanupService } from "./services/moderation-log-cleanup.js";
 import { NameHistoryCleanupService } from "./services/name-history-cleanup.js";
+import { AdoptionSnapshotCleanupService } from "./services/adoption-snapshot-cleanup.js";
 import { NameHistoryService } from "./services/name-history-service.js";
 import { ScheduledAnnouncementService } from "./services/scheduled-announcement-service.js";
 import { ChannelInitializer } from "./services/channel-initializer.js";
@@ -516,6 +517,7 @@ async function gracefulShutdown(signal: string): Promise<void> {
         ModerationLogCleanupService.getInstance().destroy();
         moderationCaseReviewService.destroy();
         nameHistoryCleanup?.destroy();
+        adoptionSnapshotCleanup?.destroy();
         await noticesChannelManager.stop();
         pollService.destroy();
         pollParticipationTracker.destroy();
@@ -590,6 +592,7 @@ let reactionRoleService: ReactionRoleService;
 let pollService: PollService;
 let leaderboardRoleService: LeaderboardRoleService;
 let nameHistoryCleanup: NameHistoryCleanupService;
+let adoptionSnapshotCleanup: AdoptionSnapshotCleanupService;
 let digestService: DigestService;
 let rewindNudgeService: RewindNudgeService;
 let birthdayService: BirthdayService;
@@ -792,6 +795,12 @@ async function initializeServices(): Promise<void> {
     // warning when nicknames cannot be recorded for lack of the intent.
     nameHistoryCleanup = NameHistoryCleanupService.getInstance(client);
     await nameHistoryCleanup.start();
+
+    // Server-adoption snapshot retention cleanup (#1018). Gates on
+    // `adoption.snapshot.retention_days` at run time (0 = keep forever).
+    adoptionSnapshotCleanup =
+      AdoptionSnapshotCleanupService.getInstance(client);
+    await adoptionSnapshotCleanup.start();
     if (
       await ConfigService.getInstance()
         .getBoolean("namehistory.enabled", false)

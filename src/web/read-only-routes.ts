@@ -5,6 +5,8 @@
  * no writes.
  */
 
+import { loadRoleGroupsPage } from "./role-groups-page.js";
+import { renderRoleGroupsPage } from "./role-groups-views.js";
 import {
   Router,
   type NextFunction,
@@ -24,6 +26,8 @@ import {
   settingsMetadata,
   type ConfigSchema,
 } from "../services/config-schema.js";
+import { ServerScanService } from "../services/server-scan-service.js";
+import { renderAdoptPage } from "./adopt-view.js";
 import { PermissionsService } from "../services/permissions-service.js";
 import { VersionCheckService } from "../services/version-check-service.js";
 import { ScheduledAnnouncementService } from "../services/scheduled-announcement-service.js";
@@ -944,6 +948,40 @@ export function createReadOnlyRouter(
         rows,
       }));
       res.type("text/html").send(renderBootstrapPage({ ...common, groups }));
+    }),
+  );
+
+  // ---------- Server scan (#1019) ----------
+  // Read-only: GET only, no forms, no Discord writes.
+  router.get(
+    "/adopt",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const sampled = req.query.sample === "1";
+      let scan = null;
+      let error: string | undefined;
+      try {
+        scan = await ServerScanService.getInstance(client).scan(
+          common.guildId,
+          {
+            adminUserId: req.webSession?.discordUserId,
+            sampleMessages: sampled,
+          },
+        );
+      } catch (err) {
+        logger.warn("server scan failed", err);
+        error = err instanceof Error ? err.message : String(err);
+      }
+      res.type("text/html").send(
+        renderAdoptPage({
+          csrfToken: common.csrfToken,
+          remainingMs: common.remainingMs,
+          navFeatureStatus: common.navFeatureStatus,
+          scan,
+          error,
+          sampled,
+        }),
+      );
     }),
   );
 
@@ -2094,6 +2132,67 @@ export function createReadOnlyRouter(
           flash: readFlash(req),
         }),
       );
+    }),
+  );
+
+  // ---------- Role Groups (#1020) ----------
+  router.get(
+    "/role-groups",
+    asyncHandler(async (req, res) => {
+      const common = await commonFromReq(req);
+      const session = req.webSession;
+      if (!session) throw new Error("requireSession middleware must run first");
+      const jobParam = req.query.job;
+      const data = await loadRoleGroupsPage(
+        client,
+        common.guildId,
+        session.discordUserId,
+      );
+      res.type("text/html").send(
+        renderRoleGroupsPage({
+          ...common,
+          ...data,
+          jobId:
+            typeof jobParam === "string" && /^[0-9a-f-]{36}$/i.test(jobParam)
+              ? jobParam
+              : null,
+          flash: readFlash(req),
+        }),
+      );
+    }),
+  );
+
+  // Progress of an apply started from the Role Groups page.
+  router.get(
+    "/role-groups/job/:id",
+    asyncHandler(async (req, res) => {
+      const session = req.webSession;
+      if (!session) throw new Error("requireSession middleware must run first");
+      const guild = await client.guilds.fetch(session.guildId);
+      // Loaded on demand: the engine pulls in the audit writer, which the
+      // page routers that share this module otherwise never need.
+      const { ServerAdoptionService } =
+        await import("../services/server-adoption-service.js");
+      const engine = await ServerAdoptionService.getInstance(client, guild);
+      const job = engine.getJob(String(req.params.id));
+      res.setHeader("Cache-Control", "no-store");
+      if (!job) {
+        res.status(404).json({
+          status: "unknown",
+          text: "This apply is no longer tracked. Reload the page to see the current state.",
+        });
+        return;
+      }
+      const p = job.progress;
+      const text =
+        job.status === "running"
+          ? `Applying… ${p.completed + p.failed + p.skipped} of ${p.total} step(s) done.`
+          : job.status === "failed"
+            ? `Apply failed: ${job.error ?? "unknown error"}`
+            : job.result && job.result.failed.length > 0
+              ? `Applied with ${job.result.failed.length} failed step(s): ${job.result.failed.map((f) => f.error).join("; ")}. A snapshot was saved.`
+              : `Applied ${p.completed} step(s). A snapshot was saved.`;
+      res.json({ status: job.status, text });
     }),
   );
 

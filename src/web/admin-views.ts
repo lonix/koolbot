@@ -1898,7 +1898,7 @@ export interface EventsProps extends CommonProps {
   flash?: FlashMessage | null;
 }
 
-function renderFlash(flash?: FlashMessage | null, id = ""): string {
+export function renderFlash(flash?: FlashMessage | null, id = ""): string {
   if (!flash) return "";
   const cls =
     flash.type === "ok" ? "ok" : flash.type === "warn" ? "warn" : "err";
