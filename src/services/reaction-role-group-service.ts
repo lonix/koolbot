@@ -69,6 +69,8 @@ export function parseRoleColour(raw: string): number | undefined {
 export class ReactionRoleGroupService {
   private static instance: ReactionRoleGroupService;
   private client: Client;
+  /** Tail of the in-process provisioning queue, per guild. */
+  private locks = new Map<string, Promise<void>>();
 
   private constructor(client: Client) {
     this.client = client;
@@ -86,6 +88,42 @@ export class ReactionRoleGroupService {
       call,
       label,
     );
+  }
+
+  /**
+   * Run `fn` after every earlier provisioning for the same guild finished.
+   * Serialised per guild (not per group) because roles are reused by name
+   * across groups, so two groups can race on the same role too. The bot is a
+   * single instance, so an in-process queue is sufficient.
+   */
+  private async withGuildLock<T>(
+    guildId: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const prev = this.locks.get(guildId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = prev.then(() => gate);
+    this.locks.set(guildId, tail);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.locks.get(guildId) === tail) this.locks.delete(guildId);
+    }
+  }
+
+  /** True when a Discord REST error (or its cause chain) carries `code`. */
+  private hasDiscordCode(error: unknown, code: number): boolean {
+    let e: unknown = error;
+    for (let i = 0; e && i < 3; i++) {
+      if ((e as { code?: unknown }).code === code) return true;
+      e = (e as { cause?: unknown }).cause;
+    }
+    return false;
   }
 
   public async provisionGroup(
@@ -125,9 +163,25 @@ export class ReactionRoleGroupService {
       return fail("Emojis within a group must be unique.");
     }
 
+    return this.withGuildLock(guildId, () =>
+      this.provisionLocked(guildId, name, clean, mode),
+    );
+  }
+
+  private async provisionLocked(
+    guildId: string,
+    name: string,
+    clean: GroupProvisionEntry[],
+    mode: ReactionRoleMode,
+  ): Promise<GroupProvisionResult> {
+    const rrService = ReactionRoleService.getInstance(this.client);
     const groupKey = name.toLowerCase();
     const createdRoles: Role[] = [];
     let postedMessage: Message | null = null;
+    // Existing-picker top-up state, so a failure can restore the message.
+    let editedAnchor: Message | null = null;
+    let previousEmbeds: EmbedBuilder[] = [];
+    const addedReactions: string[] = [];
 
     try {
       const configService = ConfigService.getInstance();
@@ -140,10 +194,20 @@ export class ReactionRoleGroupService {
           "Reaction role message channel not configured. Set reactionroles.message_channel_id",
         );
       }
-      const guild: Guild = await this.client.guilds.fetch(guildId);
-      const channel = (await guild.channels
-        .fetch(channelId)
-        .catch(() => null)) as TextChannel | null;
+      const guild: Guild = await this.api(
+        () => this.client.guilds.fetch(guildId),
+        "fetch guild",
+      );
+      // Only a confirmed Unknown Channel (10003) means "not found"; transient
+      // failures propagate instead of being reported as a config error.
+      const channel = (await this.api(
+        () =>
+          guild.channels.fetch(channelId).catch((err: unknown) => {
+            if (this.hasDiscordCode(err, 10003)) return null;
+            throw err;
+          }),
+        "fetch group channel",
+      )) as TextChannel | null;
       if (!channel || !channel.isTextBased()) {
         return fail(
           `Message channel ${channelId} not found or is not a text channel.`,
@@ -159,7 +223,16 @@ export class ReactionRoleGroupService {
       let anchor: Message | null = null;
       const anchorId = existingRows[0]?.messageId;
       if (anchorId) {
-        anchor = await channel.messages.fetch(anchorId).catch(() => null);
+        // Archive only on a confirmed Unknown Message (10008). Any other
+        // failure propagates and leaves the live rows untouched.
+        anchor = await this.api(
+          () =>
+            channel.messages.fetch(anchorId).catch((err: unknown) => {
+              if (this.hasDiscordCode(err, 10008)) return null;
+              throw err;
+            }),
+          `fetch group message ${anchorId}`,
+        );
       }
       const liveRows = anchor ? existingRows : [];
       // Rows whose picker message is gone are archived, never deleted.
@@ -277,10 +350,12 @@ export class ReactionRoleGroupService {
       let target: Message;
       if (anchor) {
         const a = anchor;
+        previousEmbeds = (a.embeds ?? []).map((e) => EmbedBuilder.from(e));
         target = await this.api(
           () => a.edit({ embeds: [embed] }),
           `edit group message ${a.id}`,
         );
+        editedAnchor = a;
       } else {
         postedMessage = await this.api(
           () => channel.send({ embeds: [embed] }),
@@ -293,6 +368,7 @@ export class ReactionRoleGroupService {
           () => target.react(t.emoji),
           `react ${t.emoji} on group message`,
         );
+        addedReactions.push(t.emoji);
       }
 
       const groupId = liveRows[0]?.groupId ?? target.id;
@@ -332,6 +408,19 @@ export class ReactionRoleGroupService {
         error,
       );
       // Undo only what this run created. Existing roles/messages stay.
+      if (editedAnchor) {
+        const a = editedAnchor as Message;
+        await a
+          .edit({ embeds: previousEmbeds })
+          .catch((err) => logger.warn("Could not restore group message:", err));
+        for (const emoji of addedReactions) {
+          const id = emoji.match(/(\d{17,20})/)?.[1] ?? emoji;
+          await a.reactions
+            .resolve(id)
+            ?.remove()
+            .catch((err) => logger.warn("Could not remove reaction:", err));
+        }
+      }
       if (postedMessage) {
         await postedMessage
           .delete()

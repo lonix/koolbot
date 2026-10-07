@@ -2014,6 +2014,14 @@ export class ReactionRoleService {
       for (const config of configs) {
         if (config.autoCreated === false) continue;
         try {
+          // Same guard as deleteReactionRole: a role reused by a mapping
+          // outside this group must survive, or that picker would dangle.
+          const stillUsed = await ReactionRoleConfig.countDocuments({
+            guildId,
+            roleId: config.roleId,
+            groupId: { $ne: groupId },
+          });
+          if (stillUsed > 0) continue;
           const role = await guild.roles.fetch(config.roleId);
           if (role) {
             await role.delete();

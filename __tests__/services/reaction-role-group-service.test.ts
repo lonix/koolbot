@@ -210,6 +210,108 @@ describe("ReactionRoleGroupService.provisionGroup", () => {
     expect(s.del).toHaveBeenCalledTimes(2);
   });
 
+  it("serialises overlapping runs for the same guild", async () => {
+    const s = setup([]);
+    // Second run must see the first run's rows, as it would in the database.
+    let rows: unknown[] = [];
+    model.find.mockImplementation(async () => rows);
+    model.insertMany.mockImplementation(async (docs: unknown) => {
+      rows = docs as unknown[];
+      return docs;
+    });
+    s.guild.roles.fetch.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      return new Map(
+        s.created.map((c, i) => [
+          `new${i + 1}`,
+          { id: `new${i + 1}`, name: c.name, managed: false },
+        ]),
+      );
+    });
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const [a, b] = await Promise.all([
+      svc.provisionGroup("g1", "Region", entries),
+      svc.provisionGroup("g1", "Region", entries),
+    ]);
+    expect(a.addedEntries).toBe(2);
+    expect(b.addedEntries).toBe(0);
+    expect(s.guild.roles.create).toHaveBeenCalledTimes(2);
+    expect(s.channel.send).toHaveBeenCalledTimes(1);
+  });
+
+  const liveRow = {
+    roleId: "r1",
+    emoji: "🇪🇺",
+    roleName: "Europe",
+    messageId: "m1",
+    groupId: "m1",
+    mode: "unique",
+  };
+
+  it("does not archive rows when the picker fetch fails transiently", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    model.find.mockResolvedValue([liveRow]);
+    s.channel.messages.fetch.mockRejectedValue(
+      Object.assign(new Error("Missing Access"), { code: 50001 }),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(model.updateMany).not.toHaveBeenCalled();
+    expect(s.channel.send).not.toHaveBeenCalled();
+  });
+
+  it("archives rows and reposts only on a confirmed Unknown Message", async () => {
+    const s = setup([]);
+    model.find.mockResolvedValue([liveRow]);
+    s.channel.messages.fetch.mockRejectedValue(
+      Object.assign(new Error("Unknown Message"), { code: 10008 }),
+    );
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(true);
+    expect(model.updateMany).toHaveBeenCalledTimes(1);
+    expect(s.channel.send).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes guild and channel fetches through the API wrapper", async () => {
+    const s = setup([]);
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    await svc.provisionGroup("g1", "Region", entries);
+    const labels = mockApi.mock.calls.map((c) => (c as unknown[])[1]);
+    expect(labels).toEqual(
+      expect.arrayContaining(["fetch guild", "fetch group channel"]),
+    );
+  });
+
+  it("reports a transient channel failure as an error, not 'not found'", async () => {
+    const s = setup([]);
+    s.guild.channels.fetch.mockRejectedValue(new Error("boom"));
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    expect(r.message).not.toMatch(/not found/i);
+  });
+
+  it("restores the embed and removes added reactions when a top-up fails", async () => {
+    const s = setup([{ id: "r1", name: "Europe" }]);
+    const reactionRemove = jest.fn(async () => undefined);
+    Object.assign(s.message, {
+      embeds: [{ data: { title: "Region" } }],
+      reactions: { resolve: jest.fn(() => ({ remove: reactionRemove })) },
+    });
+    model.find.mockResolvedValue([liveRow]);
+    model.insertMany.mockRejectedValue(new Error("db down"));
+    const svc = ReactionRoleGroupService.getInstance(s.client);
+    const r = await svc.provisionGroup("g1", "Region", entries);
+    expect(r.success).toBe(false);
+    // edited once to add the option, then restored to the prior embed
+    expect(s.message.edit).toHaveBeenCalledTimes(2);
+    expect(s.message.react).toHaveBeenCalledTimes(1);
+    expect(reactionRemove).toHaveBeenCalledTimes(1);
+    expect(s.message.delete).not.toHaveBeenCalled();
+  });
+
   it("validates input before touching Discord", async () => {
     const s = setup([]);
     const svc = ReactionRoleGroupService.getInstance(s.client);
