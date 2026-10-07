@@ -2,6 +2,7 @@ import { describe, it, expect } from "@jest/globals";
 import { ChannelType, PermissionsBitField } from "discord.js";
 import {
   BOT_CATEGORY,
+  botReadOnlySet,
   GATED_CATEGORY_EVERYONE,
   GATED_CATEGORY_ROLE,
   NOTICES_BOT,
@@ -58,7 +59,10 @@ describe("channel-permissions: one declaration, two forms", () => {
       ViewChannel: true,
       ReadMessageHistory: true,
     });
+    // The bot also gets EmbedLinks: the header post and notices are embeds, and
+    // the old inline object left a deny on @everyone applying to the bot.
     expect(toOverwriteOptions(NOTICES_BOT)).toEqual({
+      EmbedLinks: true,
       SendMessages: true,
       ManageMessages: true,
       ManageChannels: true,
@@ -186,5 +190,48 @@ describe("mergeOverwrite", () => {
       allow: "0",
       deny: "0",
     });
+  });
+});
+
+describe("structural guard: whatever a read-only claim denies is restored", () => {
+  const families = [
+    "text",
+    "announcement",
+    "forum",
+    "stage",
+    "voice",
+    "category",
+    "mixed",
+  ] as const;
+
+  it.each(families)(
+    "%s: posters and the bot are allowed everything @everyone is denied",
+    (family) => {
+      for (const options of [
+        { allowReactions: false, lockReplies: true },
+        { allowReactions: true, lockReplies: false },
+      ]) {
+        const denied = readOnlyEveryone(family, options).deny;
+        expect([...readOnlyPoster(family).allow]).toEqual(
+          expect.arrayContaining([...denied]),
+        );
+        expect([...botReadOnlySet(family).allow]).toEqual(
+          expect.arrayContaining([...denied]),
+        );
+      }
+    },
+  );
+
+  it("includes private-thread creation for text, forum and the category union", () => {
+    for (const family of ["text", "announcement", "forum", "mixed"] as const) {
+      expect([...readOnlyPoster(family).allow]).toContain(
+        "CreatePrivateThreads",
+      );
+    }
+  });
+
+  it("the bot sets cover what the bound features send (embeds)", () => {
+    expect([...NOTICES_BOT.allow]).toContain("EmbedLinks");
+    expect([...botReadOnlySet("text").allow]).toContain("EmbedLinks");
   });
 });

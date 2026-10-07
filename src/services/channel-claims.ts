@@ -868,7 +868,7 @@ export function buildClaimsDesiredState(
     // A bound feature always keeps the bot's access, whatever the action.
     if (feature) {
       layer(channel, scanned.botUserId, "member", feature.botPermissions);
-      if (feature.everyone && claim.action === "leave") {
+      if (feature.everyone && claim.action !== "read-only") {
         // e.g. the notices channel: read-only for everyone but the bot.
         // Never re-show a channel that is hidden from @everyone, whether by
         // this plan (a category gate) or already.

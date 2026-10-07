@@ -177,48 +177,25 @@ export function readOnlyEveryone(
   return { allow: [], deny };
 }
 
-/** What a group allowed to post in a read-only channel is given back. */
+/**
+ * What a group allowed to post in a read-only channel is given back. Derived
+ * from what `readOnlyEveryone` denies, so nothing denied can be left out.
+ */
 export function readOnlyPoster(family: ChannelFamily): PermissionSet {
-  switch (family) {
-    case "forum":
-      return {
-        allow: [
-          "SendMessages",
-          "SendMessagesInThreads",
-          "CreatePublicThreads",
-          "AddReactions",
-        ],
-        deny: [],
-      };
-    case "stage":
-      return { allow: ["RequestToSpeak"], deny: [] };
-    case "voice":
-      return { allow: ["Speak"], deny: [] };
-    case "category":
-      return { allow: [], deny: [] };
-    case "mixed":
-      return {
-        allow: [
-          "SendMessages",
-          "SendMessagesInThreads",
-          "CreatePublicThreads",
-          "AddReactions",
-          "Speak",
-          "RequestToSpeak",
-        ],
-        deny: [],
-      };
-    default:
-      return {
-        allow: [
-          "SendMessages",
-          "SendMessagesInThreads",
-          "CreatePublicThreads",
-          "AddReactions",
-        ],
-        deny: [],
-      };
-  }
+  return {
+    allow: [
+      ...new Set<PermissionName>([
+        ...readOnlyEveryone(family, {
+          allowReactions: false,
+          lockReplies: true,
+        }).deny,
+        ...(["category", "voice", "stage"].includes(family)
+          ? []
+          : ["AddReactions" as const]),
+      ]),
+    ],
+    deny: [],
+  };
 }
 
 /**
@@ -226,22 +203,20 @@ export function readOnlyPoster(family: ChannelFamily): PermissionSet {
  * `@everyone` is denied, or the deny would apply to it too.
  */
 export function botReadOnlySet(family: ChannelFamily): PermissionSet {
-  switch (family) {
-    case "voice":
-      return { allow: ["ViewChannel", "Connect", "Speak"], deny: [] };
-    case "stage":
-      return {
-        allow: ["ViewChannel", "Connect", "Speak", "RequestToSpeak"],
-        deny: [],
-      };
-    case "mixed":
-      return {
-        allow: [...BOT_POSTS.allow, "Connect", "Speak", "RequestToSpeak"],
-        deny: [],
-      };
-    default:
-      return BOT_POSTS;
-  }
+  const base: PermissionSet =
+    family === "voice" || family === "stage"
+      ? { allow: ["ViewChannel", "Connect"], deny: [] }
+      : family === "mixed"
+        ? unionSets(BOT_POSTS, { allow: ["Connect"], deny: [] })
+        : BOT_POSTS;
+  // Whatever `@everyone` is denied, the bot is allowed back.
+  return unionSets(base, {
+    allow: readOnlyEveryone(family, {
+      allowReactions: false,
+      lockReplies: true,
+    }).deny,
+    deny: [],
+  });
 }
 
 /** What the bot needs in a gated channel it must keep using. */
@@ -292,6 +267,7 @@ export const NOTICES_EVERYONE: PermissionSet = {
 export const NOTICES_BOT: PermissionSet = {
   allow: [
     "SendMessages",
+    "EmbedLinks", // the header post and notices are embeds
     "ManageMessages",
     "ManageChannels",
     "AddReactions",

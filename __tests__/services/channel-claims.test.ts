@@ -1119,6 +1119,76 @@ describe("bypass detection and message deletion", () => {
 describe("one composed result per channel (third review round)", () => {
   const MEMBER = "100000000000000077";
 
+  it("checks seeing and joining independently: an admin who could not join still keeps visibility", () => {
+    const s = fixture();
+    // Admin can see C_VOICE but never could connect (everyone lacks Connect).
+    s.channels.find((c) => c.id === C_VOICE)!.overwrites = [
+      ow(R_ADMIN, F.ViewChannel),
+    ];
+    const p = planAdoption(
+      s,
+      {
+        overwrites: [
+          {
+            channelId: C_VOICE,
+            target: { id: R_ADMIN },
+            allow: "0",
+            deny: F.ViewChannel.toString(),
+          },
+        ],
+      },
+      { approverId: ADMIN },
+    );
+    expect(p.errors.map((e) => e.code)).toContain("admin-access-lost");
+  });
+
+  it("binding notices or quotes with a gate or a sync still applies the read-only @everyone set", () => {
+    for (const bindKey of ["notices.channel_id", "quotes.channel_id"]) {
+      const gated = plan([
+        {
+          channelId: C_LOOSE,
+          action: "gate",
+          roleIds: [R_ADMIN],
+          bindKey,
+        },
+      ]);
+      const everyone = setFor(gated.plan, C_LOOSE, GUILD)!;
+      expect(BigInt(everyone.deny) & F.SendMessages).toBe(F.SendMessages);
+      // ...without re-opening the gate.
+      expect(BigInt(everyone.deny) & F.ViewChannel).toBe(F.ViewChannel);
+      expect(BigInt(everyone.allow) & F.ViewChannel).toBe(0n);
+    }
+    const synced = plan([
+      {
+        channelId: C_UNSYNCED,
+        action: "sync",
+        bindKey: "notices.channel_id",
+      },
+    ]);
+    expect(
+      BigInt(setFor(synced.plan, C_UNSYNCED, GUILD)!.deny) & F.SendMessages,
+    ).toBe(F.SendMessages);
+  });
+
+  it("chosen posters get every posting permission back, including private threads", () => {
+    const r = plan([
+      { channelId: C_LOOSE, action: "read-only", roleIds: [R_MOD] },
+    ]);
+    const deny = BigInt(setFor(r.plan, C_LOOSE, GUILD)!.deny);
+    const poster = BigInt(setFor(r.plan, C_LOOSE, R_MOD)!.allow);
+    const bot = BigInt(setFor(r.plan, C_LOOSE, BOT)!.allow);
+    expect(deny & F.CreatePrivateThreads).toBe(F.CreatePrivateThreads);
+    expect(poster & deny & ~F.AddReactions).toBe(deny & ~F.AddReactions);
+    expect(bot & deny).toBe(deny);
+    const cat = plan([
+      { channelId: C_CAT, action: "read-only", roleIds: [R_MOD] },
+    ]);
+    const catDeny = BigInt(setFor(cat.plan, C_CAT, GUILD)!.deny);
+    expect(BigInt(setFor(cat.plan, C_CAT, R_MOD)!.allow) & catDeny).toBe(
+      catDeny,
+    );
+  });
+
   it("blocks a plan that leaves the admin able to see a voice channel but not join it", () => {
     const s = fixture();
     s.roles = s.roles.map((r) =>

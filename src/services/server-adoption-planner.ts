@@ -1265,21 +1265,28 @@ export function planAdoption(
 
     for (const channel of scanned.channels) {
       if (!after.channels.has(channel.id)) continue; // deleted
-      // Seeing a voice or stage channel is not enough to use it: an admin who
-      // could join must still be able to.
-      const a = check(
-        scanned.adminUserId,
-        scanned.adminRoleIds,
-        adminRoles,
-        channel.id,
-        channel.kind === "voice" ? ViewChannel | Connect : ViewChannel,
-      );
-      if (a.had && !a.has)
-        err(
-          "admin-access-lost",
-          `This change would remove your own access to "${channel.name}".`,
+      // Seeing a voice or stage channel is not enough to use it, and joining
+      // one is not enough to see it: each permission the admin held must
+      // survive, checked on its own.
+      for (const perm of channel.kind === "voice"
+        ? [ViewChannel, Connect]
+        : [ViewChannel]) {
+        const a = check(
+          scanned.adminUserId,
+          scanned.adminRoleIds,
+          adminRoles,
           channel.id,
+          perm,
         );
+        if (a.had && !a.has) {
+          err(
+            "admin-access-lost",
+            `This change would remove your own access to "${channel.name}".`,
+            channel.id,
+          );
+          break;
+        }
+      }
     }
     // An admin who held Administrator and no longer would is locked out wholesale.
     const adminBefore = effectivePermissions({
