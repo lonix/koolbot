@@ -1567,6 +1567,14 @@ whole of this file against the schema in both directions, so a key that
 is documented but no longer exists — or exists but is nowhere in this
 file — fails CI.
 
+#### Page reload after save (`reloadOnSave` metadata)
+
+A setting the rest of its feature page renders from (beyond `*.enabled`, which
+always reloads) sets `reloadOnSave: true` in its `SettingMetadata` in
+`src/services/config-schema.ts`. Saving it from the feature page's card then
+reloads the page instead of only flashing in place. Today only
+`voicechannels.cleanup.managed_only` sets it.
+
 #### Feature dependencies (`dependsOn` metadata)
 
 Some features only work when another feature is enabled. These hard

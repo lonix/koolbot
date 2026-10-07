@@ -656,6 +656,13 @@ export interface SettingMetadata {
    */
   min?: number;
   /**
+   * Set when the rest of the feature page renders from this value (beyond the
+   * `*.enabled` flags, which always reload): saving it from a feature page's
+   * card reloads the page so nothing keeps describing the old value (#1090).
+   * Ignored on the Settings page, which renders nothing else from its values.
+   */
+  reloadOnSave?: boolean;
+  /**
    * Which kind of Discord channel a `channel` / `channel_list` picker offers.
    * `"text"` (the default when omitted) lists text/announcement channels;
    * `"voice"` lists voice + stage channels. Set `"voice"` on keys that
@@ -1123,6 +1130,8 @@ export const settingsMetadata: Record<keyof ConfigSchema, SettingMetadata> = {
       "Turn this on when the managed category above is an existing, shared category (for example one that already holds another bot's join-to-create channel or permanent voice rooms). Startup and periodic cleanup then delete only empty channels KoolBot created itself, tracked by ID, and never any other empty voice channel in the category. The first time it is on, existing channels in the category that match the KoolBot name prefix/suffix are adopted as KoolBot-created. Leave it off for a category that KoolBot owns exclusively: then every empty voice channel in it, except the lobby, is cleaned up.",
     category: "voicechannels",
     type: "boolean",
+    // The Force cleanup confirmation and status card render from this value.
+    reloadOnSave: true,
   },
   "voicechannels.controlpanel.enabled": {
     label: "In-channel control panel enabled",

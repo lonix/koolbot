@@ -789,6 +789,10 @@ set `ConfigService.cleanupUnknownSettings()` uses to decide which rows to keep; 
 `settingsMetadata` but missing from it is silently deleted from Mongo on every restart
 (see #609 and #834). `__tests__/services/settings-metadata.test.ts` fails if the two drift.
 
+If other parts of the feature page render from the new setting (a status card, a confirmation
+dialog), set `reloadOnSave: true` on its `settingsMetadata` entry so saving it from the page's
+AJAX card reloads the page. Do not add a key list to the route (#1090).
+
 **Step 2**: Access in code (only inside a service):
 
 ```typescript
