@@ -333,6 +333,47 @@ describe("POST /me/privacy/tracking", () => {
     expect(optInCalls).toEqual([[USER, GUILD]]);
   });
 
+  describe("redirect landing (#1066)", () => {
+    const pathOf = (c: Captured): string =>
+      new globalThis.URL(`http://x${c.redirect ?? ""}`).pathname;
+    const optIn = { body: { _csrf: "csrf-1", action: "opt-in" } };
+
+    it("lands on /me/privacy after an opt-in when the section is enabled", async () => {
+      await installMocks({ privacyEnabled: true });
+      const { captured } = await post(optIn);
+
+      expect(captured.statusCode).toBe(303);
+      expect(pathOf(captured)).toBe("/me/privacy");
+    });
+
+    it("lands on the /me/ overview, not the 404ing page, when the section is off", async () => {
+      await installMocks({ privacyEnabled: false });
+      const { captured } = await post(optIn);
+
+      expect(captured.statusCode).toBe(303);
+      expect(pathOf(captured)).toBe("/me/");
+      expect(flashOf(captured).text).toContain("opted back in");
+    });
+
+    it("also lands on /me/ with the error flash when an opt-in cannot settle while off", async () => {
+      await installMocks({ privacyEnabled: false, settled: false });
+      const { captured } = await post(optIn);
+
+      expect(pathOf(captured)).toBe("/me/");
+      expect(flashOf(captured).type).toBe("err");
+      expect(flashOf(captured).text).toContain("still opted out");
+    });
+
+    it("lands on /me/ when an opt-in write throws while the section is off", async () => {
+      await installMocks({ privacyEnabled: false, writeThrows: true });
+      const { captured } = await post(optIn);
+
+      expect(captured.statusCode).toBe(303);
+      expect(pathOf(captured)).toBe("/me/");
+      expect(flashOf(captured).type).toBe("err");
+    });
+  });
+
   it("rejects an unknown action without touching anything", async () => {
     await installMocks();
     const { captured } = await post({
